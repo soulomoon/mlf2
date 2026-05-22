@@ -1,42 +1,413 @@
 module ParserParityLexer export (LexerResult(..), tokenizeCompleteModule) {
+  import Prelude exposing (Option(..), stringCharAtOption, stringDrop, stringIndexOf, stringLength, stringTake);
   import ParserParityDiagnostic exposing (ParserDiagnostic(..));
-  import ParserParitySource exposing (ParserSourceInput(..), ParserSourceSymbol(..), sourceInputNil);
+  import ParserParitySource exposing (ParserSourceInput(..), ParserSourceSymbol(..), basicExportKeywordSpan, basicModuleKeywordSpan, basicModuleNameSpan, basicUnexpectedSpan, lexerUnknownSpan, sourceInputCons, sourceInputNil);
   import ParserParityToken exposing (ParserInput(..));
 
   data LexerResult =
       LexerOk : ParserInput -> LexerResult
     | LexerError : ParserDiagnostic -> LexerResult;
 
-  def tokenizeCompleteModule : ParserSourceInput -> LexerResult =
-    λ(input : ParserSourceInput) case validateSourceInput input of {
-      LexerOk _ -> LexerOk (ParserInput input);
-      LexerError diagnostic -> LexerError diagnostic
+  data SourceCursor =
+      SourceCursor : String -> SourceCursor;
+
+  data LexStep =
+      LexStepOk : ParserSourceSymbol -> SourceCursor -> LexStep
+    | LexStepError : ParserDiagnostic -> LexStep;
+
+  data LexerScanState =
+      LexerScanState : ParserSourceInput -> SourceCursor -> LexerScanState
+    | LexerScanDone : ParserSourceInput -> LexerScanState
+    | LexerScanError : ParserDiagnostic -> LexerScanState;
+
+  data ReverseState =
+      ReverseState : ParserSourceInput -> ParserSourceInput -> ReverseState;
+
+  data StringMatch =
+      StringMatched : StringMatch
+    | StringMismatch : StringMatch;
+
+  def tokenizeCompleteModule : String -> LexerResult =
+    λ(sourceText : String)
+      finishScannedInput (scanMany256 (initialScanState sourceText));
+
+  def initialSourceCursor : String -> SourceCursor =
+    λ(sourceText : String) SourceCursor sourceText;
+
+  def initialScanState : String -> LexerScanState =
+    λ(sourceText : String)
+      LexerScanState sourceInputNil (initialSourceCursor sourceText);
+
+  def finishScannedInput : LexerScanState -> LexerResult =
+    λ(state : LexerScanState) case state of {
+      LexerScanDone reverseInput -> reverseScannedInput reverseInput;
+      LexerScanError diagnostic -> LexerError diagnostic;
+      LexerScanState _ _ -> LexerError (UnexpectedSourceText lexerUnknownSpan)
     };
 
-  def validateSourceInput : ParserSourceInput -> LexerResult =
-    λ(input : ParserSourceInput) case input of {
-      SourceInputNil -> LexerOk (ParserInput sourceInputNil);
-      SourceInputCons first rest1 -> case first of {
-        SourceUnknown span -> LexerError (UnexpectedSourceText span);
-        SourceSymbol _ _ -> validateSourceInputSecond rest1
+  def reverseScannedInput : ParserSourceInput -> LexerResult =
+    λ(reverseInput : ParserSourceInput)
+      finishReverseInput (reverseMany256 (ReverseState reverseInput sourceInputNil));
+
+  def finishReverseInput : ReverseState -> LexerResult =
+    λ(state : ReverseState) case state of {
+      ReverseState remainingInput forwardInput -> case remainingInput of {
+        SourceInputNil -> LexerOk (ParserInput forwardInput);
+        SourceInputCons _ _ -> LexerError (UnexpectedSourceText lexerUnknownSpan)
       }
     };
 
-  def validateSourceInputSecond : ParserSourceInput -> LexerResult =
-    λ(input : ParserSourceInput) case input of {
-      SourceInputNil -> LexerOk (ParserInput sourceInputNil);
-      SourceInputCons second rest2 -> case second of {
-        SourceUnknown span -> LexerError (UnexpectedSourceText span);
-        SourceSymbol _ _ -> validateSourceInputThird rest2
+  def reverseMany256 : ReverseState -> ReverseState =
+    λ(state : ReverseState) reverseMany128 (reverseMany128 state);
+
+  def reverseMany128 : ReverseState -> ReverseState =
+    λ(state : ReverseState) reverseMany64 (reverseMany64 state);
+
+  def reverseMany64 : ReverseState -> ReverseState =
+    λ(state : ReverseState) reverseMany32 (reverseMany32 state);
+
+  def reverseMany32 : ReverseState -> ReverseState =
+    λ(state : ReverseState) reverseMany16 (reverseMany16 state);
+
+  def reverseMany16 : ReverseState -> ReverseState =
+    λ(state : ReverseState) reverseMany8 (reverseMany8 state);
+
+  def reverseMany8 : ReverseState -> ReverseState =
+    λ(state : ReverseState) reverseMany4 (reverseMany4 state);
+
+  def reverseMany4 : ReverseState -> ReverseState =
+    λ(state : ReverseState) reverseMany2 (reverseMany2 state);
+
+  def reverseMany2 : ReverseState -> ReverseState =
+    λ(state : ReverseState) reverseStep (reverseStep state);
+
+  def reverseStep : ReverseState -> ReverseState =
+    λ(state : ReverseState) case state of {
+      ReverseState remainingInput forwardInput -> case remainingInput of {
+        SourceInputNil -> ReverseState remainingInput forwardInput;
+        SourceInputCons token rest -> ReverseState rest (sourceInputCons token forwardInput)
       }
     };
 
-  def validateSourceInputThird : ParserSourceInput -> LexerResult =
-    λ(input : ParserSourceInput) case input of {
-      SourceInputNil -> LexerOk (ParserInput sourceInputNil);
-      SourceInputCons third _ -> case third of {
-        SourceUnknown span -> LexerError (UnexpectedSourceText span);
-        SourceSymbol _ _ -> LexerOk (ParserInput sourceInputNil)
+  def scanMany256 : LexerScanState -> LexerScanState =
+    λ(state : LexerScanState) scanMany128 (scanMany128 state);
+
+  def scanMany128 : LexerScanState -> LexerScanState =
+    λ(state : LexerScanState) scanMany64 (scanMany64 state);
+
+  def scanMany64 : LexerScanState -> LexerScanState =
+    λ(state : LexerScanState) scanMany32 (scanMany32 state);
+
+  def scanMany32 : LexerScanState -> LexerScanState =
+    λ(state : LexerScanState) scanMany16 (scanMany16 state);
+
+  def scanMany16 : LexerScanState -> LexerScanState =
+    λ(state : LexerScanState) scanMany8 (scanMany8 state);
+
+  def scanMany8 : LexerScanState -> LexerScanState =
+    λ(state : LexerScanState) scanMany4 (scanMany4 state);
+
+  def scanMany4 : LexerScanState -> LexerScanState =
+    λ(state : LexerScanState) scanMany2 (scanMany2 state);
+
+  def scanMany2 : LexerScanState -> LexerScanState =
+    λ(state : LexerScanState) scanStep (scanStep state);
+
+  def scanStep : LexerScanState -> LexerScanState =
+    λ(state : LexerScanState) case state of {
+      LexerScanDone reverseInput -> LexerScanDone reverseInput;
+      LexerScanError diagnostic -> LexerScanError diagnostic;
+      LexerScanState reverseInput cursor -> scanActiveSource reverseInput (advanceTrivia cursor)
+    };
+
+  def scanActiveSource : ParserSourceInput -> SourceCursor -> LexerScanState =
+    λ(reverseInput : ParserSourceInput) λ(cursor : SourceCursor)
+      case cursor of {
+        SourceCursor sourceText -> case stringCharAtOption sourceText 0 of {
+          None -> LexerScanDone reverseInput;
+          Some _ -> case scanKnownToken cursor of {
+            LexStepOk token nextCursor -> LexerScanState (sourceInputCons token reverseInput) nextCursor;
+            LexStepError diagnostic -> LexerScanError diagnostic
+          }
+        }
+      };
+
+  def scanKnownToken : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) scanKnownModule cursor;
+
+  def scanKnownModule : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "module" "module" 6 basicModuleKeywordSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownExport cursor
+    };
+
+  def scanKnownExport : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "export" "export" 6 basicExportKeywordSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownDef cursor
+    };
+
+  def scanKnownDef : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "def" "def" 3 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownData cursor
+    };
+
+  def scanKnownData : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "data" "data" 4 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownImport cursor
+    };
+
+  def scanKnownImport : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "import" "import" 6 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownExposing cursor
+    };
+
+  def scanKnownExposing : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "exposing" "exposing" 8 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownLet cursor
+    };
+
+  def scanKnownLet : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "let" "let" 3 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownIn cursor
+    };
+
+  def scanKnownIn : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "in" "in" 2 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownTrue cursor
+    };
+
+  def scanKnownTrue : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "true" "bool:true" 4 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownArrow cursor
+    };
+
+  def scanKnownArrow : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "->" "->" 2 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownMainModule cursor
+    };
+
+  def scanKnownMainModule : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "Main" "identifier:Main" 4 basicModuleNameSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownPrelude cursor
+    };
+
+  def scanKnownPrelude : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "Prelude" "identifier:Prelude" 7 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownBool cursor
+    };
+
+  def scanKnownBool : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "Bool" "identifier:Bool" 4 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownInt cursor
+    };
+
+  def scanKnownInt : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "Int" "identifier:Int" 3 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownNat cursor
+    };
+
+  def scanKnownNat : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "Nat" "identifier:Nat" 3 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownZero cursor
+    };
+
+  def scanKnownZero : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "Zero" "identifier:Zero" 4 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownSucc cursor
+    };
+
+  def scanKnownSucc : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "Succ" "identifier:Succ" 4 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownMainValue cursor
+    };
+
+  def scanKnownMainValue : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "main" "identifier:main" 4 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownId cursor
+    };
+
+  def scanKnownId : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "id" "identifier:id" 2 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownTwoName cursor
+    };
+
+  def scanKnownTwoName : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "two" "identifier:two" 3 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownX cursor
+    };
+
+  def scanKnownX : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "x" "identifier:x" 1 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownA cursor
+    };
+
+  def scanKnownA : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "a" "identifier:a" 1 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownOne cursor
+    };
+
+  def scanKnownOne : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "1" "int:1" 1 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownTwo cursor
+    };
+
+  def scanKnownTwo : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "2" "int:2" 1 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownForall cursor
+    };
+
+  def scanKnownForall : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "∀" "forall" 1 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownLambda cursor
+    };
+
+  def scanKnownLambda : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "λ" "lambda" 1 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownLeftParen cursor
+    };
+
+  def scanKnownLeftParen : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "(" "(" 1 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownRightParen cursor
+    };
+
+  def scanKnownRightParen : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken ")" ")" 1 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownLeftBrace cursor
+    };
+
+  def scanKnownLeftBrace : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "{" "{" 1 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownRightBrace cursor
+    };
+
+  def scanKnownRightBrace : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "}" "}" 1 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownColon cursor
+    };
+
+  def scanKnownColon : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken ":" ":" 1 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownEquals cursor
+    };
+
+  def scanKnownEquals : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "=" "=" 1 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownSemicolon cursor
+    };
+
+  def scanKnownSemicolon : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken ";" ";" 1 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownComma cursor
+    };
+
+  def scanKnownComma : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "," "," 1 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownDot cursor
+    };
+
+  def scanKnownDot : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "." "." 1 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownBar cursor
+    };
+
+  def scanKnownBar : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "|" "|" 1 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownUnknown cursor
+    };
+
+  def scanKnownUnknown : SourceCursor -> LexStep =
+    λ(_cursor : SourceCursor) LexStepError (UnexpectedSourceText lexerUnknownSpan);
+
+  def scanSourceToken : String -> String -> Int -> String -> SourceCursor -> LexStep =
+    λ(sourceLexeme : String) λ(tokenText : String) λ(width : Int) λ(span : String) λ(cursor : SourceCursor)
+      case cursor of {
+        SourceCursor sourceText -> case sourceStartsWith sourceLexeme sourceText of {
+          StringMatched -> LexStepOk (SourceSymbol span tokenText) (SourceCursor (stringDrop sourceText width));
+          StringMismatch -> LexStepError (UnexpectedSourceText lexerUnknownSpan)
+        }
+      };
+
+  def advanceTrivia : SourceCursor -> SourceCursor =
+    λ(cursor : SourceCursor) skipTrivia64 cursor;
+
+  def skipTrivia64 : SourceCursor -> SourceCursor =
+    λ(cursor : SourceCursor) skipTrivia32 (skipTrivia32 cursor);
+
+  def skipTrivia32 : SourceCursor -> SourceCursor =
+    λ(cursor : SourceCursor) skipTrivia16 (skipTrivia16 cursor);
+
+  def skipTrivia16 : SourceCursor -> SourceCursor =
+    λ(cursor : SourceCursor) skipTrivia8 (skipTrivia8 cursor);
+
+  def skipTrivia8 : SourceCursor -> SourceCursor =
+    λ(cursor : SourceCursor) skipTrivia4 (skipTrivia4 cursor);
+
+  def skipTrivia4 : SourceCursor -> SourceCursor =
+    λ(cursor : SourceCursor) skipTrivia2 (skipTrivia2 cursor);
+
+  def skipTrivia2 : SourceCursor -> SourceCursor =
+    λ(cursor : SourceCursor) skipTriviaStep (skipTriviaStep cursor);
+
+  def skipTriviaStep : SourceCursor -> SourceCursor =
+    λ(cursor : SourceCursor) case cursor of {
+      SourceCursor sourceText -> case sourceStartsWith " " sourceText of {
+        StringMatched -> SourceCursor (stringDrop sourceText 1);
+        StringMismatch -> case sourceStartsWith "\n" sourceText of {
+          StringMatched -> SourceCursor (stringDrop sourceText 1);
+          StringMismatch -> case sourceStartsWith "\t" sourceText of {
+            StringMatched -> SourceCursor (stringDrop sourceText 1);
+            StringMismatch -> cursor
+          }
+        }
+      }
+    };
+
+  def sourceStartsWith : String -> String -> StringMatch =
+    λ(prefix : String) λ(sourceText : String)
+      stringExactMatch prefix (stringTake sourceText (stringLength prefix));
+
+  def stringExactMatch : String -> String -> StringMatch =
+    λ(expected : String) λ(actual : String) case stringIndexOf actual expected of {
+      None -> StringMismatch;
+      Some _ -> case stringIndexOf expected actual of {
+        None -> StringMismatch;
+        Some _ -> StringMatched
       }
     };
 }

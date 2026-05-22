@@ -1,23 +1,7 @@
-module ParserParityFixture export (sourceFile, sourceInput) {
-  import ParserParitySource exposing (ParserSourceInput(..), ParserSourceSymbol(..), sourceInputNil, sourceInputCons, basicModuleKeywordSpan, basicModuleNameSpan, basicExportKeywordSpan, basicExportLeftParenSpan, basicExportMainSpan, basicExportRightParenSpan, basicModuleLeftBraceSpan, basicDefKeywordSpan, basicDefNameSpan, basicDefColonSpan, basicBoolTypeSpan, basicDefEqualsSpan, basicBoolLiteralSpan, basicDefSemicolonSpan, basicModuleRightBraceSpan);
-
+module ParserParityFixture export (sourceFile, sourceText) {
   def sourceFile : String =
     "test/conformance/mlfp/parser-parity/basic-module-def-bool/src/Main.mlfp";
 
-  def sourceInput : ParserSourceInput =
-    sourceInputCons (SourceSymbol basicModuleKeywordSpan "module")
-      (sourceInputCons (SourceSymbol basicModuleNameSpan "identifier:Main")
-        (sourceInputCons (SourceSymbol basicExportKeywordSpan "export")
-          (sourceInputCons (SourceSymbol basicExportLeftParenSpan "(")
-            (sourceInputCons (SourceSymbol basicExportMainSpan "identifier:main")
-              (sourceInputCons (SourceSymbol basicExportRightParenSpan ")")
-                (sourceInputCons (SourceSymbol basicModuleLeftBraceSpan "{")
-                  (sourceInputCons (SourceSymbol basicDefKeywordSpan "def")
-                    (sourceInputCons (SourceSymbol basicDefNameSpan "identifier:main")
-                      (sourceInputCons (SourceSymbol basicDefColonSpan ":")
-                        (sourceInputCons (SourceSymbol basicBoolTypeSpan "identifier:Bool")
-                          (sourceInputCons (SourceSymbol basicDefEqualsSpan "=")
-                            (sourceInputCons (SourceSymbol basicBoolLiteralSpan "bool:true")
-                              (sourceInputCons (SourceSymbol basicDefSemicolonSpan ";")
-                                (sourceInputCons (SourceSymbol basicModuleRightBraceSpan "}") sourceInputNil))))))))))))));
+  def sourceText : String =
+    "module Main export (main) {\n  def main : Bool = true;\n}\n";
 }

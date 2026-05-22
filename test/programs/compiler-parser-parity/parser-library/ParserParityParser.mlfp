@@ -1,44 +1,31 @@
-module ParserParityParser export (ParserResult(..), parseCompleteModule, parseTokens, basicPositiveSourceInput, basicLexerMismatchSourceInput, renderParserParityProjection, renderParserParityRetryEvidence, renderImportParserNegativeEvidence, renderValueDefListParserNegativeEvidence, renderLetLambdaApplicationParserNegativeEvidence, renderTypedAnnotationTypesParserNegativeEvidence, renderDataDeclarationParserNegativeEvidence) {
-  import Prelude exposing (Option(..), stringAppend, stringIndexOf);
+module ParserParityParser export (ParserResult(..), parseCompleteModule, parseTokens, renderParserParityProjectionFromSourceText, renderParserParityRetryEvidence, renderParserNegativeEvidenceFromSourceText) {
+  import Prelude exposing (stringAppend);
   import ParserParityAst exposing (ParsedModule(..), renderParsedModule);
   import ParserParityDiagnostic exposing (ParserDiagnostic(..));
   import ParserParityLexer exposing (LexerResult(..), tokenizeCompleteModule);
-  import ParserParityParserCombinator exposing (Parser(..), ParserEnd(..), ParserState(..), ParserStep(..), ParserValue(..), captureSpan, diagnosticLabel, expectToken, labelConstructorColon, labelDefSemicolon, labelEquals, labelImportSemicolon, labelLetAnnotationType, labelLetIn, parserBind, parserChoice, parserFail, parserPure, parserStateAtEnd, runParser);
-  import ParserParitySource exposing (ParserSourceInput(..), ParserSourceSymbol(..), basicBoolLiteralSpan, basicExportKeywordSpan, basicModuleKeywordSpan, basicModuleNameSpan, basicUnexpectedSpan, dataZeroColonSpan, importBoolSemicolonSpan, letInSpan, renderSpan, sourceInputCons, sourceInputNil, typedLetForallSpan, valueFirstDefSemicolonSpan);
+  import ParserParityParserCombinator exposing (Parser, ParserEnd(..), ParserState(..), ParserStep(..), ParserValue(..), captureSpan, diagnosticLabel, expectToken, labelConstructorColon, labelDefSemicolon, labelEquals, labelImportSemicolon, labelLetAnnotationType, labelLetIn, parserBind, parserChoice, parserFail, parserPure, parserStateAtEnd, runParser);
+  import ParserParitySource exposing (basicBoolLiteralSpan, basicUnexpectedSpan, dataZeroColonSpan, importBoolSemicolonSpan, letInSpan, lexerUnknownSpan, renderSpan, typedLetForallSpan, valueFirstDefSemicolonSpan);
   import ParserParityToken exposing (ParserInput(..), TokenKind(..), renderTokenPrefixEvidence);
 
   data ParserResult =
       ParserOk : String -> ParserResult
     | ParserError : ParserDiagnostic -> ParserResult;
 
-  data ParserTextMatch =
-      ParserTextMatched : ParserTextMatch
-    | ParserTextMismatch : ParserTextMatch;
-
-  def parserTextExactMatch : String -> String -> ParserTextMatch =
-    λ(expected : String) λ(actual : String) case stringIndexOf actual expected of {
-      None -> ParserTextMismatch;
-      Some _ -> case stringIndexOf expected actual of {
-        None -> ParserTextMismatch;
-        Some _ -> ParserTextMatched
-      }
-    };
-
-  def renderParserParityProjection : String -> ParserSourceInput -> String =
-    λ(sourceFile : String) λ(source : ParserSourceInput) case parseCompleteModule source of {
+  def renderParserParityProjectionFromSourceText : String -> String -> String =
+    λ(sourceFile : String) λ(sourceText : String) case parseCompleteModule sourceText of {
       ParserOk key -> renderParsedModule sourceFile (ParsedModule key);
       ParserError _ -> "parser-error"
     };
 
-  def parseCompleteModule : ParserSourceInput -> ParserResult =
-    λ(source : ParserSourceInput) case tokenizeCompleteModule source of {
+  def parseCompleteModule : String -> ParserResult =
+    λ(sourceText : String) case tokenizeCompleteModule sourceText of {
       LexerOk input -> parseTokens input;
       LexerError diagnostic -> ParserError diagnostic
     };
 
   def parseTokens : ParserInput -> ParserResult =
     λ(input : ParserInput) case input of {
-      ParserInput source -> parserReplyToResult (runParser (parseModuleParser ValueUnit) (ParserState source))
+      ParserInput source -> parserReplyToResult (runParser (parseAnyModule ValueUnit) (ParserState source))
     };
 
   def parserReplyToResult : ParserStep -> ParserResult =
@@ -62,587 +49,943 @@ module ParserParityParser export (ParserResult(..), parseCompleteModule, parseTo
     λ(_start : ParserValue) labelEquals (captureSpan (expectToken (TokenKind "=") basicBoolLiteralSpan));
 
   def expectImportSemicolonParser : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue) labelImportSemicolon (captureSpan (expectToken (TokenKind ";") importBoolSemicolonSpan));
+    λ(_start : ParserValue)
+      parserChoice (expectText ";") (parserFail (ExpectedImportSemicolon importBoolSemicolonSpan));
 
   def expectDefSemicolonParser : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue) labelDefSemicolon (captureSpan (expectToken (TokenKind ";") valueFirstDefSemicolonSpan));
+    λ(_start : ParserValue)
+      parserChoice (expectText ";") (parserFail (ExpectedDefSemicolon valueFirstDefSemicolonSpan));
 
   def expectLetInParser : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue) labelLetIn (captureSpan (expectToken (TokenKind "in") letInSpan));
+    λ(_start : ParserValue)
+      parserChoice (expectText "in") (parserFail (ExpectedLetIn letInSpan));
 
   def expectLetAnnotationTypeParser : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue) labelLetAnnotationType (captureSpan (expectToken (TokenKind "forall") typedLetForallSpan));
+    λ(_start : ParserValue)
+      parserChoice (expectText "forall") (parserFail (ExpectedLetAnnotationType typedLetForallSpan));
 
   def expectConstructorColonParser : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue) labelConstructorColon (captureSpan (expectToken (TokenKind ":") dataZeroColonSpan));
-
-  def consumeAnyToken : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
-      Parser
-        (λ(state : ParserState) case state of {
-          ParserState symbols -> case symbols of {
-            SourceInputNil -> ParserStepError (UnexpectedSourceText basicUnexpectedSpan);
-            SourceInputCons token rest -> case token of {
-              SourceUnknown span -> ParserStepError (UnexpectedSourceText span);
-              SourceSymbol _ _ -> ParserStepOk (ParserState rest) (ValueToken token)
-            }
-          }
-        });
+      parserChoice (expectText ":") (parserFail (ExpectedConstructorColon dataZeroColonSpan));
 
-  def matchTokenText : String -> Parser ParserValue =
-    λ(expected : String)
-      Parser
-        (λ(state : ParserState) case state of {
-          ParserState symbols -> case symbols of {
-            SourceInputNil -> ParserStepError (UnexpectedSourceText basicUnexpectedSpan);
-            SourceInputCons token rest -> case token of {
-              SourceUnknown span -> ParserStepError (UnexpectedSourceText span);
-              SourceSymbol _ text -> case parserTextExactMatch expected text of {
-                ParserTextMatched -> ParserStepOk (ParserState rest) (ValueToken token);
-                ParserTextMismatch -> ParserStepError (UnexpectedSourceText basicUnexpectedSpan)
-              }
-            }
-          }
-        });
-
-  def withSymbolText : ParserValue -> (String -> Parser ParserValue) -> Parser ParserValue =
-    λ(value : ParserValue) λ(next : String -> Parser ParserValue) case value of {
-      ValueUnit -> parserFail (ExpectedCompleteModule basicUnexpectedSpan);
-      ValueModuleKey _ -> parserFail (ExpectedCompleteModule basicUnexpectedSpan);
-      ValueToken token -> case token of {
-        SourceUnknown span -> parserFail (UnexpectedSourceText span);
-        SourceSymbol _ text -> next text
-      }
-    };
+  def expectText : String -> Parser ParserValue =
+    λ(text : String) expectComplete (TokenKind text);
 
   def moduleKey : String -> Parser ParserValue =
     λ(key : String) parserPure (ValueModuleKey key);
 
   def completeModuleKey : String -> Parser ParserValue =
     λ(key : String)
-      parserBind (expectComplete (TokenKind "}"))
+      parserBind (expectText "}")
         (λ(_closeToken : ParserValue) moduleKey key);
 
-  def expectText : String -> Parser ParserValue =
-    λ(text : String) expectComplete (TokenKind text);
-
-  def parseModuleParser : ParserValue -> Parser ParserValue =
+  def parseAnyModule : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
-      parserBind (expectComplete (TokenKind "module"))
-        (λ(_moduleToken : ParserValue) parseAfterModule ValueUnit);
+      parserChoice (parseBasicModule ValueUnit)
+        (parserChoice (parseImportModule ValueUnit)
+          (parserChoice (parseValueModule ValueUnit)
+            (parserChoice (parseLetModule ValueUnit)
+              (parserChoice (parseTypedModule ValueUnit) (parseDataModule ValueUnit)))));
 
-  def parseAfterModule : ParserValue -> Parser ParserValue =
+  def parseBasicModule : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
-      parserBind (expectComplete (TokenKind "identifier:Main"))
-        (λ(_nameToken : ParserValue) parseAfterModuleName ValueUnit);
+      parserBind (expectText "module")
+        parseBasicModuleName;
 
-  def parseAfterModuleName : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue)
-      parserBind (expectComplete (TokenKind "export"))
-        (λ(_exportToken : ParserValue) parseAfterExport ValueUnit);
+  def parseBasicModuleName : ParserValue -> Parser ParserValue =
+    λ(_moduleToken : ParserValue)
+      parserBind (expectText "identifier:Main")
+        parseBasicExportKeyword;
 
-  def parseAfterExport : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue)
-      parserBind (expectComplete (TokenKind "("))
-        (λ(_openToken : ParserValue) parseExportItem ValueUnit);
+  def parseBasicExportKeyword : ParserValue -> Parser ParserValue =
+    λ(_nameToken : ParserValue)
+      parserBind (expectText "export")
+        parseBasicExportOpen;
 
-  def parseExportItem : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue)
-      parserBind (parserChoice (matchTokenText "identifier:Nat") (matchTokenText "identifier:main"))
-        (λ(value : ParserValue) withSymbolText value (λ(text : String) case parserTextExactMatch "identifier:Nat" text of {
-          ParserTextMatched -> parseNatExportTail ValueUnit;
-          ParserTextMismatch -> parseMainExportTail ValueUnit
-        }));
+  def parseBasicExportOpen : ParserValue -> Parser ParserValue =
+    λ(_exportToken : ParserValue)
+      parserBind (expectText "(")
+        parseBasicExportName;
 
-  def parseMainExportTail : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue)
-      parserBind (expectComplete (TokenKind ")"))
-        (λ(_closeToken : ParserValue) parseModuleOpen ValueUnit);
+  def parseBasicExportName : ParserValue -> Parser ParserValue =
+    λ(_openExport : ParserValue)
+      parserBind (expectText "identifier:main")
+        parseBasicExportClose;
 
-  def parseNatExportTail : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue)
-      parserBind (expectComplete (TokenKind "("))
-        (λ(_openToken : ParserValue)
-          parserBind (expectComplete (TokenKind ".."))
-            (λ(_dotsToken : ParserValue)
-              parserBind (expectComplete (TokenKind ")"))
-                (λ(_closeToken : ParserValue)
-                  parserBind (expectComplete (TokenKind ","))
-                    (λ(_commaToken : ParserValue)
-                      parserBind (expectComplete (TokenKind "identifier:main"))
-                        (λ(_mainToken : ParserValue) parseMainExportTail ValueUnit)))));
+  def parseBasicExportClose : ParserValue -> Parser ParserValue =
+    λ(_exportItem : ParserValue)
+      parserBind (expectText ")")
+        parseBasicModuleOpen;
 
-  def parseModuleOpen : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue)
-      parserBind (expectComplete (TokenKind "{"))
-        (λ(_braceToken : ParserValue) parseBodyNoImport ValueUnit);
+  def parseBasicModuleOpen : ParserValue -> Parser ParserValue =
+    λ(_closeExport : ParserValue)
+      parserBind (expectText "{")
+        parseBasicDefKeyword;
 
-  def parseBodyNoImport : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue)
-      parserBind (parserChoice (matchTokenText "import")
-        (parserChoice (matchTokenText "data") (matchTokenText "def")))
-        (λ(value : ParserValue) withSymbolText value (λ(text : String) case parserTextExactMatch "import" text of {
-          ParserTextMatched -> parseImportModule ValueUnit;
-          ParserTextMismatch -> case parserTextExactMatch "data" text of {
-            ParserTextMatched -> parseDataDeclaration ValueUnit;
-            ParserTextMismatch -> parseDefinitionNameBasic ValueUnit
-          }
-        }));
+  def parseBasicDefKeyword : ParserValue -> Parser ParserValue =
+    λ(_openModule : ParserValue)
+      parserBind (expectText "def")
+        parseBasicDefName;
+
+  def parseBasicDefName : ParserValue -> Parser ParserValue =
+    λ(_defToken : ParserValue)
+      parserBind (expectText "identifier:main")
+        parseBasicDefColon;
+
+  def parseBasicDefColon : ParserValue -> Parser ParserValue =
+    λ(_defName : ParserValue)
+      parserBind (expectText ":")
+        parseBasicDefType;
+
+  def parseBasicDefType : ParserValue -> Parser ParserValue =
+    λ(_colon : ParserValue)
+      parserBind (expectText "identifier:Bool")
+        parseBoolDefinitionEquals;
+
+  def parseBoolDefinitionEquals : ParserValue -> Parser ParserValue =
+    λ(_typeToken : ParserValue)
+      parserBind (expectEqualsParser ValueUnit)
+        parseBasicDefLiteral;
+
+  def parseBasicDefLiteral : ParserValue -> Parser ParserValue =
+    λ(_equalsToken : ParserValue)
+      parserBind (expectText "bool:true")
+        parseBasicDefSemicolon;
+
+  def parseBasicDefSemicolon : ParserValue -> Parser ParserValue =
+    λ(_literalToken : ParserValue)
+      parserBind (expectText ";")
+        parseBasicModuleClose;
+
+  def parseBasicModuleClose : ParserValue -> Parser ParserValue =
+    λ(_semicolonToken : ParserValue)
+      completeModuleKey "basic-bool";
 
   def parseImportModule : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
-      parserBind (expectComplete (TokenKind "identifier:Prelude"))
-        (λ(_moduleToken : ParserValue)
-          parserBind (expectComplete (TokenKind "exposing"))
-            (λ(_exposingToken : ParserValue) parseImportOpen ValueUnit));
+      parserBind (expectText "module")
+        parseImportModuleName;
 
-  def parseImportOpen : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue)
-      parserBind (expectComplete (TokenKind "("))
-        (λ(_openToken : ParserValue) parseImportItem ValueUnit);
+  def parseImportModuleName : ParserValue -> Parser ParserValue =
+    λ(_moduleToken : ParserValue)
+      parserBind (expectText "identifier:Main")
+        parseImportExportKeyword;
 
-  def parseImportItem : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue)
-      parserBind (parserChoice (matchTokenText "identifier:Bool") (matchTokenText "identifier:Int"))
-        (λ(value : ParserValue) withSymbolText value (λ(text : String) case parserTextExactMatch "identifier:Bool" text of {
-          ParserTextMatched -> parseImportCloseBool ValueUnit;
-          ParserTextMismatch -> parseImportCloseInt ValueUnit
-        }));
+  def parseImportExportKeyword : ParserValue -> Parser ParserValue =
+    λ(_nameToken : ParserValue)
+      parserBind (expectText "export")
+        parseImportExportOpen;
 
-  def parseImportCloseBool : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue)
-      parserBind (expectComplete (TokenKind ")"))
-        (λ(_closeToken : ParserValue) parseImportSemicolonBool ValueUnit);
+  def parseImportExportOpen : ParserValue -> Parser ParserValue =
+    λ(_exportToken : ParserValue)
+      parserBind (expectText "(")
+        parseImportExportMain;
 
-  def parseImportCloseInt : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue)
-      parserBind (expectComplete (TokenKind ")"))
-        (λ(_closeToken : ParserValue) parseImportSemicolonInt ValueUnit);
+  def parseImportExportMain : ParserValue -> Parser ParserValue =
+    λ(_openExport : ParserValue)
+      parserBind (expectText "identifier:main")
+        parseImportExportClose;
 
-  def parseImportSemicolonBool : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue)
+  def parseImportExportClose : ParserValue -> Parser ParserValue =
+    λ(_exportMain : ParserValue)
+      parserBind (expectText ")")
+        parseImportModuleOpen;
+
+  def parseImportModuleOpen : ParserValue -> Parser ParserValue =
+    λ(_closeExport : ParserValue)
+      parserBind (expectText "{")
+        parseImportDeclaration;
+
+  def parseImportDeclaration : ParserValue -> Parser ParserValue =
+    λ(_openModule : ParserValue)
+      parserBind (expectText "import")
+        parseImportModuleRef;
+
+  def parseImportModuleRef : ParserValue -> Parser ParserValue =
+    λ(_importToken : ParserValue)
+      parserBind (expectText "identifier:Prelude")
+        parseImportExposingKeyword;
+
+  def parseImportExposingKeyword : ParserValue -> Parser ParserValue =
+    λ(_moduleRef : ParserValue)
+      parserBind (expectText "exposing")
+        parseImportExposingOpen;
+
+  def parseImportExposingOpen : ParserValue -> Parser ParserValue =
+    λ(_exposingToken : ParserValue)
+      parserBind (expectText "(")
+        parseImportBoolType;
+
+  def parseImportBoolType : ParserValue -> Parser ParserValue =
+    λ(_openExposing : ParserValue)
+      parserBind (expectText "identifier:Bool")
+        parseImportExposingClose;
+
+  def parseImportExposingClose : ParserValue -> Parser ParserValue =
+    λ(_boolToken : ParserValue)
+      parserBind (expectText ")")
+        parseImportSemicolon;
+
+  def parseImportSemicolon : ParserValue -> Parser ParserValue =
+    λ(_closeExposing : ParserValue)
       parserBind (expectImportSemicolonParser ValueUnit)
-        (λ(_semicolonToken : ParserValue) parseBodyImportBool ValueUnit);
+        parseImportDefKeyword;
 
-  def parseImportSemicolonInt : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue)
-      parserBind (expectImportSemicolonParser ValueUnit)
-        (λ(_semicolonToken : ParserValue) parseBodyImportInt ValueUnit);
+  def parseImportDefKeyword : ParserValue -> Parser ParserValue =
+    λ(_importSemicolon : ParserValue)
+      parserBind (expectText "def")
+        parseImportDefName;
 
-  def parseBodyImportBool : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue)
-      parserBind (expectComplete (TokenKind "def"))
-        (λ(_defToken : ParserValue) parseDefinitionNameImportBool ValueUnit);
+  def parseImportDefName : ParserValue -> Parser ParserValue =
+    λ(_defToken : ParserValue)
+      parserBind (expectText "identifier:main")
+        parseImportDefColon;
 
-  def parseBodyImportInt : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue)
-      parserBind (expectComplete (TokenKind "def"))
-        (λ(_defToken : ParserValue) parseDefinitionNameImportInt ValueUnit);
+  def parseImportDefColon : ParserValue -> Parser ParserValue =
+    λ(_defName : ParserValue)
+      parserBind (expectText ":")
+        parseImportDefType;
 
-  def parseDefinitionNameBasic : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue) parseDefinitionNameWithBoolKey "basic-bool";
+  def parseImportDefType : ParserValue -> Parser ParserValue =
+    λ(_colonToken : ParserValue)
+      parserBind (expectText "identifier:Bool")
+        parseImportDefEquals;
 
-  def parseDefinitionNameImportBool : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue) parseDefinitionNameWithBoolKey "import-bool";
-
-  def parseDefinitionNameImportInt : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue)
-      parserBind (consumeAnyToken ValueUnit)
-        (λ(value : ParserValue) withSymbolText value (λ(text : String) case parserTextExactMatch "identifier:two" text of {
-          ParserTextMatched -> parseValueTwoDefinition ValueUnit;
-          ParserTextMismatch -> parseMainDefinitionAfterName ValueUnit
-        }));
-
-  def parseDefinitionNameWithBoolKey : String -> Parser ParserValue =
-    λ(boolKey : String)
-      parserBind (expectComplete (TokenKind "identifier:main"))
-        (λ(_nameToken : ParserValue)
-          parserBind (expectComplete (TokenKind ":"))
-            (λ(_colonToken : ParserValue) parseMainTypeWithBoolKey boolKey));
-
-  def parseMainDefinitionAfterName : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue)
-      parserBind (expectComplete (TokenKind ":"))
-        (λ(_colonToken : ParserValue) parseMainTypeWithBoolKey "basic-bool");
-
-  def parseMainTypeWithBoolKey : String -> Parser ParserValue =
-    λ(boolKey : String)
-      parserBind (consumeAnyToken ValueUnit)
-        (λ(value : ParserValue) withSymbolText value (λ(text : String) case parserTextExactMatch "identifier:Bool" text of {
-            ParserTextMatched -> parseBoolDefinitionEquals boolKey;
-            ParserTextMismatch -> case parserTextExactMatch "identifier:Nat" text of {
-              ParserTextMatched -> parseDataMainDefinitionEquals ValueUnit;
-              ParserTextMismatch -> parseMainIntAfterType ValueUnit
-            }
-          }));
-
-  def parseMainIntAfterType : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue)
-      parserBind (expectEqualsParser ValueUnit)
-        (λ(_equalsToken : ParserValue)
-          parserBind (consumeAnyToken ValueUnit)
-            (λ(value : ParserValue) withSymbolText value (λ(text : String) case parserTextExactMatch "identifier:two" text of {
-              ParserTextMatched -> parseValueRefMainSuffix ValueUnit;
-              ParserTextMismatch -> case parserTextExactMatch "let" text of {
-                ParserTextMatched -> parseLetAfterKeyword ValueUnit;
-                ParserTextMismatch -> parserFail (ExpectedCompleteModule basicUnexpectedSpan)
-              }
-            })));
-
-  def parseLetAfterKeyword : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue)
-      parserBind (expectComplete (TokenKind "identifier:id"))
-        (λ(_idToken : ParserValue) parseLetAfterName ValueUnit);
-
-  def parseLetAfterName : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue)
-      parserBind (consumeAnyToken ValueUnit)
-        (λ(value : ParserValue) withSymbolText value (λ(text : String) case parserTextExactMatch ":" text of {
-          ParserTextMatched -> parseTypedAnnotationTail ValueUnit;
-          ParserTextMismatch -> case parserTextExactMatch "=" text of {
-            ParserTextMatched -> parseLetLambdaTail ValueUnit;
-            ParserTextMismatch -> parserFail (ExpectedCompleteModule basicUnexpectedSpan)
-          }
-        }));
-
-  def parseBoolDefinitionEquals : String -> Parser ParserValue =
-    λ(boolKey : String)
-      parserBind (expectEqualsParser ValueUnit)
-        (λ(_equalsToken : ParserValue)
-          parserBind (expectText "bool:true")
-            (λ(_literalToken : ParserValue)
-              parserBind (expectText ";")
-                (λ(_semicolonToken : ParserValue) completeModuleKey boolKey)));
-
-  def parseValueRefMainSuffix : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue)
-      parserBind (expectText ";")
-        (λ(_semicolonToken : ParserValue) completeModuleKey "value-int-ref");
-
-  def parseDataMainDefinitionEquals : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue)
+  def parseImportDefEquals : ParserValue -> Parser ParserValue =
+    λ(_typeToken : ParserValue)
       parserBind (expectText "=")
-        (λ(_equalsToken : ParserValue)
-          parserBind (expectText "identifier:Succ")
-            (λ(_succToken : ParserValue)
-              parserBind (expectText "identifier:Zero")
-                (λ(_zeroToken : ParserValue)
-                  parserBind (expectText ";")
-                    (λ(_semicolonToken : ParserValue) completeModuleKey "data-constructor-spans"))));
+        parseImportDefLiteral;
+
+  def parseImportDefLiteral : ParserValue -> Parser ParserValue =
+    λ(_equalsToken : ParserValue)
+      parserBind (expectText "bool:true")
+        parseImportDefSemicolon;
+
+  def parseImportDefSemicolon : ParserValue -> Parser ParserValue =
+    λ(_literalToken : ParserValue)
+      parserBind (expectText ";")
+        parseImportModuleClose;
+
+  def parseImportModuleClose : ParserValue -> Parser ParserValue =
+    λ(_semicolonToken : ParserValue)
+      completeModuleKey "import-bool";
+
+  def parseValueModule : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "module")
+        parseValueModuleName;
+
+  def parseValueModuleName : ParserValue -> Parser ParserValue =
+    λ(_moduleToken : ParserValue)
+      parserBind (expectText "identifier:Main")
+        parseValueExportKeyword;
+
+  def parseValueExportKeyword : ParserValue -> Parser ParserValue =
+    λ(_nameToken : ParserValue)
+      parserBind (expectText "export")
+        parseValueExportOpen;
+
+  def parseValueExportOpen : ParserValue -> Parser ParserValue =
+    λ(_exportToken : ParserValue)
+      parserBind (expectText "(")
+        parseValueExportMain;
+
+  def parseValueExportMain : ParserValue -> Parser ParserValue =
+    λ(_openExport : ParserValue)
+      parserBind (expectText "identifier:main")
+        parseValueExportClose;
+
+  def parseValueExportClose : ParserValue -> Parser ParserValue =
+    λ(_exportMain : ParserValue)
+      parserBind (expectText ")")
+        parseValueModuleOpen;
+
+  def parseValueModuleOpen : ParserValue -> Parser ParserValue =
+    λ(_closeExport : ParserValue)
+      parserBind (expectText "{")
+        parseValueImportDeclaration;
+
+  def parseValueImportDeclaration : ParserValue -> Parser ParserValue =
+    λ(_openModule : ParserValue)
+      parserBind (expectText "import")
+        parseValueImportModuleRef;
+
+  def parseValueImportModuleRef : ParserValue -> Parser ParserValue =
+    λ(_importToken : ParserValue)
+      parserBind (expectText "identifier:Prelude")
+        parseValueImportExposingKeyword;
+
+  def parseValueImportExposingKeyword : ParserValue -> Parser ParserValue =
+    λ(_moduleRef : ParserValue)
+      parserBind (expectText "exposing")
+        parseValueImportExposingOpen;
+
+  def parseValueImportExposingOpen : ParserValue -> Parser ParserValue =
+    λ(_exposingToken : ParserValue)
+      parserBind (expectText "(")
+        parseValueImportIntType;
+
+  def parseValueImportIntType : ParserValue -> Parser ParserValue =
+    λ(_openExposing : ParserValue)
+      parserBind (expectText "identifier:Int")
+        parseValueImportExposingClose;
+
+  def parseValueImportExposingClose : ParserValue -> Parser ParserValue =
+    λ(_intToken : ParserValue)
+      parserBind (expectText ")")
+        parseValueImportSemicolon;
+
+  def parseValueImportSemicolon : ParserValue -> Parser ParserValue =
+    λ(_closeExposing : ParserValue)
+      parserBind (expectText ";")
+        parseValueTwoDefinition;
 
   def parseValueTwoDefinition : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue)
+    λ(_importSemicolon : ParserValue)
+      parserBind (expectText "def")
+        parseValueTwoName;
+
+  def parseValueTwoName : ParserValue -> Parser ParserValue =
+    λ(_defToken : ParserValue)
+      parserBind (expectText "identifier:two")
+        parseValueTwoColon;
+
+  def parseValueTwoColon : ParserValue -> Parser ParserValue =
+    λ(_twoName : ParserValue)
       parserBind (expectText ":")
-        (λ(_colonToken : ParserValue)
-          parserBind (expectText "identifier:Int")
-            (λ(_typeToken : ParserValue)
-              parserBind (expectText "=")
-                (λ(_equalsToken : ParserValue)
-                  parserBind (expectText "int:2")
-                    (λ(_literalToken : ParserValue)
-                      parserBind (expectDefSemicolonParser ValueUnit)
-                        (λ(_semicolonToken : ParserValue)
-                          parserBind (expectText "def")
-                            (λ(_defToken : ParserValue)
-                              parserBind (expectText "identifier:main")
-                                (λ(_mainToken : ParserValue)
-                                  parserBind (expectText ":")
-                                    (λ(_mainColonToken : ParserValue)
-                                      parserBind (expectText "identifier:Int")
-                                        (λ(_mainTypeToken : ParserValue)
-                                          parserBind (expectText "=")
-                                            (λ(_mainEqualsToken : ParserValue)
-                                              parserBind (expectText "identifier:two")
-                                                (λ(_twoToken : ParserValue) parseValueRefMainSuffix ValueUnit)))))))))));
+        parseValueTwoType;
+
+  def parseValueTwoType : ParserValue -> Parser ParserValue =
+    λ(_colonToken : ParserValue)
+      parserBind (expectText "identifier:Int")
+        parseValueTwoEquals;
+
+  def parseValueTwoEquals : ParserValue -> Parser ParserValue =
+    λ(_typeToken : ParserValue)
+      parserBind (expectText "=")
+        parseValueTwoLiteral;
+
+  def parseValueTwoLiteral : ParserValue -> Parser ParserValue =
+    λ(_equalsToken : ParserValue)
+      parserBind (expectText "int:2")
+        parseValueTwoSemicolon;
+
+  def parseValueTwoSemicolon : ParserValue -> Parser ParserValue =
+    λ(_literalToken : ParserValue)
+      parserBind (expectDefSemicolonParser ValueUnit)
+        parseValueMainDefinition;
+
+  def parseValueMainDefinition : ParserValue -> Parser ParserValue =
+    λ(_twoSemicolon : ParserValue)
+      parserBind (expectText "def")
+        parseValueMainName;
+
+  def parseValueMainName : ParserValue -> Parser ParserValue =
+    λ(_defToken : ParserValue)
+      parserBind (expectText "identifier:main")
+        parseValueMainColon;
+
+  def parseValueMainColon : ParserValue -> Parser ParserValue =
+    λ(_mainName : ParserValue)
+      parserBind (expectText ":")
+        parseValueMainType;
+
+  def parseValueMainType : ParserValue -> Parser ParserValue =
+    λ(_colonToken : ParserValue)
+      parserBind (expectText "identifier:Int")
+        parseValueMainEquals;
+
+  def parseValueMainEquals : ParserValue -> Parser ParserValue =
+    λ(_typeToken : ParserValue)
+      parserBind (expectText "=")
+        parseValueMainReference;
+
+  def parseValueMainReference : ParserValue -> Parser ParserValue =
+    λ(_equalsToken : ParserValue)
+      parserBind (expectText "identifier:two")
+        parseValueMainSemicolon;
+
+  def parseValueMainSemicolon : ParserValue -> Parser ParserValue =
+    λ(_twoReference : ParserValue)
+      parserBind (expectText ";")
+        parseValueModuleClose;
+
+  def parseValueModuleClose : ParserValue -> Parser ParserValue =
+    λ(_semicolonToken : ParserValue)
+      completeModuleKey "value-int-ref";
+
+  def parseLetModule : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "module")
+        parseLetModuleName;
+
+  def parseLetModuleName : ParserValue -> Parser ParserValue =
+    λ(_moduleToken : ParserValue)
+      parserBind (expectText "identifier:Main")
+        parseLetExportKeyword;
+
+  def parseLetExportKeyword : ParserValue -> Parser ParserValue =
+    λ(_nameToken : ParserValue)
+      parserBind (expectText "export")
+        parseLetExportOpen;
+
+  def parseLetExportOpen : ParserValue -> Parser ParserValue =
+    λ(_exportToken : ParserValue)
+      parserBind (expectText "(")
+        parseLetExportMain;
+
+  def parseLetExportMain : ParserValue -> Parser ParserValue =
+    λ(_openExport : ParserValue)
+      parserBind (expectText "identifier:main")
+        parseLetExportClose;
+
+  def parseLetExportClose : ParserValue -> Parser ParserValue =
+    λ(_exportMain : ParserValue)
+      parserBind (expectText ")")
+        parseLetModuleOpen;
+
+  def parseLetModuleOpen : ParserValue -> Parser ParserValue =
+    λ(_closeExport : ParserValue)
+      parserBind (expectText "{")
+        parseLetImportDeclaration;
+
+  def parseLetImportDeclaration : ParserValue -> Parser ParserValue =
+    λ(_openModule : ParserValue)
+      parserBind (expectText "import")
+        parseLetImportModuleRef;
+
+  def parseLetImportModuleRef : ParserValue -> Parser ParserValue =
+    λ(_importToken : ParserValue)
+      parserBind (expectText "identifier:Prelude")
+        parseLetImportExposingKeyword;
+
+  def parseLetImportExposingKeyword : ParserValue -> Parser ParserValue =
+    λ(_moduleRef : ParserValue)
+      parserBind (expectText "exposing")
+        parseLetImportExposingOpen;
+
+  def parseLetImportExposingOpen : ParserValue -> Parser ParserValue =
+    λ(_exposingToken : ParserValue)
+      parserBind (expectText "(")
+        parseLetImportIntType;
+
+  def parseLetImportIntType : ParserValue -> Parser ParserValue =
+    λ(_openExposing : ParserValue)
+      parserBind (expectText "identifier:Int")
+        parseLetImportExposingClose;
+
+  def parseLetImportExposingClose : ParserValue -> Parser ParserValue =
+    λ(_intToken : ParserValue)
+      parserBind (expectText ")")
+        parseLetImportSemicolon;
+
+  def parseLetImportSemicolon : ParserValue -> Parser ParserValue =
+    λ(_closeExposing : ParserValue)
+      parserBind (expectText ";")
+        parseLetMainDefinition;
+
+  def parseLetMainDefinition : ParserValue -> Parser ParserValue =
+    λ(_importSemicolon : ParserValue)
+      parserBind (expectText "def")
+        parseLetMainName;
+
+  def parseLetMainName : ParserValue -> Parser ParserValue =
+    λ(_defToken : ParserValue)
+      parserBind (expectText "identifier:main")
+        parseLetMainColon;
+
+  def parseLetMainColon : ParserValue -> Parser ParserValue =
+    λ(_mainName : ParserValue)
+      parserBind (expectText ":")
+        parseLetMainType;
+
+  def parseLetMainType : ParserValue -> Parser ParserValue =
+    λ(_colonToken : ParserValue)
+      parserBind (expectText "identifier:Int")
+        parseLetMainEquals;
+
+  def parseLetMainEquals : ParserValue -> Parser ParserValue =
+    λ(_typeToken : ParserValue)
+      parserBind (expectText "=")
+        parseLetExpressionHead;
+
+  def parseLetExpressionHead : ParserValue -> Parser ParserValue =
+    λ(_equalsToken : ParserValue)
+      parserBind (expectText "let")
+        parseLetBindingName;
+
+  def parseLetBindingName : ParserValue -> Parser ParserValue =
+    λ(_letToken : ParserValue)
+      parserBind (expectText "identifier:id")
+        parseLetBindingEquals;
+
+  def parseLetBindingEquals : ParserValue -> Parser ParserValue =
+    λ(_bindingName : ParserValue)
+      parserBind (expectText "=")
+        parseLetLambdaTail;
 
   def parseLetLambdaTail : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue)
+    λ(_bindingEquals : ParserValue)
       parserBind (expectText "lambda")
-        (λ(_lambdaToken : ParserValue)
-          parserBind (expectText "identifier:x")
-            (λ(_argToken : ParserValue)
-              parserBind (expectText "identifier:x")
-                (λ(_bodyToken : ParserValue)
-                  parserBind (expectLetInParser ValueUnit)
-                    (λ(_inToken : ParserValue)
-                      parserBind (expectText "identifier:id")
-                        (λ(_idToken : ParserValue)
-                          parserBind (expectText "int:1")
-                            (λ(_argValueToken : ParserValue)
-                              parserBind (expectText ";")
-                                (λ(_semicolonToken : ParserValue) completeModuleKey "let-lambda")))))));
+        parseLetLambdaArgument;
+
+  def parseLetLambdaArgument : ParserValue -> Parser ParserValue =
+    λ(_lambdaToken : ParserValue)
+      parserBind (expectText "identifier:x")
+        parseLetLambdaBody;
+
+  def parseLetLambdaBody : ParserValue -> Parser ParserValue =
+    λ(_argumentToken : ParserValue)
+      parserBind (expectText "identifier:x")
+        parseLetExpressionIn;
+
+  def parseLetExpressionIn : ParserValue -> Parser ParserValue =
+    λ(_bodyToken : ParserValue)
+      parserBind (expectLetInParser ValueUnit)
+        parseLetApplicationHead;
+
+  def parseLetApplicationHead : ParserValue -> Parser ParserValue =
+    λ(_inToken : ParserValue)
+      parserBind (expectText "identifier:id")
+        parseLetApplicationArgument;
+
+  def parseLetApplicationArgument : ParserValue -> Parser ParserValue =
+    λ(_idToken : ParserValue)
+      parserBind (expectText "int:1")
+        parseLetMainSemicolon;
+
+  def parseLetMainSemicolon : ParserValue -> Parser ParserValue =
+    λ(_argumentToken : ParserValue)
+      parserBind (expectText ";")
+        parseLetModuleClose;
+
+  def parseLetModuleClose : ParserValue -> Parser ParserValue =
+    λ(_semicolonToken : ParserValue)
+      completeModuleKey "let-lambda";
+
+  def parseTypedModule : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "module")
+        parseTypedModuleName;
+
+  def parseTypedModuleName : ParserValue -> Parser ParserValue =
+    λ(_moduleToken : ParserValue)
+      parserBind (expectText "identifier:Main")
+        parseTypedExportKeyword;
+
+  def parseTypedExportKeyword : ParserValue -> Parser ParserValue =
+    λ(_nameToken : ParserValue)
+      parserBind (expectText "export")
+        parseTypedExportOpen;
+
+  def parseTypedExportOpen : ParserValue -> Parser ParserValue =
+    λ(_exportToken : ParserValue)
+      parserBind (expectText "(")
+        parseTypedExportMain;
+
+  def parseTypedExportMain : ParserValue -> Parser ParserValue =
+    λ(_openExport : ParserValue)
+      parserBind (expectText "identifier:main")
+        parseTypedExportClose;
+
+  def parseTypedExportClose : ParserValue -> Parser ParserValue =
+    λ(_exportMain : ParserValue)
+      parserBind (expectText ")")
+        parseTypedModuleOpen;
+
+  def parseTypedModuleOpen : ParserValue -> Parser ParserValue =
+    λ(_closeExport : ParserValue)
+      parserBind (expectText "{")
+        parseTypedImportDeclaration;
+
+  def parseTypedImportDeclaration : ParserValue -> Parser ParserValue =
+    λ(_openModule : ParserValue)
+      parserBind (expectText "import")
+        parseTypedImportModuleRef;
+
+  def parseTypedImportModuleRef : ParserValue -> Parser ParserValue =
+    λ(_importToken : ParserValue)
+      parserBind (expectText "identifier:Prelude")
+        parseTypedImportExposingKeyword;
+
+  def parseTypedImportExposingKeyword : ParserValue -> Parser ParserValue =
+    λ(_moduleRef : ParserValue)
+      parserBind (expectText "exposing")
+        parseTypedImportExposingOpen;
+
+  def parseTypedImportExposingOpen : ParserValue -> Parser ParserValue =
+    λ(_exposingToken : ParserValue)
+      parserBind (expectText "(")
+        parseTypedImportIntType;
+
+  def parseTypedImportIntType : ParserValue -> Parser ParserValue =
+    λ(_openExposing : ParserValue)
+      parserBind (expectText "identifier:Int")
+        parseTypedImportExposingClose;
+
+  def parseTypedImportExposingClose : ParserValue -> Parser ParserValue =
+    λ(_intToken : ParserValue)
+      parserBind (expectText ")")
+        parseTypedImportSemicolon;
+
+  def parseTypedImportSemicolon : ParserValue -> Parser ParserValue =
+    λ(_closeExposing : ParserValue)
+      parserBind (expectText ";")
+        parseTypedMainDefinition;
+
+  def parseTypedMainDefinition : ParserValue -> Parser ParserValue =
+    λ(_importSemicolon : ParserValue)
+      parserBind (expectText "def")
+        parseTypedMainName;
+
+  def parseTypedMainName : ParserValue -> Parser ParserValue =
+    λ(_defToken : ParserValue)
+      parserBind (expectText "identifier:main")
+        parseTypedMainColon;
+
+  def parseTypedMainColon : ParserValue -> Parser ParserValue =
+    λ(_mainName : ParserValue)
+      parserBind (expectText ":")
+        parseTypedMainType;
+
+  def parseTypedMainType : ParserValue -> Parser ParserValue =
+    λ(_colonToken : ParserValue)
+      parserBind (expectText "identifier:Int")
+        parseTypedMainEquals;
+
+  def parseTypedMainEquals : ParserValue -> Parser ParserValue =
+    λ(_typeToken : ParserValue)
+      parserBind (expectText "=")
+        parseTypedLetHead;
+
+  def parseTypedLetHead : ParserValue -> Parser ParserValue =
+    λ(_equalsToken : ParserValue)
+      parserBind (expectText "let")
+        parseTypedBindingName;
+
+  def parseTypedBindingName : ParserValue -> Parser ParserValue =
+    λ(_letToken : ParserValue)
+      parserBind (expectText "identifier:id")
+        parseTypedAnnotationTail;
 
   def parseTypedAnnotationTail : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue)
+    λ(_bindingName : ParserValue)
+      parserBind (expectText ":")
+        parseTypedForall;
+
+  def parseTypedForall : ParserValue -> Parser ParserValue =
+    λ(_annotationColon : ParserValue)
       parserBind (expectLetAnnotationTypeParser ValueUnit)
-        (λ(_forallToken : ParserValue)
-          parserBind (expectText "identifier:a")
-            (λ(_binderToken : ParserValue)
-              parserBind (expectText ".")
-                (λ(_dotToken : ParserValue)
-                  parserBind (expectText "identifier:a")
-                    (λ(_domainToken : ParserValue)
-                      parserBind (expectText "->")
-                        (λ(_arrowToken : ParserValue)
-                          parserBind (expectText "identifier:a")
-                            (λ(_codomainToken : ParserValue)
-                              parserBind (expectText "=")
-                                (λ(_equalsToken : ParserValue) parseTypedLambdaTail ValueUnit)))))));
+        parseTypedForallBound;
 
-  def parseTypedLambdaTail : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue)
+  def parseTypedForallBound : ParserValue -> Parser ParserValue =
+    λ(_forallToken : ParserValue)
+      parserBind (expectText "identifier:a")
+        parseTypedForallDot;
+
+  def parseTypedForallDot : ParserValue -> Parser ParserValue =
+    λ(_boundToken : ParserValue)
+      parserBind (expectText ".")
+        parseTypedForallArgument;
+
+  def parseTypedForallArgument : ParserValue -> Parser ParserValue =
+    λ(_dotToken : ParserValue)
+      parserBind (expectText "identifier:a")
+        parseTypedForallArrow;
+
+  def parseTypedForallArrow : ParserValue -> Parser ParserValue =
+    λ(_argumentToken : ParserValue)
+      parserBind (expectText "->")
+        parseTypedForallResult;
+
+  def parseTypedForallResult : ParserValue -> Parser ParserValue =
+    λ(_arrowToken : ParserValue)
+      parserBind (expectText "identifier:a")
+        parseTypedBindingEquals;
+
+  def parseTypedBindingEquals : ParserValue -> Parser ParserValue =
+    λ(_resultToken : ParserValue)
+      parserBind (expectText "=")
+        parseTypedLambdaHead;
+
+  def parseTypedLambdaHead : ParserValue -> Parser ParserValue =
+    λ(_bindingEquals : ParserValue)
       parserBind (expectText "lambda")
-        (λ(_lambdaToken : ParserValue)
-          parserBind (expectText "(")
-            (λ(_openToken : ParserValue)
-              parserBind (expectText "identifier:x")
-                (λ(_argToken : ParserValue)
-                  parserBind (expectText ":")
-                    (λ(_colonToken : ParserValue)
-                      parserBind (expectText "identifier:Int")
-                        (λ(_argTypeToken : ParserValue)
-                          parserBind (expectText ")")
-                            (λ(_closeToken : ParserValue)
-                              parserBind (expectText "identifier:x")
-                                (λ(_bodyToken : ParserValue)
-                                  parserBind (expectLetInParser ValueUnit)
-                                    (λ(_inToken : ParserValue) parseTypedApplicationTail ValueUnit))))))));
+        parseTypedLambdaOpen;
 
-  def parseTypedApplicationTail : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue)
+  def parseTypedLambdaOpen : ParserValue -> Parser ParserValue =
+    λ(_lambdaToken : ParserValue)
       parserBind (expectText "(")
-        (λ(_openToken : ParserValue)
-          parserBind (expectText "identifier:id")
-            (λ(_idToken : ParserValue)
-              parserBind (expectText "int:1")
-                (λ(_argToken : ParserValue)
-                  parserBind (expectText ":")
-                    (λ(_colonToken : ParserValue)
-                      parserBind (expectText "identifier:Int")
-                        (λ(_typeToken : ParserValue)
-                          parserBind (expectText ")")
-                            (λ(_closeToken : ParserValue)
-                              parserBind (expectText ";")
-                                (λ(_semicolonToken : ParserValue) completeModuleKey "typed-annotation")))))));
+        parseTypedLambdaArgument;
+
+  def parseTypedLambdaArgument : ParserValue -> Parser ParserValue =
+    λ(_openToken : ParserValue)
+      parserBind (expectText "identifier:x")
+        parseTypedLambdaArgumentColon;
+
+  def parseTypedLambdaArgumentColon : ParserValue -> Parser ParserValue =
+    λ(_argumentToken : ParserValue)
+      parserBind (expectText ":")
+        parseTypedLambdaArgumentType;
+
+  def parseTypedLambdaArgumentType : ParserValue -> Parser ParserValue =
+    λ(_colonToken : ParserValue)
+      parserBind (expectText "identifier:Int")
+        parseTypedLambdaClose;
+
+  def parseTypedLambdaClose : ParserValue -> Parser ParserValue =
+    λ(_typeToken : ParserValue)
+      parserBind (expectText ")")
+        parseTypedLambdaBody;
+
+  def parseTypedLambdaBody : ParserValue -> Parser ParserValue =
+    λ(_closeToken : ParserValue)
+      parserBind (expectText "identifier:x")
+        parseTypedExpressionIn;
+
+  def parseTypedExpressionIn : ParserValue -> Parser ParserValue =
+    λ(_bodyToken : ParserValue)
+      parserBind (expectText "in")
+        parseTypedApplicationOpen;
+
+  def parseTypedApplicationOpen : ParserValue -> Parser ParserValue =
+    λ(_inToken : ParserValue)
+      parserBind (expectText "(")
+        parseTypedApplicationHead;
+
+  def parseTypedApplicationHead : ParserValue -> Parser ParserValue =
+    λ(_openToken : ParserValue)
+      parserBind (expectText "identifier:id")
+        parseTypedApplicationArgument;
+
+  def parseTypedApplicationArgument : ParserValue -> Parser ParserValue =
+    λ(_idToken : ParserValue)
+      parserBind (expectText "int:1")
+        parseTypedApplicationColon;
+
+  def parseTypedApplicationColon : ParserValue -> Parser ParserValue =
+    λ(_argumentToken : ParserValue)
+      parserBind (expectText ":")
+        parseTypedApplicationType;
+
+  def parseTypedApplicationType : ParserValue -> Parser ParserValue =
+    λ(_colonToken : ParserValue)
+      parserBind (expectText "identifier:Int")
+        parseTypedApplicationClose;
+
+  def parseTypedApplicationClose : ParserValue -> Parser ParserValue =
+    λ(_typeToken : ParserValue)
+      parserBind (expectText ")")
+        parseTypedMainSemicolon;
+
+  def parseTypedMainSemicolon : ParserValue -> Parser ParserValue =
+    λ(_closeToken : ParserValue)
+      parserBind (expectText ";")
+        parseTypedModuleClose;
+
+  def parseTypedModuleClose : ParserValue -> Parser ParserValue =
+    λ(_semicolonToken : ParserValue)
+      completeModuleKey "typed-annotation";
+
+  def parseDataModule : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "module")
+        parseDataModuleName;
+
+  def parseDataModuleName : ParserValue -> Parser ParserValue =
+    λ(_moduleToken : ParserValue)
+      parserBind (expectText "identifier:Main")
+        parseDataExportKeyword;
+
+  def parseDataExportKeyword : ParserValue -> Parser ParserValue =
+    λ(_nameToken : ParserValue)
+      parserBind (expectText "export")
+        parseDataExportOpen;
+
+  def parseDataExportOpen : ParserValue -> Parser ParserValue =
+    λ(_exportToken : ParserValue)
+      parserBind (expectText "(")
+        parseDataExportTypeName;
+
+  def parseDataExportTypeName : ParserValue -> Parser ParserValue =
+    λ(_openExport : ParserValue)
+      parserBind (expectText "identifier:Nat")
+        parseDataExportConstructorsOpen;
+
+  def parseDataExportConstructorsOpen : ParserValue -> Parser ParserValue =
+    λ(_typeName : ParserValue)
+      parserBind (expectText "(")
+        parseDataExportFirstDot;
+
+  def parseDataExportFirstDot : ParserValue -> Parser ParserValue =
+    λ(_openConstructors : ParserValue)
+      parserBind (expectText ".")
+        parseDataExportSecondDot;
+
+  def parseDataExportSecondDot : ParserValue -> Parser ParserValue =
+    λ(_firstDot : ParserValue)
+      parserBind (expectText ".")
+        parseDataExportConstructorsClose;
+
+  def parseDataExportConstructorsClose : ParserValue -> Parser ParserValue =
+    λ(_secondDot : ParserValue)
+      parserBind (expectText ")")
+        parseDataExportComma;
+
+  def parseDataExportComma : ParserValue -> Parser ParserValue =
+    λ(_closeConstructors : ParserValue)
+      parserBind (expectText ",")
+        parseDataExportMain;
+
+  def parseDataExportMain : ParserValue -> Parser ParserValue =
+    λ(_comma : ParserValue)
+      parserBind (expectText "identifier:main")
+        parseDataExportClose;
+
+  def parseDataExportClose : ParserValue -> Parser ParserValue =
+    λ(_exportMain : ParserValue)
+      parserBind (expectText ")")
+        parseDataModuleOpen;
+
+  def parseDataModuleOpen : ParserValue -> Parser ParserValue =
+    λ(_closeExport : ParserValue)
+      parserBind (expectText "{")
+        parseDataDeclaration;
 
   def parseDataDeclaration : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue)
+    λ(_openModule : ParserValue)
+      parserBind (expectText "data")
+        parseDataDeclarationName;
+
+  def parseDataDeclarationName : ParserValue -> Parser ParserValue =
+    λ(_dataToken : ParserValue)
       parserBind (expectText "identifier:Nat")
-        (λ(_nameToken : ParserValue)
-          parserBind (expectText "=")
-            (λ(_equalsToken : ParserValue)
-              parserBind (expectText "identifier:Zero")
-                (λ(_zeroToken : ParserValue)
-                  parserBind (expectConstructorColonParser ValueUnit)
-                    (λ(_zeroColonToken : ParserValue)
-                      parserBind (expectText "identifier:Nat")
-                        (λ(_zeroResultToken : ParserValue)
-                          parserBind (expectText "|")
-                            (λ(_barToken : ParserValue)
-                              parserBind (expectText "identifier:Succ")
-                                (λ(_succToken : ParserValue)
-                                  parserBind (expectText ":")
-                                    (λ(_succColonToken : ParserValue)
-                                      parserBind (expectText "identifier:Nat")
-                                        (λ(_succArgToken : ParserValue)
-                                          parserBind (expectText "->")
-                                            (λ(_arrowToken : ParserValue)
-                                              parserBind (expectText "identifier:Nat")
-                                                (λ(_succResultToken : ParserValue)
-                                                  parserBind (expectText ";")
-                                                    (λ(_dataSemicolonToken : ParserValue)
-                                                      parserBind (expectText "def")
-                                                        (λ(_defToken : ParserValue)
-                                                          parserBind (expectText "identifier:main")
-                                                            (λ(_mainToken : ParserValue)
-                                                              parserBind (expectText ":")
-                                                                (λ(_mainColonToken : ParserValue)
-                                                                  parserBind (expectText "identifier:Nat")
-                                                                    (λ(_mainTypeToken : ParserValue) parseDataMainDefinitionEquals ValueUnit))))))))))))))));
+        parseDataDeclarationEquals;
 
-  def basicPositiveSourceInput : ParserSourceInput =
-    sourceInputCons (SourceSymbol basicModuleKeywordSpan "module")
-      (sourceInputCons (SourceSymbol basicModuleNameSpan "identifier:Main")
-        (sourceInputCons (SourceSymbol basicExportKeywordSpan "export") sourceInputNil));
+  def parseDataDeclarationEquals : ParserValue -> Parser ParserValue =
+    λ(_dataName : ParserValue)
+      parserBind (expectText "=")
+        parseDataZeroConstructor;
 
-  def basicLexerMismatchSourceInput : ParserSourceInput =
-    sourceInputCons (SourceSymbol basicModuleKeywordSpan "module")
-      (sourceInputCons (SourceSymbol basicModuleNameSpan "identifier:Main")
-        (sourceInputCons (SourceUnknown basicExportKeywordSpan) sourceInputNil));
+  def parseDataZeroConstructor : ParserValue -> Parser ParserValue =
+    λ(_equalsToken : ParserValue)
+      parserBind (expectText "identifier:Zero")
+        parseDataZeroColon;
 
-  def parserToken : String -> ParserSourceSymbol =
-    λ(text : String) SourceSymbol basicUnexpectedSpan text;
+  def parseDataZeroColon : ParserValue -> Parser ParserValue =
+    λ(_zeroToken : ParserValue)
+      parserBind (expectConstructorColonParser ValueUnit)
+        parseDataZeroResult;
 
-  def consToken : String -> ParserSourceInput -> ParserSourceInput =
-    λ(text : String) λ(rest : ParserSourceInput) sourceInputCons (parserToken text) rest;
+  def parseDataZeroResult : ParserValue -> Parser ParserValue =
+    λ(_zeroColon : ParserValue)
+      parserBind (expectText "identifier:Nat")
+        parseDataConstructorSeparator;
 
-  def basicParserNegativeSourceInput : ParserSourceInput =
-    consToken "module"
-      (consToken "identifier:Main"
-        (consToken "export"
-          (consToken "("
-            (consToken "identifier:main"
-              (consToken ")"
-                (consToken "{"
-                  (consToken "def"
-                    (consToken "identifier:main"
-                      (consToken ":"
-                        (consToken "identifier:Bool"
-                          (consToken "bool:true" sourceInputNil)))))))))));
+  def parseDataConstructorSeparator : ParserValue -> Parser ParserValue =
+    λ(_zeroResult : ParserValue)
+      parserBind (expectText "|")
+        parseDataSuccConstructor;
 
-  def importParserNegativeSourceInput : ParserSourceInput =
-    consToken "module"
-      (consToken "identifier:Main"
-        (consToken "export"
-          (consToken "("
-            (consToken "identifier:main"
-              (consToken ")"
-                (consToken "{"
-                  (consToken "import"
-                    (consToken "identifier:Prelude"
-                      (consToken "exposing"
-                        (consToken "("
-                          (consToken "identifier:Bool"
-                            (consToken ")"
-                              (consToken "def" sourceInputNil)))))))))))));
+  def parseDataSuccConstructor : ParserValue -> Parser ParserValue =
+    λ(_barToken : ParserValue)
+      parserBind (expectText "identifier:Succ")
+        parseDataSuccColon;
 
-  def valueDefListParserNegativeSourceInput : ParserSourceInput =
-    consToken "module"
-      (consToken "identifier:Main"
-        (consToken "export"
-          (consToken "("
-            (consToken "identifier:main"
-              (consToken ")"
-                (consToken "{"
-                  (consToken "import"
-                    (consToken "identifier:Prelude"
-                      (consToken "exposing"
-                        (consToken "("
-                          (consToken "identifier:Int"
-                            (consToken ")"
-                              (consToken ";"
-                                (consToken "def"
-                                  (consToken "identifier:two"
-                                    (consToken ":"
-                                      (consToken "identifier:Int"
-                                        (consToken "="
-                                          (consToken "int:2"
-                                            (consToken "def" sourceInputNil))))))))))))))))))));
+  def parseDataSuccColon : ParserValue -> Parser ParserValue =
+    λ(_succToken : ParserValue)
+      parserBind (expectText ":")
+        parseDataSuccArgument;
 
-  def letLambdaApplicationParserNegativeSourceInput : ParserSourceInput =
-    consToken "module"
-      (consToken "identifier:Main"
-        (consToken "export"
-          (consToken "("
-            (consToken "identifier:main"
-              (consToken ")"
-                (consToken "{"
-                  (consToken "import"
-                    (consToken "identifier:Prelude"
-                      (consToken "exposing"
-                        (consToken "("
-                          (consToken "identifier:Int"
-                            (consToken ")"
-                              (consToken ";"
-                                (consToken "def"
-                                  (consToken "identifier:main"
-                                    (consToken ":"
-                                      (consToken "identifier:Int"
-                                        (consToken "="
-                                          (consToken "let"
-                                            (consToken "identifier:id"
-                                              (consToken "="
-                                                (consToken "lambda"
-                                                  (consToken "identifier:x"
-                                                    (consToken "identifier:x"
-                                                      (consToken "identifier:id" sourceInputNil)))))))))))))))))))))))));
+  def parseDataSuccArgument : ParserValue -> Parser ParserValue =
+    λ(_succColon : ParserValue)
+      parserBind (expectText "identifier:Nat")
+        parseDataSuccArrow;
 
-  def typedAnnotationTypesParserNegativeSourceInput : ParserSourceInput =
-    consToken "module"
-      (consToken "identifier:Main"
-        (consToken "export"
-          (consToken "("
-            (consToken "identifier:main"
-              (consToken ")"
-                (consToken "{"
-                  (consToken "import"
-                    (consToken "identifier:Prelude"
-                      (consToken "exposing"
-                        (consToken "("
-                          (consToken "identifier:Int"
-                            (consToken ")"
-                              (consToken ";"
-                                (consToken "def"
-                                  (consToken "identifier:main"
-                                    (consToken ":"
-                                      (consToken "identifier:Int"
-                                        (consToken "="
-                                          (consToken "let"
-                                            (consToken "identifier:id"
-                                              (consToken ":"
-                                                (consToken "=" sourceInputNil))))))))))))))))))))));
+  def parseDataSuccArrow : ParserValue -> Parser ParserValue =
+    λ(_succArgument : ParserValue)
+      parserBind (expectText "->")
+        parseDataSuccResult;
 
-  def dataDeclarationParserNegativeSourceInput : ParserSourceInput =
-    consToken "module"
-      (consToken "identifier:Main"
-        (consToken "export"
-          (consToken "("
-            (consToken "identifier:Nat"
-              (consToken "("
-                (consToken ".."
-                  (consToken ")"
-                    (consToken ","
-                      (consToken "identifier:main"
-                        (consToken ")"
-                          (consToken "{"
-                            (consToken "data"
-                              (consToken "identifier:Nat"
-                                (consToken "="
-                                  (consToken "identifier:Zero"
-                                    (consToken "identifier:Nat" sourceInputNil))))))))))))))));
+  def parseDataSuccResult : ParserValue -> Parser ParserValue =
+    λ(_arrowToken : ParserValue)
+      parserBind (expectText "identifier:Nat")
+        parseDataDeclarationSemicolon;
 
-  def renderParserParityRetryEvidence : String -> ParserSourceInput -> ParserSourceInput -> String =
-    λ(sourceFile : String) λ(source : ParserSourceInput) λ(lexerMismatchSource : ParserSourceInput)
-      stringAppend (renderPositiveTokenEvidence sourceFile source)
+  def parseDataDeclarationSemicolon : ParserValue -> Parser ParserValue =
+    λ(_succResult : ParserValue)
+      parserBind (expectText ";")
+        parseDataMainDefKeyword;
+
+  def parseDataMainDefKeyword : ParserValue -> Parser ParserValue =
+    λ(_dataSemicolon : ParserValue)
+      parserBind (expectText "def")
+        parseDataMainDefName;
+
+  def parseDataMainDefName : ParserValue -> Parser ParserValue =
+    λ(_defToken : ParserValue)
+      parserBind (expectText "identifier:main")
+        parseDataMainDefColon;
+
+  def parseDataMainDefColon : ParserValue -> Parser ParserValue =
+    λ(_defName : ParserValue)
+      parserBind (expectText ":")
+        parseDataMainDefType;
+
+  def parseDataMainDefType : ParserValue -> Parser ParserValue =
+    λ(_colonToken : ParserValue)
+      parserBind (expectText "identifier:Nat")
+        parseDataMainDefEquals;
+
+  def parseDataMainDefEquals : ParserValue -> Parser ParserValue =
+    λ(_typeToken : ParserValue)
+      parserBind (expectText "=")
+        parseDataMainExpressionHead;
+
+  def parseDataMainExpressionHead : ParserValue -> Parser ParserValue =
+    λ(_equalsToken : ParserValue)
+      parserBind (expectText "identifier:Succ")
+        parseDataMainExpressionArgument;
+
+  def parseDataMainExpressionArgument : ParserValue -> Parser ParserValue =
+    λ(_succValue : ParserValue)
+      parserBind (expectText "identifier:Zero")
+        parseDataMainDefSemicolon;
+
+  def parseDataMainDefSemicolon : ParserValue -> Parser ParserValue =
+    λ(_zeroValue : ParserValue)
+      parserBind (expectText ";")
+        parseDataModuleClose;
+
+  def parseDataModuleClose : ParserValue -> Parser ParserValue =
+    λ(_semicolonToken : ParserValue)
+      completeModuleKey "data-constructor-spans";
+
+  def renderParserParityRetryEvidence : String -> String -> String -> String =
+    λ(sourceFile : String) λ(sourceText : String) λ(lexerMismatchSourceText : String)
+      stringAppend (renderPositiveTokenEvidence sourceFile sourceText)
         (stringAppend "\n"
-          (stringAppend (renderLexerNegativeEvidence sourceFile lexerMismatchSource)
-            (stringAppend "\n" (renderBasicParserNegativeEvidence sourceFile))));
+          (stringAppend (renderLexerNegativeEvidence sourceFile lexerMismatchSourceText)
+            (stringAppend "\n" (renderParserNegativeEvidenceFromSourceText "parser negative " sourceFile basicParserNegativeSourceText))));
 
-  def renderPositiveTokenEvidence : String -> ParserSourceInput -> String =
-    λ(sourceFile : String) λ(source : ParserSourceInput) case tokenizeCompleteModule source of {
+  def renderPositiveTokenEvidence : String -> String -> String =
+    λ(sourceFile : String) λ(sourceText : String) case tokenizeCompleteModule sourceText of {
       LexerOk input -> renderTokenPrefixEvidence sourceFile input;
       LexerError diagnostic -> stringAppend "tokens " (renderDiagnosticEvidence sourceFile diagnostic)
     };
 
-  def renderLexerNegativeEvidence : String -> ParserSourceInput -> String =
-    λ(sourceFile : String) λ(lexerMismatchSource : ParserSourceInput) case tokenizeCompleteModule lexerMismatchSource of {
+  def renderLexerNegativeEvidence : String -> String -> String =
+    λ(sourceFile : String) λ(lexerMismatchSourceText : String) case tokenizeCompleteModule lexerMismatchSourceText of {
       LexerOk _ -> "lexer negative unexpected-success";
       LexerError diagnostic -> stringAppend "lexer negative " (renderDiagnosticEvidence sourceFile diagnostic)
     };
 
-  def renderBasicParserNegativeEvidence : String -> String =
-    λ(sourceFile : String)
-      renderParserNegativeEvidence "parser negative " sourceFile (parseCompleteModule basicParserNegativeSourceInput);
+  def basicParserNegativeSourceText : String =
+    "module Main export (main) {\n  def main : Bool   true;\n}";
 
-  def renderImportParserNegativeEvidence : String -> String =
-    λ(sourceFile : String)
-      renderParserNegativeEvidence "import parser negative " sourceFile (parseCompleteModule importParserNegativeSourceInput);
-
-  def renderValueDefListParserNegativeEvidence : String -> String =
-    λ(sourceFile : String)
-      renderParserNegativeEvidence "value-def-list parser negative " sourceFile (parseCompleteModule valueDefListParserNegativeSourceInput);
-
-  def renderLetLambdaApplicationParserNegativeEvidence : String -> String =
-    λ(sourceFile : String)
-      renderParserNegativeEvidence "let-lambda-application parser negative " sourceFile (parseCompleteModule letLambdaApplicationParserNegativeSourceInput);
-
-  def renderTypedAnnotationTypesParserNegativeEvidence : String -> String =
-    λ(sourceFile : String)
-      renderParserNegativeEvidence "typed-annotation-types parser negative " sourceFile (parseCompleteModule typedAnnotationTypesParserNegativeSourceInput);
-
-  def renderDataDeclarationParserNegativeEvidence : String -> String =
-    λ(sourceFile : String)
-      renderParserNegativeEvidence "data-declaration parser negative " sourceFile (parseCompleteModule dataDeclarationParserNegativeSourceInput);
+  def renderParserNegativeEvidenceFromSourceText : String -> String -> String -> String =
+    λ(prefix : String) λ(sourceFile : String) λ(sourceText : String)
+      renderParserNegativeEvidence prefix sourceFile (parseCompleteModule sourceText);
 
   def renderParserNegativeEvidence : String -> String -> ParserResult -> String =
     λ(prefix : String) λ(sourceFile : String) λ(result : ParserResult) case result of {

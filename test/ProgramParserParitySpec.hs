@@ -23,6 +23,26 @@ import Test.Hspec
 spec :: Spec
 spec =
     describe "MLF.Program parser parity" $ do
+        it "shared parser-owned .mlfp parser lexes carried fixtures from source text before grammar parsing" $ do
+            basicExpected <- readFile expectedProjectionPath
+            dataExpected <- readFile dataDeclarationConstructorSpansExpectedProjectionPath
+
+            basicRoot <-
+                writeSourceTextFixturePackage
+                    sourceTextBasicPackageRoot
+                    canonicalSourcePath
+                    basicModuleSourceText
+            dataRoot <-
+                writeSourceTextFixturePackage
+                    sourceTextDataPackageRoot
+                    dataDeclarationConstructorSpansCanonicalSourcePath
+                    dataDeclarationConstructorSpansSourceText
+
+            runSharedParserFixture basicRoot
+                `shouldReturn` Right basicExpected
+            runSharedParserFixture dataRoot
+                `shouldReturn` Right dataExpected
+
         it "parser-owned .mlfp parser matches canonical parser for a basic Bool definition and source spans" $ do
             source <- readFile canonicalSourcePath
             expected <- readFile expectedProjectionPath
@@ -84,8 +104,8 @@ spec =
             staticDiagnosticMatches `shouldBe` []
             traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserCompleteParseRequiredPhrases
             traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserDynamicEvidenceRequiredPhrases
-            sharedLexerSource `shouldSatisfy` isInfixOf "def tokenizeCompleteModule : ParserSourceInput -> LexerResult"
-            sharedLexerSource `shouldSatisfy` isInfixOf "validateSourceInput input"
+            sharedLexerSource `shouldSatisfy` isInfixOf "def tokenizeCompleteModule : String -> LexerResult"
+            sharedLexerSource `shouldSatisfy` isInfixOf "initialSourceCursor sourceText"
 
         it "parser-owned .mlfp parser matches canonical parser for multiple value definitions and value-reference spans" $ do
             source <- readFile valueDefListCanonicalSourcePath
@@ -326,14 +346,10 @@ sharedParserStaticNegativeEvidencePhrases =
 
 sharedParserDynamicEvidenceRequiredPhrases :: [String]
 sharedParserDynamicEvidenceRequiredPhrases =
-    [ "parseCompleteModule basicParserNegativeSourceInput"
-    , "parseCompleteModule importParserNegativeSourceInput"
-    , "parseCompleteModule valueDefListParserNegativeSourceInput"
-    , "parseCompleteModule letLambdaApplicationParserNegativeSourceInput"
-    , "parseCompleteModule typedAnnotationTypesParserNegativeSourceInput"
-    , "parseCompleteModule dataDeclarationParserNegativeSourceInput"
-    , "tokenizeCompleteModule source"
-    , "tokenizeCompleteModule lexerMismatchSource"
+    [ "parseCompleteModule sourceText"
+    , "tokenizeCompleteModule sourceText"
+    , "tokenizeCompleteModule lexerMismatchSourceText"
+    , "renderParserNegativeEvidenceFromSourceText"
     , "renderDiagnosticEvidence"
     ]
 
@@ -364,6 +380,61 @@ typedAnnotationTypesNegativeEvidencePackageRoot =
 dataDeclarationConstructorSpansNegativeEvidencePackageRoot :: FilePath
 dataDeclarationConstructorSpansNegativeEvidencePackageRoot =
     "dist-newstyle/parser-parity-data-declaration-constructor-spans-negative-evidence"
+
+sourceTextBasicPackageRoot :: FilePath
+sourceTextBasicPackageRoot =
+    "dist-newstyle/parser-parity-basic-module-def-bool-source-text"
+
+sourceTextDataPackageRoot :: FilePath
+sourceTextDataPackageRoot =
+    "dist-newstyle/parser-parity-data-declaration-constructor-spans-source-text"
+
+writeSourceTextFixturePackage :: FilePath -> FilePath -> String -> IO FilePath
+writeSourceTextFixturePackage packageRoot sourceFile sourceText = do
+    removePathForcibly packageRoot
+    createDirectoryIfMissing True packageRoot
+    writeFile
+        (packageRoot </> "Main.mlfp")
+        (sourceTextFixtureMainSource sourceFile sourceText)
+    pure packageRoot
+
+sourceTextFixtureMainSource :: FilePath -> String -> String
+sourceTextFixtureMainSource sourceFile sourceText =
+    unlines
+        [ "module Main export (main) {"
+        , "  import Prelude exposing (Unit(..), IO, putStrLn);"
+        , "  import ParserParityParser exposing (renderParserParityProjectionFromSourceText);"
+        , ""
+        , "  def sourceFile : String ="
+        , "    " <> show sourceFile <> ";"
+        , ""
+        , "  def sourceText : String ="
+        , "    " <> show sourceText <> ";"
+        , ""
+        , "  def main : IO Unit ="
+        , "    putStrLn (renderParserParityProjectionFromSourceText sourceFile sourceText);"
+        , "}"
+        ]
+
+basicModuleSourceText :: String
+basicModuleSourceText =
+    unlines
+        [ "module Main export (main) {"
+        , "  def main : Bool = true;"
+        , "}"
+        ]
+
+dataDeclarationConstructorSpansSourceText :: String
+dataDeclarationConstructorSpansSourceText =
+    unlines
+        [ "module Main export (Nat(..), main) {"
+        , "  data Nat ="
+        , "      Zero : Nat"
+        , "    | Succ : Nat -> Nat;"
+        , ""
+        , "  def main : Nat = Succ Zero;"
+        , "}"
+        ]
 
 writeRetryEvidencePackage :: IO FilePath
 writeRetryEvidencePackage = do
@@ -412,88 +483,125 @@ retryEvidenceMainSource =
     unlines
         [ "module Main export (main) {"
         , "  import Prelude exposing (Unit(..), IO, putStrLn);"
-        , "  import ParserParityParser exposing (basicLexerMismatchSourceInput, basicPositiveSourceInput, renderParserParityRetryEvidence);"
+        , "  import ParserParityParser exposing (renderParserParityRetryEvidence);"
         , ""
         , "  def sourceFile : String ="
         , "    \"test/conformance/mlfp/parser-parity/basic-module-def-bool/src/Main.mlfp\";"
         , ""
+        , "  def sourceText : String ="
+        , "    " <> show basicModuleSourceText <> ";"
+        , ""
+        , "  def lexerMismatchSourceText : String ="
+        , "    " <> show lexerMismatchSourceText <> ";"
+        , ""
         , "  def main : IO Unit ="
-        , "    putStrLn (renderParserParityRetryEvidence sourceFile basicPositiveSourceInput basicLexerMismatchSourceInput);"
+        , "    putStrLn (renderParserParityRetryEvidence sourceFile sourceText lexerMismatchSourceText);"
         , "}"
         ]
 
 importNegativeEvidenceMainSource :: String
 importNegativeEvidenceMainSource =
-    unlines
-        [ "module Main export (main) {"
-        , "  import Prelude exposing (Unit(..), IO, putStrLn);"
-        , "  import ParserParityParser exposing (renderImportParserNegativeEvidence);"
-        , ""
-        , "  def sourceFile : String ="
-        , "    \"test/conformance/mlfp/parser-parity/import-exposing-def-bool/src/Main.mlfp\";"
-        , ""
-        , "  def main : IO Unit ="
-        , "    putStrLn (renderImportParserNegativeEvidence sourceFile);"
-        , "}"
-        ]
+    parserNegativeEvidenceMainSource
+        "import parser negative "
+        importCanonicalSourcePath
+        importNegativeSourceText
 
 valueDefListNegativeEvidenceMainSource :: String
 valueDefListNegativeEvidenceMainSource =
-    unlines
-        [ "module Main export (main) {"
-        , "  import Prelude exposing (Unit(..), IO, putStrLn);"
-        , "  import ParserParityParser exposing (renderValueDefListParserNegativeEvidence);"
-        , ""
-        , "  def sourceFile : String ="
-        , "    \"test/conformance/mlfp/parser-parity/value-def-list-int-ref/src/Main.mlfp\";"
-        , ""
-        , "  def main : IO Unit ="
-        , "    putStrLn (renderValueDefListParserNegativeEvidence sourceFile);"
-        , "}"
-        ]
+    parserNegativeEvidenceMainSource
+        "value-def-list parser negative "
+        valueDefListCanonicalSourcePath
+        valueDefListNegativeSourceText
 
 letLambdaApplicationNegativeEvidenceMainSource :: String
 letLambdaApplicationNegativeEvidenceMainSource =
-    unlines
-        [ "module Main export (main) {"
-        , "  import Prelude exposing (Unit(..), IO, putStrLn);"
-        , "  import ParserParityParser exposing (renderLetLambdaApplicationParserNegativeEvidence);"
-        , ""
-        , "  def sourceFile : String ="
-        , "    \"test/conformance/mlfp/parser-parity/let-lambda-application/src/Main.mlfp\";"
-        , ""
-        , "  def main : IO Unit ="
-        , "    putStrLn (renderLetLambdaApplicationParserNegativeEvidence sourceFile);"
-        , "}"
-        ]
+    parserNegativeEvidenceMainSource
+        "let-lambda-application parser negative "
+        letLambdaApplicationCanonicalSourcePath
+        letLambdaApplicationNegativeSourceText
 
 typedAnnotationTypesNegativeEvidenceMainSource :: String
 typedAnnotationTypesNegativeEvidenceMainSource =
-    unlines
-        [ "module Main export (main) {"
-        , "  import Prelude exposing (Unit(..), IO, putStrLn);"
-        , "  import ParserParityParser exposing (renderTypedAnnotationTypesParserNegativeEvidence);"
-        , ""
-        , "  def sourceFile : String ="
-        , "    \"test/conformance/mlfp/parser-parity/typed-annotation-types/src/Main.mlfp\";"
-        , ""
-        , "  def main : IO Unit ="
-        , "    putStrLn (renderTypedAnnotationTypesParserNegativeEvidence sourceFile);"
-        , "}"
-        ]
+    parserNegativeEvidenceMainSource
+        "typed-annotation-types parser negative "
+        typedAnnotationTypesCanonicalSourcePath
+        typedAnnotationTypesNegativeSourceText
 
 dataDeclarationConstructorSpansNegativeEvidenceMainSource :: String
 dataDeclarationConstructorSpansNegativeEvidenceMainSource =
+    parserNegativeEvidenceMainSource
+        "data-declaration parser negative "
+        dataDeclarationConstructorSpansCanonicalSourcePath
+        dataDeclarationConstructorSpansNegativeSourceText
+
+parserNegativeEvidenceMainSource :: String -> FilePath -> String -> String
+parserNegativeEvidenceMainSource prefix sourceFile sourceText =
     unlines
         [ "module Main export (main) {"
         , "  import Prelude exposing (Unit(..), IO, putStrLn);"
-        , "  import ParserParityParser exposing (renderDataDeclarationParserNegativeEvidence);"
+        , "  import ParserParityParser exposing (renderParserNegativeEvidenceFromSourceText);"
         , ""
         , "  def sourceFile : String ="
-        , "    \"test/conformance/mlfp/parser-parity/data-declaration-constructor-spans/src/Main.mlfp\";"
+        , "    " <> show sourceFile <> ";"
+        , ""
+        , "  def sourceText : String ="
+        , "    " <> show sourceText <> ";"
         , ""
         , "  def main : IO Unit ="
-        , "    putStrLn (renderDataDeclarationParserNegativeEvidence sourceFile);"
+        , "    putStrLn (renderParserNegativeEvidenceFromSourceText " <> show prefix <> " sourceFile sourceText);"
+        , "}"
+        ]
+
+lexerMismatchSourceText :: String
+lexerMismatchSourceText =
+    "module Main ?\n"
+
+importNegativeSourceText :: String
+importNegativeSourceText =
+    unlines
+        [ "module Main export (main) {"
+        , "  import Prelude exposing (Bool)"
+        , "  def main : Bool = true;"
+        , "}"
+        ]
+
+valueDefListNegativeSourceText :: String
+valueDefListNegativeSourceText =
+    unlines
+        [ "module Main export (main) {"
+        , "  import Prelude exposing (Int);"
+        , "  def two : Int = 2"
+        , "  def main : Int = two;"
+        , "}"
+        ]
+
+letLambdaApplicationNegativeSourceText :: String
+letLambdaApplicationNegativeSourceText =
+    unlines
+        [ "module Main export (main) {"
+        , "  import Prelude exposing (Int);"
+        , "  def main : Int = let id = λx x id 1;"
+        , "}"
+        ]
+
+typedAnnotationTypesNegativeSourceText :: String
+typedAnnotationTypesNegativeSourceText =
+    unlines
+        [ "module Main export (main) {"
+        , "  import Prelude exposing (Int);"
+        , "  def main : Int = let id : = λ(x : Int) x in (id 1 : Int);"
+        , "}"
+        ]
+
+dataDeclarationConstructorSpansNegativeSourceText :: String
+dataDeclarationConstructorSpansNegativeSourceText =
+    unlines
+        [ "module Main export (Nat(..), main) {"
+        , "  data Nat ="
+        , "      Zero Nat"
+        , "    | Succ : Nat -> Nat;"
+        , ""
+        , "  def main : Nat = Succ Zero;"
         , "}"
         ]
 
@@ -501,7 +609,7 @@ retryEvidenceProjection :: String
 retryEvidenceProjection =
     unlines
         [ "tokens module@test/conformance/mlfp/parser-parity/basic-module-def-bool/src/Main.mlfp:1:1-1:7 Main@test/conformance/mlfp/parser-parity/basic-module-def-bool/src/Main.mlfp:1:8-1:12 export@test/conformance/mlfp/parser-parity/basic-module-def-bool/src/Main.mlfp:1:13-1:19"
-        , "lexer negative unexpected-source@test/conformance/mlfp/parser-parity/basic-module-def-bool/src/Main.mlfp:1:13-1:19"
+        , "lexer negative unexpected-source@test/conformance/mlfp/parser-parity/basic-module-def-bool/src/Main.mlfp:1:13-1:13"
         , "parser negative expected-equals@test/conformance/mlfp/parser-parity/basic-module-def-bool/src/Main.mlfp:2:21-2:25"
         ]
 

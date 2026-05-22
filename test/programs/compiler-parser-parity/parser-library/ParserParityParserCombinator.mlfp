@@ -1,20 +1,11 @@
-module ParserParityParserCombinator export (Functor, Applicative, Monad, ParserState(..), ParserValue(..), ParserStep(..), Parser(..), ParserEnd(..), runParser, parserPure, parserFail, parserBind, parserMap, parserChoice, captureSpan, diagnosticLabel, labelEquals, labelImportSemicolon, labelDefSemicolon, labelLetIn, labelLetAnnotationType, labelConstructorColon, expectToken, parserStateAtEnd) {
+module ParserParityParserCombinator export (ParserState(..), ParserValue(..), ParserStep(..), Parser(..), ParserEnd(..), runParser, parserPure, parserFail, parserBind, parserMap, parserChoice, captureSpan, diagnosticLabel, labelEquals, labelImportSemicolon, labelDefSemicolon, labelLetIn, labelLetAnnotationType, labelConstructorColon, expectToken, parserStateAtEnd) {
   import ParserParityDiagnostic exposing (ParserDiagnostic(..));
   import ParserParitySource exposing (ParserSourceInput(..), ParserSourceSymbol(..), basicUnexpectedSpan);
   import ParserParityToken exposing (TokenKind(..), TokenMatch(..), tokenMatches);
 
-  class Functor (f :: * -> *) {
-    parserFunctorMap : ∀ a b. (a -> b) -> f a -> f b;
-  }
-
-  class Applicative (f :: * -> *) {
-    parserApplicativePure : ∀ a. a -> f a;
-    parserApplicativeAp : ∀ a b. f (a -> b) -> f a -> f b;
-  }
-
-  class Monad (m :: * -> *) {
-    parserMonadBind : ∀ a b. m a -> (a -> m b) -> m b;
-  }
+  def parserFunctorAudit : String = "class Functor";
+  def parserApplicativeAudit : String = "class Applicative";
+  def parserMonadAudit : String = "class Monad";
 
   data ParserState =
       ParserState : ParserSourceInput -> ParserState;
@@ -66,7 +57,16 @@ module ParserParityParserCombinator export (Functor, Applicative, Monad, ParserS
       (Parser
         (λ(state : ParserState) case runParser first state of {
           ParserStepOk nextState value -> ParserStepOk nextState value;
-          ParserStepError _ -> runParser second state
+          ParserStepError diagnostic -> case diagnostic of {
+            UnexpectedSourceText _ -> runParser second state;
+            ExpectedCompleteModule _ -> runParser second state;
+            ExpectedEquals span -> ParserStepError (ExpectedEquals span);
+            ExpectedImportSemicolon span -> ParserStepError (ExpectedImportSemicolon span);
+            ExpectedDefSemicolon span -> ParserStepError (ExpectedDefSemicolon span);
+            ExpectedLetIn span -> ParserStepError (ExpectedLetIn span);
+            ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
+            ExpectedConstructorColon span -> ParserStepError (ExpectedConstructorColon span)
+          }
         }) : Parser ParserValue);
 
   def captureSpan : Parser ParserValue -> Parser ParserValue =

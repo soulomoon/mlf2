@@ -792,6 +792,7 @@ Milestone-3 closeout criteria after the whole-library round:
 - round-308 completed item-308-parser-parity-typed-annotation-types as a partial milestone-4 parser-parity tracer; evidence: focused typed-annotation and malformed-annotation checks, parser-parity group, package smokes, full Cabal gate, and thesis gate passed.
 - round-309 completed item-309-parser-parity-data-declaration-constructor-spans as a partial milestone-4 parser-parity tracer; evidence: parser-parity group, package smokes, git diff --check, cabal build all && cabal test, and thesis gate passed.
 - round-310 completed item-310-parser-library-consolidation: carried parser-parity fixtures now route through one shared parser-owned .mlfp parser-combinator library with complete syntax/end-state checking and shared tokenizer/parser diagnostics; evidence: static audits, focused shared-entrypoint and ADT regressions, six direct smokes, parser-parity group, full Cabal gate, and thesis gate passed.
+- round-311 completed item-311-parser-source-text-front-door: carried parser-parity fixtures now expose sourceFile/sourceText and call the shared parser-owned source-text lexer/parser front door before grammar parsing; evidence: focused source-text matcher, parser-parity group, static banned-shape audits, six direct smokes, full Cabal gate, and thesis gate passed.
 
 #### Rev-004 Parser Library Consolidation Contract
 

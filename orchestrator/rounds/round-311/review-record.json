@@ -1,0 +1,24 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-311",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-004",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-004",
+  "milestone_id": "milestone-4",
+  "direction_id": "direction-4a-canonical-parser-parity",
+  "extracted_item_id": "item-311-parser-source-text-front-door",
+  "decision": "approved",
+  "evidence_summary": "Approved round-311: carried parser-parity fixtures now enter through sourceFile/sourceText and the shared parser-owned source-text lexer/parser front door before grammar parsing. Static audits found no fixture-authored ParserSourceInput/SourceSymbol streams, exact-source/static-token shortcuts, or public ParserSourceInput entrypoints. Focused source-text matcher, 17-example parser-parity group, six direct fixture smokes, git diff --check, cabal build all, cabal test, and thesis gate passed.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-4-completion",
+        "text": "round-311 completed item-311-parser-source-text-front-door: carried parser-parity fixtures now expose sourceFile/sourceText and call the shared parser-owned source-text lexer/parser front door before grammar parsing; evidence: focused source-text matcher, parser-parity group, static banned-shape audits, six direct smokes, full Cabal gate, and thesis gate passed."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}

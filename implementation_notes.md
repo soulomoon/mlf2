@@ -1,3 +1,23 @@
+## 2026-05-22 - Round 311 parser parity source-text front door
+
+- Changed the carried parser-parity fixture roots to expose `sourceFile` and
+  `sourceText` only, then call the shared parser-owned
+  `renderParserParityProjectionFromSourceText` entrypoint through
+  `--search-path`.
+- Replaced the failed exact-source lexer/classifier WIP with a shared
+  parser-library source scanner. The scanner advances a source cursor, skips
+  trivia, recognizes the carried token set, builds tokens from observed source
+  text, and avoids recursive top-level lexer bindings that the public
+  `run-program` runtime rejects.
+- Extended the shared parser path to consume the six carried positive
+  parser-parity fixtures through parser-state combinators and EOF checks, then
+  return the existing bounded projection keys. Negative evidence now enters via
+  source text and reports parser-owned diagnostics for missing import
+  semicolons, definition semicolons, `let ... in`, typed annotation types,
+  constructor colons, and Bool-definition equals signs.
+- Scope remains bounded parser parity only. This is not a full parser parity,
+  checker, backend, driver, platform, proof, or self-boot claim.
+
 ## 2026-05-21 - Round 310 parser parity shared library consolidation
 
 - Consolidated the carried parser-parity fixture packages for
