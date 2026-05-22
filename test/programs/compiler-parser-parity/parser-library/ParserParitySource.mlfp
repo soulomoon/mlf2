@@ -1,4 +1,4 @@
-module ParserParitySource export (ParserSourceSymbol(..), ParserSourceInput(..), sourceInputNil, sourceInputCons, renderSpan, basicModuleSpan, basicModuleKeywordSpan, basicModuleNameSpan, basicExportKeywordSpan, basicExportLeftParenSpan, basicExportMainSpan, basicExportRightParenSpan, basicModuleLeftBraceSpan, basicDefKeywordSpan, basicDefNameSpan, basicDefColonSpan, basicBoolTypeSpan, basicDefEqualsSpan, basicBoolLiteralSpan, basicDefSemicolonSpan, basicModuleRightBraceSpan, basicMainDefSpan, basicUnexpectedSpan, lexerUnknownSpan, importBoolModuleSpan, importBoolModuleNameRefSpan, importBoolExportMainSpan, importBoolTypeSpan, importBoolMainDefSpan, importBoolSemicolonSpan, importBoolDefEqualsSpan, valueModuleSpan, valueExportMainSpan, valueImportModuleSpan, valueImportIntSpan, valueFirstDefSemicolonSpan, valueDefTwoSpan, valueDefMainSpan, letModuleSpan, letExportMainSpan, letImportModuleSpan, letImportIntSpan, letInSpan, letDefMainSpan, typedModuleSpan, typedExportMainSpan, typedImportModuleSpan, typedImportIntSpan, typedLetForallSpan, typedDefMainSpan, dataModuleSpan, dataExportNatSpan, dataExportMainSpan, dataDeclSpan, dataZeroConstructorSpan, dataSuccConstructorSpan, dataDefMainSpan, dataZeroColonSpan) {
+module ParserParitySource export (ParserSourceSymbol(..), ParserSourceInput(..), sourceInputNil, sourceInputCons, renderSpan, basicModuleSpan, basicModuleKeywordSpan, basicModuleNameSpan, basicExportKeywordSpan, basicExportLeftParenSpan, basicExportMainSpan, basicExportRightParenSpan, basicModuleLeftBraceSpan, basicDefKeywordSpan, basicDefNameSpan, basicDefColonSpan, basicBoolTypeSpan, basicDefEqualsSpan, basicBoolLiteralSpan, basicDefSemicolonSpan, basicModuleRightBraceSpan, basicMainDefSpan, basicUnexpectedSpan, lexerUnknownSpan, importBoolModuleSpan, importBoolModuleNameRefSpan, importBoolExportMainSpan, importBoolTypeSpan, importBoolMainDefSpan, importBoolSemicolonSpan, importBoolDefEqualsSpan, valueModuleSpan, valueExportMainSpan, valueImportModuleSpan, valueImportIntSpan, valueFirstDefSemicolonSpan, valueDefTwoSpan, valueDefMainSpan, letModuleSpan, letExportMainSpan, letImportModuleSpan, letImportIntSpan, letInSpan, letDefMainSpan, typedModuleSpan, typedExportMainSpan, typedImportModuleSpan, typedImportIntSpan, typedLetForallSpan, typedDefMainSpan, dataModuleSpan, dataExportNatSpan, dataExportMainSpan, dataDeclSpan, dataZeroConstructorSpan, dataSuccConstructorSpan, dataDefMainSpan, dataZeroColonSpan, caseConstructorModuleSpan, caseConstructorDefMainSpan, caseNestedModuleSpan, caseNestedDefMainSpan, caseBranchArrowSpan) {
   import Prelude exposing (stringAppend);
 
   data ParserSourceSymbol =
@@ -76,4 +76,10 @@ module ParserParitySource export (ParserSourceSymbol(..), ParserSourceInput(..),
   def dataSuccConstructorSpan : String = "4:7-4:24";
   def dataDefMainSpan : String = "6:3-7:1";
   def dataZeroColonSpan : String = "3:12-3:13";
+
+  def caseConstructorModuleSpan : String = "1:1-11:1";
+  def caseConstructorDefMainSpan : String = "6:3-10:1";
+  def caseNestedModuleSpan : String = "1:1-12:1";
+  def caseNestedDefMainSpan : String = "6:3-11:1";
+  def caseBranchArrowSpan : String = "7:10-7:11";
 }

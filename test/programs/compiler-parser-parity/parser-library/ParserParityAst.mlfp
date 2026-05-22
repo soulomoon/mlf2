@@ -1,6 +1,6 @@
-module ParserParityAst export (ParsedModule(..), renderParsedModule, renderBasicModuleBool, renderImportExposingBool, renderValueDefListIntRef, renderLetLambdaApplication, renderTypedAnnotationTypes, renderDataDeclarationConstructorSpans) {
+module ParserParityAst export (ParsedModule(..), renderParsedModule, renderBasicModuleBool, renderImportExposingBool, renderValueDefListIntRef, renderLetLambdaApplication, renderTypedAnnotationTypes, renderDataDeclarationConstructorSpans, renderCaseExpressionConstructorPatterns, renderCaseExpressionNestedPatterns) {
   import Prelude exposing (Option(..), stringAppend, stringIndexOf);
-  import ParserParitySource exposing (renderSpan, basicModuleSpan, basicExportMainSpan, basicMainDefSpan, importBoolModuleSpan, importBoolModuleNameRefSpan, importBoolTypeSpan, importBoolMainDefSpan, valueModuleSpan, valueExportMainSpan, valueImportModuleSpan, valueImportIntSpan, valueDefTwoSpan, valueDefMainSpan, letModuleSpan, letExportMainSpan, letImportModuleSpan, letImportIntSpan, letDefMainSpan, typedModuleSpan, typedExportMainSpan, typedImportModuleSpan, typedImportIntSpan, typedDefMainSpan, dataModuleSpan, dataExportNatSpan, dataExportMainSpan, dataDeclSpan, dataZeroConstructorSpan, dataSuccConstructorSpan, dataDefMainSpan);
+  import ParserParitySource exposing (renderSpan, basicModuleSpan, basicExportMainSpan, basicMainDefSpan, importBoolModuleSpan, importBoolModuleNameRefSpan, importBoolTypeSpan, importBoolMainDefSpan, valueModuleSpan, valueExportMainSpan, valueImportModuleSpan, valueImportIntSpan, valueDefTwoSpan, valueDefMainSpan, letModuleSpan, letExportMainSpan, letImportModuleSpan, letImportIntSpan, letDefMainSpan, typedModuleSpan, typedExportMainSpan, typedImportModuleSpan, typedImportIntSpan, typedDefMainSpan, dataModuleSpan, dataExportNatSpan, dataExportMainSpan, dataDeclSpan, dataZeroConstructorSpan, dataSuccConstructorSpan, dataDefMainSpan, caseConstructorModuleSpan, caseConstructorDefMainSpan, caseNestedModuleSpan, caseNestedDefMainSpan);
 
   data ParsedModule =
       ParsedModule : String -> ParsedModule;
@@ -36,7 +36,13 @@ module ParserParityAst export (ParsedModule(..), renderParsedModule, renderBasic
               StringMatched _ -> renderTypedAnnotationTypes sourceFile;
               StringMismatch _ -> case stringExactMatch "data-constructor-spans" key of {
                 StringMatched _ -> renderDataDeclarationConstructorSpans sourceFile;
-                StringMismatch _ -> "parser-error"
+                StringMismatch _ -> case stringExactMatch "case-constructor-patterns" key of {
+                  StringMatched _ -> renderCaseExpressionConstructorPatterns sourceFile;
+                  StringMismatch _ -> case stringExactMatch "case-nested-patterns" key of {
+                    StringMatched _ -> renderCaseExpressionNestedPatterns sourceFile;
+                    StringMismatch _ -> "parser-error"
+                  }
+                }
               }
             }
           }
@@ -117,4 +123,36 @@ module ParserParityAst export (ParsedModule(..), renderParsedModule, renderBasic
                 (stringAppend
                   (stringAppend "constructor Succ type=Nat -> Nat span=" (stringAppend (renderSpan sourceFile dataSuccConstructorSpan) "\n"))
                   (stringAppend "def main type=Nat expr=Succ Zero span=" (renderSpan sourceFile dataDefMainSpan)))))));
+
+  def renderCaseExpressionConstructorPatterns : String -> String =
+    λ(sourceFile : String)
+      stringAppend
+        (stringAppend "module Main span=" (stringAppend (renderSpan sourceFile caseConstructorModuleSpan) "\n"))
+        (stringAppend
+          (stringAppend "export type-with-constructors Nat span=" (stringAppend (renderSpan sourceFile dataExportNatSpan) "\n"))
+          (stringAppend
+            (stringAppend "export value main span=" (stringAppend (renderSpan sourceFile dataExportMainSpan) "\n"))
+            (stringAppend
+              (stringAppend "data Nat span=" (stringAppend (renderSpan sourceFile dataDeclSpan) "\n"))
+              (stringAppend
+                (stringAppend "constructor Zero type=Nat span=" (stringAppend (renderSpan sourceFile dataZeroConstructorSpan) "\n"))
+                (stringAppend
+                  (stringAppend "constructor Succ type=Nat -> Nat span=" (stringAppend (renderSpan sourceFile dataSuccConstructorSpan) "\n"))
+                  (stringAppend "def main type=Int expr=case Succ Zero of { Zero -> 0; Succ _ -> 1 } span=" (renderSpan sourceFile caseConstructorDefMainSpan)))))));
+
+  def renderCaseExpressionNestedPatterns : String -> String =
+    λ(sourceFile : String)
+      stringAppend
+        (stringAppend "module Main span=" (stringAppend (renderSpan sourceFile caseNestedModuleSpan) "\n"))
+        (stringAppend
+          (stringAppend "export type-with-constructors Nat span=" (stringAppend (renderSpan sourceFile dataExportNatSpan) "\n"))
+          (stringAppend
+            (stringAppend "export value main span=" (stringAppend (renderSpan sourceFile dataExportMainSpan) "\n"))
+            (stringAppend
+              (stringAppend "data Nat span=" (stringAppend (renderSpan sourceFile dataDeclSpan) "\n"))
+              (stringAppend
+                (stringAppend "constructor Zero type=Nat span=" (stringAppend (renderSpan sourceFile dataZeroConstructorSpan) "\n"))
+                (stringAppend
+                  (stringAppend "constructor Succ type=Nat -> Nat span=" (stringAppend (renderSpan sourceFile dataSuccConstructorSpan) "\n"))
+                  (stringAppend "def main type=Bool expr=case Succ (Succ Zero) of { Succ Zero -> false; Succ (Succ n) -> true; _ -> false } span=" (renderSpan sourceFile caseNestedDefMainSpan)))))));
 }

@@ -22,6 +22,12 @@ end-to-end roadmap order is decided in
 | Diagnostics | Located package parsing and checking preserve file paths/spans for common package, import, and visibility failures. The lexer and parser seeds have seed-owned diagnostic ADTs carrying symbolic source spans for rejected inputs. | Compiler-grade diagnostics need real source ranges, recovery strategy, structured error payloads, and golden diagnostics for package builds. |
 | Fixture evidence | Static fixture files cover trivial file-as-package inputs, multi-file package roots, ordered search paths, runtime parity rows, backend emission over package mode, the compiler frontend seed contract fixture, the bounded lexer evidence fixture, the bounded parser/AST evidence fixture, the bounded parser-program projection artifacts for the basic Bool definition, import-exposing Bool, value-definition-list Int/reference, let/lambda/application Int, typed-annotation Int, and data-declaration Nat parser parity tracers, and bounded compiler-seed backend/native execution for the current package entrypoint. | Fixtures do not prove broad source-text lexing/parsing, separate compilation, stable ABI/linking, **Self-Boot Total Native Coverage**, or self-hosting. |
 
+Round 312 extends the parser/lexer and fixture-evidence rows above with
+bounded parser-parity fixtures for case expressions over `Nat`, constructor
+patterns, wildcard patterns, and nested constructor patterns. The evidence
+continues to use the shared parser-owned source-text library and does not
+claim broad parser parity or later self-boot stages.
+
 Round 300 adds the first safe optional cursor lookup tracer,
 `stringCharAtOption : String -> Int -> Option Char`, to the same
 source-checking, `run-program`, backend/object, `emit-native`/native-object,
@@ -327,6 +333,15 @@ constructor application rendering, plus malformed constructor-colon evidence
 through `run-program`. Full parser parity, parser combinators, general source
 streams, checker/backend/platform/compiler package/driver/proof work, and
 self-boot evidence remain open.
+Round 312 extends the shared parser-owned source-text parser-parity library
+with a bounded `case ... of` grammar slice. It proves committed parser-program
+projections for `case Succ Zero of { Zero -> 0; Succ _ -> 1 }` and
+`case Succ (Succ Zero) of { Succ Zero -> false; Succ (Succ n) -> true; _ -> false }`,
+covering constructor application scrutinees, constructor patterns, wildcard
+patterns, nested constructor patterns, parenthesized pattern arguments, branch
+arrows, branch separators, and malformed branch-arrow diagnostics through
+`run-program`. Full parser parity, checker/backend/platform/compiler
+package/driver/proof work, and self-boot evidence remain open.
 
 Broad package-manager, persisted-interface, ABI, linker, separate-compilation,
 general FFI, backend-native redesign, or full compiler-driver work remains

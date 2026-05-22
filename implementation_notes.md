@@ -1,3 +1,21 @@
+## 2026-05-22 - Round 312 parser parity case-pattern extension
+
+- Extended the shared parser-owned parser-parity library with a bounded
+  source-text `case ... of` grammar slice for constructor application
+  scrutinees, constructor patterns, wildcard patterns, nested constructor
+  patterns, parenthesized pattern arguments, branch arrows, and branch
+  separators.
+- Added committed parser-program projection fixtures for
+  `case-expression-constructor-patterns` and `case-expression-nested-patterns`,
+  plus thin `.mlfp` fixture roots that expose only `sourceFile` and
+  `sourceText` before calling `renderParserParityProjectionFromSourceText`.
+- Added public parser-parity coverage for malformed case branch arrows through
+  `renderParserNegativeEvidenceFromSourceText`, keeping negative evidence on
+  the same shared source-text lexer/parser path.
+- Scope remains bounded parser parity only. This is not full parser parity,
+  checker, backend, compiler-package, driver, platform, proof, or self-boot
+  progress.
+
 ## 2026-05-22 - Round 311 parser parity source-text front door
 
 - Changed the carried parser-parity fixture roots to expose `sourceFile` and

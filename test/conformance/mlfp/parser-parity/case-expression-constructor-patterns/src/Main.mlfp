@@ -1,0 +1,10 @@
+module Main export (Nat(..), main) {
+  data Nat =
+      Zero : Nat
+    | Succ : Nat -> Nat;
+
+  def main : Int = case Succ Zero of {
+    Zero -> 0;
+    Succ _ -> 1
+  };
+}

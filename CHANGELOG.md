@@ -14,6 +14,16 @@
   checker/backend, driver, platform, proof, or self-boot completion.
 
 ### Added
+- Extended the shared parser-owned parser-parity library with a bounded
+  `case ... of` grammar slice for constructor application scrutinees,
+  constructor patterns, wildcard patterns, nested constructor patterns,
+  parenthesized pattern arguments, branch arrows, and branch separators. New
+  committed parser-program projections and thin fixture roots cover
+  `case-expression-constructor-patterns` and
+  `case-expression-nested-patterns`, with malformed branch-arrow evidence
+  through the same source-text lexer/parser path. This is not full parser
+  parity, checker/backend, compiler-package, driver, platform, proof, or
+  self-boot work.
 - Added the next bounded canonical parser parity tracer for
   `module Main export (Nat(..), main) { data Nat = Zero : Nat | Succ : Nat -> Nat; def main : Nat = Succ Zero; }`.
   The `.mlfp` package under

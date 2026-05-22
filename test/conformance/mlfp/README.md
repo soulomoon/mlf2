@@ -49,4 +49,5 @@ during test runs, and they do not imply full `.mlfp` parser parity. Current
 bounded projection fixtures cover the basic Bool module, one import-exposing
 Bool module, one value-definition-list Int/reference module, one let/lambda/app
 Int expression module, one typed-annotation Int expression module, and one
-data-declaration Nat module with constructor spans.
+data-declaration Nat module with constructor spans, plus two case-expression
+Nat modules covering constructor, wildcard, and nested constructor patterns.

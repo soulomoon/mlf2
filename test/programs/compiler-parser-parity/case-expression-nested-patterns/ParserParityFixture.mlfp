@@ -1,0 +1,7 @@
+module ParserParityFixture export (sourceFile, sourceText) {
+  def sourceFile : String =
+    "test/conformance/mlfp/parser-parity/case-expression-nested-patterns/src/Main.mlfp";
+
+  def sourceText : String =
+    "module Main export (Nat(..), main) {\n  data Nat =\n      Zero : Nat\n    | Succ : Nat -> Nat;\n\n  def main : Bool = case Succ (Succ Zero) of {\n    Succ Zero -> false;\n    Succ (Succ n) -> true;\n    _ -> false\n  };\n}\n";
+}

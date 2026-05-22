@@ -7,5 +7,6 @@ module ParserParityDiagnostic export (ParserDiagnostic(..)) {
     | ExpectedDefSemicolon : String -> ParserDiagnostic
     | ExpectedLetIn : String -> ParserDiagnostic
     | ExpectedLetAnnotationType : String -> ParserDiagnostic
-    | ExpectedConstructorColon : String -> ParserDiagnostic;
+    | ExpectedConstructorColon : String -> ParserDiagnostic
+    | ExpectedCaseBranchArrow : String -> ParserDiagnostic;
 }

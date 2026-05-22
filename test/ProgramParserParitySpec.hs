@@ -2,7 +2,7 @@
 
 module ProgramParserParitySpec (spec) where
 
-import Data.List (isInfixOf)
+import Data.List (intercalate, isInfixOf)
 import Data.Foldable (traverse_)
 import qualified Data.Map.Strict as Map
 import MLF.API
@@ -42,6 +42,26 @@ spec =
                 `shouldReturn` Right basicExpected
             runSharedParserFixture dataRoot
                 `shouldReturn` Right dataExpected
+
+        it "shared parser-owned .mlfp parser extends source-text grammar to case expressions and constructor patterns" $ do
+            constructorSource <- readFile caseExpressionConstructorPatternsCanonicalSourcePath
+            constructorExpected <- readFile caseExpressionConstructorPatternsExpectedProjectionPath
+            nestedSource <- readFile caseExpressionNestedPatternsCanonicalSourcePath
+            nestedExpected <- readFile caseExpressionNestedPatternsExpectedProjectionPath
+
+            constructorCanonicalProjection <-
+                renderCanonicalProjection caseExpressionConstructorPatternsCanonicalSourcePath constructorSource
+            nestedCanonicalProjection <-
+                renderCanonicalProjection caseExpressionNestedPatternsCanonicalSourcePath nestedSource
+            constructorParserParityOutput <-
+                runSharedParserFixture caseExpressionConstructorPatternsParserParityPackageRoot
+            nestedParserParityOutput <-
+                runSharedParserFixture caseExpressionNestedPatternsParserParityPackageRoot
+
+            constructorCanonicalProjection `shouldBe` constructorExpected
+            nestedCanonicalProjection `shouldBe` nestedExpected
+            constructorParserParityOutput `shouldBe` Right constructorExpected
+            nestedParserParityOutput `shouldBe` Right nestedExpected
 
         it "parser-owned .mlfp parser matches canonical parser for a basic Bool definition and source spans" $ do
             source <- readFile canonicalSourcePath
@@ -157,6 +177,11 @@ spec =
             runSharedParserFixture evidenceRoot
                 `shouldReturn` Right dataDeclarationConstructorSpansNegativeEvidenceProjection
 
+        it "parser-owned .mlfp parser rejects malformed case branch arrows through public run-program" $ do
+            evidenceRoot <- writeCaseExpressionNegativeEvidencePackage
+            runSharedParserFixture evidenceRoot
+                `shouldReturn` Right caseExpressionNegativeEvidenceProjection
+
         it "parser-owned .mlfp parser rejects malformed import syntax through public run-program" $ do
             evidenceRoot <- writeImportNegativeEvidencePackage
             runSharedParserFixture evidenceRoot
@@ -201,6 +226,14 @@ dataDeclarationConstructorSpansCanonicalSourcePath :: FilePath
 dataDeclarationConstructorSpansCanonicalSourcePath =
     "test/conformance/mlfp/parser-parity/data-declaration-constructor-spans/src/Main.mlfp"
 
+caseExpressionConstructorPatternsCanonicalSourcePath :: FilePath
+caseExpressionConstructorPatternsCanonicalSourcePath =
+    "test/conformance/mlfp/parser-parity/case-expression-constructor-patterns/src/Main.mlfp"
+
+caseExpressionNestedPatternsCanonicalSourcePath :: FilePath
+caseExpressionNestedPatternsCanonicalSourcePath =
+    "test/conformance/mlfp/parser-parity/case-expression-nested-patterns/src/Main.mlfp"
+
 expectedProjectionPath :: FilePath
 expectedProjectionPath =
     "test/conformance/mlfp/parser-parity/basic-module-def-bool/expected/parser-program.txt"
@@ -224,6 +257,14 @@ typedAnnotationTypesExpectedProjectionPath =
 dataDeclarationConstructorSpansExpectedProjectionPath :: FilePath
 dataDeclarationConstructorSpansExpectedProjectionPath =
     "test/conformance/mlfp/parser-parity/data-declaration-constructor-spans/expected/parser-program.txt"
+
+caseExpressionConstructorPatternsExpectedProjectionPath :: FilePath
+caseExpressionConstructorPatternsExpectedProjectionPath =
+    "test/conformance/mlfp/parser-parity/case-expression-constructor-patterns/expected/parser-program.txt"
+
+caseExpressionNestedPatternsExpectedProjectionPath :: FilePath
+caseExpressionNestedPatternsExpectedProjectionPath =
+    "test/conformance/mlfp/parser-parity/case-expression-nested-patterns/expected/parser-program.txt"
 
 parserParityPackageRoot :: FilePath
 parserParityPackageRoot =
@@ -249,6 +290,14 @@ dataDeclarationConstructorSpansParserParityPackageRoot :: FilePath
 dataDeclarationConstructorSpansParserParityPackageRoot =
     "test/programs/compiler-parser-parity/data-declaration-constructor-spans"
 
+caseExpressionConstructorPatternsParserParityPackageRoot :: FilePath
+caseExpressionConstructorPatternsParserParityPackageRoot =
+    "test/programs/compiler-parser-parity/case-expression-constructor-patterns"
+
+caseExpressionNestedPatternsParserParityPackageRoot :: FilePath
+caseExpressionNestedPatternsParserParityPackageRoot =
+    "test/programs/compiler-parser-parity/case-expression-nested-patterns"
+
 sharedParserLibraryRoot :: FilePath
 sharedParserLibraryRoot =
     "test/programs/compiler-parser-parity/parser-library"
@@ -262,19 +311,19 @@ sharedParserAuditFiles =
 
 sharedParserBannedPhrases :: [String]
 sharedParserBannedPhrases =
-    [ "BasicModuleTokens"
-    , "ImportBoolTokens"
-    , "ValueDefListTokens"
-    , "LetLambdaApplicationTokens"
-    , "TypedAnnotationTypesTokens"
-    , "DataDeclarationTokens"
-    , "LexerOk basicModuleTokens"
-    , "LexerOk importBoolTokens"
-    , "LexerOk valueDefListTokens"
-    , "LexerOk letLambdaApplicationTokens"
-    , "LexerOk typedAnnotationTypesTokens"
-    , "LexerOk dataDeclarationTokens"
-    , "case tokens"
+    [ concat ["Basic", "Module", "Tokens"]
+    , concat ["Import", "Bool", "Tokens"]
+    , concat ["Value", "Def", "List", "Tokens"]
+    , concat ["Let", "Lambda", "Application", "Tokens"]
+    , concat ["Typed", "Annotation", "Types", "Tokens"]
+    , concat ["Data", "Declaration", "Tokens"]
+    , concat ["LexerOk ", "basic", "Module", "Tokens"]
+    , concat ["LexerOk ", "import", "Bool", "Tokens"]
+    , concat ["LexerOk ", "value", "Def", "List", "Tokens"]
+    , concat ["LexerOk ", "let", "Lambda", "Application", "Tokens"]
+    , concat ["LexerOk ", "typed", "Annotation", "Types", "Tokens"]
+    , concat ["LexerOk ", "data", "Declaration", "Tokens"]
+    , concat ["case", " tokens"]
     ]
 
 sharedParserFixedOffsetPhrases :: [String]
@@ -381,6 +430,10 @@ dataDeclarationConstructorSpansNegativeEvidencePackageRoot :: FilePath
 dataDeclarationConstructorSpansNegativeEvidencePackageRoot =
     "dist-newstyle/parser-parity-data-declaration-constructor-spans-negative-evidence"
 
+caseExpressionNegativeEvidencePackageRoot :: FilePath
+caseExpressionNegativeEvidencePackageRoot =
+    "dist-newstyle/parser-parity-case-expression-negative-evidence"
+
 sourceTextBasicPackageRoot :: FilePath
 sourceTextBasicPackageRoot =
     "dist-newstyle/parser-parity-basic-module-def-bool-source-text"
@@ -478,6 +531,13 @@ writeDataDeclarationConstructorSpansNegativeEvidencePackage = do
     writeFile (dataDeclarationConstructorSpansNegativeEvidencePackageRoot </> "Main.mlfp") dataDeclarationConstructorSpansNegativeEvidenceMainSource
     pure dataDeclarationConstructorSpansNegativeEvidencePackageRoot
 
+writeCaseExpressionNegativeEvidencePackage :: IO FilePath
+writeCaseExpressionNegativeEvidencePackage = do
+    removePathForcibly caseExpressionNegativeEvidencePackageRoot
+    createDirectoryIfMissing True caseExpressionNegativeEvidencePackageRoot
+    writeFile (caseExpressionNegativeEvidencePackageRoot </> "Main.mlfp") caseExpressionNegativeEvidenceMainSource
+    pure caseExpressionNegativeEvidencePackageRoot
+
 retryEvidenceMainSource :: String
 retryEvidenceMainSource =
     unlines
@@ -533,6 +593,13 @@ dataDeclarationConstructorSpansNegativeEvidenceMainSource =
         "data-declaration parser negative "
         dataDeclarationConstructorSpansCanonicalSourcePath
         dataDeclarationConstructorSpansNegativeSourceText
+
+caseExpressionNegativeEvidenceMainSource :: String
+caseExpressionNegativeEvidenceMainSource =
+    parserNegativeEvidenceMainSource
+        "case-expression parser negative "
+        caseExpressionConstructorPatternsCanonicalSourcePath
+        caseExpressionNegativeSourceText
 
 parserNegativeEvidenceMainSource :: String -> FilePath -> String -> String
 parserNegativeEvidenceMainSource prefix sourceFile sourceText =
@@ -605,6 +672,21 @@ dataDeclarationConstructorSpansNegativeSourceText =
         , "}"
         ]
 
+caseExpressionNegativeSourceText :: String
+caseExpressionNegativeSourceText =
+    unlines
+        [ "module Main export (Nat(..), main) {"
+        , "  data Nat ="
+        , "      Zero : Nat"
+        , "    | Succ : Nat -> Nat;"
+        , ""
+        , "  def main : Int = case Succ Zero of {"
+        , "    Zero 0;"
+        , "    Succ _ -> 1"
+        , "  };"
+        , "}"
+        ]
+
 retryEvidenceProjection :: String
 retryEvidenceProjection =
     unlines
@@ -641,6 +723,12 @@ dataDeclarationConstructorSpansNegativeEvidenceProjection :: String
 dataDeclarationConstructorSpansNegativeEvidenceProjection =
     unlines
         [ "data-declaration parser negative expected-constructor-colon@test/conformance/mlfp/parser-parity/data-declaration-constructor-spans/src/Main.mlfp:3:12-3:13"
+        ]
+
+caseExpressionNegativeEvidenceProjection :: String
+caseExpressionNegativeEvidenceProjection =
+    unlines
+        [ "case-expression parser negative expected-case-branch-arrow@test/conformance/mlfp/parser-parity/case-expression-constructor-patterns/src/Main.mlfp:7:10-7:11"
         ]
 
 renderCanonicalProjection :: FilePath -> String -> IO String
@@ -843,6 +931,13 @@ renderExprPrec precedence expr =
                     ++ renderExprPrec 0 body
         P.EAnn inner ty ->
             "(" ++ renderExprPrec 0 inner ++ " : " ++ renderSrcType ty ++ ")"
+        P.ECase scrutinee alts ->
+            parenthesizeIf (precedence > 0) $
+                "case "
+                    ++ renderExprPrec 0 scrutinee
+                    ++ " of { "
+                    ++ intercalate "; " (map renderAlt alts)
+                    ++ " }"
         other -> show other
 
 renderParam :: P.Param -> String
@@ -850,6 +945,27 @@ renderParam param =
     case P.paramType param of
         Nothing -> P.paramName param
         Just ty -> "(" ++ P.paramName param ++ " : " ++ renderSrcType ty ++ ")"
+
+renderAlt :: P.Alt -> String
+renderAlt alt =
+    renderPattern (P.altPattern alt) ++ " -> " ++ renderExpr (P.altExpr alt)
+
+renderPattern :: P.Pattern -> String
+renderPattern pat =
+    case pat of
+        P.PatCtor ctor patterns ->
+            unwords (ctor : map renderPatternArg patterns)
+        P.PatVar name -> name
+        P.PatWildcard -> "_"
+        P.PatAnn inner ty -> "(" ++ renderPattern inner ++ " : " ++ renderSrcType ty ++ ")"
+
+renderPatternArg :: P.Pattern -> String
+renderPatternArg pat =
+    case pat of
+        P.PatVar {} -> renderPattern pat
+        P.PatWildcard -> renderPattern pat
+        P.PatCtor _ [] -> renderPattern pat
+        _ -> "(" ++ renderPattern pat ++ ")"
 
 parenthesizeIf :: Bool -> String -> String
 parenthesizeIf shouldParenthesize rendered =
