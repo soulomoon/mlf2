@@ -1,3 +1,20 @@
+## 2026-05-22 - Round 313 parser parity typeclass/instance extension
+
+- Extended the shared parser-owned parser-parity library with a bounded
+  source-text declaration grammar slice for class declarations, method
+  signatures, deriving clauses, instance declarations, and instance method
+  definitions.
+- Added committed parser-program projection fixtures for
+  `typeclass-deriving-method` and `typeclass-instance-nullary-method`, plus
+  thin `.mlfp` fixture roots that expose only `sourceFile` and `sourceText`
+  before calling `renderParserParityProjectionFromSourceText`.
+- Added public parser-parity coverage for a malformed instance method
+  definition through `renderParserNegativeEvidenceFromSourceText`, keeping the
+  negative evidence on the same shared source-text lexer/parser path.
+- Scope remains bounded parser parity only. This is not full parser parity,
+  checker, backend, compiler-package, driver, platform, proof, or self-boot
+  progress.
+
 ## 2026-05-22 - Round 312 parser parity case-pattern extension
 
 - Extended the shared parser-owned parser-parity library with a bounded

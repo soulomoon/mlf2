@@ -1,0 +1,7 @@
+module ParserParityFixture export (sourceFile, sourceText) {
+  def sourceFile : String =
+    "test/conformance/mlfp/parser-parity/typeclass-instance-nullary-method/src/Main.mlfp";
+
+  def sourceText : String =
+    "module Main export (Monoid, Nat(..), mempty, append, main) {\n  class Monoid a {\n    mempty : a;\n    append : a -> a -> a;\n  }\n\n  data Nat =\n      Zero : Nat\n    | Succ : Nat -> Nat;\n\n  instance Monoid Nat {\n    mempty = Zero;\n    append = λleft λright left;\n  }\n\n  def main : Nat = append (mempty : Nat) Zero;\n}\n";
+}

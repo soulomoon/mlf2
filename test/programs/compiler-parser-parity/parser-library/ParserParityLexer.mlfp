@@ -156,6 +156,18 @@ module ParserParityLexer export (LexerResult(..), tokenizeCompleteModule) {
   def scanKnownData : SourceCursor -> LexStep =
     λ(cursor : SourceCursor) case scanSourceToken "data" "data" 4 basicUnexpectedSpan cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownClass cursor
+    };
+
+  def scanKnownClass : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "class" "class" 5 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownDeriving cursor
+    };
+
+  def scanKnownDeriving : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "deriving" "deriving" 8 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownImport cursor
     };
 
@@ -173,6 +185,12 @@ module ParserParityLexer export (LexerResult(..), tokenizeCompleteModule) {
 
   def scanKnownLet : SourceCursor -> LexStep =
     λ(cursor : SourceCursor) case scanSourceToken "let" "let" 3 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownInstance cursor
+    };
+
+  def scanKnownInstance : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "instance" "instance" 8 basicUnexpectedSpan cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownIn cursor
     };
@@ -228,6 +246,18 @@ module ParserParityLexer export (LexerResult(..), tokenizeCompleteModule) {
   def scanKnownBool : SourceCursor -> LexStep =
     λ(cursor : SourceCursor) case scanSourceToken "Bool" "identifier:Bool" 4 basicUnexpectedSpan cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownEqType cursor
+    };
+
+  def scanKnownEqType : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "Eq" "identifier:Eq" 2 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownMonoid cursor
+    };
+
+  def scanKnownMonoid : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "Monoid" "identifier:Monoid" 6 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownInt cursor
     };
 
@@ -269,6 +299,36 @@ module ParserParityLexer export (LexerResult(..), tokenizeCompleteModule) {
 
   def scanKnownTwoName : SourceCursor -> LexStep =
     λ(cursor : SourceCursor) case scanSourceToken "two" "identifier:two" 3 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownEqMethod cursor
+    };
+
+  def scanKnownEqMethod : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "eq" "identifier:eq" 2 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownMempty cursor
+    };
+
+  def scanKnownMempty : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "mempty" "identifier:mempty" 6 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownAppend cursor
+    };
+
+  def scanKnownAppend : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "append" "identifier:append" 6 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownLeft cursor
+    };
+
+  def scanKnownLeft : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "left" "identifier:left" 4 basicUnexpectedSpan cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownRight cursor
+    };
+
+  def scanKnownRight : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "right" "identifier:right" 5 basicUnexpectedSpan cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownX cursor
     };

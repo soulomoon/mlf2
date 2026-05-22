@@ -3,8 +3,8 @@ module ParserParityParser export (ParserResult(..), parseCompleteModule, parseTo
   import ParserParityAst exposing (ParsedModule(..), renderParsedModule);
   import ParserParityDiagnostic exposing (ParserDiagnostic(..));
   import ParserParityLexer exposing (LexerResult(..), tokenizeCompleteModule);
-  import ParserParityParserCombinator exposing (Parser, ParserEnd(..), ParserState(..), ParserStep(..), ParserValue(..), captureSpan, diagnosticLabel, expectToken, labelCaseBranchArrow, labelConstructorColon, labelDefSemicolon, labelEquals, labelImportSemicolon, labelLetAnnotationType, labelLetIn, parserBind, parserChoice, parserFail, parserPure, parserStateAtEnd, runParser);
-  import ParserParitySource exposing (basicBoolLiteralSpan, basicUnexpectedSpan, caseBranchArrowSpan, dataZeroColonSpan, importBoolSemicolonSpan, letInSpan, lexerUnknownSpan, renderSpan, typedLetForallSpan, valueFirstDefSemicolonSpan);
+  import ParserParityParserCombinator exposing (Parser, ParserEnd(..), ParserState(..), ParserStep(..), ParserValue(..), captureSpan, diagnosticLabel, expectToken, labelCaseBranchArrow, labelConstructorColon, labelDefSemicolon, labelEquals, labelImportSemicolon, labelInstanceMethodEquals, labelLetAnnotationType, labelLetIn, parserBind, parserChoice, parserFail, parserPure, parserStateAtEnd, runParser);
+  import ParserParitySource exposing (basicBoolLiteralSpan, basicUnexpectedSpan, caseBranchArrowSpan, dataZeroColonSpan, importBoolSemicolonSpan, letInSpan, lexerUnknownSpan, renderSpan, typedLetForallSpan, typeclassInstanceMethodEqualsSpan, valueFirstDefSemicolonSpan);
   import ParserParityToken exposing (ParserInput(..), TokenKind(..), renderTokenPrefixEvidence);
 
   data ParserResult =
@@ -72,6 +72,11 @@ module ParserParityParser export (ParserResult(..), parseCompleteModule, parseTo
     λ(_start : ParserValue)
       parserChoice (expectText "->") (parserFail (ExpectedCaseBranchArrow caseBranchArrowSpan));
 
+  def expectInstanceMethodEqualsParser : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      labelInstanceMethodEquals
+        (parserChoice (expectText "=") (parserFail (ExpectedInstanceMethodEquals typeclassInstanceMethodEqualsSpan)));
+
   def expectText : String -> Parser ParserValue =
     λ(text : String) expectComplete (TokenKind text);
 
@@ -90,7 +95,8 @@ module ParserParityParser export (ParserResult(..), parseCompleteModule, parseTo
           (parserChoice (parseValueModule ValueUnit)
             (parserChoice (parseLetModule ValueUnit)
               (parserChoice (parseTypedModule ValueUnit)
-                (parserChoice (parseDataModule ValueUnit) (parseCaseModule ValueUnit))))));
+                (parserChoice (parseDataModule ValueUnit)
+                  (parserChoice (parseCaseModule ValueUnit) (parseTypeclassModule ValueUnit)))))));
 
   def parseBasicModule : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
@@ -1348,6 +1354,693 @@ module ParserParityParser export (ParserResult(..), parseCompleteModule, parseTo
     λ(_semicolonToken : ParserValue)
       completeModuleKey "case-nested-patterns";
 
+  def parseTypeclassModule : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "module")
+        parseTypeclassModuleName;
+
+  def parseTypeclassModuleName : ParserValue -> Parser ParserValue =
+    λ(_moduleToken : ParserValue)
+      parserBind (expectText "identifier:Main")
+        parseTypeclassExportKeyword;
+
+  def parseTypeclassExportKeyword : ParserValue -> Parser ParserValue =
+    λ(_nameToken : ParserValue)
+      parserBind (expectText "export")
+        parseTypeclassExportOpen;
+
+  def parseTypeclassExportOpen : ParserValue -> Parser ParserValue =
+    λ(_exportToken : ParserValue)
+      parserBind (expectText "(")
+        parseTypeclassExportFamily;
+
+  def parseTypeclassExportFamily : ParserValue -> Parser ParserValue =
+    λ(_openExport : ParserValue)
+      parserChoice (parseTypeclassDerivingExportEq ValueUnit) (parseTypeclassInstanceExportMonoid ValueUnit);
+
+  def parseTypeclassDerivingExportEq : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "identifier:Eq")
+        parseTypeclassDerivingExportEqComma;
+
+  def parseTypeclassDerivingExportEqComma : ParserValue -> Parser ParserValue =
+    λ(_eqExport : ParserValue)
+      parserBind (expectText ",")
+        parseTypeclassDerivingExportNat;
+
+  def parseTypeclassDerivingExportNat : ParserValue -> Parser ParserValue =
+    λ(_comma : ParserValue)
+      parserBind (expectText "identifier:Nat")
+        parseTypeclassDerivingExportConstructorsOpen;
+
+  def parseTypeclassDerivingExportConstructorsOpen : ParserValue -> Parser ParserValue =
+    λ(_natExport : ParserValue)
+      parserBind (expectText "(")
+        parseTypeclassDerivingExportFirstDot;
+
+  def parseTypeclassDerivingExportFirstDot : ParserValue -> Parser ParserValue =
+    λ(_openConstructors : ParserValue)
+      parserBind (expectText ".")
+        parseTypeclassDerivingExportSecondDot;
+
+  def parseTypeclassDerivingExportSecondDot : ParserValue -> Parser ParserValue =
+    λ(_firstDot : ParserValue)
+      parserBind (expectText ".")
+        parseTypeclassDerivingExportConstructorsClose;
+
+  def parseTypeclassDerivingExportConstructorsClose : ParserValue -> Parser ParserValue =
+    λ(_secondDot : ParserValue)
+      parserBind (expectText ")")
+        parseTypeclassDerivingExportNatComma;
+
+  def parseTypeclassDerivingExportNatComma : ParserValue -> Parser ParserValue =
+    λ(_closeConstructors : ParserValue)
+      parserBind (expectText ",")
+        parseTypeclassDerivingExportEqMethod;
+
+  def parseTypeclassDerivingExportEqMethod : ParserValue -> Parser ParserValue =
+    λ(_comma : ParserValue)
+      parserBind (expectText "identifier:eq")
+        parseTypeclassDerivingExportEqMethodComma;
+
+  def parseTypeclassDerivingExportEqMethodComma : ParserValue -> Parser ParserValue =
+    λ(_eqMethodExport : ParserValue)
+      parserBind (expectText ",")
+        parseTypeclassDerivingExportMain;
+
+  def parseTypeclassDerivingExportMain : ParserValue -> Parser ParserValue =
+    λ(_comma : ParserValue)
+      parserBind (expectText "identifier:main")
+        parseTypeclassDerivingExportClose;
+
+  def parseTypeclassDerivingExportClose : ParserValue -> Parser ParserValue =
+    λ(_mainExport : ParserValue)
+      parserBind (expectText ")")
+        parseTypeclassDerivingModuleOpen;
+
+  def parseTypeclassDerivingModuleOpen : ParserValue -> Parser ParserValue =
+    λ(_closeExport : ParserValue)
+      parserBind (expectText "{")
+        parseTypeclassDerivingClassKeyword;
+
+  def parseTypeclassDerivingClassKeyword : ParserValue -> Parser ParserValue =
+    λ(_openModule : ParserValue)
+      parserBind (expectText "class")
+        parseTypeclassDerivingClassName;
+
+  def parseTypeclassDerivingClassName : ParserValue -> Parser ParserValue =
+    λ(_classToken : ParserValue)
+      parserBind (expectText "identifier:Eq")
+        parseTypeclassDerivingClassParameter;
+
+  def parseTypeclassDerivingClassParameter : ParserValue -> Parser ParserValue =
+    λ(_className : ParserValue)
+      parserBind (expectText "identifier:a")
+        parseTypeclassDerivingClassOpen;
+
+  def parseTypeclassDerivingClassOpen : ParserValue -> Parser ParserValue =
+    λ(_parameter : ParserValue)
+      parserBind (expectText "{")
+        parseTypeclassDerivingMethodSignatureName;
+
+  def parseTypeclassDerivingMethodSignatureName : ParserValue -> Parser ParserValue =
+    λ(_openClass : ParserValue)
+      parserBind (expectText "identifier:eq")
+        parseTypeclassDerivingMethodSignatureColon;
+
+  def parseTypeclassDerivingMethodSignatureColon : ParserValue -> Parser ParserValue =
+    λ(_methodName : ParserValue)
+      parserBind (expectText ":")
+        parseTypeclassDerivingMethodSignatureFirstArgument;
+
+  def parseTypeclassDerivingMethodSignatureFirstArgument : ParserValue -> Parser ParserValue =
+    λ(_colon : ParserValue)
+      parserBind (expectText "identifier:a")
+        parseTypeclassDerivingMethodSignatureFirstArrow;
+
+  def parseTypeclassDerivingMethodSignatureFirstArrow : ParserValue -> Parser ParserValue =
+    λ(_firstArgument : ParserValue)
+      parserBind (expectText "->")
+        parseTypeclassDerivingMethodSignatureSecondArgument;
+
+  def parseTypeclassDerivingMethodSignatureSecondArgument : ParserValue -> Parser ParserValue =
+    λ(_firstArrow : ParserValue)
+      parserBind (expectText "identifier:a")
+        parseTypeclassDerivingMethodSignatureSecondArrow;
+
+  def parseTypeclassDerivingMethodSignatureSecondArrow : ParserValue -> Parser ParserValue =
+    λ(_secondArgument : ParserValue)
+      parserBind (expectText "->")
+        parseTypeclassDerivingMethodSignatureResult;
+
+  def parseTypeclassDerivingMethodSignatureResult : ParserValue -> Parser ParserValue =
+    λ(_secondArrow : ParserValue)
+      parserBind (expectText "identifier:Bool")
+        parseTypeclassDerivingMethodSignatureSemicolon;
+
+  def parseTypeclassDerivingMethodSignatureSemicolon : ParserValue -> Parser ParserValue =
+    λ(_resultType : ParserValue)
+      parserBind (expectText ";")
+        parseTypeclassDerivingClassClose;
+
+  def parseTypeclassDerivingClassClose : ParserValue -> Parser ParserValue =
+    λ(_semicolon : ParserValue)
+      parserBind (expectText "}")
+        parseTypeclassDerivingDataKeyword;
+
+  def parseTypeclassDerivingDataKeyword : ParserValue -> Parser ParserValue =
+    λ(_closeClass : ParserValue)
+      parserBind (expectText "data")
+        parseTypeclassDerivingDataName;
+
+  def parseTypeclassDerivingDataName : ParserValue -> Parser ParserValue =
+    λ(_dataToken : ParserValue)
+      parserBind (expectText "identifier:Nat")
+        parseTypeclassDerivingDataEquals;
+
+  def parseTypeclassDerivingDataEquals : ParserValue -> Parser ParserValue =
+    λ(_dataName : ParserValue)
+      parserBind (expectText "=")
+        parseTypeclassDerivingZeroConstructor;
+
+  def parseTypeclassDerivingZeroConstructor : ParserValue -> Parser ParserValue =
+    λ(_equalsToken : ParserValue)
+      parserBind (expectText "identifier:Zero")
+        parseTypeclassDerivingZeroColon;
+
+  def parseTypeclassDerivingZeroColon : ParserValue -> Parser ParserValue =
+    λ(_zeroToken : ParserValue)
+      parserBind (expectText ":")
+        parseTypeclassDerivingZeroResult;
+
+  def parseTypeclassDerivingZeroResult : ParserValue -> Parser ParserValue =
+    λ(_zeroColon : ParserValue)
+      parserBind (expectText "identifier:Nat")
+        parseTypeclassDerivingConstructorSeparator;
+
+  def parseTypeclassDerivingConstructorSeparator : ParserValue -> Parser ParserValue =
+    λ(_zeroResult : ParserValue)
+      parserBind (expectText "|")
+        parseTypeclassDerivingSuccConstructor;
+
+  def parseTypeclassDerivingSuccConstructor : ParserValue -> Parser ParserValue =
+    λ(_barToken : ParserValue)
+      parserBind (expectText "identifier:Succ")
+        parseTypeclassDerivingSuccColon;
+
+  def parseTypeclassDerivingSuccColon : ParserValue -> Parser ParserValue =
+    λ(_succToken : ParserValue)
+      parserBind (expectText ":")
+        parseTypeclassDerivingSuccArgument;
+
+  def parseTypeclassDerivingSuccArgument : ParserValue -> Parser ParserValue =
+    λ(_succColon : ParserValue)
+      parserBind (expectText "identifier:Nat")
+        parseTypeclassDerivingSuccArrow;
+
+  def parseTypeclassDerivingSuccArrow : ParserValue -> Parser ParserValue =
+    λ(_succArgument : ParserValue)
+      parserBind (expectText "->")
+        parseTypeclassDerivingSuccResult;
+
+  def parseTypeclassDerivingSuccResult : ParserValue -> Parser ParserValue =
+    λ(_arrowToken : ParserValue)
+      parserBind (expectText "identifier:Nat")
+        parseTypeclassDerivingKeyword;
+
+  def parseTypeclassDerivingKeyword : ParserValue -> Parser ParserValue =
+    λ(_succResult : ParserValue)
+      parserBind (expectText "deriving")
+        parseTypeclassDerivingClassRef;
+
+  def parseTypeclassDerivingClassRef : ParserValue -> Parser ParserValue =
+    λ(_derivingToken : ParserValue)
+      parserBind (expectText "identifier:Eq")
+        parseTypeclassDerivingDataSemicolon;
+
+  def parseTypeclassDerivingDataSemicolon : ParserValue -> Parser ParserValue =
+    λ(_classRef : ParserValue)
+      parserBind (expectText ";")
+        parseTypeclassDerivingMainDefKeyword;
+
+  def parseTypeclassDerivingMainDefKeyword : ParserValue -> Parser ParserValue =
+    λ(_dataSemicolon : ParserValue)
+      parserBind (expectText "def")
+        parseTypeclassDerivingMainDefName;
+
+  def parseTypeclassDerivingMainDefName : ParserValue -> Parser ParserValue =
+    λ(_defToken : ParserValue)
+      parserBind (expectText "identifier:main")
+        parseTypeclassDerivingMainDefColon;
+
+  def parseTypeclassDerivingMainDefColon : ParserValue -> Parser ParserValue =
+    λ(_defName : ParserValue)
+      parserBind (expectText ":")
+        parseTypeclassDerivingMainDefType;
+
+  def parseTypeclassDerivingMainDefType : ParserValue -> Parser ParserValue =
+    λ(_colonToken : ParserValue)
+      parserBind (expectText "identifier:Bool")
+        parseTypeclassDerivingMainDefEquals;
+
+  def parseTypeclassDerivingMainDefEquals : ParserValue -> Parser ParserValue =
+    λ(_typeToken : ParserValue)
+      parserBind (expectText "=")
+        parseTypeclassDerivingMainCallHead;
+
+  def parseTypeclassDerivingMainCallHead : ParserValue -> Parser ParserValue =
+    λ(_equalsToken : ParserValue)
+      parserBind (expectText "identifier:eq")
+        parseTypeclassDerivingMainFirstArgumentOpen;
+
+  def parseTypeclassDerivingMainFirstArgumentOpen : ParserValue -> Parser ParserValue =
+    λ(_callHead : ParserValue)
+      parserBind (expectText "(")
+        parseTypeclassDerivingMainFirstSucc;
+
+  def parseTypeclassDerivingMainFirstSucc : ParserValue -> Parser ParserValue =
+    λ(_openToken : ParserValue)
+      parserBind (expectText "identifier:Succ")
+        parseTypeclassDerivingMainFirstZero;
+
+  def parseTypeclassDerivingMainFirstZero : ParserValue -> Parser ParserValue =
+    λ(_succValue : ParserValue)
+      parserBind (expectText "identifier:Zero")
+        parseTypeclassDerivingMainFirstArgumentClose;
+
+  def parseTypeclassDerivingMainFirstArgumentClose : ParserValue -> Parser ParserValue =
+    λ(_zeroValue : ParserValue)
+      parserBind (expectText ")")
+        parseTypeclassDerivingMainSecondArgumentOpen;
+
+  def parseTypeclassDerivingMainSecondArgumentOpen : ParserValue -> Parser ParserValue =
+    λ(_closeToken : ParserValue)
+      parserBind (expectText "(")
+        parseTypeclassDerivingMainSecondSucc;
+
+  def parseTypeclassDerivingMainSecondSucc : ParserValue -> Parser ParserValue =
+    λ(_openToken : ParserValue)
+      parserBind (expectText "identifier:Succ")
+        parseTypeclassDerivingMainSecondZero;
+
+  def parseTypeclassDerivingMainSecondZero : ParserValue -> Parser ParserValue =
+    λ(_succValue : ParserValue)
+      parserBind (expectText "identifier:Zero")
+        parseTypeclassDerivingMainSecondArgumentClose;
+
+  def parseTypeclassDerivingMainSecondArgumentClose : ParserValue -> Parser ParserValue =
+    λ(_zeroValue : ParserValue)
+      parserBind (expectText ")")
+        parseTypeclassDerivingMainSemicolon;
+
+  def parseTypeclassDerivingMainSemicolon : ParserValue -> Parser ParserValue =
+    λ(_closeToken : ParserValue)
+      parserBind (expectText ";")
+        parseTypeclassDerivingModuleClose;
+
+  def parseTypeclassDerivingModuleClose : ParserValue -> Parser ParserValue =
+    λ(_semicolonToken : ParserValue)
+      completeModuleKey "typeclass-deriving-method";
+
+  def parseTypeclassInstanceExportMonoid : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "identifier:Monoid")
+        parseTypeclassInstanceExportMonoidComma;
+
+  def parseTypeclassInstanceExportMonoidComma : ParserValue -> Parser ParserValue =
+    λ(_monoidExport : ParserValue)
+      parserBind (expectText ",")
+        parseTypeclassInstanceExportNat;
+
+  def parseTypeclassInstanceExportNat : ParserValue -> Parser ParserValue =
+    λ(_comma : ParserValue)
+      parserBind (expectText "identifier:Nat")
+        parseTypeclassInstanceExportConstructorsOpen;
+
+  def parseTypeclassInstanceExportConstructorsOpen : ParserValue -> Parser ParserValue =
+    λ(_natExport : ParserValue)
+      parserBind (expectText "(")
+        parseTypeclassInstanceExportFirstDot;
+
+  def parseTypeclassInstanceExportFirstDot : ParserValue -> Parser ParserValue =
+    λ(_openConstructors : ParserValue)
+      parserBind (expectText ".")
+        parseTypeclassInstanceExportSecondDot;
+
+  def parseTypeclassInstanceExportSecondDot : ParserValue -> Parser ParserValue =
+    λ(_firstDot : ParserValue)
+      parserBind (expectText ".")
+        parseTypeclassInstanceExportConstructorsClose;
+
+  def parseTypeclassInstanceExportConstructorsClose : ParserValue -> Parser ParserValue =
+    λ(_secondDot : ParserValue)
+      parserBind (expectText ")")
+        parseTypeclassInstanceExportNatComma;
+
+  def parseTypeclassInstanceExportNatComma : ParserValue -> Parser ParserValue =
+    λ(_closeConstructors : ParserValue)
+      parserBind (expectText ",")
+        parseTypeclassInstanceExportMempty;
+
+  def parseTypeclassInstanceExportMempty : ParserValue -> Parser ParserValue =
+    λ(_comma : ParserValue)
+      parserBind (expectText "identifier:mempty")
+        parseTypeclassInstanceExportMemptyComma;
+
+  def parseTypeclassInstanceExportMemptyComma : ParserValue -> Parser ParserValue =
+    λ(_memptyExport : ParserValue)
+      parserBind (expectText ",")
+        parseTypeclassInstanceExportAppend;
+
+  def parseTypeclassInstanceExportAppend : ParserValue -> Parser ParserValue =
+    λ(_comma : ParserValue)
+      parserBind (expectText "identifier:append")
+        parseTypeclassInstanceExportAppendComma;
+
+  def parseTypeclassInstanceExportAppendComma : ParserValue -> Parser ParserValue =
+    λ(_appendExport : ParserValue)
+      parserBind (expectText ",")
+        parseTypeclassInstanceExportMain;
+
+  def parseTypeclassInstanceExportMain : ParserValue -> Parser ParserValue =
+    λ(_comma : ParserValue)
+      parserBind (expectText "identifier:main")
+        parseTypeclassInstanceExportClose;
+
+  def parseTypeclassInstanceExportClose : ParserValue -> Parser ParserValue =
+    λ(_mainExport : ParserValue)
+      parserBind (expectText ")")
+        parseTypeclassInstanceModuleOpen;
+
+  def parseTypeclassInstanceModuleOpen : ParserValue -> Parser ParserValue =
+    λ(_closeExport : ParserValue)
+      parserBind (expectText "{")
+        parseTypeclassInstanceClassKeyword;
+
+  def parseTypeclassInstanceClassKeyword : ParserValue -> Parser ParserValue =
+    λ(_openModule : ParserValue)
+      parserBind (expectText "class")
+        parseTypeclassInstanceClassName;
+
+  def parseTypeclassInstanceClassName : ParserValue -> Parser ParserValue =
+    λ(_classToken : ParserValue)
+      parserBind (expectText "identifier:Monoid")
+        parseTypeclassInstanceClassParameter;
+
+  def parseTypeclassInstanceClassParameter : ParserValue -> Parser ParserValue =
+    λ(_className : ParserValue)
+      parserBind (expectText "identifier:a")
+        parseTypeclassInstanceClassOpen;
+
+  def parseTypeclassInstanceClassOpen : ParserValue -> Parser ParserValue =
+    λ(_parameter : ParserValue)
+      parserBind (expectText "{")
+        parseTypeclassInstanceMemptySignatureName;
+
+  def parseTypeclassInstanceMemptySignatureName : ParserValue -> Parser ParserValue =
+    λ(_openClass : ParserValue)
+      parserBind (expectText "identifier:mempty")
+        parseTypeclassInstanceMemptySignatureColon;
+
+  def parseTypeclassInstanceMemptySignatureColon : ParserValue -> Parser ParserValue =
+    λ(_methodName : ParserValue)
+      parserBind (expectText ":")
+        parseTypeclassInstanceMemptySignatureType;
+
+  def parseTypeclassInstanceMemptySignatureType : ParserValue -> Parser ParserValue =
+    λ(_colon : ParserValue)
+      parserBind (expectText "identifier:a")
+        parseTypeclassInstanceMemptySignatureSemicolon;
+
+  def parseTypeclassInstanceMemptySignatureSemicolon : ParserValue -> Parser ParserValue =
+    λ(_typeToken : ParserValue)
+      parserBind (expectText ";")
+        parseTypeclassInstanceAppendSignatureName;
+
+  def parseTypeclassInstanceAppendSignatureName : ParserValue -> Parser ParserValue =
+    λ(_semicolon : ParserValue)
+      parserBind (expectText "identifier:append")
+        parseTypeclassInstanceAppendSignatureColon;
+
+  def parseTypeclassInstanceAppendSignatureColon : ParserValue -> Parser ParserValue =
+    λ(_methodName : ParserValue)
+      parserBind (expectText ":")
+        parseTypeclassInstanceAppendSignatureFirstArgument;
+
+  def parseTypeclassInstanceAppendSignatureFirstArgument : ParserValue -> Parser ParserValue =
+    λ(_colon : ParserValue)
+      parserBind (expectText "identifier:a")
+        parseTypeclassInstanceAppendSignatureFirstArrow;
+
+  def parseTypeclassInstanceAppendSignatureFirstArrow : ParserValue -> Parser ParserValue =
+    λ(_firstArgument : ParserValue)
+      parserBind (expectText "->")
+        parseTypeclassInstanceAppendSignatureSecondArgument;
+
+  def parseTypeclassInstanceAppendSignatureSecondArgument : ParserValue -> Parser ParserValue =
+    λ(_firstArrow : ParserValue)
+      parserBind (expectText "identifier:a")
+        parseTypeclassInstanceAppendSignatureSecondArrow;
+
+  def parseTypeclassInstanceAppendSignatureSecondArrow : ParserValue -> Parser ParserValue =
+    λ(_secondArgument : ParserValue)
+      parserBind (expectText "->")
+        parseTypeclassInstanceAppendSignatureResult;
+
+  def parseTypeclassInstanceAppendSignatureResult : ParserValue -> Parser ParserValue =
+    λ(_secondArrow : ParserValue)
+      parserBind (expectText "identifier:a")
+        parseTypeclassInstanceAppendSignatureSemicolon;
+
+  def parseTypeclassInstanceAppendSignatureSemicolon : ParserValue -> Parser ParserValue =
+    λ(_resultType : ParserValue)
+      parserBind (expectText ";")
+        parseTypeclassInstanceClassClose;
+
+  def parseTypeclassInstanceClassClose : ParserValue -> Parser ParserValue =
+    λ(_semicolon : ParserValue)
+      parserBind (expectText "}")
+        parseTypeclassInstanceDataKeyword;
+
+  def parseTypeclassInstanceDataKeyword : ParserValue -> Parser ParserValue =
+    λ(_closeClass : ParserValue)
+      parserBind (expectText "data")
+        parseTypeclassInstanceDataName;
+
+  def parseTypeclassInstanceDataName : ParserValue -> Parser ParserValue =
+    λ(_dataToken : ParserValue)
+      parserBind (expectText "identifier:Nat")
+        parseTypeclassInstanceDataEquals;
+
+  def parseTypeclassInstanceDataEquals : ParserValue -> Parser ParserValue =
+    λ(_dataName : ParserValue)
+      parserBind (expectText "=")
+        parseTypeclassInstanceZeroConstructor;
+
+  def parseTypeclassInstanceZeroConstructor : ParserValue -> Parser ParserValue =
+    λ(_equalsToken : ParserValue)
+      parserBind (expectText "identifier:Zero")
+        parseTypeclassInstanceZeroColon;
+
+  def parseTypeclassInstanceZeroColon : ParserValue -> Parser ParserValue =
+    λ(_zeroToken : ParserValue)
+      parserBind (expectText ":")
+        parseTypeclassInstanceZeroResult;
+
+  def parseTypeclassInstanceZeroResult : ParserValue -> Parser ParserValue =
+    λ(_zeroColon : ParserValue)
+      parserBind (expectText "identifier:Nat")
+        parseTypeclassInstanceConstructorSeparator;
+
+  def parseTypeclassInstanceConstructorSeparator : ParserValue -> Parser ParserValue =
+    λ(_zeroResult : ParserValue)
+      parserBind (expectText "|")
+        parseTypeclassInstanceSuccConstructor;
+
+  def parseTypeclassInstanceSuccConstructor : ParserValue -> Parser ParserValue =
+    λ(_barToken : ParserValue)
+      parserBind (expectText "identifier:Succ")
+        parseTypeclassInstanceSuccColon;
+
+  def parseTypeclassInstanceSuccColon : ParserValue -> Parser ParserValue =
+    λ(_succToken : ParserValue)
+      parserBind (expectText ":")
+        parseTypeclassInstanceSuccArgument;
+
+  def parseTypeclassInstanceSuccArgument : ParserValue -> Parser ParserValue =
+    λ(_succColon : ParserValue)
+      parserBind (expectText "identifier:Nat")
+        parseTypeclassInstanceSuccArrow;
+
+  def parseTypeclassInstanceSuccArrow : ParserValue -> Parser ParserValue =
+    λ(_succArgument : ParserValue)
+      parserBind (expectText "->")
+        parseTypeclassInstanceSuccResult;
+
+  def parseTypeclassInstanceSuccResult : ParserValue -> Parser ParserValue =
+    λ(_arrowToken : ParserValue)
+      parserBind (expectText "identifier:Nat")
+        parseTypeclassInstanceDataSemicolon;
+
+  def parseTypeclassInstanceDataSemicolon : ParserValue -> Parser ParserValue =
+    λ(_succResult : ParserValue)
+      parserBind (expectText ";")
+        parseTypeclassInstanceKeyword;
+
+  def parseTypeclassInstanceKeyword : ParserValue -> Parser ParserValue =
+    λ(_dataSemicolon : ParserValue)
+      parserBind (expectText "instance")
+        parseTypeclassInstanceClassRef;
+
+  def parseTypeclassInstanceClassRef : ParserValue -> Parser ParserValue =
+    λ(_instanceToken : ParserValue)
+      parserBind (expectText "identifier:Monoid")
+        parseTypeclassInstanceTypeRef;
+
+  def parseTypeclassInstanceTypeRef : ParserValue -> Parser ParserValue =
+    λ(_classRef : ParserValue)
+      parserBind (expectText "identifier:Nat")
+        parseTypeclassInstanceOpen;
+
+  def parseTypeclassInstanceOpen : ParserValue -> Parser ParserValue =
+    λ(_typeRef : ParserValue)
+      parserBind (expectText "{")
+        parseTypeclassInstanceMemptyDefinitionName;
+
+  def parseTypeclassInstanceMemptyDefinitionName : ParserValue -> Parser ParserValue =
+    λ(_openInstance : ParserValue)
+      parserBind (expectText "identifier:mempty")
+        parseTypeclassInstanceMemptyDefinitionEquals;
+
+  def parseTypeclassInstanceMemptyDefinitionEquals : ParserValue -> Parser ParserValue =
+    λ(_methodName : ParserValue)
+      parserBind (expectInstanceMethodEqualsParser ValueUnit)
+        parseTypeclassInstanceMemptyDefinitionBody;
+
+  def parseTypeclassInstanceMemptyDefinitionBody : ParserValue -> Parser ParserValue =
+    λ(_equalsToken : ParserValue)
+      parserBind (expectText "identifier:Zero")
+        parseTypeclassInstanceMemptyDefinitionSemicolon;
+
+  def parseTypeclassInstanceMemptyDefinitionSemicolon : ParserValue -> Parser ParserValue =
+    λ(_bodyToken : ParserValue)
+      parserBind (expectText ";")
+        parseTypeclassInstanceAppendDefinitionName;
+
+  def parseTypeclassInstanceAppendDefinitionName : ParserValue -> Parser ParserValue =
+    λ(_semicolon : ParserValue)
+      parserBind (expectText "identifier:append")
+        parseTypeclassInstanceAppendDefinitionEquals;
+
+  def parseTypeclassInstanceAppendDefinitionEquals : ParserValue -> Parser ParserValue =
+    λ(_methodName : ParserValue)
+      parserBind (expectText "=")
+        parseTypeclassInstanceAppendLambdaLeft;
+
+  def parseTypeclassInstanceAppendLambdaLeft : ParserValue -> Parser ParserValue =
+    λ(_equalsToken : ParserValue)
+      parserBind (expectText "lambda")
+        parseTypeclassInstanceAppendLeftArgument;
+
+  def parseTypeclassInstanceAppendLeftArgument : ParserValue -> Parser ParserValue =
+    λ(_lambdaToken : ParserValue)
+      parserBind (expectText "identifier:left")
+        parseTypeclassInstanceAppendLambdaRight;
+
+  def parseTypeclassInstanceAppendLambdaRight : ParserValue -> Parser ParserValue =
+    λ(_leftArgument : ParserValue)
+      parserBind (expectText "lambda")
+        parseTypeclassInstanceAppendRightArgument;
+
+  def parseTypeclassInstanceAppendRightArgument : ParserValue -> Parser ParserValue =
+    λ(_lambdaToken : ParserValue)
+      parserBind (expectText "identifier:right")
+        parseTypeclassInstanceAppendBody;
+
+  def parseTypeclassInstanceAppendBody : ParserValue -> Parser ParserValue =
+    λ(_rightArgument : ParserValue)
+      parserBind (expectText "identifier:left")
+        parseTypeclassInstanceAppendDefinitionSemicolon;
+
+  def parseTypeclassInstanceAppendDefinitionSemicolon : ParserValue -> Parser ParserValue =
+    λ(_bodyToken : ParserValue)
+      parserBind (expectText ";")
+        parseTypeclassInstanceClose;
+
+  def parseTypeclassInstanceClose : ParserValue -> Parser ParserValue =
+    λ(_semicolon : ParserValue)
+      parserBind (expectText "}")
+        parseTypeclassInstanceMainDefKeyword;
+
+  def parseTypeclassInstanceMainDefKeyword : ParserValue -> Parser ParserValue =
+    λ(_closeInstance : ParserValue)
+      parserBind (expectText "def")
+        parseTypeclassInstanceMainDefName;
+
+  def parseTypeclassInstanceMainDefName : ParserValue -> Parser ParserValue =
+    λ(_defToken : ParserValue)
+      parserBind (expectText "identifier:main")
+        parseTypeclassInstanceMainDefColon;
+
+  def parseTypeclassInstanceMainDefColon : ParserValue -> Parser ParserValue =
+    λ(_defName : ParserValue)
+      parserBind (expectText ":")
+        parseTypeclassInstanceMainDefType;
+
+  def parseTypeclassInstanceMainDefType : ParserValue -> Parser ParserValue =
+    λ(_colonToken : ParserValue)
+      parserBind (expectText "identifier:Nat")
+        parseTypeclassInstanceMainDefEquals;
+
+  def parseTypeclassInstanceMainDefEquals : ParserValue -> Parser ParserValue =
+    λ(_typeToken : ParserValue)
+      parserBind (expectText "=")
+        parseTypeclassInstanceMainCallHead;
+
+  def parseTypeclassInstanceMainCallHead : ParserValue -> Parser ParserValue =
+    λ(_equalsToken : ParserValue)
+      parserBind (expectText "identifier:append")
+        parseTypeclassInstanceMainFirstArgumentOpen;
+
+  def parseTypeclassInstanceMainFirstArgumentOpen : ParserValue -> Parser ParserValue =
+    λ(_callHead : ParserValue)
+      parserBind (expectText "(")
+        parseTypeclassInstanceMainMempty;
+
+  def parseTypeclassInstanceMainMempty : ParserValue -> Parser ParserValue =
+    λ(_openToken : ParserValue)
+      parserBind (expectText "identifier:mempty")
+        parseTypeclassInstanceMainMemptyColon;
+
+  def parseTypeclassInstanceMainMemptyColon : ParserValue -> Parser ParserValue =
+    λ(_memptyToken : ParserValue)
+      parserBind (expectText ":")
+        parseTypeclassInstanceMainMemptyType;
+
+  def parseTypeclassInstanceMainMemptyType : ParserValue -> Parser ParserValue =
+    λ(_colonToken : ParserValue)
+      parserBind (expectText "identifier:Nat")
+        parseTypeclassInstanceMainFirstArgumentClose;
+
+  def parseTypeclassInstanceMainFirstArgumentClose : ParserValue -> Parser ParserValue =
+    λ(_typeToken : ParserValue)
+      parserBind (expectText ")")
+        parseTypeclassInstanceMainSecondArgument;
+
+  def parseTypeclassInstanceMainSecondArgument : ParserValue -> Parser ParserValue =
+    λ(_closeToken : ParserValue)
+      parserBind (expectText "identifier:Zero")
+        parseTypeclassInstanceMainSemicolon;
+
+  def parseTypeclassInstanceMainSemicolon : ParserValue -> Parser ParserValue =
+    λ(_zeroToken : ParserValue)
+      parserBind (expectText ";")
+        parseTypeclassInstanceModuleClose;
+
+  def parseTypeclassInstanceModuleClose : ParserValue -> Parser ParserValue =
+    λ(_semicolonToken : ParserValue)
+      completeModuleKey "typeclass-instance-nullary-method";
+
   def renderParserParityRetryEvidence : String -> String -> String -> String =
     λ(sourceFile : String) λ(sourceText : String) λ(lexerMismatchSourceText : String)
       stringAppend (renderPositiveTokenEvidence sourceFile sourceText)
@@ -1390,6 +2083,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteModule, parseTo
       ExpectedLetIn span -> stringAppend "expected-let-in@" (renderSpan sourceFile span);
       ExpectedLetAnnotationType span -> stringAppend "expected-let-annotation-type@" (renderSpan sourceFile span);
       ExpectedConstructorColon span -> stringAppend "expected-constructor-colon@" (renderSpan sourceFile span);
-      ExpectedCaseBranchArrow span -> stringAppend "expected-case-branch-arrow@" (renderSpan sourceFile span)
+      ExpectedCaseBranchArrow span -> stringAppend "expected-case-branch-arrow@" (renderSpan sourceFile span);
+      ExpectedInstanceMethodEquals span -> stringAppend "expected-instance-method-equals@" (renderSpan sourceFile span)
     };
 }

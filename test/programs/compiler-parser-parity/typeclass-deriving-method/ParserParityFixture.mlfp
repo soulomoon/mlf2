@@ -1,0 +1,7 @@
+module ParserParityFixture export (sourceFile, sourceText) {
+  def sourceFile : String =
+    "test/conformance/mlfp/parser-parity/typeclass-deriving-method/src/Main.mlfp";
+
+  def sourceText : String =
+    "module Main export (Eq, Nat(..), eq, main) {\n  class Eq a {\n    eq : a -> a -> Bool;\n  }\n\n  data Nat =\n      Zero : Nat\n    | Succ : Nat -> Nat\n    deriving Eq;\n\n  def main : Bool = eq (Succ Zero) (Succ Zero);\n}\n";
+}

@@ -15,6 +15,15 @@
 
 ### Added
 - Extended the shared parser-owned parser-parity library with a bounded
+  typeclass/instance declaration grammar slice for class declarations, method
+  signatures, deriving clauses, instance declarations, and instance method
+  definitions. New committed parser-program projections and thin fixture roots
+  cover `typeclass-deriving-method` and
+  `typeclass-instance-nullary-method`, with malformed instance-method
+  definition evidence through the same source-text lexer/parser path. This is
+  not full parser parity, checker/backend, compiler-package, driver, platform,
+  proof, or self-boot work.
+- Extended the shared parser-owned parser-parity library with a bounded
   `case ... of` grammar slice for constructor application scrutinees,
   constructor patterns, wildcard patterns, nested constructor patterns,
   parenthesized pattern arguments, branch arrows, and branch separators. New

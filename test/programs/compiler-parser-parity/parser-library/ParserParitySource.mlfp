@@ -1,4 +1,4 @@
-module ParserParitySource export (ParserSourceSymbol(..), ParserSourceInput(..), sourceInputNil, sourceInputCons, renderSpan, basicModuleSpan, basicModuleKeywordSpan, basicModuleNameSpan, basicExportKeywordSpan, basicExportLeftParenSpan, basicExportMainSpan, basicExportRightParenSpan, basicModuleLeftBraceSpan, basicDefKeywordSpan, basicDefNameSpan, basicDefColonSpan, basicBoolTypeSpan, basicDefEqualsSpan, basicBoolLiteralSpan, basicDefSemicolonSpan, basicModuleRightBraceSpan, basicMainDefSpan, basicUnexpectedSpan, lexerUnknownSpan, importBoolModuleSpan, importBoolModuleNameRefSpan, importBoolExportMainSpan, importBoolTypeSpan, importBoolMainDefSpan, importBoolSemicolonSpan, importBoolDefEqualsSpan, valueModuleSpan, valueExportMainSpan, valueImportModuleSpan, valueImportIntSpan, valueFirstDefSemicolonSpan, valueDefTwoSpan, valueDefMainSpan, letModuleSpan, letExportMainSpan, letImportModuleSpan, letImportIntSpan, letInSpan, letDefMainSpan, typedModuleSpan, typedExportMainSpan, typedImportModuleSpan, typedImportIntSpan, typedLetForallSpan, typedDefMainSpan, dataModuleSpan, dataExportNatSpan, dataExportMainSpan, dataDeclSpan, dataZeroConstructorSpan, dataSuccConstructorSpan, dataDefMainSpan, dataZeroColonSpan, caseConstructorModuleSpan, caseConstructorDefMainSpan, caseNestedModuleSpan, caseNestedDefMainSpan, caseBranchArrowSpan) {
+module ParserParitySource export (ParserSourceSymbol(..), ParserSourceInput(..), sourceInputNil, sourceInputCons, renderSpan, basicModuleSpan, basicModuleKeywordSpan, basicModuleNameSpan, basicExportKeywordSpan, basicExportLeftParenSpan, basicExportMainSpan, basicExportRightParenSpan, basicModuleLeftBraceSpan, basicDefKeywordSpan, basicDefNameSpan, basicDefColonSpan, basicBoolTypeSpan, basicDefEqualsSpan, basicBoolLiteralSpan, basicDefSemicolonSpan, basicModuleRightBraceSpan, basicMainDefSpan, basicUnexpectedSpan, lexerUnknownSpan, importBoolModuleSpan, importBoolModuleNameRefSpan, importBoolExportMainSpan, importBoolTypeSpan, importBoolMainDefSpan, importBoolSemicolonSpan, importBoolDefEqualsSpan, valueModuleSpan, valueExportMainSpan, valueImportModuleSpan, valueImportIntSpan, valueFirstDefSemicolonSpan, valueDefTwoSpan, valueDefMainSpan, letModuleSpan, letExportMainSpan, letImportModuleSpan, letImportIntSpan, letInSpan, letDefMainSpan, typedModuleSpan, typedExportMainSpan, typedImportModuleSpan, typedImportIntSpan, typedLetForallSpan, typedDefMainSpan, dataModuleSpan, dataExportNatSpan, dataExportMainSpan, dataDeclSpan, dataZeroConstructorSpan, dataSuccConstructorSpan, dataDefMainSpan, dataZeroColonSpan, caseConstructorModuleSpan, caseConstructorDefMainSpan, caseNestedModuleSpan, caseNestedDefMainSpan, caseBranchArrowSpan, typeclassDerivingModuleSpan, typeclassDerivingExportEqSpan, typeclassDerivingExportNatSpan, typeclassDerivingExportEqMethodSpan, typeclassDerivingExportMainSpan, typeclassDerivingClassSpan, typeclassDerivingEqMethodSpan, typeclassDerivingDataSpan, typeclassDerivingZeroConstructorSpan, typeclassDerivingSuccConstructorSpan, typeclassDerivingEqSpan, typeclassDerivingDefMainSpan, typeclassInstanceModuleSpan, typeclassInstanceExportMonoidSpan, typeclassInstanceExportNatSpan, typeclassInstanceExportMemptySpan, typeclassInstanceExportAppendSpan, typeclassInstanceExportMainSpan, typeclassInstanceClassSpan, typeclassInstanceMemptySignatureSpan, typeclassInstanceAppendSignatureSpan, typeclassInstanceDataSpan, typeclassInstanceZeroConstructorSpan, typeclassInstanceSuccConstructorSpan, typeclassInstanceClassNameSpan, typeclassInstanceMemptyDefinitionSpan, typeclassInstanceAppendDefinitionSpan, typeclassInstanceDefMainSpan, typeclassInstanceMethodEqualsSpan) {
   import Prelude exposing (stringAppend);
 
   data ParserSourceSymbol =
@@ -82,4 +82,35 @@ module ParserParitySource export (ParserSourceSymbol(..), ParserSourceInput(..),
   def caseNestedModuleSpan : String = "1:1-12:1";
   def caseNestedDefMainSpan : String = "6:3-11:1";
   def caseBranchArrowSpan : String = "7:10-7:11";
+
+  def typeclassDerivingModuleSpan : String = "1:1-13:1";
+  def typeclassDerivingExportEqSpan : String = "1:21-1:23";
+  def typeclassDerivingExportNatSpan : String = "1:25-1:32";
+  def typeclassDerivingExportEqMethodSpan : String = "1:34-1:36";
+  def typeclassDerivingExportMainSpan : String = "1:38-1:42";
+  def typeclassDerivingClassSpan : String = "2:3-6:3";
+  def typeclassDerivingEqMethodSpan : String = "3:5-4:3";
+  def typeclassDerivingDataSpan : String = "6:3-11:3";
+  def typeclassDerivingZeroConstructorSpan : String = "7:7-8:5";
+  def typeclassDerivingSuccConstructorSpan : String = "8:7-9:5";
+  def typeclassDerivingEqSpan : String = "9:14-9:16";
+  def typeclassDerivingDefMainSpan : String = "11:3-12:1";
+
+  def typeclassInstanceModuleSpan : String = "1:1-18:1";
+  def typeclassInstanceExportMonoidSpan : String = "1:21-1:27";
+  def typeclassInstanceExportNatSpan : String = "1:29-1:36";
+  def typeclassInstanceExportMemptySpan : String = "1:38-1:44";
+  def typeclassInstanceExportAppendSpan : String = "1:46-1:52";
+  def typeclassInstanceExportMainSpan : String = "1:54-1:58";
+  def typeclassInstanceClassSpan : String = "2:3-7:3";
+  def typeclassInstanceMemptySignatureSpan : String = "3:5-4:5";
+  def typeclassInstanceAppendSignatureSpan : String = "4:5-5:3";
+  def typeclassInstanceDataSpan : String = "7:3-11:3";
+  def typeclassInstanceZeroConstructorSpan : String = "8:7-9:5";
+  def typeclassInstanceSuccConstructorSpan : String = "9:7-9:24";
+  def typeclassInstanceClassNameSpan : String = "11:12-11:19";
+  def typeclassInstanceMemptyDefinitionSpan : String = "12:5-13:5";
+  def typeclassInstanceAppendDefinitionSpan : String = "13:5-14:3";
+  def typeclassInstanceDefMainSpan : String = "16:3-17:1";
+  def typeclassInstanceMethodEqualsSpan : String = "12:12-12:16";
 }

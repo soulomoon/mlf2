@@ -1,0 +1,12 @@
+module Main span=test/conformance/mlfp/parser-parity/typeclass-deriving-method/src/Main.mlfp:1:1-13:1
+export type Eq span=test/conformance/mlfp/parser-parity/typeclass-deriving-method/src/Main.mlfp:1:21-1:23
+export type-with-constructors Nat span=test/conformance/mlfp/parser-parity/typeclass-deriving-method/src/Main.mlfp:1:25-1:32
+export value eq span=test/conformance/mlfp/parser-parity/typeclass-deriving-method/src/Main.mlfp:1:34-1:36
+export value main span=test/conformance/mlfp/parser-parity/typeclass-deriving-method/src/Main.mlfp:1:38-1:42
+class Eq params=a span=test/conformance/mlfp/parser-parity/typeclass-deriving-method/src/Main.mlfp:2:3-6:3
+method-signature eq type=a -> a -> Bool span=test/conformance/mlfp/parser-parity/typeclass-deriving-method/src/Main.mlfp:3:5-4:3
+data Nat span=test/conformance/mlfp/parser-parity/typeclass-deriving-method/src/Main.mlfp:6:3-11:3
+constructor Zero type=Nat span=test/conformance/mlfp/parser-parity/typeclass-deriving-method/src/Main.mlfp:7:7-8:5
+constructor Succ type=Nat -> Nat span=test/conformance/mlfp/parser-parity/typeclass-deriving-method/src/Main.mlfp:8:7-9:5
+deriving Eq span=test/conformance/mlfp/parser-parity/typeclass-deriving-method/src/Main.mlfp:9:14-9:16
+def main type=Bool expr=eq (Succ Zero) (Succ Zero) span=test/conformance/mlfp/parser-parity/typeclass-deriving-method/src/Main.mlfp:11:3-12:1

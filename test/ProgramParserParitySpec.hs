@@ -1,8 +1,10 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
 
 module ProgramParserParitySpec (spec) where
 
 import Data.List (intercalate, isInfixOf)
+import qualified Data.List.NonEmpty as NE
 import Data.Foldable (traverse_)
 import qualified Data.Map.Strict as Map
 import MLF.API
@@ -62,6 +64,26 @@ spec =
             nestedCanonicalProjection `shouldBe` nestedExpected
             constructorParserParityOutput `shouldBe` Right constructorExpected
             nestedParserParityOutput `shouldBe` Right nestedExpected
+
+        it "shared parser-owned .mlfp parser extends source-text grammar to typeclass, deriving, and instance declarations" $ do
+            derivingSource <- readFile typeclassDerivingMethodCanonicalSourcePath
+            derivingExpected <- readFile typeclassDerivingMethodExpectedProjectionPath
+            instanceSource <- readFile typeclassInstanceNullaryMethodCanonicalSourcePath
+            instanceExpected <- readFile typeclassInstanceNullaryMethodExpectedProjectionPath
+
+            derivingCanonicalProjection <-
+                renderCanonicalProjection typeclassDerivingMethodCanonicalSourcePath derivingSource
+            instanceCanonicalProjection <-
+                renderCanonicalProjection typeclassInstanceNullaryMethodCanonicalSourcePath instanceSource
+            derivingParserParityOutput <-
+                runSharedParserFixture typeclassDerivingMethodParserParityPackageRoot
+            instanceParserParityOutput <-
+                runSharedParserFixture typeclassInstanceNullaryMethodParserParityPackageRoot
+
+            derivingCanonicalProjection `shouldBe` derivingExpected
+            instanceCanonicalProjection `shouldBe` instanceExpected
+            derivingParserParityOutput `shouldBe` Right derivingExpected
+            instanceParserParityOutput `shouldBe` Right instanceExpected
 
         it "parser-owned .mlfp parser matches canonical parser for a basic Bool definition and source spans" $ do
             source <- readFile canonicalSourcePath
@@ -182,6 +204,11 @@ spec =
             runSharedParserFixture evidenceRoot
                 `shouldReturn` Right caseExpressionNegativeEvidenceProjection
 
+        it "parser-owned .mlfp parser rejects malformed instance method definitions through public run-program" $ do
+            evidenceRoot <- writeTypeclassInstanceNegativeEvidencePackage
+            runSharedParserFixture evidenceRoot
+                `shouldReturn` Right typeclassInstanceNegativeEvidenceProjection
+
         it "parser-owned .mlfp parser rejects malformed import syntax through public run-program" $ do
             evidenceRoot <- writeImportNegativeEvidencePackage
             runSharedParserFixture evidenceRoot
@@ -234,6 +261,14 @@ caseExpressionNestedPatternsCanonicalSourcePath :: FilePath
 caseExpressionNestedPatternsCanonicalSourcePath =
     "test/conformance/mlfp/parser-parity/case-expression-nested-patterns/src/Main.mlfp"
 
+typeclassDerivingMethodCanonicalSourcePath :: FilePath
+typeclassDerivingMethodCanonicalSourcePath =
+    "test/conformance/mlfp/parser-parity/typeclass-deriving-method/src/Main.mlfp"
+
+typeclassInstanceNullaryMethodCanonicalSourcePath :: FilePath
+typeclassInstanceNullaryMethodCanonicalSourcePath =
+    "test/conformance/mlfp/parser-parity/typeclass-instance-nullary-method/src/Main.mlfp"
+
 expectedProjectionPath :: FilePath
 expectedProjectionPath =
     "test/conformance/mlfp/parser-parity/basic-module-def-bool/expected/parser-program.txt"
@@ -265,6 +300,14 @@ caseExpressionConstructorPatternsExpectedProjectionPath =
 caseExpressionNestedPatternsExpectedProjectionPath :: FilePath
 caseExpressionNestedPatternsExpectedProjectionPath =
     "test/conformance/mlfp/parser-parity/case-expression-nested-patterns/expected/parser-program.txt"
+
+typeclassDerivingMethodExpectedProjectionPath :: FilePath
+typeclassDerivingMethodExpectedProjectionPath =
+    "test/conformance/mlfp/parser-parity/typeclass-deriving-method/expected/parser-program.txt"
+
+typeclassInstanceNullaryMethodExpectedProjectionPath :: FilePath
+typeclassInstanceNullaryMethodExpectedProjectionPath =
+    "test/conformance/mlfp/parser-parity/typeclass-instance-nullary-method/expected/parser-program.txt"
 
 parserParityPackageRoot :: FilePath
 parserParityPackageRoot =
@@ -298,6 +341,14 @@ caseExpressionNestedPatternsParserParityPackageRoot :: FilePath
 caseExpressionNestedPatternsParserParityPackageRoot =
     "test/programs/compiler-parser-parity/case-expression-nested-patterns"
 
+typeclassDerivingMethodParserParityPackageRoot :: FilePath
+typeclassDerivingMethodParserParityPackageRoot =
+    "test/programs/compiler-parser-parity/typeclass-deriving-method"
+
+typeclassInstanceNullaryMethodParserParityPackageRoot :: FilePath
+typeclassInstanceNullaryMethodParserParityPackageRoot =
+    "test/programs/compiler-parser-parity/typeclass-instance-nullary-method"
+
 sharedParserLibraryRoot :: FilePath
 sharedParserLibraryRoot =
     "test/programs/compiler-parser-parity/parser-library"
@@ -317,13 +368,19 @@ sharedParserBannedPhrases =
     , concat ["Let", "Lambda", "Application", "Tokens"]
     , concat ["Typed", "Annotation", "Types", "Tokens"]
     , concat ["Data", "Declaration", "Tokens"]
+    , concat ["Typeclass", "Tokens"]
+    , concat ["Instance", "Tokens"]
     , concat ["LexerOk ", "basic", "Module", "Tokens"]
     , concat ["LexerOk ", "import", "Bool", "Tokens"]
     , concat ["LexerOk ", "value", "Def", "List", "Tokens"]
     , concat ["LexerOk ", "let", "Lambda", "Application", "Tokens"]
     , concat ["LexerOk ", "typed", "Annotation", "Types", "Tokens"]
     , concat ["LexerOk ", "data", "Declaration", "Tokens"]
+    , concat ["LexerOk ", "typeclass", "Tokens"]
+    , concat ["LexerOk ", "instance", "Tokens"]
     , concat ["case", " tokens"]
+    , concat ["class", " tokens"]
+    , concat ["instance", " tokens"]
     ]
 
 sharedParserFixedOffsetPhrases :: [String]
@@ -434,6 +491,10 @@ caseExpressionNegativeEvidencePackageRoot :: FilePath
 caseExpressionNegativeEvidencePackageRoot =
     "dist-newstyle/parser-parity-case-expression-negative-evidence"
 
+typeclassInstanceNegativeEvidencePackageRoot :: FilePath
+typeclassInstanceNegativeEvidencePackageRoot =
+    "dist-newstyle/parser-parity-typeclass-instance-negative-evidence"
+
 sourceTextBasicPackageRoot :: FilePath
 sourceTextBasicPackageRoot =
     "dist-newstyle/parser-parity-basic-module-def-bool-source-text"
@@ -538,6 +599,13 @@ writeCaseExpressionNegativeEvidencePackage = do
     writeFile (caseExpressionNegativeEvidencePackageRoot </> "Main.mlfp") caseExpressionNegativeEvidenceMainSource
     pure caseExpressionNegativeEvidencePackageRoot
 
+writeTypeclassInstanceNegativeEvidencePackage :: IO FilePath
+writeTypeclassInstanceNegativeEvidencePackage = do
+    removePathForcibly typeclassInstanceNegativeEvidencePackageRoot
+    createDirectoryIfMissing True typeclassInstanceNegativeEvidencePackageRoot
+    writeFile (typeclassInstanceNegativeEvidencePackageRoot </> "Main.mlfp") typeclassInstanceNegativeEvidenceMainSource
+    pure typeclassInstanceNegativeEvidencePackageRoot
+
 retryEvidenceMainSource :: String
 retryEvidenceMainSource =
     unlines
@@ -600,6 +668,13 @@ caseExpressionNegativeEvidenceMainSource =
         "case-expression parser negative "
         caseExpressionConstructorPatternsCanonicalSourcePath
         caseExpressionNegativeSourceText
+
+typeclassInstanceNegativeEvidenceMainSource :: String
+typeclassInstanceNegativeEvidenceMainSource =
+    parserNegativeEvidenceMainSource
+        "typeclass-instance parser negative "
+        typeclassInstanceNullaryMethodCanonicalSourcePath
+        typeclassInstanceNegativeSourceText
 
 parserNegativeEvidenceMainSource :: String -> FilePath -> String -> String
 parserNegativeEvidenceMainSource prefix sourceFile sourceText =
@@ -687,6 +762,28 @@ caseExpressionNegativeSourceText =
         , "}"
         ]
 
+typeclassInstanceNegativeSourceText :: String
+typeclassInstanceNegativeSourceText =
+    unlines
+        [ "module Main export (Monoid, Nat(..), mempty, append, main) {"
+        , "  class Monoid a {"
+        , "    mempty : a;"
+        , "    append : a -> a -> a;"
+        , "  }"
+        , ""
+        , "  data Nat ="
+        , "      Zero : Nat"
+        , "    | Succ : Nat -> Nat;"
+        , ""
+        , "  instance Monoid Nat {"
+        , "    mempty Zero;"
+        , "    append = λleft λright left;"
+        , "  }"
+        , ""
+        , "  def main : Nat = append (mempty : Nat) Zero;"
+        , "}"
+        ]
+
 retryEvidenceProjection :: String
 retryEvidenceProjection =
     unlines
@@ -729,6 +826,12 @@ caseExpressionNegativeEvidenceProjection :: String
 caseExpressionNegativeEvidenceProjection =
     unlines
         [ "case-expression parser negative expected-case-branch-arrow@test/conformance/mlfp/parser-parity/case-expression-constructor-patterns/src/Main.mlfp:7:10-7:11"
+        ]
+
+typeclassInstanceNegativeEvidenceProjection :: String
+typeclassInstanceNegativeEvidenceProjection =
+    unlines
+        [ "typeclass-instance parser negative expected-instance-method-equals@test/conformance/mlfp/parser-parity/typeclass-instance-nullary-method/src/Main.mlfp:12:12-12:16"
         ]
 
 renderCanonicalProjection :: FilePath -> String -> IO String
@@ -827,6 +930,8 @@ renderDefProjections spans decls =
 renderDefProjection :: P.ProgramSpanIndex -> P.Decl -> IO [String]
 renderDefProjection spans decl =
     case decl of
+        P.DeclClass class0 -> renderClassProjection spans class0
+        P.DeclInstance instance0 -> renderInstanceProjection spans instance0
         P.DeclData data0 -> renderDataProjection spans data0
         P.DeclDef def0 -> do
             defSpan <- requireListSpan "definition" (P.defDeclName def0) (P.spanValues spans)
@@ -848,6 +953,7 @@ renderDataProjection :: P.ProgramSpanIndex -> P.DataDecl -> IO [String]
 renderDataProjection spans data0 = do
     dataSpan <- requireListSpan "data declaration" (P.dataDeclName data0) (P.spanTypes spans)
     renderedConstructors <- traverse (renderConstructorProjection spans) (P.dataDeclConstructors data0)
+    renderedDeriving <- renderDerivingProjections spans (P.dataDeclDeriving data0)
     pure $
         ( "data "
             ++ P.dataDeclName data0
@@ -855,6 +961,71 @@ renderDataProjection spans data0 = do
             ++ renderSpan dataSpan
         )
             : renderedConstructors
+                ++ renderedDeriving
+
+renderClassProjection :: P.ProgramSpanIndex -> P.ClassDecl -> IO [String]
+renderClassProjection spans class0 = do
+    classSpan <- requireIndexedSpan "class declaration" (P.classDeclName class0) 0 (P.spanClasses spans)
+    renderedMethods <- traverse (renderMethodSignatureProjection spans) (P.classDeclMethods class0)
+    pure $
+        ( "class "
+            ++ P.classDeclName class0
+            ++ " params="
+            ++ intercalate "," (P.typeParamNames (NE.toList (P.classDeclParams class0)))
+            ++ " span="
+            ++ renderSpan classSpan
+        )
+            : renderedMethods
+
+renderMethodSignatureProjection :: P.ProgramSpanIndex -> P.MethodSig -> IO String
+renderMethodSignatureProjection spans method0 = do
+    methodSpan <- requireIndexedSpan "method signature" (P.methodSigName method0) 0 (P.spanValues spans)
+    pure $
+        "method-signature "
+            ++ P.methodSigName method0
+            ++ " type="
+            ++ renderConstrainedType (P.methodSigType method0)
+            ++ " span="
+            ++ renderSpan methodSpan
+
+renderInstanceProjection :: P.ProgramSpanIndex -> P.InstanceDecl -> IO [String]
+renderInstanceProjection spans instance0 = do
+    let className = P.instanceDeclClass instance0 :: String
+    classSpan <- requireLastSpan "instance class" className (P.spanClasses spans)
+    renderedMethods <- traverse (renderMethodDefProjection spans) (P.instanceDeclMethods instance0)
+    pure $
+        ( "instance "
+            ++ className
+            ++ " types="
+            ++ intercalate "," (map renderSrcType (NE.toList (P.instanceDeclTypes instance0)))
+            ++ " span="
+            ++ renderSpan classSpan
+        )
+            : renderedMethods
+
+renderMethodDefProjection :: P.ProgramSpanIndex -> P.MethodDef -> IO String
+renderMethodDefProjection spans method0 = do
+    methodSpan <- requireLastSpan "method definition" (P.methodDefName method0) (P.spanValues spans)
+    pure $
+        "method-definition "
+            ++ P.methodDefName method0
+            ++ " expr="
+            ++ renderExpr (P.methodDefExpr method0)
+            ++ " span="
+            ++ renderSpan methodSpan
+
+renderDerivingProjections :: P.ProgramSpanIndex -> [String] -> IO [String]
+renderDerivingProjections spans classes =
+    traverse (renderDerivingProjection spans) classes
+
+renderDerivingProjection :: P.ProgramSpanIndex -> String -> IO String
+renderDerivingProjection spans className = do
+    classSpan <- requireLastSpan "deriving class" className (P.spanClasses spans)
+    pure $
+        "deriving "
+            ++ className
+            ++ " span="
+            ++ renderSpan classSpan
 
 renderConstructorProjection :: P.ProgramSpanIndex -> P.ConstructorDecl -> IO String
 renderConstructorProjection spans ctor = do
@@ -885,6 +1056,45 @@ requireListSpan label name spans =
         Nothing ->
             expectationFailure ("missing " ++ label ++ " span for " ++ show name)
                 >> fail "missing span"
+
+requireIndexedSpan :: String -> String -> Int -> Map.Map String [P.SourceSpan] -> IO P.SourceSpan
+requireIndexedSpan label name index spans =
+    case Map.lookup name spans of
+        Just values
+            | index < length values -> pure (values !! index)
+            | otherwise ->
+                expectationFailure ("missing " ++ label ++ " span index " ++ show index ++ " for " ++ show name ++ ", got: " ++ show values)
+                    >> fail "missing indexed span"
+        Nothing ->
+            expectationFailure ("missing " ++ label ++ " span for " ++ show name)
+                >> fail "missing span"
+
+requireLastSpan :: String -> String -> Map.Map String [P.SourceSpan] -> IO P.SourceSpan
+requireLastSpan label name spans =
+    case Map.lookup name spans of
+        Just [] ->
+            expectationFailure ("empty " ++ label ++ " span list for " ++ show name)
+                >> fail "empty span list"
+        Just values -> pure (last values)
+        Nothing ->
+            expectationFailure ("missing " ++ label ++ " span for " ++ show name)
+                >> fail "missing span"
+
+renderConstrainedType :: P.ConstrainedType -> String
+renderConstrainedType constrained =
+    case P.constrainedConstraints constrained of
+        [] -> renderSrcType (P.constrainedBody constrained)
+        constraints ->
+            intercalate ", " (map renderClassConstraint constraints)
+                ++ " => "
+                ++ renderSrcType (P.constrainedBody constrained)
+
+renderClassConstraint :: P.ClassConstraint -> String
+renderClassConstraint constraint =
+    let className = P.constraintClassName constraint :: String
+     in className
+        ++ " "
+        ++ intercalate " " (map renderSrcType (NE.toList (P.constraintTypes constraint)))
 
 renderSrcType :: SrcType -> String
 renderSrcType ty =

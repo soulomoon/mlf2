@@ -1,0 +1,16 @@
+module Main span=test/conformance/mlfp/parser-parity/typeclass-instance-nullary-method/src/Main.mlfp:1:1-18:1
+export type Monoid span=test/conformance/mlfp/parser-parity/typeclass-instance-nullary-method/src/Main.mlfp:1:21-1:27
+export type-with-constructors Nat span=test/conformance/mlfp/parser-parity/typeclass-instance-nullary-method/src/Main.mlfp:1:29-1:36
+export value mempty span=test/conformance/mlfp/parser-parity/typeclass-instance-nullary-method/src/Main.mlfp:1:38-1:44
+export value append span=test/conformance/mlfp/parser-parity/typeclass-instance-nullary-method/src/Main.mlfp:1:46-1:52
+export value main span=test/conformance/mlfp/parser-parity/typeclass-instance-nullary-method/src/Main.mlfp:1:54-1:58
+class Monoid params=a span=test/conformance/mlfp/parser-parity/typeclass-instance-nullary-method/src/Main.mlfp:2:3-7:3
+method-signature mempty type=a span=test/conformance/mlfp/parser-parity/typeclass-instance-nullary-method/src/Main.mlfp:3:5-4:5
+method-signature append type=a -> a -> a span=test/conformance/mlfp/parser-parity/typeclass-instance-nullary-method/src/Main.mlfp:4:5-5:3
+data Nat span=test/conformance/mlfp/parser-parity/typeclass-instance-nullary-method/src/Main.mlfp:7:3-11:3
+constructor Zero type=Nat span=test/conformance/mlfp/parser-parity/typeclass-instance-nullary-method/src/Main.mlfp:8:7-9:5
+constructor Succ type=Nat -> Nat span=test/conformance/mlfp/parser-parity/typeclass-instance-nullary-method/src/Main.mlfp:9:7-9:24
+instance Monoid types=Nat span=test/conformance/mlfp/parser-parity/typeclass-instance-nullary-method/src/Main.mlfp:11:12-11:19
+method-definition mempty expr=Zero span=test/conformance/mlfp/parser-parity/typeclass-instance-nullary-method/src/Main.mlfp:12:5-13:5
+method-definition append expr=λleft λright left span=test/conformance/mlfp/parser-parity/typeclass-instance-nullary-method/src/Main.mlfp:13:5-14:3
+def main type=Nat expr=append (mempty : Nat) Zero span=test/conformance/mlfp/parser-parity/typeclass-instance-nullary-method/src/Main.mlfp:16:3-17:1

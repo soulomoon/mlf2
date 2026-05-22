@@ -1,0 +1,24 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-313",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-004",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-004",
+  "milestone_id": "milestone-4",
+  "direction_id": "direction-4a-canonical-parser-parity",
+  "extracted_item_id": "item-313-parser-library-typeclass-instance-extension",
+  "decision": "approved",
+  "evidence_summary": "Focused typeclass/deriving/instance matcher, malformed instance-method matcher, parser parity group, ten direct parser-parity fixture smokes, static shortcut audits, git diff --check, cabal build all, cabal test, and thesis conformance gate all passed.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-4-completion",
+        "text": "round-313 completed item-313-parser-library-typeclass-instance-extension: the shared source-text parser-parity library covers bounded typeclass, deriving, and instance syntax through the parser-owned lexer/combinator path with thin fixtures and malformed instance-method evidence; validation passed focused/parser-parity/full Cabal gates, static shortcut audits, direct fixture smokes, and thesis gate."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}
