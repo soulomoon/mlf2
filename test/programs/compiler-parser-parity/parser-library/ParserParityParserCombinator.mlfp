@@ -1,4 +1,4 @@
-module ParserParityParserCombinator export (ParserState(..), ParserValue(..), ParserStep(..), Parser(..), ParserEnd(..), runParser, parserPure, parserFail, parserBind, parserMap, parserChoice, captureSpan, diagnosticLabel, labelEquals, labelImportSemicolon, labelDefSemicolon, labelLetIn, labelLetAnnotationType, labelConstructorColon, labelCaseBranchArrow, labelInstanceMethodEquals, expectToken, parserStateAtEnd) {
+module ParserParityParserCombinator export (ParserState(..), ParserValue(..), ParserStep(..), Parser(..), ParserEnd(..), runParser, parserPure, parserFail, parserBind, parserMap, parserChoice, captureSpan, diagnosticLabel, labelEquals, labelImportSemicolon, labelDefSemicolon, labelLetIn, labelLetAnnotationType, labelConstructorColon, labelCaseBranchArrow, labelInstanceMethodEquals, labelFunctionalDependencyArrow, expectToken, parserStateAtEnd) {
   import ParserParityDiagnostic exposing (ParserDiagnostic(..));
   import ParserParitySource exposing (ParserSourceInput(..), ParserSourceSymbol(..), basicUnexpectedSpan);
   import ParserParityToken exposing (TokenKind(..), TokenMatch(..), tokenMatches);
@@ -67,7 +67,8 @@ module ParserParityParserCombinator export (ParserState(..), ParserValue(..), Pa
             ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
             ExpectedConstructorColon span -> ParserStepError (ExpectedConstructorColon span);
             ExpectedCaseBranchArrow span -> ParserStepError (ExpectedCaseBranchArrow span);
-            ExpectedInstanceMethodEquals span -> ParserStepError (ExpectedInstanceMethodEquals span)
+            ExpectedInstanceMethodEquals span -> ParserStepError (ExpectedInstanceMethodEquals span);
+            ExpectedFunctionalDependencyArrow span -> ParserStepError (ExpectedFunctionalDependencyArrow span)
           }
         }) : Parser ParserValue);
 
@@ -92,7 +93,8 @@ module ParserParityParserCombinator export (ParserState(..), ParserValue(..), Pa
             ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
             ExpectedConstructorColon span -> ParserStepError (ExpectedConstructorColon span);
             ExpectedCaseBranchArrow span -> ParserStepError (ExpectedCaseBranchArrow span);
-            ExpectedInstanceMethodEquals span -> ParserStepError (ExpectedInstanceMethodEquals span)
+            ExpectedInstanceMethodEquals span -> ParserStepError (ExpectedInstanceMethodEquals span);
+            ExpectedFunctionalDependencyArrow span -> ParserStepError (ExpectedFunctionalDependencyArrow span)
           }
         }) : Parser ParserValue);
 
@@ -111,7 +113,8 @@ module ParserParityParserCombinator export (ParserState(..), ParserValue(..), Pa
             ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
             ExpectedConstructorColon span -> ParserStepError (ExpectedConstructorColon span);
             ExpectedCaseBranchArrow span -> ParserStepError (ExpectedCaseBranchArrow span);
-            ExpectedInstanceMethodEquals span -> ParserStepError (ExpectedInstanceMethodEquals span)
+            ExpectedInstanceMethodEquals span -> ParserStepError (ExpectedInstanceMethodEquals span);
+            ExpectedFunctionalDependencyArrow span -> ParserStepError (ExpectedFunctionalDependencyArrow span)
           }
         }) : Parser ParserValue);
 
@@ -130,7 +133,8 @@ module ParserParityParserCombinator export (ParserState(..), ParserValue(..), Pa
             ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
             ExpectedConstructorColon span -> ParserStepError (ExpectedConstructorColon span);
             ExpectedCaseBranchArrow span -> ParserStepError (ExpectedCaseBranchArrow span);
-            ExpectedInstanceMethodEquals span -> ParserStepError (ExpectedInstanceMethodEquals span)
+            ExpectedInstanceMethodEquals span -> ParserStepError (ExpectedInstanceMethodEquals span);
+            ExpectedFunctionalDependencyArrow span -> ParserStepError (ExpectedFunctionalDependencyArrow span)
           }
         }) : Parser ParserValue);
 
@@ -149,7 +153,8 @@ module ParserParityParserCombinator export (ParserState(..), ParserValue(..), Pa
             ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
             ExpectedConstructorColon span -> ParserStepError (ExpectedConstructorColon span);
             ExpectedCaseBranchArrow span -> ParserStepError (ExpectedCaseBranchArrow span);
-            ExpectedInstanceMethodEquals span -> ParserStepError (ExpectedInstanceMethodEquals span)
+            ExpectedInstanceMethodEquals span -> ParserStepError (ExpectedInstanceMethodEquals span);
+            ExpectedFunctionalDependencyArrow span -> ParserStepError (ExpectedFunctionalDependencyArrow span)
           }
         }) : Parser ParserValue);
 
@@ -168,7 +173,8 @@ module ParserParityParserCombinator export (ParserState(..), ParserValue(..), Pa
             ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
             ExpectedConstructorColon span -> ParserStepError (ExpectedConstructorColon span);
             ExpectedCaseBranchArrow span -> ParserStepError (ExpectedCaseBranchArrow span);
-            ExpectedInstanceMethodEquals span -> ParserStepError (ExpectedInstanceMethodEquals span)
+            ExpectedInstanceMethodEquals span -> ParserStepError (ExpectedInstanceMethodEquals span);
+            ExpectedFunctionalDependencyArrow span -> ParserStepError (ExpectedFunctionalDependencyArrow span)
           }
         }) : Parser ParserValue);
 
@@ -187,7 +193,8 @@ module ParserParityParserCombinator export (ParserState(..), ParserValue(..), Pa
             ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
             ExpectedConstructorColon span -> ParserStepError (ExpectedConstructorColon span);
             ExpectedCaseBranchArrow span -> ParserStepError (ExpectedCaseBranchArrow span);
-            ExpectedInstanceMethodEquals span -> ParserStepError (ExpectedInstanceMethodEquals span)
+            ExpectedInstanceMethodEquals span -> ParserStepError (ExpectedInstanceMethodEquals span);
+            ExpectedFunctionalDependencyArrow span -> ParserStepError (ExpectedFunctionalDependencyArrow span)
           }
         }) : Parser ParserValue);
 
@@ -206,7 +213,8 @@ module ParserParityParserCombinator export (ParserState(..), ParserValue(..), Pa
             ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
             ExpectedConstructorColon span -> ParserStepError (ExpectedConstructorColon span);
             ExpectedCaseBranchArrow span -> ParserStepError (ExpectedCaseBranchArrow span);
-            ExpectedInstanceMethodEquals span -> ParserStepError (ExpectedInstanceMethodEquals span)
+            ExpectedInstanceMethodEquals span -> ParserStepError (ExpectedInstanceMethodEquals span);
+            ExpectedFunctionalDependencyArrow span -> ParserStepError (ExpectedFunctionalDependencyArrow span)
           }
         }) : Parser ParserValue);
 
@@ -225,7 +233,28 @@ module ParserParityParserCombinator export (ParserState(..), ParserValue(..), Pa
             ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
             ExpectedConstructorColon span -> ParserStepError (ExpectedConstructorColon span);
             ExpectedCaseBranchArrow span -> ParserStepError (ExpectedCaseBranchArrow span);
-            ExpectedInstanceMethodEquals span -> ParserStepError (ExpectedInstanceMethodEquals span)
+            ExpectedInstanceMethodEquals span -> ParserStepError (ExpectedInstanceMethodEquals span);
+            ExpectedFunctionalDependencyArrow span -> ParserStepError (ExpectedFunctionalDependencyArrow span)
+          }
+        }) : Parser ParserValue);
+
+  def labelFunctionalDependencyArrow : Parser ParserValue -> Parser ParserValue =
+    λ(parser : Parser ParserValue)
+      (Parser
+        (λ(state : ParserState) case runParser parser state of {
+          ParserStepOk nextState value -> ParserStepOk nextState value;
+          ParserStepError diagnostic -> case diagnostic of {
+            UnexpectedSourceText span -> ParserStepError (ExpectedFunctionalDependencyArrow span);
+            ExpectedCompleteModule span -> ParserStepError (ExpectedCompleteModule span);
+            ExpectedEquals span -> ParserStepError (ExpectedEquals span);
+            ExpectedImportSemicolon span -> ParserStepError (ExpectedImportSemicolon span);
+            ExpectedDefSemicolon span -> ParserStepError (ExpectedDefSemicolon span);
+            ExpectedLetIn span -> ParserStepError (ExpectedLetIn span);
+            ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
+            ExpectedConstructorColon span -> ParserStepError (ExpectedConstructorColon span);
+            ExpectedCaseBranchArrow span -> ParserStepError (ExpectedCaseBranchArrow span);
+            ExpectedInstanceMethodEquals span -> ParserStepError (ExpectedInstanceMethodEquals span);
+            ExpectedFunctionalDependencyArrow span -> ParserStepError (ExpectedFunctionalDependencyArrow span)
           }
         }) : Parser ParserValue);
 

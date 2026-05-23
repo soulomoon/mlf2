@@ -1,3 +1,22 @@
+## 2026-05-23 - Round 314 parser parity higher-kinded constraint extension
+
+- Extended the shared parser-owned parser-parity source-text lexer/parser
+  library with the bounded higher-kinded class/data and constrained
+  multi-parameter class syntax slice: kinded declaration parameters,
+  source kind arrows, variable-headed type applications, constructor type
+  applications, superclass prefixes, Unicode functional dependencies, and
+  empty instance bodies.
+- Added committed parser-program projection fixtures for
+  `higher-kinded-class-data-params` and `multiparam-superclass-fundep`, plus
+  thin `.mlfp` fixture roots that expose only `sourceFile` and `sourceText`
+  before calling `renderParserParityProjectionFromSourceText`.
+- Added public negative evidence for malformed functional-dependency syntax
+  through `renderParserNegativeEvidenceFromSourceText`, keeping the rejection
+  on the shared source-text lexer/parser path.
+- Scope remains bounded parser parity only. This is not full parser parity,
+  type-family parity, checker, backend, compiler-package, driver, platform,
+  proof, or self-boot progress.
+
 ## 2026-05-22 - Round 313 parser parity typeclass/instance extension
 
 - Extended the shared parser-owned parser-parity library with a bounded

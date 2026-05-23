@@ -3,8 +3,8 @@ module ParserParityParser export (ParserResult(..), parseCompleteModule, parseTo
   import ParserParityAst exposing (ParsedModule(..), renderParsedModule);
   import ParserParityDiagnostic exposing (ParserDiagnostic(..));
   import ParserParityLexer exposing (LexerResult(..), tokenizeCompleteModule);
-  import ParserParityParserCombinator exposing (Parser, ParserEnd(..), ParserState(..), ParserStep(..), ParserValue(..), captureSpan, diagnosticLabel, expectToken, labelCaseBranchArrow, labelConstructorColon, labelDefSemicolon, labelEquals, labelImportSemicolon, labelInstanceMethodEquals, labelLetAnnotationType, labelLetIn, parserBind, parserChoice, parserFail, parserPure, parserStateAtEnd, runParser);
-  import ParserParitySource exposing (basicBoolLiteralSpan, basicUnexpectedSpan, caseBranchArrowSpan, dataZeroColonSpan, importBoolSemicolonSpan, letInSpan, lexerUnknownSpan, renderSpan, typedLetForallSpan, typeclassInstanceMethodEqualsSpan, valueFirstDefSemicolonSpan);
+  import ParserParityParserCombinator exposing (Parser, ParserEnd(..), ParserState(..), ParserStep(..), ParserValue(..), captureSpan, diagnosticLabel, expectToken, labelCaseBranchArrow, labelConstructorColon, labelDefSemicolon, labelEquals, labelFunctionalDependencyArrow, labelImportSemicolon, labelInstanceMethodEquals, labelLetAnnotationType, labelLetIn, parserBind, parserChoice, parserFail, parserPure, parserStateAtEnd, runParser);
+  import ParserParitySource exposing (basicBoolLiteralSpan, basicUnexpectedSpan, caseBranchArrowSpan, dataZeroColonSpan, importBoolSemicolonSpan, letInSpan, lexerUnknownSpan, multiparamFundepArrowSpan, renderSpan, typedLetForallSpan, typeclassInstanceMethodEqualsSpan, valueFirstDefSemicolonSpan);
   import ParserParityToken exposing (ParserInput(..), TokenKind(..), renderTokenPrefixEvidence);
 
   data ParserResult =
@@ -77,6 +77,11 @@ module ParserParityParser export (ParserResult(..), parseCompleteModule, parseTo
       labelInstanceMethodEquals
         (parserChoice (expectText "=") (parserFail (ExpectedInstanceMethodEquals typeclassInstanceMethodEqualsSpan)));
 
+  def expectFunctionalDependencyArrowParser : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      labelFunctionalDependencyArrow
+        (parserChoice (expectText "→") (parserFail (ExpectedFunctionalDependencyArrow multiparamFundepArrowSpan)));
+
   def expectText : String -> Parser ParserValue =
     λ(text : String) expectComplete (TokenKind text);
 
@@ -96,7 +101,8 @@ module ParserParityParser export (ParserResult(..), parseCompleteModule, parseTo
             (parserChoice (parseLetModule ValueUnit)
               (parserChoice (parseTypedModule ValueUnit)
                 (parserChoice (parseDataModule ValueUnit)
-                  (parserChoice (parseCaseModule ValueUnit) (parseTypeclassModule ValueUnit)))))));
+                  (parserChoice (parseCaseModule ValueUnit)
+                    (parserChoice (parseTypeclassModule ValueUnit) (parseKindedConstraintModule ValueUnit))))))));
 
   def parseBasicModule : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
@@ -2041,6 +2047,617 @@ module ParserParityParser export (ParserResult(..), parseCompleteModule, parseTo
     λ(_semicolonToken : ParserValue)
       completeModuleKey "typeclass-instance-nullary-method";
 
+  def kindedClassDataProjectionKey : String =
+    "kinded-class-data-projection";
+
+  def constrainedClassFundepProjectionKey : String =
+    "constrained-class-fundep-projection";
+
+  def expectIdentifier : String -> Parser ParserValue =
+    λ(name : String) expectText (stringAppend "identifier:" name);
+
+  def parsedUnit : ParserValue -> Parser ParserValue =
+    λ(_value : ParserValue) parserPure ValueUnit;
+
+  def parseKindedConstraintModule : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "module")
+        parseKindedConstraintModuleName;
+
+  def parseKindedConstraintModuleName : ParserValue -> Parser ParserValue =
+    λ(_moduleToken : ParserValue)
+      parserBind (expectIdentifier "Main")
+        parseKindedConstraintExportKeyword;
+
+  def parseKindedConstraintExportKeyword : ParserValue -> Parser ParserValue =
+    λ(_nameToken : ParserValue)
+      parserBind (expectText "export")
+        parseKindedConstraintExportOpen;
+
+  def parseKindedConstraintExportOpen : ParserValue -> Parser ParserValue =
+    λ(_exportToken : ParserValue)
+      parserBind (expectText "(")
+        parseKindedConstraintExportList;
+
+  def parseKindedConstraintExportList : ParserValue -> Parser ParserValue =
+    λ(_openExport : ParserValue)
+      parserChoice
+        (parseClassDataExportList ValueUnit)
+        (parseConstrainedClassExportList ValueUnit);
+
+  def parseClassDataExportList : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectIdentifier "Functor")
+        parseClassDataExportComma;
+
+  def parseClassDataExportComma : ParserValue -> Parser ParserValue =
+    λ(_functorExport : ParserValue)
+      parserBind (expectText ",")
+        parseClassDataExportConstructedType;
+
+  def parseClassDataExportConstructedType : ParserValue -> Parser ParserValue =
+    λ(_comma : ParserValue)
+      parserBind (expectIdentifier "Higher")
+        parseExportedConstructorsMarker;
+
+  def parseExportedConstructorsMarker : ParserValue -> Parser ParserValue =
+    λ(_typeExport : ParserValue)
+      parserBind (expectText "(")
+        parseExportedConstructorsFirstDot;
+
+  def parseExportedConstructorsFirstDot : ParserValue -> Parser ParserValue =
+    λ(_openConstructors : ParserValue)
+      parserBind (expectText ".")
+        parseExportedConstructorsSecondDot;
+
+  def parseExportedConstructorsSecondDot : ParserValue -> Parser ParserValue =
+    λ(_firstDot : ParserValue)
+      parserBind (expectText ".")
+        parseExportedConstructorsClose;
+
+  def parseExportedConstructorsClose : ParserValue -> Parser ParserValue =
+    λ(_secondDot : ParserValue)
+      parserBind (expectText ")")
+        parseExportListClose;
+
+  def parseConstrainedClassExportList : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectIdentifier "Monad")
+        parseExportListClose;
+
+  def parseExportListClose : ParserValue -> Parser ParserValue =
+    λ(_lastExportItem : ParserValue)
+      parserBind (expectText ")")
+        parseExportListClosed;
+
+  def parseExportListClosed : ParserValue -> Parser ParserValue =
+    λ(_closeExport : ParserValue)
+      parserChoice
+        (parseKindedClassDataModuleOpen ValueUnit)
+        (parseConstrainedClassModuleOpen ValueUnit);
+
+  def parseKindedClassDataModuleOpen : ParserValue -> Parser ParserValue =
+    λ(_exports : ParserValue)
+      parserBind (expectText "{")
+        parseKindedClassDataModuleBody;
+
+  def parseConstrainedClassModuleOpen : ParserValue -> Parser ParserValue =
+    λ(_exports : ParserValue)
+      parserBind (expectText "{")
+        parseConstrainedClassModuleBody;
+
+  def parseKindedClassDataModuleBody : ParserValue -> Parser ParserValue =
+    λ(_openModule : ParserValue)
+      parserBind
+        (parseKindedFunctorClassDeclaration ValueUnit)
+        parseKindedClassDataAfterClass;
+
+  def parseKindedClassDataAfterClass : ParserValue -> Parser ParserValue =
+    λ(_classDecl : ParserValue)
+      parserBind
+        (parseKindedHigherDataDeclaration ValueUnit)
+        finishKindedClassDataModule;
+
+  def parseConstrainedClassModuleBody : ParserValue -> Parser ParserValue =
+    λ(_openModule : ParserValue)
+      parserBind
+        (parseConstrainedMonadClassDeclaration ValueUnit)
+        parseConstrainedClassAfterClass;
+
+  def parseConstrainedClassAfterClass : ParserValue -> Parser ParserValue =
+    λ(_classDecl : ParserValue)
+      parserBind
+        (parseEmptyMonadInstanceDeclaration ValueUnit)
+        finishConstrainedClassModule;
+
+  def finishKindedClassDataModule : ParserValue -> Parser ParserValue =
+    λ(_body : ParserValue)
+      parserBind (expectText "}")
+        kindedClassDataModuleValue;
+
+  def kindedClassDataModuleValue : ParserValue -> Parser ParserValue =
+    λ(_closeModule : ParserValue)
+      moduleKey kindedClassDataProjectionKey;
+
+  def finishConstrainedClassModule : ParserValue -> Parser ParserValue =
+    λ(_body : ParserValue)
+      parserBind (expectText "}")
+        constrainedClassModuleValue;
+
+  def constrainedClassModuleValue : ParserValue -> Parser ParserValue =
+    λ(_closeModule : ParserValue)
+      moduleKey constrainedClassFundepProjectionKey;
+
+  def parseKindedFunctorClassDeclaration : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "class")
+        parseKindedFunctorClassName;
+
+  def parseKindedFunctorClassName : ParserValue -> Parser ParserValue =
+    λ(_classKeyword : ParserValue)
+      parserBind (expectIdentifier "Functor")
+        parseKindedFunctorClassParameter;
+
+  def parseKindedFunctorClassParameter : ParserValue -> Parser ParserValue =
+    λ(_className : ParserValue)
+      parserBind (parseKindedDeclarationParameterF ValueUnit)
+        parseKindedFunctorClassBody;
+
+  def parseKindedFunctorClassBody : ParserValue -> Parser ParserValue =
+    λ(_parameter : ParserValue)
+      parseClassBodyWithMapMethod "map" ValueUnit;
+
+  def parseConstrainedMonadClassDeclaration : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "class")
+        parseConstrainedMonadSuperclass;
+
+  def parseConstrainedMonadSuperclass : ParserValue -> Parser ParserValue =
+    λ(_classKeyword : ParserValue)
+      parserBind (parseSuperclassConstraintFunctorF ValueUnit)
+        parseConstrainedMonadClassName;
+
+  def parseConstrainedMonadClassName : ParserValue -> Parser ParserValue =
+    λ(_superclass : ParserValue)
+      parserBind (expectIdentifier "Monad")
+        parseConstrainedMonadFirstParameter;
+
+  def parseConstrainedMonadFirstParameter : ParserValue -> Parser ParserValue =
+    λ(_className : ParserValue)
+      parserBind (parseKindedDeclarationParameterM ValueUnit)
+        parseConstrainedMonadSecondParameter;
+
+  def parseConstrainedMonadSecondParameter : ParserValue -> Parser ParserValue =
+    λ(_firstParameter : ParserValue)
+      parserBind (parseKindedDeclarationParameterF ValueUnit)
+        parseConstrainedMonadFundep;
+
+  def parseConstrainedMonadFundep : ParserValue -> Parser ParserValue =
+    λ(_secondParameter : ParserValue)
+      parserBind (parseFunctionalDependencyMF ValueUnit)
+        parseConstrainedMonadClassBody;
+
+  def parseConstrainedMonadClassBody : ParserValue -> Parser ParserValue =
+    λ(_fundep : ParserValue)
+      parseClassBodyWithBindMethod "bind" ValueUnit;
+
+  def parseSuperclassConstraintFunctorF : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectIdentifier "Functor")
+        parseSuperclassConstraintTypeF;
+
+  def parseSuperclassConstraintTypeF : ParserValue -> Parser ParserValue =
+    λ(_superclassName : ParserValue)
+      parserBind (expectIdentifier "f")
+        parseSuperclassConstraintArrow;
+
+  def parseSuperclassConstraintArrow : ParserValue -> Parser ParserValue =
+    λ(_superclassType : ParserValue)
+      parserBind (expectText "=>")
+        parsedUnit;
+
+  def parseFunctionalDependencyMF : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "|")
+        parseFunctionalDependencyDeterminerM;
+
+  def parseFunctionalDependencyDeterminerM : ParserValue -> Parser ParserValue =
+    λ(_bar : ParserValue)
+      parserBind (expectIdentifier "m")
+        parseFunctionalDependencyArrow;
+
+  def parseFunctionalDependencyArrow : ParserValue -> Parser ParserValue =
+    λ(_determiner : ParserValue)
+      parserBind (expectFunctionalDependencyArrowParser ValueUnit)
+        parseFunctionalDependencyDeterminedF;
+
+  def parseFunctionalDependencyDeterminedF : ParserValue -> Parser ParserValue =
+    λ(_arrow : ParserValue)
+      parserBind (expectIdentifier "f")
+        parsedUnit;
+
+  def parseKindedDeclarationParameterF : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "(")
+        parseKindedDeclarationParameterFName;
+
+  def parseKindedDeclarationParameterFName : ParserValue -> Parser ParserValue =
+    λ(_openParameter : ParserValue)
+      parserBind (expectIdentifier "f")
+        parseKindedDeclarationParameterFirstColon;
+
+  def parseKindedDeclarationParameterM : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "(")
+        parseKindedDeclarationParameterMName;
+
+  def parseKindedDeclarationParameterMName : ParserValue -> Parser ParserValue =
+    λ(_openParameter : ParserValue)
+      parserBind (expectIdentifier "m")
+        parseKindedDeclarationParameterFirstColon;
+
+  def parseKindedDeclarationParameterFirstColon : ParserValue -> Parser ParserValue =
+    λ(_parameterName : ParserValue)
+      parserBind (expectText ":")
+        parseKindedDeclarationParameterSecondColon;
+
+  def parseKindedDeclarationParameterSecondColon : ParserValue -> Parser ParserValue =
+    λ(_firstColon : ParserValue)
+      parserBind (expectText ":")
+        parseKindedDeclarationParameterKind;
+
+  def parseKindedDeclarationParameterKind : ParserValue -> Parser ParserValue =
+    λ(_secondColon : ParserValue)
+      parserBind (parseSourceKind ValueUnit)
+        parseKindedDeclarationParameterClose;
+
+  def parseKindedDeclarationParameterClose : ParserValue -> Parser ParserValue =
+    λ(_kind : ParserValue)
+      parserBind (expectText ")")
+        parsedUnit;
+
+  def parseSourceKind : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "*")
+        parseSourceKindArrow;
+
+  def parseSourceKindArrow : ParserValue -> Parser ParserValue =
+    λ(_argumentKind : ParserValue)
+      parserBind (expectText "->")
+        parseSourceKindResult;
+
+  def parseSourceKindResult : ParserValue -> Parser ParserValue =
+    λ(_kindArrow : ParserValue)
+      parserBind (expectText "*")
+        parsedUnit;
+
+  def parseClassBodyWithMapMethod : String -> ParserValue -> Parser ParserValue =
+    λ(methodName : String) λ(_start : ParserValue)
+      parserBind (expectText "{")
+        parseClassBodyWithMapMethodSignature;
+
+  def parseClassBodyWithMapMethodSignature : ParserValue -> Parser ParserValue =
+    λ(_openClass : ParserValue)
+      parserBind (parseMapMethodSignature "map" ValueUnit)
+        parseClassBodyClose;
+
+  def parseClassBodyWithBindMethod : String -> ParserValue -> Parser ParserValue =
+    λ(methodName : String) λ(_start : ParserValue)
+      parserBind (expectText "{")
+        parseClassBodyWithBindMethodSignature;
+
+  def parseClassBodyWithBindMethodSignature : ParserValue -> Parser ParserValue =
+    λ(_openClass : ParserValue)
+      parserBind (parseBindMethodSignature "bind" ValueUnit)
+        parseClassBodyClose;
+
+  def parseClassBodyClose : ParserValue -> Parser ParserValue =
+    λ(_method : ParserValue)
+      parserBind (expectText "}")
+        parsedUnit;
+
+  def parseMapMethodSignature : String -> ParserValue -> Parser ParserValue =
+    λ(methodName : String) λ(_start : ParserValue)
+      parserBind (expectIdentifier methodName)
+        parseMapMethodSignatureColon;
+
+  def parseMapMethodSignatureColon : ParserValue -> Parser ParserValue =
+    λ(_methodName : ParserValue)
+      parserBind (expectText ":")
+        parseMapMethodSignatureType;
+
+  def parseMapMethodSignatureType : ParserValue -> Parser ParserValue =
+    λ(_colon : ParserValue)
+      parserBind (parseMapMethodSourceType ValueUnit)
+        parseMethodSignatureSemicolon;
+
+  def parseBindMethodSignature : String -> ParserValue -> Parser ParserValue =
+    λ(methodName : String) λ(_start : ParserValue)
+      parserBind (expectIdentifier methodName)
+        parseBindMethodSignatureColon;
+
+  def parseBindMethodSignatureColon : ParserValue -> Parser ParserValue =
+    λ(_methodName : ParserValue)
+      parserBind (expectText ":")
+        parseBindMethodSignatureType;
+
+  def parseBindMethodSignatureType : ParserValue -> Parser ParserValue =
+    λ(_colon : ParserValue)
+      parserBind (parseBindMethodSourceType ValueUnit)
+        parseMethodSignatureSemicolon;
+
+  def parseMethodSignatureSemicolon : ParserValue -> Parser ParserValue =
+    λ(_type : ParserValue)
+      parserBind (expectText ";")
+        parsedUnit;
+
+  def parseMapMethodSourceType : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (parseForallTwoBinders "a" "b" ValueUnit)
+        parseMapMethodFunctionArgument;
+
+  def parseMapMethodFunctionArgument : ParserValue -> Parser ParserValue =
+    λ(_forall : ParserValue)
+      parserBind (parseParenthesizedFunctionTypeAB ValueUnit)
+        parseMapMethodFirstArrow;
+
+  def parseMapMethodFirstArrow : ParserValue -> Parser ParserValue =
+    λ(_functionArgument : ParserValue)
+      parserBind (expectText "->")
+        parseMapMethodInputType;
+
+  def parseMapMethodInputType : ParserValue -> Parser ParserValue =
+    λ(_firstArrow : ParserValue)
+      parserBind (parseTypeApplicationFA ValueUnit)
+        parseMapMethodSecondArrow;
+
+  def parseMapMethodSecondArrow : ParserValue -> Parser ParserValue =
+    λ(_inputType : ParserValue)
+      parserBind (expectText "->")
+        parseMapMethodOutputType;
+
+  def parseMapMethodOutputType : ParserValue -> Parser ParserValue =
+    λ(_secondArrow : ParserValue)
+      parseTypeApplicationFB ValueUnit;
+
+  def parseBindMethodSourceType : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (parseForallTwoBinders "a" "b" ValueUnit)
+        parseBindMethodInputType;
+
+  def parseBindMethodInputType : ParserValue -> Parser ParserValue =
+    λ(_forall : ParserValue)
+      parserBind (parseTypeApplicationMA ValueUnit)
+        parseBindMethodFirstArrow;
+
+  def parseBindMethodFirstArrow : ParserValue -> Parser ParserValue =
+    λ(_inputType : ParserValue)
+      parserBind (expectText "->")
+        parseBindMethodFunctionArgument;
+
+  def parseBindMethodFunctionArgument : ParserValue -> Parser ParserValue =
+    λ(_firstArrow : ParserValue)
+      parserBind (parseParenthesizedAppliedFunctionTypeAMB ValueUnit)
+        parseBindMethodSecondArrow;
+
+  def parseBindMethodSecondArrow : ParserValue -> Parser ParserValue =
+    λ(_functionArgument : ParserValue)
+      parserBind (expectText "->")
+        parseBindMethodOutputType;
+
+  def parseBindMethodOutputType : ParserValue -> Parser ParserValue =
+    λ(_secondArrow : ParserValue)
+      parseTypeApplicationMB ValueUnit;
+
+  def parseForallTwoBinders : String -> String -> ParserValue -> Parser ParserValue =
+    λ(firstBinder : String) λ(secondBinder : String) λ(_start : ParserValue)
+      parserBind (expectText "forall")
+        parseForallBinderA;
+
+  def parseForallBinderA : ParserValue -> Parser ParserValue =
+    λ(_forallToken : ParserValue)
+      parserBind (expectIdentifier "a")
+        parseForallBinderB;
+
+  def parseForallBinderB : ParserValue -> Parser ParserValue =
+    λ(_firstBinder : ParserValue)
+      parserBind (expectIdentifier "b")
+        parseForallDot;
+
+  def parseForallDot : ParserValue -> Parser ParserValue =
+    λ(_secondBinder : ParserValue)
+      parserBind (expectText ".")
+        parsedUnit;
+
+  def parseParenthesizedFunctionTypeAB : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "(")
+        parseParenthesizedFunctionArgumentA;
+
+  def parseParenthesizedFunctionArgumentA : ParserValue -> Parser ParserValue =
+    λ(_openFunction : ParserValue)
+      parserBind (expectIdentifier "a")
+        parseParenthesizedFunctionArrow;
+
+  def parseParenthesizedFunctionArrow : ParserValue -> Parser ParserValue =
+    λ(_argumentType : ParserValue)
+      parserBind (expectText "->")
+        parseParenthesizedFunctionResultB;
+
+  def parseParenthesizedFunctionResultB : ParserValue -> Parser ParserValue =
+    λ(_arrow : ParserValue)
+      parserBind (expectIdentifier "b")
+        parseParenthesizedFunctionClose;
+
+  def parseParenthesizedFunctionClose : ParserValue -> Parser ParserValue =
+    λ(_resultType : ParserValue)
+      parserBind (expectText ")")
+        parsedUnit;
+
+  def parseParenthesizedAppliedFunctionTypeAMB : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "(")
+        parseParenthesizedAppliedFunctionArgumentA;
+
+  def parseParenthesizedAppliedFunctionArgumentA : ParserValue -> Parser ParserValue =
+    λ(_openFunction : ParserValue)
+      parserBind (expectIdentifier "a")
+        parseParenthesizedAppliedFunctionArrow;
+
+  def parseParenthesizedAppliedFunctionArrow : ParserValue -> Parser ParserValue =
+    λ(_argumentType : ParserValue)
+      parserBind (expectText "->")
+        parseParenthesizedAppliedFunctionResultMB;
+
+  def parseParenthesizedAppliedFunctionResultMB : ParserValue -> Parser ParserValue =
+    λ(_arrow : ParserValue)
+      parserBind (parseTypeApplicationMB ValueUnit)
+        parseParenthesizedAppliedFunctionClose;
+
+  def parseParenthesizedAppliedFunctionClose : ParserValue -> Parser ParserValue =
+    λ(_resultType : ParserValue)
+      parserBind (expectText ")")
+        parsedUnit;
+
+  def parseTypeApplicationFA : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectIdentifier "f")
+        parseTypeApplicationArgumentA;
+
+  def parseTypeApplicationFB : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectIdentifier "f")
+        parseTypeApplicationArgumentB;
+
+  def parseTypeApplicationMA : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectIdentifier "m")
+        parseTypeApplicationArgumentA;
+
+  def parseTypeApplicationMB : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectIdentifier "m")
+        parseTypeApplicationArgumentB;
+
+  def parseTypeApplicationArgumentA : ParserValue -> Parser ParserValue =
+    λ(_typeHead : ParserValue)
+      parserBind (expectIdentifier "a")
+        parsedUnit;
+
+  def parseTypeApplicationArgumentB : ParserValue -> Parser ParserValue =
+    λ(_typeHead : ParserValue)
+      parserBind (expectIdentifier "b")
+        parsedUnit;
+
+  def parseTypeApplicationHigherFA : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectIdentifier "Higher")
+        parseTypeApplicationHigherFirstArgument;
+
+  def parseTypeApplicationHigherFirstArgument : ParserValue -> Parser ParserValue =
+    λ(_typeHead : ParserValue)
+      parserBind (expectIdentifier "f")
+        parseTypeApplicationHigherSecondArgument;
+
+  def parseTypeApplicationHigherSecondArgument : ParserValue -> Parser ParserValue =
+    λ(_firstArgument : ParserValue)
+      parserBind (expectIdentifier "a")
+        parsedUnit;
+
+  def parseKindedHigherDataDeclaration : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "data")
+        parseKindedHigherDataName;
+
+  def parseKindedHigherDataName : ParserValue -> Parser ParserValue =
+    λ(_dataKeyword : ParserValue)
+      parserBind (expectIdentifier "Higher")
+        parseKindedHigherDataParameter;
+
+  def parseKindedHigherDataParameter : ParserValue -> Parser ParserValue =
+    λ(_dataName : ParserValue)
+      parserBind (parseKindedDeclarationParameterF ValueUnit)
+        parseKindedHigherDataPlainParameter;
+
+  def parseKindedHigherDataPlainParameter : ParserValue -> Parser ParserValue =
+    λ(_kindedParameter : ParserValue)
+      parserBind (expectIdentifier "a")
+        parseKindedHigherDataEquals;
+
+  def parseKindedHigherDataEquals : ParserValue -> Parser ParserValue =
+    λ(_plainParameter : ParserValue)
+      parserBind (expectText "=")
+        parseKindedHigherDataConstructor;
+
+  def parseKindedHigherDataConstructor : ParserValue -> Parser ParserValue =
+    λ(_equals : ParserValue)
+      parserBind (parseWrapConstructorDeclaration "Wrap" ValueUnit)
+        parsedUnit;
+
+  def parseWrapConstructorDeclaration : String -> ParserValue -> Parser ParserValue =
+    λ(constructorName : String) λ(_start : ParserValue)
+      parserBind (expectIdentifier constructorName)
+        parseWrapConstructorColon;
+
+  def parseWrapConstructorColon : ParserValue -> Parser ParserValue =
+    λ(_constructorName : ParserValue)
+      parserBind (expectConstructorColonParser ValueUnit)
+        parseWrapConstructorType;
+
+  def parseWrapConstructorType : ParserValue -> Parser ParserValue =
+    λ(_colon : ParserValue)
+      parserBind (parseWrapConstructorSourceType ValueUnit)
+        parseWrapConstructorSemicolon;
+
+  def parseWrapConstructorSemicolon : ParserValue -> Parser ParserValue =
+    λ(_constructorType : ParserValue)
+      parserBind (expectText ";")
+        parsedUnit;
+
+  def parseWrapConstructorSourceType : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (parseTypeApplicationFA ValueUnit)
+        parseWrapConstructorArrow;
+
+  def parseWrapConstructorArrow : ParserValue -> Parser ParserValue =
+    λ(_argumentType : ParserValue)
+      parserBind (expectText "->")
+        parseWrapConstructorResult;
+
+  def parseWrapConstructorResult : ParserValue -> Parser ParserValue =
+    λ(_arrow : ParserValue)
+      parseTypeApplicationHigherFA ValueUnit;
+
+  def parseEmptyMonadInstanceDeclaration : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "instance")
+        parseEmptyMonadInstanceClassName;
+
+  def parseEmptyMonadInstanceClassName : ParserValue -> Parser ParserValue =
+    λ(_instanceKeyword : ParserValue)
+      parserBind (expectIdentifier "Monad")
+        parseEmptyMonadInstanceFirstType;
+
+  def parseEmptyMonadInstanceFirstType : ParserValue -> Parser ParserValue =
+    λ(_className : ParserValue)
+      parserBind (expectIdentifier "IO")
+        parseEmptyMonadInstanceSecondType;
+
+  def parseEmptyMonadInstanceSecondType : ParserValue -> Parser ParserValue =
+    λ(_firstType : ParserValue)
+      parserBind (expectIdentifier "IO")
+        parseEmptyInstanceBodyOpen;
+
+  def parseEmptyInstanceBodyOpen : ParserValue -> Parser ParserValue =
+    λ(_secondType : ParserValue)
+      parserBind (expectText "{")
+        parseEmptyInstanceBodyClose;
+
+  def parseEmptyInstanceBodyClose : ParserValue -> Parser ParserValue =
+    λ(_openInstance : ParserValue)
+      parserBind (expectText "}")
+        parsedUnit;
+
   def renderParserParityRetryEvidence : String -> String -> String -> String =
     λ(sourceFile : String) λ(sourceText : String) λ(lexerMismatchSourceText : String)
       stringAppend (renderPositiveTokenEvidence sourceFile sourceText)
@@ -2084,6 +2701,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteModule, parseTo
       ExpectedLetAnnotationType span -> stringAppend "expected-let-annotation-type@" (renderSpan sourceFile span);
       ExpectedConstructorColon span -> stringAppend "expected-constructor-colon@" (renderSpan sourceFile span);
       ExpectedCaseBranchArrow span -> stringAppend "expected-case-branch-arrow@" (renderSpan sourceFile span);
-      ExpectedInstanceMethodEquals span -> stringAppend "expected-instance-method-equals@" (renderSpan sourceFile span)
+      ExpectedInstanceMethodEquals span -> stringAppend "expected-instance-method-equals@" (renderSpan sourceFile span);
+      ExpectedFunctionalDependencyArrow span -> stringAppend "expected-functional-dependency-arrow@" (renderSpan sourceFile span)
     };
 }

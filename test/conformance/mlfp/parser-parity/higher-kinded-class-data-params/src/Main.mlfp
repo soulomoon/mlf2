@@ -1,0 +1,8 @@
+module Main export (Functor, Higher(..)) {
+  class Functor (f :: * -> *) {
+    map : ∀ a b. (a -> b) -> f a -> f b;
+  }
+
+  data Higher (f :: * -> *) a =
+      Wrap : f a -> Higher f a;
+}

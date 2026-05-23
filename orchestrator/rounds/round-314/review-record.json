@@ -1,0 +1,24 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-314",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-004",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-004",
+  "milestone_id": "milestone-4",
+  "direction_id": "direction-4a-canonical-parser-parity",
+  "extracted_item_id": "item-314-parser-library-higher-kinded-constraint-extension",
+  "decision": "approved",
+  "evidence_summary": "Re-review confirmed the rejected round-314 fixture-shaped parser branches and direct fixture-key success shortcuts are gone; the retry extends the shared source-text parser-combinator library for higher-kinded and constrained class syntax with thin source/evidence fixtures, guard coverage against the rejected shortcut shapes, and focused/parser-parity/direct-smoke/static/full Cabal/thesis gates passing.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-4-completion",
+        "text": "round-314 completed item-314-parser-library-higher-kinded-constraint-extension: the shared source-text parser-parity library covers bounded higher-kinded parameters, variable-headed type applications, superclass constraints, multi-parameter class heads, functional dependencies, and empty instance bodies through parser-combinator grammar with thin fixtures and guard coverage against the rejected fixture-key shortcut shapes; validation passed focused/parser-parity/full Cabal gates, direct fixture smokes, static shortcut audits, and thesis gate."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}

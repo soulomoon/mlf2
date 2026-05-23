@@ -1,0 +1,7 @@
+module ParserParityFixture export (sourceFile, sourceText) {
+  def sourceFile : String =
+    "test/conformance/mlfp/parser-parity/multiparam-superclass-fundep/src/Main.mlfp";
+
+  def sourceText : String =
+    "module Main export (Monad) {\n  class Functor f => Monad (m :: * -> *) (f :: * -> *) | m → f {\n    bind : ∀ a b. m a -> (a -> m b) -> m b;\n  }\n\n  instance Monad IO IO {\n  }\n}\n";
+}

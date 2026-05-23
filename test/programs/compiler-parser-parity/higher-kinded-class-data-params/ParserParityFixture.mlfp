@@ -1,0 +1,7 @@
+module ParserParityFixture export (sourceFile, sourceText) {
+  def sourceFile : String =
+    "test/conformance/mlfp/parser-parity/higher-kinded-class-data-params/src/Main.mlfp";
+
+  def sourceText : String =
+    "module Main export (Functor, Higher(..)) {\n  class Functor (f :: * -> *) {\n    map : ∀ a b. (a -> b) -> f a -> f b;\n  }\n\n  data Higher (f :: * -> *) a =\n      Wrap : f a -> Higher f a;\n}\n";
+}

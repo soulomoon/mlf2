@@ -11,7 +11,7 @@ import MLF.API
     ( parseLocatedProgramWithFile
     , renderProgramParseError
     )
-import MLF.Frontend.Syntax (Lit (..), SrcTy (..), SrcType)
+import MLF.Frontend.Syntax (Lit (..), SrcKind (..), SrcTy (..), SrcType)
 import qualified MLF.Frontend.Syntax.Program as P
 import MLF.Program.CLI (runProgramArgs)
 import System.Directory
@@ -84,6 +84,32 @@ spec =
             instanceCanonicalProjection `shouldBe` instanceExpected
             derivingParserParityOutput `shouldBe` Right derivingExpected
             instanceParserParityOutput `shouldBe` Right instanceExpected
+
+        it "shared parser-owned .mlfp parser extends source-text grammar to higher-kinded and constrained class syntax" $ do
+            higherKindedSource <- readFile higherKindedClassDataParamsCanonicalSourcePath
+            higherKindedExpected <- readFile higherKindedClassDataParamsExpectedProjectionPath
+            fundepSource <- readFile multiparamSuperclassFundepCanonicalSourcePath
+            fundepExpected <- readFile multiparamSuperclassFundepExpectedProjectionPath
+
+            higherKindedCanonicalProjection <-
+                renderCanonicalProjection higherKindedClassDataParamsCanonicalSourcePath higherKindedSource
+            fundepCanonicalProjection <-
+                renderCanonicalProjection multiparamSuperclassFundepCanonicalSourcePath fundepSource
+            higherKindedParserParityOutput <-
+                runSharedParserFixture higherKindedClassDataParamsParserParityPackageRoot
+            fundepParserParityOutput <-
+                runSharedParserFixture multiparamSuperclassFundepParserParityPackageRoot
+            negativeEvidenceRoot <- writeHigherKindedFundepNegativeEvidencePackage
+            sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
+
+            higherKindedCanonicalProjection `shouldBe` higherKindedExpected
+            fundepCanonicalProjection `shouldBe` fundepExpected
+            higherKindedParserParityOutput `shouldBe` Right higherKindedExpected
+            fundepParserParityOutput `shouldBe` Right fundepExpected
+            runSharedParserFixture negativeEvidenceRoot
+                `shouldReturn` Right higherKindedFundepNegativeEvidenceProjection
+            filter (`isInfixOf` sharedParserSource) sharedParserRound314ShortcutPhrases
+                `shouldBe` []
 
         it "parser-owned .mlfp parser matches canonical parser for a basic Bool definition and source spans" $ do
             source <- readFile canonicalSourcePath
@@ -269,6 +295,14 @@ typeclassInstanceNullaryMethodCanonicalSourcePath :: FilePath
 typeclassInstanceNullaryMethodCanonicalSourcePath =
     "test/conformance/mlfp/parser-parity/typeclass-instance-nullary-method/src/Main.mlfp"
 
+higherKindedClassDataParamsCanonicalSourcePath :: FilePath
+higherKindedClassDataParamsCanonicalSourcePath =
+    "test/conformance/mlfp/parser-parity/higher-kinded-class-data-params/src/Main.mlfp"
+
+multiparamSuperclassFundepCanonicalSourcePath :: FilePath
+multiparamSuperclassFundepCanonicalSourcePath =
+    "test/conformance/mlfp/parser-parity/multiparam-superclass-fundep/src/Main.mlfp"
+
 expectedProjectionPath :: FilePath
 expectedProjectionPath =
     "test/conformance/mlfp/parser-parity/basic-module-def-bool/expected/parser-program.txt"
@@ -308,6 +342,14 @@ typeclassDerivingMethodExpectedProjectionPath =
 typeclassInstanceNullaryMethodExpectedProjectionPath :: FilePath
 typeclassInstanceNullaryMethodExpectedProjectionPath =
     "test/conformance/mlfp/parser-parity/typeclass-instance-nullary-method/expected/parser-program.txt"
+
+higherKindedClassDataParamsExpectedProjectionPath :: FilePath
+higherKindedClassDataParamsExpectedProjectionPath =
+    "test/conformance/mlfp/parser-parity/higher-kinded-class-data-params/expected/parser-program.txt"
+
+multiparamSuperclassFundepExpectedProjectionPath :: FilePath
+multiparamSuperclassFundepExpectedProjectionPath =
+    "test/conformance/mlfp/parser-parity/multiparam-superclass-fundep/expected/parser-program.txt"
 
 parserParityPackageRoot :: FilePath
 parserParityPackageRoot =
@@ -349,6 +391,14 @@ typeclassInstanceNullaryMethodParserParityPackageRoot :: FilePath
 typeclassInstanceNullaryMethodParserParityPackageRoot =
     "test/programs/compiler-parser-parity/typeclass-instance-nullary-method"
 
+higherKindedClassDataParamsParserParityPackageRoot :: FilePath
+higherKindedClassDataParamsParserParityPackageRoot =
+    "test/programs/compiler-parser-parity/higher-kinded-class-data-params"
+
+multiparamSuperclassFundepParserParityPackageRoot :: FilePath
+multiparamSuperclassFundepParserParityPackageRoot =
+    "test/programs/compiler-parser-parity/multiparam-superclass-fundep"
+
 sharedParserLibraryRoot :: FilePath
 sharedParserLibraryRoot =
     "test/programs/compiler-parser-parity/parser-library"
@@ -370,6 +420,9 @@ sharedParserBannedPhrases =
     , concat ["Data", "Declaration", "Tokens"]
     , concat ["Typeclass", "Tokens"]
     , concat ["Instance", "Tokens"]
+    , concat ["Higher", "Kinded", "Tokens"]
+    , concat ["Constraint", "Tokens"]
+    , concat ["Fundep", "Tokens"]
     , concat ["LexerOk ", "basic", "Module", "Tokens"]
     , concat ["LexerOk ", "import", "Bool", "Tokens"]
     , concat ["LexerOk ", "value", "Def", "List", "Tokens"]
@@ -378,9 +431,15 @@ sharedParserBannedPhrases =
     , concat ["LexerOk ", "data", "Declaration", "Tokens"]
     , concat ["LexerOk ", "typeclass", "Tokens"]
     , concat ["LexerOk ", "instance", "Tokens"]
+    , concat ["LexerOk ", "higher", "Kinded", "Tokens"]
+    , concat ["LexerOk ", "constraint", "Tokens"]
+    , concat ["LexerOk ", "fundep", "Tokens"]
     , concat ["case", " tokens"]
     , concat ["class", " tokens"]
     , concat ["instance", " tokens"]
+    , concat ["higher-kinded", " tokens"]
+    , concat ["constraint", " tokens"]
+    , concat ["fundep", " tokens"]
     ]
 
 sharedParserFixedOffsetPhrases :: [String]
@@ -426,6 +485,16 @@ sharedParserEarlySuccessPhrases =
     , "ParserTextMatched -> moduleKey \"value-int-ref\""
     , "ParserTextMatched -> moduleKey \"typed-annotation\""
     , "ParserTextMismatch -> moduleKey \"let-lambda\""
+    ]
+
+sharedParserRound314ShortcutPhrases :: [String]
+sharedParserRound314ShortcutPhrases =
+    [ "parseHigherKindedModule"
+    , "parseMultiparam"
+    , "completeModuleKey \"higher-kinded-class-data-params\""
+    , "completeModuleKey \"multiparam-superclass-fundep\""
+    , "moduleKey \"higher-kinded-class-data-params\""
+    , "moduleKey \"multiparam-superclass-fundep\""
     ]
 
 sharedParserCompleteParseRequiredPhrases :: [String]
@@ -494,6 +563,10 @@ caseExpressionNegativeEvidencePackageRoot =
 typeclassInstanceNegativeEvidencePackageRoot :: FilePath
 typeclassInstanceNegativeEvidencePackageRoot =
     "dist-newstyle/parser-parity-typeclass-instance-negative-evidence"
+
+higherKindedFundepNegativeEvidencePackageRoot :: FilePath
+higherKindedFundepNegativeEvidencePackageRoot =
+    "dist-newstyle/parser-parity-higher-kinded-fundep-negative-evidence"
 
 sourceTextBasicPackageRoot :: FilePath
 sourceTextBasicPackageRoot =
@@ -606,6 +679,13 @@ writeTypeclassInstanceNegativeEvidencePackage = do
     writeFile (typeclassInstanceNegativeEvidencePackageRoot </> "Main.mlfp") typeclassInstanceNegativeEvidenceMainSource
     pure typeclassInstanceNegativeEvidencePackageRoot
 
+writeHigherKindedFundepNegativeEvidencePackage :: IO FilePath
+writeHigherKindedFundepNegativeEvidencePackage = do
+    removePathForcibly higherKindedFundepNegativeEvidencePackageRoot
+    createDirectoryIfMissing True higherKindedFundepNegativeEvidencePackageRoot
+    writeFile (higherKindedFundepNegativeEvidencePackageRoot </> "Main.mlfp") higherKindedFundepNegativeEvidenceMainSource
+    pure higherKindedFundepNegativeEvidencePackageRoot
+
 retryEvidenceMainSource :: String
 retryEvidenceMainSource =
     unlines
@@ -675,6 +755,13 @@ typeclassInstanceNegativeEvidenceMainSource =
         "typeclass-instance parser negative "
         typeclassInstanceNullaryMethodCanonicalSourcePath
         typeclassInstanceNegativeSourceText
+
+higherKindedFundepNegativeEvidenceMainSource :: String
+higherKindedFundepNegativeEvidenceMainSource =
+    parserNegativeEvidenceMainSource
+        "higher-kinded-fundep parser negative "
+        multiparamSuperclassFundepCanonicalSourcePath
+        higherKindedFundepNegativeSourceText
 
 parserNegativeEvidenceMainSource :: String -> FilePath -> String -> String
 parserNegativeEvidenceMainSource prefix sourceFile sourceText =
@@ -784,6 +871,19 @@ typeclassInstanceNegativeSourceText =
         , "}"
         ]
 
+higherKindedFundepNegativeSourceText :: String
+higherKindedFundepNegativeSourceText =
+    unlines
+        [ "module Main export (Monad) {"
+        , "  class Functor f => Monad (m :: * -> *) (f :: * -> *) | m f {"
+        , "    bind : ∀ a b. m a -> (a -> m b) -> m b;"
+        , "  }"
+        , ""
+        , "  instance Monad IO IO {"
+        , "  }"
+        , "}"
+        ]
+
 retryEvidenceProjection :: String
 retryEvidenceProjection =
     unlines
@@ -832,6 +932,12 @@ typeclassInstanceNegativeEvidenceProjection :: String
 typeclassInstanceNegativeEvidenceProjection =
     unlines
         [ "typeclass-instance parser negative expected-instance-method-equals@test/conformance/mlfp/parser-parity/typeclass-instance-nullary-method/src/Main.mlfp:12:12-12:16"
+        ]
+
+higherKindedFundepNegativeEvidenceProjection :: String
+higherKindedFundepNegativeEvidenceProjection =
+    unlines
+        [ "higher-kinded-fundep parser negative expected-functional-dependency-arrow@test/conformance/mlfp/parser-parity/multiparam-superclass-fundep/src/Main.mlfp:2:60-2:61"
         ]
 
 renderCanonicalProjection :: FilePath -> String -> IO String
@@ -957,6 +1063,7 @@ renderDataProjection spans data0 = do
     pure $
         ( "data "
             ++ P.dataDeclName data0
+            ++ renderOptionalTypeParams (P.dataDeclParams data0)
             ++ " span="
             ++ renderSpan dataSpan
         )
@@ -966,16 +1073,40 @@ renderDataProjection spans data0 = do
 renderClassProjection :: P.ProgramSpanIndex -> P.ClassDecl -> IO [String]
 renderClassProjection spans class0 = do
     classSpan <- requireIndexedSpan "class declaration" (P.classDeclName class0) 0 (P.spanClasses spans)
+    renderedSuperclasses <- traverse (renderSuperclassProjection spans) (P.classDeclSuperclasses class0)
+    let renderedFundeps = map (renderFunctionalDependencyProjection classSpan) (P.classDeclFundeps class0)
     renderedMethods <- traverse (renderMethodSignatureProjection spans) (P.classDeclMethods class0)
     pure $
         ( "class "
             ++ P.classDeclName class0
             ++ " params="
-            ++ intercalate "," (P.typeParamNames (NE.toList (P.classDeclParams class0)))
+            ++ renderTypeParams (NE.toList (P.classDeclParams class0))
             ++ " span="
             ++ renderSpan classSpan
         )
-            : renderedMethods
+            : renderedSuperclasses
+                ++ renderedFundeps
+                ++ renderedMethods
+
+renderSuperclassProjection :: P.ProgramSpanIndex -> P.ClassConstraint -> IO String
+renderSuperclassProjection spans superclass0 = do
+    classSpan <- requireListSpan "superclass" (P.constraintClassName superclass0) (P.spanClasses spans)
+    pure $
+        "superclass "
+            ++ P.constraintClassName superclass0
+            ++ " types="
+            ++ intercalate "," (map renderSrcType (NE.toList (P.constraintTypes superclass0)))
+            ++ " span="
+            ++ renderSpan classSpan
+
+renderFunctionalDependencyProjection :: P.SourceSpan -> P.FunctionalDependency -> String
+renderFunctionalDependencyProjection classSpan fundep =
+    "fundep "
+        ++ intercalate "," (NE.toList (P.fundepDeterminers fundep))
+        ++ " -> "
+        ++ intercalate "," (NE.toList (P.fundepDetermined fundep))
+        ++ " span="
+        ++ renderSpan classSpan
 
 renderMethodSignatureProjection :: P.ProgramSpanIndex -> P.MethodSig -> IO String
 renderMethodSignatureProjection spans method0 = do
@@ -992,6 +1123,7 @@ renderInstanceProjection :: P.ProgramSpanIndex -> P.InstanceDecl -> IO [String]
 renderInstanceProjection spans instance0 = do
     let className = P.instanceDeclClass instance0 :: String
     classSpan <- requireLastSpan "instance class" className (P.spanClasses spans)
+    renderedConstraints <- traverse (renderInstanceConstraintProjection spans) (P.instanceDeclConstraints instance0)
     renderedMethods <- traverse (renderMethodDefProjection spans) (P.instanceDeclMethods instance0)
     pure $
         ( "instance "
@@ -1001,7 +1133,19 @@ renderInstanceProjection spans instance0 = do
             ++ " span="
             ++ renderSpan classSpan
         )
-            : renderedMethods
+            : renderedConstraints
+                ++ renderedMethods
+
+renderInstanceConstraintProjection :: P.ProgramSpanIndex -> P.ClassConstraint -> IO String
+renderInstanceConstraintProjection spans constraint0 = do
+    classSpan <- requireListSpan "instance constraint" (P.constraintClassName constraint0) (P.spanClasses spans)
+    pure $
+        "instance-constraint "
+            ++ P.constraintClassName constraint0
+            ++ " types="
+            ++ intercalate "," (map renderSrcType (NE.toList (P.constraintTypes constraint0)))
+            ++ " span="
+            ++ renderSpan classSpan
 
 renderMethodDefProjection :: P.ProgramSpanIndex -> P.MethodDef -> IO String
 renderMethodDefProjection spans method0 = do
@@ -1105,13 +1249,66 @@ renderSrcTypePrec precedence ty =
     case ty of
         STVar name -> name
         STBase name -> name
+        STCon name args ->
+            parenthesizeIf (precedence > 2) $
+                unwords (name : map (renderSrcTypePrec 3) (NE.toList args))
+        STVarApp name args ->
+            parenthesizeIf (precedence > 2) $
+                unwords (name : map (renderSrcTypePrec 3) (NE.toList args))
+        STTyApp fun arg ->
+            parenthesizeIf (precedence > 2) $
+                renderSrcTypePrec 2 fun ++ " " ++ renderSrcTypePrec 3 arg
         STArrow dom cod ->
             parenthesizeIf (precedence > 1) $
                 renderSrcTypePrec 2 dom ++ " -> " ++ renderSrcTypePrec 1 cod
         STForall name Nothing body ->
+            let (names, finalBody) = collectForallNames body
+             in parenthesizeIf (precedence > 0) $
+                    "∀" ++ unwords (name : names) ++ ". " ++ renderSrcTypePrec 0 finalBody
+        STForall name (Just _) body ->
             parenthesizeIf (precedence > 0) $
                 "∀" ++ name ++ ". " ++ renderSrcTypePrec 0 body
         other -> show other
+
+collectForallNames :: SrcType -> ([String], SrcType)
+collectForallNames ty =
+    case ty of
+        STForall name Nothing body ->
+            let (names, finalBody) = collectForallNames body
+             in (name : names, finalBody)
+        _ -> ([], ty)
+
+renderOptionalTypeParams :: [P.TypeParam] -> String
+renderOptionalTypeParams params =
+    case params of
+        [] -> ""
+        _ -> " params=" ++ renderTypeParams params
+
+renderTypeParams :: [P.TypeParam] -> String
+renderTypeParams =
+    intercalate "," . map renderTypeParam
+
+renderTypeParam :: P.TypeParam -> String
+renderTypeParam param =
+    P.typeParamName param ++ renderTypeParamKind (P.typeParamKind param)
+
+renderTypeParamKind :: SrcKind -> String
+renderTypeParamKind kind =
+    case kind of
+        KType -> ""
+        _ -> "::" ++ renderSrcKind kind
+
+renderSrcKind :: SrcKind -> String
+renderSrcKind =
+    renderSrcKindPrec 0
+
+renderSrcKindPrec :: Int -> SrcKind -> String
+renderSrcKindPrec precedence kind =
+    case kind of
+        KType -> "*"
+        KArrow left right ->
+            parenthesizeIf (precedence > 0) $
+                renderSrcKindPrec 1 left ++ " -> " ++ renderSrcKindPrec 0 right
 
 renderExpr :: P.Expr -> String
 renderExpr expr =

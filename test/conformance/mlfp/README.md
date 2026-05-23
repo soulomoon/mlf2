@@ -53,4 +53,8 @@ data-declaration Nat module with constructor spans, plus two case-expression
 Nat modules covering constructor, wildcard, and nested constructor patterns,
 plus two typeclass/instance modules covering class method signatures,
 `deriving`, instance method definitions, and one malformed instance-method
+diagnostic path, plus two higher-kinded/constrained class modules covering
+kinded declaration parameters, variable-headed type applications, superclass
+constraints, multi-parameter class heads, Unicode functional dependencies,
+empty instance bodies, and one malformed functional-dependency arrow
 diagnostic path.

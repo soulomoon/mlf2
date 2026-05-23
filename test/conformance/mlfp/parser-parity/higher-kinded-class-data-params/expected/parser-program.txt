@@ -1,0 +1,7 @@
+module Main span=test/conformance/mlfp/parser-parity/higher-kinded-class-data-params/src/Main.mlfp:1:1-9:1
+export type Functor span=test/conformance/mlfp/parser-parity/higher-kinded-class-data-params/src/Main.mlfp:1:21-1:28
+export type-with-constructors Higher span=test/conformance/mlfp/parser-parity/higher-kinded-class-data-params/src/Main.mlfp:1:30-1:40
+class Functor params=f::* -> * span=test/conformance/mlfp/parser-parity/higher-kinded-class-data-params/src/Main.mlfp:2:3-6:3
+method-signature map type=∀a b. (a -> b) -> f a -> f b span=test/conformance/mlfp/parser-parity/higher-kinded-class-data-params/src/Main.mlfp:3:5-4:3
+data Higher params=f::* -> *,a span=test/conformance/mlfp/parser-parity/higher-kinded-class-data-params/src/Main.mlfp:6:3-8:1
+constructor Wrap type=f a -> Higher f a span=test/conformance/mlfp/parser-parity/higher-kinded-class-data-params/src/Main.mlfp:7:7-7:31

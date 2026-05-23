@@ -1,0 +1,7 @@
+module Main span=test/conformance/mlfp/parser-parity/multiparam-superclass-fundep/src/Main.mlfp:1:1-9:1
+export type Monad span=test/conformance/mlfp/parser-parity/multiparam-superclass-fundep/src/Main.mlfp:1:21-1:26
+class Monad params=m::* -> *,f::* -> * span=test/conformance/mlfp/parser-parity/multiparam-superclass-fundep/src/Main.mlfp:2:3-6:3
+superclass Functor types=f span=test/conformance/mlfp/parser-parity/multiparam-superclass-fundep/src/Main.mlfp:2:9-2:17
+fundep m -> f span=test/conformance/mlfp/parser-parity/multiparam-superclass-fundep/src/Main.mlfp:2:3-6:3
+method-signature bind type=∀a b. m a -> (a -> m b) -> m b span=test/conformance/mlfp/parser-parity/multiparam-superclass-fundep/src/Main.mlfp:3:5-4:3
+instance Monad types=IO,IO span=test/conformance/mlfp/parser-parity/multiparam-superclass-fundep/src/Main.mlfp:6:12-6:18

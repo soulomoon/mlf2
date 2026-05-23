@@ -15,6 +15,16 @@
 
 ### Added
 - Extended the shared parser-owned parser-parity library with a bounded
+  higher-kinded and constrained class syntax grammar slice for kinded
+  declaration parameters, variable-headed type applications, superclass
+  constraints, multi-parameter class heads, Unicode functional dependencies,
+  and empty instance bodies. New committed parser-program projections and thin
+  fixture roots cover `higher-kinded-class-data-params` and
+  `multiparam-superclass-fundep`, with malformed functional-dependency arrow
+  evidence through the same source-text lexer/parser path. This is not full
+  parser parity, type-family parity, checker/backend, compiler-package,
+  driver, platform, proof, or self-boot work.
+- Extended the shared parser-owned parser-parity library with a bounded
   typeclass/instance declaration grammar slice for class declarations, method
   signatures, deriving clauses, instance declarations, and instance method
   definitions. New committed parser-program projections and thin fixture roots

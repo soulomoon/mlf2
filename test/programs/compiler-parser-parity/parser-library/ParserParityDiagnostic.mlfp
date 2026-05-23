@@ -9,5 +9,6 @@ module ParserParityDiagnostic export (ParserDiagnostic(..)) {
     | ExpectedLetAnnotationType : String -> ParserDiagnostic
     | ExpectedConstructorColon : String -> ParserDiagnostic
     | ExpectedCaseBranchArrow : String -> ParserDiagnostic
-    | ExpectedInstanceMethodEquals : String -> ParserDiagnostic;
+    | ExpectedInstanceMethodEquals : String -> ParserDiagnostic
+    | ExpectedFunctionalDependencyArrow : String -> ParserDiagnostic;
 }

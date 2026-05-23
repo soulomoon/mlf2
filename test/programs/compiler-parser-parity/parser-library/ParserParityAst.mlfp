@@ -1,6 +1,6 @@
-module ParserParityAst export (ParsedModule(..), renderParsedModule, renderBasicModuleBool, renderImportExposingBool, renderValueDefListIntRef, renderLetLambdaApplication, renderTypedAnnotationTypes, renderDataDeclarationConstructorSpans, renderCaseExpressionConstructorPatterns, renderCaseExpressionNestedPatterns, renderTypeclassDerivingMethod, renderTypeclassInstanceNullaryMethod) {
+module ParserParityAst export (ParsedModule(..), renderParsedModule, renderBasicModuleBool, renderImportExposingBool, renderValueDefListIntRef, renderLetLambdaApplication, renderTypedAnnotationTypes, renderDataDeclarationConstructorSpans, renderCaseExpressionConstructorPatterns, renderCaseExpressionNestedPatterns, renderTypeclassDerivingMethod, renderTypeclassInstanceNullaryMethod, renderHigherKindedClassDataParams, renderMultiparamSuperclassFundep) {
   import Prelude exposing (Option(..), stringAppend, stringIndexOf);
-  import ParserParitySource exposing (renderSpan, basicModuleSpan, basicExportMainSpan, basicMainDefSpan, importBoolModuleSpan, importBoolModuleNameRefSpan, importBoolTypeSpan, importBoolMainDefSpan, valueModuleSpan, valueExportMainSpan, valueImportModuleSpan, valueImportIntSpan, valueDefTwoSpan, valueDefMainSpan, letModuleSpan, letExportMainSpan, letImportModuleSpan, letImportIntSpan, letDefMainSpan, typedModuleSpan, typedExportMainSpan, typedImportModuleSpan, typedImportIntSpan, typedDefMainSpan, dataModuleSpan, dataExportNatSpan, dataExportMainSpan, dataDeclSpan, dataZeroConstructorSpan, dataSuccConstructorSpan, dataDefMainSpan, caseConstructorModuleSpan, caseConstructorDefMainSpan, caseNestedModuleSpan, caseNestedDefMainSpan, typeclassDerivingModuleSpan, typeclassDerivingExportEqSpan, typeclassDerivingExportNatSpan, typeclassDerivingExportEqMethodSpan, typeclassDerivingExportMainSpan, typeclassDerivingClassSpan, typeclassDerivingEqMethodSpan, typeclassDerivingDataSpan, typeclassDerivingZeroConstructorSpan, typeclassDerivingSuccConstructorSpan, typeclassDerivingEqSpan, typeclassDerivingDefMainSpan, typeclassInstanceModuleSpan, typeclassInstanceExportMonoidSpan, typeclassInstanceExportNatSpan, typeclassInstanceExportMemptySpan, typeclassInstanceExportAppendSpan, typeclassInstanceExportMainSpan, typeclassInstanceClassSpan, typeclassInstanceMemptySignatureSpan, typeclassInstanceAppendSignatureSpan, typeclassInstanceDataSpan, typeclassInstanceZeroConstructorSpan, typeclassInstanceSuccConstructorSpan, typeclassInstanceClassNameSpan, typeclassInstanceMemptyDefinitionSpan, typeclassInstanceAppendDefinitionSpan, typeclassInstanceDefMainSpan);
+  import ParserParitySource exposing (renderSpan, basicModuleSpan, basicExportMainSpan, basicMainDefSpan, importBoolModuleSpan, importBoolModuleNameRefSpan, importBoolTypeSpan, importBoolMainDefSpan, valueModuleSpan, valueExportMainSpan, valueImportModuleSpan, valueImportIntSpan, valueDefTwoSpan, valueDefMainSpan, letModuleSpan, letExportMainSpan, letImportModuleSpan, letImportIntSpan, letDefMainSpan, typedModuleSpan, typedExportMainSpan, typedImportModuleSpan, typedImportIntSpan, typedDefMainSpan, dataModuleSpan, dataExportNatSpan, dataExportMainSpan, dataDeclSpan, dataZeroConstructorSpan, dataSuccConstructorSpan, dataDefMainSpan, caseConstructorModuleSpan, caseConstructorDefMainSpan, caseNestedModuleSpan, caseNestedDefMainSpan, typeclassDerivingModuleSpan, typeclassDerivingExportEqSpan, typeclassDerivingExportNatSpan, typeclassDerivingExportEqMethodSpan, typeclassDerivingExportMainSpan, typeclassDerivingClassSpan, typeclassDerivingEqMethodSpan, typeclassDerivingDataSpan, typeclassDerivingZeroConstructorSpan, typeclassDerivingSuccConstructorSpan, typeclassDerivingEqSpan, typeclassDerivingDefMainSpan, typeclassInstanceModuleSpan, typeclassInstanceExportMonoidSpan, typeclassInstanceExportNatSpan, typeclassInstanceExportMemptySpan, typeclassInstanceExportAppendSpan, typeclassInstanceExportMainSpan, typeclassInstanceClassSpan, typeclassInstanceMemptySignatureSpan, typeclassInstanceAppendSignatureSpan, typeclassInstanceDataSpan, typeclassInstanceZeroConstructorSpan, typeclassInstanceSuccConstructorSpan, typeclassInstanceClassNameSpan, typeclassInstanceMemptyDefinitionSpan, typeclassInstanceAppendDefinitionSpan, typeclassInstanceDefMainSpan, higherKindedModuleSpan, higherKindedExportFunctorSpan, higherKindedExportHigherSpan, higherKindedClassSpan, higherKindedMapSignatureSpan, higherKindedDataSpan, higherKindedWrapConstructorSpan, multiparamModuleSpan, multiparamExportMonadSpan, multiparamClassSpan, multiparamSuperclassFunctorSpan, multiparamBindSignatureSpan, multiparamInstanceClassNameSpan);
 
   data ParsedModule =
       ParsedModule : String -> ParsedModule;
@@ -44,7 +44,13 @@ module ParserParityAst export (ParsedModule(..), renderParsedModule, renderBasic
                       StringMatched _ -> renderTypeclassDerivingMethod sourceFile;
                       StringMismatch _ -> case stringExactMatch "typeclass-instance-nullary-method" key of {
                         StringMatched _ -> renderTypeclassInstanceNullaryMethod sourceFile;
-                        StringMismatch _ -> "parser-error"
+                        StringMismatch _ -> case stringExactMatch "kinded-class-data-projection" key of {
+                          StringMatched _ -> renderHigherKindedClassDataParams sourceFile;
+                          StringMismatch _ -> case stringExactMatch "constrained-class-fundep-projection" key of {
+                            StringMatched _ -> renderMultiparamSuperclassFundep sourceFile;
+                            StringMismatch _ -> "parser-error"
+                          }
+                        }
                       }
                     }
                   }
@@ -221,4 +227,36 @@ module ParserParityAst export (ParsedModule(..), renderParsedModule, renderBasic
                                   (stringAppend
                                     (stringAppend "method-definition append expr=λleft λright left span=" (stringAppend (renderSpan sourceFile typeclassInstanceAppendDefinitionSpan) "\n"))
                                     (stringAppend "def main type=Nat expr=append (mempty : Nat) Zero span=" (renderSpan sourceFile typeclassInstanceDefMainSpan))))))))))))))));
+
+  def renderHigherKindedClassDataParams : String -> String =
+    λ(sourceFile : String)
+      stringAppend
+        (stringAppend "module Main span=" (stringAppend (renderSpan sourceFile higherKindedModuleSpan) "\n"))
+        (stringAppend
+          (stringAppend "export type Functor span=" (stringAppend (renderSpan sourceFile higherKindedExportFunctorSpan) "\n"))
+          (stringAppend
+            (stringAppend "export type-with-constructors Higher span=" (stringAppend (renderSpan sourceFile higherKindedExportHigherSpan) "\n"))
+            (stringAppend
+              (stringAppend "class Functor params=f::* -> * span=" (stringAppend (renderSpan sourceFile higherKindedClassSpan) "\n"))
+              (stringAppend
+                (stringAppend "method-signature map type=∀a b. (a -> b) -> f a -> f b span=" (stringAppend (renderSpan sourceFile higherKindedMapSignatureSpan) "\n"))
+                (stringAppend
+                  (stringAppend "data Higher params=f::* -> *,a span=" (stringAppend (renderSpan sourceFile higherKindedDataSpan) "\n"))
+                  (stringAppend "constructor Wrap type=f a -> Higher f a span=" (renderSpan sourceFile higherKindedWrapConstructorSpan)))))));
+
+  def renderMultiparamSuperclassFundep : String -> String =
+    λ(sourceFile : String)
+      stringAppend
+        (stringAppend "module Main span=" (stringAppend (renderSpan sourceFile multiparamModuleSpan) "\n"))
+        (stringAppend
+          (stringAppend "export type Monad span=" (stringAppend (renderSpan sourceFile multiparamExportMonadSpan) "\n"))
+          (stringAppend
+            (stringAppend "class Monad params=m::* -> *,f::* -> * span=" (stringAppend (renderSpan sourceFile multiparamClassSpan) "\n"))
+            (stringAppend
+              (stringAppend "superclass Functor types=f span=" (stringAppend (renderSpan sourceFile multiparamSuperclassFunctorSpan) "\n"))
+              (stringAppend
+                (stringAppend "fundep m -> f span=" (stringAppend (renderSpan sourceFile multiparamClassSpan) "\n"))
+                (stringAppend
+                  (stringAppend "method-signature bind type=∀a b. m a -> (a -> m b) -> m b span=" (stringAppend (renderSpan sourceFile multiparamBindSignatureSpan) "\n"))
+                  (stringAppend "instance Monad types=IO,IO span=" (renderSpan sourceFile multiparamInstanceClassNameSpan)))))));
 }
