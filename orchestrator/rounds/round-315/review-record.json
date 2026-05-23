@@ -1,0 +1,24 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-315",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-004",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-004",
+  "milestone_id": "milestone-4",
+  "direction_id": "direction-4a-canonical-parser-parity",
+  "extracted_item_id": "item-315-parser-library-type-family-type-level-extension",
+  "decision": "approved",
+  "evidence_summary": "Focused round-315 parser-parity matcher passed; all carried and new parser-parity run-program smokes passed; static audits found no fixture-root parser shortcuts, exact-source/static-token shortcuts, rejected round-315 shapes, or fixture-owned parser entrypoints; git diff --check, cabal build all, cabal test, and thesis conformance gate passed. The standalone parser-parity group timed out after passing the round-315 type-family example, but full cabal test completed the parser-parity section with 2637 examples and 0 failures. The diff stays bounded to shared source-text parser-library type-family/type-level parser-parity evidence and does not claim checker/reducer, backend/platform/driver/proof, full parser parity, or self-boot support.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-4-completion",
+        "text": "round-315 completed item-315-parser-library-type-family-type-level-extension: the shared source-text parser-library path now covers bounded closed type-family declarations, kinded/plain family parameters, type-level patterns, type-level lambda/application syntax, source type-family annotations, and malformed equation diagnostics through thin parser-parity fixtures; reviewer evidence: focused matcher, all carried/new run-program smokes, static shortcut audits, git diff --check, cabal build all, cabal test, and thesis gate passed."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}

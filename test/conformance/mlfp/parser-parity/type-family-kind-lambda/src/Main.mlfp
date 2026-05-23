@@ -1,0 +1,7 @@
+module Main {
+  type family Normalize (a :: k) :: k where {
+    Normalize Int = Int;
+    Normalize (Box a) = a;
+    Normalize a = (Λx. x) a;
+  }
+}

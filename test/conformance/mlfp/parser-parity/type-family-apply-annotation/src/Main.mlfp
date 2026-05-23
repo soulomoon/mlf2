@@ -1,0 +1,7 @@
+module Main export (main) {
+  type family Apply (f :: * -> *) a :: * where {
+    Apply f a = f a;
+  }
+
+  def main : Apply (Λx. x) Int = 1;
+}

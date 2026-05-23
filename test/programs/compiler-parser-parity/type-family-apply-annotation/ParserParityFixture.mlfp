@@ -1,0 +1,7 @@
+module ParserParityFixture export (sourceFile, sourceText) {
+  def sourceFile : String =
+    "test/conformance/mlfp/parser-parity/type-family-apply-annotation/src/Main.mlfp";
+
+  def sourceText : String =
+    "module Main export (main) {\n  type family Apply (f :: * -> *) a :: * where {\n    Apply f a = f a;\n  }\n\n  def main : Apply (Λx. x) Int = 1;\n}\n";
+}

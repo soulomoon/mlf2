@@ -1,0 +1,5 @@
+module Main span=test/conformance/mlfp/parser-parity/type-family-apply-annotation/src/Main.mlfp:1:1-8:1
+export value main span=test/conformance/mlfp/parser-parity/type-family-apply-annotation/src/Main.mlfp:1:21-1:25
+type-family Apply params=f::* -> *,a result=* span=test/conformance/mlfp/parser-parity/type-family-apply-annotation/src/Main.mlfp:2:3-6:3
+family-equation Apply patterns=f,a rhs=f a
+def main type=Apply (Λx. x) Int expr=1 span=test/conformance/mlfp/parser-parity/type-family-apply-annotation/src/Main.mlfp:6:3-7:1

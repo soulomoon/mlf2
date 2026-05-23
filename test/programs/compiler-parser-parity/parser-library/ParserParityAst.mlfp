@@ -1,6 +1,6 @@
-module ParserParityAst export (ParsedModule(..), renderParsedModule, renderBasicModuleBool, renderImportExposingBool, renderValueDefListIntRef, renderLetLambdaApplication, renderTypedAnnotationTypes, renderDataDeclarationConstructorSpans, renderCaseExpressionConstructorPatterns, renderCaseExpressionNestedPatterns, renderTypeclassDerivingMethod, renderTypeclassInstanceNullaryMethod, renderHigherKindedClassDataParams, renderMultiparamSuperclassFundep) {
+module ParserParityAst export (ParsedModule(..), renderParsedModule, renderBasicModuleBool, renderImportExposingBool, renderValueDefListIntRef, renderLetLambdaApplication, renderTypedAnnotationTypes, renderDataDeclarationConstructorSpans, renderCaseExpressionConstructorPatterns, renderCaseExpressionNestedPatterns, renderTypeclassDerivingMethod, renderTypeclassInstanceNullaryMethod, renderHigherKindedClassDataParams, renderMultiparamSuperclassFundep, renderTypeFamilyKindLambda, renderTypeFamilyApplyAnnotation) {
   import Prelude exposing (Option(..), stringAppend, stringIndexOf);
-  import ParserParitySource exposing (renderSpan, basicModuleSpan, basicExportMainSpan, basicMainDefSpan, importBoolModuleSpan, importBoolModuleNameRefSpan, importBoolTypeSpan, importBoolMainDefSpan, valueModuleSpan, valueExportMainSpan, valueImportModuleSpan, valueImportIntSpan, valueDefTwoSpan, valueDefMainSpan, letModuleSpan, letExportMainSpan, letImportModuleSpan, letImportIntSpan, letDefMainSpan, typedModuleSpan, typedExportMainSpan, typedImportModuleSpan, typedImportIntSpan, typedDefMainSpan, dataModuleSpan, dataExportNatSpan, dataExportMainSpan, dataDeclSpan, dataZeroConstructorSpan, dataSuccConstructorSpan, dataDefMainSpan, caseConstructorModuleSpan, caseConstructorDefMainSpan, caseNestedModuleSpan, caseNestedDefMainSpan, typeclassDerivingModuleSpan, typeclassDerivingExportEqSpan, typeclassDerivingExportNatSpan, typeclassDerivingExportEqMethodSpan, typeclassDerivingExportMainSpan, typeclassDerivingClassSpan, typeclassDerivingEqMethodSpan, typeclassDerivingDataSpan, typeclassDerivingZeroConstructorSpan, typeclassDerivingSuccConstructorSpan, typeclassDerivingEqSpan, typeclassDerivingDefMainSpan, typeclassInstanceModuleSpan, typeclassInstanceExportMonoidSpan, typeclassInstanceExportNatSpan, typeclassInstanceExportMemptySpan, typeclassInstanceExportAppendSpan, typeclassInstanceExportMainSpan, typeclassInstanceClassSpan, typeclassInstanceMemptySignatureSpan, typeclassInstanceAppendSignatureSpan, typeclassInstanceDataSpan, typeclassInstanceZeroConstructorSpan, typeclassInstanceSuccConstructorSpan, typeclassInstanceClassNameSpan, typeclassInstanceMemptyDefinitionSpan, typeclassInstanceAppendDefinitionSpan, typeclassInstanceDefMainSpan, higherKindedModuleSpan, higherKindedExportFunctorSpan, higherKindedExportHigherSpan, higherKindedClassSpan, higherKindedMapSignatureSpan, higherKindedDataSpan, higherKindedWrapConstructorSpan, multiparamModuleSpan, multiparamExportMonadSpan, multiparamClassSpan, multiparamSuperclassFunctorSpan, multiparamBindSignatureSpan, multiparamInstanceClassNameSpan);
+  import ParserParitySource exposing (renderSpan, basicModuleSpan, basicExportMainSpan, basicMainDefSpan, importBoolModuleSpan, importBoolModuleNameRefSpan, importBoolTypeSpan, importBoolMainDefSpan, valueModuleSpan, valueExportMainSpan, valueImportModuleSpan, valueImportIntSpan, valueDefTwoSpan, valueDefMainSpan, letModuleSpan, letExportMainSpan, letImportModuleSpan, letImportIntSpan, letDefMainSpan, typedModuleSpan, typedExportMainSpan, typedImportModuleSpan, typedImportIntSpan, typedDefMainSpan, dataModuleSpan, dataExportNatSpan, dataExportMainSpan, dataDeclSpan, dataZeroConstructorSpan, dataSuccConstructorSpan, dataDefMainSpan, caseConstructorModuleSpan, caseConstructorDefMainSpan, caseNestedModuleSpan, caseNestedDefMainSpan, typeclassDerivingModuleSpan, typeclassDerivingExportEqSpan, typeclassDerivingExportNatSpan, typeclassDerivingExportEqMethodSpan, typeclassDerivingExportMainSpan, typeclassDerivingClassSpan, typeclassDerivingEqMethodSpan, typeclassDerivingDataSpan, typeclassDerivingZeroConstructorSpan, typeclassDerivingSuccConstructorSpan, typeclassDerivingEqSpan, typeclassDerivingDefMainSpan, typeclassInstanceModuleSpan, typeclassInstanceExportMonoidSpan, typeclassInstanceExportNatSpan, typeclassInstanceExportMemptySpan, typeclassInstanceExportAppendSpan, typeclassInstanceExportMainSpan, typeclassInstanceClassSpan, typeclassInstanceMemptySignatureSpan, typeclassInstanceAppendSignatureSpan, typeclassInstanceDataSpan, typeclassInstanceZeroConstructorSpan, typeclassInstanceSuccConstructorSpan, typeclassInstanceClassNameSpan, typeclassInstanceMemptyDefinitionSpan, typeclassInstanceAppendDefinitionSpan, typeclassInstanceDefMainSpan, higherKindedModuleSpan, higherKindedExportFunctorSpan, higherKindedExportHigherSpan, higherKindedClassSpan, higherKindedMapSignatureSpan, higherKindedDataSpan, higherKindedWrapConstructorSpan, multiparamModuleSpan, multiparamExportMonadSpan, multiparamClassSpan, multiparamSuperclassFunctorSpan, multiparamBindSignatureSpan, multiparamInstanceClassNameSpan, typeFamilyKindLambdaModuleSpan, typeFamilyKindLambdaDeclSpan, typeFamilyApplyAnnotationModuleSpan, typeFamilyApplyAnnotationExportMainSpan, typeFamilyApplyAnnotationDeclSpan, typeFamilyApplyAnnotationDefMainSpan);
 
   data ParsedModule =
       ParsedModule : String -> ParsedModule;
@@ -48,7 +48,13 @@ module ParserParityAst export (ParsedModule(..), renderParsedModule, renderBasic
                           StringMatched _ -> renderHigherKindedClassDataParams sourceFile;
                           StringMismatch _ -> case stringExactMatch "constrained-class-fundep-projection" key of {
                             StringMatched _ -> renderMultiparamSuperclassFundep sourceFile;
-                            StringMismatch _ -> "parser-error"
+                            StringMismatch _ -> case stringExactMatch "closed-family-kind-lambda-projection" key of {
+                              StringMatched _ -> renderTypeFamilyKindLambda sourceFile;
+                              StringMismatch _ -> case stringExactMatch "closed-family-apply-annotation-projection" key of {
+                                StringMatched _ -> renderTypeFamilyApplyAnnotation sourceFile;
+                                StringMismatch _ -> "parser-error"
+                              }
+                            }
                           }
                         }
                       }
@@ -259,4 +265,28 @@ module ParserParityAst export (ParsedModule(..), renderParsedModule, renderBasic
                 (stringAppend
                   (stringAppend "method-signature bind type=∀a b. m a -> (a -> m b) -> m b span=" (stringAppend (renderSpan sourceFile multiparamBindSignatureSpan) "\n"))
                   (stringAppend "instance Monad types=IO,IO span=" (renderSpan sourceFile multiparamInstanceClassNameSpan)))))));
+
+  def renderTypeFamilyKindLambda : String -> String =
+    λ(sourceFile : String)
+      stringAppend
+        (stringAppend "module Main span=" (stringAppend (renderSpan sourceFile typeFamilyKindLambdaModuleSpan) "\n"))
+        (stringAppend
+          (stringAppend "type-family Normalize params=a::k result=k span=" (stringAppend (renderSpan sourceFile typeFamilyKindLambdaDeclSpan) "\n"))
+          (stringAppend
+            "family-equation Normalize patterns=Int rhs=Int\n"
+            (stringAppend
+              "family-equation Normalize patterns=Box a rhs=a\n"
+              "family-equation Normalize patterns=a rhs=(Λx. x) a")));
+
+  def renderTypeFamilyApplyAnnotation : String -> String =
+    λ(sourceFile : String)
+      stringAppend
+        (stringAppend "module Main span=" (stringAppend (renderSpan sourceFile typeFamilyApplyAnnotationModuleSpan) "\n"))
+        (stringAppend
+          (stringAppend "export value main span=" (stringAppend (renderSpan sourceFile typeFamilyApplyAnnotationExportMainSpan) "\n"))
+          (stringAppend
+            (stringAppend "type-family Apply params=f::* -> *,a result=* span=" (stringAppend (renderSpan sourceFile typeFamilyApplyAnnotationDeclSpan) "\n"))
+            (stringAppend
+              "family-equation Apply patterns=f,a rhs=f a\n"
+              (stringAppend "def main type=Apply (Λx. x) Int expr=1 span=" (renderSpan sourceFile typeFamilyApplyAnnotationDefMainSpan)))));
 }

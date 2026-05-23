@@ -1,0 +1,7 @@
+module ParserParityFixture export (sourceFile, sourceText) {
+  def sourceFile : String =
+    "test/conformance/mlfp/parser-parity/type-family-kind-lambda/src/Main.mlfp";
+
+  def sourceText : String =
+    "module Main {\n  type family Normalize (a :: k) :: k where {\n    Normalize Int = Int;\n    Normalize (Box a) = a;\n    Normalize a = (Λx. x) a;\n  }\n}\n";
+}

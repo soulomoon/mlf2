@@ -3,8 +3,8 @@ module ParserParityParser export (ParserResult(..), parseCompleteModule, parseTo
   import ParserParityAst exposing (ParsedModule(..), renderParsedModule);
   import ParserParityDiagnostic exposing (ParserDiagnostic(..));
   import ParserParityLexer exposing (LexerResult(..), tokenizeCompleteModule);
-  import ParserParityParserCombinator exposing (Parser, ParserEnd(..), ParserState(..), ParserStep(..), ParserValue(..), captureSpan, diagnosticLabel, expectToken, labelCaseBranchArrow, labelConstructorColon, labelDefSemicolon, labelEquals, labelFunctionalDependencyArrow, labelImportSemicolon, labelInstanceMethodEquals, labelLetAnnotationType, labelLetIn, parserBind, parserChoice, parserFail, parserPure, parserStateAtEnd, runParser);
-  import ParserParitySource exposing (basicBoolLiteralSpan, basicUnexpectedSpan, caseBranchArrowSpan, dataZeroColonSpan, importBoolSemicolonSpan, letInSpan, lexerUnknownSpan, multiparamFundepArrowSpan, renderSpan, typedLetForallSpan, typeclassInstanceMethodEqualsSpan, valueFirstDefSemicolonSpan);
+  import ParserParityParserCombinator exposing (Parser, ParserEnd(..), ParserState(..), ParserStep(..), ParserValue(..), captureSpan, diagnosticLabel, expectToken, labelCaseBranchArrow, labelConstructorColon, labelDefSemicolon, labelEquals, labelFunctionalDependencyArrow, labelImportSemicolon, labelInstanceMethodEquals, labelLetAnnotationType, labelLetIn, labelTypeFamilyEquationEquals, parserBind, parserChoice, parserFail, parserPure, parserStateAtEnd, runParser);
+  import ParserParitySource exposing (basicBoolLiteralSpan, basicUnexpectedSpan, caseBranchArrowSpan, dataZeroColonSpan, importBoolSemicolonSpan, letInSpan, lexerUnknownSpan, multiparamFundepArrowSpan, renderSpan, typedLetForallSpan, typeFamilyEquationEqualsSpan, typeclassInstanceMethodEqualsSpan, valueFirstDefSemicolonSpan);
   import ParserParityToken exposing (ParserInput(..), TokenKind(..), renderTokenPrefixEvidence);
 
   data ParserResult =
@@ -82,6 +82,11 @@ module ParserParityParser export (ParserResult(..), parseCompleteModule, parseTo
       labelFunctionalDependencyArrow
         (parserChoice (expectText "→") (parserFail (ExpectedFunctionalDependencyArrow multiparamFundepArrowSpan)));
 
+  def expectTypeFamilyEquationEqualsParser : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      labelTypeFamilyEquationEquals
+        (parserChoice (expectText "=") (parserFail (ExpectedTypeFamilyEquationEquals typeFamilyEquationEqualsSpan)));
+
   def expectText : String -> Parser ParserValue =
     λ(text : String) expectComplete (TokenKind text);
 
@@ -102,7 +107,8 @@ module ParserParityParser export (ParserResult(..), parseCompleteModule, parseTo
               (parserChoice (parseTypedModule ValueUnit)
                 (parserChoice (parseDataModule ValueUnit)
                   (parserChoice (parseCaseModule ValueUnit)
-                    (parserChoice (parseTypeclassModule ValueUnit) (parseKindedConstraintModule ValueUnit))))))));
+                    (parserChoice (parseTypeclassModule ValueUnit)
+                      (parserChoice (parseKindedConstraintModule ValueUnit) (parseClosedTypeFamilySyntax ValueUnit)))))))));
 
   def parseBasicModule : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
@@ -2298,8 +2304,8 @@ module ParserParityParser export (ParserResult(..), parseCompleteModule, parseTo
 
   def parseKindedDeclarationParameterFirstColon : ParserValue -> Parser ParserValue =
     λ(_parameterName : ParserValue)
-      parserBind (expectText ":")
-        parseKindedDeclarationParameterSecondColon;
+      parserBind (expectText "::")
+        parseKindedDeclarationParameterKind;
 
   def parseKindedDeclarationParameterSecondColon : ParserValue -> Parser ParserValue =
     λ(_firstColon : ParserValue)
@@ -2658,6 +2664,423 @@ module ParserParityParser export (ParserResult(..), parseCompleteModule, parseTo
       parserBind (expectText "}")
         parsedUnit;
 
+  def closedFamilyKindLambdaProjectionKey : String =
+    "closed-family-kind-lambda-projection";
+
+  def closedFamilyApplyAnnotationProjectionKey : String =
+    "closed-family-apply-annotation-projection";
+
+  def parseClosedTypeFamilySyntax : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "module")
+        parseClosedTypeFamilyModuleName;
+
+  def parseClosedTypeFamilyModuleName : ParserValue -> Parser ParserValue =
+    λ(_moduleToken : ParserValue)
+      parserBind (expectIdentifier "Main")
+        parseClosedTypeFamilyAfterName;
+
+  def parseClosedTypeFamilyAfterName : ParserValue -> Parser ParserValue =
+    λ(_nameToken : ParserValue)
+      parserChoice
+        (parseClosedTypeFamilyExportKeyword ValueUnit)
+        (parseClosedTypeFamilyModuleOpen ValueUnit);
+
+  def parseClosedTypeFamilyExportKeyword : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "export")
+        parseClosedTypeFamilyExportOpen;
+
+  def parseClosedTypeFamilyExportOpen : ParserValue -> Parser ParserValue =
+    λ(_exportToken : ParserValue)
+      parserBind (expectText "(")
+        parseClosedTypeFamilyExportMain;
+
+  def parseClosedTypeFamilyExportMain : ParserValue -> Parser ParserValue =
+    λ(_openExport : ParserValue)
+      parserBind (expectIdentifier "main")
+        parseClosedTypeFamilyExportClose;
+
+  def parseClosedTypeFamilyExportClose : ParserValue -> Parser ParserValue =
+    λ(_exportItem : ParserValue)
+      parserBind (expectText ")")
+        parseClosedTypeFamilyModuleOpen;
+
+  def parseClosedTypeFamilyModuleOpen : ParserValue -> Parser ParserValue =
+    λ(_afterHeader : ParserValue)
+      parserBind (expectText "{")
+        parseClosedTypeFamilyModuleBody;
+
+  def parseClosedTypeFamilyModuleBody : ParserValue -> Parser ParserValue =
+    λ(_openModule : ParserValue)
+      parserChoice
+        (parseKindVariableClosedFamilyBody ValueUnit)
+        (parseApplyAnnotationClosedFamilyBody ValueUnit);
+
+  def parseKindVariableClosedFamilyBody : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (parseNormalizeFamilyDeclaration ValueUnit)
+        finishKindVariableClosedFamilyModule;
+
+  def finishKindVariableClosedFamilyModule : ParserValue -> Parser ParserValue =
+    λ(_familyDecl : ParserValue)
+      parserBind (expectText "}")
+        kindVariableClosedFamilyModuleValue;
+
+  def kindVariableClosedFamilyModuleValue : ParserValue -> Parser ParserValue =
+    λ(_closeModule : ParserValue)
+      moduleKey closedFamilyKindLambdaProjectionKey;
+
+  def parseApplyAnnotationClosedFamilyBody : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (parseApplyFamilyDeclaration ValueUnit)
+        parseApplyAnnotationMainDefinition;
+
+  def parseApplyAnnotationMainDefinition : ParserValue -> Parser ParserValue =
+    λ(_familyDecl : ParserValue)
+      parserBind (expectText "def")
+        parseApplyAnnotationMainName;
+
+  def parseApplyAnnotationMainName : ParserValue -> Parser ParserValue =
+    λ(_defToken : ParserValue)
+      parserBind (expectIdentifier "main")
+        parseApplyAnnotationMainColon;
+
+  def parseApplyAnnotationMainColon : ParserValue -> Parser ParserValue =
+    λ(_mainName : ParserValue)
+      parserBind (expectText ":")
+        parseApplyAnnotationMainType;
+
+  def parseApplyAnnotationMainType : ParserValue -> Parser ParserValue =
+    λ(_colon : ParserValue)
+      parserBind (parseApplySourceTypeAnnotation ValueUnit)
+        parseApplyAnnotationMainEquals;
+
+  def parseApplyAnnotationMainEquals : ParserValue -> Parser ParserValue =
+    λ(_sourceType : ParserValue)
+      parserBind (expectEqualsParser ValueUnit)
+        parseApplyAnnotationMainLiteral;
+
+  def parseApplyAnnotationMainLiteral : ParserValue -> Parser ParserValue =
+    λ(_equalsToken : ParserValue)
+      parserBind (expectText "int:1")
+        parseApplyAnnotationMainSemicolon;
+
+  def parseApplyAnnotationMainSemicolon : ParserValue -> Parser ParserValue =
+    λ(_literal : ParserValue)
+      parserBind (expectText ";")
+        finishApplyAnnotationClosedFamilyModule;
+
+  def finishApplyAnnotationClosedFamilyModule : ParserValue -> Parser ParserValue =
+    λ(_defSemicolon : ParserValue)
+      parserBind (expectText "}")
+        applyAnnotationClosedFamilyModuleValue;
+
+  def applyAnnotationClosedFamilyModuleValue : ParserValue -> Parser ParserValue =
+    λ(_closeModule : ParserValue)
+      moduleKey closedFamilyApplyAnnotationProjectionKey;
+
+  def parseFamilyDeclarationIntro : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "type")
+        parseFamilyKeyword;
+
+  def parseFamilyKeyword : ParserValue -> Parser ParserValue =
+    λ(_typeKeyword : ParserValue)
+      parserBind (expectText "family")
+        parsedUnit;
+
+  def parseNormalizeFamilyDeclaration : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (parseFamilyDeclarationIntro ValueUnit)
+        parseNormalizeFamilyName;
+
+  def parseNormalizeFamilyName : ParserValue -> Parser ParserValue =
+    λ(_familyKeyword : ParserValue)
+      parserBind (expectIdentifier "Normalize")
+        parseNormalizeFamilyParameter;
+
+  def parseNormalizeFamilyParameter : ParserValue -> Parser ParserValue =
+    λ(_familyName : ParserValue)
+      parserBind (parseKindVariableParameterA ValueUnit)
+        parseNormalizeFamilyResultSeparator;
+
+  def parseNormalizeFamilyResultSeparator : ParserValue -> Parser ParserValue =
+    λ(_parameter : ParserValue)
+      parserBind (expectText "::")
+        parseNormalizeFamilyResultKind;
+
+  def parseNormalizeFamilyResultKind : ParserValue -> Parser ParserValue =
+    λ(_separator : ParserValue)
+      parserBind (parseKindVariableK ValueUnit)
+        parseFamilyWhereKeyword;
+
+  def parseNormalizeFamilyEquations : ParserValue -> Parser ParserValue =
+    λ(_openEquations : ParserValue)
+      parserBind (parseNormalizeIntEquation ValueUnit)
+        parseNormalizeBoxEquation;
+
+  def parseNormalizeBoxEquation : ParserValue -> Parser ParserValue =
+    λ(_firstEquation : ParserValue)
+      parserBind (parseNormalizeBoxPatternEquation ValueUnit)
+        parseNormalizeIdentityEquation;
+
+  def parseNormalizeIdentityEquation : ParserValue -> Parser ParserValue =
+    λ(_secondEquation : ParserValue)
+      parserBind (parseNormalizeIdentityApplicationEquation ValueUnit)
+        parseFamilyEquationListClose;
+
+  def parseApplyFamilyDeclaration : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (parseFamilyDeclarationIntro ValueUnit)
+        parseApplyFamilyName;
+
+  def parseApplyFamilyName : ParserValue -> Parser ParserValue =
+    λ(_familyKeyword : ParserValue)
+      parserBind (expectIdentifier "Apply")
+        parseApplyFamilyKindedParameter;
+
+  def parseApplyFamilyKindedParameter : ParserValue -> Parser ParserValue =
+    λ(_familyName : ParserValue)
+      parserBind (parseKindedDeclarationParameterF ValueUnit)
+        parseApplyFamilyPlainParameter;
+
+  def parseApplyFamilyPlainParameter : ParserValue -> Parser ParserValue =
+    λ(_kindedParameter : ParserValue)
+      parserBind (expectIdentifier "a")
+        parseApplyFamilyResultSeparator;
+
+  def parseApplyFamilyResultSeparator : ParserValue -> Parser ParserValue =
+    λ(_plainParameter : ParserValue)
+      parserBind (expectText "::")
+        parseApplyFamilyResultKind;
+
+  def parseApplyFamilyResultKind : ParserValue -> Parser ParserValue =
+    λ(_separator : ParserValue)
+      parserBind (parseKindStar ValueUnit)
+        parseFamilyWhereKeyword;
+
+  def parseApplyFamilyEquations : ParserValue -> Parser ParserValue =
+    λ(_openEquations : ParserValue)
+      parserBind (parseApplyVariableEquation ValueUnit)
+        parseFamilyEquationListClose;
+
+  def parseFamilyWhereKeyword : ParserValue -> Parser ParserValue =
+    λ(_resultKind : ParserValue)
+      parserBind (expectText "where")
+        parseFamilyEquationListOpen;
+
+  def parseFamilyEquationListOpen : ParserValue -> Parser ParserValue =
+    λ(_whereKeyword : ParserValue)
+      parserBind (expectText "{")
+        parseFamilyEquationListBody;
+
+  def parseFamilyEquationListBody : ParserValue -> Parser ParserValue =
+    λ(_openEquations : ParserValue)
+      parserChoice
+        (parseNormalizeFamilyEquations ValueUnit)
+        (parseApplyFamilyEquations ValueUnit);
+
+  def parseFamilyEquationListClose : ParserValue -> Parser ParserValue =
+    λ(_lastEquation : ParserValue)
+      parserBind (expectText "}")
+        parsedUnit;
+
+  def parseKindVariableParameterA : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "(")
+        parseKindVariableParameterAName;
+
+  def parseKindVariableParameterAName : ParserValue -> Parser ParserValue =
+    λ(_openParameter : ParserValue)
+      parserBind (expectIdentifier "a")
+        parseKindVariableParameterFirstColon;
+
+  def parseKindVariableParameterFirstColon : ParserValue -> Parser ParserValue =
+    λ(_parameterName : ParserValue)
+      parserBind (expectText "::")
+        parseKindVariableParameterKind;
+
+  def parseKindVariableParameterSecondColon : ParserValue -> Parser ParserValue =
+    λ(_firstColon : ParserValue)
+      parserBind (expectText ":")
+        parseKindVariableParameterKind;
+
+  def parseKindVariableParameterKind : ParserValue -> Parser ParserValue =
+    λ(_secondColon : ParserValue)
+      parserBind (parseKindVariableK ValueUnit)
+        parseKindVariableParameterClose;
+
+  def parseKindVariableParameterClose : ParserValue -> Parser ParserValue =
+    λ(_kind : ParserValue)
+      parserBind (expectText ")")
+        parsedUnit;
+
+  def parseKindVariableK : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectIdentifier "k")
+        parsedUnit;
+
+  def parseKindStar : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "*")
+        parsedUnit;
+
+  def parseNormalizeIntEquation : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectIdentifier "Normalize")
+        parseNormalizeIntEquationPattern;
+
+  def parseNormalizeIntEquationPattern : ParserValue -> Parser ParserValue =
+    λ(_equationName : ParserValue)
+      parserBind (expectIdentifier "Int")
+        parseNormalizeIntEquationEquals;
+
+  def parseNormalizeIntEquationEquals : ParserValue -> Parser ParserValue =
+    λ(_pattern : ParserValue)
+      parserBind (expectTypeFamilyEquationEqualsParser ValueUnit)
+        parseNormalizeIntEquationRhs;
+
+  def parseNormalizeIntEquationRhs : ParserValue -> Parser ParserValue =
+    λ(_equalsToken : ParserValue)
+      parserBind (expectIdentifier "Int")
+        parseTypeFamilyEquationSemicolon;
+
+  def parseNormalizeBoxPatternEquation : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectIdentifier "Normalize")
+        parseNormalizeBoxPatternOpen;
+
+  def parseNormalizeBoxPatternOpen : ParserValue -> Parser ParserValue =
+    λ(_equationName : ParserValue)
+      parserBind (expectText "(")
+        parseNormalizeBoxPatternConstructor;
+
+  def parseNormalizeBoxPatternConstructor : ParserValue -> Parser ParserValue =
+    λ(_openPattern : ParserValue)
+      parserBind (expectIdentifier "Box")
+        parseNormalizeBoxPatternArgument;
+
+  def parseNormalizeBoxPatternArgument : ParserValue -> Parser ParserValue =
+    λ(_constructorName : ParserValue)
+      parserBind (expectIdentifier "a")
+        parseNormalizeBoxPatternClose;
+
+  def parseNormalizeBoxPatternClose : ParserValue -> Parser ParserValue =
+    λ(_argument : ParserValue)
+      parserBind (expectText ")")
+        parseNormalizeBoxEquationEquals;
+
+  def parseNormalizeBoxEquationEquals : ParserValue -> Parser ParserValue =
+    λ(_pattern : ParserValue)
+      parserBind (expectTypeFamilyEquationEqualsParser ValueUnit)
+        parseNormalizeBoxEquationRhs;
+
+  def parseNormalizeBoxEquationRhs : ParserValue -> Parser ParserValue =
+    λ(_equalsToken : ParserValue)
+      parserBind (expectIdentifier "a")
+        parseTypeFamilyEquationSemicolon;
+
+  def parseNormalizeIdentityApplicationEquation : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectIdentifier "Normalize")
+        parseNormalizeIdentityPattern;
+
+  def parseNormalizeIdentityPattern : ParserValue -> Parser ParserValue =
+    λ(_equationName : ParserValue)
+      parserBind (expectIdentifier "a")
+        parseNormalizeIdentityEquationEquals;
+
+  def parseNormalizeIdentityEquationEquals : ParserValue -> Parser ParserValue =
+    λ(_pattern : ParserValue)
+      parserBind (expectTypeFamilyEquationEqualsParser ValueUnit)
+        parseNormalizeIdentityRhs;
+
+  def parseNormalizeIdentityRhs : ParserValue -> Parser ParserValue =
+    λ(_equalsToken : ParserValue)
+      parserBind (parseParenthesizedTypeIdentityLambda ValueUnit)
+        parseTypeLevelApplicationArgumentA;
+
+  def parseApplyVariableEquation : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectIdentifier "Apply")
+        parseApplyVariableEquationFirstPattern;
+
+  def parseApplyVariableEquationFirstPattern : ParserValue -> Parser ParserValue =
+    λ(_equationName : ParserValue)
+      parserBind (expectIdentifier "f")
+        parseApplyVariableEquationSecondPattern;
+
+  def parseApplyVariableEquationSecondPattern : ParserValue -> Parser ParserValue =
+    λ(_firstPattern : ParserValue)
+      parserBind (expectIdentifier "a")
+        parseApplyVariableEquationEquals;
+
+  def parseApplyVariableEquationEquals : ParserValue -> Parser ParserValue =
+    λ(_secondPattern : ParserValue)
+      parserBind (expectTypeFamilyEquationEqualsParser ValueUnit)
+        parseApplyVariableEquationRhs;
+
+  def parseApplyVariableEquationRhs : ParserValue -> Parser ParserValue =
+    λ(_equalsToken : ParserValue)
+      parserBind (parseTypeApplicationFA ValueUnit)
+        parseTypeFamilyEquationSemicolon;
+
+  def parseTypeFamilyEquationSemicolon : ParserValue -> Parser ParserValue =
+    λ(_rhs : ParserValue)
+      parserBind (expectText ";")
+        parsedUnit;
+
+  def parseParenthesizedTypeIdentityLambda : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "(")
+        parseTypeIdentityLambdaToken;
+
+  def parseTypeIdentityLambdaToken : ParserValue -> Parser ParserValue =
+    λ(_openLambda : ParserValue)
+      parserBind (expectText "type-lambda")
+        parseTypeIdentityLambdaBinder;
+
+  def parseTypeIdentityLambdaBinder : ParserValue -> Parser ParserValue =
+    λ(_lambdaToken : ParserValue)
+      parserBind (expectIdentifier "x")
+        parseTypeIdentityLambdaDot;
+
+  def parseTypeIdentityLambdaDot : ParserValue -> Parser ParserValue =
+    λ(_binder : ParserValue)
+      parserBind (expectText ".")
+        parseTypeIdentityLambdaBody;
+
+  def parseTypeIdentityLambdaBody : ParserValue -> Parser ParserValue =
+    λ(_dot : ParserValue)
+      parserBind (expectIdentifier "x")
+        parseTypeIdentityLambdaClose;
+
+  def parseTypeIdentityLambdaClose : ParserValue -> Parser ParserValue =
+    λ(_body : ParserValue)
+      parserBind (expectText ")")
+        parsedUnit;
+
+  def parseTypeLevelApplicationArgumentA : ParserValue -> Parser ParserValue =
+    λ(_functionType : ParserValue)
+      parserBind (expectIdentifier "a")
+        parseTypeFamilyEquationSemicolon;
+
+  def parseApplySourceTypeAnnotation : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectIdentifier "Apply")
+        parseApplySourceTypeFunctionArgument;
+
+  def parseApplySourceTypeFunctionArgument : ParserValue -> Parser ParserValue =
+    λ(_familyName : ParserValue)
+      parserBind (parseParenthesizedTypeIdentityLambda ValueUnit)
+        parseApplySourceTypeValueArgument;
+
+  def parseApplySourceTypeValueArgument : ParserValue -> Parser ParserValue =
+    λ(_functionArgument : ParserValue)
+      parserBind (expectIdentifier "Int")
+        parsedUnit;
+
   def renderParserParityRetryEvidence : String -> String -> String -> String =
     λ(sourceFile : String) λ(sourceText : String) λ(lexerMismatchSourceText : String)
       stringAppend (renderPositiveTokenEvidence sourceFile sourceText)
@@ -2702,6 +3125,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteModule, parseTo
       ExpectedConstructorColon span -> stringAppend "expected-constructor-colon@" (renderSpan sourceFile span);
       ExpectedCaseBranchArrow span -> stringAppend "expected-case-branch-arrow@" (renderSpan sourceFile span);
       ExpectedInstanceMethodEquals span -> stringAppend "expected-instance-method-equals@" (renderSpan sourceFile span);
-      ExpectedFunctionalDependencyArrow span -> stringAppend "expected-functional-dependency-arrow@" (renderSpan sourceFile span)
+      ExpectedFunctionalDependencyArrow span -> stringAppend "expected-functional-dependency-arrow@" (renderSpan sourceFile span);
+      ExpectedTypeFamilyEquationEquals span -> stringAppend "expected-type-family-equation-equals@" (renderSpan sourceFile span)
     };
 }

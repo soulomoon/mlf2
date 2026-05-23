@@ -57,4 +57,8 @@ diagnostic path, plus two higher-kinded/constrained class modules covering
 kinded declaration parameters, variable-headed type applications, superclass
 constraints, multi-parameter class heads, Unicode functional dependencies,
 empty instance bodies, and one malformed functional-dependency arrow
-diagnostic path.
+diagnostic path, plus two closed type-family/type-level modules covering
+kind-variable result kinds, kinded/plain family parameters, type-level
+constructor and variable patterns, type-level lambda/application RHS syntax,
+source type-family application annotations, and one malformed type-family
+equation diagnostic path.

@@ -15,6 +15,17 @@
 
 ### Added
 - Extended the shared parser-owned parser-parity library with a bounded
+  closed type-family and type-level syntax grammar slice for optional module
+  export lists, closed `type family` declarations, kind-variable result kinds,
+  kinded/plain family parameters, type-level constructor and variable
+  patterns, type-level lambda/application RHS syntax, and source type-family
+  application annotations. New committed parser-program projections and thin
+  fixture roots cover `type-family-kind-lambda` and
+  `type-family-apply-annotation`, with malformed type-family equation evidence
+  through the same source-text lexer/parser path. This is not full parser
+  parity, type-family checker/reducer support, checker/backend,
+  compiler-package, driver, platform, proof, or self-boot work.
+- Extended the shared parser-owned parser-parity library with a bounded
   higher-kinded and constrained class syntax grammar slice for kinded
   declaration parameters, variable-headed type applications, superclass
   constraints, multi-parameter class heads, Unicode functional dependencies,

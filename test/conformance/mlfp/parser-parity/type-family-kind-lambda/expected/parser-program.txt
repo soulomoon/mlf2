@@ -1,0 +1,5 @@
+module Main span=test/conformance/mlfp/parser-parity/type-family-kind-lambda/src/Main.mlfp:1:1-8:1
+type-family Normalize params=a::k result=k span=test/conformance/mlfp/parser-parity/type-family-kind-lambda/src/Main.mlfp:2:3-7:1
+family-equation Normalize patterns=Int rhs=Int
+family-equation Normalize patterns=Box a rhs=a
+family-equation Normalize patterns=a rhs=(Λx. x) a

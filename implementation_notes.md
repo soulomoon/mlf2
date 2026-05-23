@@ -1,3 +1,22 @@
+## 2026-05-23 - Round 315 parser parity type-family/type-level extension
+
+- Extended the shared parser-owned parser-parity source-text lexer/parser
+  library with the bounded closed type-family and type-level syntax slice:
+  optional module export lists, `type family` declarations, kind-variable
+  result kinds, kinded and plain family parameters, constructor and variable
+  type-level patterns, type-level lambdas/applications in family equations,
+  and source type-family-style annotations.
+- Added committed parser-program projection fixtures for
+  `type-family-kind-lambda` and `type-family-apply-annotation`, plus thin
+  `.mlfp` fixture roots that expose only `sourceFile` and `sourceText` before
+  calling `renderParserParityProjectionFromSourceText`.
+- Added public negative evidence for malformed type-family equation syntax
+  through `renderParserNegativeEvidenceFromSourceText`, keeping the rejection
+  on the shared source-text lexer/parser path.
+- Scope remains bounded parser parity only. This is not full parser parity,
+  type-family checker/reducer support, checker, backend, compiler-package,
+  driver, platform, proof, or self-boot progress.
+
 ## 2026-05-23 - Round 314 parser parity higher-kinded constraint extension
 
 - Extended the shared parser-owned parser-parity source-text lexer/parser
