@@ -3,8 +3,8 @@ module ParserParityParser export (ParserResult(..), parseCompleteModule, parseTo
   import ParserParityAst exposing (ParsedModule(..), renderParsedModule);
   import ParserParityDiagnostic exposing (ParserDiagnostic(..));
   import ParserParityLexer exposing (LexerResult(..), tokenizeCompleteModule);
-  import ParserParityParserCombinator exposing (Parser, ParserEnd(..), ParserState(..), ParserStep(..), ParserValue(..), captureSpan, diagnosticLabel, expectToken, labelCaseBranchArrow, labelConstructorColon, labelDefSemicolon, labelEquals, labelFunctionalDependencyArrow, labelImportSemicolon, labelInstanceMethodEquals, labelLetAnnotationType, labelLetIn, labelTypeFamilyEquationEquals, parserBind, parserChoice, parserFail, parserPure, parserStateAtEnd, runParser);
-  import ParserParitySource exposing (basicBoolLiteralSpan, basicUnexpectedSpan, caseBranchArrowSpan, dataZeroColonSpan, importBoolSemicolonSpan, letInSpan, lexerUnknownSpan, multiparamFundepArrowSpan, renderSpan, typedLetForallSpan, typeFamilyEquationEqualsSpan, typeclassInstanceMethodEqualsSpan, valueFirstDefSemicolonSpan);
+  import ParserParityParserCombinator exposing (Parser, ParserEnd(..), ParserState(..), ParserStep(..), ParserValue(..), captureSpan, diagnosticLabel, expectToken, labelCaseBranchArrow, labelConstructorColon, labelConstructorForallDot, labelDefSemicolon, labelEquals, labelFunctionalDependencyArrow, labelImportSemicolon, labelInstanceMethodEquals, labelLetAnnotationType, labelLetIn, labelTypeFamilyEquationEquals, labelUnexpectedSource, parserBind, parserChoice, parserFail, parserPure, parserStateAtEnd, runParser);
+  import ParserParitySource exposing (basicBoolLiteralSpan, basicUnexpectedSpan, caseBranchArrowSpan, constructorForallDotSpan, dataZeroColonSpan, existentialForallExprDataSpan, existentialForallMainDefSpan, existentialForallModuleSpan, existentialForallNatDataSpan, existentialForallSomeExprDataSpan, existentialForallUnwrapSomeDefSpan, importBoolSemicolonSpan, letInSpan, lexerUnknownSpan, multiparamFundepArrowSpan, recursiveGadtDoneNowDefSpan, recursiveGadtExprDataSpan, recursiveGadtMainDefSpan, recursiveGadtModuleSpan, recursiveGadtNatDataSpan, renderSpan, typedLetForallSpan, typeFamilyEquationEqualsSpan, typeclassInstanceMethodEqualsSpan, valueFirstDefSemicolonSpan);
   import ParserParityToken exposing (ParserInput(..), TokenKind(..), renderTokenPrefixEvidence);
 
   data ParserResult =
@@ -87,6 +87,11 @@ module ParserParityParser export (ParserResult(..), parseCompleteModule, parseTo
       labelTypeFamilyEquationEquals
         (parserChoice (expectText "=") (parserFail (ExpectedTypeFamilyEquationEquals typeFamilyEquationEqualsSpan)));
 
+  def expectConstructorForallDotParser : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      labelConstructorForallDot
+        (parserChoice (expectText ".") (parserFail (ExpectedConstructorForallDot constructorForallDotSpan)));
+
   def expectText : String -> Parser ParserValue =
     λ(text : String) expectComplete (TokenKind text);
 
@@ -108,7 +113,8 @@ module ParserParityParser export (ParserResult(..), parseCompleteModule, parseTo
                 (parserChoice (parseDataModule ValueUnit)
                   (parserChoice (parseCaseModule ValueUnit)
                     (parserChoice (parseTypeclassModule ValueUnit)
-                      (parserChoice (parseKindedConstraintModule ValueUnit) (parseClosedTypeFamilySyntax ValueUnit)))))))));
+                      (parserChoice (parseKindedConstraintModule ValueUnit)
+                        (parserChoice (parseClosedTypeFamilySyntax ValueUnit) (parseRecursiveAdtSyntax ValueUnit))))))))));
 
   def parseBasicModule : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
@@ -3081,6 +3087,896 @@ module ParserParityParser export (ParserResult(..), parseCompleteModule, parseTo
       parserBind (expectIdentifier "Int")
         parsedUnit;
 
+  def recursiveGadtProjectionKey : String =
+    "recursive-gadt-projection";
+
+  def existentialForallProjectionKey : String =
+    "existential-forall-projection";
+
+  def parseRecursiveAdtSyntax : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (labelUnexpectedSource recursiveGadtModuleSpan (expectText "module"))
+        parseRecursiveAdtModuleName;
+
+  def parseRecursiveAdtModuleName : ParserValue -> Parser ParserValue =
+    λ(_moduleToken : ParserValue)
+      parserBind (expectIdentifier "Main")
+        parseRecursiveAdtExportKeyword;
+
+  def parseRecursiveAdtExportKeyword : ParserValue -> Parser ParserValue =
+    λ(_moduleName : ParserValue)
+      parserBind (expectText "export")
+        parseRecursiveAdtExportOpen;
+
+  def parseRecursiveAdtExportOpen : ParserValue -> Parser ParserValue =
+    λ(_exportToken : ParserValue)
+      parserBind (expectText "(")
+        parseRecursiveAdtNatExport;
+
+  def parseRecursiveAdtNatExport : ParserValue -> Parser ParserValue =
+    λ(_openExport : ParserValue)
+      parserBind (parseTypeWithConstructorsExport "Nat" ValueUnit)
+        parseRecursiveAdtNatExportComma;
+
+  def parseRecursiveAdtNatExportComma : ParserValue -> Parser ParserValue =
+    λ(_natExport : ParserValue)
+      parserBind (expectText ",")
+        parseRecursiveAdtExprExport;
+
+  def parseRecursiveAdtExprExport : ParserValue -> Parser ParserValue =
+    λ(_comma : ParserValue)
+      parserBind (parseTypeWithConstructorsExport "Expr" ValueUnit)
+        parseRecursiveAdtExprExportComma;
+
+  def parseRecursiveAdtExprExportComma : ParserValue -> Parser ParserValue =
+    λ(_exprExport : ParserValue)
+      parserBind (expectText ",")
+        parseRecursiveAdtExportTail;
+
+  def parseRecursiveAdtExportTail : ParserValue -> Parser ParserValue =
+    λ(_comma : ParserValue)
+      parserChoice
+        (parseExistentialValueExports ValueUnit)
+        (parseRecursiveGadtValueExports ValueUnit);
+
+  def parseTypeWithConstructorsExport : String -> ParserValue -> Parser ParserValue =
+    λ(typeName : String) λ(_start : ParserValue)
+      parserBind (expectIdentifier typeName)
+        parseConstructorExportOpen;
+
+  def parseConstructorExportOpen : ParserValue -> Parser ParserValue =
+    λ(_typeName : ParserValue)
+      parserBind (expectText "(")
+        parseConstructorExportFirstDot;
+
+  def parseConstructorExportFirstDot : ParserValue -> Parser ParserValue =
+    λ(_openConstructors : ParserValue)
+      parserBind (expectText ".")
+        parseConstructorExportSecondDot;
+
+  def parseConstructorExportSecondDot : ParserValue -> Parser ParserValue =
+    λ(_firstDot : ParserValue)
+      parserBind (expectText ".")
+        parseConstructorExportClose;
+
+  def parseConstructorExportClose : ParserValue -> Parser ParserValue =
+    λ(_secondDot : ParserValue)
+      parserBind (expectText ")")
+        parsedUnit;
+
+  def parseRecursiveGadtValueExports : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectIdentifier "doneNow")
+        parseRecursiveGadtExportComma;
+
+  def parseRecursiveGadtExportComma : ParserValue -> Parser ParserValue =
+    λ(_doneNowExport : ParserValue)
+      parserBind (expectText ",")
+        parseRecursiveGadtMainExport;
+
+  def parseRecursiveGadtMainExport : ParserValue -> Parser ParserValue =
+    λ(_comma : ParserValue)
+      parserBind (expectIdentifier "main")
+        parseRecursiveGadtExportClose;
+
+  def parseRecursiveGadtExportClose : ParserValue -> Parser ParserValue =
+    λ(_mainExport : ParserValue)
+      parserBind (expectText ")")
+        parseRecursiveGadtModuleOpen;
+
+  def parseRecursiveGadtModuleOpen : ParserValue -> Parser ParserValue =
+    λ(_closeExport : ParserValue)
+      parserBind (expectText "{")
+        parseRecursiveGadtBody;
+
+  def parseExistentialValueExports : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (parseTypeWithConstructorsExport "SomeExpr" ValueUnit)
+        parseExistentialSomeExprExportComma;
+
+  def parseExistentialSomeExprExportComma : ParserValue -> Parser ParserValue =
+    λ(_someExprExport : ParserValue)
+      parserBind (expectText ",")
+        parseExistentialUnwrapExport;
+
+  def parseExistentialUnwrapExport : ParserValue -> Parser ParserValue =
+    λ(_comma : ParserValue)
+      parserBind (expectIdentifier "unwrapSome")
+        parseExistentialUnwrapExportComma;
+
+  def parseExistentialUnwrapExportComma : ParserValue -> Parser ParserValue =
+    λ(_unwrapExport : ParserValue)
+      parserBind (expectText ",")
+        parseExistentialMainExport;
+
+  def parseExistentialMainExport : ParserValue -> Parser ParserValue =
+    λ(_comma : ParserValue)
+      parserBind (expectIdentifier "main")
+        parseExistentialExportClose;
+
+  def parseExistentialExportClose : ParserValue -> Parser ParserValue =
+    λ(_mainExport : ParserValue)
+      parserBind (expectText ")")
+        parseExistentialModuleOpen;
+
+  def parseExistentialModuleOpen : ParserValue -> Parser ParserValue =
+    λ(_closeExport : ParserValue)
+      parserBind (expectText "{")
+        parseExistentialBody;
+
+  def parseRecursiveGadtBody : ParserValue -> Parser ParserValue =
+    λ(_openModule : ParserValue)
+      parserBind (labelUnexpectedSource recursiveGadtNatDataSpan (parseNatRecursiveDataDeclaration ValueUnit))
+        parseRecursiveGadtExprData;
+
+  def parseRecursiveGadtExprData : ParserValue -> Parser ParserValue =
+    λ(_natData : ParserValue)
+      parserBind (labelUnexpectedSource recursiveGadtExprDataSpan (parseExprRecursiveDataDeclaration ValueUnit))
+        parseRecursiveGadtDoneNowDefinition;
+
+  def parseRecursiveGadtDoneNowDefinition : ParserValue -> Parser ParserValue =
+    λ(_exprData : ParserValue)
+      parserBind (labelUnexpectedSource recursiveGadtDoneNowDefSpan (parseDoneNowDefinition ValueUnit))
+        parseRecursiveGadtMainDefinition;
+
+  def parseRecursiveGadtMainDefinition : ParserValue -> Parser ParserValue =
+    λ(_doneNowDef : ParserValue)
+      parserBind (labelUnexpectedSource recursiveGadtMainDefSpan (parseRecursiveGadtMainDef ValueUnit))
+        finishRecursiveGadtModule;
+
+  def finishRecursiveGadtModule : ParserValue -> Parser ParserValue =
+    λ(_mainDef : ParserValue)
+      parserBind (expectText "}")
+        recursiveGadtModuleValue;
+
+  def recursiveGadtModuleValue : ParserValue -> Parser ParserValue =
+    λ(_closeModule : ParserValue)
+      moduleKey recursiveGadtProjectionKey;
+
+  def parseExistentialBody : ParserValue -> Parser ParserValue =
+    λ(_openModule : ParserValue)
+      parserBind (labelUnexpectedSource existentialForallNatDataSpan (parseNatRecursiveDataDeclaration ValueUnit))
+        parseExistentialExprData;
+
+  def parseExistentialExprData : ParserValue -> Parser ParserValue =
+    λ(_natData : ParserValue)
+      parserBind (labelUnexpectedSource existentialForallExprDataSpan (parseExprRecursiveDataDeclaration ValueUnit))
+        parseExistentialSomeExprData;
+
+  def parseExistentialSomeExprData : ParserValue -> Parser ParserValue =
+    λ(_exprData : ParserValue)
+      parserBind (labelUnexpectedSource existentialForallSomeExprDataSpan (parseSomeExprDataDeclaration ValueUnit))
+        parseExistentialUnwrapDefinition;
+
+  def parseExistentialUnwrapDefinition : ParserValue -> Parser ParserValue =
+    λ(_someExprData : ParserValue)
+      parserBind (labelUnexpectedSource existentialForallUnwrapSomeDefSpan (parseUnwrapSomeDefinition ValueUnit))
+        parseExistentialMainDefinition;
+
+  def parseExistentialMainDefinition : ParserValue -> Parser ParserValue =
+    λ(_unwrapDef : ParserValue)
+      parserBind (labelUnexpectedSource existentialForallMainDefSpan (parseExistentialMainDef ValueUnit))
+        finishExistentialModule;
+
+  def finishExistentialModule : ParserValue -> Parser ParserValue =
+    λ(_mainDef : ParserValue)
+      parserBind (expectText "}")
+        existentialModuleValue;
+
+  def existentialModuleValue : ParserValue -> Parser ParserValue =
+    λ(_closeModule : ParserValue)
+      moduleKey existentialForallProjectionKey;
+
+  def parseNatRecursiveDataDeclaration : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "data")
+        parseNatRecursiveDataName;
+
+  def parseNatRecursiveDataName : ParserValue -> Parser ParserValue =
+    λ(_dataKeyword : ParserValue)
+      parserBind (expectIdentifier "Nat")
+        parseNatRecursiveDataEquals;
+
+  def parseNatRecursiveDataEquals : ParserValue -> Parser ParserValue =
+    λ(_dataName : ParserValue)
+      parserBind (expectText "=")
+        parseNatRecursiveZeroConstructor;
+
+  def parseNatRecursiveZeroConstructor : ParserValue -> Parser ParserValue =
+    λ(_equals : ParserValue)
+      parserBind (expectIdentifier "Zero")
+        parseNatRecursiveZeroColon;
+
+  def parseNatRecursiveZeroColon : ParserValue -> Parser ParserValue =
+    λ(_zeroName : ParserValue)
+      parserBind (expectText ":")
+        parseNatRecursiveZeroResult;
+
+  def parseNatRecursiveZeroResult : ParserValue -> Parser ParserValue =
+    λ(_colon : ParserValue)
+      parserBind (expectIdentifier "Nat")
+        parseNatRecursiveConstructorSeparator;
+
+  def parseNatRecursiveConstructorSeparator : ParserValue -> Parser ParserValue =
+    λ(_zeroType : ParserValue)
+      parserBind (expectText "|")
+        parseNatRecursiveSuccConstructor;
+
+  def parseNatRecursiveSuccConstructor : ParserValue -> Parser ParserValue =
+    λ(_separator : ParserValue)
+      parserBind (expectIdentifier "Succ")
+        parseNatRecursiveSuccColon;
+
+  def parseNatRecursiveSuccColon : ParserValue -> Parser ParserValue =
+    λ(_succName : ParserValue)
+      parserBind (expectText ":")
+        parseNatRecursiveSuccArgument;
+
+  def parseNatRecursiveSuccArgument : ParserValue -> Parser ParserValue =
+    λ(_colon : ParserValue)
+      parserBind (expectIdentifier "Nat")
+        parseNatRecursiveSuccArrow;
+
+  def parseNatRecursiveSuccArrow : ParserValue -> Parser ParserValue =
+    λ(_argument : ParserValue)
+      parserBind (expectText "->")
+        parseNatRecursiveSuccResult;
+
+  def parseNatRecursiveSuccResult : ParserValue -> Parser ParserValue =
+    λ(_arrow : ParserValue)
+      parserBind (expectIdentifier "Nat")
+        parseNatRecursiveDataSemicolon;
+
+  def parseNatRecursiveDataSemicolon : ParserValue -> Parser ParserValue =
+    λ(_result : ParserValue)
+      parserBind (expectText ";")
+        parsedUnit;
+
+  def parseExprRecursiveDataDeclaration : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "data")
+        parseExprRecursiveDataName;
+
+  def parseExprRecursiveDataName : ParserValue -> Parser ParserValue =
+    λ(_dataKeyword : ParserValue)
+      parserBind (expectIdentifier "Expr")
+        parseExprRecursiveDataParameter;
+
+  def parseExprRecursiveDataParameter : ParserValue -> Parser ParserValue =
+    λ(_dataName : ParserValue)
+      parserBind (expectIdentifier "a")
+        parseExprRecursiveDataEquals;
+
+  def parseExprRecursiveDataEquals : ParserValue -> Parser ParserValue =
+    λ(_parameter : ParserValue)
+      parserBind (expectText "=")
+        parseDoneNatConstructorSignature;
+
+  def parseDoneNatConstructorSignature : ParserValue -> Parser ParserValue =
+    λ(_equals : ParserValue)
+      parserBind (expectIdentifier "DoneNat")
+        parseDoneNatConstructorColon;
+
+  def parseDoneNatConstructorColon : ParserValue -> Parser ParserValue =
+    λ(_constructorName : ParserValue)
+      parserBind (expectText ":")
+        parseDoneNatConstructorArgument;
+
+  def parseDoneNatConstructorArgument : ParserValue -> Parser ParserValue =
+    λ(_colon : ParserValue)
+      parserBind (expectIdentifier "Nat")
+        parseDoneNatConstructorArrow;
+
+  def parseDoneNatConstructorArrow : ParserValue -> Parser ParserValue =
+    λ(_argumentType : ParserValue)
+      parserBind (expectText "->")
+        parseDoneNatConstructorResult;
+
+  def parseDoneNatConstructorResult : ParserValue -> Parser ParserValue =
+    λ(_arrow : ParserValue)
+      parserBind (parseExprNatType ValueUnit)
+        parseExprRecursiveConstructorSeparator;
+
+  def parseExprRecursiveConstructorSeparator : ParserValue -> Parser ParserValue =
+    λ(_doneNatType : ParserValue)
+      parserBind (expectText "|")
+        parseStepConstructorSignature;
+
+  def parseStepConstructorSignature : ParserValue -> Parser ParserValue =
+    λ(_separator : ParserValue)
+      parserBind (expectIdentifier "Step")
+        parseStepConstructorColon;
+
+  def parseStepConstructorColon : ParserValue -> Parser ParserValue =
+    λ(_constructorName : ParserValue)
+      parserBind (expectText ":")
+        parseStepConstructorArgument;
+
+  def parseStepConstructorArgument : ParserValue -> Parser ParserValue =
+    λ(_colon : ParserValue)
+      parserBind (parseExprAType ValueUnit)
+        parseStepConstructorArrow;
+
+  def parseStepConstructorArrow : ParserValue -> Parser ParserValue =
+    λ(_argumentType : ParserValue)
+      parserBind (expectText "->")
+        parseStepConstructorResult;
+
+  def parseStepConstructorResult : ParserValue -> Parser ParserValue =
+    λ(_arrow : ParserValue)
+      parserBind (parseExprAType ValueUnit)
+        parseExprRecursiveDataSemicolon;
+
+  def parseExprRecursiveDataSemicolon : ParserValue -> Parser ParserValue =
+    λ(_resultType : ParserValue)
+      parserBind (expectText ";")
+        parsedUnit;
+
+  def parseSomeExprDataDeclaration : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "data")
+        parseSomeExprDataName;
+
+  def parseSomeExprDataName : ParserValue -> Parser ParserValue =
+    λ(_dataKeyword : ParserValue)
+      parserBind (expectIdentifier "SomeExpr")
+        parseSomeExprDataEquals;
+
+  def parseSomeExprDataEquals : ParserValue -> Parser ParserValue =
+    λ(_dataName : ParserValue)
+      parserBind (expectText "=")
+        parseSomeExprConstructorSignature;
+
+  def parseSomeExprConstructorSignature : ParserValue -> Parser ParserValue =
+    λ(_equals : ParserValue)
+      parserBind (expectIdentifier "SomeExpr")
+        parseSomeExprConstructorColon;
+
+  def parseSomeExprConstructorColon : ParserValue -> Parser ParserValue =
+    λ(_constructorName : ParserValue)
+      parserBind (expectText ":")
+        parseSomeExprConstructorForall;
+
+  def parseSomeExprConstructorForall : ParserValue -> Parser ParserValue =
+    λ(_colon : ParserValue)
+      parserBind (expectText "forall")
+        parseSomeExprConstructorForallBinder;
+
+  def parseSomeExprConstructorForallBinder : ParserValue -> Parser ParserValue =
+    λ(_forallToken : ParserValue)
+      parserBind (expectIdentifier "a")
+        parseSomeExprConstructorForallDot;
+
+  def parseSomeExprConstructorForallDot : ParserValue -> Parser ParserValue =
+    λ(_binder : ParserValue)
+      parserBind (expectConstructorForallDotParser ValueUnit)
+        parseSomeExprConstructorArgument;
+
+  def parseSomeExprConstructorArgument : ParserValue -> Parser ParserValue =
+    λ(_dot : ParserValue)
+      parserBind (parseExprAType ValueUnit)
+        parseSomeExprConstructorArrow;
+
+  def parseSomeExprConstructorArrow : ParserValue -> Parser ParserValue =
+    λ(_argumentType : ParserValue)
+      parserBind (expectText "->")
+        parseSomeExprConstructorResult;
+
+  def parseSomeExprConstructorResult : ParserValue -> Parser ParserValue =
+    λ(_arrow : ParserValue)
+      parserBind (expectIdentifier "SomeExpr")
+        parseSomeExprDataSemicolon;
+
+  def parseSomeExprDataSemicolon : ParserValue -> Parser ParserValue =
+    λ(_resultType : ParserValue)
+      parserBind (expectText ";")
+        parsedUnit;
+
+  def parseExprAType : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectIdentifier "Expr")
+        parseExprATypeArgument;
+
+  def parseExprATypeArgument : ParserValue -> Parser ParserValue =
+    λ(_typeHead : ParserValue)
+      parserBind (expectIdentifier "a")
+        parsedUnit;
+
+  def parseExprNatType : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectIdentifier "Expr")
+        parseExprNatTypeArgument;
+
+  def parseExprNatTypeArgument : ParserValue -> Parser ParserValue =
+    λ(_typeHead : ParserValue)
+      parserBind (expectIdentifier "Nat")
+        parsedUnit;
+
+  def parseDoneNowDefinition : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "def")
+        parseDoneNowDefinitionName;
+
+  def parseDoneNowDefinitionName : ParserValue -> Parser ParserValue =
+    λ(_defToken : ParserValue)
+      parserBind (expectIdentifier "doneNow")
+        parseDoneNowDefinitionColon;
+
+  def parseDoneNowDefinitionColon : ParserValue -> Parser ParserValue =
+    λ(_defName : ParserValue)
+      parserBind (expectText ":")
+        parseDoneNowDefinitionArgumentType;
+
+  def parseDoneNowDefinitionArgumentType : ParserValue -> Parser ParserValue =
+    λ(_colon : ParserValue)
+      parserBind (parseExprAType ValueUnit)
+        parseDoneNowDefinitionTypeArrow;
+
+  def parseDoneNowDefinitionTypeArrow : ParserValue -> Parser ParserValue =
+    λ(_argumentType : ParserValue)
+      parserBind (expectText "->")
+        parseDoneNowDefinitionResultType;
+
+  def parseDoneNowDefinitionResultType : ParserValue -> Parser ParserValue =
+    λ(_arrow : ParserValue)
+      parserBind (expectIdentifier "Bool")
+        parseDoneNowDefinitionEquals;
+
+  def parseDoneNowDefinitionEquals : ParserValue -> Parser ParserValue =
+    λ(_resultType : ParserValue)
+      parserBind (expectEqualsParser ValueUnit)
+        parseDoneNowLambda;
+
+  def parseDoneNowLambda : ParserValue -> Parser ParserValue =
+    λ(_equals : ParserValue)
+      parserBind (parsePlainLambdaParameter "expr" ValueUnit)
+        parseDoneNowCaseExpression;
+
+  def parseDoneNowCaseExpression : ParserValue -> Parser ParserValue =
+    λ(_lambda : ParserValue)
+      parserBind (expectText "case")
+        parseDoneNowCaseScrutinee;
+
+  def parseDoneNowCaseScrutinee : ParserValue -> Parser ParserValue =
+    λ(_caseToken : ParserValue)
+      parserBind (expectIdentifier "expr")
+        parseDoneNowCaseOf;
+
+  def parseDoneNowCaseOf : ParserValue -> Parser ParserValue =
+    λ(_scrutinee : ParserValue)
+      parserBind (expectText "of")
+        parseDoneNowCaseBranchesOpen;
+
+  def parseDoneNowCaseBranchesOpen : ParserValue -> Parser ParserValue =
+    λ(_ofToken : ParserValue)
+      parserBind (expectText "{")
+        parseDoneNatWildcardBoolBranch;
+
+  def parseDoneNatWildcardBoolBranch : ParserValue -> Parser ParserValue =
+    λ(_openBranches : ParserValue)
+      parserBind (expectIdentifier "DoneNat")
+        parseDoneNatWildcardPatternArgument;
+
+  def parseDoneNatWildcardPatternArgument : ParserValue -> Parser ParserValue =
+    λ(_constructor : ParserValue)
+      parserBind (expectText "_")
+        parseDoneNatWildcardBranchArrow;
+
+  def parseDoneNatWildcardBranchArrow : ParserValue -> Parser ParserValue =
+    λ(_patternArgument : ParserValue)
+      parserBind (expectCaseBranchArrowParser ValueUnit)
+        parseDoneNatWildcardBranchBody;
+
+  def parseDoneNatWildcardBranchBody : ParserValue -> Parser ParserValue =
+    λ(_arrow : ParserValue)
+      parserBind (expectText "bool:true")
+        parseDoneNowBranchSeparator;
+
+  def parseDoneNowBranchSeparator : ParserValue -> Parser ParserValue =
+    λ(_body : ParserValue)
+      parserBind (expectText ";")
+        parseStepNextRecursiveBranch;
+
+  def parseStepNextRecursiveBranch : ParserValue -> Parser ParserValue =
+    λ(_separator : ParserValue)
+      parserBind (expectIdentifier "Step")
+        parseStepNextPatternArgument;
+
+  def parseStepNextPatternArgument : ParserValue -> Parser ParserValue =
+    λ(_constructor : ParserValue)
+      parserBind (expectIdentifier "next")
+        parseStepNextBranchArrow;
+
+  def parseStepNextBranchArrow : ParserValue -> Parser ParserValue =
+    λ(_patternArgument : ParserValue)
+      parserBind (expectCaseBranchArrowParser ValueUnit)
+        parseDoneNowRecursiveCall;
+
+  def parseDoneNowRecursiveCall : ParserValue -> Parser ParserValue =
+    λ(_arrow : ParserValue)
+      parserBind (expectIdentifier "doneNow")
+        parseDoneNowRecursiveArgument;
+
+  def parseDoneNowRecursiveArgument : ParserValue -> Parser ParserValue =
+    λ(_functionName : ParserValue)
+      parserBind (expectIdentifier "next")
+        parseDoneNowCaseBranchesClose;
+
+  def parseDoneNowCaseBranchesClose : ParserValue -> Parser ParserValue =
+    λ(_argument : ParserValue)
+      parserBind (expectText "}")
+        parseDoneNowDefinitionSemicolon;
+
+  def parseDoneNowDefinitionSemicolon : ParserValue -> Parser ParserValue =
+    λ(_closeBranches : ParserValue)
+      parserBind (expectText ";")
+        parsedUnit;
+
+  def parseUnwrapSomeDefinition : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "def")
+        parseUnwrapSomeDefinitionName;
+
+  def parseUnwrapSomeDefinitionName : ParserValue -> Parser ParserValue =
+    λ(_defToken : ParserValue)
+      parserBind (expectIdentifier "unwrapSome")
+        parseUnwrapSomeDefinitionColon;
+
+  def parseUnwrapSomeDefinitionColon : ParserValue -> Parser ParserValue =
+    λ(_defName : ParserValue)
+      parserBind (expectText ":")
+        parseUnwrapSomeDefinitionArgumentType;
+
+  def parseUnwrapSomeDefinitionArgumentType : ParserValue -> Parser ParserValue =
+    λ(_colon : ParserValue)
+      parserBind (expectIdentifier "SomeExpr")
+        parseUnwrapSomeDefinitionTypeArrow;
+
+  def parseUnwrapSomeDefinitionTypeArrow : ParserValue -> Parser ParserValue =
+    λ(_argumentType : ParserValue)
+      parserBind (expectText "->")
+        parseUnwrapSomeDefinitionResultType;
+
+  def parseUnwrapSomeDefinitionResultType : ParserValue -> Parser ParserValue =
+    λ(_arrow : ParserValue)
+      parserBind (expectIdentifier "Bool")
+        parseUnwrapSomeDefinitionEquals;
+
+  def parseUnwrapSomeDefinitionEquals : ParserValue -> Parser ParserValue =
+    λ(_resultType : ParserValue)
+      parserBind (expectEqualsParser ValueUnit)
+        parseUnwrapSomeLambda;
+
+  def parseUnwrapSomeLambda : ParserValue -> Parser ParserValue =
+    λ(_equals : ParserValue)
+      parserBind (parsePlainLambdaParameter "boxed" ValueUnit)
+        parseUnwrapSomeOuterCase;
+
+  def parseUnwrapSomeOuterCase : ParserValue -> Parser ParserValue =
+    λ(_lambda : ParserValue)
+      parserBind (expectText "case")
+        parseUnwrapSomeOuterScrutinee;
+
+  def parseUnwrapSomeOuterScrutinee : ParserValue -> Parser ParserValue =
+    λ(_caseToken : ParserValue)
+      parserBind (expectIdentifier "boxed")
+        parseUnwrapSomeOuterOf;
+
+  def parseUnwrapSomeOuterOf : ParserValue -> Parser ParserValue =
+    λ(_scrutinee : ParserValue)
+      parserBind (expectText "of")
+        parseUnwrapSomeOuterBranchesOpen;
+
+  def parseUnwrapSomeOuterBranchesOpen : ParserValue -> Parser ParserValue =
+    λ(_ofToken : ParserValue)
+      parserBind (expectText "{")
+        parseUnwrapSomeOuterPatternConstructor;
+
+  def parseUnwrapSomeOuterPatternConstructor : ParserValue -> Parser ParserValue =
+    λ(_openBranches : ParserValue)
+      parserBind (expectIdentifier "SomeExpr")
+        parseUnwrapSomeOuterPatternArgument;
+
+  def parseUnwrapSomeOuterPatternArgument : ParserValue -> Parser ParserValue =
+    λ(_constructor : ParserValue)
+      parserBind (expectIdentifier "expr")
+        parseUnwrapSomeOuterBranchArrow;
+
+  def parseUnwrapSomeOuterBranchArrow : ParserValue -> Parser ParserValue =
+    λ(_patternArgument : ParserValue)
+      parserBind (expectCaseBranchArrowParser ValueUnit)
+        parseUnwrapSomeInnerCase;
+
+  def parseUnwrapSomeInnerCase : ParserValue -> Parser ParserValue =
+    λ(_arrow : ParserValue)
+      parserBind (expectText "case")
+        parseUnwrapSomeInnerScrutinee;
+
+  def parseUnwrapSomeInnerScrutinee : ParserValue -> Parser ParserValue =
+    λ(_caseToken : ParserValue)
+      parserBind (expectIdentifier "expr")
+        parseUnwrapSomeInnerOf;
+
+  def parseUnwrapSomeInnerOf : ParserValue -> Parser ParserValue =
+    λ(_scrutinee : ParserValue)
+      parserBind (expectText "of")
+        parseUnwrapSomeInnerBranchesOpen;
+
+  def parseUnwrapSomeInnerBranchesOpen : ParserValue -> Parser ParserValue =
+    λ(_ofToken : ParserValue)
+      parserBind (expectText "{")
+        parseUnwrapSomeDoneNatBranch;
+
+  def parseUnwrapSomeDoneNatBranch : ParserValue -> Parser ParserValue =
+    λ(_openBranches : ParserValue)
+      parserBind (expectIdentifier "DoneNat")
+        parseUnwrapSomeDoneNatWildcard;
+
+  def parseUnwrapSomeDoneNatWildcard : ParserValue -> Parser ParserValue =
+    λ(_constructor : ParserValue)
+      parserBind (expectText "_")
+        parseUnwrapSomeDoneNatArrow;
+
+  def parseUnwrapSomeDoneNatArrow : ParserValue -> Parser ParserValue =
+    λ(_wildcard : ParserValue)
+      parserBind (expectCaseBranchArrowParser ValueUnit)
+        parseUnwrapSomeDoneNatBody;
+
+  def parseUnwrapSomeDoneNatBody : ParserValue -> Parser ParserValue =
+    λ(_arrow : ParserValue)
+      parserBind (expectText "bool:true")
+        parseUnwrapSomeInnerBranchSeparator;
+
+  def parseUnwrapSomeInnerBranchSeparator : ParserValue -> Parser ParserValue =
+    λ(_body : ParserValue)
+      parserBind (expectText ";")
+        parseUnwrapSomeStepBranch;
+
+  def parseUnwrapSomeStepBranch : ParserValue -> Parser ParserValue =
+    λ(_separator : ParserValue)
+      parserBind (expectIdentifier "Step")
+        parseUnwrapSomeStepPatternArgument;
+
+  def parseUnwrapSomeStepPatternArgument : ParserValue -> Parser ParserValue =
+    λ(_constructor : ParserValue)
+      parserBind (expectIdentifier "next")
+        parseUnwrapSomeStepArrow;
+
+  def parseUnwrapSomeStepArrow : ParserValue -> Parser ParserValue =
+    λ(_patternArgument : ParserValue)
+      parserBind (expectCaseBranchArrowParser ValueUnit)
+        parseUnwrapSomeRecursiveCall;
+
+  def parseUnwrapSomeRecursiveCall : ParserValue -> Parser ParserValue =
+    λ(_arrow : ParserValue)
+      parserBind (expectIdentifier "unwrapSome")
+        parseUnwrapSomeRecursiveArgumentOpen;
+
+  def parseUnwrapSomeRecursiveArgumentOpen : ParserValue -> Parser ParserValue =
+    λ(_functionName : ParserValue)
+      parserBind (expectText "(")
+        parseUnwrapSomeRecursiveSomeExpr;
+
+  def parseUnwrapSomeRecursiveSomeExpr : ParserValue -> Parser ParserValue =
+    λ(_openArgument : ParserValue)
+      parserBind (expectIdentifier "SomeExpr")
+        parseUnwrapSomeRecursiveNext;
+
+  def parseUnwrapSomeRecursiveNext : ParserValue -> Parser ParserValue =
+    λ(_constructor : ParserValue)
+      parserBind (expectIdentifier "next")
+        parseUnwrapSomeRecursiveArgumentClose;
+
+  def parseUnwrapSomeRecursiveArgumentClose : ParserValue -> Parser ParserValue =
+    λ(_argument : ParserValue)
+      parserBind (expectText ")")
+        parseUnwrapSomeInnerBranchesClose;
+
+  def parseUnwrapSomeInnerBranchesClose : ParserValue -> Parser ParserValue =
+    λ(_closeArgument : ParserValue)
+      parserBind (expectText "}")
+        parseUnwrapSomeOuterBranchesClose;
+
+  def parseUnwrapSomeOuterBranchesClose : ParserValue -> Parser ParserValue =
+    λ(_closeInner : ParserValue)
+      parserBind (expectText "}")
+        parseUnwrapSomeDefinitionSemicolon;
+
+  def parseUnwrapSomeDefinitionSemicolon : ParserValue -> Parser ParserValue =
+    λ(_closeOuter : ParserValue)
+      parserBind (expectText ";")
+        parsedUnit;
+
+  def parsePlainLambdaParameter : String -> ParserValue -> Parser ParserValue =
+    λ(parameterName : String) λ(_start : ParserValue)
+      parserBind (expectText "lambda")
+        parsePlainLambdaOpen;
+
+  def parsePlainLambdaOpen : ParserValue -> Parser ParserValue =
+    λ(_lambda : ParserValue)
+      parserBind (expectText "(")
+        parsePlainLambdaParameterName;
+
+  def parsePlainLambdaParameterName : ParserValue -> Parser ParserValue =
+    λ(_openParameter : ParserValue)
+      parserChoice
+        (parsePlainExprParameter ValueUnit)
+        (parsePlainBoxedParameter ValueUnit);
+
+  def parsePlainExprParameter : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectIdentifier "expr")
+        parsePlainLambdaClose;
+
+  def parsePlainBoxedParameter : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectIdentifier "boxed")
+        parsePlainLambdaClose;
+
+  def parsePlainLambdaClose : ParserValue -> Parser ParserValue =
+    λ(_parameter : ParserValue)
+      parserBind (expectText ")")
+        parsedUnit;
+
+  def parseRecursiveGadtMainDef : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "def")
+        parseRecursiveGadtMainName;
+
+  def parseRecursiveGadtMainName : ParserValue -> Parser ParserValue =
+    λ(_defToken : ParserValue)
+      parserBind (expectIdentifier "main")
+        parseBoolMainColon;
+
+  def parseBoolMainColon : ParserValue -> Parser ParserValue =
+    λ(_mainName : ParserValue)
+      parserBind (expectText ":")
+        parseBoolMainType;
+
+  def parseBoolMainType : ParserValue -> Parser ParserValue =
+    λ(_colon : ParserValue)
+      parserBind (expectIdentifier "Bool")
+        parseRecursiveGadtMainEquals;
+
+  def parseRecursiveGadtMainEquals : ParserValue -> Parser ParserValue =
+    λ(_type : ParserValue)
+      parserBind (expectEqualsParser ValueUnit)
+        parseDoneNowCallExpression;
+
+  def parseDoneNowCallExpression : ParserValue -> Parser ParserValue =
+    λ(_equals : ParserValue)
+      parserBind (expectIdentifier "doneNow")
+        parseDoneNowCallArgumentOpen;
+
+  def parseDoneNowCallArgumentOpen : ParserValue -> Parser ParserValue =
+    λ(_functionName : ParserValue)
+      parserBind (expectText "(")
+        parseDoneNowCallStepArgument;
+
+  def parseDoneNowCallStepArgument : ParserValue -> Parser ParserValue =
+    λ(_openArgument : ParserValue)
+      parserBind (parseStepDoneNatZeroExpression ValueUnit)
+        parseDoneNowCallArgumentClose;
+
+  def parseStepDoneNatZeroExpression : ParserValue -> Parser ParserValue =
+    λ(_openArgument : ParserValue)
+      parserBind (expectIdentifier "Step")
+        parseStepDoneNatArgumentOpen;
+
+  def parseStepDoneNatArgumentOpen : ParserValue -> Parser ParserValue =
+    λ(_stepConstructor : ParserValue)
+      parserBind (expectText "(")
+        parseDoneNatZeroExpression;
+
+  def parseDoneNatZeroExpression : ParserValue -> Parser ParserValue =
+    λ(_openArgument : ParserValue)
+      parserBind (expectIdentifier "DoneNat")
+        parseDoneNatZeroArgument;
+
+  def parseDoneNatZeroArgument : ParserValue -> Parser ParserValue =
+    λ(_doneNatConstructor : ParserValue)
+      parserBind (expectIdentifier "Zero")
+        parseDoneNatZeroClose;
+
+  def parseDoneNatZeroClose : ParserValue -> Parser ParserValue =
+    λ(_zero : ParserValue)
+      parserBind (expectText ")")
+        parseStepDoneNatClose;
+
+  def parseStepDoneNatClose : ParserValue -> Parser ParserValue =
+    λ(_closeDoneNat : ParserValue)
+      parserPure ValueUnit;
+
+  def parseDoneNowCallArgumentClose : ParserValue -> Parser ParserValue =
+    λ(_closeStep : ParserValue)
+      parserBind (expectText ")")
+        parseBoolMainSemicolon;
+
+  def parseBoolMainSemicolon : ParserValue -> Parser ParserValue =
+    λ(_closeArgument : ParserValue)
+      parserBind (expectText ";")
+        parsedUnit;
+
+  def parseExistentialMainDef : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "def")
+        parseExistentialMainName;
+
+  def parseExistentialMainName : ParserValue -> Parser ParserValue =
+    λ(_defToken : ParserValue)
+      parserBind (expectIdentifier "main")
+        parseExistentialMainColon;
+
+  def parseExistentialMainColon : ParserValue -> Parser ParserValue =
+    λ(_mainName : ParserValue)
+      parserBind (expectText ":")
+        parseExistentialMainType;
+
+  def parseExistentialMainType : ParserValue -> Parser ParserValue =
+    λ(_colon : ParserValue)
+      parserBind (expectIdentifier "Bool")
+        parseExistentialMainEquals;
+
+  def parseExistentialMainEquals : ParserValue -> Parser ParserValue =
+    λ(_type : ParserValue)
+      parserBind (expectEqualsParser ValueUnit)
+        parseUnwrapSomeMainCall;
+
+  def parseUnwrapSomeMainCall : ParserValue -> Parser ParserValue =
+    λ(_equals : ParserValue)
+      parserBind (expectIdentifier "unwrapSome")
+        parseUnwrapSomeMainArgumentOpen;
+
+  def parseUnwrapSomeMainArgumentOpen : ParserValue -> Parser ParserValue =
+    λ(_functionName : ParserValue)
+      parserBind (expectText "(")
+        parseUnwrapSomeMainSomeExpr;
+
+  def parseUnwrapSomeMainSomeExpr : ParserValue -> Parser ParserValue =
+    λ(_openArgument : ParserValue)
+      parserBind (expectIdentifier "SomeExpr")
+        parseUnwrapSomeMainStepOpen;
+
+  def parseUnwrapSomeMainStepOpen : ParserValue -> Parser ParserValue =
+    λ(_constructor : ParserValue)
+      parserBind (expectText "(")
+        parseUnwrapSomeMainStepArgument;
+
+  def parseUnwrapSomeMainStepArgument : ParserValue -> Parser ParserValue =
+    λ(_openStep : ParserValue)
+      parserBind (parseStepDoneNatZeroExpression ValueUnit)
+        parseUnwrapSomeMainArgumentClose;
+
+  def parseUnwrapSomeMainArgumentClose : ParserValue -> Parser ParserValue =
+    λ(_stepArgument : ParserValue)
+      parserBind (expectText ")")
+        parseUnwrapSomeMainOuterArgumentClose;
+
+  def parseUnwrapSomeMainOuterArgumentClose : ParserValue -> Parser ParserValue =
+    λ(_someExprArgument : ParserValue)
+      parserBind (expectText ")")
+        parseBoolMainSemicolon;
+
   def renderParserParityRetryEvidence : String -> String -> String -> String =
     λ(sourceFile : String) λ(sourceText : String) λ(lexerMismatchSourceText : String)
       stringAppend (renderPositiveTokenEvidence sourceFile sourceText)
@@ -3126,6 +4022,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteModule, parseTo
       ExpectedCaseBranchArrow span -> stringAppend "expected-case-branch-arrow@" (renderSpan sourceFile span);
       ExpectedInstanceMethodEquals span -> stringAppend "expected-instance-method-equals@" (renderSpan sourceFile span);
       ExpectedFunctionalDependencyArrow span -> stringAppend "expected-functional-dependency-arrow@" (renderSpan sourceFile span);
-      ExpectedTypeFamilyEquationEquals span -> stringAppend "expected-type-family-equation-equals@" (renderSpan sourceFile span)
+      ExpectedTypeFamilyEquationEquals span -> stringAppend "expected-type-family-equation-equals@" (renderSpan sourceFile span);
+      ExpectedConstructorForallDot span -> stringAppend "expected-constructor-forall-dot@" (renderSpan sourceFile span)
     };
 }

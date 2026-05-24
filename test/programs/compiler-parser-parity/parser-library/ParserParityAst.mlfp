@@ -1,6 +1,6 @@
-module ParserParityAst export (ParsedModule(..), renderParsedModule, renderBasicModuleBool, renderImportExposingBool, renderValueDefListIntRef, renderLetLambdaApplication, renderTypedAnnotationTypes, renderDataDeclarationConstructorSpans, renderCaseExpressionConstructorPatterns, renderCaseExpressionNestedPatterns, renderTypeclassDerivingMethod, renderTypeclassInstanceNullaryMethod, renderHigherKindedClassDataParams, renderMultiparamSuperclassFundep, renderTypeFamilyKindLambda, renderTypeFamilyApplyAnnotation) {
+module ParserParityAst export (ParsedModule(..), renderParsedModule, renderBasicModuleBool, renderImportExposingBool, renderValueDefListIntRef, renderLetLambdaApplication, renderTypedAnnotationTypes, renderDataDeclarationConstructorSpans, renderCaseExpressionConstructorPatterns, renderCaseExpressionNestedPatterns, renderTypeclassDerivingMethod, renderTypeclassInstanceNullaryMethod, renderHigherKindedClassDataParams, renderMultiparamSuperclassFundep, renderTypeFamilyKindLambda, renderTypeFamilyApplyAnnotation, renderRecursiveGadtResultConstructors, renderExistentialConstructorForall) {
   import Prelude exposing (Option(..), stringAppend, stringIndexOf);
-  import ParserParitySource exposing (renderSpan, basicModuleSpan, basicExportMainSpan, basicMainDefSpan, importBoolModuleSpan, importBoolModuleNameRefSpan, importBoolTypeSpan, importBoolMainDefSpan, valueModuleSpan, valueExportMainSpan, valueImportModuleSpan, valueImportIntSpan, valueDefTwoSpan, valueDefMainSpan, letModuleSpan, letExportMainSpan, letImportModuleSpan, letImportIntSpan, letDefMainSpan, typedModuleSpan, typedExportMainSpan, typedImportModuleSpan, typedImportIntSpan, typedDefMainSpan, dataModuleSpan, dataExportNatSpan, dataExportMainSpan, dataDeclSpan, dataZeroConstructorSpan, dataSuccConstructorSpan, dataDefMainSpan, caseConstructorModuleSpan, caseConstructorDefMainSpan, caseNestedModuleSpan, caseNestedDefMainSpan, typeclassDerivingModuleSpan, typeclassDerivingExportEqSpan, typeclassDerivingExportNatSpan, typeclassDerivingExportEqMethodSpan, typeclassDerivingExportMainSpan, typeclassDerivingClassSpan, typeclassDerivingEqMethodSpan, typeclassDerivingDataSpan, typeclassDerivingZeroConstructorSpan, typeclassDerivingSuccConstructorSpan, typeclassDerivingEqSpan, typeclassDerivingDefMainSpan, typeclassInstanceModuleSpan, typeclassInstanceExportMonoidSpan, typeclassInstanceExportNatSpan, typeclassInstanceExportMemptySpan, typeclassInstanceExportAppendSpan, typeclassInstanceExportMainSpan, typeclassInstanceClassSpan, typeclassInstanceMemptySignatureSpan, typeclassInstanceAppendSignatureSpan, typeclassInstanceDataSpan, typeclassInstanceZeroConstructorSpan, typeclassInstanceSuccConstructorSpan, typeclassInstanceClassNameSpan, typeclassInstanceMemptyDefinitionSpan, typeclassInstanceAppendDefinitionSpan, typeclassInstanceDefMainSpan, higherKindedModuleSpan, higherKindedExportFunctorSpan, higherKindedExportHigherSpan, higherKindedClassSpan, higherKindedMapSignatureSpan, higherKindedDataSpan, higherKindedWrapConstructorSpan, multiparamModuleSpan, multiparamExportMonadSpan, multiparamClassSpan, multiparamSuperclassFunctorSpan, multiparamBindSignatureSpan, multiparamInstanceClassNameSpan, typeFamilyKindLambdaModuleSpan, typeFamilyKindLambdaDeclSpan, typeFamilyApplyAnnotationModuleSpan, typeFamilyApplyAnnotationExportMainSpan, typeFamilyApplyAnnotationDeclSpan, typeFamilyApplyAnnotationDefMainSpan);
+  import ParserParitySource exposing (renderSpan, basicModuleSpan, basicExportMainSpan, basicMainDefSpan, importBoolModuleSpan, importBoolModuleNameRefSpan, importBoolTypeSpan, importBoolMainDefSpan, valueModuleSpan, valueExportMainSpan, valueImportModuleSpan, valueImportIntSpan, valueDefTwoSpan, valueDefMainSpan, letModuleSpan, letExportMainSpan, letImportModuleSpan, letImportIntSpan, letDefMainSpan, typedModuleSpan, typedExportMainSpan, typedImportModuleSpan, typedImportIntSpan, typedDefMainSpan, dataModuleSpan, dataExportNatSpan, dataExportMainSpan, dataDeclSpan, dataZeroConstructorSpan, dataSuccConstructorSpan, dataDefMainSpan, caseConstructorModuleSpan, caseConstructorDefMainSpan, caseNestedModuleSpan, caseNestedDefMainSpan, typeclassDerivingModuleSpan, typeclassDerivingExportEqSpan, typeclassDerivingExportNatSpan, typeclassDerivingExportEqMethodSpan, typeclassDerivingExportMainSpan, typeclassDerivingClassSpan, typeclassDerivingEqMethodSpan, typeclassDerivingDataSpan, typeclassDerivingZeroConstructorSpan, typeclassDerivingSuccConstructorSpan, typeclassDerivingEqSpan, typeclassDerivingDefMainSpan, typeclassInstanceModuleSpan, typeclassInstanceExportMonoidSpan, typeclassInstanceExportNatSpan, typeclassInstanceExportMemptySpan, typeclassInstanceExportAppendSpan, typeclassInstanceExportMainSpan, typeclassInstanceClassSpan, typeclassInstanceMemptySignatureSpan, typeclassInstanceAppendSignatureSpan, typeclassInstanceDataSpan, typeclassInstanceZeroConstructorSpan, typeclassInstanceSuccConstructorSpan, typeclassInstanceClassNameSpan, typeclassInstanceMemptyDefinitionSpan, typeclassInstanceAppendDefinitionSpan, typeclassInstanceDefMainSpan, higherKindedModuleSpan, higherKindedExportFunctorSpan, higherKindedExportHigherSpan, higherKindedClassSpan, higherKindedMapSignatureSpan, higherKindedDataSpan, higherKindedWrapConstructorSpan, multiparamModuleSpan, multiparamExportMonadSpan, multiparamClassSpan, multiparamSuperclassFunctorSpan, multiparamBindSignatureSpan, multiparamInstanceClassNameSpan, typeFamilyKindLambdaModuleSpan, typeFamilyKindLambdaDeclSpan, typeFamilyApplyAnnotationModuleSpan, typeFamilyApplyAnnotationExportMainSpan, typeFamilyApplyAnnotationDeclSpan, typeFamilyApplyAnnotationDefMainSpan, recursiveGadtModuleSpan, recursiveGadtExportNatSpan, recursiveGadtExportExprSpan, recursiveGadtExportDoneNowSpan, recursiveGadtExportMainSpan, recursiveGadtNatDataSpan, recursiveGadtZeroConstructorSpan, recursiveGadtSuccConstructorSpan, recursiveGadtExprDataSpan, recursiveGadtDoneNatConstructorSpan, recursiveGadtStepConstructorSpan, recursiveGadtDoneNowDefSpan, recursiveGadtMainDefSpan, existentialForallModuleSpan, existentialForallExportNatSpan, existentialForallExportExprSpan, existentialForallExportSomeExprSpan, existentialForallExportUnwrapSomeSpan, existentialForallExportMainSpan, existentialForallNatDataSpan, existentialForallZeroConstructorSpan, existentialForallSuccConstructorSpan, existentialForallExprDataSpan, existentialForallDoneNatConstructorSpan, existentialForallStepConstructorSpan, existentialForallSomeExprDataSpan, existentialForallSomeExprConstructorSpan, existentialForallUnwrapSomeDefSpan, existentialForallMainDefSpan);
 
   data ParsedModule =
       ParsedModule : String -> ParsedModule;
@@ -52,7 +52,13 @@ module ParserParityAst export (ParsedModule(..), renderParsedModule, renderBasic
                               StringMatched _ -> renderTypeFamilyKindLambda sourceFile;
                               StringMismatch _ -> case stringExactMatch "closed-family-apply-annotation-projection" key of {
                                 StringMatched _ -> renderTypeFamilyApplyAnnotation sourceFile;
-                                StringMismatch _ -> "parser-error"
+                                StringMismatch _ -> case stringExactMatch "recursive-gadt-projection" key of {
+                                  StringMatched _ -> renderRecursiveGadtResultConstructors sourceFile;
+                                  StringMismatch _ -> case stringExactMatch "existential-forall-projection" key of {
+                                    StringMatched _ -> renderExistentialConstructorForall sourceFile;
+                                    StringMismatch _ -> "parser-error"
+                                  }
+                                }
                               }
                             }
                           }
@@ -289,4 +295,66 @@ module ParserParityAst export (ParsedModule(..), renderParsedModule, renderBasic
             (stringAppend
               "family-equation Apply patterns=f,a rhs=f a\n"
               (stringAppend "def main type=Apply (Λx. x) Int expr=1 span=" (renderSpan sourceFile typeFamilyApplyAnnotationDefMainSpan)))));
+
+  def renderRecursiveGadtResultConstructors : String -> String =
+    λ(sourceFile : String)
+      stringAppend
+        (stringAppend "module Main span=" (stringAppend (renderSpan sourceFile recursiveGadtModuleSpan) "\n"))
+        (stringAppend
+          (stringAppend "export type-with-constructors Nat span=" (stringAppend (renderSpan sourceFile recursiveGadtExportNatSpan) "\n"))
+          (stringAppend
+            (stringAppend "export type-with-constructors Expr span=" (stringAppend (renderSpan sourceFile recursiveGadtExportExprSpan) "\n"))
+            (stringAppend
+              (stringAppend "export value doneNow span=" (stringAppend (renderSpan sourceFile recursiveGadtExportDoneNowSpan) "\n"))
+              (stringAppend
+                (stringAppend "export value main span=" (stringAppend (renderSpan sourceFile recursiveGadtExportMainSpan) "\n"))
+                (stringAppend
+                  (stringAppend "data Nat span=" (stringAppend (renderSpan sourceFile recursiveGadtNatDataSpan) "\n"))
+                  (stringAppend
+                    (stringAppend "constructor Zero type=Nat span=" (stringAppend (renderSpan sourceFile recursiveGadtZeroConstructorSpan) "\n"))
+                    (stringAppend
+                      (stringAppend "constructor Succ type=Nat -> Nat span=" (stringAppend (renderSpan sourceFile recursiveGadtSuccConstructorSpan) "\n"))
+                      (stringAppend
+                        (stringAppend "data Expr params=a span=" (stringAppend (renderSpan sourceFile recursiveGadtExprDataSpan) "\n"))
+                        (stringAppend
+                          (stringAppend "constructor DoneNat type=Nat -> Expr Nat span=" (stringAppend (renderSpan sourceFile recursiveGadtDoneNatConstructorSpan) "\n"))
+                          (stringAppend
+                            (stringAppend "constructor Step type=Expr a -> Expr a span=" (stringAppend (renderSpan sourceFile recursiveGadtStepConstructorSpan) "\n"))
+                            (stringAppend
+                              (stringAppend "def doneNow type=Expr a -> Bool expr=λexpr case expr of { DoneNat _ -> true; Step next -> doneNow next } span=" (stringAppend (renderSpan sourceFile recursiveGadtDoneNowDefSpan) "\n"))
+                              (stringAppend "def main type=Bool expr=doneNow (Step (DoneNat Zero)) span=" (renderSpan sourceFile recursiveGadtMainDefSpan)))))))))))));
+
+  def renderExistentialConstructorForall : String -> String =
+    λ(sourceFile : String)
+      stringAppend
+        (stringAppend "module Main span=" (stringAppend (renderSpan sourceFile existentialForallModuleSpan) "\n"))
+        (stringAppend
+          (stringAppend "export type-with-constructors Nat span=" (stringAppend (renderSpan sourceFile existentialForallExportNatSpan) "\n"))
+          (stringAppend
+            (stringAppend "export type-with-constructors Expr span=" (stringAppend (renderSpan sourceFile existentialForallExportExprSpan) "\n"))
+            (stringAppend
+              (stringAppend "export type-with-constructors SomeExpr span=" (stringAppend (renderSpan sourceFile existentialForallExportSomeExprSpan) "\n"))
+              (stringAppend
+                (stringAppend "export value unwrapSome span=" (stringAppend (renderSpan sourceFile existentialForallExportUnwrapSomeSpan) "\n"))
+                (stringAppend
+                  (stringAppend "export value main span=" (stringAppend (renderSpan sourceFile existentialForallExportMainSpan) "\n"))
+                  (stringAppend
+                    (stringAppend "data Nat span=" (stringAppend (renderSpan sourceFile existentialForallNatDataSpan) "\n"))
+                    (stringAppend
+                      (stringAppend "constructor Zero type=Nat span=" (stringAppend (renderSpan sourceFile existentialForallZeroConstructorSpan) "\n"))
+                      (stringAppend
+                        (stringAppend "constructor Succ type=Nat -> Nat span=" (stringAppend (renderSpan sourceFile existentialForallSuccConstructorSpan) "\n"))
+                        (stringAppend
+                          (stringAppend "data Expr params=a span=" (stringAppend (renderSpan sourceFile existentialForallExprDataSpan) "\n"))
+                          (stringAppend
+                            (stringAppend "constructor DoneNat type=Nat -> Expr Nat span=" (stringAppend (renderSpan sourceFile existentialForallDoneNatConstructorSpan) "\n"))
+                            (stringAppend
+                              (stringAppend "constructor Step type=Expr a -> Expr a span=" (stringAppend (renderSpan sourceFile existentialForallStepConstructorSpan) "\n"))
+                              (stringAppend
+                                (stringAppend "data SomeExpr span=" (stringAppend (renderSpan sourceFile existentialForallSomeExprDataSpan) "\n"))
+                                (stringAppend
+                                  (stringAppend "constructor SomeExpr type=∀a. Expr a -> SomeExpr span=" (stringAppend (renderSpan sourceFile existentialForallSomeExprConstructorSpan) "\n"))
+                                  (stringAppend
+                                    (stringAppend "def unwrapSome type=SomeExpr -> Bool expr=λboxed case boxed of { SomeExpr expr -> case expr of { DoneNat _ -> true; Step next -> unwrapSome (SomeExpr next) } } span=" (stringAppend (renderSpan sourceFile existentialForallUnwrapSomeDefSpan) "\n"))
+                                    (stringAppend "def main type=Bool expr=unwrapSome (SomeExpr (Step (DoneNat Zero))) span=" (renderSpan sourceFile existentialForallMainDefSpan))))))))))))))));
 }

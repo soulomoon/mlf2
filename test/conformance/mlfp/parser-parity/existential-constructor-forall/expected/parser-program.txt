@@ -1,0 +1,16 @@
+module Main span=test/conformance/mlfp/parser-parity/existential-constructor-forall/src/Main.mlfp:1:1-22:1
+export type-with-constructors Nat span=test/conformance/mlfp/parser-parity/existential-constructor-forall/src/Main.mlfp:1:21-1:28
+export type-with-constructors Expr span=test/conformance/mlfp/parser-parity/existential-constructor-forall/src/Main.mlfp:1:30-1:38
+export type-with-constructors SomeExpr span=test/conformance/mlfp/parser-parity/existential-constructor-forall/src/Main.mlfp:1:40-1:52
+export value unwrapSome span=test/conformance/mlfp/parser-parity/existential-constructor-forall/src/Main.mlfp:1:54-1:64
+export value main span=test/conformance/mlfp/parser-parity/existential-constructor-forall/src/Main.mlfp:1:66-1:70
+data Nat span=test/conformance/mlfp/parser-parity/existential-constructor-forall/src/Main.mlfp:2:3-6:3
+constructor Zero type=Nat span=test/conformance/mlfp/parser-parity/existential-constructor-forall/src/Main.mlfp:3:7-4:5
+constructor Succ type=Nat -> Nat span=test/conformance/mlfp/parser-parity/existential-constructor-forall/src/Main.mlfp:4:7-4:24
+data Expr params=a span=test/conformance/mlfp/parser-parity/existential-constructor-forall/src/Main.mlfp:6:3-10:3
+constructor DoneNat type=Nat -> Expr Nat span=test/conformance/mlfp/parser-parity/existential-constructor-forall/src/Main.mlfp:7:7-8:5
+constructor Step type=Expr a -> Expr a span=test/conformance/mlfp/parser-parity/existential-constructor-forall/src/Main.mlfp:8:7-8:30
+data SomeExpr span=test/conformance/mlfp/parser-parity/existential-constructor-forall/src/Main.mlfp:10:3-13:3
+constructor SomeExpr type=∀a. Expr a -> SomeExpr span=test/conformance/mlfp/parser-parity/existential-constructor-forall/src/Main.mlfp:11:7-11:41
+def unwrapSome type=SomeExpr -> Bool expr=λboxed case boxed of { SomeExpr expr -> case expr of { DoneNat _ -> true; Step next -> unwrapSome (SomeExpr next) } } span=test/conformance/mlfp/parser-parity/existential-constructor-forall/src/Main.mlfp:13:3-20:3
+def main type=Bool expr=unwrapSome (SomeExpr (Step (DoneNat Zero))) span=test/conformance/mlfp/parser-parity/existential-constructor-forall/src/Main.mlfp:20:3-21:1

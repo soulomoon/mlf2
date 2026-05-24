@@ -1,0 +1,49 @@
+### Checks Run
+- Command: `timeout 900 cabal test mlf2-test --test-options='--match "/MLF.Program parser parity/shared parser-owned .mlfp parser extends source-text grammar to GADT-style results and existential constructors/"'`
+  Result: pass. The focused round-316 matcher passed in 599.8410 seconds with `1 example, 0 failures`.
+- Command: `timeout 3600 cabal test mlf2-test --test-options='--match "/MLF.Program parser parity/"'`
+  Result: timeout. The command exited 124 after printing passing results for the shared source-text matcher, case/pattern matcher, typeclass/instance matcher, higher-kinded/constraint matcher, type-family/type-level matcher, the new GADT/existential matcher, the basic Bool matcher, and the import matcher. The later full `cabal test` completed the parser-parity section and whole suite successfully.
+- Command: direct `run-program` smokes through `test/programs/compiler-parser-parity/parser-library` for `basic-module-def-bool`, `import-exposing-def-bool`, `value-def-list-int-ref`, `let-lambda-application`, `typed-annotation-types`, `data-declaration-constructor-spans`, `case-expression-constructor-patterns`, `case-expression-nested-patterns`, `typeclass-deriving-method`, `typeclass-instance-nullary-method`, `higher-kinded-class-data-params`, `multiparam-superclass-fundep`, `type-family-kind-lambda`, `type-family-apply-annotation`, `gadt-result-constructor-spans`, and `existential-constructor-forall`
+  Result: pass. All 16 fixture package roots exited successfully using the compiled `mlf2` binary and `--search-path test/programs/compiler-parser-parity/parser-library`.
+- Command: `find test/programs/compiler-parser-parity -mindepth 2 -maxdepth 2 -name ParserParityFixture.mlfp -print0 | xargs -0 rg -n 'ParserSourceInput|ParserSourceSymbol|SourceSymbol|SourceInputCons|sourceInputCons|basicModuleKeywordSpan|dataDeclSpan|case.*Span|class.*Span|instance.*Span|deriving.*Span|higherKinded.*Span|fundep.*Span|constraint.*Span|typeFamily.*Span|family.*Span|typeLevel.*Span|gadt.*Span|existential.*Span|constructorForall.*Span'`
+  Result: pass. No matches; fixture roots remain thin and do not contain parser-source internals or span/projection constants.
+- Command: `rg -n 'stringSlice source [0-9]|stringIndexOf source .*SourceText|renderParserParityEvidence|TokenStream :|BasicModuleTokens|ImportBoolTokens|ValueDefListTokens|LetLambdaApplicationTokens|TypedAnnotationTypesTokens|DataDeclarationTokens|CaseExpressionTokens|TypeclassTokens|InstanceTokens|HigherKindedTokens|ConstraintTokens|FundepTokens|TypeFamilyTokens|FamilyTokens|GadtTokens|ExistentialTokens|LexerOk (basicModuleTokens|importBoolTokens|valueDefListTokens|letLambdaApplicationTokens|typedAnnotationTypesTokens|dataDeclarationTokens|caseExpressionTokens|typeclassTokens|instanceTokens|higherKindedTokens|constraintTokens|fundepTokens|typeFamilyTokens|familyTokens|gadtTokens|existentialTokens)|case tokens|class tokens|instance tokens|higher-kinded tokens|constraint tokens|fundep tokens|type-family tokens|family tokens|gadt tokens|existential tokens' test/programs/compiler-parser-parity/parser-library test/programs/compiler-parser-parity test/ProgramParserParitySpec.hs`
+  Result: pass. No exact-source, static-token-stream, or fixture-token shortcuts found.
+- Command: `rg -n 'parseGadtResultModule|parseExistentialConstructorModule|completeModuleKey "gadt-result-constructor-spans"|completeModuleKey "existential-constructor-forall"|moduleKey "gadt-result-constructor-spans"|moduleKey "existential-constructor-forall"' test/programs/compiler-parser-parity/parser-library/ParserParityParser.mlfp`
+  Result: pass. No rejected round-316 fixture-key parser branches or direct fixture-key success branches found.
+- Command: `rg -n 'renderParserParityProjection.*ParserSourceInput|parseCompleteModule : ParserSourceInput|tokenizeCompleteModule : ParserSourceInput|ParserParityParser.mlfp' test/programs/compiler-parser-parity`
+  Result: pass. No fixture-owned parser entrypoint or `ParserSourceInput` public entrypoint in fixture roots.
+- Command: manual parser architecture audit of `ParserParityParser.mlfp`, `ParserParityParserCombinator.mlfp`, and `ParserParityAst.mlfp`
+  Result: pass. The new path is wired into `parseAnyModule`, tokenizes source text through the shared lexer, composes with `Parser`, `parserBind`, `parserChoice`, parser-owned diagnostic labels, complete-input checking, and the existing parser-internal projection model. I found internal semantic projection keys `recursiveGadtProjectionKey` and `existentialForallProjectionKey`, but no direct fixture-key `moduleKey`/`completeModuleKey` branch for `gadt-result-constructor-spans` or `existential-constructor-forall`.
+- Command: `rg -n 'expected-constructor-forall-dot|ExpectedConstructorForallDot|constructorForallDotSpan|labelConstructorForallDot|expectConstructorForallDotParser' test/ProgramParserParitySpec.hs test/programs/compiler-parser-parity/parser-library`
+  Result: pass. The malformed constructor-local forall diagnostic is present and rendered as `expected-constructor-forall-dot`.
+- Command: `git diff --check`
+  Result: pass. No whitespace errors.
+- Command: `timeout 7200 cabal build all`
+  Result: pass.
+- Command: `timeout 10800 cabal test`
+  Result: pass. The suite finished in 7556.7104 seconds with `2638 examples, 0 failures`.
+- Command: `timeout 7200 ./scripts/thesis-conformance-gate.sh`
+  Result: pass. Final output included `[thesis-gate] PASS: thesis conformance anchors are green`.
+
+### Plan Compliance
+- Step 1, focused RED/GREEN matcher: met for final review evidence. The focused matcher exists in `test/ProgramParserParitySpec.hs` and passes. Implementation notes record pre-implementation RED evidence for the same matcher.
+- Step 2, committed conformance sources and expected parser projections: met. `test/conformance/mlfp/parser-parity/gadt-result-constructor-spans/` and `test/conformance/mlfp/parser-parity/existential-constructor-forall/` contain source files and committed `expected/parser-program.txt` projections. The focused matcher compares canonical Haskell projections with these files.
+- Step 3, thin fixture roots: met. The two new roots contain only `Main.mlfp` and `ParserParityFixture.mlfp`; each fixture exports `sourceFile`/`sourceText` and the root calls `renderParserParityProjectionFromSourceText`.
+- Step 4, lexer/token extension: met. The shared parser library lexer recognizes the selected recursive ADT, constructor, forall, case, pattern, punctuation, and identifier tokens from source text.
+- Step 5, parser-combinator grammar extension: met for this bounded parser-parity slice. The new parsing path composes through the shared `Parser` abstraction and parser combinators for parameterized `Expr a`, `Expr Nat`, GADT-style constructor results, constructor-local `∀ a.`, related case patterns, and complete module parsing.
+- Step 6, AST/projection rendering and spans: met. The new parser projection renderers and span constants match the committed canonical projections for both new fixtures.
+- Step 7, malformed constructor-local forall diagnostic: met. The focused matcher verifies `expected-constructor-forall-dot@test/conformance/mlfp/parser-parity/existential-constructor-forall/src/Main.mlfp:11:22-11:26` through `renderParserNegativeEvidenceFromSourceText`.
+- Step 8, guard coverage against fixture-key shortcuts: met. The Hspec guard and reviewer `rg` audits found no `parseGadtResultModule`, `parseExistentialConstructorModule`, `completeModuleKey "gadt-result-constructor-spans"`, `completeModuleKey "existential-constructor-forall"`, `moduleKey "gadt-result-constructor-spans"`, or `moduleKey "existential-constructor-forall"` branches. The new internal projection keys are not fixture-root names and are reached only after the shared parser-combinator path succeeds.
+- Step 9, bounded progress docs: met. `CHANGELOG.md`, `implementation_notes.md`, `docs/mlfp-self-boot-readiness.md`, and `test/conformance/mlfp/README.md` describe bounded parser-parity progress and explicitly avoid claiming full parser parity, checker/resolver/backend, platform, driver, proof, or self-boot completion.
+- Step 10, validation: met with one precise timeout. Focused matcher, direct smokes, static audits, `git diff --check`, `cabal build all`, full `cabal test`, and thesis gate passed. The standalone parser-parity matcher timed out at 3600 seconds after several relevant parser-parity examples, including the new round-316 matcher, had passed; the full suite later completed the parser-parity section and all tests.
+
+### Decision
+**APPROVED**
+
+### Evidence
+The integrated round stays within `milestone-4` / `direction-4a-canonical-parser-parity` / `item-316-parser-library-gadt-existential-extension`. It adds two bounded parser-parity fixtures for GADT-style constructor results and constructor-local existential forall syntax, extends only the shared parser-library path, keeps fixture roots as source/evidence harnesses, and keeps docs scoped to bounded parser parity.
+
+The exact rejected shortcut audit returned no matches. Manual audit did find the expected parser-internal semantic projection keys, `recursiveGadtProjectionKey` and `existentialForallProjectionKey`, with `moduleKey` returns after the grammar succeeds. I do not classify those as rejected fixture-key shortcuts because they are not fixture root keys, are not `completeModuleKey`/`moduleKey` branches on `gadt-result-constructor-spans` or `existential-constructor-forall`, and sit inside the existing accepted parser-library projection model after source-text lexer/parser-combinator parsing.
+
+The full gates passed: `git diff --check`, `timeout 7200 cabal build all`, `timeout 10800 cabal test` with `2638 examples, 0 failures`, and `timeout 7200 ./scripts/thesis-conformance-gate.sh`.

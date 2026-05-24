@@ -1,0 +1,24 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-316",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-004",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-004",
+  "milestone_id": "milestone-4",
+  "direction_id": "direction-4a-canonical-parser-parity",
+  "extracted_item_id": "item-316-parser-library-gadt-existential-extension",
+  "decision": "approved",
+  "evidence_summary": "Focused round-316 parser-parity matcher passed; all carried and new parser-parity run-program smokes passed; static audits found no fixture-root parser shortcuts, exact-source/static-token shortcuts, rejected round-316 fixture-key branches, or fixture-owned parser entrypoints; git diff --check, cabal build all, cabal test, and thesis conformance gate passed. The standalone parser-parity group timed out after passing the new round-316 matcher and several carried examples, but full cabal test completed the parser-parity section and whole suite with 2638 examples and 0 failures. The diff stays bounded to shared source-text parser-library GADT/existential constructor parser-parity evidence and does not claim checker/resolver/backend/platform/driver/proof, full parser parity, or self-boot support.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-4-completion",
+        "text": "round-316 completed item-316-parser-library-gadt-existential-extension: the shared source-text parser-library path now covers bounded GADT-style constructor result heads, parameterized data declarations, constructor-local Unicode forall signatures, nested constructor field/result type applications, related constructor/case pattern syntax, and malformed constructor-local forall-dot diagnostics through thin parser-parity fixtures; reviewer evidence: focused matcher, all carried/new run-program smokes, static shortcut audits, git diff --check, cabal build all, cabal test, and thesis gate passed."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}

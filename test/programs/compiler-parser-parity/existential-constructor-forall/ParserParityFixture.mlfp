@@ -1,0 +1,7 @@
+module ParserParityFixture export (sourceFile, sourceText) {
+  def sourceFile : String =
+    "test/conformance/mlfp/parser-parity/existential-constructor-forall/src/Main.mlfp";
+
+  def sourceText : String =
+    "module Main export (Nat(..), Expr(..), SomeExpr(..), unwrapSome, main) {\n  data Nat =\n      Zero : Nat\n    | Succ : Nat -> Nat;\n\n  data Expr a =\n      DoneNat : Nat -> Expr Nat\n    | Step : Expr a -> Expr a;\n\n  data SomeExpr =\n      SomeExpr : ∀ a. Expr a -> SomeExpr;\n\n  def unwrapSome : SomeExpr -> Bool = λ(boxed) case boxed of {\n    SomeExpr expr -> case expr of {\n      DoneNat _ -> true;\n      Step next -> unwrapSome (SomeExpr next)\n    }\n  };\n\n  def main : Bool = unwrapSome (SomeExpr (Step (DoneNat Zero)));\n}\n";
+}

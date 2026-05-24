@@ -1,3 +1,23 @@
+## 2026-05-24 - Round 316 parser parity GADT/existential extension
+
+- Extended the shared parser-owned parser-parity source-text lexer/parser
+  library with the bounded recursive-ADT syntax slice: parameterized data
+  heads, GADT-style constructor result heads, constructor-local Unicode
+  `∀` binders, nested `Expr a` / `Expr Nat` constructor field and result
+  source types, constructor applications, and related constructor/case
+  patterns.
+- Added committed parser-program projection fixtures for
+  `gadt-result-constructor-spans` and `existential-constructor-forall`, plus
+  thin `.mlfp` fixture roots that expose only `sourceFile` and `sourceText`
+  before calling `renderParserParityProjectionFromSourceText`.
+- Added public negative evidence for malformed constructor-local forall syntax
+  through `renderParserNegativeEvidenceFromSourceText`, keeping the rejection
+  on the shared source-text lexer/parser path with an
+  `expected-constructor-forall-dot` parser-owned diagnostic.
+- Scope remains bounded parser parity only. This is not full parser parity,
+  checker, resolver, backend, compiler-package, driver, platform, proof, or
+  self-boot progress.
+
 ## 2026-05-23 - Round 315 parser parity type-family/type-level extension
 
 - Extended the shared parser-owned parser-parity source-text lexer/parser

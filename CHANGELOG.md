@@ -15,6 +15,16 @@
 
 ### Added
 - Extended the shared parser-owned parser-parity library with a bounded
+  GADT/existential constructor syntax grammar slice for parameterized data
+  heads, GADT-style constructor result heads, constructor-local Unicode
+  `∀` binders, nested source-type applications in constructor fields/results,
+  and related constructor/case pattern syntax. New committed parser-program
+  projections and thin fixture roots cover `gadt-result-constructor-spans`
+  and `existential-constructor-forall`, with malformed constructor-local
+  forall-dot evidence through the same source-text lexer/parser path. This is
+  not full parser parity, checker/resolver/backend, compiler-package, driver,
+  platform, proof, or self-boot work.
+- Extended the shared parser-owned parser-parity library with a bounded
   closed type-family and type-level syntax grammar slice for optional module
   export lists, closed `type family` declarations, kind-variable result kinds,
   kinded/plain family parameters, type-level constructor and variable

@@ -1,0 +1,7 @@
+module ParserParityFixture export (sourceFile, sourceText) {
+  def sourceFile : String =
+    "test/conformance/mlfp/parser-parity/gadt-result-constructor-spans/src/Main.mlfp";
+
+  def sourceText : String =
+    "module Main export (Nat(..), Expr(..), doneNow, main) {\n  data Nat =\n      Zero : Nat\n    | Succ : Nat -> Nat;\n\n  data Expr a =\n      DoneNat : Nat -> Expr Nat\n    | Step : Expr a -> Expr a;\n\n  def doneNow : Expr a -> Bool = λ(expr) case expr of {\n    DoneNat _ -> true;\n    Step next -> doneNow next\n  };\n\n  def main : Bool = doneNow (Step (DoneNat Zero));\n}\n";
+}

@@ -144,6 +144,32 @@ spec =
             filter (`isInfixOf` sharedParserSource) sharedParserRound315ShortcutPhrases
                 `shouldBe` []
 
+        it "shared parser-owned .mlfp parser extends source-text grammar to GADT-style results and existential constructors" $ do
+            gadtSource <- readFile gadtResultConstructorSpansCanonicalSourcePath
+            gadtExpected <- readFile gadtResultConstructorSpansExpectedProjectionPath
+            existentialSource <- readFile existentialConstructorForallCanonicalSourcePath
+            existentialExpected <- readFile existentialConstructorForallExpectedProjectionPath
+
+            gadtCanonicalProjection <-
+                renderCanonicalProjection gadtResultConstructorSpansCanonicalSourcePath gadtSource
+            existentialCanonicalProjection <-
+                renderCanonicalProjection existentialConstructorForallCanonicalSourcePath existentialSource
+            gadtParserParityOutput <-
+                runSharedParserFixture gadtResultConstructorSpansParserParityPackageRoot
+            existentialParserParityOutput <-
+                runSharedParserFixture existentialConstructorForallParserParityPackageRoot
+            negativeEvidenceRoot <- writeConstructorForallNegativeEvidencePackage
+            sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
+
+            gadtCanonicalProjection `shouldBe` gadtExpected
+            existentialCanonicalProjection `shouldBe` existentialExpected
+            gadtParserParityOutput `shouldBe` Right gadtExpected
+            existentialParserParityOutput `shouldBe` Right existentialExpected
+            runSharedParserFixture negativeEvidenceRoot
+                `shouldReturn` Right constructorForallNegativeEvidenceProjection
+            filter (`isInfixOf` sharedParserSource) sharedParserRound316ShortcutPhrases
+                `shouldBe` []
+
         it "parser-owned .mlfp parser matches canonical parser for a basic Bool definition and source spans" $ do
             source <- readFile canonicalSourcePath
             expected <- readFile expectedProjectionPath
@@ -344,6 +370,14 @@ typeFamilyApplyAnnotationCanonicalSourcePath :: FilePath
 typeFamilyApplyAnnotationCanonicalSourcePath =
     "test/conformance/mlfp/parser-parity/type-family-apply-annotation/src/Main.mlfp"
 
+gadtResultConstructorSpansCanonicalSourcePath :: FilePath
+gadtResultConstructorSpansCanonicalSourcePath =
+    "test/conformance/mlfp/parser-parity/gadt-result-constructor-spans/src/Main.mlfp"
+
+existentialConstructorForallCanonicalSourcePath :: FilePath
+existentialConstructorForallCanonicalSourcePath =
+    "test/conformance/mlfp/parser-parity/existential-constructor-forall/src/Main.mlfp"
+
 expectedProjectionPath :: FilePath
 expectedProjectionPath =
     "test/conformance/mlfp/parser-parity/basic-module-def-bool/expected/parser-program.txt"
@@ -399,6 +433,14 @@ typeFamilyKindLambdaExpectedProjectionPath =
 typeFamilyApplyAnnotationExpectedProjectionPath :: FilePath
 typeFamilyApplyAnnotationExpectedProjectionPath =
     "test/conformance/mlfp/parser-parity/type-family-apply-annotation/expected/parser-program.txt"
+
+gadtResultConstructorSpansExpectedProjectionPath :: FilePath
+gadtResultConstructorSpansExpectedProjectionPath =
+    "test/conformance/mlfp/parser-parity/gadt-result-constructor-spans/expected/parser-program.txt"
+
+existentialConstructorForallExpectedProjectionPath :: FilePath
+existentialConstructorForallExpectedProjectionPath =
+    "test/conformance/mlfp/parser-parity/existential-constructor-forall/expected/parser-program.txt"
 
 parserParityPackageRoot :: FilePath
 parserParityPackageRoot =
@@ -456,6 +498,14 @@ typeFamilyApplyAnnotationParserParityPackageRoot :: FilePath
 typeFamilyApplyAnnotationParserParityPackageRoot =
     "test/programs/compiler-parser-parity/type-family-apply-annotation"
 
+gadtResultConstructorSpansParserParityPackageRoot :: FilePath
+gadtResultConstructorSpansParserParityPackageRoot =
+    "test/programs/compiler-parser-parity/gadt-result-constructor-spans"
+
+existentialConstructorForallParserParityPackageRoot :: FilePath
+existentialConstructorForallParserParityPackageRoot =
+    "test/programs/compiler-parser-parity/existential-constructor-forall"
+
 sharedParserLibraryRoot :: FilePath
 sharedParserLibraryRoot =
     "test/programs/compiler-parser-parity/parser-library"
@@ -482,6 +532,8 @@ sharedParserBannedPhrases =
     , concat ["Fundep", "Tokens"]
     , concat ["Type", "Family", "Tokens"]
     , concat ["Family", "Tokens"]
+    , concat ["Gadt", "Tokens"]
+    , concat ["Existential", "Tokens"]
     , concat ["LexerOk ", "basic", "Module", "Tokens"]
     , concat ["LexerOk ", "import", "Bool", "Tokens"]
     , concat ["LexerOk ", "value", "Def", "List", "Tokens"]
@@ -495,6 +547,8 @@ sharedParserBannedPhrases =
     , concat ["LexerOk ", "fundep", "Tokens"]
     , concat ["LexerOk ", "type", "Family", "Tokens"]
     , concat ["LexerOk ", "family", "Tokens"]
+    , concat ["LexerOk ", "gadt", "Tokens"]
+    , concat ["LexerOk ", "existential", "Tokens"]
     , concat ["case", " tokens"]
     , concat ["class", " tokens"]
     , concat ["instance", " tokens"]
@@ -503,6 +557,8 @@ sharedParserBannedPhrases =
     , concat ["fundep", " tokens"]
     , concat ["type-family", " tokens"]
     , concat ["family", " tokens"]
+    , concat ["gadt", " tokens"]
+    , concat ["existential", " tokens"]
     ]
 
 sharedParserFixedOffsetPhrases :: [String]
@@ -568,6 +624,16 @@ sharedParserRound315ShortcutPhrases =
     , "completeModuleKey \"type-family-apply-annotation\""
     , "moduleKey \"type-family-kind-lambda\""
     , "moduleKey \"type-family-apply-annotation\""
+    ]
+
+sharedParserRound316ShortcutPhrases :: [String]
+sharedParserRound316ShortcutPhrases =
+    [ "parseGadtResultModule"
+    , "parseExistentialConstructorModule"
+    , "completeModuleKey \"gadt-result-constructor-spans\""
+    , "completeModuleKey \"existential-constructor-forall\""
+    , "moduleKey \"gadt-result-constructor-spans\""
+    , "moduleKey \"existential-constructor-forall\""
     ]
 
 sharedParserCompleteParseRequiredPhrases :: [String]
@@ -644,6 +710,10 @@ higherKindedFundepNegativeEvidencePackageRoot =
 typeFamilyEquationNegativeEvidencePackageRoot :: FilePath
 typeFamilyEquationNegativeEvidencePackageRoot =
     "dist-newstyle/parser-parity-type-family-equation-negative-evidence"
+
+constructorForallNegativeEvidencePackageRoot :: FilePath
+constructorForallNegativeEvidencePackageRoot =
+    "dist-newstyle/parser-parity-constructor-forall-negative-evidence"
 
 sourceTextBasicPackageRoot :: FilePath
 sourceTextBasicPackageRoot =
@@ -770,6 +840,13 @@ writeTypeFamilyEquationNegativeEvidencePackage = do
     writeFile (typeFamilyEquationNegativeEvidencePackageRoot </> "Main.mlfp") typeFamilyEquationNegativeEvidenceMainSource
     pure typeFamilyEquationNegativeEvidencePackageRoot
 
+writeConstructorForallNegativeEvidencePackage :: IO FilePath
+writeConstructorForallNegativeEvidencePackage = do
+    removePathForcibly constructorForallNegativeEvidencePackageRoot
+    createDirectoryIfMissing True constructorForallNegativeEvidencePackageRoot
+    writeFile (constructorForallNegativeEvidencePackageRoot </> "Main.mlfp") constructorForallNegativeEvidenceMainSource
+    pure constructorForallNegativeEvidencePackageRoot
+
 retryEvidenceMainSource :: String
 retryEvidenceMainSource =
     unlines
@@ -853,6 +930,13 @@ typeFamilyEquationNegativeEvidenceMainSource =
         "type-family parser negative "
         typeFamilyKindLambdaCanonicalSourcePath
         typeFamilyEquationNegativeSourceText
+
+constructorForallNegativeEvidenceMainSource :: String
+constructorForallNegativeEvidenceMainSource =
+    parserNegativeEvidenceMainSource
+        "constructor-forall parser negative "
+        existentialConstructorForallCanonicalSourcePath
+        constructorForallNegativeSourceText
 
 parserNegativeEvidenceMainSource :: String -> FilePath -> String -> String
 parserNegativeEvidenceMainSource prefix sourceFile sourceText =
@@ -985,6 +1069,32 @@ typeFamilyEquationNegativeSourceText =
         , "}"
         ]
 
+constructorForallNegativeSourceText :: String
+constructorForallNegativeSourceText =
+    unlines
+        [ "module Main export (Nat(..), Expr(..), SomeExpr(..), unwrapSome, main) {"
+        , "  data Nat ="
+        , "      Zero : Nat"
+        , "    | Succ : Nat -> Nat;"
+        , ""
+        , "  data Expr a ="
+        , "      DoneNat : Nat -> Expr Nat"
+        , "    | Step : Expr a -> Expr a;"
+        , ""
+        , "  data SomeExpr ="
+        , "      SomeExpr : ∀ a Expr a -> SomeExpr;"
+        , ""
+        , "  def unwrapSome : SomeExpr -> Bool = λ(boxed) case boxed of {"
+        , "    SomeExpr expr -> case expr of {"
+        , "      DoneNat _ -> true;"
+        , "      Step next -> unwrapSome (SomeExpr next)"
+        , "    }"
+        , "  };"
+        , ""
+        , "  def main : Bool = unwrapSome (SomeExpr (Step (DoneNat Zero)));"
+        , "}"
+        ]
+
 retryEvidenceProjection :: String
 retryEvidenceProjection =
     unlines
@@ -1045,6 +1155,12 @@ typeFamilyEquationNegativeEvidenceProjection :: String
 typeFamilyEquationNegativeEvidenceProjection =
     unlines
         [ "type-family parser negative expected-type-family-equation-equals@test/conformance/mlfp/parser-parity/type-family-kind-lambda/src/Main.mlfp:3:19-3:22"
+        ]
+
+constructorForallNegativeEvidenceProjection :: String
+constructorForallNegativeEvidenceProjection =
+    unlines
+        [ "constructor-forall parser negative expected-constructor-forall-dot@test/conformance/mlfp/parser-parity/existential-constructor-forall/src/Main.mlfp:11:22-11:26"
         ]
 
 renderCanonicalProjection :: FilePath -> String -> IO String

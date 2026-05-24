@@ -61,4 +61,8 @@ diagnostic path, plus two closed type-family/type-level modules covering
 kind-variable result kinds, kinded/plain family parameters, type-level
 constructor and variable patterns, type-level lambda/application RHS syntax,
 source type-family application annotations, and one malformed type-family
-equation diagnostic path.
+equation diagnostic path, plus two GADT/existential constructor modules
+covering parameterized data heads, GADT-style constructor result heads,
+constructor-local Unicode `∀`, nested source-type applications in constructor
+fields/results, related constructor/case patterns, and one malformed
+constructor-local forall-dot diagnostic path.
