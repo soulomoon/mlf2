@@ -1,6 +1,6 @@
-module ParserParityAst export (ParsedModule(..), renderParsedModule, renderBasicModuleBool, renderImportExposingBool, renderValueDefListIntRef, renderLetLambdaApplication, renderTypedAnnotationTypes, renderDataDeclarationConstructorSpans, renderCaseExpressionConstructorPatterns, renderCaseExpressionNestedPatterns, renderTypeclassDerivingMethod, renderTypeclassInstanceNullaryMethod, renderHigherKindedClassDataParams, renderMultiparamSuperclassFundep, renderTypeFamilyKindLambda, renderTypeFamilyApplyAnnotation, renderRecursiveGadtResultConstructors, renderExistentialConstructorForall) {
+module ParserParityAst export (ParsedModule(..), renderParsedModule, renderBasicModuleBool, renderImportExposingBool, renderValueDefListIntRef, renderLetLambdaApplication, renderTypedAnnotationTypes, renderDataDeclarationConstructorSpans, renderCaseExpressionConstructorPatterns, renderCaseExpressionNestedPatterns, renderTypeclassDerivingMethod, renderTypeclassInstanceNullaryMethod, renderHigherKindedClassDataParams, renderMultiparamSuperclassFundep, renderTypeFamilyKindLambda, renderTypeFamilyApplyAnnotation, renderRecursiveGadtResultConstructors, renderExistentialConstructorForall, renderQualifiedImportAliasReferences, renderQualifiedImportAliasOnly) {
   import Prelude exposing (Option(..), stringAppend, stringIndexOf);
-  import ParserParitySource exposing (renderSpan, basicModuleSpan, basicExportMainSpan, basicMainDefSpan, importBoolModuleSpan, importBoolModuleNameRefSpan, importBoolTypeSpan, importBoolMainDefSpan, valueModuleSpan, valueExportMainSpan, valueImportModuleSpan, valueImportIntSpan, valueDefTwoSpan, valueDefMainSpan, letModuleSpan, letExportMainSpan, letImportModuleSpan, letImportIntSpan, letDefMainSpan, typedModuleSpan, typedExportMainSpan, typedImportModuleSpan, typedImportIntSpan, typedDefMainSpan, dataModuleSpan, dataExportNatSpan, dataExportMainSpan, dataDeclSpan, dataZeroConstructorSpan, dataSuccConstructorSpan, dataDefMainSpan, caseConstructorModuleSpan, caseConstructorDefMainSpan, caseNestedModuleSpan, caseNestedDefMainSpan, typeclassDerivingModuleSpan, typeclassDerivingExportEqSpan, typeclassDerivingExportNatSpan, typeclassDerivingExportEqMethodSpan, typeclassDerivingExportMainSpan, typeclassDerivingClassSpan, typeclassDerivingEqMethodSpan, typeclassDerivingDataSpan, typeclassDerivingZeroConstructorSpan, typeclassDerivingSuccConstructorSpan, typeclassDerivingEqSpan, typeclassDerivingDefMainSpan, typeclassInstanceModuleSpan, typeclassInstanceExportMonoidSpan, typeclassInstanceExportNatSpan, typeclassInstanceExportMemptySpan, typeclassInstanceExportAppendSpan, typeclassInstanceExportMainSpan, typeclassInstanceClassSpan, typeclassInstanceMemptySignatureSpan, typeclassInstanceAppendSignatureSpan, typeclassInstanceDataSpan, typeclassInstanceZeroConstructorSpan, typeclassInstanceSuccConstructorSpan, typeclassInstanceClassNameSpan, typeclassInstanceMemptyDefinitionSpan, typeclassInstanceAppendDefinitionSpan, typeclassInstanceDefMainSpan, higherKindedModuleSpan, higherKindedExportFunctorSpan, higherKindedExportHigherSpan, higherKindedClassSpan, higherKindedMapSignatureSpan, higherKindedDataSpan, higherKindedWrapConstructorSpan, multiparamModuleSpan, multiparamExportMonadSpan, multiparamClassSpan, multiparamSuperclassFunctorSpan, multiparamBindSignatureSpan, multiparamInstanceClassNameSpan, typeFamilyKindLambdaModuleSpan, typeFamilyKindLambdaDeclSpan, typeFamilyApplyAnnotationModuleSpan, typeFamilyApplyAnnotationExportMainSpan, typeFamilyApplyAnnotationDeclSpan, typeFamilyApplyAnnotationDefMainSpan, recursiveGadtModuleSpan, recursiveGadtExportNatSpan, recursiveGadtExportExprSpan, recursiveGadtExportDoneNowSpan, recursiveGadtExportMainSpan, recursiveGadtNatDataSpan, recursiveGadtZeroConstructorSpan, recursiveGadtSuccConstructorSpan, recursiveGadtExprDataSpan, recursiveGadtDoneNatConstructorSpan, recursiveGadtStepConstructorSpan, recursiveGadtDoneNowDefSpan, recursiveGadtMainDefSpan, existentialForallModuleSpan, existentialForallExportNatSpan, existentialForallExportExprSpan, existentialForallExportSomeExprSpan, existentialForallExportUnwrapSomeSpan, existentialForallExportMainSpan, existentialForallNatDataSpan, existentialForallZeroConstructorSpan, existentialForallSuccConstructorSpan, existentialForallExprDataSpan, existentialForallDoneNatConstructorSpan, existentialForallStepConstructorSpan, existentialForallSomeExprDataSpan, existentialForallSomeExprConstructorSpan, existentialForallUnwrapSomeDefSpan, existentialForallMainDefSpan);
+  import ParserParitySource exposing (renderSpan, basicModuleSpan, basicExportMainSpan, basicMainDefSpan, importBoolModuleSpan, importBoolModuleNameRefSpan, importBoolTypeSpan, importBoolMainDefSpan, valueModuleSpan, valueExportMainSpan, valueImportModuleSpan, valueImportIntSpan, valueDefTwoSpan, valueDefMainSpan, letModuleSpan, letExportMainSpan, letImportModuleSpan, letImportIntSpan, letDefMainSpan, typedModuleSpan, typedExportMainSpan, typedImportModuleSpan, typedImportIntSpan, typedDefMainSpan, dataModuleSpan, dataExportNatSpan, dataExportMainSpan, dataDeclSpan, dataZeroConstructorSpan, dataSuccConstructorSpan, dataDefMainSpan, caseConstructorModuleSpan, caseConstructorDefMainSpan, caseNestedModuleSpan, caseNestedDefMainSpan, typeclassDerivingModuleSpan, typeclassDerivingExportEqSpan, typeclassDerivingExportNatSpan, typeclassDerivingExportEqMethodSpan, typeclassDerivingExportMainSpan, typeclassDerivingClassSpan, typeclassDerivingEqMethodSpan, typeclassDerivingDataSpan, typeclassDerivingZeroConstructorSpan, typeclassDerivingSuccConstructorSpan, typeclassDerivingEqSpan, typeclassDerivingDefMainSpan, typeclassInstanceModuleSpan, typeclassInstanceExportMonoidSpan, typeclassInstanceExportNatSpan, typeclassInstanceExportMemptySpan, typeclassInstanceExportAppendSpan, typeclassInstanceExportMainSpan, typeclassInstanceClassSpan, typeclassInstanceMemptySignatureSpan, typeclassInstanceAppendSignatureSpan, typeclassInstanceDataSpan, typeclassInstanceZeroConstructorSpan, typeclassInstanceSuccConstructorSpan, typeclassInstanceClassNameSpan, typeclassInstanceMemptyDefinitionSpan, typeclassInstanceAppendDefinitionSpan, typeclassInstanceDefMainSpan, higherKindedModuleSpan, higherKindedExportFunctorSpan, higherKindedExportHigherSpan, higherKindedClassSpan, higherKindedMapSignatureSpan, higherKindedDataSpan, higherKindedWrapConstructorSpan, multiparamModuleSpan, multiparamExportMonadSpan, multiparamClassSpan, multiparamSuperclassFunctorSpan, multiparamBindSignatureSpan, multiparamInstanceClassNameSpan, typeFamilyKindLambdaModuleSpan, typeFamilyKindLambdaDeclSpan, typeFamilyApplyAnnotationModuleSpan, typeFamilyApplyAnnotationExportMainSpan, typeFamilyApplyAnnotationDeclSpan, typeFamilyApplyAnnotationDefMainSpan, recursiveGadtModuleSpan, recursiveGadtExportNatSpan, recursiveGadtExportExprSpan, recursiveGadtExportDoneNowSpan, recursiveGadtExportMainSpan, recursiveGadtNatDataSpan, recursiveGadtZeroConstructorSpan, recursiveGadtSuccConstructorSpan, recursiveGadtExprDataSpan, recursiveGadtDoneNatConstructorSpan, recursiveGadtStepConstructorSpan, recursiveGadtDoneNowDefSpan, recursiveGadtMainDefSpan, existentialForallModuleSpan, existentialForallExportNatSpan, existentialForallExportExprSpan, existentialForallExportSomeExprSpan, existentialForallExportUnwrapSomeSpan, existentialForallExportMainSpan, existentialForallNatDataSpan, existentialForallZeroConstructorSpan, existentialForallSuccConstructorSpan, existentialForallExprDataSpan, existentialForallDoneNatConstructorSpan, existentialForallStepConstructorSpan, existentialForallSomeExprDataSpan, existentialForallSomeExprConstructorSpan, existentialForallUnwrapSomeDefSpan, existentialForallMainDefSpan, qualifiedImportReferencesModuleSpan, qualifiedImportReferencesImportModuleSpan, qualifiedImportReferencesAliasSpan, qualifiedImportReferencesExposingEqSpan, qualifiedImportReferencesExposingTokenSpan, qualifiedImportReferencesExposingAnswerSpan, qualifiedImportReferencesExposingEqMethodSpan, qualifiedImportReferencesLeftDefSpan, qualifiedImportReferencesRightDefSpan, qualifiedImportReferencesSameCtorDefSpan, qualifiedImportReferencesUsesClassDefSpan, qualifiedImportReferencesUsesQualifiedClassDefSpan, qualifiedImportReferencesAlsoDefSpan, qualifiedImportReferencesMainDefSpan, qualifiedImportOnlyModuleSpan, qualifiedImportOnlyImportModuleSpan, qualifiedImportOnlyAliasSpan, qualifiedImportOnlyMainDefSpan);
 
   data ParsedModule =
       ParsedModule : String -> ParsedModule;
@@ -55,8 +55,14 @@ module ParserParityAst export (ParsedModule(..), renderParsedModule, renderBasic
                                 StringMismatch _ -> case stringExactMatch "recursive-gadt-projection" key of {
                                   StringMatched _ -> renderRecursiveGadtResultConstructors sourceFile;
                                   StringMismatch _ -> case stringExactMatch "existential-forall-projection" key of {
-                                    StringMatched _ -> renderExistentialConstructorForall sourceFile;
-                                    StringMismatch _ -> "parser-error"
+                                  StringMatched _ -> renderExistentialConstructorForall sourceFile;
+                                    StringMismatch _ -> case stringExactMatch "qualified-import-reference-projection" key of {
+                                      StringMatched _ -> renderQualifiedImportAliasReferences sourceFile;
+                                      StringMismatch _ -> case stringExactMatch "qualified-import-access-projection" key of {
+                                        StringMatched _ -> renderQualifiedImportAliasOnly sourceFile;
+                                        StringMismatch _ -> "parser-error"
+                                      }
+                                    }
                                   }
                                 }
                               }
@@ -357,4 +363,48 @@ module ParserParityAst export (ParsedModule(..), renderParsedModule, renderBasic
                                   (stringAppend
                                     (stringAppend "def unwrapSome type=SomeExpr -> Bool expr=λboxed case boxed of { SomeExpr expr -> case expr of { DoneNat _ -> true; Step next -> unwrapSome (SomeExpr next) } } span=" (stringAppend (renderSpan sourceFile existentialForallUnwrapSomeDefSpan) "\n"))
                                     (stringAppend "def main type=Bool expr=unwrapSome (SomeExpr (Step (DoneNat Zero))) span=" (renderSpan sourceFile existentialForallMainDefSpan))))))))))))))));
+
+  def renderQualifiedImportAliasReferences : String -> String =
+    λ(sourceFile : String)
+      stringAppend
+        (stringAppend "module Main span=" (stringAppend (renderSpan sourceFile qualifiedImportReferencesModuleSpan) "\n"))
+        (stringAppend
+          (stringAppend "export value main span=" (stringAppend (renderSpan sourceFile basicExportMainSpan) "\n"))
+          (stringAppend
+            (stringAppend "import Core span=" (stringAppend (renderSpan sourceFile qualifiedImportReferencesImportModuleSpan) "\n"))
+            (stringAppend
+              (stringAppend "import alias C span=" (stringAppend (renderSpan sourceFile qualifiedImportReferencesAliasSpan) "\n"))
+              (stringAppend
+                (stringAppend "import exposing type Eq span=" (stringAppend (renderSpan sourceFile qualifiedImportReferencesExposingEqSpan) "\n"))
+                (stringAppend
+                  (stringAppend "import exposing type-with-constructors Token span=" (stringAppend (renderSpan sourceFile qualifiedImportReferencesExposingTokenSpan) "\n"))
+                  (stringAppend
+                    (stringAppend "import exposing value answer span=" (stringAppend (renderSpan sourceFile qualifiedImportReferencesExposingAnswerSpan) "\n"))
+                    (stringAppend
+                      (stringAppend "import exposing value eq span=" (stringAppend (renderSpan sourceFile qualifiedImportReferencesExposingEqMethodSpan) "\n"))
+                      (stringAppend
+                        (stringAppend "def left type=Token expr=answer span=" (stringAppend (renderSpan sourceFile qualifiedImportReferencesLeftDefSpan) "\n"))
+                        (stringAppend
+                          (stringAppend "def right type=C.Token expr=C.answer span=" (stringAppend (renderSpan sourceFile qualifiedImportReferencesRightDefSpan) "\n"))
+                          (stringAppend
+                            (stringAppend "def sameCtor type=C.Token expr=C.Token span=" (stringAppend (renderSpan sourceFile qualifiedImportReferencesSameCtorDefSpan) "\n"))
+                            (stringAppend
+                              (stringAppend "def usesClass type=Eq Token => Bool expr=true span=" (stringAppend (renderSpan sourceFile qualifiedImportReferencesUsesClassDefSpan) "\n"))
+                              (stringAppend
+                                (stringAppend "def usesQualifiedClass type=C.Eq C.Token => Bool expr=true span=" (stringAppend (renderSpan sourceFile qualifiedImportReferencesUsesQualifiedClassDefSpan) "\n"))
+                                (stringAppend
+                                  (stringAppend "def also type=Bool expr=eq Token Token span=" (stringAppend (renderSpan sourceFile qualifiedImportReferencesAlsoDefSpan) "\n"))
+                                  (stringAppend "def main type=Bool expr=C.eq Token C.Token span=" (renderSpan sourceFile qualifiedImportReferencesMainDefSpan)))))))))))))));
+
+  def renderQualifiedImportAliasOnly : String -> String =
+    λ(sourceFile : String)
+      stringAppend
+        (stringAppend "module Main span=" (stringAppend (renderSpan sourceFile qualifiedImportOnlyModuleSpan) "\n"))
+        (stringAppend
+          (stringAppend "export value main span=" (stringAppend (renderSpan sourceFile basicExportMainSpan) "\n"))
+          (stringAppend
+            (stringAppend "import Core span=" (stringAppend (renderSpan sourceFile qualifiedImportOnlyImportModuleSpan) "\n"))
+            (stringAppend
+              (stringAppend "import alias C span=" (stringAppend (renderSpan sourceFile qualifiedImportOnlyAliasSpan) "\n"))
+              (stringAppend "def main type=C.Token expr=C.Token span=" (renderSpan sourceFile qualifiedImportOnlyMainDefSpan)))));
 }

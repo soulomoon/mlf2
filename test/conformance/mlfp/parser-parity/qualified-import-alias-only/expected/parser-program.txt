@@ -1,0 +1,5 @@
+module Main span=test/conformance/mlfp/parser-parity/qualified-import-alias-only/src/Main.mlfp:1:1-5:1
+export value main span=test/conformance/mlfp/parser-parity/qualified-import-alias-only/src/Main.mlfp:1:21-1:25
+import Core span=test/conformance/mlfp/parser-parity/qualified-import-alias-only/src/Main.mlfp:2:10-2:15
+import alias C span=test/conformance/mlfp/parser-parity/qualified-import-alias-only/src/Main.mlfp:2:18-2:19
+def main type=C.Token expr=C.Token span=test/conformance/mlfp/parser-parity/qualified-import-alias-only/src/Main.mlfp:3:3-4:1

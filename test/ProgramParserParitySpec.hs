@@ -170,6 +170,32 @@ spec =
             filter (`isInfixOf` sharedParserSource) sharedParserRound316ShortcutPhrases
                 `shouldBe` []
 
+        it "shared parser-owned .mlfp parser extends source-text grammar to qualified imports and references" $ do
+            aliasReferencesSource <- readFile qualifiedImportAliasReferencesCanonicalSourcePath
+            aliasReferencesExpected <- readFile qualifiedImportAliasReferencesExpectedProjectionPath
+            aliasOnlySource <- readFile qualifiedImportAliasOnlyCanonicalSourcePath
+            aliasOnlyExpected <- readFile qualifiedImportAliasOnlyExpectedProjectionPath
+
+            aliasReferencesCanonicalProjection <-
+                renderCanonicalProjection qualifiedImportAliasReferencesCanonicalSourcePath aliasReferencesSource
+            aliasOnlyCanonicalProjection <-
+                renderCanonicalProjection qualifiedImportAliasOnlyCanonicalSourcePath aliasOnlySource
+            aliasReferencesParserParityOutput <-
+                runSharedParserFixture qualifiedImportAliasReferencesParserParityPackageRoot
+            aliasOnlyParserParityOutput <-
+                runSharedParserFixture qualifiedImportAliasOnlyParserParityPackageRoot
+            negativeEvidenceRoot <- writeQualifiedImportAliasNegativeEvidencePackage
+            sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
+
+            aliasReferencesCanonicalProjection `shouldBe` aliasReferencesExpected
+            aliasOnlyCanonicalProjection `shouldBe` aliasOnlyExpected
+            aliasReferencesParserParityOutput `shouldBe` Right aliasReferencesExpected
+            aliasOnlyParserParityOutput `shouldBe` Right aliasOnlyExpected
+            runSharedParserFixture negativeEvidenceRoot
+                `shouldReturn` Right qualifiedImportAliasNegativeEvidenceProjection
+            filter (`isInfixOf` sharedParserSource) sharedParserRound317ShortcutPhrases
+                `shouldBe` []
+
         it "parser-owned .mlfp parser matches canonical parser for a basic Bool definition and source spans" $ do
             source <- readFile canonicalSourcePath
             expected <- readFile expectedProjectionPath
@@ -378,6 +404,14 @@ existentialConstructorForallCanonicalSourcePath :: FilePath
 existentialConstructorForallCanonicalSourcePath =
     "test/conformance/mlfp/parser-parity/existential-constructor-forall/src/Main.mlfp"
 
+qualifiedImportAliasReferencesCanonicalSourcePath :: FilePath
+qualifiedImportAliasReferencesCanonicalSourcePath =
+    "test/conformance/mlfp/parser-parity/qualified-import-alias-references/src/Main.mlfp"
+
+qualifiedImportAliasOnlyCanonicalSourcePath :: FilePath
+qualifiedImportAliasOnlyCanonicalSourcePath =
+    "test/conformance/mlfp/parser-parity/qualified-import-alias-only/src/Main.mlfp"
+
 expectedProjectionPath :: FilePath
 expectedProjectionPath =
     "test/conformance/mlfp/parser-parity/basic-module-def-bool/expected/parser-program.txt"
@@ -442,6 +476,14 @@ existentialConstructorForallExpectedProjectionPath :: FilePath
 existentialConstructorForallExpectedProjectionPath =
     "test/conformance/mlfp/parser-parity/existential-constructor-forall/expected/parser-program.txt"
 
+qualifiedImportAliasReferencesExpectedProjectionPath :: FilePath
+qualifiedImportAliasReferencesExpectedProjectionPath =
+    "test/conformance/mlfp/parser-parity/qualified-import-alias-references/expected/parser-program.txt"
+
+qualifiedImportAliasOnlyExpectedProjectionPath :: FilePath
+qualifiedImportAliasOnlyExpectedProjectionPath =
+    "test/conformance/mlfp/parser-parity/qualified-import-alias-only/expected/parser-program.txt"
+
 parserParityPackageRoot :: FilePath
 parserParityPackageRoot =
     "test/programs/compiler-parser-parity/basic-module-def-bool"
@@ -505,6 +547,14 @@ gadtResultConstructorSpansParserParityPackageRoot =
 existentialConstructorForallParserParityPackageRoot :: FilePath
 existentialConstructorForallParserParityPackageRoot =
     "test/programs/compiler-parser-parity/existential-constructor-forall"
+
+qualifiedImportAliasReferencesParserParityPackageRoot :: FilePath
+qualifiedImportAliasReferencesParserParityPackageRoot =
+    "test/programs/compiler-parser-parity/qualified-import-alias-references"
+
+qualifiedImportAliasOnlyParserParityPackageRoot :: FilePath
+qualifiedImportAliasOnlyParserParityPackageRoot =
+    "test/programs/compiler-parser-parity/qualified-import-alias-only"
 
 sharedParserLibraryRoot :: FilePath
 sharedParserLibraryRoot =
@@ -636,6 +686,16 @@ sharedParserRound316ShortcutPhrases =
     , "moduleKey \"existential-constructor-forall\""
     ]
 
+sharedParserRound317ShortcutPhrases :: [String]
+sharedParserRound317ShortcutPhrases =
+    [ "parseQualifiedImportAliasModule"
+    , "parseQualifiedAliasOnlyModule"
+    , "completeModuleKey \"qualified-import-alias-references\""
+    , "completeModuleKey \"qualified-import-alias-only\""
+    , "moduleKey \"qualified-import-alias-references\""
+    , "moduleKey \"qualified-import-alias-only\""
+    ]
+
 sharedParserCompleteParseRequiredPhrases :: [String]
 sharedParserCompleteParseRequiredPhrases =
     [ "parserStateAtEnd state"
@@ -714,6 +774,10 @@ typeFamilyEquationNegativeEvidencePackageRoot =
 constructorForallNegativeEvidencePackageRoot :: FilePath
 constructorForallNegativeEvidencePackageRoot =
     "dist-newstyle/parser-parity-constructor-forall-negative-evidence"
+
+qualifiedImportAliasNegativeEvidencePackageRoot :: FilePath
+qualifiedImportAliasNegativeEvidencePackageRoot =
+    "dist-newstyle/parser-parity-qualified-import-alias-negative-evidence"
 
 sourceTextBasicPackageRoot :: FilePath
 sourceTextBasicPackageRoot =
@@ -847,6 +911,13 @@ writeConstructorForallNegativeEvidencePackage = do
     writeFile (constructorForallNegativeEvidencePackageRoot </> "Main.mlfp") constructorForallNegativeEvidenceMainSource
     pure constructorForallNegativeEvidencePackageRoot
 
+writeQualifiedImportAliasNegativeEvidencePackage :: IO FilePath
+writeQualifiedImportAliasNegativeEvidencePackage = do
+    removePathForcibly qualifiedImportAliasNegativeEvidencePackageRoot
+    createDirectoryIfMissing True qualifiedImportAliasNegativeEvidencePackageRoot
+    writeFile (qualifiedImportAliasNegativeEvidencePackageRoot </> "Main.mlfp") qualifiedImportAliasNegativeEvidenceMainSource
+    pure qualifiedImportAliasNegativeEvidencePackageRoot
+
 retryEvidenceMainSource :: String
 retryEvidenceMainSource =
     unlines
@@ -937,6 +1008,13 @@ constructorForallNegativeEvidenceMainSource =
         "constructor-forall parser negative "
         existentialConstructorForallCanonicalSourcePath
         constructorForallNegativeSourceText
+
+qualifiedImportAliasNegativeEvidenceMainSource :: String
+qualifiedImportAliasNegativeEvidenceMainSource =
+    parserNegativeEvidenceMainSource
+        "qualified-import-alias parser negative "
+        qualifiedImportAliasReferencesCanonicalSourcePath
+        qualifiedImportAliasNegativeSourceText
 
 parserNegativeEvidenceMainSource :: String -> FilePath -> String -> String
 parserNegativeEvidenceMainSource prefix sourceFile sourceText =
@@ -1095,6 +1173,15 @@ constructorForallNegativeSourceText =
         , "}"
         ]
 
+qualifiedImportAliasNegativeSourceText :: String
+qualifiedImportAliasNegativeSourceText =
+    unlines
+        [ "module Main export (main) {"
+        , "  import Core as exposing (answer);"
+        , "  def main : Bool = true;"
+        , "}"
+        ]
+
 retryEvidenceProjection :: String
 retryEvidenceProjection =
     unlines
@@ -1163,6 +1250,12 @@ constructorForallNegativeEvidenceProjection =
         [ "constructor-forall parser negative expected-constructor-forall-dot@test/conformance/mlfp/parser-parity/existential-constructor-forall/src/Main.mlfp:11:22-11:26"
         ]
 
+qualifiedImportAliasNegativeEvidenceProjection :: String
+qualifiedImportAliasNegativeEvidenceProjection =
+    unlines
+        [ "qualified-import-alias parser negative expected-import-alias@test/conformance/mlfp/parser-parity/qualified-import-alias-references/src/Main.mlfp:2:18-2:26"
+        ]
+
 renderCanonicalProjection :: FilePath -> String -> IO String
 renderCanonicalProjection path source =
     case parseLocatedProgramWithFile path source of
@@ -1215,35 +1308,52 @@ renderExportProjection spans item = do
 
 renderImportProjections :: P.ProgramSpanIndex -> [P.Import] -> IO [String]
 renderImportProjections spans imports =
-    case imports of
-        [] -> pure []
-        [import0] -> do
-            importSpan <- requireListSpan "import" (P.importModuleName import0) (P.spanImports spans)
-            exposingItem <- requireSingleImportExposing (P.importExposing import0)
-            exposingSpan <- requireListSpan "import exposing item" (P.exportItemName exposingItem) (P.spanImportItems spans)
-            pure
-                [ "import "
-                    ++ P.importModuleName import0
-                    ++ " span="
-                    ++ renderSpan importSpan
-                , "import exposing "
-                    ++ renderExportKind exposingItem
-                    ++ " "
-                    ++ P.exportItemName exposingItem
-                    ++ " span="
-                    ++ renderSpan exposingSpan
-                ]
-        other ->
-            expectationFailure ("expected zero or one import declaration, got: " ++ show other)
-                >> fail "unexpected import shape"
+    concat <$> traverse (renderImportProjection spans) imports
 
-requireSingleImportExposing :: Maybe [P.ExportItem] -> IO P.ExportItem
-requireSingleImportExposing exposing =
+renderImportProjection :: P.ProgramSpanIndex -> P.Import -> IO [String]
+renderImportProjection spans import0 = do
+    importSpan <- requireListSpan "import" (P.importModuleName import0) (P.spanImports spans)
+    aliasProjection <- renderImportAliasProjection spans (P.importAlias import0)
+    exposingProjections <- renderImportExposingProjections spans (P.importExposing import0)
+    pure $
+        [ "import "
+            ++ P.importModuleName import0
+            ++ " span="
+            ++ renderSpan importSpan
+        ]
+            ++ aliasProjection
+            ++ exposingProjections
+
+renderImportAliasProjection :: P.ProgramSpanIndex -> Maybe String -> IO [String]
+renderImportAliasProjection spans alias =
+    case alias of
+        Nothing -> pure []
+        Just aliasName -> do
+            aliasSpan <- requireListSpan "import alias" aliasName (P.spanImportAliases spans)
+            pure
+                [ "import alias "
+                    ++ aliasName
+                    ++ " span="
+                    ++ renderSpan aliasSpan
+                ]
+
+renderImportExposingProjections :: P.ProgramSpanIndex -> Maybe [P.ExportItem] -> IO [String]
+renderImportExposingProjections spans exposing =
     case exposing of
-        Just [item] -> pure item
-        other ->
-            expectationFailure ("expected one import exposing item, got: " ++ show other)
-                >> fail "unexpected import exposing shape"
+        Nothing -> pure []
+        Just items -> traverse (renderImportExposingProjection spans) items
+
+renderImportExposingProjection :: P.ProgramSpanIndex -> P.ExportItem -> IO String
+renderImportExposingProjection spans item = do
+    let name = P.exportItemName item
+    exposingSpan <- requireListSpan "import exposing item" name (P.spanImportItems spans)
+    pure $
+        "import exposing "
+            ++ renderExportKind item
+            ++ " "
+            ++ name
+            ++ " span="
+            ++ renderSpan exposingSpan
 
 renderExportKind :: P.ExportItem -> String
 renderExportKind item =
@@ -1269,7 +1379,7 @@ renderDefProjection spans decl =
                 [ "def "
                     ++ P.defDeclName def0
                     ++ " type="
-                    ++ renderSrcType (P.constrainedBody (P.defDeclType def0))
+                    ++ renderConstrainedType (P.defDeclType def0)
                     ++ " expr="
                     ++ renderExpr (P.defDeclExpr def0)
                     ++ " span="

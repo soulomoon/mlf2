@@ -65,4 +65,8 @@ equation diagnostic path, plus two GADT/existential constructor modules
 covering parameterized data heads, GADT-style constructor result heads,
 constructor-local Unicode `∀`, nested source-type applications in constructor
 fields/results, related constructor/case patterns, and one malformed
-constructor-local forall-dot diagnostic path.
+constructor-local forall-dot diagnostic path, plus two qualified
+import/reference modules covering import aliases, alias-only imports, exposed
+classes/types/constructors/values/methods, qualified
+value/type/constructor/class/method references, and one malformed import-alias
+diagnostic path.

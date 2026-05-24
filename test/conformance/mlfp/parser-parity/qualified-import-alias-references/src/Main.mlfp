@@ -1,0 +1,10 @@
+module Main export (main) {
+  import Core as C exposing (Eq, Token(..), answer, eq);
+  def left : Token = answer;
+  def right : C.Token = C.answer;
+  def sameCtor : C.Token = C.Token;
+  def usesClass : Eq Token => Bool = true;
+  def usesQualifiedClass : C.Eq C.Token => Bool = true;
+  def also : Bool = eq Token Token;
+  def main : Bool = C.eq Token C.Token;
+}

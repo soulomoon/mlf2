@@ -1,0 +1,16 @@
+{
+  "schema_version": "selection-record-v1",
+  "round_id": "round-317",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-004",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-004",
+  "milestone_id": "milestone-4",
+  "direction_id": "direction-4a-canonical-parser-parity",
+  "extracted_item_id": "item-317-parser-library-qualified-import-reference-extension",
+  "summary": "Extend the shared source-text parser library with qualified import aliases and qualified value/type/constructor/class references through thin parser-parity fixtures, without returning to fixture-owned parser packages or exact-source shortcuts.",
+  "scheduler": {
+    "depends_on_round_ids": [],
+    "merge_after_item_ids": [],
+    "parallel_group": null
+  }
+}

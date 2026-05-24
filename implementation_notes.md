@@ -1,3 +1,22 @@
+## 2026-05-24 - Round 317 parser parity qualified import/reference extension
+
+- Extended the shared parser-owned parser-parity source-text lexer/parser
+  library with the bounded qualified import/reference syntax slice: import
+  aliases, alias-only imports, exposed classes/types/constructors/values and
+  methods, plus qualified value, type, constructor, class, and method
+  references.
+- Added committed parser-program projection fixtures for
+  `qualified-import-alias-references` and `qualified-import-alias-only`, plus
+  thin `.mlfp` fixture roots that expose only `sourceFile` and `sourceText`
+  before calling `renderParserParityProjectionFromSourceText`.
+- Added public negative evidence for malformed import-alias syntax through
+  `renderParserNegativeEvidenceFromSourceText`, keeping the rejection on the
+  shared source-text lexer/parser path with an `expected-import-alias`
+  parser-owned diagnostic.
+- Scope remains bounded parser parity only. This is not full parser parity,
+  resolver, checker, backend, compiler-package, driver, platform, proof, or
+  self-boot progress.
+
 ## 2026-05-24 - Round 316 parser parity GADT/existential extension
 
 - Extended the shared parser-owned parser-parity source-text lexer/parser

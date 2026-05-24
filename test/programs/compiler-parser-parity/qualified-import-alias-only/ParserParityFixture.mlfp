@@ -1,0 +1,7 @@
+module ParserParityFixture export (sourceFile, sourceText) {
+  def sourceFile : String =
+    "test/conformance/mlfp/parser-parity/qualified-import-alias-only/src/Main.mlfp";
+
+  def sourceText : String =
+    "module Main export (main) {\n  import Core as C;\n  def main : C.Token = C.Token;\n}\n";
+}

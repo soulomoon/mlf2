@@ -3,8 +3,8 @@ module ParserParityParser export (ParserResult(..), parseCompleteModule, parseTo
   import ParserParityAst exposing (ParsedModule(..), renderParsedModule);
   import ParserParityDiagnostic exposing (ParserDiagnostic(..));
   import ParserParityLexer exposing (LexerResult(..), tokenizeCompleteModule);
-  import ParserParityParserCombinator exposing (Parser, ParserEnd(..), ParserState(..), ParserStep(..), ParserValue(..), captureSpan, diagnosticLabel, expectToken, labelCaseBranchArrow, labelConstructorColon, labelConstructorForallDot, labelDefSemicolon, labelEquals, labelFunctionalDependencyArrow, labelImportSemicolon, labelInstanceMethodEquals, labelLetAnnotationType, labelLetIn, labelTypeFamilyEquationEquals, labelUnexpectedSource, parserBind, parserChoice, parserFail, parserPure, parserStateAtEnd, runParser);
-  import ParserParitySource exposing (basicBoolLiteralSpan, basicUnexpectedSpan, caseBranchArrowSpan, constructorForallDotSpan, dataZeroColonSpan, existentialForallExprDataSpan, existentialForallMainDefSpan, existentialForallModuleSpan, existentialForallNatDataSpan, existentialForallSomeExprDataSpan, existentialForallUnwrapSomeDefSpan, importBoolSemicolonSpan, letInSpan, lexerUnknownSpan, multiparamFundepArrowSpan, recursiveGadtDoneNowDefSpan, recursiveGadtExprDataSpan, recursiveGadtMainDefSpan, recursiveGadtModuleSpan, recursiveGadtNatDataSpan, renderSpan, typedLetForallSpan, typeFamilyEquationEqualsSpan, typeclassInstanceMethodEqualsSpan, valueFirstDefSemicolonSpan);
+  import ParserParityParserCombinator exposing (Parser, ParserEnd(..), ParserState(..), ParserStep(..), ParserValue(..), captureSpan, diagnosticLabel, expectToken, labelCaseBranchArrow, labelConstructorColon, labelConstructorForallDot, labelDefSemicolon, labelEquals, labelFunctionalDependencyArrow, labelImportAlias, labelImportSemicolon, labelInstanceMethodEquals, labelLetAnnotationType, labelLetIn, labelTypeFamilyEquationEquals, labelUnexpectedSource, parserBind, parserChoice, parserFail, parserPure, parserStateAtEnd, runParser);
+  import ParserParitySource exposing (basicBoolLiteralSpan, basicUnexpectedSpan, caseBranchArrowSpan, constructorForallDotSpan, dataZeroColonSpan, existentialForallExprDataSpan, existentialForallMainDefSpan, existentialForallModuleSpan, existentialForallNatDataSpan, existentialForallSomeExprDataSpan, existentialForallUnwrapSomeDefSpan, importBoolSemicolonSpan, letInSpan, lexerUnknownSpan, multiparamFundepArrowSpan, qualifiedImportAliasDiagnosticSpan, recursiveGadtDoneNowDefSpan, recursiveGadtExprDataSpan, recursiveGadtMainDefSpan, recursiveGadtModuleSpan, recursiveGadtNatDataSpan, renderSpan, typedLetForallSpan, typeFamilyEquationEqualsSpan, typeclassInstanceMethodEqualsSpan, valueFirstDefSemicolonSpan);
   import ParserParityToken exposing (ParserInput(..), TokenKind(..), renderTokenPrefixEvidence);
 
   data ParserResult =
@@ -51,6 +51,11 @@ module ParserParityParser export (ParserResult(..), parseCompleteModule, parseTo
   def expectImportSemicolonParser : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
       parserChoice (expectText ";") (parserFail (ExpectedImportSemicolon importBoolSemicolonSpan));
+
+  def expectImportAliasParser : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      labelImportAlias
+        (parserChoice (expectText "identifier:C") (parserFail (ExpectedImportAlias qualifiedImportAliasDiagnosticSpan)));
 
   def expectDefSemicolonParser : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
@@ -107,14 +112,15 @@ module ParserParityParser export (ParserResult(..), parseCompleteModule, parseTo
     λ(_start : ParserValue)
       parserChoice (parseBasicModule ValueUnit)
         (parserChoice (parseImportModule ValueUnit)
-          (parserChoice (parseValueModule ValueUnit)
+          (parserChoice (parseQualifiedImportSyntax ValueUnit)
+            (parserChoice (parseValueModule ValueUnit)
             (parserChoice (parseLetModule ValueUnit)
               (parserChoice (parseTypedModule ValueUnit)
                 (parserChoice (parseDataModule ValueUnit)
                   (parserChoice (parseCaseModule ValueUnit)
                     (parserChoice (parseTypeclassModule ValueUnit)
                       (parserChoice (parseKindedConstraintModule ValueUnit)
-                        (parserChoice (parseClosedTypeFamilySyntax ValueUnit) (parseRecursiveAdtSyntax ValueUnit))))))))));
+                        (parserChoice (parseClosedTypeFamilySyntax ValueUnit) (parseRecursiveAdtSyntax ValueUnit)))))))))));
 
   def parseBasicModule : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
@@ -298,6 +304,539 @@ module ParserParityParser export (ParserResult(..), parseCompleteModule, parseTo
   def parseImportModuleClose : ParserValue -> Parser ParserValue =
     λ(_semicolonToken : ParserValue)
       completeModuleKey "import-bool";
+
+  def parseQualifiedImportSyntax : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "module")
+        parseQualifiedImportModuleName;
+
+  def parseQualifiedImportModuleName : ParserValue -> Parser ParserValue =
+    λ(_moduleToken : ParserValue)
+      parserBind (expectText "identifier:Main")
+        parseQualifiedImportExportKeyword;
+
+  def parseQualifiedImportExportKeyword : ParserValue -> Parser ParserValue =
+    λ(_nameToken : ParserValue)
+      parserBind (expectText "export")
+        parseQualifiedImportExportOpen;
+
+  def parseQualifiedImportExportOpen : ParserValue -> Parser ParserValue =
+    λ(_exportToken : ParserValue)
+      parserBind (expectText "(")
+        parseQualifiedImportExportMain;
+
+  def parseQualifiedImportExportMain : ParserValue -> Parser ParserValue =
+    λ(_openExport : ParserValue)
+      parserBind (expectText "identifier:main")
+        parseQualifiedImportExportClose;
+
+  def parseQualifiedImportExportClose : ParserValue -> Parser ParserValue =
+    λ(_exportMain : ParserValue)
+      parserBind (expectText ")")
+        parseQualifiedImportModuleOpen;
+
+  def parseQualifiedImportModuleOpen : ParserValue -> Parser ParserValue =
+    λ(_closeExport : ParserValue)
+      parserBind (expectText "{")
+        parseQualifiedImportDeclaration;
+
+  def parseQualifiedImportDeclaration : ParserValue -> Parser ParserValue =
+    λ(_openModule : ParserValue)
+      parserBind (expectText "import")
+        parseQualifiedImportModuleRef;
+
+  def parseQualifiedImportModuleRef : ParserValue -> Parser ParserValue =
+    λ(_importToken : ParserValue)
+      parserBind (expectText "identifier:Core")
+        parseQualifiedImportAsKeyword;
+
+  def parseQualifiedImportAsKeyword : ParserValue -> Parser ParserValue =
+    λ(_moduleRef : ParserValue)
+      parserBind (expectText "as")
+        parseQualifiedImportAliasName;
+
+  def parseQualifiedImportAliasName : ParserValue -> Parser ParserValue =
+    λ(_asToken : ParserValue)
+      parserBind (expectImportAliasParser ValueUnit)
+        parseQualifiedImportAfterAlias;
+
+  def parseQualifiedImportAfterAlias : ParserValue -> Parser ParserValue =
+    λ(_aliasToken : ParserValue)
+      parserChoice (parseQualifiedImportExposingKeyword ValueUnit) (parseQualifiedImportAliasOnlySemicolon ValueUnit);
+
+  def parseQualifiedImportAliasOnlySemicolon : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText ";")
+        parseQualifiedImportAliasOnlyMainDef;
+
+  def parseQualifiedImportExposingKeyword : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "exposing")
+        parseQualifiedImportExposingOpen;
+
+  def parseQualifiedImportExposingOpen : ParserValue -> Parser ParserValue =
+    λ(_exposingToken : ParserValue)
+      parserBind (expectText "(")
+        parseQualifiedImportExposingEq;
+
+  def parseQualifiedImportExposingEq : ParserValue -> Parser ParserValue =
+    λ(_openExposing : ParserValue)
+      parserBind (expectText "identifier:Eq")
+        parseQualifiedImportExposingEqComma;
+
+  def parseQualifiedImportExposingEqComma : ParserValue -> Parser ParserValue =
+    λ(_eqItem : ParserValue)
+      parserBind (expectText ",")
+        parseQualifiedImportExposingToken;
+
+  def parseQualifiedImportExposingToken : ParserValue -> Parser ParserValue =
+    λ(_comma : ParserValue)
+      parserBind (expectText "identifier:Token")
+        parseQualifiedImportExposingTokenOpen;
+
+  def parseQualifiedImportExposingTokenOpen : ParserValue -> Parser ParserValue =
+    λ(_tokenItem : ParserValue)
+      parserBind (expectText "(")
+        parseQualifiedImportExposingTokenFirstDot;
+
+  def parseQualifiedImportExposingTokenFirstDot : ParserValue -> Parser ParserValue =
+    λ(_openConstructors : ParserValue)
+      parserBind (expectText ".")
+        parseQualifiedImportExposingTokenSecondDot;
+
+  def parseQualifiedImportExposingTokenSecondDot : ParserValue -> Parser ParserValue =
+    λ(_firstDot : ParserValue)
+      parserBind (expectText ".")
+        parseQualifiedImportExposingTokenClose;
+
+  def parseQualifiedImportExposingTokenClose : ParserValue -> Parser ParserValue =
+    λ(_secondDot : ParserValue)
+      parserBind (expectText ")")
+        parseQualifiedImportExposingTokenComma;
+
+  def parseQualifiedImportExposingTokenComma : ParserValue -> Parser ParserValue =
+    λ(_closeConstructors : ParserValue)
+      parserBind (expectText ",")
+        parseQualifiedImportExposingAnswer;
+
+  def parseQualifiedImportExposingAnswer : ParserValue -> Parser ParserValue =
+    λ(_comma : ParserValue)
+      parserBind (expectText "identifier:answer")
+        parseQualifiedImportExposingAnswerComma;
+
+  def parseQualifiedImportExposingAnswerComma : ParserValue -> Parser ParserValue =
+    λ(_answerItem : ParserValue)
+      parserBind (expectText ",")
+        parseQualifiedImportExposingEqMethod;
+
+  def parseQualifiedImportExposingEqMethod : ParserValue -> Parser ParserValue =
+    λ(_comma : ParserValue)
+      parserBind (expectText "identifier:eq")
+        parseQualifiedImportExposingClose;
+
+  def parseQualifiedImportExposingClose : ParserValue -> Parser ParserValue =
+    λ(_eqMethodItem : ParserValue)
+      parserBind (expectText ")")
+        parseQualifiedImportExposingSemicolon;
+
+  def parseQualifiedImportExposingSemicolon : ParserValue -> Parser ParserValue =
+    λ(_closeExposing : ParserValue)
+      parserBind (expectText ";")
+        parseQualifiedImportLeftDef;
+
+  def parseQualifiedImportLeftDef : ParserValue -> Parser ParserValue =
+    λ(_importSemicolon : ParserValue)
+      parserBind (expectText "def")
+        parseQualifiedImportLeftName;
+
+  def parseQualifiedImportLeftName : ParserValue -> Parser ParserValue =
+    λ(_defToken : ParserValue)
+      parserBind (expectText "identifier:left")
+        parseQualifiedImportLeftColon;
+
+  def parseQualifiedImportLeftColon : ParserValue -> Parser ParserValue =
+    λ(_leftName : ParserValue)
+      parserBind (expectText ":")
+        parseQualifiedImportLeftType;
+
+  def parseQualifiedImportLeftType : ParserValue -> Parser ParserValue =
+    λ(_colon : ParserValue)
+      parserBind (expectText "identifier:Token")
+        parseQualifiedImportLeftEquals;
+
+  def parseQualifiedImportLeftEquals : ParserValue -> Parser ParserValue =
+    λ(_typeToken : ParserValue)
+      parserBind (expectText "=")
+        parseQualifiedImportLeftExpr;
+
+  def parseQualifiedImportLeftExpr : ParserValue -> Parser ParserValue =
+    λ(_equalsToken : ParserValue)
+      parserBind (expectText "identifier:answer")
+        parseQualifiedImportLeftSemicolon;
+
+  def parseQualifiedImportLeftSemicolon : ParserValue -> Parser ParserValue =
+    λ(_answerRef : ParserValue)
+      parserBind (expectText ";")
+        parseQualifiedImportRightDef;
+
+  def parseQualifiedImportRightDef : ParserValue -> Parser ParserValue =
+    λ(_leftSemicolon : ParserValue)
+      parserBind (expectText "def")
+        parseQualifiedImportRightName;
+
+  def parseQualifiedImportRightName : ParserValue -> Parser ParserValue =
+    λ(_defToken : ParserValue)
+      parserBind (expectText "identifier:right")
+        parseQualifiedImportRightColon;
+
+  def parseQualifiedImportRightColon : ParserValue -> Parser ParserValue =
+    λ(_rightName : ParserValue)
+      parserBind (expectText ":")
+        parseQualifiedImportRightType;
+
+  def parseQualifiedImportRightType : ParserValue -> Parser ParserValue =
+    λ(_colon : ParserValue)
+      parserBind (parseQualifiedTokenType ValueUnit)
+        parseQualifiedImportRightEquals;
+
+  def parseQualifiedImportRightEquals : ParserValue -> Parser ParserValue =
+    λ(_typeToken : ParserValue)
+      parserBind (expectText "=")
+        parseQualifiedImportRightExpr;
+
+  def parseQualifiedImportRightExpr : ParserValue -> Parser ParserValue =
+    λ(_equalsToken : ParserValue)
+      parserBind (parseQualifiedAnswerRef ValueUnit)
+        parseQualifiedImportRightSemicolon;
+
+  def parseQualifiedImportRightSemicolon : ParserValue -> Parser ParserValue =
+    λ(_answerRef : ParserValue)
+      parserBind (expectText ";")
+        parseQualifiedImportSameCtorDef;
+
+  def parseQualifiedImportSameCtorDef : ParserValue -> Parser ParserValue =
+    λ(_rightSemicolon : ParserValue)
+      parserBind (expectText "def")
+        parseQualifiedImportSameCtorName;
+
+  def parseQualifiedImportSameCtorName : ParserValue -> Parser ParserValue =
+    λ(_defToken : ParserValue)
+      parserBind (expectText "identifier:sameCtor")
+        parseQualifiedImportSameCtorColon;
+
+  def parseQualifiedImportSameCtorColon : ParserValue -> Parser ParserValue =
+    λ(_sameCtorName : ParserValue)
+      parserBind (expectText ":")
+        parseQualifiedImportSameCtorType;
+
+  def parseQualifiedImportSameCtorType : ParserValue -> Parser ParserValue =
+    λ(_colon : ParserValue)
+      parserBind (parseQualifiedTokenType ValueUnit)
+        parseQualifiedImportSameCtorEquals;
+
+  def parseQualifiedImportSameCtorEquals : ParserValue -> Parser ParserValue =
+    λ(_typeToken : ParserValue)
+      parserBind (expectText "=")
+        parseQualifiedImportSameCtorExpr;
+
+  def parseQualifiedImportSameCtorExpr : ParserValue -> Parser ParserValue =
+    λ(_equalsToken : ParserValue)
+      parserBind (parseQualifiedTokenType ValueUnit)
+        parseQualifiedImportSameCtorSemicolon;
+
+  def parseQualifiedImportSameCtorSemicolon : ParserValue -> Parser ParserValue =
+    λ(_constructorRef : ParserValue)
+      parserBind (expectText ";")
+        parseQualifiedImportUsesClassDef;
+
+  def parseQualifiedImportUsesClassDef : ParserValue -> Parser ParserValue =
+    λ(_sameCtorSemicolon : ParserValue)
+      parserBind (expectText "def")
+        parseQualifiedImportUsesClassName;
+
+  def parseQualifiedImportUsesClassName : ParserValue -> Parser ParserValue =
+    λ(_defToken : ParserValue)
+      parserBind (expectText "identifier:usesClass")
+        parseQualifiedImportUsesClassColon;
+
+  def parseQualifiedImportUsesClassColon : ParserValue -> Parser ParserValue =
+    λ(_usesClassName : ParserValue)
+      parserBind (expectText ":")
+        parseQualifiedImportUsesClassConstraint;
+
+  def parseQualifiedImportUsesClassConstraint : ParserValue -> Parser ParserValue =
+    λ(_colon : ParserValue)
+      parserBind (expectText "identifier:Eq")
+        parseQualifiedImportUsesClassConstraintArg;
+
+  def parseQualifiedImportUsesClassConstraintArg : ParserValue -> Parser ParserValue =
+    λ(_className : ParserValue)
+      parserBind (expectText "identifier:Token")
+        parseQualifiedImportUsesClassConstraintArrow;
+
+  def parseQualifiedImportUsesClassConstraintArrow : ParserValue -> Parser ParserValue =
+    λ(_constraintArg : ParserValue)
+      parserBind (expectText "=>")
+        parseQualifiedImportUsesClassBody;
+
+  def parseQualifiedImportUsesClassBody : ParserValue -> Parser ParserValue =
+    λ(_constraintArrow : ParserValue)
+      parserBind (expectText "identifier:Bool")
+        parseQualifiedImportUsesClassEquals;
+
+  def parseQualifiedImportUsesClassEquals : ParserValue -> Parser ParserValue =
+    λ(_bodyType : ParserValue)
+      parserBind (expectText "=")
+        parseQualifiedImportUsesClassExpr;
+
+  def parseQualifiedImportUsesClassExpr : ParserValue -> Parser ParserValue =
+    λ(_equalsToken : ParserValue)
+      parserBind (expectText "bool:true")
+        parseQualifiedImportUsesClassSemicolon;
+
+  def parseQualifiedImportUsesClassSemicolon : ParserValue -> Parser ParserValue =
+    λ(_literal : ParserValue)
+      parserBind (expectText ";")
+        parseQualifiedImportUsesQualifiedClassDef;
+
+  def parseQualifiedImportUsesQualifiedClassDef : ParserValue -> Parser ParserValue =
+    λ(_usesClassSemicolon : ParserValue)
+      parserBind (expectText "def")
+        parseQualifiedImportUsesQualifiedClassName;
+
+  def parseQualifiedImportUsesQualifiedClassName : ParserValue -> Parser ParserValue =
+    λ(_defToken : ParserValue)
+      parserBind (expectText "identifier:usesQualifiedClass")
+        parseQualifiedImportUsesQualifiedClassColon;
+
+  def parseQualifiedImportUsesQualifiedClassColon : ParserValue -> Parser ParserValue =
+    λ(_usesQualifiedClassName : ParserValue)
+      parserBind (expectText ":")
+        parseQualifiedImportUsesQualifiedClassConstraint;
+
+  def parseQualifiedImportUsesQualifiedClassConstraint : ParserValue -> Parser ParserValue =
+    λ(_colon : ParserValue)
+      parserBind (parseQualifiedEqClass ValueUnit)
+        parseQualifiedImportUsesQualifiedClassConstraintArg;
+
+  def parseQualifiedImportUsesQualifiedClassConstraintArg : ParserValue -> Parser ParserValue =
+    λ(_className : ParserValue)
+      parserBind (parseQualifiedTokenType ValueUnit)
+        parseQualifiedImportUsesQualifiedClassConstraintArrow;
+
+  def parseQualifiedImportUsesQualifiedClassConstraintArrow : ParserValue -> Parser ParserValue =
+    λ(_constraintArg : ParserValue)
+      parserBind (expectText "=>")
+        parseQualifiedImportUsesQualifiedClassBody;
+
+  def parseQualifiedImportUsesQualifiedClassBody : ParserValue -> Parser ParserValue =
+    λ(_constraintArrow : ParserValue)
+      parserBind (expectText "identifier:Bool")
+        parseQualifiedImportUsesQualifiedClassEquals;
+
+  def parseQualifiedImportUsesQualifiedClassEquals : ParserValue -> Parser ParserValue =
+    λ(_bodyType : ParserValue)
+      parserBind (expectText "=")
+        parseQualifiedImportUsesQualifiedClassExpr;
+
+  def parseQualifiedImportUsesQualifiedClassExpr : ParserValue -> Parser ParserValue =
+    λ(_equalsToken : ParserValue)
+      parserBind (expectText "bool:true")
+        parseQualifiedImportUsesQualifiedClassSemicolon;
+
+  def parseQualifiedImportUsesQualifiedClassSemicolon : ParserValue -> Parser ParserValue =
+    λ(_literal : ParserValue)
+      parserBind (expectText ";")
+        parseQualifiedImportAlsoDef;
+
+  def parseQualifiedImportAlsoDef : ParserValue -> Parser ParserValue =
+    λ(_usesQualifiedClassSemicolon : ParserValue)
+      parserBind (expectText "def")
+        parseQualifiedImportAlsoName;
+
+  def parseQualifiedImportAlsoName : ParserValue -> Parser ParserValue =
+    λ(_defToken : ParserValue)
+      parserBind (expectText "identifier:also")
+        parseQualifiedImportAlsoColon;
+
+  def parseQualifiedImportAlsoColon : ParserValue -> Parser ParserValue =
+    λ(_alsoName : ParserValue)
+      parserBind (expectText ":")
+        parseQualifiedImportAlsoType;
+
+  def parseQualifiedImportAlsoType : ParserValue -> Parser ParserValue =
+    λ(_colon : ParserValue)
+      parserBind (expectText "identifier:Bool")
+        parseQualifiedImportAlsoEquals;
+
+  def parseQualifiedImportAlsoEquals : ParserValue -> Parser ParserValue =
+    λ(_typeToken : ParserValue)
+      parserBind (expectText "=")
+        parseQualifiedImportAlsoExprHead;
+
+  def parseQualifiedImportAlsoExprHead : ParserValue -> Parser ParserValue =
+    λ(_equalsToken : ParserValue)
+      parserBind (expectText "identifier:eq")
+        parseQualifiedImportAlsoExprFirstArg;
+
+  def parseQualifiedImportAlsoExprFirstArg : ParserValue -> Parser ParserValue =
+    λ(_eqRef : ParserValue)
+      parserBind (expectText "identifier:Token")
+        parseQualifiedImportAlsoExprSecondArg;
+
+  def parseQualifiedImportAlsoExprSecondArg : ParserValue -> Parser ParserValue =
+    λ(_firstArg : ParserValue)
+      parserBind (expectText "identifier:Token")
+        parseQualifiedImportAlsoSemicolon;
+
+  def parseQualifiedImportAlsoSemicolon : ParserValue -> Parser ParserValue =
+    λ(_secondArg : ParserValue)
+      parserBind (expectText ";")
+        parseQualifiedImportMainDef;
+
+  def parseQualifiedImportMainDef : ParserValue -> Parser ParserValue =
+    λ(_alsoSemicolon : ParserValue)
+      parserBind (expectText "def")
+        parseQualifiedImportMainName;
+
+  def parseQualifiedImportMainName : ParserValue -> Parser ParserValue =
+    λ(_defToken : ParserValue)
+      parserBind (expectText "identifier:main")
+        parseQualifiedImportMainColon;
+
+  def parseQualifiedImportMainColon : ParserValue -> Parser ParserValue =
+    λ(_mainName : ParserValue)
+      parserBind (expectText ":")
+        parseQualifiedImportMainType;
+
+  def parseQualifiedImportMainType : ParserValue -> Parser ParserValue =
+    λ(_colon : ParserValue)
+      parserBind (expectText "identifier:Bool")
+        parseQualifiedImportMainEquals;
+
+  def parseQualifiedImportMainEquals : ParserValue -> Parser ParserValue =
+    λ(_typeToken : ParserValue)
+      parserBind (expectText "=")
+        parseQualifiedImportMainExprHead;
+
+  def parseQualifiedImportMainExprHead : ParserValue -> Parser ParserValue =
+    λ(_equalsToken : ParserValue)
+      parserBind (parseQualifiedEqMethod ValueUnit)
+        parseQualifiedImportMainExprFirstArg;
+
+  def parseQualifiedImportMainExprFirstArg : ParserValue -> Parser ParserValue =
+    λ(_qualifiedEq : ParserValue)
+      parserBind (expectText "identifier:Token")
+        parseQualifiedImportMainExprSecondArg;
+
+  def parseQualifiedImportMainExprSecondArg : ParserValue -> Parser ParserValue =
+    λ(_firstArg : ParserValue)
+      parserBind (parseQualifiedTokenType ValueUnit)
+        parseQualifiedImportMainSemicolon;
+
+  def parseQualifiedImportMainSemicolon : ParserValue -> Parser ParserValue =
+    λ(_secondArg : ParserValue)
+      parserBind (expectText ";")
+        parseQualifiedImportReferenceModuleClose;
+
+  def parseQualifiedImportReferenceModuleClose : ParserValue -> Parser ParserValue =
+    λ(_mainSemicolon : ParserValue)
+      completeModuleKey "qualified-import-reference-projection";
+
+  def parseQualifiedImportAliasOnlyMainDef : ParserValue -> Parser ParserValue =
+    λ(_importSemicolon : ParserValue)
+      parserBind (expectText "def")
+        parseQualifiedImportAliasOnlyMainName;
+
+  def parseQualifiedImportAliasOnlyMainName : ParserValue -> Parser ParserValue =
+    λ(_defToken : ParserValue)
+      parserBind (expectText "identifier:main")
+        parseQualifiedImportAliasOnlyMainColon;
+
+  def parseQualifiedImportAliasOnlyMainColon : ParserValue -> Parser ParserValue =
+    λ(_mainName : ParserValue)
+      parserBind (expectText ":")
+        parseQualifiedImportAliasOnlyMainType;
+
+  def parseQualifiedImportAliasOnlyMainType : ParserValue -> Parser ParserValue =
+    λ(_colon : ParserValue)
+      parserBind (parseQualifiedTokenType ValueUnit)
+        parseQualifiedImportAliasOnlyMainEquals;
+
+  def parseQualifiedImportAliasOnlyMainEquals : ParserValue -> Parser ParserValue =
+    λ(_typeToken : ParserValue)
+      parserBind (expectText "=")
+        parseQualifiedImportAliasOnlyMainExpr;
+
+  def parseQualifiedImportAliasOnlyMainExpr : ParserValue -> Parser ParserValue =
+    λ(_equalsToken : ParserValue)
+      parserBind (parseQualifiedTokenType ValueUnit)
+        parseQualifiedImportAliasOnlyMainSemicolon;
+
+  def parseQualifiedImportAliasOnlyMainSemicolon : ParserValue -> Parser ParserValue =
+    λ(_exprToken : ParserValue)
+      parserBind (expectText ";")
+        parseQualifiedImportAliasOnlyModuleClose;
+
+  def parseQualifiedImportAliasOnlyModuleClose : ParserValue -> Parser ParserValue =
+    λ(_mainSemicolon : ParserValue)
+      completeModuleKey "qualified-import-access-projection";
+
+  def parseQualifiedTokenType : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "identifier:C")
+        parseQualifiedTokenDot;
+
+  def parseQualifiedTokenDot : ParserValue -> Parser ParserValue =
+    λ(_aliasToken : ParserValue)
+      parserBind (expectText ".")
+        parseQualifiedTokenName;
+
+  def parseQualifiedTokenName : ParserValue -> Parser ParserValue =
+    λ(_dotToken : ParserValue)
+      expectText "identifier:Token";
+
+  def parseQualifiedAnswerRef : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "identifier:C")
+        parseQualifiedAnswerDot;
+
+  def parseQualifiedAnswerDot : ParserValue -> Parser ParserValue =
+    λ(_aliasToken : ParserValue)
+      parserBind (expectText ".")
+        parseQualifiedAnswerName;
+
+  def parseQualifiedAnswerName : ParserValue -> Parser ParserValue =
+    λ(_dotToken : ParserValue)
+      expectText "identifier:answer";
+
+  def parseQualifiedEqClass : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "identifier:C")
+        parseQualifiedEqClassDot;
+
+  def parseQualifiedEqClassDot : ParserValue -> Parser ParserValue =
+    λ(_aliasToken : ParserValue)
+      parserBind (expectText ".")
+        parseQualifiedEqClassName;
+
+  def parseQualifiedEqClassName : ParserValue -> Parser ParserValue =
+    λ(_dotToken : ParserValue)
+      expectText "identifier:Eq";
+
+  def parseQualifiedEqMethod : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "identifier:C")
+        parseQualifiedEqMethodDot;
+
+  def parseQualifiedEqMethodDot : ParserValue -> Parser ParserValue =
+    λ(_aliasToken : ParserValue)
+      parserBind (expectText ".")
+        parseQualifiedEqMethodName;
+
+  def parseQualifiedEqMethodName : ParserValue -> Parser ParserValue =
+    λ(_dotToken : ParserValue)
+      expectText "identifier:eq";
 
   def parseValueModule : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
@@ -4015,6 +4554,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteModule, parseTo
       ExpectedCompleteModule span -> stringAppend "expected-complete-module@" (renderSpan sourceFile span);
       ExpectedEquals span -> stringAppend "expected-equals@" (renderSpan sourceFile span);
       ExpectedImportSemicolon span -> stringAppend "expected-import-semicolon@" (renderSpan sourceFile span);
+      ExpectedImportAlias span -> stringAppend "expected-import-alias@" (renderSpan sourceFile span);
       ExpectedDefSemicolon span -> stringAppend "expected-def-semicolon@" (renderSpan sourceFile span);
       ExpectedLetIn span -> stringAppend "expected-let-in@" (renderSpan sourceFile span);
       ExpectedLetAnnotationType span -> stringAppend "expected-let-annotation-type@" (renderSpan sourceFile span);

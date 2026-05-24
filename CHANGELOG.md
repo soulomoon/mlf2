@@ -15,6 +15,15 @@
 
 ### Added
 - Extended the shared parser-owned parser-parity library with a bounded
+  qualified import/reference grammar slice for import aliases, alias-only
+  imports, exposed classes/types/constructors/values/methods, and qualified
+  value/type/constructor/class/method references. New committed
+  parser-program projections and thin fixture roots cover
+  `qualified-import-alias-references` and `qualified-import-alias-only`, with
+  malformed import-alias evidence through the same source-text lexer/parser
+  path. This is not full parser parity, resolver/checker/backend,
+  compiler-package, driver, platform, proof, or self-boot work.
+- Extended the shared parser-owned parser-parity library with a bounded
   GADT/existential constructor syntax grammar slice for parameterized data
   heads, GADT-style constructor result heads, constructor-local Unicode
   `∀` binders, nested source-type applications in constructor fields/results,

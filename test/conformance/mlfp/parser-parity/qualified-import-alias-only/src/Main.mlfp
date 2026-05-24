@@ -1,0 +1,4 @@
+module Main export (main) {
+  import Core as C;
+  def main : C.Token = C.Token;
+}

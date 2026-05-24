@@ -1,0 +1,24 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-317",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-004",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-004",
+  "milestone_id": "milestone-4",
+  "direction_id": "direction-4a-canonical-parser-parity",
+  "extracted_item_id": "item-317-parser-library-qualified-import-reference-extension",
+  "decision": "approved",
+  "evidence_summary": "Focused parser-parity matcher, direct parser-library smokes, shortcut audits, cabal build all, full cabal test, and thesis conformance gate passed; the broad parser-parity matcher timed out after partial progress and was covered by the full suite.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-4-completion",
+        "text": "round-317 extended the shared parser-owned parser library to qualified import aliases and qualified value/type/constructor/class/method references; evidence: focused matcher, direct smokes, shortcut audits, cabal build all, cabal test, and thesis gate passed."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}
