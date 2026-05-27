@@ -1,7 +1,2 @@
-tool	version	mode	defs	run	real_ms	per_def_ms
-ghc	9.12.2	-fforce-recomp -fno-code -O0 -v0 +RTS -A64m	914	1	270.000	0.295
-ghc	9.12.2	-fforce-recomp -fno-code -O0 -v0 +RTS -A64m	914	2	270.000	0.295
-ghc	9.12.2	-fforce-recomp -fno-code -O0 -v0 +RTS -A64m	914	3	260.000	0.284
-ghc	9.12.2	-fforce-recomp -fno-code -O0 -v0 +RTS -A64m	914	4	260.000	0.284
-ghc	9.12.2	-fforce-recomp -fno-code -O0 -v0 +RTS -A64m	914	5	250.000	0.274
-ghc	9.12.2	median	914	median	260.000	0.284
+tool	version	mode	defs	source	run	real_ms	per_def_ms	status
+ghc	9.12.2	-fforce-recomp -fno-code -O0 -v0 +RTS -A64m	914	bench/ghc-reference/ParserShape914.hs	1	510.000	0.558	0

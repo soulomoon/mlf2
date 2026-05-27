@@ -20,6 +20,19 @@ import System.IO (hClose, openTempFile)
 import System.Timeout (timeout)
 import Test.Hspec
 
+import CheckedProgramTestSupport
+  ( checkedArtifactBackendLLVM,
+    checkedArtifactCheckOutput,
+    checkedArtifactNativeLLVM,
+    checkedArtifactRunOutput,
+    checkedProgramArtifactFromSource,
+    checkProgramFileCached,
+    emitBackendFileCached,
+    emitBackendSourceCached,
+    emitNativeFileCached,
+    emitNativeSourceCached,
+    runProgramFileCached,
+  )
 import LLVMToolSupport
   ( NativeRunResult (..),
     parseExecutableCommand,
@@ -37,13 +50,7 @@ import MLF.API (parseRawProgram, renderProgramParseError)
 import MLF.Frontend.Program.Types (CheckedProgram)
 import MLF.Frontend.Syntax (Lit (..))
 import MLF.Pipeline (checkProgram)
-import MLF.Program.CLI
-  ( checkProgramFile,
-    emitBackendArgs,
-    emitBackendFile,
-    emitNativeFile,
-    runProgramFile,
-  )
+import qualified MLF.Program.CLI as CLI
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
 import Parity.ProgramMatrix
   ( ProgramMatrixCase (..),
@@ -73,7 +80,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "emits LLVM IR from the CLI file entrypoint" $ do
-    output <- requireRight =<< emitBackendFile "test/programs/unified/authoritative-let-polymorphism.mlfp"
+    output <- requireRight =<< CLI.emitBackendFile "test/programs/unified/authoritative-let-polymorphism.mlfp"
 
     output `shouldSatisfy` isInfixOf "; mlf2 LLVM backend v0"
     output `shouldSatisfy` isInfixOf "define i64 @\"Main__main\"()"
@@ -86,7 +93,7 @@ spec = describe "MLF.Backend.LLVM" $ do
           _ <- writePackageFile mainRoot "Main.mlfp" llvmPackageMainSource
           _ <- writePackageFile libRoot "Lib.mlfp" llvmPackageLibSource
 
-          output <- requireRight =<< emitBackendArgs [mainRoot, "--search-path", libRoot]
+          output <- requireRight =<< CLI.emitBackendArgs [mainRoot, "--search-path", libRoot]
 
           output `shouldSatisfy` isInfixOf "; mlf2 LLVM backend v0"
           output `shouldSatisfy` isInfixOf "define i64 @\"Lib__two\"()"
@@ -2875,36 +2882,52 @@ assertNativeProgram programText expectedValue = do
     `shouldReturn` NativeRunResult ExitSuccess (expectedValue ++ "\n") ""
 
 assertNativeProgramBehavior :: String -> String -> String -> Expectation
-assertNativeProgramBehavior programText expectedOutput backendSignature =
-  withTempProgram programText $ \path -> do
-    checkProgramFile path `shouldReturn` Right "OK\n"
-    runProgramFile path `shouldReturn` Right expectedOutput
+assertNativeProgramBehavior programText expectedOutput backendSignature = do
+  artifact <- requireRight =<< checkedProgramArtifactFromSource "<inline-test>" programText
+  checkedArtifactCheckOutput artifact `shouldBe` Right "OK\n"
+  checkedArtifactRunOutput artifact `shouldBe` Right expectedOutput
 
-    backendOutput <- requireRight =<< emitBackendFile path
-    backendOutput `shouldSatisfy` isInfixOf backendSignature
-    validateLLVMAssembly backendOutput
-    validateLLVMObjectCode backendOutput
+  backendOutput <- requireRight (checkedArtifactBackendLLVM artifact)
+  backendOutput `shouldSatisfy` isInfixOf backendSignature
+  validateLLVMAssembly backendOutput
+  validateLLVMObjectCode backendOutput
 
-    nativeOutput <- requireRight =<< emitNativeFile path
-    nativeOutput `shouldSatisfy` isInfixOf "define i32 @\"main\"()"
-    validateLLVMAssembly nativeOutput
-    validateLLVMObjectCode nativeOutput
-    runLLVMNativeExecutable nativeOutput
-      `shouldReturn` NativeRunResult ExitSuccess expectedOutput ""
+  nativeOutput <- requireRight (checkedArtifactNativeLLVM artifact)
+  nativeOutput `shouldSatisfy` isInfixOf "define i32 @\"main\"()"
+  validateLLVMAssembly nativeOutput
+  validateLLVMObjectCode nativeOutput
+  runLLVMNativeExecutable nativeOutput
+    `shouldReturn` NativeRunResult ExitSuccess expectedOutput ""
 
 emitNativeSource :: String -> IO (Either String String)
 emitNativeSource programText =
-  withTempProgram programText emitNativeFile
+  emitNativeSourceCached "<inline-test>" programText
 
 emitBackendSource :: String -> IO (Either String String)
 emitBackendSource programText =
-  withTempProgram programText emitBackendFile
+  emitBackendSourceCached "<inline-test>" programText
+
+checkProgramFile :: FilePath -> IO (Either String String)
+checkProgramFile =
+  checkProgramFileCached
+
+runProgramFile :: FilePath -> IO (Either String String)
+runProgramFile =
+  runProgramFileCached
+
+emitBackendFile :: FilePath -> IO (Either String String)
+emitBackendFile =
+  emitBackendFileCached
+
+emitNativeFile :: FilePath -> IO (Either String String)
+emitNativeFile =
+  emitNativeFileCached
 
 renderProgramMatrixSourceLLVM :: ProgramMatrixSource -> IO String
 renderProgramMatrixSourceLLVM source =
   case source of
     InlineProgram programText ->
-      requireRight =<< withTempProgram programText emitBackendFile
+      requireRight =<< emitBackendSource programText
     ProgramFile path ->
       requireRight =<< emitBackendFile path
 
@@ -8661,7 +8684,7 @@ emitProgramRuntimeLLVM :: ProgramMatrixSource -> IO (Either String String)
 emitProgramRuntimeLLVM source =
   case source of
     InlineProgram programText ->
-      withTempProgram programText emitBackendFile
+      emitBackendSource programText
     ProgramFile path ->
       emitBackendFile path
 
@@ -8669,7 +8692,7 @@ emitProgramRuntimeNativeLLVM :: ProgramMatrixSource -> IO (Either String String)
 emitProgramRuntimeNativeLLVM source =
   case source of
     InlineProgram programText ->
-      withTempProgram programText emitNativeFile
+      emitNativeSource programText
     ProgramFile path ->
       emitNativeFile path
 

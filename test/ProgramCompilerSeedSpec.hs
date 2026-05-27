@@ -5,16 +5,24 @@ import System.Exit (ExitCode (..))
 import System.FilePath ((</>))
 import Test.Hspec
 
+import CheckedProgramTestSupport
+    ( CheckedProgramArtifact
+    , checkedArtifactBackendLLVM
+    , checkedArtifactCheckOutput
+    , checkedArtifactNativeLLVM
+    , checkedArtifactRunOutput
+    , checkedProgramArtifactFromLocatedPackage
+    )
 import LLVMToolSupport
     ( NativeRunResult (..)
     , runLLVMNativeExecutable
     , validateLLVMAssembly
     , validateLLVMObjectCode
     )
-import MLF.Frontend.Program.Check (checkLocatedProgramPackage)
 import MLF.Frontend.Program.Package
     ( PackageId (..)
     , PackageModuleId (..)
+    , PackageModuleGraph
     , discoverLocatedProgramPackage
     , locatedProgramPackageModuleGraph
     , packageModuleGraphNodes
@@ -22,78 +30,80 @@ import MLF.Frontend.Program.Package
     , packageModuleGraphOrder
     )
 import MLF.Frontend.Program.Prelude (withPreludeLocatedPackage)
-import MLF.Frontend.Program.Run
-    ( programRunOutput
-    , runLocatedProgramPackageOutput
-    )
-import MLF.Program.CLI
-    ( checkProgramArgs
-    , emitBackendArgs
-    , emitNativeArgs
-    , runProgramArgs
-    )
 
 spec :: Spec
 spec =
-    describe "MLF.Program compiler frontend seed package contract" $ do
-        it "compiler-seed discovers, checks, and runs the fixture as an ordinary package root" $ do
-            discovered <- requireRight =<< discoverLocatedProgramPackage compilerSeedPackageId compilerSeedRoot
-            let package = withPreludeLocatedPackage discovered
-            graph <- requireRight (locatedProgramPackageModuleGraph package)
+    describe "MLF.Program compiler frontend seed package contract" $
+        beforeAll loadCompilerSeedFixture $ do
+            it "compiler-seed discovers, checks, and runs the fixture as an ordinary package root" $ \fixture -> do
+                packageModuleGraphOrder (compilerSeedGraph fixture)
+                    `shouldBe`
+                        [ PackageModuleId compilerSeedPackageId "Prelude"
+                        , PackageModuleId compilerSeedPackageId "SeedContract"
+                        , PackageModuleId compilerSeedPackageId "SeedSource"
+                        , PackageModuleId compilerSeedPackageId "SeedToken"
+                        , PackageModuleId compilerSeedPackageId "SeedDiagnostic"
+                        , PackageModuleId compilerSeedPackageId "SeedLexer"
+                        , PackageModuleId compilerSeedPackageId "SeedAst"
+                        , PackageModuleId compilerSeedPackageId "SeedParser"
+                        , PackageModuleId compilerSeedPackageId "Main"
+                        ]
+                map packageModuleGraphNodeSourcePath (packageModuleGraphNodes (compilerSeedGraph fixture))
+                    `shouldMatchList`
+                        [ Just "<mlfp-prelude>"
+                        , Just (compilerSeedRoot </> "Main.mlfp")
+                        , Just (compilerSeedRoot </> "SeedAst.mlfp")
+                        , Just (compilerSeedRoot </> "SeedContract.mlfp")
+                        , Just (compilerSeedRoot </> "SeedDiagnostic.mlfp")
+                        , Just (compilerSeedRoot </> "SeedLexer.mlfp")
+                        , Just (compilerSeedRoot </> "SeedParser.mlfp")
+                        , Just (compilerSeedRoot </> "SeedSource.mlfp")
+                        , Just (compilerSeedRoot </> "SeedToken.mlfp")
+                        ]
+                checkedArtifactRunOutput (compilerSeedArtifact fixture)
+                    `shouldBe` Right compilerSeedFrontendEvidenceOutput
 
-            packageModuleGraphOrder graph
-                `shouldBe`
-                    [ PackageModuleId compilerSeedPackageId "Prelude"
-                    , PackageModuleId compilerSeedPackageId "SeedContract"
-                    , PackageModuleId compilerSeedPackageId "SeedSource"
-                    , PackageModuleId compilerSeedPackageId "SeedToken"
-                    , PackageModuleId compilerSeedPackageId "SeedDiagnostic"
-                    , PackageModuleId compilerSeedPackageId "SeedLexer"
-                    , PackageModuleId compilerSeedPackageId "SeedAst"
-                    , PackageModuleId compilerSeedPackageId "SeedParser"
-                    , PackageModuleId compilerSeedPackageId "Main"
-                    ]
-            map packageModuleGraphNodeSourcePath (packageModuleGraphNodes graph)
-                `shouldMatchList`
-                    [ Just "<mlfp-prelude>"
-                    , Just (compilerSeedRoot </> "Main.mlfp")
-                    , Just (compilerSeedRoot </> "SeedAst.mlfp")
-                    , Just (compilerSeedRoot </> "SeedContract.mlfp")
-                    , Just (compilerSeedRoot </> "SeedDiagnostic.mlfp")
-                    , Just (compilerSeedRoot </> "SeedLexer.mlfp")
-                    , Just (compilerSeedRoot </> "SeedParser.mlfp")
-                    , Just (compilerSeedRoot </> "SeedSource.mlfp")
-                    , Just (compilerSeedRoot </> "SeedToken.mlfp")
-                    ]
-            _checked <- requireRight (checkLocatedProgramPackage package)
-            result <- requireRight (runLocatedProgramPackageOutput package)
+            it "compiler-seed reuses the checked fixture artifact for check and run" $ \fixture -> do
+                checkedArtifactCheckOutput (compilerSeedArtifact fixture) `shouldBe` Right "OK\n"
+                checkedArtifactRunOutput (compilerSeedArtifact fixture) `shouldBe` Right compilerSeedFrontendEvidenceOutput
 
-            programRunOutput result `shouldBe` compilerSeedFrontendEvidenceOutput
+            it "compiler-seed emits backend and native LLVM without changing the seed contract" $ \fixture -> do
+                backendOutput <- requireRight (checkedArtifactBackendLLVM (compilerSeedArtifact fixture))
 
-        it "compiler-seed runs the fixture through the public CLI package entrypoint" $ do
-            checkProgramArgs [compilerSeedRoot] `shouldReturn` Right "OK\n"
-            runProgramArgs [compilerSeedRoot] `shouldReturn` Right compilerSeedFrontendEvidenceOutput
+                backendOutput `shouldSatisfy` isInfixOf "define ptr @\"SeedLexer__lexSeedInput\""
+                backendOutput `shouldSatisfy` isInfixOf "define ptr @\"SeedParser__parseSeedTokens\""
+                backendOutput `shouldSatisfy` isInfixOf "define ptr @\"Main__main\""
+                backendOutput `shouldSatisfy` isInfixOf "define private ptr @\"__io_bind.wrapper\""
+                backendOutput `shouldSatisfy` isInfixOf "define private ptr @\"__io_putStrLn.wrapper\""
+                validateLLVMAssembly backendOutput
 
-        it "compiler-seed emits backend and native LLVM without changing the seed contract" $ do
-            backendOutput <- requireRight =<< emitBackendArgs [compilerSeedRoot]
+                nativeOutput <- requireRight (checkedArtifactNativeLLVM (compilerSeedArtifact fixture))
 
-            backendOutput `shouldSatisfy` isInfixOf "define ptr @\"SeedLexer__lexSeedInput\""
-            backendOutput `shouldSatisfy` isInfixOf "define ptr @\"SeedParser__parseSeedTokens\""
-            backendOutput `shouldSatisfy` isInfixOf "define ptr @\"Main__main\""
-            backendOutput `shouldSatisfy` isInfixOf "define private ptr @\"__io_bind.wrapper\""
-            backendOutput `shouldSatisfy` isInfixOf "define private ptr @\"__io_putStrLn.wrapper\""
-            validateLLVMAssembly backendOutput
+                nativeOutput `shouldSatisfy` isInfixOf "define i32 @\"main\"()"
+                nativeOutput `shouldSatisfy` isInfixOf "define ptr @\"Main__main\""
+                nativeOutput `shouldSatisfy` isInfixOf "define private ptr @\"__io_bind.wrapper\""
+                nativeOutput `shouldSatisfy` isInfixOf "define private ptr @\"__io_putStrLn.wrapper\""
+                validateLLVMAssembly nativeOutput
+                validateLLVMObjectCode nativeOutput
+                runLLVMNativeExecutable nativeOutput
+                    `shouldReturn` NativeRunResult ExitSuccess compilerSeedFrontendEvidenceOutput ""
 
-            nativeOutput <- requireRight =<< emitNativeArgs [compilerSeedRoot]
+data CompilerSeedFixture = CompilerSeedFixture
+    { compilerSeedGraph :: PackageModuleGraph
+    , compilerSeedArtifact :: CheckedProgramArtifact
+    }
 
-            nativeOutput `shouldSatisfy` isInfixOf "define i32 @\"main\"()"
-            nativeOutput `shouldSatisfy` isInfixOf "define ptr @\"Main__main\""
-            nativeOutput `shouldSatisfy` isInfixOf "define private ptr @\"__io_bind.wrapper\""
-            nativeOutput `shouldSatisfy` isInfixOf "define private ptr @\"__io_putStrLn.wrapper\""
-            validateLLVMAssembly nativeOutput
-            validateLLVMObjectCode nativeOutput
-            runLLVMNativeExecutable nativeOutput
-                `shouldReturn` NativeRunResult ExitSuccess compilerSeedFrontendEvidenceOutput ""
+loadCompilerSeedFixture :: IO CompilerSeedFixture
+loadCompilerSeedFixture = do
+    discovered <- requireRight =<< discoverLocatedProgramPackage compilerSeedPackageId compilerSeedRoot
+    let package = withPreludeLocatedPackage discovered
+    graph <- requireRight (locatedProgramPackageModuleGraph package)
+    artifact <- requireRight (checkedProgramArtifactFromLocatedPackage package)
+    pure
+        CompilerSeedFixture
+            { compilerSeedGraph = graph
+            , compilerSeedArtifact = artifact
+            }
 
 compilerSeedPackageId :: PackageId
 compilerSeedPackageId = PackageId "compiler-frontend-seed"

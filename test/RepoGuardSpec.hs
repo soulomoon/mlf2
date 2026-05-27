@@ -110,11 +110,18 @@ discoverMainCalls :: IO [String]
 discoverMainCalls = do
   src <- lines <$> readFile "test/Main.hs"
   pure
-    [ reverse (drop 5 (reverse trimmed))
+    [ moduleName
     | line <- src,
       let trimmed = trim line,
-      ".spec" `isSuffixOf` trimmed
+      Just moduleName <- [parseMainCall trimmed]
     ]
+  where
+    parseMainCall line
+      | ".spec" `isSuffixOf` line =
+          case reverse (words (reverse (drop 5 (reverse line)))) of
+            moduleName : _ -> Just moduleName
+            [] -> Nothing
+      | otherwise = Nothing
 
 findImportOffenders :: [String] -> [FilePath] -> IO [FilePath]
 findImportOffenders moduleNames roots = do

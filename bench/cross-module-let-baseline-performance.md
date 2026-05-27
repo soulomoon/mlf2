@@ -43,14 +43,19 @@ Captured with:
 
 | Benchmark | `program.check.modules` median (ms) | `Prelude.instance-bindings` median (ms) | `Prelude.instance_methods_group_finalize` median (ms) | `real` median (ms) | Reading |
 | --- | ---: | ---: | ---: | ---: | --- |
-| `test/programs/packages/cross-module-let` | 913.937 | 701.716 | 664.112 | 1800.000 | Exact module read-context caching is gated away from this small fixture; the remaining cost is still the grouped Prelude instance pipeline. The latest local repair-cache experiments did not produce an accepted speedup. |
+| `test/programs/packages/cross-module-let` | 730.263 | n/a | n/a | 2000.000 | This one-run snapshot hit the module-level Prelude cache (`program.check.module.Prelude.cache = 702.747ms`), so the old grouped instance subphase rows are not emitted in `bench/results/latest.tsv`. Use this as the current end-to-end fixture timing, not as a fine group-finalizer profile. |
 
-## Current group-finalizer subphase medians
+The generic indexed worklist queue now uses `Data.Sequence` and appends
+requeued stale items directly from the stored item table. A matching
+`Data.Sequence` change to the final unification solve queue was measured and
+rejected because it regressed both this fixture and parser-library.
 
-Source:
+## Historical group-finalizer subphase medians
+
+Historical source:
 
 ```text
-bench/results/latest.tsv
+earlier bench/results/latest.tsv snapshots before the module-cache timing path
 ```
 
 | Benchmark | Group 1 pipeline (ms) | Group 1 deferred obligations (ms) | Group 1 extract (ms) | Group 1 binding checks total (ms) | Group 2 pipeline (ms) | Total group finalize (ms) |
@@ -102,21 +107,22 @@ Source:
 bench/results/latest.tsv
 ```
 
-| Presolution subphase | Previous deep profile (ms) | After edge-loop opt (ms) | After witness/rewrite opt (ms) | After elab inline-context opt (ms) | After typecheck/op opt (ms) | After presolution working-model opt (ms) | Rejected elab+incremental-binding attempt (ms) |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `init` | 0.476 | 0.419 | 0.397 | 0.403 | 0.566 | 0.457 | 0.411 |
-| `edge_loop` | 418.294 | 298.902 | 288.862 | 298.713 | 296.882 | 308.348 | 310.075 |
-| `edge_loop.validation` | 9.220 | 9.491 | 8.966 | 9.387 | 8.501 | 8.677 | 20.667 |
-| `edge_loop.plan` | 87.672 | 80.388 | 80.752 | 79.026 | 78.670 | 96.570 | 97.405 |
-| `edge_loop.schedule_weakens` | 0.296 | 0.273 | 0.132 | 0.245 | 0.240 | 0.288 | 0.282 |
-| `edge_loop.execute` | 308.184 | 198.383 | 189.121 | 198.205 | 198.665 | 181.413 | 181.284 |
-| `edge_loop.canonicalize_trace_interiors` | 0.045 | 0.025 | 0.021 | 0.039 | 0.028 | 0.033 | 0.035 |
-| `edge_loop.drain_unify_closure` | 0.015 | 0.022 | 0.006 | 0.011 | 0.014 | 0.014 | 0.014 |
-| `finalize.materialize_expansions` | 86.340 | 36.000 | 35.801 | 36.408 | 37.092 | 11.534 | 11.581 |
-| `finalize.rewrite_constraint` | 124.930 | 116.963 | 60.267 | 72.896 | 72.477 | 5.065 | 5.457 |
-| `finalize.rigidify_validate` | 2.036 | 1.277 | 1.346 | 1.318 | 1.214 | 1.288 | 1.368 |
-| `finalize.normalize_witnesses` | 184.035 | 160.864 | 86.291 | 87.979 | 87.145 | 4.023 | 3.997 |
-| `post_validate` | 1.044 | 0.972 | 0.885 | 0.916 | 0.878 | 0.891 | 0.892 |
+| Presolution subphase | Previous deep profile (ms) | After edge-loop opt (ms) | After witness/rewrite opt (ms) | After elab inline-context opt (ms) | After typecheck/op opt (ms) | After presolution working-model opt (ms) | Rejected elab+incremental-binding attempt (ms) | After indexed edge seeds (ms) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `init` | 0.476 | 0.419 | 0.397 | 0.403 | 0.566 | 0.457 | 0.411 | 0.506 |
+| `edge_loop` | 418.294 | 298.902 | 288.862 | 298.713 | 296.882 | 308.348 | 310.075 | 329.505 |
+| `edge_loop.validation` | 9.220 | 9.491 | 8.966 | 9.387 | 8.501 | 8.677 | 20.667 | 9.867 |
+| `edge_loop.index` | n/a | n/a | n/a | n/a | n/a | n/a | n/a | 0.152 |
+| `edge_loop.plan` | 87.672 | 80.388 | 80.752 | 79.026 | 78.670 | 96.570 | 97.405 | 105.221 |
+| `edge_loop.schedule_weakens` | 0.296 | 0.273 | 0.132 | 0.245 | 0.240 | 0.288 | 0.282 | 0.230 |
+| `edge_loop.execute` | 308.184 | 198.383 | 189.121 | 198.205 | 198.665 | 181.413 | 181.284 | 201.920 |
+| `edge_loop.canonicalize_trace_interiors` | 0.045 | 0.025 | 0.021 | 0.039 | 0.028 | 0.033 | 0.035 | 0.023 |
+| `edge_loop.drain_unify_closure` | 0.015 | 0.022 | 0.006 | 0.011 | 0.014 | 0.014 | 0.014 | 0.015 |
+| `finalize.materialize_expansions` | 86.340 | 36.000 | 35.801 | 36.408 | 37.092 | 11.534 | 11.581 | 10.785 |
+| `finalize.rewrite_constraint` | 124.930 | 116.963 | 60.267 | 72.896 | 72.477 | 5.065 | 5.457 | 4.840 |
+| `finalize.rigidify_validate` | 2.036 | 1.277 | 1.346 | 1.318 | 1.214 | 1.288 | 1.368 | 1.333 |
+| `finalize.normalize_witnesses` | 184.035 | 160.864 | 86.291 | 87.979 | 87.145 | 4.023 | 3.997 | 3.623 |
+| `post_validate` | 1.044 | 0.972 | 0.885 | 0.916 | 0.878 | 0.891 | 0.892 | 1.126 |
 
 The incremental binding-repair split is no longer in the hot path. The old full
 inline repair body was restored because the validation-only incremental path

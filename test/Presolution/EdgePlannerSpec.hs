@@ -10,6 +10,22 @@ import MLF.Constraint.Presolution.TestSupport
     )
 import MLF.Constraint.Presolution.EdgeProcessing.Plan
 import MLF.Constraint.Presolution.EdgeProcessing.Planner (planEdge)
+import MLF.Constraint.Presolution.EdgeProcessing.Worklist
+    ( EdgeFingerprint(..)
+    , EdgePlanSeed(..)
+    , EdgeWorkItem(..)
+    , WorklistInvalidation(..)
+    , buildEdgeWorklist
+    , buildIndexedEdgeWorklist
+    , invalidateExpansions
+    , invalidateOwners
+    , invalidateRoots
+    , noteInertEdge
+    , notePlannedEdge
+    , noteProcessedEdge
+    , popEdgeWorkItem
+    , queuedEdgeCount
+    )
 import MLF.Constraint.Types.Graph
     ( BindFlag(..)
     , Constraint(..)
@@ -26,6 +42,7 @@ import MLF.Constraint.Types.Graph
     , typeRef
     )
 import MLF.Constraint.Types.Presolution (Presolution(..))
+import MLF.Constraint.Types.Witness (Expansion(..))
 import SpecUtil (bindParentsFromPairs, defaultTraceConfig, emptyConstraint, nodeMapFromList, rootedConstraint)
 import Test.Hspec
 
@@ -63,6 +80,109 @@ spec = describe "Edge plan types" $ do
             edge = InstEdge (EdgeId 42) (NodeId 10) (NodeId 1)
             plan = mkEmptyResolvedPlan edge leftTyExp rightNode (NodeId 10) (NodeId 1) (GenNodeId 0)
         edgePlanEdge plan `shouldBe` edge
+
+    it "indexes planned worklist edges by roots, owner, and expansion variable" $ do
+        let leftTyExp = ResolvedTyExp
+                { rteNodeId = NodeId 10
+                , rteExpVar = ExpVarId 3
+                , rteBodyId = NodeId 0
+                }
+            rightNode = TyVar { tnId = NodeId 1, tnBound = Nothing }
+            edge = InstEdge (EdgeId 42) (NodeId 10) (NodeId 1)
+            plan = mkEmptyResolvedPlan edge leftTyExp rightNode (NodeId 10) (NodeId 1) (GenNodeId 7)
+            worklist0 = buildEdgeWorklist [edge]
+        case popEdgeWorkItem worklist0 of
+            Nothing -> expectationFailure "expected one queued edge"
+            Just (popped, worklist1) -> do
+                ewiEdge popped `shouldBe` edge
+                let worklist2 = notePlannedEdge plan worklist1
+                    (rootInvalidation, rootWorklist) =
+                        invalidateRoots (IntSet.singleton 10) worklist2
+                    (ownerInvalidation, ownerWorklist) =
+                        invalidateOwners (IntSet.singleton 7) worklist2
+                    (expInvalidation, expWorklist) =
+                        invalidateExpansions (IntSet.singleton 3) worklist2
+                wiEdges rootInvalidation `shouldBe` IntSet.singleton 42
+                wiEdges ownerInvalidation `shouldBe` IntSet.singleton 42
+                wiEdges expInvalidation `shouldBe` IntSet.singleton 42
+                queuedEdgeCount rootWorklist `shouldBe` 1
+                queuedEdgeCount ownerWorklist `shouldBe` 1
+                queuedEdgeCount expWorklist `shouldBe` 1
+
+    it "requeues processed stale edges with their latest fingerprint" $ do
+        let leftTyExp = ResolvedTyExp
+                { rteNodeId = NodeId 10
+                , rteExpVar = ExpVarId 3
+                , rteBodyId = NodeId 0
+                }
+            edge = InstEdge (EdgeId 42) (NodeId 10) (NodeId 1)
+            seed = EdgePlanSeed
+                { epsLeftTyExp = leftTyExp
+                , epsLeftRoot = NodeId 10
+                , epsRightRoot = NodeId 1
+                , epsBodyRoot = NodeId 0
+                , epsSchemeOwnerGen = GenNodeId 7
+                , epsExpansionVar = ExpVarId 3
+                }
+            fingerprint = EdgeFingerprint
+                { efLeftRoot = NodeId 10
+                , efRightRoot = NodeId 1
+                , efBodyRoot = NodeId 0
+                , efSchemeOwnerGen = GenNodeId 7
+                , efExpansionVar = ExpVarId 3
+                , efCurrentExpansion = ExpIdentity
+                }
+            worklist0 = buildEdgeWorklist [edge]
+        case popEdgeWorkItem worklist0 of
+            Nothing -> expectationFailure "expected one queued edge"
+            Just (_popped, worklist1) -> do
+                let worklist2 = noteProcessedEdge edge (Just (seed, fingerprint)) worklist1
+                    (_rootInvalidation, worklist3) =
+                        invalidateRoots (IntSet.singleton 10) worklist2
+                queuedEdgeCount worklist3 `shouldBe` 1
+                case popEdgeWorkItem worklist3 of
+                    Nothing -> expectationFailure "expected requeued stale edge"
+                    Just (staleItem, worklist4) -> do
+                        ewiStale staleItem `shouldBe` True
+                        ewiFingerprint staleItem `shouldBe` Just fingerprint
+                        popEdgeWorkItem (noteInertEdge staleItem worklist4) `shouldBe` Nothing
+
+    it "builds indexed work items with stable owner seeds from one snapshot" $ do
+        let a = NodeId 0
+            forallNode = NodeId 1
+            expNode = NodeId 2
+            target = NodeId 3
+            edge = InstEdge (EdgeId 0) expNode target
+            nodes = nodeMapFromList
+                [ (0, TyVar { tnId = a, tnBound = Nothing })
+                , (1, TyForall forallNode a)
+                , (2, TyExp expNode (ExpVarId 0) forallNode)
+                , (3, TyVar { tnId = target, tnBound = Nothing })
+                ]
+            constraint = rootedConstraint emptyConstraint
+                { cNodes = nodes
+                , cInstEdges = [edge]
+                , cBindParents = bindParentsFromPairs
+                    [ (a, forallNode, BindFlex)
+                    , (forallNode, expNode, BindFlex)
+                    ]
+                }
+            st0 = PresolutionState constraint (Presolution IntMap.empty)
+                IntMap.empty 4 IntSet.empty IntMap.empty
+                IntMap.empty IntMap.empty IntMap.empty IntMap.empty
+        case runPresolutionM defaultTraceConfig st0 (buildIndexedEdgeWorklist [edge]) of
+            Left err -> expectationFailure ("buildIndexedEdgeWorklist failed: " ++ show err)
+            Right (worklist, _) ->
+                case popEdgeWorkItem worklist of
+                    Nothing -> expectationFailure "expected one queued edge"
+                    Just (item, _) -> do
+                        ewiEdge item `shouldBe` edge
+                        ewiStale item `shouldBe` False
+                        case ewiPlanSeed item of
+                            Nothing -> expectationFailure "expected indexed plan seed"
+                            Just seed -> do
+                                epsBodyRoot seed `shouldBe` forallNode
+                                epsSchemeOwnerGen seed `shouldBe` GenNodeId 0
 
     describe "planner classification" $ do
         it "returns a resolved TyExp payload when left node is TyExp" $ do

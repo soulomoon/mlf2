@@ -11,21 +11,27 @@ module LLVMToolSupport
     , withTempProgram
     ) where
 
+import Control.Concurrent.MVar
 import Control.Exception (bracket)
 import Control.Monad (filterM)
+import Data.Bits (xor)
 import Data.Char (isSpace)
+import qualified Data.Map.Strict as Map
+import Data.Word (Word64)
+import Numeric (showHex)
 import System.Directory
     ( createDirectory
+    , createDirectoryIfMissing
     , doesFileExist
     , findExecutable
     , getTemporaryDirectory
-    , removeDirectoryRecursive
     , removeFile
     )
 import System.Environment (lookupEnv)
 import System.Exit (ExitCode (..))
 import System.FilePath (isPathSeparator, takeFileName, (</>))
 import System.IO (hClose, hPutStr, openTempFile, stderr)
+import System.IO.Unsafe (unsafePerformIO)
 import System.Process (readProcessWithExitCode)
 import Test.Hspec
 
@@ -39,7 +45,7 @@ data ToolCommand = ToolCommand
     { toolCommandExecutable :: FilePath
     , toolCommandArguments :: [String]
     }
-    deriving (Eq, Show)
+    deriving (Eq, Ord, Show)
 
 data NativeRunResult = NativeRunResult
     { nativeRunExitCode :: ExitCode
@@ -48,18 +54,42 @@ data NativeRunResult = NativeRunResult
     }
     deriving (Eq, Show)
 
+data LLVMTestCache = LLVMTestCache
+    { llvmCacheRoot :: Maybe FilePath
+    , llvmCacheNativeToolchain :: Maybe (Either [String] LLVMToolchain)
+    , llvmCacheAssemblyValidation :: Map.Map String (Either String ())
+    , llvmCacheObjectCode :: Map.Map String (Either String FilePath)
+    , llvmCacheRuntimeObjects :: Map.Map ToolCommand [FilePath]
+    , llvmCacheNativeExecutables :: Map.Map String (Either String FilePath)
+    }
+
+emptyLLVMTestCache :: LLVMTestCache
+emptyLLVMTestCache =
+    LLVMTestCache
+        { llvmCacheRoot = Nothing
+        , llvmCacheNativeToolchain = Nothing
+        , llvmCacheAssemblyValidation = Map.empty
+        , llvmCacheObjectCode = Map.empty
+        , llvmCacheRuntimeObjects = Map.empty
+        , llvmCacheNativeExecutables = Map.empty
+        }
+
+llvmTestCache :: MVar LLVMTestCache
+llvmTestCache =
+    unsafePerformIO (newMVar emptyLLVMTestCache)
+{-# NOINLINE llvmTestCache #-}
+
 validateLLVMAssembly :: String -> Expectation
 validateLLVMAssembly output = do
     mbLlvmAs <- findLLVMTool "llvm-as"
     case mbLlvmAs of
         Nothing ->
             expectationFailure "required LLVM tool not found: llvm-as"
-        Just llvmAs ->
-            withTempLLVM output $ \path -> do
-                (exitCode, errOutput) <- runLLVMTool llvmAs ["-o", "/dev/null", path]
-                case exitCode of
-                    ExitSuccess -> pure ()
-                    ExitFailure _ -> expectationFailure ("llvm-as rejected backend output:\n" ++ errOutput)
+        Just llvmAs -> do
+            result <- cachedAssemblyValidation llvmAs output
+            case result of
+                Right () -> pure ()
+                Left errOutput -> expectationFailure errOutput
 
 validateLLVMObjectCode :: String -> Expectation
 validateLLVMObjectCode output = do
@@ -67,31 +97,22 @@ validateLLVMObjectCode output = do
     case mbLlc of
         Nothing ->
             expectationFailure "required LLVM tool not found: llc"
-        Just llc ->
-            withTempLLVM output $ \path -> do
-                (exitCode, errOutput) <- runLLVMTool llc ["-filetype=obj", "-o", "/dev/null", path]
-                case exitCode of
-                    ExitSuccess -> pure ()
-                    ExitFailure _ -> expectationFailure ("llc rejected backend output:\n" ++ errOutput)
+        Just llc -> do
+            result <- cachedObjectCode llc output
+            case result of
+                Right _ -> pure ()
+                Left errOutput -> expectationFailure errOutput
 
 discoverNativeLLVMToolchain :: IO (Either [String] LLVMToolchain)
 discoverNativeLLVMToolchain = do
-    mbLlc <- findLLVMTool "llc"
-    mbNativeLinker <- findNativeLinker
-    pure $
-        case (mbLlc, mbNativeLinker) of
-            (Just llc, Just nativeLinker) ->
-                Right
-                    LLVMToolchain
-                        { llvmToolchainLlc = llc
-                        , llvmToolchainNativeLinker = nativeLinker
-                        }
-            _ ->
-                Left $
-                    missingTool "llc" mbLlc
-                        ++ missingTool
-                            "native C compiler/linker (set CC or install cc, clang, or gcc)"
-                            mbNativeLinker
+    cache <- readMVar llvmTestCache
+    case llvmCacheNativeToolchain cache of
+        Just result -> pure result
+        Nothing -> do
+            result <- discoverNativeLLVMToolchainUncached
+            modifyMVar_ llvmTestCache $ \cache' ->
+                pure cache' { llvmCacheNativeToolchain = Just result }
+            pure result
 
 runLLVMNativeExecutable :: String -> IO NativeRunResult
 runLLVMNativeExecutable output = do
@@ -125,41 +146,166 @@ withTempProgram contents action = do
         pure path
 
 runLLVMNativeExecutableWith :: LLVMToolchain -> String -> IO NativeRunResult
-runLLVMNativeExecutableWith toolchain output =
-    withTempLLVMBuildDirectory $ \buildDir -> do
-        let llvmPath = buildDir </> "program.ll"
-            objectPath = buildDir </> "program.o"
-            executablePath = buildDir </> "program"
-            llc = llvmToolchainLlc toolchain
-            nativeLinker = llvmToolchainNativeLinker toolchain
+runLLVMNativeExecutableWith toolchain output = do
+    mbExecutable <- cachedNativeExecutable toolchain output
+    case mbExecutable of
+        Left errOutput -> do
+            expectationFailure errOutput
+            fail "native LLVM executable unavailable"
+        Right executablePath -> do
+            (runExitCode, runStdout, runStderr) <- readProcessWithExitCode executablePath [] ""
+            pure
+                NativeRunResult
+                    { nativeRunExitCode = runExitCode
+                    , nativeRunStdout = runStdout
+                    , nativeRunStderr = runStderr
+                    }
 
-        writeFile llvmPath output
+discoverNativeLLVMToolchainUncached :: IO (Either [String] LLVMToolchain)
+discoverNativeLLVMToolchainUncached = do
+    mbLlc <- findLLVMTool "llc"
+    mbNativeLinker <- findNativeLinker
+    pure $
+        case (mbLlc, mbNativeLinker) of
+            (Just llc, Just nativeLinker) ->
+                Right
+                    LLVMToolchain
+                        { llvmToolchainLlc = llc
+                        , llvmToolchainNativeLinker = nativeLinker
+                        }
+            _ ->
+                Left $
+                    missingTool "llc" mbLlc
+                        ++ missingTool
+                            "native C compiler/linker (set CC or install cc, clang, or gcc)"
+                            mbNativeLinker
 
-        (llcExitCode, llcStderr) <-
-            runLLVMTool llc ["-relocation-model=pic", "-filetype=obj", "-o", objectPath, llvmPath]
-        expectProcessSuccess "llc rejected native-runner LLVM input" llcExitCode "" llcStderr
+cachedAssemblyValidation :: FilePath -> String -> IO (Either String ())
+cachedAssemblyValidation llvmAs output = do
+    let key = cacheKey ["assembly", llvmAs, output]
+    cache <- readMVar llvmTestCache
+    case Map.lookup key (llvmCacheAssemblyValidation cache) of
+        Just result -> pure result
+        Nothing -> do
+            result <- buildAssemblyValidation llvmAs output
+            modifyMVar_ llvmTestCache $ \cache' ->
+                pure
+                    cache'
+                        { llvmCacheAssemblyValidation =
+                            Map.insert key result (llvmCacheAssemblyValidation cache')
+                        }
+            pure result
 
-        -- Compile and link the C runtime if it exists
-        extraObjects <- compileCRuntimeIfPresent nativeLinker buildDir
+buildAssemblyValidation :: FilePath -> String -> IO (Either String ())
+buildAssemblyValidation llvmAs output =
+    withTempLLVM output $ \path -> do
+        (exitCode, errOutput) <- runLLVMTool llvmAs ["-o", "/dev/null", path]
+        pure $
+            case exitCode of
+                ExitSuccess -> Right ()
+                ExitFailure _ -> Left ("llvm-as rejected backend output:\n" ++ errOutput)
 
-        (linkExitCode, linkStdout, linkStderr) <-
-            readProcessWithExitCode
-                (toolCommandExecutable nativeLinker)
-                (toolCommandArguments nativeLinker ++ [objectPath] ++ extraObjects ++ ["-o", executablePath])
-                ""
-        expectProcessSuccess "native linker rejected LLVM object" linkExitCode linkStdout linkStderr
+cachedObjectCode :: FilePath -> String -> IO (Either String FilePath)
+cachedObjectCode llc output = do
+    let key = cacheKey ["object", llc, output]
+    cache <- readMVar llvmTestCache
+    case Map.lookup key (llvmCacheObjectCode cache) of
+        Just result -> pure result
+        Nothing -> do
+            result <- buildObjectCode key llc output
+            modifyMVar_ llvmTestCache $ \cache' ->
+                pure
+                    cache'
+                        { llvmCacheObjectCode =
+                            Map.insert key result (llvmCacheObjectCode cache')
+                        }
+            pure result
 
-        (runExitCode, runStdout, runStderr) <- readProcessWithExitCode executablePath [] ""
-        pure
-            NativeRunResult
-                { nativeRunExitCode = runExitCode
-                , nativeRunStdout = runStdout
-                , nativeRunStderr = runStderr
-                }
+buildObjectCode :: String -> FilePath -> String -> IO (Either String FilePath)
+buildObjectCode key llc output = do
+    cacheRoot <- getLLVMCacheRoot
+    let objectDir = cacheRoot </> stableCacheName key
+        llvmPath = objectDir </> "program.ll"
+        objectPath = objectDir </> "program.o"
+    createDirectoryIfMissing True objectDir
+    writeFile llvmPath output
+    (exitCode, errOutput) <-
+        runLLVMTool llc ["-relocation-model=pic", "-filetype=obj", "-o", objectPath, llvmPath]
+    pure $
+        case exitCode of
+            ExitSuccess -> Right objectPath
+            ExitFailure _ -> Left ("llc rejected backend output:\n" ++ errOutput)
+
+cachedNativeExecutable :: LLVMToolchain -> String -> IO (Either String FilePath)
+cachedNativeExecutable toolchain output = do
+    extraObjects <- cachedRuntimeObjects (llvmToolchainNativeLinker toolchain)
+    let key = cacheKey ["native", show toolchain, show extraObjects, output]
+    cache <- readMVar llvmTestCache
+    case Map.lookup key (llvmCacheNativeExecutables cache) of
+        Just result -> pure result
+        Nothing -> do
+            result <- buildNativeExecutable key toolchain extraObjects output
+            modifyMVar_ llvmTestCache $ \cache' ->
+                pure
+                    cache'
+                        { llvmCacheNativeExecutables =
+                            Map.insert key result (llvmCacheNativeExecutables cache')
+                        }
+            pure result
+
+buildNativeExecutable :: String -> LLVMToolchain -> [FilePath] -> String -> IO (Either String FilePath)
+buildNativeExecutable key toolchain extraObjects output = do
+    objectResult <- cachedObjectCode (llvmToolchainLlc toolchain) output
+    case objectResult of
+        Left errOutput -> pure (Left errOutput)
+        Right objectPath -> do
+            cacheRoot <- getLLVMCacheRoot
+            let executableDir = cacheRoot </> stableCacheName key
+                executablePath = executableDir </> "program"
+                nativeLinker = llvmToolchainNativeLinker toolchain
+            createDirectoryIfMissing True executableDir
+            (linkExitCode, linkStdout, linkStderr) <-
+                readProcessWithExitCode
+                    (toolCommandExecutable nativeLinker)
+                    (toolCommandArguments nativeLinker ++ [objectPath] ++ extraObjects ++ ["-o", executablePath])
+                    ""
+            pure $
+                case linkExitCode of
+                    ExitSuccess -> Right executablePath
+                    ExitFailure _ ->
+                        Left (processFailureMessage "native linker rejected LLVM object" linkStdout linkStderr)
+
+cachedRuntimeObjects :: ToolCommand -> IO [FilePath]
+cachedRuntimeObjects nativeLinker = do
+    cache <- readMVar llvmTestCache
+    case Map.lookup nativeLinker (llvmCacheRuntimeObjects cache) of
+        Just objects -> pure objects
+        Nothing -> do
+            objects <- compileCRuntimeIfPresent nativeLinker
+            modifyMVar_ llvmTestCache $ \cache' ->
+                pure
+                    cache'
+                        { llvmCacheRuntimeObjects =
+                            Map.insert nativeLinker objects (llvmCacheRuntimeObjects cache')
+                        }
+            pure objects
+
+getLLVMCacheRoot :: IO FilePath
+getLLVMCacheRoot =
+    modifyMVar llvmTestCache $ \cache ->
+        case llvmCacheRoot cache of
+            Just root -> pure (cache, root)
+            Nothing -> do
+                tempDir <- getTemporaryDirectory
+                (path, handle) <- openTempFile tempDir "mlf2-llvm-cache"
+                hClose handle
+                removeFile path
+                createDirectory path
+                pure (cache { llvmCacheRoot = Just path }, path)
 
 -- | Compile the Rust runtime crate if it exists, returning the path to the static library.
-compileCRuntimeIfPresent :: ToolCommand -> FilePath -> IO [FilePath]
-compileCRuntimeIfPresent _nativeLinker _buildDir = do
+compileCRuntimeIfPresent :: ToolCommand -> IO [FilePath]
+compileCRuntimeIfPresent _nativeLinker = do
     let cargoTomlPath = "runtime" </> "mlfp_io" </> "Cargo.toml"
     exists <- doesFileExist cargoTomlPath
     if exists
@@ -184,20 +330,7 @@ compileCRuntimeIfPresent _nativeLinker _buildDir = do
                         _ -> do
                             hPutStr stderr ("warning: Rust runtime compilation failed:\n" ++ cargoStderr)
                             pure []
-        else pure []
-
-withTempLLVMBuildDirectory :: (FilePath -> IO a) -> IO a
-withTempLLVMBuildDirectory action = do
-    tempDir <- getTemporaryDirectory
-    bracket (createTempLLVMBuildDirectory tempDir) removeDirectoryRecursive action
-
-createTempLLVMBuildDirectory :: FilePath -> IO FilePath
-createTempLLVMBuildDirectory tempDir = do
-    (path, handle) <- openTempFile tempDir "mlf2-llvm-native"
-    hClose handle
-    removeFile path
-    createDirectory path
-    pure path
+                        else pure []
 
 runLLVMTool :: FilePath -> [String] -> IO (ExitCode, String)
 runLLVMTool tool args = do
@@ -353,17 +486,27 @@ failMissingNativeToolchain missing = do
     expectationFailure ("required native LLVM toolchain pieces not found: " ++ unwords missing)
     fail "native LLVM toolchain unavailable"
 
-expectProcessSuccess :: String -> ExitCode -> String -> String -> IO ()
-expectProcessSuccess label exitCode stdoutText stderrText =
-    case exitCode of
-        ExitSuccess -> pure ()
-        ExitFailure _ ->
-            expectationFailure $
-                label
-                    ++ ":\nstdout:\n"
-                    ++ stdoutText
-                    ++ "\nstderr:\n"
-                    ++ stderrText
+processFailureMessage :: String -> String -> String -> String
+processFailureMessage label stdoutText stderrText =
+    label
+        ++ ":\nstdout:\n"
+        ++ stdoutText
+        ++ "\nstderr:\n"
+        ++ stderrText
+
+cacheKey :: [String] -> String
+cacheKey = concatMap (++ "\NUL")
+
+stableCacheName :: String -> String
+stableCacheName key =
+    "mlf2-" ++ showHex (fnv1a64 key) ""
+
+fnv1a64 :: String -> Word64
+fnv1a64 =
+    foldl' step 14695981039346656037
+  where
+    step hash char =
+        (hash `xor` fromIntegral (fromEnum char)) * 1099511628211
 
 knownLLVMToolPaths :: [FilePath]
 knownLLVMToolPaths =

@@ -12,6 +12,7 @@ module MLF.Frontend.Program.Run
     runLocatedProgramOutput,
     runLocatedProgramPackageOutput,
     runLocatedProgramPackageOutputWithTiming,
+    runCheckedProgramOutput,
     programRunOutput,
     prettyValue,
   )

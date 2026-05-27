@@ -17,14 +17,14 @@ Current median timings from `bench/results/latest.tsv`:
 
 | Metric | Median |
 | --- | ---: |
-| `program.check.modules` | 913.937ms |
-| `program.check.module.Prelude` | 890.882ms |
-| `program.check.module.Prelude.instance-bindings` | 701.716ms |
-| `program.check.operation.Prelude.instance_methods_group_finalize` | 664.112ms |
-| `...group_1.pipeline` | 609.642ms |
-| `...group_1.pipeline.elab_pipeline.presolution` | 360.117ms |
-| `...group_1.pipeline.elab_pipeline.presolution.edge_loop` | 317.712ms |
-| `...group_1.pipeline.elab_pipeline.elaborate` | 191.970ms |
+| `program.check.modules` | 879.266ms |
+| `program.check.module.Prelude` | 856.810ms |
+| `program.check.module.Prelude.instance-bindings` | 679.357ms |
+| `program.check.operation.Prelude.instance_methods_group_finalize` | 667.015ms |
+| `...group_1.pipeline` | 611.404ms |
+| `...group_1.pipeline.elab_pipeline.presolution` | 361.669ms |
+| `...group_1.pipeline.elab_pipeline.presolution.edge_loop` | 329.505ms |
+| `...group_1.pipeline.elab_pipeline.elaborate` | 194.562ms |
 
 The source-level Prelude is small, but the generated instance-method group is
 large enough semantically to dominate the run. The anomaly to explain is not
@@ -53,25 +53,25 @@ Current single-run timings from `bench/results/parser-library-latest.tsv`:
 
 | Metric | Time |
 | --- | ---: |
-| `real` | 143430.000ms |
-| `program.check.modules` | 142332.496ms |
-| `program.check.module.ParserParityParser` | 97185.657ms |
-| `program.check.module.ParserParityParser.def-bindings` | 96953.643ms |
-| `program.check.module.ParserParityParserCombinator` | 15582.880ms |
-| `program.check.module.ParserParityParserCombinator.def-bindings` | 15188.455ms |
-| `program.check.module.ParserParityLexer` | 15709.798ms |
-| `program.check.module.ParserParityLexer.def-bindings` | 15088.786ms |
-| `program.check.module.ParserParityAst` | 10540.400ms |
-| `program.check.module.ParserParityAst.def-bindings` | 10500.032ms |
+| `real` | 135560.000ms |
+| `program.check.modules` | 135467.223ms |
+| `program.check.module.ParserParityParser` | 93338.764ms |
+| `program.check.module.ParserParityParser.def-bindings` | 93148.598ms |
+| `program.check.module.ParserParityParserCombinator` | 14622.306ms |
+| `program.check.module.ParserParityParserCombinator.def-bindings` | 14239.710ms |
+| `program.check.module.ParserParityLexer` | 14531.222ms |
+| `program.check.module.ParserParityLexer.def-bindings` | 13953.509ms |
+| `program.check.module.ParserParityAst` | 9930.904ms |
+| `program.check.module.ParserParityAst.def-bindings` | 9892.336ms |
 
 Aggregated ordinary definition timings:
 
 | Module | Def count | Sum | Mean | Slowest def |
 | --- | ---: | ---: | ---: | --- |
-| `ParserParityParser` | 914 | 96953.643ms | 106.076ms | see `bench/results/parser-library-def-details-latest.tsv` |
-| `ParserParityParserCombinator` | 26 | 15188.455ms | 584.171ms | see `bench/results/parser-library-def-details-latest.tsv` |
-| `ParserParityLexer` | 130 | 15088.786ms | 116.068ms | see `bench/results/parser-library-def-details-latest.tsv` |
-| `ParserParityAst` | 21 | 10500.032ms | 500.002ms | see `bench/results/parser-library-def-details-latest.tsv` |
+| `ParserParityParser` | 914 | 93148.598ms | 101.913ms | see `bench/results/parser-library-def-details.tsv` |
+| `ParserParityParserCombinator` | 26 | 14239.710ms | 547.681ms | see `bench/results/parser-library-def-details.tsv` |
+| `ParserParityLexer` | 130 | 13953.509ms | 107.335ms | see `bench/results/parser-library-def-details.tsv` |
+| `ParserParityAst` | 21 | 9892.336ms | 471.063ms | see `bench/results/parser-library-def-details.tsv` |
 
 Across all direct `def_` operations, 210 definitions are at least 100ms, 21 are
 at least 500ms, and 5 are at least 1000ms. This benchmark is therefore not
@@ -80,13 +80,17 @@ definition finalizations, each paying a substantial fixed pipeline cost. The
 current exact-pipeline reduction came from sharing prepared module context,
 reusing already-softened read-model binding parents with a child index for
 reification, and selectively materializing only referenced external schemes
-before constraint generation.
+before constraint generation. The latest slice also seeds presolution edge
+owner/root indexes once per edge loop and uses the seed while the source body
+root remains canonical-stable.
 
 One attempted owner-cache variant was rejected after measurement: caching
 scheme owners by mutating the per-edge binding snapshot raised
 `cross-module-let` `program.check.modules` to 860.412 ms. The better direction is
-to build owner/root indexes once as part of an edge worklist/inert model, not by
-inserting into a cache during every `planEdge` call.
+to keep the owner/root index on the edge worklist rather than inserting into a
+mutable per-edge binding-snapshot cache. The accepted indexed-owner seed is a
+small exact-pipeline win for the parser-library headline, but not a complete
+inert solver yet.
 
 ## Techniques From Other Typecheckers
 
@@ -108,6 +112,9 @@ Relevance here:
 - The likely optimization is not another whole-loop cache. It is an indexed
   edge-work model where canonical roots, binder parents, and expansion
   obligations are stable query artifacts for the current read phase.
+- The first accepted slice seeds owner/root indexes once per loop. The remaining
+  large work is invalidating and reusing edge execution artifacts without
+  replaying `apply_expansion` and `execute_omega` for unaffected obligations.
 - This maps most directly to `MLF.Constraint.Presolution.EdgeProcessing`,
   `Expansion`, `Copy`, and `EdgeUnify`.
 
