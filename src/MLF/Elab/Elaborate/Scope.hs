@@ -31,8 +31,9 @@ import MLF.Constraint.Types.Phase (Phase)
 import MLF.Elab.Generalize (GaBindParents (..))
 import MLF.Elab.Inst (schemeToType)
 import qualified MLF.Elab.Inst as Inst
+import MLF.Elab.ReadModel (ElabReadModel)
 import MLF.Elab.Run.Scope (generalizeTargetNode, schemeBodyTarget)
-import MLF.Elab.Run.TypeOps (inlineBoundVarsType)
+import MLF.Elab.Run.TypeOps (InlineBoundVarsContext, inlineBoundVarsTypeWithContext)
 import MLF.Elab.Types
   ( ElabError,
     ElabScheme,
@@ -40,7 +41,7 @@ import MLF.Elab.Types
     SchemeInfo (..),
     schemeFromType,
   )
-import MLF.Reify.Core (namedNodes, reifyTypeWithNamedSetNoFallback)
+import MLF.Reify.Core (reifyTypeWithNamedSetNoFallbackReadModel)
 import MLF.Reify.TypeOps (inlineBaseBoundsType, parseNameId)
 
 type GeneralizeAtWith (p :: Phase) =
@@ -53,7 +54,10 @@ data ScopeContext (p :: Phase) = ScopeContext
   { scPresolutionView :: PresolutionView p,
     scGaParents :: GaBindParents p,
     scScopeOverrides :: IntMap.IntMap NodeRef,
-    scGeneralizeAtWith :: GeneralizeAtWith p
+    scGeneralizeAtWith :: GeneralizeAtWith p,
+    scReadModel :: ElabReadModel p,
+    scNamedSetReify :: IntSet.IntSet,
+    scInlineBoundVarsContext :: InlineBoundVarsContext p
   }
 
 scopeRootForNode :: ScopeContext p -> NodeId -> Either ElabError NodeRef
@@ -109,19 +113,17 @@ normalizeSubstForScheme scheme substRaw =
 
 reifyNodeTypeDirect :: ScopeContext p -> NodeId -> Either ElabError ElabType
 reifyNodeTypeDirect scopeContext nodeId = do
-  namedSet <- namedNodes presolutionView
-  reifyTypeForParam presolutionView namedSet (canonical nodeId)
+  reifyTypeForParam scopeContext (canonical nodeId)
   where
     presolutionView = scPresolutionView scopeContext
     canonical = pvCanonical presolutionView
 
 reifyNodeTypePreferringBound :: ScopeContext p -> NodeId -> Either ElabError ElabType
 reifyNodeTypePreferringBound scopeContext nodeId = do
-  namedSet <- namedNodes presolutionView
   let nodeC = canonical nodeId
   case pvLookupVarBound presolutionView nodeC of
-    Just bnd -> reifyTypeForParam presolutionView namedSet bnd
-    Nothing -> reifyTypeForParam presolutionView namedSet nodeC
+    Just bnd -> reifyTypeForParam scopeContext bnd
+    Nothing -> reifyTypeForParam scopeContext nodeC
   where
     presolutionView = scPresolutionView scopeContext
     canonical = pvCanonical presolutionView
@@ -131,7 +133,7 @@ reifyTargetType scopeContext namedSetReify schemeInfo nodeId =
   let presolutionView = scPresolutionView scopeContext
       subst = siSubst schemeInfo
       targetNode = schemeBodyTarget presolutionView nodeId
-   in reifyTypeWithNamedSetNoFallback presolutionView subst namedSetReify targetNode
+   in reifyTypeWithNamedSetNoFallbackReadModel (scReadModel scopeContext) subst namedSetReify targetNode
 
 reifyTargetNodeType :: ScopeContext p -> IntSet.IntSet -> SchemeInfo -> NodeId -> Either ElabError ElabType
 reifyTargetNodeType scopeContext namedSetReify schemeInfo nodeId =
@@ -139,13 +141,16 @@ reifyTargetNodeType scopeContext namedSetReify schemeInfo nodeId =
       canonical = pvCanonical presolutionView
       subst = siSubst schemeInfo
       targetNode = canonical nodeId
-   in reifyTypeWithNamedSetNoFallback presolutionView subst namedSetReify targetNode
+   in reifyTypeWithNamedSetNoFallbackReadModel (scReadModel scopeContext) subst namedSetReify targetNode
 
-reifyTypeForParam :: PresolutionView p -> IntSet.IntSet -> NodeId -> Either ElabError ElabType
-reifyTypeForParam presolutionView namedSet nodeId = do
-  ty <- reifyTypeWithNamedSetNoFallback presolutionView IntMap.empty namedSet nodeId
+reifyTypeForParam :: ScopeContext p -> NodeId -> Either ElabError ElabType
+reifyTypeForParam scopeContext nodeId = do
+  ty <- reifyTypeWithNamedSetNoFallbackReadModel (scReadModel scopeContext) IntMap.empty namedSet nodeId
   let ty' = inlineBaseBounds presolutionView ty
-  pure (inlineBoundVarsType presolutionView ty')
+  pure (inlineBoundVarsTypeWithContext (scInlineBoundVarsContext scopeContext) ty')
+  where
+    presolutionView = scPresolutionView scopeContext
+    namedSet = scNamedSetReify scopeContext
 
 inlineBaseBounds :: PresolutionView p -> ElabType -> ElabType
 inlineBaseBounds presolutionView =

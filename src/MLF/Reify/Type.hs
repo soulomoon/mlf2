@@ -7,6 +7,8 @@ module MLF.Reify.Type
     , reifyTypeWithNamesNoFallbackOnConstraint
     , reifyTypeWithNamedSet
     , reifyTypeWithNamedSetNoFallback
+    , reifyTypeWithNamesNoFallbackReadModel
+    , reifyTypeWithNamedSetNoFallbackReadModel
     , reifyWith
     , reifyWithAs
     , ReifyRoot (..)
@@ -24,9 +26,10 @@ import MLF.Constraint.Presolution.View (PresolutionView (..))
 import MLF.Constraint.Solved (Solved)
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types.Graph
+import MLF.Elab.ReadModel (ElabReadModel, ermPresolutionView)
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Reify.Named (namedNodes)
-import MLF.Reify.Type.Core (ReifyRoot (..), reifyWith, reifyWithAs)
+import MLF.Reify.Type.Core (ReifyRoot (..), reifyWith, reifyWithAs, reifyWithReadModel)
 import MLF.Types.Elab
 import MLF.Util.ElabError (ElabError (..))
 
@@ -62,6 +65,28 @@ reifyTypeWithNamesNoFallback presolutionView subst nid =
          in IntMap.member key subst
    in reifyWith "reifyTypeWithNamesNoFallback" presolutionView varNameFor isNamed RootTypeNoFallback nid
 
+reifyTypeWithNamesNoFallbackReadModel ::
+  ElabReadModel p ->
+  IntMap.IntMap String ->
+  NodeId ->
+  Either ElabError ElabType
+reifyTypeWithNamesNoFallbackReadModel readModel subst nid =
+  reifyWithReadModel "reifyTypeWithNamesNoFallback" readModel varNameFor isNamed RootTypeNoFallback nid
+  where
+    presolutionView = ermPresolutionView readModel
+    canonical = pvCanonical presolutionView
+
+    nameFor (NodeId i) = "t" ++ show i
+
+    varNameFor :: NodeId -> String
+    varNameFor v =
+      let cv = canonical v
+       in fromMaybe (nameFor cv) (IntMap.lookup (getNodeId cv) subst)
+
+    isNamed nodeId =
+      let key = getNodeId (canonical nodeId)
+       in IntMap.member key subst
+
 -- | Reify with an explicit constraint (Schi' on base graphs).
 reifyTypeWithNamesNoFallbackOnConstraint :: Constraint p -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
 reifyTypeWithNamesNoFallbackOnConstraint constraint subst nid =
@@ -93,6 +118,27 @@ reifyTypeWithNamedSetNoFallback ::
 reifyTypeWithNamedSetNoFallback presolutionView subst namedSet nid =
   reifyWith "reifyTypeWithNamedSetNoFallback" presolutionView varNameFor isNamed RootTypeNoFallback nid
   where
+    canonical = pvCanonical presolutionView
+
+    nameFor (NodeId i) = "t" ++ show i
+
+    varNameFor :: NodeId -> String
+    varNameFor v =
+      let cv = canonical v
+       in fromMaybe (nameFor cv) (IntMap.lookup (getNodeId cv) subst)
+
+    isNamed nodeId = IntSet.member (getNodeId (canonical nodeId)) namedSet
+
+reifyTypeWithNamedSetNoFallbackReadModel ::
+  ElabReadModel p ->
+  IntMap.IntMap String ->
+  IntSet.IntSet ->
+  NodeId ->
+  Either ElabError ElabType
+reifyTypeWithNamedSetNoFallbackReadModel readModel subst namedSet nid =
+  reifyWithReadModel "reifyTypeWithNamedSetNoFallback" readModel varNameFor isNamed RootTypeNoFallback nid
+  where
+    presolutionView = ermPresolutionView readModel
     canonical = pvCanonical presolutionView
 
     nameFor (NodeId i) = "t" ++ show i

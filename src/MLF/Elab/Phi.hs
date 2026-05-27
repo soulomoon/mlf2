@@ -12,6 +12,7 @@ module MLF.Elab.Phi (
     contextToNodeBound,
     -- * Main entry point (chi-native callback: no solved-typed arg)
     phiFromEdgeWitnessWithTrace,
+    phiFromEdgeWitnessWithTraceReadModel,
     -- * Phi environment
     PhiEnv(..),
     PhiM,
@@ -25,4 +26,4 @@ module MLF.Elab.Phi (
 
 import MLF.Elab.Phi.Context (contextToNodeBound)
 import MLF.Elab.Phi.Env (PhiEnv(..), PhiM, askCanonical, askCopyMap, askGaParents, askTrace)
-import MLF.Elab.Phi.Translate (canonicalNodeM, phiFromEdgeWitnessWithTrace)
+import MLF.Elab.Phi.Translate (canonicalNodeM, phiFromEdgeWitnessWithTrace, phiFromEdgeWitnessWithTraceReadModel)

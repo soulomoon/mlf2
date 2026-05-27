@@ -13,9 +13,12 @@ module MLF.Constraint.Presolution.Expansion (
     applyExpansion,
     applyExpansionTraced,
     applyExpansionEdgeTraced,
+    applyExpansionEdgeTracedWithBinders,
     bindExpansionRootLikeTarget,
     bindUnboundCopiedNodes,
+    MinimalExpansionDecision(..),
     decideMinimalExpansion,
+    decideMinimalExpansionDetailed,
     getExpansion,
     instantiateScheme,
     instantiateSchemeWithTrace,
@@ -202,8 +205,21 @@ nearestGenAncestor nid0 = do
                         go (IntSet.insert (nodeRefKey ref) visited) (typeRef (canonical parent))
     go IntSet.empty start
 
+data MinimalExpansionDecision = MinimalExpansionDecision
+    { medExpansion :: Expansion
+    , medUnifications :: [(NodeId, NodeId)]
+    , medBodyRoot :: NodeId
+    , medBoundVars :: [NodeId]
+    }
+    deriving (Eq, Show)
+
 decideMinimalExpansion :: GenNodeId -> Bool -> TyNode -> TyNode -> PresolutionM p (Expansion, [(NodeId, NodeId)])
-decideMinimalExpansion gid allowTrivial (TyExp { tnBody = bodyId }) targetNode = do
+decideMinimalExpansion gid allowTrivial sourceNode targetNode = do
+    decision <- decideMinimalExpansionDetailed gid allowTrivial sourceNode targetNode
+    pure (medExpansion decision, medUnifications decision)
+
+decideMinimalExpansionDetailed :: GenNodeId -> Bool -> TyNode -> TyNode -> PresolutionM p MinimalExpansionDecision
+decideMinimalExpansionDetailed gid allowTrivial (TyExp { tnBody = bodyId }) targetNode = do
     (bodyRoot, boundVars) <- instantiationBindersM gid bodyId
     debugExpansion
         ( "decideMinimalExpansion: bodyId="
@@ -215,6 +231,14 @@ decideMinimalExpansion gid allowTrivial (TyExp { tnBody = bodyId }) targetNode =
             ++ " target="
             ++ show (tnId targetNode)
         )
+    let done expn unifications =
+            pure
+                MinimalExpansionDecision
+                    { medExpansion = expn
+                    , medUnifications = unifications
+                    , medBodyRoot = bodyRoot
+                    , medBoundVars = boundVars
+                    }
     isTrivialTarget <- case targetNode of
         TyVar { tnId = targetId, tnBound = Nothing } -> do
             mbGen <- nearestGenAncestor targetId
@@ -233,26 +257,26 @@ decideMinimalExpansion gid allowTrivial (TyExp { tnBody = bodyId }) targetNode =
         then if isTrivialTarget
             then
                 -- Trivial let-scheme instantiation is identity: unify without extra expansion.
-                return (ExpIdentity, [(bodyRoot, tnId targetNode)])
+                done ExpIdentity [(bodyRoot, tnId targetNode)]
             else case targetNode of
             TyForall { tnId = targetForallId, tnBody = targetBody } -> do
                 targetSpec <- forallSpecM targetForallId
                 if length boundVars == forallSpecBinderCount targetSpec
                     then
                         -- Note [Minimal Expansion Decision] case 1 (∀≤∀ matching arity)
-                        return (ExpIdentity, [(bodyRoot, targetBody)])
+                        done ExpIdentity [(bodyRoot, targetBody)]
                     else do
                         -- Note [Minimal Expansion Decision] case 1 (∀≤∀ arity mismatch)
                         freshNodes <- mapM (const createFreshVar) boundVars
                         let expn =
                                 ExpCompose
                                     (ExpInstantiate freshNodes NE.<| (ExpForall (targetSpec NE.:| []) NE.:| []))
-                        return (expn, [])
+                        done expn []
             _ -> do
                 -- target is not a forall → instantiate to expose structure
                 -- Note [Minimal Expansion Decision] case 2 (∀≤structure, with binders)
                 freshNodes <- mapM (const createFreshVar) boundVars
-                return (ExpInstantiate freshNodes, [])
+                done (ExpInstantiate freshNodes) []
         else do
             bodyNode <- getCanonicalNode bodyRoot
             case bodyNode of
@@ -260,24 +284,31 @@ decideMinimalExpansion gid allowTrivial (TyExp { tnBody = bodyId }) targetNode =
                     case targetNode of
                         TyArrow { tnDom = tDom, tnCod = tCod } ->
                             -- Note [Minimal Expansion Decision] case 4 (structure≤structure, arrow)
-                            return (ExpIdentity, [(bDom, tDom), (bCod, tCod)])
+                            done ExpIdentity [(bDom, tDom), (bCod, tCod)]
                         TyForall {} -> do
                             -- need to generalize to meet target forall
                             -- Note [Minimal Expansion Decision] case 3 (structure≤∀)
                             targetSpec <- forallSpecM (tnId targetNode)
                             let expn = ExpForall (targetSpec NE.:| [])
-                            return (expn, [])
-                        _ -> return (ExpIdentity, [(bodyRoot, tnId targetNode)])
+                            done expn []
+                        _ -> done ExpIdentity [(bodyRoot, tnId targetNode)]
 
                 _ -> case targetNode of
                     TyForall {} -> do
                         -- Note [Minimal Expansion Decision] case 3 (structure≤∀)
                         targetSpec <- forallSpecM (tnId targetNode)
                         let expn = ExpForall (targetSpec NE.:| [])
-                        return (expn, [])
-                    _ -> return (ExpIdentity, [(bodyRoot, tnId targetNode)])
+                        done expn []
+                    _ -> done ExpIdentity [(bodyRoot, tnId targetNode)]
 
-decideMinimalExpansion _ _ _ _ = return (ExpIdentity, [])
+decideMinimalExpansionDetailed _ _ sourceNode _ =
+    pure
+        MinimalExpansionDecision
+            { medExpansion = ExpIdentity
+            , medUnifications = []
+            , medBodyRoot = tnId sourceNode
+            , medBoundVars = []
+            }
 
 debugExpansion :: String -> PresolutionM p ()
 debugExpansion msg = do
@@ -414,13 +445,15 @@ applyExpansionTraced gid expansion expNode =
     -- instantiation arguments (via `MLF.Constraint.VarStore`).
 applyExpansionEdgeTraced :: GenNodeId -> Expansion -> TyNode -> PresolutionM p (NodeId, (CopyMap, InteriorSet, FrontierSet))
 applyExpansionEdgeTraced gid expansion expNode =
-    let start =
-            case expNode of
-                TyExp { tnBody = b } -> b
-                _ -> tnId expNode
-        action = expansionActionEdgeTraced expansion
+    let action = expansionActionEdgeTraced expansion
     in action expNode start
   where
+    start :: NodeId
+    start =
+        case expNode of
+            TyExp { tnBody = b } -> b
+            _ -> tnId expNode
+
     binderMetaAt :: NodeId -> NodeId -> PresolutionM p NodeId
     binderMetaAt _arg _bv =
         createFreshVar
@@ -508,6 +541,55 @@ applyExpansionEdgeTraced gid expansion expNode =
                                 (root, cmap0, interior0, frontier0) <- instantiateSchemeWithTrace bodyRoot binderMetas
                                 (cmapB, interiorB, frontierB) <- copyBinderBounds binderMetas binderArgs
                                 pure (root, (cmap0 <> cmapB, IntSet.union interior0 interiorB, IntSet.union frontier0 frontierB))
+
+applyExpansionEdgeTracedWithBinders ::
+    GenNodeId ->
+    Expansion ->
+    TyNode ->
+    NodeId ->
+    [NodeId] ->
+    PresolutionM p (NodeId, (CopyMap, InteriorSet, FrontierSet))
+applyExpansionEdgeTracedWithBinders gid expansion expNode bodyRoot boundVars =
+    case expansion of
+        ExpInstantiate args ->
+            instantiateEdgeTraceFromKnownBinders expNode bodyRoot boundVars args
+        _ ->
+            applyExpansionEdgeTraced gid expansion expNode
+
+instantiateEdgeTraceFromKnownBinders ::
+    TyNode ->
+    NodeId ->
+    [NodeId] ->
+    [NodeId] ->
+    PresolutionM p (NodeId, (CopyMap, InteriorSet, FrontierSet))
+instantiateEdgeTraceFromKnownBinders expNode bodyRoot boundVars args
+    | null boundVars =
+        if null args
+            then pure (bodyRoot, emptyTrace)
+            else throwError $ InstantiateOnNonForall (tnId expNode)
+    | length boundVars == length args =
+        instantiateWithArgs args
+    | length boundVars == 1 && length args > 1 =
+        case args of
+            [] -> throwError $ ArityMismatch "applyExpansionEdgeTracedWithBinders" (length boundVars) (length args)
+            (arg0 : rest) -> do
+                mapM_ (unifyAcyclic arg0) rest
+                instantiateWithArgs [arg0]
+    | otherwise =
+        throwError $ ArityMismatch "applyExpansionEdgeTracedWithBinders" (length boundVars) (length args)
+  where
+    binderMetaAt :: NodeId -> NodeId -> PresolutionM p NodeId
+    binderMetaAt _arg _bv =
+        createFreshVar
+
+    instantiateWithArgs args0 = do
+        metas <- zipWithM binderMetaAt args0 boundVars
+        let binderMetas = zip boundVars metas
+            binderArgs = zip boundVars args0
+        (root, cmap0, interior0, frontier0) <- instantiateSchemeWithTrace bodyRoot binderMetas
+        (cmapB, interiorB, frontierB) <- copyBinderBounds binderMetas binderArgs
+        pure (root, (cmap0 <> cmapB, IntSet.union interior0 interiorB, IntSet.union frontier0 frontierB))
+
 copyBinderBounds :: [(NodeId, NodeId)] -> [(NodeId, NodeId)] -> PresolutionM p (CopyMap, InteriorSet, FrontierSet)
 copyBinderBounds binderMetas binderArgs = do
     let binderMetaMap = IntMap.fromList [(getNodeId bv, meta) | (bv, meta) <- binderMetas]

@@ -1,0 +1,3 @@
+module Core export (applyId) {
+  def applyId : Int = let id1 = λx x in let id2 = λx id1 x in let id3 = λx id2 x in let id4 = λx id3 x in let id5 = λx id4 x in let id6 = λx id5 x in let id7 = λx id6 x in let id8 = λx id7 x in let id9 = λx id8 x in let id10 = λx id9 x in let id11 = λx id10 x in let id12 = λx id11 x in let id13 = λx id12 x in let id14 = λx id13 x in let id15 = λx id14 x in let id16 = λx id15 x in let id17 = λx id16 x in let id18 = λx id17 x in let id19 = λx id18 x in let id20 = λx id19 x in let id21 = λx id20 x in let id22 = λx id21 x in let id23 = λx id22 x in let id24 = λx id23 x in let id25 = λx id24 x in id25 1;
+}

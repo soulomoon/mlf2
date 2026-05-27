@@ -38,11 +38,11 @@ import MLF.Elab.Elaborate.Scope
   )
 import MLF.Elab.Inst (applyInstantiation, schemeToType)
 import qualified MLF.Elab.Inst as Inst
-import MLF.Elab.Phi (phiFromEdgeWitnessWithTrace)
+import MLF.Elab.Phi (phiFromEdgeWitnessWithTraceReadModel)
 import MLF.Elab.Phi.Omega.Normalize (normalizeInst)
 import MLF.Elab.Run.Annotation (adjustAnnotationInst)
 import MLF.Elab.Run.Instantiation (inferInstAppArgsFromScheme)
-import MLF.Elab.Run.TypeOps (inlineBoundVarsType, inlineBoundVarsTypeForBound)
+import MLF.Elab.Run.TypeOps (inlineBoundVarsTypeForBoundWithContext, inlineBoundVarsTypeWithContext)
 import MLF.Elab.TermClosure
   ( alignTermTypeVarsToScheme,
     alignTermTypeVarsToTopTyAbs,
@@ -68,7 +68,7 @@ import MLF.Elab.Types
   )
 import MLF.Frontend.ConstraintGen.Types (AnnExpr (..))
 import MLF.Frontend.Syntax (NormSrcType, SrcBound (..), SrcNorm (NormN), SrcTy (..), StructBound, VarName)
-import MLF.Reify.Core (reifyTypeWithNamedSetNoFallback)
+import MLF.Reify.Core (reifyTypeWithNamedSetNoFallbackReadModel)
 import MLF.Reify.TypeOps
   ( alphaEqType,
     churchAwareEqType,
@@ -111,28 +111,30 @@ stripUnusedTopTyAbs term =
     _ -> term
 
 expInstantiateArgsToInstNoFallback ::
-  PresolutionView p ->
+  ScopeContext p ->
   IntSet.IntSet ->
   [NodeId] ->
   Either ElabError Instantiation
-expInstantiateArgsToInstNoFallback presolutionView namedSet args = do
+expInstantiateArgsToInstNoFallback scopeContext namedSet args = do
   tys <- mapM reifyArg args
-  instAppsFromTypes presolutionView tys
+  instAppsFromTypes scopeContext tys
   where
+    presolutionView = scPresolutionView scopeContext
     constraint = pvConstraint presolutionView
     canonical = pvCanonical presolutionView
     resolveBaseBound = resolveBaseBoundForInstConstraint constraint canonical
     reifyArg arg =
       let argC = canonical arg
+          readModel = scReadModel scopeContext
        in case resolveBaseBound argC of
             Just baseC ->
-              reifyTypeWithNamedSetNoFallback presolutionView IntMap.empty namedSet baseC
+              reifyTypeWithNamedSetNoFallbackReadModel readModel IntMap.empty namedSet baseC
             Nothing ->
-              reifyTypeWithNamedSetNoFallback presolutionView IntMap.empty namedSet argC
+              reifyTypeWithNamedSetNoFallbackReadModel readModel IntMap.empty namedSet argC
 
-instAppsFromTypes :: PresolutionView p -> [ElabType] -> Either ElabError Instantiation
-instAppsFromTypes presolutionView tys =
-  let tys' = map (inlineBoundVarsTypeForBound presolutionView) tys
+instAppsFromTypes :: ScopeContext p -> [ElabType] -> Either ElabError Instantiation
+instAppsFromTypes scopeContext tys =
+  let tys' = map (inlineBoundVarsTypeForBoundWithContext (scInlineBoundVarsContext scopeContext)) tys
    in if null tys'
         then Right InstId
         else Right $ foldr1 InstSeq (map InstApp tys')
@@ -497,10 +499,10 @@ reifyInst annotationContext namedSetReify env funAnn (EdgeId eid) =
           () -> pure ()
         phi0 <-
           case
-            phiFromEdgeWitnessWithTrace
+            phiFromEdgeWitnessWithTraceReadModel
               traceCfg
               generalizeAtWith
-              presolutionView
+              (scReadModel scopeContext)
               (Just gaParents)
               mSchemeInfo
               mTrace
@@ -515,7 +517,7 @@ reifyInst annotationContext namedSetReify env funAnn (EdgeId eid) =
               either
                 (const Nothing)
                 Just
-                (reifyTypeWithNamedSetNoFallback presolutionView substForPhi namedSetReify bnd)
+                (reifyTypeWithNamedSetNoFallbackReadModel (scReadModel scopeContext) substForPhi namedSetReify bnd)
             normalizePhiInst inst0 = case inst0 of
               InstApp (TVar v) -> maybe inst0 InstApp (resolvePhiVar v)
               InstBot (TVar v) -> maybe inst0 InstBot (resolvePhiVar v)
@@ -568,7 +570,7 @@ reifyInst annotationContext namedSetReify env funAnn (EdgeId eid) =
                     let tryPrefixes n best
                           | n <= 0 = best
                           | otherwise =
-                              case expInstantiateArgsToInstNoFallback presolutionView namedSetReify (take n nodeArgs) of
+                              case expInstantiateArgsToInstNoFallback scopeContext namedSetReify (take n nodeArgs) of
                                 Right inst
                                   | Right _ <- applyInstantiation schemeTy inst -> tryPrefixes (n - 1) (Just inst)
                                 _ -> tryPrefixes (n - 1) best
@@ -596,7 +598,12 @@ reifyInst annotationContext namedSetReify env funAnn (EdgeId eid) =
                   | shouldRefine,
                     schemeArity > 0,
                     not (null inferred) ->
-                      let usable = longestValidAppPrefix (map (inlineBoundVarsType presolutionView) (take (min schemeArity (length inferred)) inferred))
+                      let usable =
+                            longestValidAppPrefix
+                              ( map
+                                  (inlineBoundVarsTypeWithContext (scInlineBoundVarsContext scopeContext))
+                                  (take (min schemeArity (length inferred)) inferred)
+                              )
                        in pure
                             ( Just
                                 (instSeqApps usable)
@@ -761,8 +768,8 @@ reifyInst annotationContext namedSetReify env funAnn (EdgeId eid) =
           let nodeC = canonical nodeId
               tyE =
                 case pvLookupVarBound presolutionView nodeC of
-                  Just bnd -> reifyTypeWithNamedSetNoFallback presolutionView subst namedSet bnd
-                  Nothing -> reifyTypeWithNamedSetNoFallback presolutionView subst namedSet nodeC
+                  Just bnd -> reifyTypeWithNamedSetNoFallbackReadModel (scReadModel scopeContext) subst namedSet bnd
+                  Nothing -> reifyTypeWithNamedSetNoFallbackReadModel (scReadModel scopeContext) subst namedSet nodeC
            in either (const Nothing) Just tyE
 
     instNeedsAuthoritativeRefinement inst =

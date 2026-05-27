@@ -62,7 +62,7 @@ runEdgeUnifyForTest edgeRoot interior n1 n2 = do
     requireValidBindingTree
     eu0 <- initEdgeUnifyState [] interior edgeRoot PendingWeakenOwnerUnknown
     (_a, eu1) <- runStateT (unifyAcyclicEdge n1 n2) eu0
-    pure (eusOps eu1)
+    pure (reverse (eusOps eu1))
 
 -- | Execute edge-local graph operations as one block around a unification action.
 --

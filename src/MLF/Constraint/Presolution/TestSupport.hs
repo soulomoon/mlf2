@@ -1,6 +1,7 @@
 module MLF.Constraint.Presolution.TestSupport (
     EdgeArtifacts(..),
     PresolutionState(..),
+    emptyBindingRepairDirty,
     CopyMapping(..),
     CopyMap,
     lookupCopy,
@@ -34,6 +35,7 @@ import MLF.Constraint.Presolution.Base
     , InteriorNodes(..)
     , PresolutionPlanBuilder(..)
     , PresolutionState(..)
+    , emptyBindingRepairDirty
     , copiedNodes
     , fromListInterior
     , insertCopy

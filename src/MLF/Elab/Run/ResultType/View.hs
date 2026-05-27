@@ -9,6 +9,7 @@ module MLF.Elab.Run.ResultType.View (
     rtvLookupVarBound,
     rtvPresolutionViewOverlay,
     rtvNamedNodes,
+    rtvBaseVarOnlyNodes,
     rtvReifyWithNamedSetNoFallback,
     rtvReifyWithNamesNoFallback,
     rtvReifyBaseWithNamesNoFallback,
@@ -21,12 +22,14 @@ module MLF.Elab.Run.ResultType.View (
 
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+import Data.Maybe (fromMaybe)
 
 import qualified MLF.Constraint.Finalize as Finalize
 import MLF.Constraint.Presolution (PresolutionView(..))
 import MLF.Constraint.Types.Graph
     ( Constraint(..)
     , NodeId(..)
+    , NodeMap
     , NodeRef
     , TyNode(..)
     , fromListNode
@@ -34,6 +37,12 @@ import MLF.Constraint.Types.Graph
     , toListNode
     )
 import MLF.Constraint.Types.Phase (Phase)
+import MLF.Elab.ReadModel
+    ( ElabReadModel
+    , buildElabReadModel
+    , ermNamedNodes
+    , ermNodesVarOnly
+    )
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Elab.Run.Generalize (generalizeAtWithBuilder)
 import MLF.Elab.Run.Scope
@@ -45,10 +54,8 @@ import MLF.Elab.Run.Scope
 import MLF.Elab.Run.ResultType.Types (ResultTypeInputs(..))
 import MLF.Elab.Types (ElabScheme)
 import MLF.Reify.Core
-    ( namedNodes
-    , reifyTypeWithNamedSetNoFallback
-    , reifyTypeWithNamesNoFallback
-    , reifyTypeWithNamesNoFallbackOnConstraint
+    ( reifyTypeWithNamedSetNoFallbackReadModel
+    , reifyTypeWithNamesNoFallbackReadModel
     )
 import MLF.Types.Elab (ElabType)
 import MLF.Util.ElabError (ElabError(..), bindingToElab)
@@ -56,11 +63,21 @@ import MLF.Util.ElabError (ElabError(..), bindingToElab)
 data ResultTypeView (p :: Phase) = ResultTypeView
     { rtvInputs0 :: ResultTypeInputs p
     , rtvBoundOverlay0 :: IntMap.IntMap NodeId
+    , rtvReadModel0 :: Either ElabError (ElabReadModel p)
+    , rtvBaseReadModel0 :: Either ElabError (ElabReadModel p)
+    , rtvBaseVarOnlyNodes0 :: NodeMap TyNode
     }
 
 buildResultTypeView :: ResultTypeInputs p -> Either ElabError (ResultTypeView p)
 buildResultTypeView inputs = do
     let presolutionView = rtcPresolutionView inputs
+        readModel = fromMaybe (buildElabReadModel presolutionView) (rtcReadModel inputs)
+        baseReadModel =
+            fromMaybe
+                ( buildElabReadModel
+                    (Finalize.presolutionViewFromSnapshot (gaBaseConstraint (rtcBindParentsGa inputs)) IntMap.empty)
+                )
+                (rtcBaseReadModel inputs)
     case Finalize.validateCanonicalSnapshotStrict
             (pvCanonicalConstraint presolutionView)
             (pvCanonicalMap presolutionView) of
@@ -69,17 +86,39 @@ buildResultTypeView inputs = do
     pure ResultTypeView
         { rtvInputs0 = inputs
         , rtvBoundOverlay0 = IntMap.empty
+        , rtvReadModel0 = readModel
+        , rtvBaseReadModel0 = baseReadModel
+        , rtvBaseVarOnlyNodes0 =
+            case baseReadModel of
+                Right model -> ermNodesVarOnly model
+                Left _ -> baseVarOnlyNodes
         }
+  where
+    isTyVar node = case node of
+        TyVar{} -> True
+        _ -> False
+    baseVarOnlyNodes =
+        fromListNode
+            [ (nid, node)
+            | (nid, node) <- toListNode (cNodes (gaBaseConstraint (rtcBindParentsGa inputs)))
+            , isTyVar node
+            ]
 
 rtvWithBoundOverlay :: NodeId -> NodeId -> ResultTypeView p -> ResultTypeView p
 rtvWithBoundOverlay rootNid baseBound view =
     let canonical = rtcCanonical (rtvInputs0 view)
         rootKey = getNodeId (canonical rootNid)
         boundC = canonical baseBound
-    in view
-        { rtvBoundOverlay0 = IntMap.insert rootKey boundC (rtvBoundOverlay0 view)
+        viewWithOverlay =
+            view
+                { rtvBoundOverlay0 = IntMap.insert rootKey boundC (rtvBoundOverlay0 view)
+                }
+    in viewWithOverlay
+        { rtvReadModel0 = buildElabReadModel (rtvPresolutionViewOverlay viewWithOverlay)
+        , rtvBaseReadModel0 =
+            buildElabReadModel
+                (Finalize.presolutionViewFromSnapshot (gaBaseConstraint (rtvGaBindParents viewWithOverlay)) IntMap.empty)
         }
-
 
 rtvLookupNode :: ResultTypeView p -> NodeId -> Maybe TyNode
 rtvLookupNode view nid =
@@ -100,16 +139,26 @@ rtvPresolutionViewBase :: ResultTypeView p -> PresolutionView p
 rtvPresolutionViewBase = rtcPresolutionView . rtvInputs0
 
 rtvPresolutionViewOverlay :: ResultTypeView p -> PresolutionView p
-rtvPresolutionViewOverlay view =
-    (rtvPresolutionViewBase view)
-        { pvConstraint = rtvConstraintOverlay view
-        , pvCanonicalConstraint = rtvCanonicalConstraintOverlay view
-        , pvLookupNode = rtvLookupNode view
-        , pvLookupVarBound = rtvLookupVarBound view
-        }
+rtvPresolutionViewOverlay view
+    | IntMap.null (rtvBoundOverlay0 view) =
+        rtvPresolutionViewBase view
+    | otherwise =
+        (rtvPresolutionViewBase view)
+            { pvConstraint = rtvConstraintOverlay view
+            , pvCanonicalConstraint = rtvCanonicalConstraintOverlay view
+            , pvLookupNode = rtvLookupNode view
+            , pvLookupVarBound = rtvLookupVarBound view
+            }
 
 rtvNamedNodes :: ResultTypeView p -> Either ElabError IntSet.IntSet
-rtvNamedNodes = namedNodes . rtvPresolutionViewOverlay
+rtvNamedNodes view = ermNamedNodes <$> rtvReadModel0 view
+
+rtvBaseVarOnlyNodes :: ResultTypeView p -> NodeMap TyNode
+rtvBaseVarOnlyNodes view
+    | IntMap.null (rtvBoundOverlay0 view) = rtvBaseVarOnlyNodes0 view
+    | otherwise = cNodes (applyBaseBoundOverlay view (emptyBaseConstraint { cNodes = rtvBaseVarOnlyNodes0 view }))
+  where
+    emptyBaseConstraint = gaBaseConstraint (rtcBindParentsGa (rtvInputs0 view))
 
 rtvReifyWithNamedSetNoFallback
     :: ResultTypeView p
@@ -117,26 +166,27 @@ rtvReifyWithNamedSetNoFallback
     -> IntSet.IntSet
     -> NodeId
     -> Either ElabError ElabType
-rtvReifyWithNamedSetNoFallback view subst namedSet =
-    reifyTypeWithNamedSetNoFallback (rtvPresolutionViewOverlay view) subst namedSet
+rtvReifyWithNamedSetNoFallback view subst namedSet nid = do
+    readModel <- rtvReadModel0 view
+    reifyTypeWithNamedSetNoFallbackReadModel readModel subst namedSet nid
 
 rtvReifyWithNamesNoFallback
     :: ResultTypeView p
     -> IntMap.IntMap String
     -> NodeId
     -> Either ElabError ElabType
-rtvReifyWithNamesNoFallback view subst =
-    reifyTypeWithNamesNoFallback (rtvPresolutionViewOverlay view) subst
+rtvReifyWithNamesNoFallback view subst nid = do
+    readModel <- rtvReadModel0 view
+    reifyTypeWithNamesNoFallbackReadModel readModel subst nid
 
 rtvReifyBaseWithNamesNoFallback
     :: ResultTypeView p
     -> IntMap.IntMap String
     -> NodeId
     -> Either ElabError ElabType
-rtvReifyBaseWithNamesNoFallback view subst =
-    reifyTypeWithNamesNoFallbackOnConstraint
-        (gaBaseConstraint (rtvGaBindParents view))
-        subst
+rtvReifyBaseWithNamesNoFallback view subst nid = do
+    readModel <- rtvBaseReadModel0 view
+    reifyTypeWithNamesNoFallbackReadModel readModel subst nid
 
 rtvSchemeBodyTarget :: ResultTypeView p -> NodeId -> NodeId
 rtvSchemeBodyTarget view =
@@ -185,10 +235,14 @@ rtvCanonicalConstraintOverlay view =
 rtvGaBindParents :: ResultTypeView p -> GaBindParents p
 rtvGaBindParents view =
     let ga0 = rtcBindParentsGa (rtvInputs0 view)
-    in ga0 { gaBaseConstraint = applyBaseBoundOverlay view (gaBaseConstraint ga0) }
+    in if IntMap.null (rtvBoundOverlay0 view)
+        then ga0
+        else ga0 { gaBaseConstraint = applyBaseBoundOverlay view (gaBaseConstraint ga0) }
 
 applyBoundOverlay :: ResultTypeView p -> Constraint p -> Constraint p
-applyBoundOverlay view constraint =
+applyBoundOverlay view constraint
+    | IntMap.null (rtvBoundOverlay0 view) = constraint
+    | otherwise =
     constraint
         { cNodes =
             fromListNode
@@ -208,7 +262,9 @@ applyBoundOverlay view constraint =
             _ -> node
 
 applyBaseBoundOverlay :: ResultTypeView p -> Constraint p -> Constraint p
-applyBaseBoundOverlay view constraint =
+applyBaseBoundOverlay view constraint
+    | IntMap.null (rtvBoundOverlay0 view) = constraint
+    | otherwise =
     constraint
         { cNodes =
             fromListNode

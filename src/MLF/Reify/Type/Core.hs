@@ -3,6 +3,7 @@
 module MLF.Reify.Type.Core
   ( ReifyRoot (..),
     reifyWith,
+    reifyWithReadModel,
     reifyWithAs,
   )
 where
@@ -42,8 +43,11 @@ import qualified MLF.Constraint.Canonicalize as Canonicalize
 import MLF.Constraint.Presolution.View (PresolutionView (..))
 import qualified MLF.Constraint.Traversal as Traversal
 import MLF.Constraint.Types.Graph hiding (lookupNode)
+import MLF.Elab.ReadModel
+  ( ElabReadModel (..),
+    buildElabReadModel,
+  )
 import MLF.Reify.Cache
-import MLF.Reify.Named (softenedBindParentsUnder)
 import MLF.Types.Elab
 import MLF.Util.ElabError (ElabError (..))
 import MLF.Util.Graph (topoSortBy)
@@ -62,13 +66,26 @@ reifyWith ::
   ReifyRoot ->
   NodeId ->
   Either ElabError ElabType
-reifyWith _contextLabel presolutionView nameForVar isNamed rootMode nid =
+reifyWith contextLabel presolutionView nameForVar isNamed rootMode nid = do
+  readModel <- buildElabReadModel presolutionView
+  reifyWithReadModel contextLabel readModel nameForVar isNamed rootMode nid
+
+reifyWithReadModel ::
+  String ->
+  ElabReadModel p ->
+  (NodeId -> String) ->
+  (NodeId -> Bool) ->
+  ReifyRoot ->
+  NodeId ->
+  Either ElabError ElabType
+reifyWithReadModel _contextLabel readModel nameForVar isNamed rootMode nid =
   let start = case rootMode of
         RootType -> goType
         RootTypeNoFallback -> goTypeNoFallback
         RootBound -> goBoundRoot
    in snd <$> start emptyCache (canonical nid)
   where
+    presolutionView = ermPresolutionView readModel
     originalConstraint = pvConstraint presolutionView
     canonicalConstraint = pvCanonicalConstraint presolutionView
     nodes = cNodes canonicalConstraint
@@ -77,46 +94,15 @@ reifyWith _contextLabel presolutionView nameForVar isNamed rootMode nid =
     originalGenNodes = cGenNodes originalConstraint
     weakened = cWeakenedVars canonicalConstraint
     isEliminatedVarS queryNid = IntSet.member (getNodeId queryNid) (cEliminatedVars canonicalConstraint)
-    canonicalGenNodesList =
-      map snd (IntMap.toList (getGenNodeMap originalGenNodes))
-    schemeRootSetRaw =
-      IntSet.fromList
-        [ getNodeId root
-          | gen <- canonicalGenNodesList,
-            root <- gnSchemes gen
-        ]
-    schemeRootSet =
-      IntSet.union schemeRootSetRaw $
-        IntSet.fromList
-          [ getNodeId (canonical root)
-            | gen <- canonicalGenNodesList,
-              root <- gnSchemes gen
-          ]
-    schemeGenByRootRaw =
-      IntMap.fromListWith
-        const
-        [ (getNodeId root, gnId gen)
-          | gen <- canonicalGenNodesList,
-            root <- gnSchemes gen
-        ]
-    schemeGenByRoot =
-      IntMap.union schemeGenByRootRaw $
-        IntMap.fromListWith
-          const
-          [ (getNodeId (canonical root), gnId gen)
-            | gen <- canonicalGenNodesList,
-              root <- gnSchemes gen
-          ]
-    schemeGenSet =
-      IntSet.fromList
-        [ getGenNodeId gid
-          | gid <- IntMap.elems schemeGenByRoot
-        ]
+    schemeRootSet = ermSchemeRootSet readModel
+    schemeGenByRoot = ermSchemeGenByRoot readModel
+    schemeGenSet = ermSchemeGenSet readModel
+    softChildren = ermSoftChildren readModel
 
     lookupNode k = maybe (Left (MissingNode k)) Right (lookupNodeIn nodes k)
 
     bindParentsE =
-      softenedBindParentsUnder canonical canonicalConstraint
+      Right (ermSoftBindParents readModel)
 
     boundIsSimple start =
       let go visited nid0 =
@@ -171,17 +157,16 @@ reifyWith _contextLabel presolutionView nameForVar isNamed rootMode nid =
       pure (IntMap.lookup (nodeRefKey refC) bindParents)
 
     boundFlexChildrenAllUnderSoft binder0 = do
-      bindParents <- bindParentsE
       let binderC = canonicalRef binder0
       unless (nodeRefExists binderC) $
         Left $
           BindingTreeError $
-            InvalidBindingTree $
-              "boundFlexChildrenAllUnderSoft: binder " ++ show binderC ++ " not in constraint"
+              InvalidBindingTree $
+                "boundFlexChildrenAllUnderSoft: binder " ++ show binderC ++ " not in constraint"
       reverse
         <$> foldM
-          ( \acc (childKey, (parent, flag)) ->
-              if parent /= binderC || flag /= BindFlex
+          ( \acc (childKey, flag) ->
+              if flag /= BindFlex
                 then pure acc
                 else
                   let childRef = nodeRefFromKey childKey
@@ -207,7 +192,9 @@ reifyWith _contextLabel presolutionView nameForVar isNamed rootMode nid =
                                     "boundFlexChildrenAllUnderSoft: child " ++ show gid ++ " not in cGenNodes"
           )
           []
-          (IntMap.toList bindParents)
+          [ (childKey, flag)
+          | (childKey, flag) <- IntMap.findWithDefault [] (nodeRefKey binderC) softChildren
+          ]
 
     varName n = nameForVar (canonical n)
     varFor n = TVar (varName n)
@@ -666,7 +653,7 @@ reifyWith _contextLabel presolutionView nameForVar isNamed rootMode nid =
           if not includeAll
             then boundFlexChildrenAllUnderSoft parentRef
             else do
-              bindParents <- bindParentsE
+              let parentRefC = canonicalRef parentRef
               let childNode childKey =
                     case nodeRefFromKey childKey of
                       TypeRef childN -> Just childN
@@ -680,8 +667,7 @@ reifyWith _contextLabel presolutionView nameForVar isNamed rootMode nid =
                     BindRigid -> includeRigid && isBindableNode child
               pure
                 [ canonical child
-                  | (childKey, (parent, flag)) <- IntMap.toList bindParents,
-                    parent == parentRef,
+                  | (childKey, flag) <- IntMap.findWithDefault [] (nodeRefKey parentRefC) softChildren,
                     Just child <- [childNode childKey],
                     isBindable flag child
                 ]

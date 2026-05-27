@@ -23,7 +23,13 @@ import qualified MLF.Binding.Adjustment as BindingAdjustment
 import qualified MLF.Constraint.Traversal as Traversal
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Constraint.Types.Graph hiding (lookupNode)
-import MLF.Constraint.Presolution.Base (PresolutionError(..), PresolutionM, PresolutionState(..))
+import MLF.Constraint.Presolution.Base
+    ( PresolutionError(..)
+    , PresolutionM
+    , PresolutionState(..)
+    , modifyConstraintState
+    , modifyUnionFindState
+    )
 import MLF.Constraint.Presolution.Ops (findRoot)
 import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical)
 
@@ -74,7 +80,7 @@ unifyAcyclicRootsWithRaiseTracePrefer prefer root1 root2 = do
             Left err -> throwError (BindingTreeError err)
             Right result -> pure result
 
-    put st0 { psConstraint = c1 }
+    put (modifyConstraintState (const c1) st0)
     let nodes = cNodes c1
         aElim = VarStore.isEliminatedVar c1 root1
         bElim = VarStore.isEliminatedVar c1 root2
@@ -109,8 +115,7 @@ unifyAcyclicRootsWithRaiseTracePrefer prefer root1 root2 = do
                     | p == root2 && not bElim -> (root1, root2)
                     | otherwise -> (fromRoot, toRoot)
                 Nothing -> (fromRoot, toRoot)
-    modify $ \st ->
-        st { psUnionFind = IntMap.insert (getNodeId fromRoot') toRoot' (psUnionFind st) }
+    modify $ modifyUnionFindState (IntMap.insert (getNodeId fromRoot') toRoot')
 
     pure trace0
 

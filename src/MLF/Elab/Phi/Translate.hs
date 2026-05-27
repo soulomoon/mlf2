@@ -33,6 +33,7 @@ the public entry points as a facade.
 module MLF.Elab.Phi.Translate (
     -- * Translation entry point (requires trace)
     phiFromEdgeWitnessWithTrace,
+    phiFromEdgeWitnessWithTraceReadModel,
     canonicalNodeM
 ) where
 
@@ -41,26 +42,25 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.Maybe (listToMaybe)
 
+import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness
 import MLF.Constraint.Types.Phase (Phase)
 import MLF.Elab.Types
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Constraint.BindingUtil (bindingPathToRootLocal)
+import MLF.Elab.ReadModel (ElabReadModel(..), buildElabReadModel)
 import MLF.Reify.Core
-    ( namedNodes
-    , reifyBoundWithNames
+    ( reifyBoundWithNamesReadModel
     , reifyType
-    , reifyTypeWithNamedSetNoFallback
+    , reifyTypeWithNamedSetNoFallbackReadModel
     )
 import MLF.Constraint.Presolution (EdgeTrace(..), PresolutionView(..))
 import MLF.Constraint.Presolution.Base (CopyMapping(..), InteriorNodes(..), copiedNodes)
-import qualified MLF.Binding.Tree as Binding
-import MLF.Binding.Tree (checkBindingTree, checkNoGenFallback, checkSchemeClosureUnder)
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Elab.Phi.Env (PhiM, askCanonical)
 import MLF.Elab.Phi.Omega (OmegaContext(..), phiWithSchemeOmega)
-import MLF.Util.Trace (TraceConfig, traceGeneralize)
+import MLF.Util.Trace (TraceConfig(..), traceGeneralize)
 import MLF.Elab.Run.Scope (schemeBodyTarget)
 
 -- | Canonicalize a node id using the union-find from the solve result.
@@ -88,8 +88,24 @@ phiFromEdgeWitnessWithTrace
 phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith presolutionView mbGaParents mSchemeInfo mTrace ew =
     case mTrace of
         Nothing -> Left (MissingEdgeTrace (ewEdgeId ew))
+        Just _ -> do
+            readModel <- buildElabReadModel presolutionView
+            phiFromEdgeWitnessCore traceCfg generalizeAtWith readModel mbGaParents mSchemeInfo mTrace ew
+
+phiFromEdgeWitnessWithTraceReadModel
+    :: TraceConfig
+    -> GeneralizeAtWith p
+    -> ElabReadModel p
+    -> Maybe (GaBindParents p)
+    -> Maybe SchemeInfo
+    -> Maybe EdgeTrace
+    -> EdgeWitness
+    -> Either ElabError Instantiation
+phiFromEdgeWitnessWithTraceReadModel traceCfg generalizeAtWith readModel mbGaParents mSchemeInfo mTrace ew =
+    case mTrace of
+        Nothing -> Left (MissingEdgeTrace (ewEdgeId ew))
         Just _ ->
-            phiFromEdgeWitnessCore traceCfg generalizeAtWith presolutionView mbGaParents mSchemeInfo mTrace ew
+            phiFromEdgeWitnessCore traceCfg generalizeAtWith readModel mbGaParents mSchemeInfo mTrace ew
 
 {- Note [Trace-First Copied Set]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -103,27 +119,33 @@ were merged during solving but does not introduce new semantic content.
 phiFromEdgeWitnessCore
     :: TraceConfig
     -> GeneralizeAtWith p
-    -> PresolutionView p
+    -> ElabReadModel p
     -> Maybe (GaBindParents p)
     -> Maybe SchemeInfo
     -> Maybe EdgeTrace
     -> EdgeWitness
     -> Either ElabError Instantiation
-phiFromEdgeWitnessCore traceCfg generalizeAtWith presolutionView mbGaParents mSchemeInfo mTrace ew = do
+phiFromEdgeWitnessCore traceCfg generalizeAtWith readModel mbGaParents mSchemeInfo mTrace ew = do
     requireValidBindingTree
-    namedSet0 <- namedNodes presolutionView
-    case debugPhi
-        ("phi ewLeft=" ++ show (ewLeft ew)
-            ++ " ewRight=" ++ show (ewRight ew)
-        )
-        () of
+    let namedSet0 = ermNamedNodes readModel
+    case if tcGeneralize traceCfg
+        then
+            debugPhi
+                ("phi ewLeft=" ++ show (ewLeft ew)
+                    ++ " ewRight=" ++ show (ewRight ew)
+                )
+                ()
+        else () of
         () -> pure ()
-    case debugPhi
-        ("phi ewRootType=" ++ show (reifyDebugType (ewRoot ew))
-            ++ " ewLeftType=" ++ show (reifyDebugType (ewLeft ew))
-            ++ " ewRightType=" ++ show (reifyDebugType (ewRight ew))
-        )
-        () of
+    case if tcGeneralize traceCfg
+        then
+            debugPhi
+                ("phi ewRootType=" ++ show (reifyDebugType (ewRoot ew))
+                    ++ " ewLeftType=" ++ show (reifyDebugType (ewLeft ew))
+                    ++ " ewRightType=" ++ show (reifyDebugType (ewRight ew))
+                )
+                ()
+        else () of
         () -> pure ()
     -- See Note [Trace-First Copied Set]
     let copied =
@@ -227,21 +249,12 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith presolutionView mbGaParents mSc
             }
 
     requireValidBindingTree :: Either ElabError ()
-    requireValidBindingTree =
-        let (constraintCheck, schemeConstraint, schemeCanonical) =
-                (constraint, constraint, canonicalNode)
-        in case checkBindingTree constraintCheck of
-            Left err -> Left (BindingTreeError err)
-            Right () ->
-                case checkNoGenFallback constraintCheck of
-                    Left err -> Left (BindingTreeError err)
-                    Right () ->
-                        case checkSchemeClosureUnder schemeCanonical schemeConstraint of
-                            Left err -> Left (BindingTreeError err)
-                            Right () -> Right ()
+    requireValidBindingTree = ermPhiValidation readModel
 
     canonicalNode :: NodeId -> NodeId
     canonicalNode = pvCanonical presolutionView
+
+    presolutionView = ermPresolutionView readModel
 
     constraint = pvConstraint presolutionView
 
@@ -252,14 +265,14 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith presolutionView mbGaParents mSc
         :: IntMap.IntMap String
         -> NodeId
         -> Either ElabError ElabType
-    reifyBoundWithNamesAt = reifyBoundWithNames presolutionView
+    reifyBoundWithNamesAt = reifyBoundWithNamesReadModel readModel
 
     reifyTypeWithNamedSetNoFallbackAt
         :: IntMap.IntMap String
         -> IntSet.IntSet
         -> NodeId
         -> Either ElabError ElabType
-    reifyTypeWithNamedSetNoFallbackAt = reifyTypeWithNamedSetNoFallback presolutionView
+    reifyTypeWithNamedSetNoFallbackAt = reifyTypeWithNamedSetNoFallbackReadModel readModel
 
     computeTraceBinderReplayBridge
         :: Maybe EdgeTrace

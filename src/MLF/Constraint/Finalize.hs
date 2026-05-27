@@ -3,6 +3,7 @@
 module MLF.Constraint.Finalize (
     presolutionViewFromSnapshot,
     finalizePresolutionViewFromSnapshot,
+    finalizeSnapshotArtifacts,
     validateCanonicalSnapshotStrict,
     finalizeSolvedFromSnapshot,
     finalizeSolvedForConstraint
@@ -36,6 +37,18 @@ finalizePresolutionViewFromSnapshot constraint uf = do
         Solve.finalizeConstraintWithUF (spSanitizedUf prepared0) constraint
     let preparedFinal = prepareSnapshotPreparationFromParts constraint ufFinal
     pure (buildPresolutionView preparedFinal canonicalConstraint)
+
+finalizeSnapshotArtifacts :: Constraint p -> IntMap NodeId -> Either SolveError (Solved.Solved, PresolutionView p)
+finalizeSnapshotArtifacts constraint uf = do
+    let prepared0 = prepareSnapshotPreparationFromParts constraint uf
+    SolveResult { srConstraint = canonicalConstraint, srUnionFind = ufFinal } <-
+        Solve.finalizeConstraintWithUF (spSanitizedUf prepared0) constraint
+    let preparedFinal = prepareSnapshotPreparationFromParts constraint ufFinal
+        solved0 = SolvedInternal.fromConstraintAndUf constraint ufFinal
+        solved1 = SolvedInternal.rebuildWithConstraint solved0 canonicalConstraint
+        solved2 = Internal.pruneSolvedBindParents solved1
+    solvedClean <- Internal.validateSolvedStrict solved2
+    pure (solvedClean, buildPresolutionView preparedFinal canonicalConstraint)
 
 validateCanonicalSnapshotStrict :: Constraint p -> IntMap NodeId -> [String]
 validateCanonicalSnapshotStrict canonicalConstraint canonicalMap =

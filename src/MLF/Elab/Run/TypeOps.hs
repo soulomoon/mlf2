@@ -1,7 +1,12 @@
 {-# LANGUAGE GADTs #-}
 module MLF.Elab.Run.TypeOps (
+    InlineBoundVarsContext,
+    mkInlineBoundVarsContext,
+    mkInlineBoundVarsContextWithReadModel,
     inlineBoundVarsType,
     inlineBoundVarsTypeForBound,
+    inlineBoundVarsTypeWithContext,
+    inlineBoundVarsTypeForBoundWithContext,
     simplifyAnnotationType
 ) where
 
@@ -12,10 +17,12 @@ import qualified Data.Set as Set
 
 import MLF.Constraint.Presolution (PresolutionView(..))
 import qualified MLF.Constraint.VarStore as VarStore
-import MLF.Constraint.Types.Graph (TyNode(..), cNodes, fromListNode, toListNode)
+import MLF.Constraint.Types.Graph (NodeMap, TyNode(..), cNodes, fromListNode, toListNode)
+import MLF.Elab.ReadModel (ElabReadModel(..))
 import MLF.Reify.Core
     ( namedNodes
     , reifyTypeWithNamedSetNoFallback
+    , reifyTypeWithNamedSetNoFallbackReadModel
     )
 import MLF.Reify.TypeOps (
     freeTypeVarsType,
@@ -32,16 +39,66 @@ import MLF.Elab.Types
     , tyToElab
     , mapBoundType
     )
+
+data InlineBoundVarsContext p = InlineBoundVarsContext
+    { ibvcPresolutionView :: PresolutionView p
+    , ibvcNamedSet :: IntSet.IntSet
+    , ibvcNodesVarOnly :: NodeMap TyNode
+    , ibvcReadModel :: Maybe (ElabReadModel p)
+    }
+
+mkInlineBoundVarsContext :: PresolutionView p -> IntSet.IntSet -> InlineBoundVarsContext p
+mkInlineBoundVarsContext presolutionView namedSet =
+    InlineBoundVarsContext
+        { ibvcPresolutionView = presolutionView
+        , ibvcNamedSet = namedSet
+        , ibvcNodesVarOnly =
+            fromListNode
+                [ (nid, node)
+                | (nid, node) <- toListNode (cNodes constraint)
+                , isTyVar node
+                ]
+        , ibvcReadModel = Nothing
+        }
+  where
+    constraint = pvConstraint presolutionView
+    isTyVar node = case node of
+        TyVar{} -> True
+        _ -> False
+
+mkInlineBoundVarsContextWithReadModel :: ElabReadModel p -> InlineBoundVarsContext p
+mkInlineBoundVarsContextWithReadModel readModel =
+    InlineBoundVarsContext
+        { ibvcPresolutionView = presolutionView
+        , ibvcNamedSet = ermNamedNodes readModel
+        , ibvcNodesVarOnly = ermNodesVarOnly readModel
+        , ibvcReadModel = Just readModel
+        }
+  where
+    presolutionView = ermPresolutionView readModel
+
 inlineBoundVarsType :: PresolutionView p -> ElabType -> ElabType
 inlineBoundVarsType = inlineBoundVarsTypeWith False
 
 inlineBoundVarsTypeForBound :: PresolutionView p -> ElabType -> ElabType
 inlineBoundVarsTypeForBound = inlineBoundVarsTypeWith True
 
+inlineBoundVarsTypeWithContext :: InlineBoundVarsContext p -> ElabType -> ElabType
+inlineBoundVarsTypeWithContext = inlineBoundVarsTypeWithPrepared False
+
+inlineBoundVarsTypeForBoundWithContext :: InlineBoundVarsContext p -> ElabType -> ElabType
+inlineBoundVarsTypeForBoundWithContext = inlineBoundVarsTypeWithPrepared True
+
 -- See Note [Scope-aware bound/alias inlining] in
 -- docs/notes/2026-01-27-elab-changes.md.
 inlineBoundVarsTypeWith :: Bool -> PresolutionView p -> ElabType -> ElabType
 inlineBoundVarsTypeWith unboundToBottom presolutionView =
+    inlineBoundVarsTypeWithPrepared unboundToBottom (mkInlineBoundVarsContext presolutionView namedSet)
+  where
+    namedSet = either (const IntSet.empty) id (namedNodes presolutionView)
+
+inlineBoundVarsTypeWithPrepared :: Bool -> InlineBoundVarsContext p -> ElabType -> ElabType
+inlineBoundVarsTypeWithPrepared unboundToBottom context =
     inlineAliasBoundsWithBySeen
         unboundToBottom
         canonical
@@ -49,21 +106,19 @@ inlineBoundVarsTypeWith unboundToBottom presolutionView =
         (VarStore.lookupVarBound constraint)
         reifyBoundWithSeen
   where
+    presolutionView = ibvcPresolutionView context
     constraint = pvConstraint presolutionView
     canonical = pvCanonical presolutionView
-    namedSet = either (const IntSet.empty) id (namedNodes presolutionView)
-    nodesVarOnly =
-        fromListNode
-            [ (nid, node)
-            | (nid, node) <- toListNode (cNodes constraint)
-            , isTyVar node
-            ]
-    isTyVar node = case node of
-        TyVar{} -> True
-        _ -> False
+    namedSet = ibvcNamedSet context
+    nodesVarOnly = ibvcNodesVarOnly context
     reifyBoundWithSeen seen bnd = do
         let bndRoot = resolveBoundBodyConstraint canonical constraint seen bnd
-        t0 <- reifyTypeWithNamedSetNoFallback presolutionView IntMap.empty namedSet bndRoot
+        t0 <-
+            case ibvcReadModel context of
+                Just readModel ->
+                    reifyTypeWithNamedSetNoFallbackReadModel readModel IntMap.empty namedSet bndRoot
+                Nothing ->
+                    reifyTypeWithNamedSetNoFallback presolutionView IntMap.empty namedSet bndRoot
         pure (inlineBaseBoundsType constraint canonical t0)
 
 simplifyAnnotationType :: ElabType -> ElabType

@@ -10,7 +10,7 @@ module MLF.Program.CLI
     , runProgramFile
     ) where
 
-import Control.Exception (IOException, try)
+import Control.Exception (IOException, evaluate, try)
 import Data.Bifunctor (first)
 import Data.List (intercalate)
 import System.Directory (doesDirectoryExist, doesFileExist)
@@ -28,7 +28,7 @@ import MLF.Frontend.Parse.Program
     ( parseLocatedProgramWithFile
     , renderProgramParseError
     )
-import MLF.Frontend.Program.Check (checkLocatedProgramPackage)
+import MLF.Frontend.Program.Check (checkLocatedProgramPackageWithTiming)
 import MLF.Frontend.Program.Package
     ( LocatedProgramPackage (..)
     , PackageId (..)
@@ -43,10 +43,11 @@ import MLF.Frontend.Program.Package
 import MLF.Frontend.Program.Prelude (withPreludeLocatedPackage)
 import MLF.Frontend.Program.Run
     ( programRunOutput
-    , runLocatedProgramPackageOutput
+    , runLocatedProgramPackageOutputWithTiming
     )
 import MLF.Frontend.Program.Types (renderProgramDiagnostic)
 import MLF.Frontend.Syntax.Program (LocatedProgram)
+import MLF.Util.Timing (TimingConfig, timeProgramIO, timingConfigFromEnv)
 
 data ProgramCliInput = ProgramCliInput
     { programCliInputPath :: FilePath
@@ -73,33 +74,41 @@ programCliUsage =
 
 checkProgramArgs :: [String] -> IO (Either String String)
 checkProgramArgs args =
-    runLocatedPackageCommand args $ \package -> do
-        _ <- first renderProgramDiagnostic (checkLocatedProgramPackage package)
-        pure "OK\n"
+    runLocatedPackageCommand args $ \timing package -> do
+        checkedResult <- checkLocatedProgramPackageWithTiming timing package
+        pure $ do
+            _ <- first renderProgramDiagnostic checkedResult
+            pure "OK\n"
 
 runProgramArgs :: [String] -> IO (Either String String)
 runProgramArgs args =
-    runLocatedPackageCommand args $ \package ->
-        first renderProgramDiagnostic $
-            programRunOutput <$> runLocatedProgramPackageOutput package
+    runLocatedPackageCommand args $ \timing package -> do
+        runResult <- runLocatedProgramPackageOutputWithTiming timing package
+        pure $
+            first renderProgramDiagnostic $
+                programRunOutput <$> runResult
 
 emitBackendArgs :: [String] -> IO (Either String String)
 emitBackendArgs args =
-    runLocatedPackageCommand args $ \package -> do
-        checked <-
-            first
-                renderBackendEmissionPreparationError
-                (prepareBackendEmissionFromLocatedPackage package)
-        first renderBackendLLVMError (renderCheckedProgramLLVM checked)
+    runLocatedPackageCommand args $ \timing package ->
+        timeProgramIO timing "program.emit-backend.prepare-and-render" $
+            evaluate $ do
+                checked <-
+                    first
+                        renderBackendEmissionPreparationError
+                        (prepareBackendEmissionFromLocatedPackage package)
+                first renderBackendLLVMError (renderCheckedProgramLLVM checked)
 
 emitNativeArgs :: [String] -> IO (Either String String)
 emitNativeArgs args =
-    runLocatedPackageCommand args $ \package -> do
-        checked <-
-            first
-                renderBackendEmissionPreparationError
-                (prepareBackendEmissionFromLocatedPackage package)
-        first renderBackendLLVMError (renderCheckedProgramNativeLLVM checked)
+    runLocatedPackageCommand args $ \timing package ->
+        timeProgramIO timing "program.emit-native.prepare-and-render" $
+            evaluate $ do
+                checked <-
+                    first
+                        renderBackendEmissionPreparationError
+                        (prepareBackendEmissionFromLocatedPackage package)
+                first renderBackendLLVMError (renderCheckedProgramNativeLLVM checked)
 
 checkProgramFile :: FilePath -> IO (Either String String)
 checkProgramFile path =
@@ -119,15 +128,29 @@ emitNativeFile path =
 
 runLocatedPackageCommand ::
     [String] ->
-    (LocatedProgramPackage -> Either String String) ->
+    (TimingConfig -> LocatedProgramPackage -> IO (Either String String)) ->
     IO (Either String String)
-runLocatedPackageCommand args command =
-    case parseProgramCliInputArgs args of
+runLocatedPackageCommand args command = do
+    timing <- timingConfigFromEnv
+    inputResult <-
+        timeProgramIO
+            timing
+            "program.cli.parse-args"
+            (evaluate (parseProgramCliInputArgs args))
+    case inputResult of
         Left err ->
             pure (Left err)
         Right input -> do
-            packageResult <- loadLocatedProgramPackageInput input
-            pure (packageResult >>= command)
+            packageResult <-
+                timeProgramIO
+                    timing
+                    "program.cli.load-package"
+                    (loadLocatedProgramPackageInput input)
+            case packageResult of
+                Left err ->
+                    pure (Left err)
+                Right package ->
+                    timeProgramIO timing "program.cli.command" (command timing package)
 
 parseProgramCliInputArgs :: [String] -> Either String ProgramCliInput
 parseProgramCliInputArgs args =

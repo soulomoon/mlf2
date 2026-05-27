@@ -40,9 +40,12 @@ module MLF.Binding.Tree (
     removeBindParent,
     -- * Binder enumeration (paper Q(n))
     boundFlexChildren,
+    boundFlexChildrenInQuotient,
     boundFlexChildrenAllUnder,
+    boundFlexChildrenAllInQuotient,
     boundFlexChildrenUnder,
     orderedBinders,
+    orderedBindersInQuotient,
     forallSpecFromForall,
     -- * Root detection
     bindingRoots,
@@ -56,6 +59,8 @@ module MLF.Binding.Tree (
     bindingPathToRootLocal,
     bindingLCA,
     canonicalizeBindParentsUnder,
+    QuotientBindParents(..),
+    quotientBindParentsContextUnder,
     -- * Interior computation
     interiorOf,
     interiorOfUnder,
@@ -80,6 +85,7 @@ import qualified Data.IntSet as IntSet
 import Data.IntSet (IntSet)
 
 import MLF.Binding.Children (
+    collectBoundChildrenEntriesWithFlag,
     collectBoundChildrenWithFlag,
     )
 import MLF.Binding.NodeRefs (
@@ -110,8 +116,12 @@ import MLF.Binding.Validation (
 
 -- Re-export canonicalization functions
 import MLF.Binding.Canonicalization (
+    QuotientBindParents(..),
     canonicalizeBindParentsUnder,
+    quotientBindParentsContextUnder,
+    quotientChildrenForParent,
     withQuotientBindParents,
+    withQuotientBindParentsContext,
     )
 
 -- Re-export query functions
@@ -206,8 +216,21 @@ boundFlexChildrenUnder
     -> NodeRef
     -> Either BindingError [NodeId]
 boundFlexChildrenUnder canonical c0 binder0 =
-    withQuotientBindParents "boundFlexChildrenUnder" canonical c0 binder0 $ \binderC bindParents ->
-        collectBoundChildren (tyVarChildFilter c0) c0 bindParents binderC "boundFlexChildrenUnder"
+    withQuotientBindParentsContext "boundFlexChildrenUnder" canonical c0 binder0 $
+        \binderC qbp -> boundFlexChildrenInQuotient c0 qbp binderC
+
+boundFlexChildrenInQuotient
+    :: Constraint p
+    -> QuotientBindParents
+    -> NodeRef
+    -> Either BindingError [NodeId]
+boundFlexChildrenInQuotient c0 qbp binderC =
+    collectBoundChildrenEntriesWithFlag
+        (tyVarChildFilter c0)
+        (== BindFlex)
+        c0
+        (quotientChildrenForParent binderC qbp)
+        "boundFlexChildrenInQuotient"
 
 -- | Direct flexibly-bound children (any node type) of a binder node, under a
 -- canonicalization function.
@@ -220,17 +243,30 @@ boundFlexChildrenAllUnder
     -> NodeRef
     -> Either BindingError [NodeId]
 boundFlexChildrenAllUnder canonical c0 binder0 =
-    withQuotientBindParents "boundFlexChildrenAllUnder" canonical c0 binder0 $ \binderC bindParents ->
-        let allFilter ref = case ref of
-                TypeRef nid ->
-                    case NodeAccess.lookupNode c0 nid of
-                        Just TyExp{} -> Nothing
-                        Just TyBase{} -> Nothing
-                        Just TyBottom{} -> Nothing
-                        Just _ -> Just nid
-                        Nothing -> Nothing
-                _ -> Nothing
-        in collectBoundChildren allFilter c0 bindParents binderC "boundFlexChildrenAllUnder"
+    withQuotientBindParentsContext "boundFlexChildrenAllUnder" canonical c0 binder0 $
+        \binderC qbp -> boundFlexChildrenAllInQuotient c0 qbp binderC
+
+boundFlexChildrenAllInQuotient
+    :: Constraint p
+    -> QuotientBindParents
+    -> NodeRef
+    -> Either BindingError [NodeId]
+boundFlexChildrenAllInQuotient c0 qbp binderC =
+    let allFilter ref = case ref of
+            TypeRef nid ->
+                case NodeAccess.lookupNode c0 nid of
+                    Just TyExp{} -> Nothing
+                    Just TyBase{} -> Nothing
+                    Just TyBottom{} -> Nothing
+                    Just _ -> Just nid
+                    Nothing -> Nothing
+            _ -> Nothing
+    in collectBoundChildrenEntriesWithFlag
+        allFilter
+        (== BindFlex)
+        c0
+        (quotientChildrenForParent binderC qbp)
+        "boundFlexChildrenAllInQuotient"
 
 -- | Ordered binders for a binder node (leftmost-lowermost, paper ≺).
 --
@@ -248,6 +284,20 @@ orderedBinders
     -> Either BindingError [NodeId]
 orderedBinders canonical c0 binder0 = do
     let binderC = Canonicalize.canonicalRef canonical binder0
+    qbp <- quotientBindParentsContextUnder canonical c0
+    orderedBindersInQuotient canonical c0 qbp binderC
+
+orderedBindersInQuotient
+    :: (NodeId -> NodeId)
+    -> Constraint p
+    -> QuotientBindParents
+    -> NodeRef
+    -> Either BindingError [NodeId]
+orderedBindersInQuotient canonical c0 qbp binderC = do
+    unless (IntSet.member (nodeRefKey binderC) (qbpAllRoots qbp)) $
+        Left $
+            InvalidBindingTree $
+                "orderedBindersInQuotient: node " ++ show binderC ++ " not in constraint"
     case binderC of
         GenRef _ ->
             Left $
@@ -271,7 +321,7 @@ orderedBinders canonical c0 binder0 = do
                         canonical
                         (lookupNodeIn nodes)
                         orderRoot
-            binders <- boundChildrenUnder canonical c0 (TypeRef binderN) includeRigid
+            binders <- boundChildrenInQuotient c0 qbp (TypeRef binderN) includeRigid
             let bindersReachable =
                     filter (\nid -> IntSet.member (getNodeId nid) reachable) binders
                 extraChildren nid =
@@ -290,17 +340,21 @@ orderedBinders canonical c0 binder0 = do
                         "orderedBinders: missing order keys for " ++ show missing
             orderBindersByDeps canonical c0 orderKeys bindersReachable
   where
-    boundChildrenUnder
-        :: (NodeId -> NodeId)
-        -> Constraint p
+    boundChildrenInQuotient
+        :: Constraint p
+        -> QuotientBindParents
         -> NodeRef
         -> Bool
         -> Either BindingError [NodeId]
-    boundChildrenUnder canon constraint binderRef includeRigid =
-        withQuotientBindParents "orderedBinders" canon constraint binderRef $ \binderC bindParents ->
-            let tyVarFilter = tyVarChildFilter constraint
-                flagOk flag = flag == BindFlex || (includeRigid && flag == BindRigid)
-            in collectBoundChildrenWithFlag tyVarFilter flagOk constraint bindParents binderC "orderedBinders"
+    boundChildrenInQuotient constraint quotient binderRef includeRigid =
+        let tyVarFilter = tyVarChildFilter constraint
+            flagOk flag = flag == BindFlex || (includeRigid && flag == BindRigid)
+        in collectBoundChildrenEntriesWithFlag
+            tyVarFilter
+            flagOk
+            constraint
+            (quotientChildrenForParent binderRef quotient)
+            "orderedBinders"
 
 orderBindersByDeps
     :: (NodeId -> NodeId)

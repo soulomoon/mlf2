@@ -1,6 +1,7 @@
 module MLF.Binding.Children (
     collectBoundChildren,
     collectBoundChildrenWithFlag,
+    collectBoundChildrenEntriesWithFlag,
 ) where
 
 import Control.Monad (foldM)
@@ -28,10 +29,28 @@ collectBoundChildrenWithFlag
     -> String
     -> Either BindingError [NodeId]
 collectBoundChildrenWithFlag childFilter flagOk c bindParents binder errCtx =
-    reverse <$> foldM step [] (IntMap.toList bindParents)
+    collectBoundChildrenEntriesWithFlag
+        childFilter
+        flagOk
+        c
+        [ entry
+        | entry@(_childKey, (parent, _flag)) <- IntMap.toList bindParents
+        , parent == binder
+        ]
+        errCtx
+
+collectBoundChildrenEntriesWithFlag
+    :: (NodeRef -> Maybe NodeId)
+    -> (BindFlag -> Bool)
+    -> Constraint p
+    -> [(Int, (NodeRef, BindFlag))]
+    -> String
+    -> Either BindingError [NodeId]
+collectBoundChildrenEntriesWithFlag childFilter flagOk c entries errCtx =
+    reverse <$> foldM step [] entries
   where
-    step acc (childKey, (parent, flag))
-        | parent /= binder || not (flagOk flag) = pure acc
+    step acc (childKey, (_parent, flag))
+        | not (flagOk flag) = pure acc
         | otherwise =
             case nodeRefFromKey childKey of
                 TypeRef childN ->

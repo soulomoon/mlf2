@@ -24,12 +24,19 @@ module MLF.Constraint.Presolution.Ops (
 
 import Control.Monad.State (get, gets, modify', put)
 import Control.Monad.Except (throwError)
+import qualified Data.IntSet as IntSet
 
-import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Util.UnionFind as UnionFind
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Presolution.Base (PresolutionM, PresolutionError(..), PresolutionState(..))
+import MLF.Constraint.Presolution.Base
+    ( PresolutionM
+    , PresolutionError(..)
+    , PresolutionState(..)
+    , compressUnionFindState
+    , modifyConstraintDirtyTypesState
+    , setBindParentState
+    )
 
 -- | Allocate a fresh NodeId from the presolution state counter.
 createFreshNodeId :: PresolutionM p NodeId
@@ -45,7 +52,10 @@ registerNode nid node =
     modify' $ \st ->
         let c0 = psConstraint st
             nodes' = insertNode nid node (cNodes c0)
-        in st { psConstraint = c0 { cNodes = nodes' } }
+            dirty =
+                IntSet.fromList $
+                    getNodeId nid : map getNodeId (structuralChildrenWithBounds node)
+        in modifyConstraintDirtyTypesState dirty (\c -> c { cNodes = nodes' }) st
 
 -- | Set a binding parent for a node in the constraint.
 --
@@ -53,10 +63,7 @@ registerNode nid node =
 -- this mutates the explicit binding tree relation `cBindParents`.
 setBindParentM :: NodeRef -> (NodeRef, BindFlag) -> PresolutionM p ()
 setBindParentM child parentInfo =
-    modify' $ \st ->
-        let c0 = psConstraint st
-            c1 = Binding.setBindParent child parentInfo c0
-        in st { psConstraint = c1 }
+    modify' (setBindParentState child parentInfo)
 
 -- | Lookup a node in the term-DAG or fail.
 getNode :: NodeId -> PresolutionM p TyNode
@@ -71,7 +78,7 @@ findRoot :: NodeId -> PresolutionM p NodeId
 findRoot nid = do
     uf <- gets psUnionFind
     let (root, uf') = UnionFind.findRootWithCompression uf nid
-    modify' $ \st -> st { psUnionFind = uf' }
+    modify' (compressUnionFindState uf')
     pure root
 
 -- | Lookup a node at its current canonical representative.
@@ -114,7 +121,10 @@ setVarBound vid mb = do
             modify' $ \st ->
                 let c0 = psConstraint st
                     c1 = VarStore.setVarBound root mbRoot c0
-                in st { psConstraint = c1 }
+                    dirty =
+                        IntSet.fromList $
+                            getNodeId root : maybe [] ((: []) . getNodeId) mbRoot
+                in modifyConstraintDirtyTypesState dirty (const c1) st
         _ -> pure ()
 
 -- | Mark a type variable as eliminated so elaboration will not re-quantify it.
@@ -126,5 +136,6 @@ dropVarBind vid = do
             modify' $ \st ->
                 let c0 = psConstraint st
                     c1 = VarStore.markEliminatedVar vid c0
-                in st { psConstraint = c1 }
+                    dirty = IntSet.singleton (getNodeId vid)
+                in modifyConstraintDirtyTypesState dirty (const c1) st
         _ -> pure ()

@@ -13,7 +13,10 @@ module MLF.Constraint.Presolution.Witness
   ( EdgeWitnessInput (..),
     EdgeWitnessPlan (..),
     binderArgsFromExpansion,
+    binderArgsFromKnownBinders,
+    filterTyVarBinders,
     edgeWitnessPlan,
+    edgeWitnessPlanFromBinders,
     buildEdgeWitness,
     buildEdgeTrace,
     integratePhase2Ops,
@@ -95,11 +98,21 @@ data EdgeWitnessInput = EdgeWitnessInput
   }
 
 edgeWitnessPlan :: GenNodeId -> NodeId -> TyNode -> Expansion -> PresolutionM p EdgeWitnessPlan
-edgeWitnessPlan gid leftId leftRaw expn = do
-  let root = case leftRaw of
-        TyExp {tnBody = b} -> b
-        _ -> leftId
-  (introCount, baseOps) <- witnessFromExpansion gid root leftRaw expn
+edgeWitnessPlan gid _leftId leftRaw expn = do
+  boundVars <-
+    if expansionHasInstantiate expn
+      then case leftRaw of
+        TyExp {tnBody = b} -> do
+          (_bodyRoot, binders) <- instantiationBindersM gid b
+          pure binders
+        _ -> pure []
+      else pure []
+  (introCount, baseOps) <- witnessFromExpansionWithBinders boundVars expn
+  pure EdgeWitnessPlan {ewpForallIntros = introCount, ewpBaseOps = baseOps}
+
+edgeWitnessPlanFromBinders :: [NodeId] -> Expansion -> PresolutionM p EdgeWitnessPlan
+edgeWitnessPlanFromBinders binders expn = do
+  (introCount, baseOps) <- witnessFromExpansionWithBinders binders expn
   pure EdgeWitnessPlan {ewpForallIntros = introCount, ewpBaseOps = baseOps}
 
 buildEdgeWitness ::
@@ -129,13 +142,12 @@ validatedInstanceOpsAfterNormalization =
 buildEdgeTrace ::
   EdgeWitnessInput ->
   GenNodeId ->
-  Expansion ->
+  [(NodeId, NodeId)] ->
   (CopyMap, InteriorSet, FrontierSet) ->
   PresolutionM p EdgeTrace
-buildEdgeTrace input gid expn (copyMap0, _interior0, _frontier0) = do
+buildEdgeTrace input gid bas (copyMap0, _interior0, _frontier0) = do
   let left = ewiSrcNode input
       leftRaw = ewiLeftRaw input
-  bas <- binderArgsFromExpansion gid leftRaw expn
   let rootSeed = case leftRaw of
         TyExp {tnBody = b} -> b
         _ -> left
@@ -162,54 +174,69 @@ buildEdgeTrace input gid expn (copyMap0, _interior0, _frontier0) = do
       }
 
 binderArgsFromExpansion :: GenNodeId -> TyNode -> Expansion -> PresolutionM p [(NodeId, NodeId)]
-binderArgsFromExpansion gid leftRaw expn = do
-  let isTyVarBinder nid = do
-        n <- getCanonicalNode nid
-        pure $
-          case n of
-            TyVar {} -> True
-            _ -> False
-      instantiationBinders nid = do
-        (_bodyRoot, binders) <- instantiationBindersM gid nid
-        filterM isTyVarBinder binders
-  let alg layer = case layer of
-        ExpIdentityF -> pure []
-        ExpForallF _ -> pure []
-        ExpComposeF es -> pure (concat (NE.toList es))
-        ExpInstantiateF args ->
-          case leftRaw of
-            TyExp {tnBody = b} -> do
-              binders <- instantiationBinders b
-              if null binders
-                then pure []
-                else
-                  if length binders > length args
-                    then throwError (ArityMismatch "binderArgsFromExpansion/ExpInstantiate" (length binders) (length args))
-                    else pure (zip binders (take (length binders) args))
-            _ -> do
-              binders <- instantiationBinders (tnId leftRaw)
-              if null binders
-                then pure []
-                else
-                  if length binders > length args
-                    then throwError (ArityMismatch "binderArgsFromExpansion/ExpInstantiate" (length binders) (length args))
-                    else pure (zip binders (take (length binders) args))
+binderArgsFromExpansion gid leftRaw expn =
+  if expansionHasInstantiate expn
+    then do
+      let instantiationBinders nid = do
+            (_bodyRoot, binders) <- instantiationBindersM gid nid
+            filterTyVarBinders binders
+      binders <- case leftRaw of
+        TyExp {tnBody = b} -> instantiationBinders b
+        _ -> instantiationBinders (tnId leftRaw)
+      binderArgsFromKnownBinders "binderArgsFromExpansion/ExpInstantiate" binders expn
+    else pure []
+
+filterTyVarBinders :: [NodeId] -> PresolutionM p [NodeId]
+filterTyVarBinders =
+  filterM $ \nid -> do
+    n <- getCanonicalNode nid
+    pure $
+      case n of
+        TyVar {} -> True
+        _ -> False
+
+binderArgsFromKnownBinders :: String -> [NodeId] -> Expansion -> PresolutionM p [(NodeId, NodeId)]
+binderArgsFromKnownBinders context binders expn =
   cataM alg expn
+ where
+  alg :: ExpansionF [(NodeId, NodeId)] -> PresolutionM q [(NodeId, NodeId)]
+  alg layer = case layer of
+    ExpIdentityF -> pure []
+    ExpForallF _ -> pure []
+    ExpComposeF es -> pure (concat (NE.toList es))
+    ExpInstantiateF args ->
+      if null binders
+        then pure []
+        else
+          if length binders > length args
+            then throwError (ArityMismatch context (length binders) (length args))
+            else pure (zip binders (take (length binders) args))
 
 -- | Convert a presolution expansion recipe into a forall-intro count and omega ops.
 witnessFromExpansion :: GenNodeId -> NodeId -> TyNode -> Expansion -> PresolutionM p (Int, [InstanceOp])
 witnessFromExpansion gid _root leftRaw expn = do
-  let (_hasForall, stepper) = cata (witnessAlg leftRaw) expn
+  boundVars <-
+    if expansionHasInstantiate expn
+      then case leftRaw of
+        TyExp {tnBody = b} -> do
+          (_bodyRoot, binders) <- instantiationBindersM gid b
+          pure binders
+        _ -> pure []
+      else pure []
+  witnessFromExpansionWithBinders boundVars expn
+
+witnessFromExpansionWithBinders :: [NodeId] -> Expansion -> PresolutionM p (Int, [InstanceOp])
+witnessFromExpansionWithBinders boundVars expn = do
+  let (_hasForall, stepper) = cata witnessAlg expn
   steps <- stepper
   let introCount = fst steps
       ops = snd steps
   pure (introCount, ops)
   where
     witnessAlg ::
-      TyNode ->
       ExpansionF (Bool, PresolutionM p (Int, [InstanceOp])) ->
       (Bool, PresolutionM p (Int, [InstanceOp]))
-    witnessAlg lr layer = case layer of
+    witnessAlg layer = case layer of
       ExpIdentityF ->
         (False, pure (0, []))
       ExpForallF ls ->
@@ -217,22 +244,16 @@ witnessFromExpansion gid _root leftRaw expn = do
          in (True, pure (count, []))
       ExpInstantiateF args ->
         ( False,
-          do
-            case lr of
-              TyExp {tnBody = b} -> do
-                (_bodyRoot, boundVars) <- instantiationBindersM gid b
-                if null boundVars
-                  then pure (0, [])
-                  else
-                    if length boundVars > length args
-                      then throwError (ArityMismatch "witnessFromExpansion/ExpInstantiate" (length boundVars) (length args))
-                      else do
-                        let args' = take (length boundVars) args
-                            pairs = zip args' boundVars
-                        (grafts, merges, weakens) <- foldM (classify boundVars) ([], [], []) pairs
-                        pure (0, grafts ++ merges ++ weakens)
-              _ -> do
-                pure (0, [])
+          if null boundVars
+            then pure (0, [])
+            else
+              if length boundVars > length args
+                then throwError (ArityMismatch "witnessFromExpansion/ExpInstantiate" (length boundVars) (length args))
+                else do
+                  let args' = take (length boundVars) args
+                      pairs = zip args' boundVars
+                  (grafts, merges, weakens) <- foldM (classify boundVars) ([], [], []) pairs
+                  pure (0, grafts ++ merges ++ weakens)
         )
       ExpComposeF es ->
         let children = NE.toList es
@@ -281,6 +302,14 @@ witnessFromExpansion gid _root leftRaw expn = do
       pure $ case n of
         TyVar {} -> True
         _ -> False
+
+expansionHasInstantiate :: Expansion -> Bool
+expansionHasInstantiate =
+  cata $ \case
+    ExpIdentityF -> False
+    ExpForallF _ -> False
+    ExpInstantiateF _ -> True
+    ExpComposeF es -> or (NE.toList es)
 
 integratePhase2Ops :: [InstanceOp] -> [InstanceOp] -> [InstanceOp]
 integratePhase2Ops baseOps extraOps =

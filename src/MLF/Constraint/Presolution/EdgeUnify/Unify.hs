@@ -26,6 +26,7 @@ import MLF.Constraint.Presolution.EdgeUnify.State (
     deleteInteriorKey,
     insertInteriorKey,
     isEliminated,
+    mergeBinderMetaRoots,
     nullInteriorNodes,
     preferBinderMetaRoot,
     recordEliminate,
@@ -160,7 +161,13 @@ unifyAcyclicEdge n1 n2 = do
                                 then IntMap.delete r2 (IntMap.delete r1 m0)
                                 else IntMap.insert repId intAll (IntMap.delete r2 (IntMap.delete r1 m0))
                     in m1
-            in st { eusInteriorRoots = roots', eusBindersByRoot = binders', eusInteriorByRoot = interior' }
+                metaRoots' = mergeBinderMetaRoots r1 r2 repId (eusBinderMetaRoots st)
+            in st
+                { eusInteriorRoots = roots'
+                , eusBindersByRoot = binders'
+                , eusInteriorByRoot = interior'
+                , eusBinderMetaRoots = metaRoots'
+                }
 
         recordMergesIntoRep bs
 
@@ -385,6 +392,5 @@ unifyStructureEdge n1 n2 = do
 
 isBinderMetaRoot :: NodeId -> EdgeUnifyM p Bool
 isBinderMetaRoot root = do
-    metaRoots <- gets eusBinderMeta >>= mapM findRootM . IntMap.elems
-    let metaSet = IntSet.fromList (map getNodeId metaRoots)
-    pure (IntSet.member (getNodeId root) metaSet)
+    metaRoots <- gets eusBinderMetaRoots
+    pure (IntSet.member (getNodeId root) metaRoots)

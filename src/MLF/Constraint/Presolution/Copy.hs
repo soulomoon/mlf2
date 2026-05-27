@@ -28,20 +28,23 @@ import MLF.Constraint.Presolution.Base (
     MonadPresolution(getConstraint),
     PresolutionError(..),
     PresolutionM,
-    bindingPathToRootUnderM,
     copiedNodes,
     instantiationBindersM
     )
 import MLF.Constraint.Presolution.Ops (
     createFreshNodeId,
-    getCanonicalNode,
     registerNode,
     setBindParentM
     )
 import MLF.Constraint.Presolution.StateAccess (
-    findSchemeIntroducerM,
+    PresolutionBindingSnapshot(..),
+    bindingSnapshotBoundFlexChildren,
+    bindingSnapshotFindSchemeIntroducer,
+    bindingSnapshotInteriorOf,
+    bindingSnapshotLookupBindParent,
+    bindingSnapshotPathToRoot,
+    getBindingSnapshot,
     getConstraintAndCanonical,
-    liftBindingError,
     lookupBindParentM
     )
 import qualified MLF.Constraint.Canonicalize as Canonicalize
@@ -57,8 +60,17 @@ data CopyState = CopyState
 
 expansionCopySetsM :: NodeId -> PresolutionM p (GenNodeId, IntSet.IntSet, IntSet.IntSet)
 expansionCopySetsM bodyId = do
-    (c0, canonical) <- getConstraintAndCanonical
-    let bodyC = canonical bodyId
+    snapshot <- getBindingSnapshot
+    expansionCopySetsWithSnapshot snapshot bodyId
+
+expansionCopySetsWithSnapshot
+    :: PresolutionBindingSnapshot p
+    -> NodeId
+    -> PresolutionM p (GenNodeId, IntSet.IntSet, IntSet.IntSet)
+expansionCopySetsWithSnapshot snapshot bodyId = do
+    let c0 = pbsConstraint snapshot
+        canonical = pbsCanonical snapshot
+        bodyC = canonical bodyId
         lookupNode = lookupNodeIn (cNodes c0)
         children :: NodeId -> [NodeId]
         children nid =
@@ -74,9 +86,9 @@ expansionCopySetsM bodyId = do
                         map TypeRef (structuralChildrenWithBounds node)
             GenRef _ ->
                 []
-    gid <- findSchemeIntroducerM canonical c0 bodyC
+    gid <- bindingSnapshotFindSchemeIntroducer snapshot bodyC
     binderRef <- do
-        mbParentInfo <- liftBindingError $ Binding.lookupBindParentUnder canonical c0 (typeRef bodyC)
+        mbParentInfo <- bindingSnapshotLookupBindParent snapshot (typeRef bodyC)
         pure $ case mbParentInfo of
             Just (TypeRef pid, _flag) ->
                 case NodeAccess.lookupNode c0 (canonical pid) of
@@ -94,8 +106,8 @@ expansionCopySetsM bodyId = do
             if useGenInterior
                 then genRef gid
                 else binderRef
-    interiorAll0 <- liftBindingError $ Binding.interiorOfUnder canonical c0 interiorRoot
-    bindersUnderGen <- liftBindingError $ Binding.boundFlexChildrenUnder canonical c0 (genRef gid)
+    interiorAll0 <- bindingSnapshotInteriorOf snapshot interiorRoot
+    bindersUnderGen <- bindingSnapshotBoundFlexChildren snapshot (genRef gid)
     let binderKeysGen =
             IntSet.fromList
                 [ nodeRefKey (typeRef (canonical b))
@@ -201,7 +213,9 @@ instantiateSchemeWithMode
     -> [(NodeId, NodeId)]
     -> PresolutionM p (NodeId, CopyMap, IntSet.IntSet, IntSet.IntSet)
 instantiateSchemeWithMode replaceFrontier bodyId substList = do
-    (c0, canonical) <- getConstraintAndCanonical
+    snapshot <- getBindingSnapshot
+    let c0 = pbsConstraint snapshot
+        canonical = pbsCanonical snapshot
 
     let bodyC = canonical bodyId
     case lookupNodeIn (cNodes c0) bodyC of
@@ -211,7 +225,7 @@ instantiateSchemeWithMode replaceFrontier bodyId substList = do
     -- Paper (`papers/these-finale-english.txt`; see `papers/xmlf.txt` §3.2):
     -- expansion copies nodes in I^s(g) and F^s(g) that are reachable from s,
     -- then replaces frontier copies with ⊥ and adds frontier unification edges.
-    (gid, copyInterior0, frontierSet0) <- expansionCopySetsM bodyId
+    (gid, copyInterior0, frontierSet0) <- expansionCopySetsWithSnapshot snapshot bodyId
     let bodyKey = getNodeId bodyC
         isDegenerate = not (IntSet.member bodyKey copyInterior0)
         copyInterior =
@@ -232,6 +246,12 @@ instantiateSchemeWithMode replaceFrontier bodyId substList = do
                 else IntSet.empty
 
     let nodes = cNodes c0
+        lookupSourceNode :: NodeId -> StateT CopyState (PresolutionM p) (NodeId, TyNode)
+        lookupSourceNode nid =
+            let nidC = canonical nid
+            in case lookupNodeIn nodes nidC of
+                Just node -> pure (nidC, node)
+                Nothing -> lift $ throwError (NodeLookupFailed nidC)
         schemeRoots =
             IntSet.fromList
                 [ getNodeId (canonical r)
@@ -258,16 +278,15 @@ instantiateSchemeWithMode replaceFrontier bodyId substList = do
                 , csCopyMap = initialCopyMap
                 , csInterior = initialInterior
                 }
-    (root, st1) <- runStateT (copyNode copyInterior frontierForCopy degenerateRoot canonical subst bodyId) st0
+    (root, st1) <- runStateT (copyNode lookupSourceNode copyInterior frontierForCopy degenerateRoot canonical subst bodyId) st0
     let cmap = CopyMapping (csCopyMap st1)
         interior = csInterior st1
     let substKeys = IntSet.fromList (map (getNodeId . fst) substList)
-    resetBindingsForCopies canonical c0 gid bodyC root frontierForCopy cmap substKeys
+    resetBindingsForCopies snapshot gid bodyC root frontierForCopy cmap substKeys
     pure (root, cmap, interior, frontierSet)
   where
     resetBindingsForCopies
-        :: (NodeId -> NodeId)
-        -> Constraint p
+        :: PresolutionBindingSnapshot p
         -> GenNodeId
         -> NodeId
         -> NodeId
@@ -275,7 +294,9 @@ instantiateSchemeWithMode replaceFrontier bodyId substList = do
         -> CopyMap
         -> IntSet.IntSet
         -> PresolutionM p ()
-    resetBindingsForCopies canonical c0 gid schemeRootId copyRoot frontierSet cmap0 substKeys = do
+    resetBindingsForCopies snapshot gid schemeRootId copyRoot frontierSet cmap0 substKeys = do
+        let canonical = pbsCanonical snapshot
+            qbp = Binding.qbpBindParents (pbsQuotient snapshot)
         let cmap =
                 IntMap.fromListWith
                     (\a _ -> a)
@@ -312,10 +333,10 @@ instantiateSchemeWithMode replaceFrontier bodyId substList = do
                         let childRef = typeRef copy
                         setBindParentM childRef (rootBinder, BindFlex)
                     else
-                        case Binding.lookupBindParent c0 (typeRef copy) of
+                        case IntMap.lookup (nodeRefKey (typeRef copy)) qbp of
                             Just _ -> pure ()
                             Nothing -> do
-                                mbParent <- liftBindingError $ Binding.lookupBindParentUnder canonical c0 (typeRef origC)
+                                mbParent <- bindingSnapshotLookupBindParent snapshot (typeRef origC)
                                 case mbParent of
                                     Nothing ->
                                         throwError (BindingTreeError (MissingBindParent (typeRef origC)))
@@ -364,25 +385,25 @@ instantiateSchemeWithMode replaceFrontier bodyId substList = do
             st { csCache = IntMap.insert (getNodeId srcNid) freshId (csCache st) }
 
     copyNode
-        :: IntSet.IntSet
+        :: (NodeId -> StateT CopyState (PresolutionM p) (NodeId, TyNode))
+        -> IntSet.IntSet
         -> IntSet.IntSet
         -> Maybe NodeId
         -> (NodeId -> NodeId)
         -> IntMap NodeId
         -> NodeId
         -> StateT CopyState (PresolutionM p) NodeId
-    copyNode copyInterior frontierSet degenerateRoot canonical subst nid = do
+    copyNode lookupSourceNode copyInterior frontierSet degenerateRoot canonical subst nid = do
         mbCached <- cacheLookup nid
         case mbCached of
             Just existing -> pure existing
             Nothing -> do
-                node <- lift $ getCanonicalNode nid
+                (nidC, node) <- lookupSourceNode nid
                 case node of
                     TyExp { tnBody = b } -> do
-                        b' <- copyNode copyInterior frontierSet degenerateRoot canonical subst b
+                        b' <- copyNode lookupSourceNode copyInterior frontierSet degenerateRoot canonical subst b
                         pure b'
                     _ -> do
-                        let nidC = canonical nid
                         let k = getNodeId nidC
                         let isDegenerateRoot =
                                 case degenerateRoot of
@@ -439,28 +460,28 @@ instantiateSchemeWithMode replaceFrontier bodyId substList = do
                                                 -- Recursively copy children
                                                 newNode <- case node of
                                                     TyArrow { tnDom = d, tnCod = c } -> do
-                                                        d' <- copyNode copyInterior frontierSet degenerateRoot canonical subst d
-                                                        c' <- copyNode copyInterior frontierSet degenerateRoot canonical subst c
+                                                        d' <- copyNode lookupSourceNode copyInterior frontierSet degenerateRoot canonical subst d
+                                                        c' <- copyNode lookupSourceNode copyInterior frontierSet degenerateRoot canonical subst c
                                                         return $ TyArrow freshId d' c'
                                                     TyForall { tnBody = b } -> do
-                                                        b' <- copyNode copyInterior frontierSet degenerateRoot canonical subst b
+                                                        b' <- copyNode lookupSourceNode copyInterior frontierSet degenerateRoot canonical subst b
                                                         return $ TyForall freshId b'
                                                     TyMu { tnBody = b } -> do
-                                                        b' <- copyNode copyInterior frontierSet degenerateRoot canonical subst b
+                                                        b' <- copyNode lookupSourceNode copyInterior frontierSet degenerateRoot canonical subst b
                                                         return $ TyMu freshId b'
                                                     TyVar { tnBound = mb } -> do
-                                                        mb' <- traverse (copyNode copyInterior frontierSet degenerateRoot canonical subst) mb
+                                                        mb' <- traverse (copyNode lookupSourceNode copyInterior frontierSet degenerateRoot canonical subst) mb
                                                         pure $ TyVar { tnId = freshId, tnBound = mb' }
                                                     TyBottom {} ->
                                                         pure $ TyBottom freshId
                                                     TyBase { tnBase = b } -> do
                                                         return $ TyBase freshId b
                                                     TyCon { tnCon = con, tnArgs = args } -> do
-                                                        args' <- traverse (copyNode copyInterior frontierSet degenerateRoot canonical subst) args
+                                                        args' <- traverse (copyNode lookupSourceNode copyInterior frontierSet degenerateRoot canonical subst) args
                                                         return $ TyCon freshId con args'
                                                     TyVarApp { tnVarHead = headNode, tnArgs = args } -> do
-                                                        head' <- copyNode copyInterior frontierSet degenerateRoot canonical subst headNode
-                                                        args' <- traverse (copyNode copyInterior frontierSet degenerateRoot canonical subst) args
+                                                        head' <- copyNode lookupSourceNode copyInterior frontierSet degenerateRoot canonical subst headNode
+                                                        args' <- traverse (copyNode lookupSourceNode copyInterior frontierSet degenerateRoot canonical subst) args
                                                         return $ TyVarApp freshId head' args'
 
                                                 -- Register new node in constraint (overwrite placeholder)
@@ -524,9 +545,11 @@ bindExpansionRootLikeTarget expansionRoot targetNode = do
 -- have binding parents.
 bindUnboundCopiedNodes :: CopyMap -> IntSet.IntSet -> NodeId -> PresolutionM p ()
 bindUnboundCopiedNodes copyMap interior expansionRoot = do
-    (c0, canonical) <- getConstraintAndCanonical
+    snapshot <- getBindingSnapshot
+    let c0 = pbsConstraint snapshot
+        canonical = pbsCanonical snapshot
     let expansionRootC = canonical expansionRoot
-    expansionPath <- bindingPathToRootUnderM canonical c0 (typeRef expansionRootC)
+    expansionPath <- bindingSnapshotPathToRoot snapshot (typeRef expansionRootC)
     let copiedIds = IntSet.fromList (map getNodeId (copiedNodes copyMap))
         candidateIds0 = IntSet.union copiedIds interior
 

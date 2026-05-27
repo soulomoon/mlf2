@@ -32,201 +32,24 @@ import Test.Hspec
 spec :: Spec
 spec =
     describe "MLF.Program parser parity" $ do
-        it "shared parser-owned .mlfp parser lexes carried fixtures from source text before grammar parsing" $ do
-            basicExpected <- readFile expectedProjectionPath
-            dataExpected <- readFile dataDeclarationConstructorSpansExpectedProjectionPath
+        it "matches canonical parser projections for every batched positive fixture" $
+            traverse_ assertCanonicalParserParityProjection parserParityPositiveCases
 
-            basicRoot <-
-                writeSourceTextFixturePackage
-                    sourceTextBasicPackageRoot
-                    canonicalSourcePath
-                    basicModuleSourceText
-            dataRoot <-
-                writeSourceTextFixturePackage
-                    sourceTextDataPackageRoot
-                    dataDeclarationConstructorSpansCanonicalSourcePath
-                    dataDeclarationConstructorSpansSourceText
+        it "runs all .mlfp parser parity fixtures through one generated public CLI driver" $ do
+            expected <- expectedParserParityBatchOutput
+            batchRoot <- writeParserParityBatchPackage
+            runSharedParserBatch batchRoot `shouldReturn` Right expected
 
-            runSharedParserFixture basicRoot
-                `shouldReturn` Right basicExpected
-            runSharedParserFixture dataRoot
-                `shouldReturn` Right dataExpected
-
-        it "shared parser-owned .mlfp parser extends source-text grammar to case expressions and constructor patterns" $ do
-            constructorSource <- readFile caseExpressionConstructorPatternsCanonicalSourcePath
-            constructorExpected <- readFile caseExpressionConstructorPatternsExpectedProjectionPath
-            nestedSource <- readFile caseExpressionNestedPatternsCanonicalSourcePath
-            nestedExpected <- readFile caseExpressionNestedPatternsExpectedProjectionPath
-
-            constructorCanonicalProjection <-
-                renderCanonicalProjection caseExpressionConstructorPatternsCanonicalSourcePath constructorSource
-            nestedCanonicalProjection <-
-                renderCanonicalProjection caseExpressionNestedPatternsCanonicalSourcePath nestedSource
-            constructorParserParityOutput <-
-                runSharedParserFixture caseExpressionConstructorPatternsParserParityPackageRoot
-            nestedParserParityOutput <-
-                runSharedParserFixture caseExpressionNestedPatternsParserParityPackageRoot
-
-            constructorCanonicalProjection `shouldBe` constructorExpected
-            nestedCanonicalProjection `shouldBe` nestedExpected
-            constructorParserParityOutput `shouldBe` Right constructorExpected
-            nestedParserParityOutput `shouldBe` Right nestedExpected
-
-        it "shared parser-owned .mlfp parser extends source-text grammar to typeclass, deriving, and instance declarations" $ do
-            derivingSource <- readFile typeclassDerivingMethodCanonicalSourcePath
-            derivingExpected <- readFile typeclassDerivingMethodExpectedProjectionPath
-            instanceSource <- readFile typeclassInstanceNullaryMethodCanonicalSourcePath
-            instanceExpected <- readFile typeclassInstanceNullaryMethodExpectedProjectionPath
-
-            derivingCanonicalProjection <-
-                renderCanonicalProjection typeclassDerivingMethodCanonicalSourcePath derivingSource
-            instanceCanonicalProjection <-
-                renderCanonicalProjection typeclassInstanceNullaryMethodCanonicalSourcePath instanceSource
-            derivingParserParityOutput <-
-                runSharedParserFixture typeclassDerivingMethodParserParityPackageRoot
-            instanceParserParityOutput <-
-                runSharedParserFixture typeclassInstanceNullaryMethodParserParityPackageRoot
-
-            derivingCanonicalProjection `shouldBe` derivingExpected
-            instanceCanonicalProjection `shouldBe` instanceExpected
-            derivingParserParityOutput `shouldBe` Right derivingExpected
-            instanceParserParityOutput `shouldBe` Right instanceExpected
-
-        it "shared parser-owned .mlfp parser extends source-text grammar to higher-kinded and constrained class syntax" $ do
-            higherKindedSource <- readFile higherKindedClassDataParamsCanonicalSourcePath
-            higherKindedExpected <- readFile higherKindedClassDataParamsExpectedProjectionPath
-            fundepSource <- readFile multiparamSuperclassFundepCanonicalSourcePath
-            fundepExpected <- readFile multiparamSuperclassFundepExpectedProjectionPath
-
-            higherKindedCanonicalProjection <-
-                renderCanonicalProjection higherKindedClassDataParamsCanonicalSourcePath higherKindedSource
-            fundepCanonicalProjection <-
-                renderCanonicalProjection multiparamSuperclassFundepCanonicalSourcePath fundepSource
-            higherKindedParserParityOutput <-
-                runSharedParserFixture higherKindedClassDataParamsParserParityPackageRoot
-            fundepParserParityOutput <-
-                runSharedParserFixture multiparamSuperclassFundepParserParityPackageRoot
-            negativeEvidenceRoot <- writeHigherKindedFundepNegativeEvidencePackage
-            sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
-
-            higherKindedCanonicalProjection `shouldBe` higherKindedExpected
-            fundepCanonicalProjection `shouldBe` fundepExpected
-            higherKindedParserParityOutput `shouldBe` Right higherKindedExpected
-            fundepParserParityOutput `shouldBe` Right fundepExpected
-            runSharedParserFixture negativeEvidenceRoot
-                `shouldReturn` Right higherKindedFundepNegativeEvidenceProjection
-            filter (`isInfixOf` sharedParserSource) sharedParserRound314ShortcutPhrases
-                `shouldBe` []
-
-        it "shared parser-owned .mlfp parser extends source-text grammar to closed type-family and type-level syntax" $ do
-            kindLambdaSource <- readFile typeFamilyKindLambdaCanonicalSourcePath
-            kindLambdaExpected <- readFile typeFamilyKindLambdaExpectedProjectionPath
-            applyAnnotationSource <- readFile typeFamilyApplyAnnotationCanonicalSourcePath
-            applyAnnotationExpected <- readFile typeFamilyApplyAnnotationExpectedProjectionPath
-
-            kindLambdaCanonicalProjection <-
-                renderCanonicalProjection typeFamilyKindLambdaCanonicalSourcePath kindLambdaSource
-            applyAnnotationCanonicalProjection <-
-                renderCanonicalProjection typeFamilyApplyAnnotationCanonicalSourcePath applyAnnotationSource
-            kindLambdaParserParityOutput <-
-                runSharedParserFixture typeFamilyKindLambdaParserParityPackageRoot
-            applyAnnotationParserParityOutput <-
-                runSharedParserFixture typeFamilyApplyAnnotationParserParityPackageRoot
-            negativeEvidenceRoot <- writeTypeFamilyEquationNegativeEvidencePackage
-            sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
-
-            kindLambdaCanonicalProjection `shouldBe` kindLambdaExpected
-            applyAnnotationCanonicalProjection `shouldBe` applyAnnotationExpected
-            kindLambdaParserParityOutput `shouldBe` Right kindLambdaExpected
-            applyAnnotationParserParityOutput `shouldBe` Right applyAnnotationExpected
-            runSharedParserFixture negativeEvidenceRoot
-                `shouldReturn` Right typeFamilyEquationNegativeEvidenceProjection
-            filter (`isInfixOf` sharedParserSource) sharedParserRound315ShortcutPhrases
-                `shouldBe` []
-
-        it "shared parser-owned .mlfp parser extends source-text grammar to GADT-style results and existential constructors" $ do
-            gadtSource <- readFile gadtResultConstructorSpansCanonicalSourcePath
-            gadtExpected <- readFile gadtResultConstructorSpansExpectedProjectionPath
-            existentialSource <- readFile existentialConstructorForallCanonicalSourcePath
-            existentialExpected <- readFile existentialConstructorForallExpectedProjectionPath
-
-            gadtCanonicalProjection <-
-                renderCanonicalProjection gadtResultConstructorSpansCanonicalSourcePath gadtSource
-            existentialCanonicalProjection <-
-                renderCanonicalProjection existentialConstructorForallCanonicalSourcePath existentialSource
-            gadtParserParityOutput <-
-                runSharedParserFixture gadtResultConstructorSpansParserParityPackageRoot
-            existentialParserParityOutput <-
-                runSharedParserFixture existentialConstructorForallParserParityPackageRoot
-            negativeEvidenceRoot <- writeConstructorForallNegativeEvidencePackage
-            sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
-
-            gadtCanonicalProjection `shouldBe` gadtExpected
-            existentialCanonicalProjection `shouldBe` existentialExpected
-            gadtParserParityOutput `shouldBe` Right gadtExpected
-            existentialParserParityOutput `shouldBe` Right existentialExpected
-            runSharedParserFixture negativeEvidenceRoot
-                `shouldReturn` Right constructorForallNegativeEvidenceProjection
-            filter (`isInfixOf` sharedParserSource) sharedParserRound316ShortcutPhrases
-                `shouldBe` []
-
-        it "shared parser-owned .mlfp parser extends source-text grammar to qualified imports and references" $ do
-            aliasReferencesSource <- readFile qualifiedImportAliasReferencesCanonicalSourcePath
-            aliasReferencesExpected <- readFile qualifiedImportAliasReferencesExpectedProjectionPath
-            aliasOnlySource <- readFile qualifiedImportAliasOnlyCanonicalSourcePath
-            aliasOnlyExpected <- readFile qualifiedImportAliasOnlyExpectedProjectionPath
-
-            aliasReferencesCanonicalProjection <-
-                renderCanonicalProjection qualifiedImportAliasReferencesCanonicalSourcePath aliasReferencesSource
-            aliasOnlyCanonicalProjection <-
-                renderCanonicalProjection qualifiedImportAliasOnlyCanonicalSourcePath aliasOnlySource
-            aliasReferencesParserParityOutput <-
-                runSharedParserFixture qualifiedImportAliasReferencesParserParityPackageRoot
-            aliasOnlyParserParityOutput <-
-                runSharedParserFixture qualifiedImportAliasOnlyParserParityPackageRoot
-            negativeEvidenceRoot <- writeQualifiedImportAliasNegativeEvidencePackage
-            sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
-
-            aliasReferencesCanonicalProjection `shouldBe` aliasReferencesExpected
-            aliasOnlyCanonicalProjection `shouldBe` aliasOnlyExpected
-            aliasReferencesParserParityOutput `shouldBe` Right aliasReferencesExpected
-            aliasOnlyParserParityOutput `shouldBe` Right aliasOnlyExpected
-            runSharedParserFixture negativeEvidenceRoot
-                `shouldReturn` Right qualifiedImportAliasNegativeEvidenceProjection
-            filter (`isInfixOf` sharedParserSource) sharedParserRound317ShortcutPhrases
-                `shouldBe` []
-
-        it "parser-owned .mlfp parser matches canonical parser for a basic Bool definition and source spans" $ do
-            source <- readFile canonicalSourcePath
-            expected <- readFile expectedProjectionPath
-
-            canonicalProjection <- renderCanonicalProjection canonicalSourcePath source
-            parserParityOutput <- runSharedParserFixture parserParityPackageRoot
-
-            canonicalProjection `shouldBe` expected
-            parserParityOutput `shouldBe` Right expected
-
-        it "parser-owned .mlfp parser matches canonical parser for a single import declaration and source spans" $ do
-            source <- readFile importCanonicalSourcePath
-            expected <- readFile importExpectedProjectionPath
-
-            canonicalProjection <- renderCanonicalProjection importCanonicalSourcePath source
-            parserParityOutput <- runSharedParserFixture importParserParityPackageRoot
-
-            canonicalProjection `shouldBe` expected
-            parserParityOutput `shouldBe` Right expected
-
-        it "shared parser-owned .mlfp parser library routes carried parser fixtures through one entrypoint" $ do
+        it "shared parser-owned .mlfp parser library routes the generated batch through one entrypoint" $ do
             sharedParserExists <- doesFileExist (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
             sharedParserExists `shouldBe` True
 
-            basicExpected <- readFile expectedProjectionPath
-            importExpected <- readFile importExpectedProjectionPath
-
-            runSharedParserFixture parserParityPackageRoot
-                `shouldReturn` Right basicExpected
-            runSharedParserFixture importParserParityPackageRoot
-                `shouldReturn` Right importExpected
+            batchRoot <- writeParserParityBatchPackage
+            batchSource <- readFile (batchRoot </> "Main.mlfp")
+            batchSource `shouldSatisfy` isInfixOf "import ParserParityParser exposing"
+            batchSource `shouldSatisfy` isInfixOf "renderParserParityProjectionFromSourceText"
+            batchSource `shouldSatisfy` isInfixOf "renderParserNegativeEvidenceFromSourceText"
+            batchSource `shouldSatisfy` isInfixOf "renderParserParityRetryEvidence"
 
         it "shared parser-owned .mlfp parser composes grammar without fixture-level token streams" $ do
             sharedParserSource <- concat <$> traverse readFile sharedParserAuditFiles
@@ -260,85 +83,13 @@ spec =
             sharedLexerSource `shouldSatisfy` isInfixOf "def tokenizeCompleteModule : String -> LexerResult"
             sharedLexerSource `shouldSatisfy` isInfixOf "initialSourceCursor sourceText"
 
-        it "parser-owned .mlfp parser matches canonical parser for multiple value definitions and value-reference spans" $ do
-            source <- readFile valueDefListCanonicalSourcePath
-            expected <- readFile valueDefListExpectedProjectionPath
-
-            canonicalProjection <- renderCanonicalProjection valueDefListCanonicalSourcePath source
-            parserParityOutput <- runSharedParserFixture valueDefListParserParityPackageRoot
-
-            canonicalProjection `shouldBe` expected
-            parserParityOutput `shouldBe` Right expected
-
-        it "parser-owned .mlfp parser matches canonical parser for let, lambda, and application expressions" $ do
-            source <- readFile letLambdaApplicationCanonicalSourcePath
-            expected <- readFile letLambdaApplicationExpectedProjectionPath
-
-            canonicalProjection <- renderCanonicalProjection letLambdaApplicationCanonicalSourcePath source
-            parserParityOutput <- runSharedParserFixture letLambdaApplicationParserParityPackageRoot
-
-            canonicalProjection `shouldBe` expected
-            parserParityOutput `shouldBe` Right expected
-
-        it "parser-owned .mlfp parser matches canonical parser for typed let, annotated lambda, and expression annotations" $ do
-            source <- readFile typedAnnotationTypesCanonicalSourcePath
-            expected <- readFile typedAnnotationTypesExpectedProjectionPath
-
-            canonicalProjection <- renderCanonicalProjection typedAnnotationTypesCanonicalSourcePath source
-            parserParityOutput <- runSharedParserFixture typedAnnotationTypesParserParityPackageRoot
-
-            canonicalProjection `shouldBe` expected
-            parserParityOutput `shouldBe` Right expected
-
-        it "parser-owned .mlfp parser matches canonical parser for data declarations and constructor spans" $ do
-            source <- readFile dataDeclarationConstructorSpansCanonicalSourcePath
-            expected <- readFile dataDeclarationConstructorSpansExpectedProjectionPath
-
-            canonicalProjection <- renderCanonicalProjection dataDeclarationConstructorSpansCanonicalSourcePath source
-            parserParityOutput <- runSharedParserFixture dataDeclarationConstructorSpansParserParityPackageRoot
-
-            canonicalProjection `shouldBe` expected
-            parserParityOutput `shouldBe` Right expected
-
-        it "parser-owned .mlfp parser rejects malformed annotation syntax through public run-program" $ do
-            evidenceRoot <- writeTypedAnnotationTypesNegativeEvidencePackage
-            runSharedParserFixture evidenceRoot
-                `shouldReturn` Right typedAnnotationTypesNegativeEvidenceProjection
-
-        it "parser-owned .mlfp parser rejects malformed data declarations through public run-program" $ do
-            evidenceRoot <- writeDataDeclarationConstructorSpansNegativeEvidencePackage
-            runSharedParserFixture evidenceRoot
-                `shouldReturn` Right dataDeclarationConstructorSpansNegativeEvidenceProjection
-
-        it "parser-owned .mlfp parser rejects malformed case branch arrows through public run-program" $ do
-            evidenceRoot <- writeCaseExpressionNegativeEvidencePackage
-            runSharedParserFixture evidenceRoot
-                `shouldReturn` Right caseExpressionNegativeEvidenceProjection
-
-        it "parser-owned .mlfp parser rejects malformed instance method definitions through public run-program" $ do
-            evidenceRoot <- writeTypeclassInstanceNegativeEvidencePackage
-            runSharedParserFixture evidenceRoot
-                `shouldReturn` Right typeclassInstanceNegativeEvidenceProjection
-
-        it "parser-owned .mlfp parser rejects malformed import syntax through public run-program" $ do
-            evidenceRoot <- writeImportNegativeEvidencePackage
-            runSharedParserFixture evidenceRoot
-                `shouldReturn` Right importNegativeEvidenceProjection
-
-        it "parser-owned .mlfp parser rejects malformed value-definition sequencing through public run-program" $ do
-            evidenceRoot <- writeValueDefListNegativeEvidencePackage
-            runSharedParserFixture evidenceRoot
-                `shouldReturn` Right valueDefListNegativeEvidenceProjection
-
-        it "parser-owned .mlfp parser rejects malformed let expressions through public run-program" $ do
-            evidenceRoot <- writeLetLambdaApplicationNegativeEvidencePackage
-            runSharedParserFixture evidenceRoot
-                `shouldReturn` Right letLambdaApplicationNegativeEvidenceProjection
-
-        it "parser-owned .mlfp tokenizer and parser reject discrete token mismatches" $ do
-            evidenceRoot <- writeRetryEvidencePackage
-            runSharedParserFixture evidenceRoot
-                `shouldReturn` Right retryEvidenceProjection
+        it "shared parser-owned .mlfp parser keeps expanded grammar paths instead of shortcut entrypoints" $ do
+            sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
+            let shortcutMatches =
+                    filter
+                        (`isInfixOf` sharedParserSource)
+                        sharedParserShortcutPhrases
+            shortcutMatches `shouldBe` []
 
 canonicalSourcePath :: FilePath
 canonicalSourcePath =
@@ -484,78 +235,6 @@ qualifiedImportAliasOnlyExpectedProjectionPath :: FilePath
 qualifiedImportAliasOnlyExpectedProjectionPath =
     "test/conformance/mlfp/parser-parity/qualified-import-alias-only/expected/parser-program.txt"
 
-parserParityPackageRoot :: FilePath
-parserParityPackageRoot =
-    "test/programs/compiler-parser-parity/basic-module-def-bool"
-
-importParserParityPackageRoot :: FilePath
-importParserParityPackageRoot =
-    "test/programs/compiler-parser-parity/import-exposing-def-bool"
-
-valueDefListParserParityPackageRoot :: FilePath
-valueDefListParserParityPackageRoot =
-    "test/programs/compiler-parser-parity/value-def-list-int-ref"
-
-letLambdaApplicationParserParityPackageRoot :: FilePath
-letLambdaApplicationParserParityPackageRoot =
-    "test/programs/compiler-parser-parity/let-lambda-application"
-
-typedAnnotationTypesParserParityPackageRoot :: FilePath
-typedAnnotationTypesParserParityPackageRoot =
-    "test/programs/compiler-parser-parity/typed-annotation-types"
-
-dataDeclarationConstructorSpansParserParityPackageRoot :: FilePath
-dataDeclarationConstructorSpansParserParityPackageRoot =
-    "test/programs/compiler-parser-parity/data-declaration-constructor-spans"
-
-caseExpressionConstructorPatternsParserParityPackageRoot :: FilePath
-caseExpressionConstructorPatternsParserParityPackageRoot =
-    "test/programs/compiler-parser-parity/case-expression-constructor-patterns"
-
-caseExpressionNestedPatternsParserParityPackageRoot :: FilePath
-caseExpressionNestedPatternsParserParityPackageRoot =
-    "test/programs/compiler-parser-parity/case-expression-nested-patterns"
-
-typeclassDerivingMethodParserParityPackageRoot :: FilePath
-typeclassDerivingMethodParserParityPackageRoot =
-    "test/programs/compiler-parser-parity/typeclass-deriving-method"
-
-typeclassInstanceNullaryMethodParserParityPackageRoot :: FilePath
-typeclassInstanceNullaryMethodParserParityPackageRoot =
-    "test/programs/compiler-parser-parity/typeclass-instance-nullary-method"
-
-higherKindedClassDataParamsParserParityPackageRoot :: FilePath
-higherKindedClassDataParamsParserParityPackageRoot =
-    "test/programs/compiler-parser-parity/higher-kinded-class-data-params"
-
-multiparamSuperclassFundepParserParityPackageRoot :: FilePath
-multiparamSuperclassFundepParserParityPackageRoot =
-    "test/programs/compiler-parser-parity/multiparam-superclass-fundep"
-
-typeFamilyKindLambdaParserParityPackageRoot :: FilePath
-typeFamilyKindLambdaParserParityPackageRoot =
-    "test/programs/compiler-parser-parity/type-family-kind-lambda"
-
-typeFamilyApplyAnnotationParserParityPackageRoot :: FilePath
-typeFamilyApplyAnnotationParserParityPackageRoot =
-    "test/programs/compiler-parser-parity/type-family-apply-annotation"
-
-gadtResultConstructorSpansParserParityPackageRoot :: FilePath
-gadtResultConstructorSpansParserParityPackageRoot =
-    "test/programs/compiler-parser-parity/gadt-result-constructor-spans"
-
-existentialConstructorForallParserParityPackageRoot :: FilePath
-existentialConstructorForallParserParityPackageRoot =
-    "test/programs/compiler-parser-parity/existential-constructor-forall"
-
-qualifiedImportAliasReferencesParserParityPackageRoot :: FilePath
-qualifiedImportAliasReferencesParserParityPackageRoot =
-    "test/programs/compiler-parser-parity/qualified-import-alias-references"
-
-qualifiedImportAliasOnlyParserParityPackageRoot :: FilePath
-qualifiedImportAliasOnlyParserParityPackageRoot =
-    "test/programs/compiler-parser-parity/qualified-import-alias-only"
-
 sharedParserLibraryRoot :: FilePath
 sharedParserLibraryRoot =
     "test/programs/compiler-parser-parity/parser-library"
@@ -656,6 +335,15 @@ sharedParserEarlySuccessPhrases =
     , "ParserTextMismatch -> moduleKey \"let-lambda\""
     ]
 
+sharedParserShortcutPhrases :: [String]
+sharedParserShortcutPhrases =
+    concat
+        [ sharedParserRound314ShortcutPhrases
+        , sharedParserRound315ShortcutPhrases
+        , sharedParserRound316ShortcutPhrases
+        , sharedParserRound317ShortcutPhrases
+        ]
+
 sharedParserRound314ShortcutPhrases :: [String]
 sharedParserRound314ShortcutPhrases =
     [ "parseHigherKindedModule"
@@ -727,310 +415,230 @@ sharedParserDynamicEvidenceRequiredPhrases =
     , "renderDiagnosticEvidence"
     ]
 
-runSharedParserFixture :: FilePath -> IO (Either String String)
-runSharedParserFixture fixtureRoot =
-    runProgramArgs [fixtureRoot, "--search-path", sharedParserLibraryRoot]
+runSharedParserBatch :: FilePath -> IO (Either String String)
+runSharedParserBatch batchRoot =
+    runProgramArgs [batchRoot, "--search-path", sharedParserLibraryRoot]
 
-retryEvidencePackageRoot :: FilePath
-retryEvidencePackageRoot =
-    "dist-newstyle/parser-parity-basic-module-def-bool-retry-evidence"
+parserParityBatchPackageRoot :: FilePath
+parserParityBatchPackageRoot =
+    "dist-newstyle/parser-parity-batch"
 
-importNegativeEvidencePackageRoot :: FilePath
-importNegativeEvidencePackageRoot =
-    "dist-newstyle/parser-parity-import-exposing-def-bool-negative-evidence"
+data ParserParityPositiveCase = ParserParityPositiveCase
+    { positiveCaseLabel :: String
+    , positiveCaseIdentifier :: String
+    , positiveCaseSourcePath :: FilePath
+    , positiveCaseExpectedPath :: FilePath
+    }
 
-valueDefListNegativeEvidencePackageRoot :: FilePath
-valueDefListNegativeEvidencePackageRoot =
-    "dist-newstyle/parser-parity-value-def-list-int-ref-negative-evidence"
+data ParserParityNegativeCase = ParserParityNegativeCase
+    { negativeCaseLabel :: String
+    , negativeCaseIdentifier :: String
+    , negativeCasePrefix :: String
+    , negativeCaseSourcePath :: FilePath
+    , negativeCaseSourceText :: String
+    , negativeCaseExpected :: String
+    }
 
-letLambdaApplicationNegativeEvidencePackageRoot :: FilePath
-letLambdaApplicationNegativeEvidencePackageRoot =
-    "dist-newstyle/parser-parity-let-lambda-application-negative-evidence"
+parserParityPositiveCases :: [ParserParityPositiveCase]
+parserParityPositiveCases =
+    [ ParserParityPositiveCase "positive:basic-module-def-bool" "positiveBasicModuleDefBool" canonicalSourcePath expectedProjectionPath
+    , ParserParityPositiveCase "positive:import-exposing-def-bool" "positiveImportExposingDefBool" importCanonicalSourcePath importExpectedProjectionPath
+    , ParserParityPositiveCase "positive:value-def-list-int-ref" "positiveValueDefListIntRef" valueDefListCanonicalSourcePath valueDefListExpectedProjectionPath
+    , ParserParityPositiveCase "positive:let-lambda-application" "positiveLetLambdaApplication" letLambdaApplicationCanonicalSourcePath letLambdaApplicationExpectedProjectionPath
+    , ParserParityPositiveCase "positive:typed-annotation-types" "positiveTypedAnnotationTypes" typedAnnotationTypesCanonicalSourcePath typedAnnotationTypesExpectedProjectionPath
+    , ParserParityPositiveCase "positive:data-declaration-constructor-spans" "positiveDataDeclarationConstructorSpans" dataDeclarationConstructorSpansCanonicalSourcePath dataDeclarationConstructorSpansExpectedProjectionPath
+    , ParserParityPositiveCase "positive:case-expression-constructor-patterns" "positiveCaseExpressionConstructorPatterns" caseExpressionConstructorPatternsCanonicalSourcePath caseExpressionConstructorPatternsExpectedProjectionPath
+    , ParserParityPositiveCase "positive:case-expression-nested-patterns" "positiveCaseExpressionNestedPatterns" caseExpressionNestedPatternsCanonicalSourcePath caseExpressionNestedPatternsExpectedProjectionPath
+    , ParserParityPositiveCase "positive:typeclass-deriving-method" "positiveTypeclassDerivingMethod" typeclassDerivingMethodCanonicalSourcePath typeclassDerivingMethodExpectedProjectionPath
+    , ParserParityPositiveCase "positive:typeclass-instance-nullary-method" "positiveTypeclassInstanceNullaryMethod" typeclassInstanceNullaryMethodCanonicalSourcePath typeclassInstanceNullaryMethodExpectedProjectionPath
+    , ParserParityPositiveCase "positive:higher-kinded-class-data-params" "positiveHigherKindedClassDataParams" higherKindedClassDataParamsCanonicalSourcePath higherKindedClassDataParamsExpectedProjectionPath
+    , ParserParityPositiveCase "positive:multiparam-superclass-fundep" "positiveMultiparamSuperclassFundep" multiparamSuperclassFundepCanonicalSourcePath multiparamSuperclassFundepExpectedProjectionPath
+    , ParserParityPositiveCase "positive:type-family-kind-lambda" "positiveTypeFamilyKindLambda" typeFamilyKindLambdaCanonicalSourcePath typeFamilyKindLambdaExpectedProjectionPath
+    , ParserParityPositiveCase "positive:type-family-apply-annotation" "positiveTypeFamilyApplyAnnotation" typeFamilyApplyAnnotationCanonicalSourcePath typeFamilyApplyAnnotationExpectedProjectionPath
+    , ParserParityPositiveCase "positive:gadt-result-constructor-spans" "positiveGadtResultConstructorSpans" gadtResultConstructorSpansCanonicalSourcePath gadtResultConstructorSpansExpectedProjectionPath
+    , ParserParityPositiveCase "positive:existential-constructor-forall" "positiveExistentialConstructorForall" existentialConstructorForallCanonicalSourcePath existentialConstructorForallExpectedProjectionPath
+    , ParserParityPositiveCase "positive:qualified-import-alias-references" "positiveQualifiedImportAliasReferences" qualifiedImportAliasReferencesCanonicalSourcePath qualifiedImportAliasReferencesExpectedProjectionPath
+    , ParserParityPositiveCase "positive:qualified-import-alias-only" "positiveQualifiedImportAliasOnly" qualifiedImportAliasOnlyCanonicalSourcePath qualifiedImportAliasOnlyExpectedProjectionPath
+    ]
 
-typedAnnotationTypesNegativeEvidencePackageRoot :: FilePath
-typedAnnotationTypesNegativeEvidencePackageRoot =
-    "dist-newstyle/parser-parity-typed-annotation-types-negative-evidence"
+parserParityNegativeCases :: [ParserParityNegativeCase]
+parserParityNegativeCases =
+    [ ParserParityNegativeCase "negative:import-exposing-def-bool" "negativeImportExposingDefBool" "import parser negative " importCanonicalSourcePath importNegativeSourceText importNegativeEvidenceProjection
+    , ParserParityNegativeCase "negative:value-def-list-int-ref" "negativeValueDefListIntRef" "value-def-list parser negative " valueDefListCanonicalSourcePath valueDefListNegativeSourceText valueDefListNegativeEvidenceProjection
+    , ParserParityNegativeCase "negative:let-lambda-application" "negativeLetLambdaApplication" "let-lambda-application parser negative " letLambdaApplicationCanonicalSourcePath letLambdaApplicationNegativeSourceText letLambdaApplicationNegativeEvidenceProjection
+    , ParserParityNegativeCase "negative:typed-annotation-types" "negativeTypedAnnotationTypes" "typed-annotation-types parser negative " typedAnnotationTypesCanonicalSourcePath typedAnnotationTypesNegativeSourceText typedAnnotationTypesNegativeEvidenceProjection
+    , ParserParityNegativeCase "negative:data-declaration-constructor-spans" "negativeDataDeclarationConstructorSpans" "data-declaration parser negative " dataDeclarationConstructorSpansCanonicalSourcePath dataDeclarationConstructorSpansNegativeSourceText dataDeclarationConstructorSpansNegativeEvidenceProjection
+    , ParserParityNegativeCase "negative:case-expression-constructor-patterns" "negativeCaseExpressionConstructorPatterns" "case-expression parser negative " caseExpressionConstructorPatternsCanonicalSourcePath caseExpressionNegativeSourceText caseExpressionNegativeEvidenceProjection
+    , ParserParityNegativeCase "negative:typeclass-instance-nullary-method" "negativeTypeclassInstanceNullaryMethod" "typeclass-instance parser negative " typeclassInstanceNullaryMethodCanonicalSourcePath typeclassInstanceNegativeSourceText typeclassInstanceNegativeEvidenceProjection
+    , ParserParityNegativeCase "negative:multiparam-superclass-fundep" "negativeMultiparamSuperclassFundep" "higher-kinded-fundep parser negative " multiparamSuperclassFundepCanonicalSourcePath higherKindedFundepNegativeSourceText higherKindedFundepNegativeEvidenceProjection
+    , ParserParityNegativeCase "negative:type-family-kind-lambda" "negativeTypeFamilyKindLambda" "type-family parser negative " typeFamilyKindLambdaCanonicalSourcePath typeFamilyEquationNegativeSourceText typeFamilyEquationNegativeEvidenceProjection
+    , ParserParityNegativeCase "negative:existential-constructor-forall" "negativeExistentialConstructorForall" "constructor-forall parser negative " existentialConstructorForallCanonicalSourcePath constructorForallNegativeSourceText constructorForallNegativeEvidenceProjection
+    , ParserParityNegativeCase "negative:qualified-import-alias-references" "negativeQualifiedImportAliasReferences" "qualified-import-alias parser negative " qualifiedImportAliasReferencesCanonicalSourcePath qualifiedImportAliasNegativeSourceText qualifiedImportAliasNegativeEvidenceProjection
+    ]
 
-dataDeclarationConstructorSpansNegativeEvidencePackageRoot :: FilePath
-dataDeclarationConstructorSpansNegativeEvidencePackageRoot =
-    "dist-newstyle/parser-parity-data-declaration-constructor-spans-negative-evidence"
+assertCanonicalParserParityProjection :: ParserParityPositiveCase -> IO ()
+assertCanonicalParserParityProjection testCase = do
+    source <- readFile (positiveCaseSourcePath testCase)
+    expected <- readFile (positiveCaseExpectedPath testCase)
+    canonicalProjection <- renderCanonicalProjection (positiveCaseSourcePath testCase) source
+    canonicalProjection `shouldBe` expected
 
-caseExpressionNegativeEvidencePackageRoot :: FilePath
-caseExpressionNegativeEvidencePackageRoot =
-    "dist-newstyle/parser-parity-case-expression-negative-evidence"
-
-typeclassInstanceNegativeEvidencePackageRoot :: FilePath
-typeclassInstanceNegativeEvidencePackageRoot =
-    "dist-newstyle/parser-parity-typeclass-instance-negative-evidence"
-
-higherKindedFundepNegativeEvidencePackageRoot :: FilePath
-higherKindedFundepNegativeEvidencePackageRoot =
-    "dist-newstyle/parser-parity-higher-kinded-fundep-negative-evidence"
-
-typeFamilyEquationNegativeEvidencePackageRoot :: FilePath
-typeFamilyEquationNegativeEvidencePackageRoot =
-    "dist-newstyle/parser-parity-type-family-equation-negative-evidence"
-
-constructorForallNegativeEvidencePackageRoot :: FilePath
-constructorForallNegativeEvidencePackageRoot =
-    "dist-newstyle/parser-parity-constructor-forall-negative-evidence"
-
-qualifiedImportAliasNegativeEvidencePackageRoot :: FilePath
-qualifiedImportAliasNegativeEvidencePackageRoot =
-    "dist-newstyle/parser-parity-qualified-import-alias-negative-evidence"
-
-sourceTextBasicPackageRoot :: FilePath
-sourceTextBasicPackageRoot =
-    "dist-newstyle/parser-parity-basic-module-def-bool-source-text"
-
-sourceTextDataPackageRoot :: FilePath
-sourceTextDataPackageRoot =
-    "dist-newstyle/parser-parity-data-declaration-constructor-spans-source-text"
-
-writeSourceTextFixturePackage :: FilePath -> FilePath -> String -> IO FilePath
-writeSourceTextFixturePackage packageRoot sourceFile sourceText = do
-    removePathForcibly packageRoot
-    createDirectoryIfMissing True packageRoot
+writeParserParityBatchPackage :: IO FilePath
+writeParserParityBatchPackage = do
+    loadedPositiveCases <- traverse loadPositiveParserParityCase parserParityPositiveCases
+    removePathForcibly parserParityBatchPackageRoot
+    createDirectoryIfMissing True parserParityBatchPackageRoot
     writeFile
-        (packageRoot </> "Main.mlfp")
-        (sourceTextFixtureMainSource sourceFile sourceText)
-    pure packageRoot
+        (parserParityBatchPackageRoot </> "Main.mlfp")
+        (parserParityBatchMainSource loadedPositiveCases)
+    pure parserParityBatchPackageRoot
 
-sourceTextFixtureMainSource :: FilePath -> String -> String
-sourceTextFixtureMainSource sourceFile sourceText =
-    unlines
+loadPositiveParserParityCase :: ParserParityPositiveCase -> IO (ParserParityPositiveCase, String)
+loadPositiveParserParityCase testCase = do
+    sourceText <- readFile (positiveCaseSourcePath testCase)
+    pure (testCase, sourceText)
+
+parserParityBatchMainSource :: [(ParserParityPositiveCase, String)] -> String
+parserParityBatchMainSource loadedPositiveCases =
+    unlines $
         [ "module Main export (main) {"
-        , "  import Prelude exposing (Unit(..), IO, putStrLn);"
-        , "  import ParserParityParser exposing (renderParserParityProjectionFromSourceText);"
+        , "  import Prelude exposing (Unit(..), IO, putStr, stringAppend);"
+        , "  import ParserParityParser exposing (renderParserParityProjectionFromSourceText, renderParserParityRetryEvidence, renderParserNegativeEvidenceFromSourceText);"
         , ""
-        , "  def sourceFile : String ="
-        , "    " <> show sourceFile <> ";"
+        , "  def section : String -> String -> String ="
+        , "    λ(label : String) λ(output : String)"
+        , "      stringAppend \"== \" (stringAppend label (stringAppend \" ==\\n\" (stringAppend output \"\\n\")));"
         , ""
-        , "  def sourceText : String ="
-        , "    " <> show sourceText <> ";"
-        , ""
-        , "  def main : IO Unit ="
-        , "    putStrLn (renderParserParityProjectionFromSourceText sourceFile sourceText);"
-        , "}"
         ]
+            ++ concatMap renderPositiveBatchDefinitions loadedPositiveCases
+            ++ concatMap renderNegativeBatchDefinitions parserParityNegativeCases
+            ++ renderRetryBatchDefinitions
+            ++ [ "  def parserParityBatchOutput : String ="
+               , "    " <> appendStringExpressions batchSectionNames <> ";"
+               , ""
+               , "  def main : IO Unit ="
+               , "    putStr parserParityBatchOutput;"
+               , "}"
+               ]
+  where
+    batchSectionNames =
+        map ((<> "Section") . positiveCaseIdentifier . fst) loadedPositiveCases
+            ++ map ((<> "Section") . negativeCaseIdentifier) parserParityNegativeCases
+            ++ [retryEvidenceIdentifier <> "Section"]
+
+renderPositiveBatchDefinitions :: (ParserParityPositiveCase, String) -> [String]
+renderPositiveBatchDefinitions (testCase, sourceText) =
+    [ "  def " <> ident <> "SourceFile : String ="
+    , "    " <> show (positiveCaseSourcePath testCase) <> ";"
+    , ""
+    , "  def " <> ident <> "SourceText : String ="
+    , "    " <> show sourceText <> ";"
+    , ""
+    , "  def " <> ident <> "Section : String ="
+    , "    section "
+        <> show (positiveCaseLabel testCase)
+        <> " (renderParserParityProjectionFromSourceText "
+        <> ident
+        <> "SourceFile "
+        <> ident
+        <> "SourceText);"
+    , ""
+    ]
+  where
+    ident = positiveCaseIdentifier testCase
+
+renderNegativeBatchDefinitions :: ParserParityNegativeCase -> [String]
+renderNegativeBatchDefinitions testCase =
+    [ "  def " <> ident <> "SourceFile : String ="
+    , "    " <> show (negativeCaseSourcePath testCase) <> ";"
+    , ""
+    , "  def " <> ident <> "SourceText : String ="
+    , "    " <> show (negativeCaseSourceText testCase) <> ";"
+    , ""
+    , "  def " <> ident <> "Section : String ="
+    , "    section "
+        <> show (negativeCaseLabel testCase)
+        <> " (renderParserNegativeEvidenceFromSourceText "
+        <> show (negativeCasePrefix testCase)
+        <> " "
+        <> ident
+        <> "SourceFile "
+        <> ident
+        <> "SourceText);"
+    , ""
+    ]
+  where
+    ident = negativeCaseIdentifier testCase
+
+renderRetryBatchDefinitions :: [String]
+renderRetryBatchDefinitions =
+    [ "  def " <> retryEvidenceIdentifier <> "SourceFile : String ="
+    , "    " <> show canonicalSourcePath <> ";"
+    , ""
+    , "  def " <> retryEvidenceIdentifier <> "SourceText : String ="
+    , "    " <> show basicModuleSourceText <> ";"
+    , ""
+    , "  def " <> retryEvidenceIdentifier <> "LexerMismatchSourceText : String ="
+    , "    " <> show lexerMismatchSourceText <> ";"
+    , ""
+    , "  def " <> retryEvidenceIdentifier <> "Section : String ="
+    , "    section "
+        <> show retryEvidenceLabel
+        <> " (renderParserParityRetryEvidence "
+        <> retryEvidenceIdentifier
+        <> "SourceFile "
+        <> retryEvidenceIdentifier
+        <> "SourceText "
+        <> retryEvidenceIdentifier
+        <> "LexerMismatchSourceText);"
+    , ""
+    ]
+
+appendStringExpressions :: [String] -> String
+appendStringExpressions expressions =
+    case expressions of
+        [] -> "\"\""
+        [expr] -> expr
+        expr : rest -> "stringAppend " <> expr <> "\n      (" <> appendStringExpressions rest <> ")"
+
+expectedParserParityBatchOutput :: IO String
+expectedParserParityBatchOutput = do
+    positiveSections <- traverse expectedPositiveParserParitySection parserParityPositiveCases
+    let negativeSections =
+            map expectedNegativeParserParitySection parserParityNegativeCases
+    pure $
+        concat
+            ( positiveSections
+                ++ negativeSections
+                ++ [batchSection retryEvidenceLabel retryEvidenceProjection]
+            )
+
+expectedPositiveParserParitySection :: ParserParityPositiveCase -> IO String
+expectedPositiveParserParitySection testCase =
+    batchSection (positiveCaseLabel testCase)
+        <$> readFile (positiveCaseExpectedPath testCase)
+
+expectedNegativeParserParitySection :: ParserParityNegativeCase -> String
+expectedNegativeParserParitySection testCase =
+    batchSection (negativeCaseLabel testCase) (negativeCaseExpected testCase)
+
+batchSection :: String -> String -> String
+batchSection label output =
+    "== " <> label <> " ==\n" <> output
+
+retryEvidenceLabel :: String
+retryEvidenceLabel =
+    "retry:basic-module-def-bool"
+
+retryEvidenceIdentifier :: String
+retryEvidenceIdentifier =
+    "retryBasicModuleDefBool"
 
 basicModuleSourceText :: String
 basicModuleSourceText =
     unlines
         [ "module Main export (main) {"
         , "  def main : Bool = true;"
-        , "}"
-        ]
-
-dataDeclarationConstructorSpansSourceText :: String
-dataDeclarationConstructorSpansSourceText =
-    unlines
-        [ "module Main export (Nat(..), main) {"
-        , "  data Nat ="
-        , "      Zero : Nat"
-        , "    | Succ : Nat -> Nat;"
-        , ""
-        , "  def main : Nat = Succ Zero;"
-        , "}"
-        ]
-
-writeRetryEvidencePackage :: IO FilePath
-writeRetryEvidencePackage = do
-    removePathForcibly retryEvidencePackageRoot
-    createDirectoryIfMissing True retryEvidencePackageRoot
-    writeFile (retryEvidencePackageRoot </> "Main.mlfp") retryEvidenceMainSource
-    pure retryEvidencePackageRoot
-
-writeImportNegativeEvidencePackage :: IO FilePath
-writeImportNegativeEvidencePackage = do
-    removePathForcibly importNegativeEvidencePackageRoot
-    createDirectoryIfMissing True importNegativeEvidencePackageRoot
-    writeFile (importNegativeEvidencePackageRoot </> "Main.mlfp") importNegativeEvidenceMainSource
-    pure importNegativeEvidencePackageRoot
-
-writeValueDefListNegativeEvidencePackage :: IO FilePath
-writeValueDefListNegativeEvidencePackage = do
-    removePathForcibly valueDefListNegativeEvidencePackageRoot
-    createDirectoryIfMissing True valueDefListNegativeEvidencePackageRoot
-    writeFile (valueDefListNegativeEvidencePackageRoot </> "Main.mlfp") valueDefListNegativeEvidenceMainSource
-    pure valueDefListNegativeEvidencePackageRoot
-
-writeLetLambdaApplicationNegativeEvidencePackage :: IO FilePath
-writeLetLambdaApplicationNegativeEvidencePackage = do
-    removePathForcibly letLambdaApplicationNegativeEvidencePackageRoot
-    createDirectoryIfMissing True letLambdaApplicationNegativeEvidencePackageRoot
-    writeFile (letLambdaApplicationNegativeEvidencePackageRoot </> "Main.mlfp") letLambdaApplicationNegativeEvidenceMainSource
-    pure letLambdaApplicationNegativeEvidencePackageRoot
-
-writeTypedAnnotationTypesNegativeEvidencePackage :: IO FilePath
-writeTypedAnnotationTypesNegativeEvidencePackage = do
-    removePathForcibly typedAnnotationTypesNegativeEvidencePackageRoot
-    createDirectoryIfMissing True typedAnnotationTypesNegativeEvidencePackageRoot
-    writeFile (typedAnnotationTypesNegativeEvidencePackageRoot </> "Main.mlfp") typedAnnotationTypesNegativeEvidenceMainSource
-    pure typedAnnotationTypesNegativeEvidencePackageRoot
-
-writeDataDeclarationConstructorSpansNegativeEvidencePackage :: IO FilePath
-writeDataDeclarationConstructorSpansNegativeEvidencePackage = do
-    removePathForcibly dataDeclarationConstructorSpansNegativeEvidencePackageRoot
-    createDirectoryIfMissing True dataDeclarationConstructorSpansNegativeEvidencePackageRoot
-    writeFile (dataDeclarationConstructorSpansNegativeEvidencePackageRoot </> "Main.mlfp") dataDeclarationConstructorSpansNegativeEvidenceMainSource
-    pure dataDeclarationConstructorSpansNegativeEvidencePackageRoot
-
-writeCaseExpressionNegativeEvidencePackage :: IO FilePath
-writeCaseExpressionNegativeEvidencePackage = do
-    removePathForcibly caseExpressionNegativeEvidencePackageRoot
-    createDirectoryIfMissing True caseExpressionNegativeEvidencePackageRoot
-    writeFile (caseExpressionNegativeEvidencePackageRoot </> "Main.mlfp") caseExpressionNegativeEvidenceMainSource
-    pure caseExpressionNegativeEvidencePackageRoot
-
-writeTypeclassInstanceNegativeEvidencePackage :: IO FilePath
-writeTypeclassInstanceNegativeEvidencePackage = do
-    removePathForcibly typeclassInstanceNegativeEvidencePackageRoot
-    createDirectoryIfMissing True typeclassInstanceNegativeEvidencePackageRoot
-    writeFile (typeclassInstanceNegativeEvidencePackageRoot </> "Main.mlfp") typeclassInstanceNegativeEvidenceMainSource
-    pure typeclassInstanceNegativeEvidencePackageRoot
-
-writeHigherKindedFundepNegativeEvidencePackage :: IO FilePath
-writeHigherKindedFundepNegativeEvidencePackage = do
-    removePathForcibly higherKindedFundepNegativeEvidencePackageRoot
-    createDirectoryIfMissing True higherKindedFundepNegativeEvidencePackageRoot
-    writeFile (higherKindedFundepNegativeEvidencePackageRoot </> "Main.mlfp") higherKindedFundepNegativeEvidenceMainSource
-    pure higherKindedFundepNegativeEvidencePackageRoot
-
-writeTypeFamilyEquationNegativeEvidencePackage :: IO FilePath
-writeTypeFamilyEquationNegativeEvidencePackage = do
-    removePathForcibly typeFamilyEquationNegativeEvidencePackageRoot
-    createDirectoryIfMissing True typeFamilyEquationNegativeEvidencePackageRoot
-    writeFile (typeFamilyEquationNegativeEvidencePackageRoot </> "Main.mlfp") typeFamilyEquationNegativeEvidenceMainSource
-    pure typeFamilyEquationNegativeEvidencePackageRoot
-
-writeConstructorForallNegativeEvidencePackage :: IO FilePath
-writeConstructorForallNegativeEvidencePackage = do
-    removePathForcibly constructorForallNegativeEvidencePackageRoot
-    createDirectoryIfMissing True constructorForallNegativeEvidencePackageRoot
-    writeFile (constructorForallNegativeEvidencePackageRoot </> "Main.mlfp") constructorForallNegativeEvidenceMainSource
-    pure constructorForallNegativeEvidencePackageRoot
-
-writeQualifiedImportAliasNegativeEvidencePackage :: IO FilePath
-writeQualifiedImportAliasNegativeEvidencePackage = do
-    removePathForcibly qualifiedImportAliasNegativeEvidencePackageRoot
-    createDirectoryIfMissing True qualifiedImportAliasNegativeEvidencePackageRoot
-    writeFile (qualifiedImportAliasNegativeEvidencePackageRoot </> "Main.mlfp") qualifiedImportAliasNegativeEvidenceMainSource
-    pure qualifiedImportAliasNegativeEvidencePackageRoot
-
-retryEvidenceMainSource :: String
-retryEvidenceMainSource =
-    unlines
-        [ "module Main export (main) {"
-        , "  import Prelude exposing (Unit(..), IO, putStrLn);"
-        , "  import ParserParityParser exposing (renderParserParityRetryEvidence);"
-        , ""
-        , "  def sourceFile : String ="
-        , "    \"test/conformance/mlfp/parser-parity/basic-module-def-bool/src/Main.mlfp\";"
-        , ""
-        , "  def sourceText : String ="
-        , "    " <> show basicModuleSourceText <> ";"
-        , ""
-        , "  def lexerMismatchSourceText : String ="
-        , "    " <> show lexerMismatchSourceText <> ";"
-        , ""
-        , "  def main : IO Unit ="
-        , "    putStrLn (renderParserParityRetryEvidence sourceFile sourceText lexerMismatchSourceText);"
-        , "}"
-        ]
-
-importNegativeEvidenceMainSource :: String
-importNegativeEvidenceMainSource =
-    parserNegativeEvidenceMainSource
-        "import parser negative "
-        importCanonicalSourcePath
-        importNegativeSourceText
-
-valueDefListNegativeEvidenceMainSource :: String
-valueDefListNegativeEvidenceMainSource =
-    parserNegativeEvidenceMainSource
-        "value-def-list parser negative "
-        valueDefListCanonicalSourcePath
-        valueDefListNegativeSourceText
-
-letLambdaApplicationNegativeEvidenceMainSource :: String
-letLambdaApplicationNegativeEvidenceMainSource =
-    parserNegativeEvidenceMainSource
-        "let-lambda-application parser negative "
-        letLambdaApplicationCanonicalSourcePath
-        letLambdaApplicationNegativeSourceText
-
-typedAnnotationTypesNegativeEvidenceMainSource :: String
-typedAnnotationTypesNegativeEvidenceMainSource =
-    parserNegativeEvidenceMainSource
-        "typed-annotation-types parser negative "
-        typedAnnotationTypesCanonicalSourcePath
-        typedAnnotationTypesNegativeSourceText
-
-dataDeclarationConstructorSpansNegativeEvidenceMainSource :: String
-dataDeclarationConstructorSpansNegativeEvidenceMainSource =
-    parserNegativeEvidenceMainSource
-        "data-declaration parser negative "
-        dataDeclarationConstructorSpansCanonicalSourcePath
-        dataDeclarationConstructorSpansNegativeSourceText
-
-caseExpressionNegativeEvidenceMainSource :: String
-caseExpressionNegativeEvidenceMainSource =
-    parserNegativeEvidenceMainSource
-        "case-expression parser negative "
-        caseExpressionConstructorPatternsCanonicalSourcePath
-        caseExpressionNegativeSourceText
-
-typeclassInstanceNegativeEvidenceMainSource :: String
-typeclassInstanceNegativeEvidenceMainSource =
-    parserNegativeEvidenceMainSource
-        "typeclass-instance parser negative "
-        typeclassInstanceNullaryMethodCanonicalSourcePath
-        typeclassInstanceNegativeSourceText
-
-higherKindedFundepNegativeEvidenceMainSource :: String
-higherKindedFundepNegativeEvidenceMainSource =
-    parserNegativeEvidenceMainSource
-        "higher-kinded-fundep parser negative "
-        multiparamSuperclassFundepCanonicalSourcePath
-        higherKindedFundepNegativeSourceText
-
-typeFamilyEquationNegativeEvidenceMainSource :: String
-typeFamilyEquationNegativeEvidenceMainSource =
-    parserNegativeEvidenceMainSource
-        "type-family parser negative "
-        typeFamilyKindLambdaCanonicalSourcePath
-        typeFamilyEquationNegativeSourceText
-
-constructorForallNegativeEvidenceMainSource :: String
-constructorForallNegativeEvidenceMainSource =
-    parserNegativeEvidenceMainSource
-        "constructor-forall parser negative "
-        existentialConstructorForallCanonicalSourcePath
-        constructorForallNegativeSourceText
-
-qualifiedImportAliasNegativeEvidenceMainSource :: String
-qualifiedImportAliasNegativeEvidenceMainSource =
-    parserNegativeEvidenceMainSource
-        "qualified-import-alias parser negative "
-        qualifiedImportAliasReferencesCanonicalSourcePath
-        qualifiedImportAliasNegativeSourceText
-
-parserNegativeEvidenceMainSource :: String -> FilePath -> String -> String
-parserNegativeEvidenceMainSource prefix sourceFile sourceText =
-    unlines
-        [ "module Main export (main) {"
-        , "  import Prelude exposing (Unit(..), IO, putStrLn);"
-        , "  import ParserParityParser exposing (renderParserNegativeEvidenceFromSourceText);"
-        , ""
-        , "  def sourceFile : String ="
-        , "    " <> show sourceFile <> ";"
-        , ""
-        , "  def sourceText : String ="
-        , "    " <> show sourceText <> ";"
-        , ""
-        , "  def main : IO Unit ="
-        , "    putStrLn (renderParserNegativeEvidenceFromSourceText " <> show prefix <> " sourceFile sourceText);"
         , "}"
         ]
 

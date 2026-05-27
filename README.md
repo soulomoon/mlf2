@@ -180,6 +180,28 @@ Check a local package root from the executable:
 cabal run mlf2 -- check-program test/programs/packages/cross-module-let
 ```
 
+Set `MLF_PROGRAM_TIMING=1` to emit package-loading and frontend-check stage
+timings to stderr while preserving normal stdout:
+
+```bash
+MLF_PROGRAM_TIMING=1 cabal run mlf2 -- check-program test/programs/packages/cross-module-let
+```
+
+Use `MLF_PROGRAM_TIMING_DETAIL=1` when the `program.check.modules` stage needs
+per-module and per-module-phase timings:
+
+```bash
+MLF_PROGRAM_TIMING_DETAIL=1 cabal run mlf2 -- check-program test/programs/packages/cross-module-let
+```
+
+Use `MLF_PROGRAM_TIMING_OPERATIONS=1` only for narrow profiling runs. It
+includes the detail timings plus per-constructor, per-instance-method, and
+per-definition timings:
+
+```bash
+MLF_PROGRAM_TIMING_OPERATIONS=1 cabal run mlf2 -- check-program test/programs/packages/cross-module-let
+```
+
 Run a local package root directly from the executable:
 
 ```bash

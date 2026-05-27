@@ -113,6 +113,10 @@ data Binding = Binding
   { bindingNode :: NodeId,
     bindingGen :: Maybe GenNodeId
   }
+  | LazyExternalBinding
+      { bindingExternalRoot :: GenNodeId,
+        bindingExternal :: ExternalBinding
+      }
   deriving (Eq, Show)
 
 type Env = Map VarName Binding

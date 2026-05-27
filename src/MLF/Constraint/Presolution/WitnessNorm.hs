@@ -18,12 +18,16 @@ import Control.Monad.Except (throwError)
 import Control.Monad.State
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.List (find, nub)
+import Data.List (find)
 import Data.Maybe (mapMaybe)
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution.Base
-import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical)
+import MLF.Constraint.Presolution.StateAccess
+  ( PresolutionBindingSnapshot (..),
+    bindingSnapshotInteriorOf,
+    getBindingSnapshot,
+  )
 import MLF.Constraint.Presolution.Validation (translatableWeakenedNodes)
 import MLF.Constraint.Presolution.Witness
   ( OmegaNormalizeEnv (OmegaNormalizeEnv, oneRoot),
@@ -47,20 +51,236 @@ import MLF.Constraint.Types.Witness
     )
 import qualified MLF.Util.Order as Order
 
+data WitnessNormCache = WitnessNormCache
+  { wncOrderedBinders :: IntMap.IntMap [NodeId],
+    wncInteriorExact :: IntMap.IntMap IntSet.IntSet,
+    wncOrderKeys :: IntMap.IntMap (IntMap.IntMap Order.OrderKey),
+    wncAbstractBoundShapes :: IntMap.IntMap Bool
+  }
+
+emptyWitnessNormCache :: WitnessNormCache
+emptyWitnessNormCache =
+  WitnessNormCache
+    { wncOrderedBinders = IntMap.empty,
+      wncInteriorExact = IntMap.empty,
+      wncOrderKeys = IntMap.empty,
+      wncAbstractBoundShapes = IntMap.empty
+    }
+
+orderedNubNodes :: [NodeId] -> [NodeId]
+orderedNubNodes =
+  reverse . snd . foldl' step (IntSet.empty, [])
+  where
+    step (seen, acc) nid =
+      let key = getNodeId nid
+       in if IntSet.member key seen
+            then (seen, acc)
+            else (IntSet.insert key seen, nid : acc)
+
+orderedNubPairs :: [((NodeId, NodeId), NodeId)] -> [((NodeId, NodeId), NodeId)]
+orderedNubPairs =
+  reverse . snd . foldl' step (IntMap.empty, [])
+  where
+    step (seen, acc) entry@((sourceBinder, _arg), target) =
+      let sourceKey = getNodeId sourceBinder
+          targetKey = getNodeId target
+          targets = IntMap.findWithDefault IntSet.empty sourceKey seen
+       in if IntSet.member targetKey targets
+            then (seen, acc)
+            else (IntMap.insert sourceKey (IntSet.insert targetKey targets) seen, entry : acc)
+
+opTargets :: InstanceOp -> [NodeId]
+opTargets op =
+  case op of
+    OpGraft sigma n -> [sigma, n]
+    OpWeaken n -> [n]
+    OpMerge n m -> [n, m]
+    OpRaise n -> [n]
+    OpRaiseMerge n m -> [n, m]
+
+cachedOrderedBinders ::
+  PresolutionBindingSnapshot p ->
+  NodeId ->
+  StateT WitnessNormCache (PresolutionM p) [NodeId]
+cachedOrderedBinders snapshot nid = do
+  let c0 = pbsConstraint snapshot
+      canonical = pbsCanonical snapshot
+  let nidC = canonical nid
+      key = getNodeId nidC
+  cache <- gets wncOrderedBinders
+  case IntMap.lookup key cache of
+    Just binders -> pure binders
+    Nothing -> do
+      binders <-
+        case Binding.orderedBindersInQuotient canonical c0 (pbsQuotient snapshot) (typeRef nidC) of
+          Left _ -> pure []
+          Right ordered -> pure ordered
+      modify' $ \st ->
+        st {wncOrderedBinders = IntMap.insert key binders (wncOrderedBinders st)}
+      pure binders
+
+cachedInteriorExact ::
+  PresolutionBindingSnapshot p ->
+  NodeId ->
+  StateT WitnessNormCache (PresolutionM p) IntSet.IntSet
+cachedInteriorExact snapshot root0 = do
+  let c0 = pbsConstraint snapshot
+      canonical = pbsCanonical snapshot
+  let rootC = canonical root0
+      key = getNodeId rootC
+  cache <- gets wncInteriorExact
+  case IntMap.lookup key cache of
+    Just interior -> pure interior
+    Nothing -> do
+      let interiorRootRef = traceInteriorRootRef canonical c0 root0
+      raw <- lift (bindingSnapshotInteriorOf snapshot interiorRootRef)
+      let interior =
+            IntSet.fromList
+              [ getNodeId nid
+                | refKey <- IntSet.toList raw,
+                  TypeRef nid <- [nodeRefFromKey refKey]
+              ]
+      modify' $ \st ->
+        st {wncInteriorExact = IntMap.insert key interior (wncInteriorExact st)}
+      pure interior
+
+cachedOrderKeys ::
+  Constraint p ->
+  (NodeId -> NodeId) ->
+  NodeId ->
+  StateT WitnessNormCache (PresolutionM p) (IntMap.IntMap Order.OrderKey)
+cachedOrderKeys c0 canonical root0 = do
+  let rootC = canonical root0
+      key = getNodeId rootC
+  cache <- gets wncOrderKeys
+  case IntMap.lookup key cache of
+    Just orderKeys -> pure orderKeys
+    Nothing -> do
+      let orderKeys = Order.orderKeysFromConstraintWith canonical c0 rootC Nothing
+      modify' $ \st ->
+        st {wncOrderKeys = IntMap.insert key orderKeys (wncOrderKeys st)}
+      pure orderKeys
+
+cachedAbstractBoundShape ::
+  Constraint p ->
+  IntSet.IntSet ->
+  (NodeId -> NodeId) ->
+  NodeId ->
+  StateT WitnessNormCache (PresolutionM p) Bool
+cachedAbstractBoundShape c0 liveNodeKeys canonical nid = do
+  let nidC = canonical nid
+      key = getNodeId nidC
+  cache <- gets wncAbstractBoundShapes
+  case IntMap.lookup key cache of
+    Just result -> pure result
+    Nothing -> do
+      let go seen current =
+            let currentC = canonical current
+                currentKey = getNodeId currentC
+                seen' = IntSet.insert currentKey seen
+             in if IntSet.member currentKey seen
+                  then True
+                  else case NodeAccess.lookupNode c0 currentC of
+                    Just TyVar {tnBound = Nothing} ->
+                      True
+                    Just TyVar {tnBound = Just bnd} ->
+                      go seen' bnd
+                    Just TyBase {} ->
+                      False
+                    Just TyBottom {} ->
+                      False
+                    Just node ->
+                      let children = structuralChildren node
+                       in not (null children) && all (go seen') children
+                    Nothing ->
+                      False
+          result =
+            if IntSet.notMember key liveNodeKeys
+              then False
+              else case NodeAccess.lookupNode c0 nidC of
+                Just TyVar {tnBound = Just bnd} ->
+                  go IntSet.empty bnd
+                Just TyMu {tnBody = muBody} ->
+                  go IntSet.empty muBody
+                _ ->
+                  False
+      modify' $ \st ->
+        st {wncAbstractBoundShapes = IntMap.insert key result (wncAbstractBoundShapes st)}
+      pure result
+
+precomputedDescendantsForOps ::
+  PresolutionBindingSnapshot p ->
+  [InstanceOp] ->
+  IntMap.IntMap IntSet.IntSet
+precomputedDescendantsForOps snapshot ops =
+  IntMap.fromList
+    [ (getNodeId (canonical target), descendants)
+      | target <- orderedNubNodes (concatMap opCacheTargets ops),
+        Just descendants <- [descendantsOf target]
+    ]
+  where
+    canonical = pbsCanonical snapshot
+    qbp = pbsQuotient snapshot
+    childrenByParent = Binding.qbpChildrenByParent qbp
+
+    descendantsOf target =
+      let targetC = canonical target
+          rootKey = nodeRefKey (typeRef targetC)
+       in if IntSet.notMember rootKey (Binding.qbpAllRoots qbp)
+            then Nothing
+            else
+              let go visited [] = visited
+                  go visited (key : rest) =
+                    let kids =
+                          [ childKey
+                          | (childKey, _info) <- IntMap.findWithDefault [] key childrenByParent,
+                            not (IntSet.member childKey visited)
+                          ]
+                        visited' = foldl' (flip IntSet.insert) visited kids
+                     in go visited' (kids ++ rest)
+                  raw = go (IntSet.singleton rootKey) [rootKey]
+               in Just $
+                    IntSet.delete (getNodeId targetC) $
+                      IntSet.fromList
+                        [ getNodeId nid
+                        | refKey <- IntSet.toList raw,
+                          TypeRef nid <- [nodeRefFromKey refKey]
+                        ]
+
+    opCacheTargets op =
+      case op of
+        OpGraft _ n -> [n]
+        OpWeaken n -> [n]
+        OpMerge n m -> [n, m]
+        OpRaise n -> [n]
+        OpRaiseMerge n m -> [n, m]
+
 -- | Normalize edge witnesses against the finalized presolution constraint.
 normalizeEdgeWitnessesM :: PresolutionM p ()
 normalizeEdgeWitnessesM = do
-  (c0, canonical) <- getConstraintAndCanonical
+  snapshot <- getBindingSnapshot
+  let c0 = pbsConstraint snapshot
+      canonical = pbsCanonical snapshot
   traces <- gets psEdgeTraces
   witnesses0 <- gets psEdgeWitnesses
+  let allNodes0 = NodeAccess.allNodes c0
+      liveNodeKeys =
+        IntSet.fromList [getNodeId (tnId node) | node <- allNodes0]
+      tyVarNodeKeys =
+        IntSet.fromList
+          [ getNodeId (tnId node)
+            | node@TyVar {} <- allNodes0
+          ]
+      tyMuNodeKeys =
+        IntSet.fromList
+          [ getNodeId (tnId node)
+            | node@TyMu {} <- allNodes0
+          ]
   let rewriteNodeWith copyMap nid =
         let mapped = IntMap.findWithDefault nid (getNodeId nid) (getCopyMapping copyMap)
             mappedC = canonical mapped
             sourceC = canonical nid
-            isLive n =
-              case NodeAccess.lookupNode c0 n of
-                Just _ -> True
-                _ -> False
+            isLive n = IntSet.member (getNodeId n) liveNodeKeys
          in if isLive mappedC
               then mappedC
               else
@@ -76,7 +296,7 @@ normalizeEdgeWitnessesM = do
           ]
       weakened =
         IntSet.union weakenedOps (translatableWeakenedNodes c0)
-  witnessResults <- forM (IntMap.toList witnesses0) $ \(eid, w0) -> do
+  witnessResults <- evalStateT (forM (IntMap.toList witnesses0) $ \(eid, w0) -> do
     let mbTrace = IntMap.lookup eid traces
         (edgeRoot, copyMap, binderArgs0, traceInterior) =
           case mbTrace of
@@ -118,13 +338,9 @@ normalizeEdgeWitnessesM = do
             OpWeaken n -> OpWeaken (restoreNode n)
             OpRaiseMerge n m -> OpRaiseMerge (restoreNode n) (restoreNode m)
         isExactTyVar nid =
-          case NodeAccess.lookupNode c0 nid of
-            Just TyVar {} -> True
-            _ -> False
+          IntSet.member (getNodeId nid) tyVarNodeKeys
         isLiveNode nid =
-          case NodeAccess.lookupNode c0 (canonical nid) of
-            Just _ -> True
-            _ -> False
+          IntSet.member (getNodeId (canonical nid)) liveNodeKeys
         sourceEntriesInOrder :: [(NodeId, NodeId)]
         sourceEntriesInOrder =
           reverse $
@@ -159,31 +375,27 @@ normalizeEdgeWitnessesM = do
               restored = restoreNode targetC
            in isExactTyVar targetC
                 && (restored == targetC || IntSet.notMember (getNodeId restored) sourceBinderKeySet)
-        replayBindersAtRoot =
+    let rootC = canonical edgeRoot
+    directBinders <- cachedOrderedBinders snapshot rootC
+    bindersOrdered <-
+      case NodeAccess.lookupNode c0 rootC of
+        Just TyVar {tnBound = Just bnd} -> do
+          viaBound <- cachedOrderedBinders snapshot bnd
+          pure (if null directBinders then viaBound else directBinders)
+        Just TyMu {tnBody = muBody} -> do
+          viaMu <- cachedOrderedBinders snapshot muBody
+          pure (if null directBinders then viaMu else directBinders)
+        _ -> pure directBinders
+    let replayBindersAtRoot =
           [ canonical b
             | b <- bindersOrdered,
               isReplayDomainBinder b
           ]
-          where
-            bindersOrdered =
-              let rootC = canonical edgeRoot
-                  orderedUnder nid =
-                    either (const []) id $
-                      Binding.orderedBinders canonical c0 (typeRef (canonical nid))
-                  direct = orderedUnder rootC
-               in case NodeAccess.lookupNode c0 rootC of
-                    Just TyVar {tnBound = Just bnd} ->
-                      let viaBound = orderedUnder bnd
-                       in if null direct then viaBound else direct
-                    Just TyMu {tnBody = muBody} ->
-                      let viaMu = orderedUnder muBody
-                       in if null direct then viaMu else direct
-                    _ -> direct
     let orderBase = edgeRoot
         orderRoot = orderBase
     interiorExact <-
       if IntSet.null traceInteriorKeys
-        then edgeInteriorExact edgeRoot
+        then cachedInteriorExact snapshot edgeRoot
         else pure traceInteriorKeys
     let interiorNorm =
           -- Rewrite interior through copyMap so it's in the same node-id space
@@ -201,7 +413,7 @@ normalizeEdgeWitnessesM = do
               | (sourceBinder, replayBinder) <- initialReplayPairs
             ]
         sourceReplayBinders =
-          nub
+          orderedNubNodes
             [ binderC
               | sourceBinder <- sourceBindersInOrder,
                 let binderC = canonical (rewriteNode sourceBinder),
@@ -215,9 +427,8 @@ normalizeEdgeWitnessesM = do
         isAnnEdge =
           IntSet.member eid (cAnnEdges c0)
         ops0 = map rewriteOp (getInstanceOps (ewWitness w0))
-    let orderKeys0 = Order.orderKeysFromConstraintWith canonical c0 (canonical orderRoot) Nothing
-        orderKeys = orderKeys0
-        env =
+    orderKeys <- cachedOrderKeys c0 canonical orderRoot
+    let env =
           OmegaNormalizeEnv
             { oneRoot = canonical edgeRoot,
               Witness.interior = interiorWithBinders,
@@ -227,6 +438,7 @@ normalizeEdgeWitnessesM = do
               Witness.canonical = canonical,
               Witness.constraint = c0,
               Witness.binderArgs = binderArgs,
+              Witness.precomputedDescendants = precomputedDescendantsForOps snapshot ops0,
               Witness.binderReplayMap = replayMapRewritten,
               Witness.replayContract = ReplayContractNone,
               Witness.replayDomainBinders = replayBindersAtRoot,
@@ -237,39 +449,24 @@ normalizeEdgeWitnessesM = do
       Left err ->
         throwError (WitnessNormalizationError (EdgeId eid) err)
     let opsNorm = opsNormRaw
+    abstractShapes <-
+      IntMap.fromList <$> do
+        let targets =
+              orderedNubNodes
+                [ target
+                  | op <- opsNorm,
+                    target <- opTargets op
+                ]
+        forM targets $ \target -> do
+          shape <- cachedAbstractBoundShape c0 liveNodeKeys canonical target
+          pure (getNodeId (canonical target), shape)
     let sourceKeySet =
           IntSet.fromList
             [ getNodeId sourceBinder
               | sourceBinder <- sourceBindersInOrder
             ]
         abstractBoundShape nid =
-          let go seen current =
-                let currentC = canonical current
-                    currentKey = getNodeId currentC
-                    seen' = IntSet.insert currentKey seen
-                 in if IntSet.member currentKey seen
-                      then True
-                      else case NodeAccess.lookupNode c0 currentC of
-                        Just TyVar {tnBound = Nothing} ->
-                          True
-                        Just TyVar {tnBound = Just bnd} ->
-                          go seen' bnd
-                        Just TyBase {} ->
-                          False
-                        Just TyBottom {} ->
-                          False
-                        Just node ->
-                          let children = structuralChildren node
-                           in not (null children) && all (go seen') children
-                        Nothing ->
-                          False
-           in case NodeAccess.lookupNode c0 (canonical nid) of
-                Just TyVar {tnBound = Just bnd} ->
-                  go IntSet.empty bnd
-                Just TyMu {tnBody = muBody} ->
-                  go IntSet.empty muBody
-                _ ->
-                  False
+          IntMap.findWithDefault False (getNodeId (canonical nid)) abstractShapes
         sourceKeySetSeed =
           IntSet.fromList
             [ getNodeId (canonical (rewriteNode sourceBinder))
@@ -310,14 +507,10 @@ normalizeEdgeWitnessesM = do
           IntSet.member (getNodeId (restoreNode target)) traceInteriorKeys
         interiorContainsTyMu =
           any
-            ( \nid ->
-                case NodeAccess.lookupNode c0 (NodeId nid) of
-                  Just TyMu {} -> True
-                  _ -> False
-            )
+            (`IntSet.member` tyMuNodeKeys)
             (IntSet.toList interiorWithBinders)
         replayBindersSeededFromInteriorGrafts =
-          nub
+          orderedNubNodes
             [ targetC
               | OpGraft _ target <- opsNormFinalized,
                 let targetC = canonical target,
@@ -334,7 +527,7 @@ normalizeEdgeWitnessesM = do
             )
             sourceEntriesInOrder
         replayEntriesSeededFromRaiseMerge =
-          nub
+          orderedNubPairs
             [ (sourceEntry, targetC)
               | OpRaiseMerge source target <- opsNormFinalized,
                 let sourceKey = getNodeId (restoreNode source),
@@ -359,14 +552,14 @@ normalizeEdgeWitnessesM = do
               replayBindersSeededFromInteriorGrafts
           | null replayBindersAtRoot
               && not (null replayEntriesSeededFromRaiseMerge) =
-              nub (map snd replayEntriesSeededFromRaiseMerge)
+              orderedNubNodes (map snd replayEntriesSeededFromRaiseMerge)
           | otherwise =
               replayBindersAtRoot
         replayBindersWithBoundedGrafts =
           if null replayBinders
             then []
             else
-              nub
+              orderedNubNodes
                 ( replayBinders
                     ++ [ targetC
                          | OpGraft _ target <- opsNormFinalized,
@@ -586,6 +779,7 @@ normalizeEdgeWitnessesM = do
                 Right witness ->
                     witness
     pure (eid, witness', trace')
+    ) emptyWitnessNormCache
   let witnessMap =
         IntMap.fromList
           [ (eid, witness)

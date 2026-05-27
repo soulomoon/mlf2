@@ -1,0 +1,9 @@
+metric	value_ms
+program.check.modules	1211.706
+program.check.module.Prelude.constructor-bindings	65.408
+program.check.module.Prelude.instance-bindings	1042.074
+program.check.operation.Prelude.instance_methods_group_finalize	1030.465
+program.check.module.Prelude.def-bindings	74.193
+real	1240.000
+user	1110.000
+sys	90.000

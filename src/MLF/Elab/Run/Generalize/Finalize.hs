@@ -115,11 +115,13 @@ finalizeConstraint env phase1 phase2 _phase3 phase4 =
             in pruneBindParentsConstraint constraint0
         alignedMapping =
             let canonicalBase = id
+                baseQuotient = Binding.quotientBindParentsContextUnder canonicalBase base
+                solvedQuotient = Binding.quotientBindParentsContextUnder canonical constraintForGen
                 alignOne (accSolved, accBase) gen =
                     let gid = gnId gen
                     in case
-                        ( Binding.boundFlexChildrenUnder canonicalBase base (GenRef gid)
-                        , Binding.boundFlexChildrenUnder canonical constraintForGen (GenRef gid)
+                        ( baseQuotient >>= \qbp -> Binding.boundFlexChildrenInQuotient base qbp (GenRef gid)
+                        , solvedQuotient >>= \qbp -> Binding.boundFlexChildrenInQuotient constraintForGen qbp (GenRef gid)
                         ) of
                             (Right baseBinders, Right solvedBinders) ->
                                 foldl'

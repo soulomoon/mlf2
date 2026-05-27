@@ -7,6 +7,7 @@ module MLF.Elab.Elaborate
   ( ElabConfig (ElabConfig, ecTraceConfig, ecGeneralizeAtWith),
     ElabEnv (..),
     elaborateWithEnv,
+    elaborateWithEnvReadModel,
   )
 where
 
@@ -22,16 +23,17 @@ import MLF.Elab.Elaborate.Algebra
   ( AlgebraContext (..),
     ElabOut (..),
     elabAlg,
-    mkEnvBinding,
+    mkEnv,
     resolvedLambdaParamNode,
   )
 import MLF.Elab.Elaborate.Annotation (AnnotationContext (..))
 import MLF.Elab.Elaborate.Scope (GeneralizeAtWith, ScopeContext (..))
 import MLF.Elab.Generalize (GaBindParents)
+import MLF.Elab.ReadModel (ElabReadModel (..))
+import MLF.Elab.Run.TypeOps (mkInlineBoundVarsContextWithReadModel)
 import MLF.Elab.Types (ElabError, ElabTerm, SchemeInfo)
 import MLF.Frontend.ConstraintGen.Types (AnnExpr)
 import MLF.Frontend.Syntax (NormSrcType, VarName)
-import MLF.Reify.Core (namedNodes)
 import MLF.Util.Trace (TraceConfig)
 
 data ElabConfig (p :: Phase) = ElabConfig
@@ -41,6 +43,7 @@ data ElabConfig (p :: Phase) = ElabConfig
 
 data ElabEnv (p :: Phase) = ElabEnv
   { eePresolutionView :: PresolutionView p,
+    eeReadModel :: Either ElabError (ElabReadModel p),
     eeGaParents :: GaBindParents p,
     eeEdgeArtifacts :: EdgeArtifacts,
     eeScopeOverrides :: IntMap.IntMap NodeRef,
@@ -63,13 +66,27 @@ elaborateWithEnv ::
   AnnExpr ->
   Either ElabError ElabTerm
 elaborateWithEnv config elabEnv ann = do
-  namedSet <- namedNodes presolutionView
+  readModel <- eeReadModel elabEnv
+  elaborateWithEnvReadModel config elabEnv readModel ann
+
+elaborateWithEnvReadModel ::
+  ElabConfig p ->
+  ElabEnv p ->
+  ElabReadModel p ->
+  AnnExpr ->
+  Either ElabError ElabTerm
+elaborateWithEnvReadModel config elabEnv readModel ann = do
+  let namedSet = ermNamedNodes readModel
+      inlineBoundVarsContext = mkInlineBoundVarsContextWithReadModel readModel
   let scopeContext =
         ScopeContext
           { scPresolutionView = presolutionView,
             scGaParents = eeGaParents elabEnv,
             scScopeOverrides = eeScopeOverrides elabEnv,
-            scGeneralizeAtWith = ecGeneralizeAtWith config
+            scGeneralizeAtWith = ecGeneralizeAtWith config,
+            scReadModel = readModel,
+            scNamedSetReify = namedSet,
+            scInlineBoundVarsContext = inlineBoundVarsContext
           }
       annotationContext =
         AnnotationContext
@@ -88,11 +105,12 @@ elaborateWithEnv config elabEnv ann = do
             algResolvedLambdaParamNode = resolvedLambdaParamNode canonical lookupNode,
             algAnnotationContext = annotationContext,
             algNamedSetReify = namedSet,
+            algInlineBoundVarsContext = inlineBoundVarsContext,
             algAnnSourceTypes = eeAnnSourceTypes elabEnv
           }
       ElabOut {elabTerm = runElab} = para (elabAlg algebraContext) ann
-  runElab (Map.map (`mkEnvBinding` False) (eeInitialTermEnv elabEnv))
+  runElab (mkEnv (eeInitialTermEnv elabEnv))
   where
-    presolutionView = eePresolutionView elabEnv
+    presolutionView = ermPresolutionView readModel
     canonical = pvCanonical presolutionView
     lookupNode = pvLookupNode presolutionView
