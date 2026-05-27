@@ -35,21 +35,19 @@ spec =
         it "matches canonical parser projections for every batched positive fixture" $
             traverse_ assertCanonicalParserParityProjection parserParityPositiveCases
 
-        it "runs all .mlfp parser parity fixtures through one generated public CLI driver" $ do
-            expected <- expectedParserParityBatchOutput
-            batchRoot <- writeParserParityBatchPackage
-            runSharedParserBatch batchRoot `shouldReturn` Right expected
+        beforeAll loadParserParityBatchFixture $ do
+            it "runs all .mlfp parser parity fixtures through one generated public CLI driver" $ \fixture ->
+                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
 
-        it "shared parser-owned .mlfp parser library routes the generated batch through one entrypoint" $ do
-            sharedParserExists <- doesFileExist (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
-            sharedParserExists `shouldBe` True
+            it "shared parser-owned .mlfp parser library routes the generated batch through one entrypoint" $ \fixture -> do
+                sharedParserExists <- doesFileExist (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
+                sharedParserExists `shouldBe` True
 
-            batchRoot <- writeParserParityBatchPackage
-            batchSource <- readFile (batchRoot </> "Main.mlfp")
-            batchSource `shouldSatisfy` isInfixOf "import ParserParityParser exposing"
-            batchSource `shouldSatisfy` isInfixOf "renderParserParityProjectionFromSourceText"
-            batchSource `shouldSatisfy` isInfixOf "renderParserNegativeEvidenceFromSourceText"
-            batchSource `shouldSatisfy` isInfixOf "renderParserParityRetryEvidence"
+                let batchSource = batchMainSource fixture
+                batchSource `shouldSatisfy` isInfixOf "import ParserParityParser exposing"
+                batchSource `shouldSatisfy` isInfixOf "renderParserParityProjectionFromSourceText"
+                batchSource `shouldSatisfy` isInfixOf "renderParserNegativeEvidenceFromSourceText"
+                batchSource `shouldSatisfy` isInfixOf "renderParserParityRetryEvidence"
 
         it "shared parser-owned .mlfp parser composes grammar without fixture-level token streams" $ do
             sharedParserSource <- concat <$> traverse readFile sharedParserAuditFiles
@@ -418,6 +416,25 @@ sharedParserDynamicEvidenceRequiredPhrases =
 runSharedParserBatch :: FilePath -> IO (Either String String)
 runSharedParserBatch batchRoot =
     runProgramArgs [batchRoot, "--search-path", sharedParserLibraryRoot]
+
+data ParserParityBatchFixture = ParserParityBatchFixture
+    { batchExpectedOutput :: String
+    , batchMainSource :: String
+    , batchRunResult :: Either String String
+    }
+
+loadParserParityBatchFixture :: IO ParserParityBatchFixture
+loadParserParityBatchFixture = do
+    expected <- expectedParserParityBatchOutput
+    batchRoot <- writeParserParityBatchPackage
+    source <- readFile (batchRoot </> "Main.mlfp")
+    result <- runSharedParserBatch batchRoot
+    pure
+        ParserParityBatchFixture
+            { batchExpectedOutput = expected
+            , batchMainSource = source
+            , batchRunResult = result
+            }
 
 parserParityBatchPackageRoot :: FilePath
 parserParityBatchPackageRoot =

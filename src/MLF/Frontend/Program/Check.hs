@@ -25,6 +25,7 @@ module MLF.Frontend.Program.Check
   )
 where
 
+import Control.Concurrent.MVar (MVar, modifyMVar, newMVar)
 import Control.Exception (evaluate)
 import Control.Monad (foldM, forM, when, zipWithM)
 import Control.Monad.Except (MonadError (throwError))
@@ -155,6 +156,7 @@ import MLF.Frontend.Syntax
     resolvedSrcTypeToSrcType,
   )
 import qualified MLF.Frontend.Syntax.Program as P
+import System.IO.Unsafe (unsafePerformIO)
 import MLF.Frontend.TypeLevel (TypeFamilyDecl, familyDeclName)
 
 type TcM a = Either ProgramError a
@@ -654,7 +656,10 @@ checkModules mbGraph (ResolvedSemanticProgramArtifact resolvedModules) = do
 
     go _ checkedAcc [] = pure (reverse checkedAcc)
     go interfaceAcc checkedAcc (resolvedModule : rest) = do
-      checked <- checkModule resolvedModule interfaceAcc
+      checked <-
+        if isBuiltinPreludeModule nodesByModule mbGraph resolvedModule
+          then checkedBuiltinPreludeModule resolvedModule
+          else checkModule resolvedModule interfaceAcc
       node <- moduleInterfaceNodeForResolved nodesByModule mbGraph resolvedModule
       interface <- liftEitherWithInterface (moduleInterfaceFromCheckedModule node checked)
       go (interface : interfaceAcc) (checked : checkedAcc) rest
@@ -683,11 +688,19 @@ checkModulesWithTiming timing mbGraph (ResolvedSemanticProgramArtifact resolvedM
       pure (Right (reverse checkedAcc))
     go interfaceAcc checkedAcc (resolvedModule : rest) = do
       let moduleName0 = resolvedSemanticModuleName resolvedModule
+          isBuiltinPrelude = isBuiltinPreludeModule nodesByModule mbGraph resolvedModule
       checkedResult <-
-        timeProgramDetailIO
-          timing
-          ("program.check.module." ++ moduleName0)
-          (checkModuleWithTiming timing resolvedModule interfaceAcc)
+        if isBuiltinPrelude
+          then
+            timeProgramDetailIO
+              timing
+              ("program.check.module." ++ moduleName0 ++ ".cache")
+              (evaluate (checkedBuiltinPreludeModule resolvedModule))
+          else
+            timeProgramDetailIO
+              timing
+              ("program.check.module." ++ moduleName0)
+              (checkModuleWithTiming timing resolvedModule interfaceAcc)
       case checkedResult of
         Left err ->
           pure (Left err)
@@ -704,6 +717,41 @@ checkModulesWithTiming timing mbGraph (ResolvedSemanticProgramArtifact resolvedM
               pure (Left err)
             Right interface ->
               go (interface : interfaceAcc) (checked : checkedAcc) rest
+
+builtinPreludeSourcePath :: FilePath
+builtinPreludeSourcePath = "<mlfp-prelude>"
+
+builtinPreludeCheckCache :: MVar (Maybe (TcM CheckedModule))
+builtinPreludeCheckCache = unsafePerformIO (newMVar Nothing)
+{-# NOINLINE builtinPreludeCheckCache #-}
+
+checkedBuiltinPreludeModule :: ResolvedSemanticModule -> TcM CheckedModule
+checkedBuiltinPreludeModule resolvedModule =
+  unsafePerformIO $
+    modifyMVar builtinPreludeCheckCache $ \case
+      Just cached ->
+        pure (Just cached, cached)
+      Nothing -> do
+        checked <- evaluate (checkModule resolvedModule [])
+        pure (Just checked, checked)
+{-# NOINLINE checkedBuiltinPreludeModule #-}
+
+isBuiltinPreludeModule ::
+  Map P.ModuleName PackageModuleGraphNode ->
+  Maybe PackageModuleGraph ->
+  ResolvedSemanticModule ->
+  Bool
+isBuiltinPreludeModule nodesByModule mbGraph resolvedModule =
+  resolvedSemanticModuleName resolvedModule == "Prelude"
+    && case mbGraph of
+      Nothing ->
+        False
+      Just _ ->
+        case Map.lookup "Prelude" nodesByModule of
+          Just node ->
+            packageModuleGraphNodeSourcePath node == Just builtinPreludeSourcePath
+          Nothing ->
+            False
 
 moduleInterfaceNodeForResolved ::
   Map P.ModuleName PackageModuleGraphNode ->

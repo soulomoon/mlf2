@@ -91,6 +91,21 @@ The parser-library exact module read-context comparison is stored in:
 bench/parser-library-performance.md
 ```
 
+The persisted GHC parser-shape scale reference is stored in:
+
+```text
+bench/ghc-reference/ParserShape914.hs
+bench/results/ghc-per-def-reference.tsv
+```
+
+Refresh it with:
+
+```bash
+bench/run-ghc-parser-reference.sh \
+  --runs 1 \
+  --output bench/results/ghc-per-def-reference.tsv
+```
+
 To compare a future run, capture stderr and read the same top-level timing:
 
 ```bash

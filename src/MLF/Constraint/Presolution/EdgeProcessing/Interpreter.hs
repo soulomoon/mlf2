@@ -9,12 +9,18 @@
 module MLF.Constraint.Presolution.EdgeProcessing.Interpreter
   ( executeEdgePlan,
     executeEdgePlanWithoutTraceCanonicalization,
+    executeEdgePlanWithoutTraceCanonicalizationWithOutcome,
     EdgeExecutionDecision (..),
+    EdgeExecutionOutcome (..),
+    EdgeExecutionReplay (..),
     EdgeExecutionWitnessContext (..),
     prepareEdgeExecutionDecision,
     recordEdgeExecutionExpansion,
     unifyEdgeExecutionStructure,
     prepareEdgeExecutionWitness,
+    edgeExecutionReplay,
+    recordEdgeExecutionReplayTraceFromDecision,
+    recordEdgeExecutionReplayTrace,
     runEdgeExecutionExpansionUnify,
     recordEdgeExecutionTrace,
     recordEdgeExecutionWitness,
@@ -22,7 +28,16 @@ module MLF.Constraint.Presolution.EdgeProcessing.Interpreter
 where
 
 import Control.Monad.Except (catchError, throwError)
-import MLF.Constraint.Presolution.Base (PresolutionError (..), PresolutionM, emptyTrace)
+import Control.Monad.State.Strict (gets)
+import qualified Data.IntMap.Strict as IntMap
+import qualified Data.IntSet as IntSet
+import MLF.Constraint.Presolution.Base
+  ( EdgeTrace (..),
+    PresolutionError (..),
+    PresolutionM,
+    PresolutionState (..),
+    emptyTrace,
+  )
 import MLF.Constraint.Presolution.EdgeProcessing.Plan
 import MLF.Constraint.Presolution.EdgeProcessing.Solve
   ( canonicalizeEdgeTraceInteriorsM,
@@ -66,7 +81,8 @@ data EdgeExecutionDecision = EdgeExecutionDecision
     eedUnifications :: [(NodeId, NodeId)],
     eedBodyRoot :: NodeId,
     eedBoundVars :: [NodeId],
-    eedBinderArgs :: [(NodeId, NodeId)]
+    eedBinderArgs :: [(NodeId, NodeId)],
+    eedReplayTrace :: Maybe EdgeTrace
   }
 
 data EdgeExecutionWitnessContext = EdgeExecutionWitnessContext
@@ -76,6 +92,16 @@ data EdgeExecutionWitnessContext = EdgeExecutionWitnessContext
     eewExpansionInput :: EdgeExpansionInput
   }
 
+data EdgeExecutionReplay
+  = EdgeExecutionFresh
+  | EdgeExecutionReplay !EdgeTrace
+
+data EdgeExecutionOutcome
+  = EdgeExecutionFreshOutcome
+  | EdgeExecutionReplayTraceRebuilt
+  | EdgeExecutionReplayNoop
+  deriving (Eq, Show)
+
 -- | Execute a resolved edge plan.
 executeEdgePlan :: EdgePlan -> PresolutionM p ()
 executeEdgePlan plan = do
@@ -84,6 +110,10 @@ executeEdgePlan plan = do
 
 executeEdgePlanWithoutTraceCanonicalization :: EdgePlan -> PresolutionM p ()
 executeEdgePlanWithoutTraceCanonicalization plan =
+  () <$ executeEdgePlanWithoutTraceCanonicalizationWithOutcome plan
+
+executeEdgePlanWithoutTraceCanonicalizationWithOutcome :: EdgePlan -> PresolutionM p EdgeExecutionOutcome
+executeEdgePlanWithoutTraceCanonicalizationWithOutcome plan =
   catchError (executeUnifiedExpansionPath plan) (throwError . toExecError)
 
 -- | Wrap non-tagged interpreter errors at the phase boundary.
@@ -94,18 +124,38 @@ toExecError err = ExecError err
 -- | Unified expansion-oriented execution path.
 --
 -- Frontend TyExp edges all use the same minimal-expansion + unification flow.
-executeUnifiedExpansionPath :: EdgePlan -> PresolutionM p ()
+executeUnifiedExpansionPath :: EdgePlan -> PresolutionM p EdgeExecutionOutcome
 executeUnifiedExpansionPath plan = do
   decision <- prepareEdgeExecutionDecision plan
+  case eedReplayTrace decision of
+    Just previousTrace -> do
+      recordEdgeExecutionExpansion decision
+      unifyEdgeExecutionStructure decision
+      witnessContext <- prepareEdgeExecutionWitness decision
+      recordEdgeExecutionReplayTrace witnessContext previousTrace
+      pure EdgeExecutionReplayTraceRebuilt
+    Nothing ->
+      executeFreshDecision decision
+
+executeFreshDecision :: EdgeExecutionDecision -> PresolutionM p EdgeExecutionOutcome
+executeFreshDecision decision = do
   recordEdgeExecutionExpansion decision
   unifyEdgeExecutionStructure decision
   witnessContext <- prepareEdgeExecutionWitness decision
   expansionResult <- runEdgeExecutionExpansionUnify witnessContext
   recordEdgeExecutionTrace witnessContext expansionResult
   recordEdgeExecutionWitness witnessContext expansionResult
+  pure EdgeExecutionFreshOutcome
 
 prepareEdgeExecutionDecision :: EdgePlan -> PresolutionM p EdgeExecutionDecision
 prepareEdgeExecutionDecision plan = do
+  mbReplayDecision <- prepareRecordedEdgeExecutionDecision plan
+  case mbReplayDecision of
+    Just decision -> pure decision
+    Nothing -> prepareFreshEdgeExecutionDecision plan
+
+prepareFreshEdgeExecutionDecision :: EdgePlan -> PresolutionM p EdgeExecutionDecision
+prepareFreshEdgeExecutionDecision plan = do
   let leftTyExp = eprLeftTyExp plan
       edge = eprEdge plan
       edgeId = instEdgeId edge
@@ -137,8 +187,53 @@ prepareEdgeExecutionDecision plan = do
         eedUnifications = medUnifications minimal,
         eedBodyRoot = medBodyRoot minimal,
         eedBoundVars = medBoundVars minimal,
-        eedBinderArgs = binderArgs
+        eedBinderArgs = binderArgs,
+        eedReplayTrace = Nothing
       }
+
+prepareRecordedEdgeExecutionDecision :: EdgePlan -> PresolutionM p (Maybe EdgeExecutionDecision)
+prepareRecordedEdgeExecutionDecision plan = do
+  let leftTyExp = eprLeftTyExp plan
+      edge = eprEdge plan
+      edgeId = instEdgeId edge
+      edgeKey = getEdgeId edgeId
+      n1Raw = resolvedTyExpNode leftTyExp
+      n2 = eprRightNode plan
+      s = rteExpVar leftTyExp
+      ownerGen = eprSchemeOwnerGen plan
+  st <- gets id
+  currentExp <- getExpansion s
+  case ( IntMap.lookup edgeKey (psEdgeExpansions st)
+       , IntMap.member edgeKey (psEdgeWitnesses st)
+       , IntMap.lookup edgeKey (psEdgeTraces st)
+       ) of
+    (Just recordedExp, True, Just previousTrace)
+      | recordedExp /= ExpIdentity
+      , recordedExp == currentExp -> do
+          let bodyRoot =
+                case n1Raw of
+                  TyExp {tnBody = bodyId} -> bodyId
+                  _ -> tnId n1Raw
+              binderArgs = etBinderArgs previousTrace
+              boundVars0 = map fst binderArgs
+          pure $
+            Just
+              EdgeExecutionDecision
+                { eedEdgeId = edgeId,
+                  eedLeftNodeId = instLeft edge,
+                  eedRightNodeId = instRight edge,
+                  eedLeftRaw = n1Raw,
+                  eedRightRaw = n2,
+                  eedOwnerGen = ownerGen,
+                  eedFinalExpansion = recordedExp,
+                  eedUnifications = [],
+                  eedBodyRoot = bodyRoot,
+                  eedBoundVars = boundVars0,
+                  eedBinderArgs = binderArgs,
+                  eedReplayTrace = Just previousTrace
+                }
+    _ ->
+      pure Nothing
 
 recordEdgeExecutionExpansion :: EdgeExecutionDecision -> PresolutionM p ()
 recordEdgeExecutionExpansion decision =
@@ -183,6 +278,22 @@ prepareEdgeExecutionWitness decision = do
         eewExpansionInput = expansionInput
       }
 
+edgeExecutionReplay :: EdgeExecutionWitnessContext -> PresolutionM p EdgeExecutionReplay
+edgeExecutionReplay context = do
+  st <- gets id
+  let decision = eewDecision context
+      edgeKey = getEdgeId (eedEdgeId decision)
+      mbExpansion = IntMap.lookup edgeKey (psEdgeExpansions st)
+      hasWitness = IntMap.member edgeKey (psEdgeWitnesses st)
+      mbTrace = IntMap.lookup edgeKey (psEdgeTraces st)
+  pure $
+    case (mbExpansion, hasWitness, mbTrace) of
+      (Just expn, True, Just trace)
+        | expn == eedFinalExpansion decision ->
+            EdgeExecutionReplay trace
+      _ ->
+        EdgeExecutionFresh
+
 runEdgeExecutionExpansionUnify :: EdgeExecutionWitnessContext -> PresolutionM p EdgeExpansionResult
 runEdgeExecutionExpansionUnify context = do
   expansionResult <-
@@ -190,6 +301,28 @@ runEdgeExecutionExpansionUnify context = do
       then pure EdgeExpansionResult {eerTrace = emptyTrace, eerExtraOps = []}
       else runExpansionUnify (eewExpansionInput context) (ewpBaseOps (eewWitnessPlan context))
   pure expansionResult
+
+recordEdgeExecutionReplayTrace :: EdgeExecutionWitnessContext -> EdgeTrace -> PresolutionM p ()
+recordEdgeExecutionReplayTrace context previousTrace =
+  recordEdgeExecutionReplayTraceFromDecision (eewDecision context) previousTrace
+
+recordEdgeExecutionReplayTraceFromDecision :: EdgeExecutionDecision -> EdgeTrace -> PresolutionM p ()
+recordEdgeExecutionReplayTraceFromDecision decision previousTrace = do
+  let witnessInput =
+        EdgeWitnessInput
+          { ewiEdgeId = eedEdgeId decision,
+            ewiSrcNode = eedLeftNodeId decision,
+            ewiTgtNode = eedRightNodeId decision,
+            ewiLeftRaw = eedLeftRaw decision,
+            ewiDepth = length (eedBinderArgs decision)
+          }
+  tr <-
+    buildEdgeTrace
+      witnessInput
+      (eedOwnerGen decision)
+      (eedBinderArgs decision)
+      (etCopyMap previousTrace, IntSet.empty, IntSet.empty)
+  recordEdgeTrace (eedEdgeId decision) tr
 
 recordEdgeExecutionTrace :: EdgeExecutionWitnessContext -> EdgeExpansionResult -> PresolutionM p ()
 recordEdgeExecutionTrace context expansionResult = do

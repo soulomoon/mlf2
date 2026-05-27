@@ -3,6 +3,7 @@
 module Presolution.EdgeTraceSpec (spec) where
 
 import Test.Hspec
+import Control.Monad.State.Strict (get)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
@@ -91,6 +92,65 @@ spec = describe "EdgeTrace" $ do
                                     Nothing -> expectationFailure "Expected binder meta in etCopyMap"
                                     Just _meta -> pure ()
                             other -> expectationFailure ("Unexpected binder/arg pairs: " ++ show other)
+
+    it "replays a processed expansion edge without allocating fresh copies" $ do
+        let a = NodeId 0
+            arrow = NodeId 1
+            forallNode = NodeId 2
+            expNode = NodeId 3
+            intNode = NodeId 4
+            targetArrow = NodeId 5
+
+            nodes = nodeMapFromList
+                    [ (0, TyVar { tnId = a, tnBound = Nothing })
+                    , (1, TyArrow arrow a a)
+                    , (2, TyForall forallNode arrow)
+                    , (3, TyExp expNode (ExpVarId 0) forallNode)
+                    , (4, TyBase intNode (BaseTy "Int"))
+                    , (5, TyArrow targetArrow intNode intNode)
+                    ]
+
+            edge = InstEdge (EdgeId 0) expNode targetArrow
+            constraint =
+                rootedConstraint emptyConstraint
+                    { cNodes = nodes
+                    , cInstEdges = [edge]
+                    , cBindParents =
+                        bindParentsFromPairs
+                            [ (a, forallNode, BindFlex)
+                            , (arrow, forallNode, BindFlex)
+                            , (forallNode, expNode, BindFlex)
+                            , (intNode, targetArrow, BindFlex)
+                            ]
+                    }
+            st0 =
+                PresolutionState constraint (Presolution IntMap.empty)
+                    IntMap.empty
+                    6
+                    IntSet.empty
+                    IntMap.empty
+                    IntMap.empty
+                    IntMap.empty
+                    IntMap.empty
+                    IntMap.empty
+            action = do
+                processInstEdge edge
+                stAfterFirst <- get
+                processInstEdge edge
+                stAfterSecond <- get
+                pure (stAfterFirst, stAfterSecond)
+        case runPresolutionM defaultTraceConfig st0 action of
+            Left err -> expectationFailure ("processInstEdge replay failed: " ++ show err)
+            Right ((stAfterFirst, stAfterSecond), _) -> do
+                psNextNodeId stAfterSecond `shouldBe` psNextNodeId stAfterFirst
+                psEdgeWitnesses stAfterSecond `shouldBe` psEdgeWitnesses stAfterFirst
+                case ( IntMap.lookup 0 (psEdgeTraces stAfterFirst)
+                     , IntMap.lookup 0 (psEdgeTraces stAfterSecond)
+                     ) of
+                    (Just firstTrace, Just secondTrace) ->
+                        etCopyMap secondTrace `shouldBe` etCopyMap firstTrace
+                    other ->
+                        expectationFailure ("Missing replay traces: " ++ show other)
 
     it "tracks binder-argument nodes across merged expansions" $ do
         -- When an expansion variable is reused across multiple instantiation edges, the

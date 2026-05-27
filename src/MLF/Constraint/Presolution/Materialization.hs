@@ -36,7 +36,7 @@ import MLF.Constraint.Presolution.Expansion (
 -- | Apply final expansions to all TyExp nodes and record their replacements.
 materializeExpansions :: PresolutionM p (IntMap NodeId)
 materializeExpansions = do
-    (c0, _canonical) <- getConstraintAndCanonical
+    (c0, canonical) <- getConstraintAndCanonical
     let exps =
             [ (expNode, eid, expVar, expBody)
             | (_, expNode@TyExp { tnId = eid, tnExpVar = expVar, tnBody = expBody }) <- toListNode (cNodes c0)
@@ -46,19 +46,17 @@ materializeExpansions = do
         nid' <- case expn of
             -- Identity expansions are erased by rewriting the wrapper to its body.
             ExpIdentity -> do
-                (c0', canonical') <- getConstraintAndCanonical
-                gid <- findSchemeIntroducerM canonical' c0' expBody
+                gid <- findSchemeIntroducerM canonical c0 expBody
                 applyExpansion gid expn expNode
             -- For non-identity expansions, `processInstEdge` should already have
             -- materialized and unified the `TyExp` with its expansion result. Reuse
             -- that representative to avoid duplicating fresh nodes here.
             _ -> do
-                (c0', canonical') <- getConstraintAndCanonical
-                let root = canonical' eid
+                let root = canonical eid
                 if root /= eid
                     then pure root
                     else do
-                        gid <- findSchemeIntroducerM canonical' c0' expBody
+                        gid <- findSchemeIntroducerM canonical c0 expBody
                         applyExpansion gid expn expNode
         pure (getNodeId eid, nid')
 
