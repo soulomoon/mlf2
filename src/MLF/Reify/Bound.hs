@@ -1,5 +1,6 @@
 module MLF.Reify.Bound (
     reifyBoundWithNames,
+    reifyBoundWithNamesReadModel,
     reifyBoundWithNamesOnConstraint,
     reifyBoundWithNamesBound,
     reifyBoundWithNamesOnConstraintBound,
@@ -14,7 +15,9 @@ import qualified MLF.Constraint.Finalize as Finalize
 import MLF.Constraint.Presolution.View (PresolutionView (..))
 import MLF.Constraint.Solved (Solved)
 import MLF.Constraint.Types.Graph
+import MLF.Elab.ReadModel (ElabReadModel, ermPresolutionView)
 import qualified MLF.Reify.Type as ReifyType
+import MLF.Reify.Type.Core (reifyWithReadModel)
 import MLF.Reify.Type (ReifyRoot(..), reifyWith, reifyWithAs)
 import MLF.Types.Elab
 import MLF.Util.ElabError (ElabError(..))
@@ -23,6 +26,22 @@ reifyBoundWithNames :: PresolutionView p -> IntMap.IntMap String -> NodeId -> Ei
 reifyBoundWithNames presolutionView subst =
     reifyWith "reifyBoundWithNames" presolutionView varNameFor isNamed RootBound
   where
+    canonical = pvCanonical presolutionView
+
+    nameFor (NodeId i) = "t" ++ show i
+
+    varNameFor :: NodeId -> String
+    varNameFor v =
+        let cv = canonical v
+        in fromMaybe (nameFor cv) (IntMap.lookup (getNodeId cv) subst)
+
+    isNamed nodeId = IntMap.member (getNodeId (canonical nodeId)) subst
+
+reifyBoundWithNamesReadModel :: ElabReadModel p -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
+reifyBoundWithNamesReadModel readModel subst =
+    reifyWithReadModel "reifyBoundWithNames" readModel varNameFor isNamed RootBound
+  where
+    presolutionView = ermPresolutionView readModel
     canonical = pvCanonical presolutionView
 
     nameFor (NodeId i) = "t" ++ show i

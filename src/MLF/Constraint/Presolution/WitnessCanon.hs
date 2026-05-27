@@ -164,16 +164,19 @@ reorderWeakenWithEnv env ops =
             OpRaiseMerge n m -> [n, m]
 
     descendantsOf nid =
-        case Binding.interiorOf (constraint env) (typeRef (canon nid)) of
-            Left _ -> Left (OpUnderRigid (canon nid))
-            Right s ->
-                let typeInterior =
-                        IntSet.fromList
-                            [ getNodeId t
-                            | key <- IntSet.toList s
-                            , TypeRef t <- [nodeRefFromKey key]
-                            ]
-                in Right (IntSet.delete (getNodeId (canon nid)) typeInterior)
+        case IntMap.lookup (getNodeId (canon nid)) (precomputedDescendants env) of
+            Just typeInterior -> Right typeInterior
+            Nothing ->
+                case Binding.interiorOf (constraint env) (typeRef (canon nid)) of
+                    Left _ -> Left (OpUnderRigid (canon nid))
+                    Right s ->
+                        let typeInterior =
+                                IntSet.fromList
+                                    [ getNodeId t
+                                    | key <- IntSet.toList s
+                                    , TypeRef t <- [nodeRefFromKey key]
+                                    ]
+                        in Right (IntSet.delete (getNodeId (canon nid)) typeInterior)
 
     isDescendant descSet nid =
         IntSet.member (getNodeId (canon nid)) descSet
@@ -246,16 +249,20 @@ coalesceDelayedGraftWeakenWithEnv env = go
             OpRaiseMerge n m -> [n, m]
 
     protectedSetFor binder =
-        case Binding.interiorOf (constraint env) (typeRef (canon binder)) of
-            Left _ -> Nothing
-            Right s ->
-                let descendants =
-                        IntSet.fromList
-                            [ getNodeId (canon t)
-                            | key <- IntSet.toList s
-                            , TypeRef t <- [nodeRefFromKey key]
-                            ]
-                in Just (IntSet.insert (getNodeId (canon binder)) descendants)
+        case IntMap.lookup (getNodeId (canon binder)) (precomputedDescendants env) of
+            Just descendants ->
+                Just (IntSet.insert (getNodeId (canon binder)) descendants)
+            Nothing ->
+                case Binding.interiorOf (constraint env) (typeRef (canon binder)) of
+                    Left _ -> Nothing
+                    Right s ->
+                        let descendants =
+                                IntSet.fromList
+                                    [ getNodeId (canon t)
+                                    | key <- IntSet.toList s
+                                    , TypeRef t <- [nodeRefFromKey key]
+                                    ]
+                        in Just (IntSet.insert (getNodeId (canon binder)) descendants)
 
     touchesProtected protected op =
         any

@@ -8,6 +8,16 @@
 -- 'EdgePlan' using a single expansion-oriented execution path.
 module MLF.Constraint.Presolution.EdgeProcessing.Interpreter
   ( executeEdgePlan,
+    executeEdgePlanWithoutTraceCanonicalization,
+    EdgeExecutionDecision (..),
+    EdgeExecutionWitnessContext (..),
+    prepareEdgeExecutionDecision,
+    recordEdgeExecutionExpansion,
+    unifyEdgeExecutionStructure,
+    prepareEdgeExecutionWitness,
+    runEdgeExecutionExpansionUnify,
+    recordEdgeExecutionTrace,
+    recordEdgeExecutionWitness,
   )
 where
 
@@ -26,7 +36,8 @@ import MLF.Constraint.Presolution.EdgeProcessing.Unify
     runExpansionUnify,
   )
 import MLF.Constraint.Presolution.Expansion
-  ( decideMinimalExpansion,
+  ( MinimalExpansionDecision (..),
+    decideMinimalExpansionDetailed,
     getExpansion,
     mergeExpansions,
     recordEdgeExpansion,
@@ -37,14 +48,42 @@ import MLF.Constraint.Presolution.Witness
     EdgeWitnessPlan (..),
     buildEdgeTrace,
     buildEdgeWitness,
-    edgeWitnessPlan,
+    binderArgsFromKnownBinders,
+    edgeWitnessPlanFromBinders,
+    filterTyVarBinders,
   )
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness
 
+data EdgeExecutionDecision = EdgeExecutionDecision
+  { eedEdgeId :: EdgeId,
+    eedLeftNodeId :: NodeId,
+    eedRightNodeId :: NodeId,
+    eedLeftRaw :: TyNode,
+    eedRightRaw :: TyNode,
+    eedOwnerGen :: GenNodeId,
+    eedFinalExpansion :: Expansion,
+    eedUnifications :: [(NodeId, NodeId)],
+    eedBodyRoot :: NodeId,
+    eedBoundVars :: [NodeId],
+    eedBinderArgs :: [(NodeId, NodeId)]
+  }
+
+data EdgeExecutionWitnessContext = EdgeExecutionWitnessContext
+  { eewDecision :: EdgeExecutionDecision,
+    eewWitnessPlan :: EdgeWitnessPlan,
+    eewWitnessInput :: EdgeWitnessInput,
+    eewExpansionInput :: EdgeExpansionInput
+  }
+
 -- | Execute a resolved edge plan.
 executeEdgePlan :: EdgePlan -> PresolutionM p ()
-executeEdgePlan plan =
+executeEdgePlan plan = do
+  executeEdgePlanWithoutTraceCanonicalization plan
+  canonicalizeEdgeTraceInteriorsM
+
+executeEdgePlanWithoutTraceCanonicalization :: EdgePlan -> PresolutionM p ()
+executeEdgePlanWithoutTraceCanonicalization plan =
   catchError (executeUnifiedExpansionPath plan) (throwError . toExecError)
 
 -- | Wrap non-tagged interpreter errors at the phase boundary.
@@ -57,6 +96,16 @@ toExecError err = ExecError err
 -- Frontend TyExp edges all use the same minimal-expansion + unification flow.
 executeUnifiedExpansionPath :: EdgePlan -> PresolutionM p ()
 executeUnifiedExpansionPath plan = do
+  decision <- prepareEdgeExecutionDecision plan
+  recordEdgeExecutionExpansion decision
+  unifyEdgeExecutionStructure decision
+  witnessContext <- prepareEdgeExecutionWitness decision
+  expansionResult <- runEdgeExecutionExpansionUnify witnessContext
+  recordEdgeExecutionTrace witnessContext expansionResult
+  recordEdgeExecutionWitness witnessContext expansionResult
+
+prepareEdgeExecutionDecision :: EdgePlan -> PresolutionM p EdgeExecutionDecision
+prepareEdgeExecutionDecision plan = do
   let leftTyExp = eprLeftTyExp plan
       edge = eprEdge plan
       edgeId = instEdgeId edge
@@ -68,40 +117,96 @@ executeUnifiedExpansionPath plan = do
       ownerGen = eprSchemeOwnerGen plan
 
   currentExp <- getExpansion s
-  (reqExp, unifications) <- decideMinimalExpansion ownerGen (eprAllowTrivial plan) n1Raw n2
-  finalExp <- mergeExpansions s currentExp reqExp
+  minimal <- decideMinimalExpansionDetailed ownerGen (eprAllowTrivial plan) n1Raw n2
+  finalExp <- mergeExpansions s currentExp (medExpansion minimal)
+  binderArgVars <- filterTyVarBinders (medBoundVars minimal)
+  binderArgs <-
+    binderArgsFromKnownBinders
+      "prepareEdgeExecutionDecision/ExpInstantiate"
+      binderArgVars
+      finalExp
+  pure
+    EdgeExecutionDecision
+      { eedEdgeId = edgeId,
+        eedLeftNodeId = n1Id,
+        eedRightNodeId = n2Id,
+        eedLeftRaw = n1Raw,
+        eedRightRaw = n2,
+        eedOwnerGen = ownerGen,
+        eedFinalExpansion = finalExp,
+        eedUnifications = medUnifications minimal,
+        eedBodyRoot = medBodyRoot minimal,
+        eedBoundVars = medBoundVars minimal,
+        eedBinderArgs = binderArgs
+      }
 
-  setExpansion s finalExp
-  recordEdgeExpansion edgeId finalExp
+recordEdgeExecutionExpansion :: EdgeExecutionDecision -> PresolutionM p ()
+recordEdgeExecutionExpansion decision =
+  case eedLeftRaw decision of
+    TyExp {tnExpVar = s} -> do
+      setExpansion s (eedFinalExpansion decision)
+      recordEdgeExpansion (eedEdgeId decision) (eedFinalExpansion decision)
+    _ ->
+      throwError (InternalError ("recordEdgeExecutionExpansion: expected TyExp for edge " ++ show (eedEdgeId decision)))
 
-  mapM_ (uncurry unifyStructure) unifications
+unifyEdgeExecutionStructure :: EdgeExecutionDecision -> PresolutionM p ()
+unifyEdgeExecutionStructure decision =
+  mapM_ (uncurry unifyStructure) (eedUnifications decision)
 
-  witnessPlan <- edgeWitnessPlan ownerGen n1Id n1Raw finalExp
+prepareEdgeExecutionWitness :: EdgeExecutionDecision -> PresolutionM p EdgeExecutionWitnessContext
+prepareEdgeExecutionWitness decision = do
+  witnessPlan <- edgeWitnessPlanFromBinders (eedBoundVars decision) (eedFinalExpansion decision)
   let witnessInput =
         EdgeWitnessInput
-          { ewiEdgeId = edgeId,
-            ewiSrcNode = n1Id,
-            ewiTgtNode = n2Id,
-            ewiLeftRaw = n1Raw,
+          { ewiEdgeId = eedEdgeId decision,
+            ewiSrcNode = eedLeftNodeId decision,
+            ewiTgtNode = eedRightNodeId decision,
+            ewiLeftRaw = eedLeftRaw decision,
             ewiDepth = ewpForallIntros witnessPlan
           }
       expansionInput =
         EdgeExpansionInput
-          { eeiGenId = ownerGen,
-            eeiEdgeId = edgeId,
-            eeiLeftRaw = n1Raw,
-            eeiRightRaw = n2,
-            eeiExpansion = finalExp
+          { eeiGenId = eedOwnerGen decision,
+            eeiEdgeId = eedEdgeId decision,
+            eeiLeftRaw = eedLeftRaw decision,
+            eeiRightRaw = eedRightRaw decision,
+            eeiExpansion = eedFinalExpansion decision,
+            eeiBodyRoot = eedBodyRoot decision,
+            eeiBoundVars = eedBoundVars decision,
+            eeiBinderArgs = eedBinderArgs decision
           }
-  expansionResult <-
-    if finalExp == ExpIdentity
-      then pure EdgeExpansionResult {eerTrace = emptyTrace, eerExtraOps = []}
-      else runExpansionUnify expansionInput (ewpBaseOps witnessPlan)
+  pure
+    EdgeExecutionWitnessContext
+      { eewDecision = decision,
+        eewWitnessPlan = witnessPlan,
+        eewWitnessInput = witnessInput,
+        eewExpansionInput = expansionInput
+      }
 
+runEdgeExecutionExpansionUnify :: EdgeExecutionWitnessContext -> PresolutionM p EdgeExpansionResult
+runEdgeExecutionExpansionUnify context = do
+  expansionResult <-
+    if eedFinalExpansion (eewDecision context) == ExpIdentity
+      then pure EdgeExpansionResult {eerTrace = emptyTrace, eerExtraOps = []}
+      else runExpansionUnify (eewExpansionInput context) (ewpBaseOps (eewWitnessPlan context))
+  pure expansionResult
+
+recordEdgeExecutionTrace :: EdgeExecutionWitnessContext -> EdgeExpansionResult -> PresolutionM p ()
+recordEdgeExecutionTrace context expansionResult = do
   let expTrace = eerTrace expansionResult
-      extraOps = eerExtraOps expansionResult
-  tr <- buildEdgeTrace witnessInput ownerGen finalExp expTrace
-  recordEdgeTrace edgeId tr
-  w <- buildEdgeWitness witnessInput (ewpBaseOps witnessPlan) extraOps
-  recordEdgeWitness edgeId w
-  canonicalizeEdgeTraceInteriorsM
+      decision = eewDecision context
+  tr <-
+    buildEdgeTrace
+      (eewWitnessInput context)
+      (eedOwnerGen decision)
+      (eedBinderArgs decision)
+      expTrace
+  recordEdgeTrace (eedEdgeId decision) tr
+
+recordEdgeExecutionWitness :: EdgeExecutionWitnessContext -> EdgeExpansionResult -> PresolutionM p ()
+recordEdgeExecutionWitness context expansionResult = do
+  let extraOps = eerExtraOps expansionResult
+      decision = eewDecision context
+      witnessPlan = eewWitnessPlan context
+  w <- buildEdgeWitness (eewWitnessInput context) (ewpBaseOps witnessPlan) extraOps
+  recordEdgeWitness (eedEdgeId decision) w

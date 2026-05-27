@@ -40,6 +40,7 @@ import MLF.Constraint.Types.Phase (Phase(Acyclic, Presolved))
 import MLF.Constraint.Types.Presolution (PresolutionSnapshot(..))
 import MLF.Elab.Elaborate (ElabConfig(..), ElabEnv(..))
 import MLF.Elab.Generalize (GaBindParents(..))
+import MLF.Elab.ReadModel (ElabReadModel, buildElabReadModel)
 import MLF.Elab.Run.Annotation (annNode, redirectAndCanonicalizeAnn)
 import MLF.Elab.Run.Generalize
     ( GeneralizeAtView
@@ -49,7 +50,7 @@ import MLF.Elab.Run.Generalize
     )
 import MLF.Elab.Run.Provenance (buildTraceCopyMap, collectBaseNamedKeys)
 import MLF.Elab.Run.ResultType
-    ( ResultTypeInputs
+    ( ResultTypeInputs(..)
     , computeResultTypeFallback
     , computeResultTypeFromAnn
     , mkResultTypeInputs
@@ -111,6 +112,8 @@ data PreparedGeneralizationArtifact = PreparedGeneralizationArtifact
     , pgaBindParentsGa :: GaBindParents 'Presolved
     , pgaGeneralizeAt :: GeneralizeAtView 'Presolved
     , pgaResultTypeInputs :: ResultTypeInputs 'Presolved
+    , pgaReadModel :: Either ElabError (ElabReadModel 'Presolved)
+    , pgaBaseReadModel :: Either ElabError (ElabReadModel 'Presolved)
     , pgaEdgeArtifacts :: EdgeArtifacts
     , pgaScopeOverrides :: IntMap.IntMap NodeRef
     , pgaAnnotated :: AnnExpr
@@ -128,8 +131,8 @@ prepareGeneralizationArtifact
     -> Either SolveError PreparedGeneralizationArtifact
 prepareGeneralizationArtifact traceCfg acyclicBase pres ann = do
     let preRewrite = snapshotConstraint pres
-    solvedClean <- Finalize.finalizeSolvedFromSnapshot preRewrite (snapshotUnionFind pres)
-    presolutionViewClean <- Finalize.finalizePresolutionViewFromSnapshot preRewrite (snapshotUnionFind pres)
+    (solvedClean, presolutionViewClean) <-
+        Finalize.finalizeSnapshotArtifacts preRewrite (snapshotUnionFind pres)
     let canonNode = makeCanonicalizer (Solved.canonicalMap solvedClean) (prRedirects pres)
         acyclicBaseForGeneralization = toPresolvedConstraint acyclicBase
         planBuilder = prPlanBuilder pres
@@ -186,12 +189,23 @@ prepareGeneralizationArtifact traceCfg acyclicBase pres ann = do
                 acyclicBaseForGeneralization
                 (prRedirects pres)
                 traceCfg
+        readModel = buildElabReadModel presolutionViewForGen
+        baseReadModel =
+            buildElabReadModel
+                (Finalize.presolutionViewFromSnapshot acyclicBaseForGeneralization IntMap.empty)
+        resultTypeInputsWithReadModels =
+            resultTypeInputs
+                { rtcReadModel = Just readModel
+                , rtcBaseReadModel = Just baseReadModel
+                }
     pure
         PreparedGeneralizationArtifact
             { pgaPresolutionView = presolutionViewForGen
             , pgaBindParentsGa = bindParentsGa
             , pgaGeneralizeAt = generalizeAtWithView
-            , pgaResultTypeInputs = resultTypeInputs
+            , pgaResultTypeInputs = resultTypeInputsWithReadModels
+            , pgaReadModel = readModel
+            , pgaBaseReadModel = baseReadModel
             , pgaEdgeArtifacts = edgeArtifacts
             , pgaScopeOverrides = scopeOverrides
             , pgaAnnotated = annCanon
@@ -219,6 +233,7 @@ preparedElaborationEnv
 preparedElaborationEnv annSourceTypes initialTermEnv artifact =
     ElabEnv
         { eePresolutionView = pgaPresolutionView artifact
+        , eeReadModel = pgaReadModel artifact
         , eeGaParents = pgaBindParentsGa artifact
         , eeEdgeArtifacts = pgaEdgeArtifacts artifact
         , eeScopeOverrides = pgaScopeOverrides artifact

@@ -5,13 +5,24 @@
 ### Changed
 - Consolidated the carried bounded canonical parser parity fixtures onto one
   shared parser-owned `.mlfp` library under
-  `test/programs/compiler-parser-parity/parser-library/`. The fixture roots
-  for the basic Bool module, import-exposing Bool module, value-definition
-  list, let/lambda/application, typed annotation, and data-declaration
-  projections now call one common parser entrypoint through `--search-path`;
-  per-fixture parser/source/token/AST support modules and exact-source
-  success recognizers were retired without claiming full parser parity,
-  checker/backend, driver, platform, proof, or self-boot completion.
+  `test/programs/compiler-parser-parity/parser-library/`. The Hspec harness
+  now generates one aggregate `.mlfp` public CLI driver for the carried
+  positive fixtures, negative evidence paths, and retry evidence path, so the
+  shared parser library is checked once per parser-parity spec run instead of
+  once per fixture. Per-fixture parser/source/token/AST support modules and
+  exact-source success recognizers remain retired without claiming full parser
+  parity, checker/backend, driver, platform, proof, or self-boot completion.
+- Added opt-in `.mlfp` CLI timing diagnostics through `MLF_PROGRAM_TIMING=1`.
+  The logs go to stderr and split package loading, module graph/order,
+  type-family normalization, resolver, module checking, interface validation,
+  and runtime-output stages without changing command stdout. The
+  `MLF_PROGRAM_TIMING_DETAIL=1` variant adds per-module and per-module-phase
+  timings inside `program.check.modules`, and
+  `MLF_PROGRAM_TIMING_OPERATIONS=1` adds narrow per-constructor,
+  per-instance-method, and per-definition timings for focused profiling runs.
+- Reused module-level `.mlfp` finalization context so each module prepares the
+  shared runtime external-binding environment once, while binding-local
+  deferred placeholders remain per binding.
 
 ### Added
 - Extended the shared parser-owned parser-parity library with a bounded

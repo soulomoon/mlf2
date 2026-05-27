@@ -16,6 +16,7 @@ module MLF.Constraint.Presolution.EdgeUnify.State (
     deleteInteriorKey,
     insertInteriorKey,
     isEliminated,
+    mergeBinderMetaRoots,
     nullInteriorNodes,
     preferBinderMetaRoot,
     recordEliminate,
@@ -31,7 +32,6 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.Maybe (fromMaybe, listToMaybe)
 
-import qualified MLF.Binding.GraphOps as GraphOps
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution.Base (
@@ -44,13 +44,18 @@ import MLF.Constraint.Presolution.Base (
     MonadPresolution(..),
     PresolutionError(..),
     PresolutionM,
-    PresolutionState(..)
+    PresolutionState(..),
+    modifyUnionFindState,
+    setBindParentState
     )
 import qualified MLF.Constraint.Presolution.Ops as Ops
 import qualified MLF.Constraint.Presolution.Unify as PresolutionUnify
 import MLF.Constraint.Presolution.StateAccess (
+    PresolutionBindingSnapshot(..),
+    bindingSnapshotLookupBindParent,
+    bindingSnapshotPathToRoot,
+    getBindingSnapshot,
     getConstraintAndCanonical,
-    liftBindingError
     )
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness
@@ -65,6 +70,7 @@ data EdgeUnifyState = EdgeUnifyState
     , eusInheritedPendingWeakens :: IntSet.IntSet
     , eusEliminatedBinders :: IntSet.IntSet
     , eusBinderMeta :: IntMap NodeId
+    , eusBinderMetaRoots :: IntSet.IntSet
     , eusOrderKeys :: IntMap Order.OrderKey
     , eusPendingWeakenOwner :: PendingWeakenOwner
     , eusOps :: [InstanceOp]
@@ -80,6 +86,12 @@ deleteInteriorKey k (InteriorNodes s) = InteriorNodes (IntSet.delete k s)
 
 nullInteriorNodes :: InteriorNodes -> Bool
 nullInteriorNodes (InteriorNodes s) = IntSet.null s
+
+mergeBinderMetaRoots :: Int -> Int -> Int -> IntSet.IntSet -> IntSet.IntSet
+mergeBinderMetaRoots r1 r2 rep roots
+    | IntSet.member r1 roots || IntSet.member r2 roots =
+        IntSet.insert rep (IntSet.delete r2 (IntSet.delete r1 roots))
+    | otherwise = roots
 
 -- | Typeclass for monads that support edge-local unification operations.
 -- This allows functions to be polymorphic over the concrete monad stack,
@@ -111,7 +123,7 @@ instance MonadEdgeUnify (EdgeUnifyM p) where
     getEdgeRoot = gets eusEdgeRoot
     getBinderMeta = gets eusBinderMeta
     getOrderKeys = gets eusOrderKeys
-    recordInstanceOp op = modify $ \st -> st { eusOps = eusOps st ++ [op] }
+    recordInstanceOp op = modify $ \st -> st { eusOps = op : eusOps st }
     liftPresolution = lift
     findRootM nid = lift $ Ops.findRoot nid
     unifyAcyclicRawWithRaiseTracePreferM prefer n1 n2 =
@@ -199,14 +211,24 @@ applyPendingWeaken nid0 = do
         case Binding.lookupBindParent c0 (typeRef target) of
             Nothing -> pure False
             Just (_p, BindRigid) -> pure False
-            Just _ ->
-                case GraphOps.applyWeaken (TypeRefTag target) c0 of
-                    Left MissingBindParent{} -> pure True
-                    Left OperationOnLockedNode{} -> pure True
-                    Left err -> throwError (BindingTreeError err)
-                    Right (c', _op) -> do
-                        modifyConstraint (const c')
-                        pure False
+            Just (parent, BindFlex) -> do
+                modify' $ \st ->
+                    let st1 =
+                            setBindParentState
+                                (typeRef target)
+                                (parent, BindRigid)
+                                st
+                        c1 = psConstraint st1
+                    in st1
+                        { psConstraint =
+                            c1
+                                { cWeakenedVars =
+                                    IntSet.insert
+                                        (getNodeId target)
+                                        (cWeakenedVars c1)
+                                }
+                        }
+                pure False
 
 -- | Edge-local union like 'unifyAcyclicEdge', but without emitting merge-like
 -- witness ops. This is used to *execute* base `Merge` operations (already
@@ -256,7 +278,13 @@ unifyAcyclicEdgeNoMerge n1 n2 = do
                                 then IntMap.delete r2 (IntMap.delete r1 m0)
                                 else IntMap.insert repId intAll (IntMap.delete r2 (IntMap.delete r1 m0))
                     in m1
-            in st { eusInteriorRoots = roots', eusBindersByRoot = binders', eusInteriorByRoot = interior' }
+                metaRoots' = mergeBinderMetaRoots r1 r2 repId (eusBinderMetaRoots st)
+            in st
+                { eusInteriorRoots = roots'
+                , eusBindersByRoot = binders'
+                , eusInteriorByRoot = interior'
+                , eusBinderMetaRoots = metaRoots'
+                }
 
 initEdgeUnifyState
     :: [(NodeId, NodeId)]
@@ -266,28 +294,28 @@ initEdgeUnifyState
     -> PresolutionM p EdgeUnifyState
 initEdgeUnifyState binderArgs interior edgeRoot pendingOwner = do
     inheritedPendingWeakens <- gets psPendingWeakens
-    roots <- forM (IntSet.toList interior) $ \i -> Ops.findRoot (NodeId i)
-    let interiorRoots = InteriorNodes (IntSet.fromList (map getNodeId roots))
-    bindersByRoot <-
-        foldM
-            (\m (bv, arg) -> do
-                r <- Ops.findRoot arg
-                let k = getNodeId r
-                    v = IntSet.singleton (getNodeId bv)
-                pure (IntMap.insertWith IntSet.union k v m)
-            )
-            IntMap.empty
-            binderArgs
-    interiorByRoot <-
-        foldM
-            (\m i -> do
-                r <- Ops.findRoot (NodeId i)
-                let k = getNodeId r
-                    v = InteriorNodes (IntSet.singleton i)
-                pure (IntMap.insertWith (<>) k v m)
-            )
-            IntMap.empty
-            (IntSet.toList interior)
+    interiorRootEntries <- forM (IntSet.toList interior) $ \i -> do
+        r <- Ops.findRoot (NodeId i)
+        pure (i, r)
+    let interiorRoots =
+            InteriorNodes (IntSet.fromList [getNodeId r | (_i, r) <- interiorRootEntries])
+    binderRootEntries <- forM binderArgs $ \(bv, arg) -> do
+        r <- Ops.findRoot arg
+        pure (bv, r)
+    let bindersByRoot =
+            IntMap.fromListWith
+                IntSet.union
+                [ (getNodeId r, IntSet.singleton (getNodeId bv))
+                | (bv, r) <- binderRootEntries
+                ]
+        binderMetaRoots =
+            IntSet.fromList [getNodeId r | (_bv, r) <- binderRootEntries]
+        interiorByRoot =
+            IntMap.fromListWith
+                (<>)
+                [ (getNodeId r, InteriorNodes (IntSet.singleton i))
+                | (i, r) <- interiorRootEntries
+                ]
     constraint <- getConstraint
     let interiorRootRef =
             case Binding.lookupBindParent constraint (typeRef edgeRoot) of
@@ -309,7 +337,10 @@ initEdgeUnifyState binderArgs interior edgeRoot pendingOwner = do
                             in fromMaybe edgeRoot pick
                         Nothing -> edgeRoot
         binderMetaMap = IntMap.fromList [(getNodeId bv, meta) | (bv, meta) <- binderArgs]
-    let keys = Order.orderKeysFromConstraintWith id constraint interiorRoot Nothing
+    let keys =
+            if length binderArgs <= 1
+                then IntMap.empty
+                else Order.orderKeysFromConstraintWith id constraint interiorRoot Nothing
     pure EdgeUnifyState
         { eusInteriorRoots = interiorRoots
         , eusBindersByRoot = bindersByRoot
@@ -318,6 +349,7 @@ initEdgeUnifyState binderArgs interior edgeRoot pendingOwner = do
         , eusInheritedPendingWeakens = inheritedPendingWeakens
         , eusEliminatedBinders = IntSet.empty
         , eusBinderMeta = binderMetaMap
+        , eusBinderMetaRoots = binderMetaRoots
         , eusOrderKeys = keys
         , eusPendingWeakenOwner = pendingOwner
         , eusOps = []
@@ -363,10 +395,7 @@ unifyWithLockedFallback prefer left right =
                         _ -> (rootLeft, rootRight)
             liftPresolution $
                 modify' $ \st ->
-                    st
-                        { psUnionFind =
-                            IntMap.insert (getNodeId fromRoot) toRoot (psUnionFind st)
-                        }
+                    modifyUnionFindState (IntMap.insert (getNodeId fromRoot) toRoot) st
         pure []
 
     retryAfterFlush :: EdgeUnifyM p [NodeId]
@@ -405,19 +434,29 @@ isEliminated :: NodeId -> EdgeUnifyM p Bool
 isEliminated bv = gets (IntSet.member (getNodeId bv) . eusEliminatedBinders)
 
 recordRaisesFromTrace :: InteriorNodes -> [NodeId] -> EdgeUnifyM p ()
-recordRaisesFromTrace interiorNodes raiseTrace =
-    forM_ raiseTrace $ \nid ->
-        when (memberInterior nid interiorNodes) $ do
-            already <- isEliminated nid
-            isLocked <- checkNodeLocked nid
-            when (not already && not isLocked) $
+recordRaisesFromTrace interiorNodes raiseTrace = do
+    candidates <-
+        foldM
+            (\acc nid ->
+                if memberInterior nid interiorNodes
+                    then do
+                        already <- isEliminated nid
+                        pure $ if already then acc else nid : acc
+                    else pure acc
+            )
+            []
+            raiseTrace
+    when (not (null candidates)) $ do
+        snapshot <- lift getBindingSnapshot
+        forM_ (reverse candidates) $ \nid -> do
+            isLocked <- lift $ checkNodeLockedInSnapshot snapshot nid
+            when (not isLocked) $
                 recordInstanceOp (OpRaise nid)
 
 preferBinderMetaRoot :: NodeId -> NodeId -> EdgeUnifyM p (Maybe NodeId)
 preferBinderMetaRoot root1 root2 = do
     st <- get
-    metaRoots <- forM (IntMap.elems (eusBinderMeta st)) findRootM
-    let metaSet = IntSet.fromList (map getNodeId metaRoots)
+    let metaSet = eusBinderMetaRoots st
         r1 = getNodeId root1
         r2 = getNodeId root2
     pure $ case (IntSet.member r1 metaSet, IntSet.member r2 metaSet) of
@@ -425,37 +464,39 @@ preferBinderMetaRoot root1 root2 = do
         (False, True) -> Just root2
         _ -> Nothing
 
-checkNodeLocked :: NodeId -> EdgeUnifyM p Bool
-checkNodeLocked nid = lift $ do
-    (c0, canonical) <- getConstraintAndCanonical
-    let lookupParent :: NodeId -> PresolutionM p (Maybe (NodeId, BindFlag))
-        lookupParent n = do
-            mbParent <- liftBindingError $ Binding.lookupBindParentUnder canonical c0 (typeRef n)
-            pure $ case mbParent of
-                Nothing -> Nothing
-                Just (TypeRef parent, flag) -> Just (parent, flag)
-                Just (GenRef _, _flag) -> Nothing
+checkNodeLockedInSnapshot :: PresolutionBindingSnapshot p -> NodeId -> PresolutionM p Bool
+checkNodeLockedInSnapshot snapshot nid =
+    goSelf IntSet.empty (typeRef nid)
+  where
+    goSelf visited ref
+        | IntSet.member (nodeRefKey ref) visited = pure False
+        | otherwise = do
+            mbSelf <- bindingSnapshotLookupBindParent snapshot ref
+            case mbSelf of
+                Nothing -> pure False
+                Just (TypeRef parent, _flag) ->
+                    goStrict (IntSet.insert (nodeRefKey ref) visited) (typeRef parent)
+                Just (GenRef _, _flag) -> pure False
 
-        goStrict :: NodeId -> PresolutionM p Bool
-        goStrict n = do
-            mbParent <- lookupParent n
+    goStrict visited ref
+        | IntSet.member (nodeRefKey ref) visited = pure False
+        | otherwise = do
+            mbParent <- bindingSnapshotLookupBindParent snapshot ref
             case mbParent of
                 Nothing -> pure False
                 Just (_, BindRigid) -> pure True
-                Just (parent, BindFlex) -> goStrict parent
-
-    mbSelf <- lookupParent nid
-    case mbSelf of
-        Nothing -> pure False
-        Just (parent, _flag) -> goStrict parent
+                Just (TypeRef parent, BindFlex) ->
+                    goStrict (IntSet.insert (nodeRefKey ref) visited) (typeRef parent)
+                Just (GenRef _, BindFlex) -> pure False
 
 isBoundAboveInBindingTree :: NodeId -> NodeId -> PresolutionM p Bool
 isBoundAboveInBindingTree edgeRoot ext = do
-    (c0, canonical) <- getConstraintAndCanonical
+    snapshot <- getBindingSnapshot
+    let canonical = pbsCanonical snapshot
     let edgeRootC = canonical edgeRoot
         extC = canonical ext
-    pathRoot <- liftBindingError $ Binding.bindingPathToRoot c0 (typeRef edgeRootC)
-    pathExt <- liftBindingError $ Binding.bindingPathToRoot c0 (typeRef extC)
+    pathRoot <- bindingSnapshotPathToRoot snapshot (typeRef edgeRootC)
+    pathExt <- bindingSnapshotPathToRoot snapshot (typeRef extC)
     let rootAncestors =
             IntSet.fromList
                 [ nodeRefKey ref

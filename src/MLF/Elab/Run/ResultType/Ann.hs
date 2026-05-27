@@ -11,16 +11,13 @@ import MLF.Constraint.Types.Graph
     ( EdgeId(..)
     , NodeId(..)
     , NodeRef(..)
-    , TyNode(..)
     , cGenNodes
     , cNodes
-    , fromListNode
     , getEdgeId
     , getNodeId
     , lookupGen
     , lookupNodeIn
     , gnSchemes
-    , toListNode
     )
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Elab.Generalize (GaBindParents(..))
@@ -112,6 +109,9 @@ computeResultTypeFromAnnWithView ctx view inner innerPre annNodeId eid = do
         subst = subst0
         srcTy = schemeToType sch
         schemeInfo = SchemeInfo { siScheme = sch, siSubst = subst }
+        generalizeTargetCached scopeRoot' target'
+            | scopeRoot' == scopeRoot && target' == targetC = Right (sch0, subst0)
+            | otherwise = View.rtvGeneralizeTarget view scopeRoot' target'
     phi0 <- phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith presolutionViewForGen (Just bindParentsGa) (Just schemeInfo) mTrace ew
     namedSetSolved <- View.rtvNamedNodes view
     let annBound = View.rtvLookupVarBound view annNodeId
@@ -127,7 +127,9 @@ computeResultTypeFromAnnWithView ctx view inner innerPre annNodeId eid = do
             reifyMaybe annTargetNode0
         annTargetNode = View.rtvSchemeBodyTarget view annTargetNode0
         targetTyRawM =
-            reifyMaybe annTargetNode
+            if annTargetNode == annTargetNode0
+                then targetTyRawFullM
+                else reifyMaybe annTargetNode
         targetTyMatchM =
             fmap
                 (inlineBoundVarsType presolutionViewForGen)
@@ -136,15 +138,7 @@ computeResultTypeFromAnnWithView ctx view inner innerPre annNodeId eid = do
         solvedToBase = gaSolvedToBase bindParentsGa
         toBase nid =
             IntMap.findWithDefault nid (getNodeId nid) solvedToBase
-        baseNodesVarOnly =
-            fromListNode
-                [ (nid, node)
-                | (nid, node) <- toListNode (cNodes baseConstraint)
-                , isTyVar node
-                ]
-        isTyVar node = case node of
-            TyVar{} -> True
-            _ -> False
+        baseNodesVarOnly = View.rtvBaseVarOnlyNodes view
         inlineAllBoundsType =
             -- See Note [Scope-aware bound/alias inlining] in
             -- docs/notes/2026-01-27-elab-changes.md.
@@ -283,7 +277,7 @@ computeResultTypeFromAnnWithView ctx view inner innerPre annNodeId eid = do
                     annScopeRoot <-
                         View.rtvResolveCanonicalScope view annTargetNode
                     (annSch, _substAnn) <-
-                        View.rtvGeneralizeTarget view annScopeRoot annTargetNode
+                        generalizeTargetCached annScopeRoot annTargetNode
                     pure (simplifyAnnotationType (schemeToType annSch))
                 else if targetHasBoundForall
                     then do
@@ -293,5 +287,5 @@ computeResultTypeFromAnnWithView ctx view inner innerPre annNodeId eid = do
                         annScopeRoot <-
                             View.rtvResolveCanonicalScope view annTargetNode
                         (annSch, _substAnn) <-
-                            View.rtvGeneralizeTarget view annScopeRoot annTargetNode
+                            generalizeTargetCached annScopeRoot annTargetNode
                         pure (simplifyAnnotationType (schemeToType annSch))

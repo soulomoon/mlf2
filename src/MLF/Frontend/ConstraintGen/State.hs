@@ -16,7 +16,7 @@ import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import MLF.Constraint.Types.Graph
-import MLF.Frontend.ConstraintGen.Types (ConstraintError)
+import MLF.Frontend.ConstraintGen.Types (Binding, ConstraintError)
 import MLF.Frontend.Syntax (NormSrcType)
 
 data ScopeFrame = ScopeFrame
@@ -54,7 +54,12 @@ data BuildState = BuildState
     -- Preserves the exact lowered 'NormSrcType' from 'buildCoerce' so that
     -- elaboration can recover annotation types that presolution strips
     -- (e.g. TForall inside a μ body).
-    bsAnnSourceTypes :: !(IntMap.IntMap NormSrcType)
+    bsAnnSourceTypes :: !(IntMap.IntMap NormSrcType),
+    -- | External assumptions materialized selectively for referenced free
+    -- variables.  The initial environment keeps compact lazy entries; once a
+    -- variable is needed, its graph binding is cached here so later
+    -- occurrences share the same scheme graph within this definition.
+    bsExternalBindingCache :: !(Map.Map String Binding)
   }
 
 type ConstraintM = StateT BuildState (Except ConstraintError)
@@ -81,7 +86,8 @@ mkInitialStateWithPolySyms polySyms =
       bsScopes = [ScopeFrame IntSet.empty],
       bsLetEdges = IntSet.empty,
       bsTyConArity = Map.empty,
-      bsAnnSourceTypes = IntMap.empty
+      bsAnnSourceTypes = IntMap.empty,
+      bsExternalBindingCache = Map.empty
     }
 
 buildConstraint :: BuildState -> Constraint p

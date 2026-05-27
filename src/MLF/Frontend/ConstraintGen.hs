@@ -150,6 +150,10 @@ generateConstraintsCoreWithExternalBindings polySyms extBindings expr = do
   let initialState = mkInitialStateWithPolySyms polySyms
   ((_rootGen, initialEnv, rootNode, annRoot), finalState) <-
     runConstraintM (buildRootExprWithExternalBindings extBindings expr) initialState
+  constraintResultFromState initialEnv rootNode annRoot finalState
+
+constraintResultFromState :: Env -> NodeId -> AnnExpr -> BuildState -> Either ConstraintError (ConstraintResult p)
+constraintResultFromState initialEnv rootNode annRoot finalState = do
   let annEdges = collectAnnEdges annRoot
       constraint = (buildConstraint finalState) {cAnnEdges = annEdges}
   pure

@@ -31,11 +31,13 @@ to extract shared state into explicit parameter passing or reader patterns.
 -}
 module MLF.Constraint.Presolution.Driver (
     computePresolution,
+    computePresolutionWithTiming,
     validateReplayMapTraceContract
 ) where
 
-import Control.Monad.Except (throwError)
-import Control.Monad (forM, forM_, when)
+import Control.Exception (evaluate)
+import Control.Monad.Except (ExceptT(..), runExceptT, throwError)
+import Control.Monad (foldM, forM, forM_, when)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
@@ -73,11 +75,13 @@ import MLF.Constraint.Presolution.Materialization (
     materializeExpansions
     )
 import MLF.Constraint.Presolution.EdgeProcessing (
-    runPresolutionLoop
+    runPresolutionLoop,
+    runPresolutionLoopWithTiming
     )
 import MLF.Constraint.Presolution.EdgeUnify.Omega (pendingWeakenOwners)
 import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical)
 import MLF.Constraint.Acyclicity (AcyclicityResult(..))
+import MLF.Util.Timing (TimingConfig, timeProgramOperationIO)
 
 -- | Main entry point: compute principal presolution.
 computePresolution
@@ -102,6 +106,47 @@ computePresolution traceCfg acyclicityResult constraint = do
     (redirects, finalState) <- runPresolutionM traceCfg presState $ do
         runFinalizationStage
 
+    finishPresolutionResult traceCfg constraint redirects finalState
+
+computePresolutionWithTiming
+    :: TimingConfig
+    -> String
+    -> TraceConfig
+    -> AcyclicityResult
+    -> Constraint 'Acyclic
+    -> IO (Either PresolutionError PresolutionResult)
+computePresolutionWithTiming timing label traceCfg acyclicityResult constraint =
+    runExceptT $ do
+        initialState <-
+            ExceptT $
+                Right
+                    <$> timeProgramOperationIO
+                        timing
+                        (label ++ ".init")
+                        (evaluate (mkInitialPresolutionState constraint))
+        (_, presState) <-
+            ExceptT $
+                timeProgramOperationIO timing (label ++ ".edge_loop") $
+                    runPresolutionLoopWithTiming
+                        timing
+                        (label ++ ".edge_loop")
+                        traceCfg
+                        (arSortedEdges acyclicityResult)
+                        initialState
+        (redirects, finalState) <-
+            ExceptT $
+                runFinalizationStageWithTiming timing (label ++ ".finalize") traceCfg presState
+        ExceptT $
+            timeProgramOperationIO timing (label ++ ".post_validate") $
+                evaluate (finishPresolutionResult traceCfg constraint redirects finalState)
+
+finishPresolutionResult
+    :: TraceConfig
+    -> Constraint 'Acyclic
+    -> IntMap NodeId
+    -> PresolutionState 'Acyclic
+    -> Either PresolutionError PresolutionResult
+finishPresolutionResult traceCfg constraint redirects finalState = do
     let finalConstraint = psConstraint finalState
     when (not (null (cUnifyEdges finalConstraint))) $
         Left (ResidualUnifyEdges (cUnifyEdges finalConstraint))
@@ -152,6 +197,69 @@ computePresolution traceCfg acyclicityResult constraint = do
         , prUnionFind = PresolutionUf (psUnionFind finalState)
         , prPlanBuilder = PresolutionPlanBuilder (buildGeneralizePlans traceCfg)
         }
+
+runFinalizationStageWithTiming
+    :: TimingConfig
+    -> String
+    -> TraceConfig
+    -> PresolutionState 'Acyclic
+    -> IO (Either PresolutionError (IntMap NodeId, PresolutionState 'Acyclic))
+runFinalizationStageWithTiming timing label traceCfg st0 =
+    runExceptT $ do
+        ((), st1) <-
+            timedStage st0 "pre_materialization_boundary" $
+                assertFinalizationBoundary "pre-materialization"
+        (mapping, st2) <-
+            timedStage st1 "materialize_expansions" $
+                materializeExpansions
+        ((), st3) <-
+            timedStage st2 "materialization_coverage" $
+                assertMaterializationCoverage mapping
+        ((), st4) <-
+            timedStage st3 "post_materialization_boundary" $
+                assertFinalizationBoundary "post-materialization"
+        (redirects, st5) <-
+            timedStage st4 "rewrite_constraint" $
+                rewriteConstraint mapping
+        ((), st6) <-
+            timedStage st5 "post_rewrite_validate" $ do
+                assertNoResidualTyExp "post-rewrite"
+                assertFinalizationBoundary "post-rewrite"
+        ((), st7) <-
+            timedStage st6 "rigidify_validate" $ do
+                rigidifyTranslatablePresolutionM
+                cRigid <- getConstraint
+                case validateTranslatablePresolution cRigid of
+                    Left err -> throwError err
+                    Right () -> pure ()
+        ((), st8) <-
+            timedStage st7 "normalize_witnesses" $
+                normalizeEdgeWitnessesM
+        ((), st9) <-
+            timedStage st8 "post_witness_validate" $ do
+                assertWitnessTraceDomain "post-witness-normalization"
+                assertFinalizationBoundary "post-witness-normalization"
+        pure (redirects, st9)
+  where
+    timedStage
+        :: PresolutionState p
+        -> String
+        -> PresolutionM p a
+        -> ExceptT PresolutionError IO (a, PresolutionState p)
+    timedStage st suffix action =
+        ExceptT $
+            runPresolutionStageWithTiming timing (label ++ "." ++ suffix) traceCfg st action
+
+runPresolutionStageWithTiming
+    :: TimingConfig
+    -> String
+    -> TraceConfig
+    -> PresolutionState p
+    -> PresolutionM p a
+    -> IO (Either PresolutionError (a, PresolutionState p))
+runPresolutionStageWithTiming timing label traceCfg st action =
+    timeProgramOperationIO timing label $
+        evaluate (runPresolutionM traceCfg st action)
 
 runFinalizationStage :: PresolutionM 'Acyclic (IntMap NodeId)
 runFinalizationStage = do
@@ -356,6 +464,7 @@ rewriteConstraint mapping = do
     let edgeExpansions0 = psEdgeExpansions st
         edgeWitnesses0 = psEdgeWitnesses st
         edgeTraces0 = psEdgeTraces st
+        allNodes0 = NodeAccess.allNodes c
 
     -- If an identity `TyExp` wrapper is unified away (i.e. it is not the UF root),
     -- we still must redirect the whole UF class to the wrapper’s body, otherwise
@@ -364,8 +473,7 @@ rewriteConstraint mapping = do
     identityRootMap <- do
         let exps =
                 [ (expNode, expVar, expBody)
-                | nid <- tyExpNodeIds c
-                , Just expNode@TyExp { tnExpVar = expVar, tnBody = expBody } <- [NodeAccess.lookupNode c nid]
+                | expNode@TyExp { tnExpVar = expVar, tnBody = expBody } <- allNodes0
                 ]
         pairs <- forM exps $ \(expNode, expVar, expBody) -> do
             expn <- getExpansion expVar
@@ -377,7 +485,7 @@ rewriteConstraint mapping = do
         let chooseMin a b = min a b
         pure $ IntMap.fromListWith chooseMin (catMaybes pairs)
 
-    let canonical nid =
+    let canonicalSlow nid =
             let step n =
                     let r0 = canonicalUf n
                         r1 = fromMaybe r0 (IntMap.lookup (getNodeId r0) identityRootMap)
@@ -389,9 +497,26 @@ rewriteConstraint mapping = do
                         then n'
                         else go (IntSet.insert (getNodeId n') seen) n'
             in go IntSet.empty nid
+        touchedKeys =
+            IntSet.unions
+                [ IntSet.fromList [getNodeId (tnId node) | node <- allNodes0]
+                , IntSet.fromList (IntMap.keys mapping)
+                , IntSet.fromList [getNodeId nid | nid <- IntMap.elems mapping]
+                , IntSet.fromList (IntMap.keys identityRootMap)
+                , IntSet.fromList [getNodeId nid | nid <- IntMap.elems identityRootMap]
+                , IntSet.fromList (IntMap.keys (psUnionFind st))
+                , IntSet.fromList [getNodeId nid | nid <- IntMap.elems (psUnionFind st)]
+                ]
+        canonicalMemo =
+            IntMap.fromList
+                [ (key, canonicalSlow (NodeId key))
+                | key <- IntSet.toList touchedKeys
+                ]
+        canonical nid =
+            IntMap.findWithDefault (canonicalSlow nid) (getNodeId nid) canonicalMemo
         canon = canonicalizerFrom canonical
 
-        newNodes = IntMap.fromListWith Canonicalize.chooseRepNode (mapMaybe (rewriteNode canonical) (NodeAccess.allNodes c))
+        newNodes = IntMap.fromListWith Canonicalize.chooseRepNode (mapMaybe (rewriteNode canonical) allNodes0)
         eliminated' = rewriteVarSet canonical newNodes (cEliminatedVars c)
         weakened' = rewriteVarSet canonical newNodes (cWeakenedVars c)
         genNodes' = rewriteGenNodes canonical newNodes (cGenNodes c)
@@ -424,7 +549,7 @@ rewriteConstraint mapping = do
         -- We want to return a map for ALL nodes that were redirected or merged.
         fullRedirects = IntMap.fromList
             [ (nid, canonical (NodeId nid))
-            | nid <- map (getNodeId . fst) (toListNode (cNodes c))
+            | nid <- map (getNodeId . tnId) allNodes0
             ]
 
     newBindParents <-
@@ -453,32 +578,69 @@ rewriteConstraint mapping = do
         Left err -> throwError (BindingTreeError err)
         Right () -> pure ()
 
-    newTraces' <- do
-        let updateTrace tr = do
-                let root = etRoot tr
-                    interiorRootRef = traceInteriorRootRef id c' root
-                interior <- bindingToPresM (Binding.interiorOf c' interiorRootRef)
-                let interiorNodes =
-                        fromListInterior
-                            [ nid
-                            | key <- IntSet.toList interior
-                            , TypeRef nid <- [nodeRefFromKey key]
-                            ]
-                pure tr { etInterior = interiorNodes }
-        traverse updateTrace newTraces0
+    newTraces' <- refreshRewrittenTraceInteriors c' newTraces0
 
-    putPresolutionState st
-        { psConstraint = c'
-        , psEdgeExpansions = newExps
-        , psEdgeWitnesses = newWitnesses
-        , psEdgeTraces = newTraces'
-        }
+    putPresolutionState $
+        (setConstraintState c' st)
+            { psEdgeExpansions = newExps
+            , psEdgeWitnesses = newWitnesses
+            , psEdgeTraces = newTraces'
+            }
 
     return fullRedirects
 
+refreshRewrittenTraceInteriors :: Constraint 'Acyclic -> IntMap EdgeTrace -> PresolutionM 'Acyclic (IntMap EdgeTrace)
+refreshRewrittenTraceInteriors c' traces = do
+    qbp <- bindingToPresM (Binding.quotientBindParentsContextUnder id c')
+    snd <$> foldM (refreshOne qbp) (IntMap.empty, IntMap.empty) (IntMap.toList traces)
+  where
+    refreshOne
+        :: Binding.QuotientBindParents
+        -> (IntMap InteriorNodes, IntMap EdgeTrace)
+        -> (Int, EdgeTrace)
+        -> PresolutionM 'Acyclic (IntMap InteriorNodes, IntMap EdgeTrace)
+    refreshOne qbp (cache, acc) (eid, tr) = do
+        let root = etRoot tr
+            rootKey = getNodeId root
+        interiorNodes <-
+            case IntMap.lookup rootKey cache of
+                Just cached ->
+                    pure cached
+                Nothing -> do
+                    let interiorRootRef = traceInteriorRootRef id c' root
+                        interiorRootKey = nodeRefKey interiorRootRef
+                    when (IntSet.notMember interiorRootKey (Binding.qbpAllRoots qbp)) $
+                        throwError $
+                            BindingTreeError $
+                                InvalidBindingTree $
+                                    "refreshRewrittenTraceInteriors: root "
+                                        ++ show interiorRootRef
+                                        ++ " not in constraint"
+                    let childrenByParent = Binding.qbpChildrenByParent qbp
+                        go visited [] = visited
+                        go visited (key : rest) =
+                            let kids =
+                                    [ childKey
+                                    | (childKey, _info) <- IntMap.findWithDefault [] key childrenByParent
+                                    , not (IntSet.member childKey visited)
+                                    ]
+                                visited' = foldl' (flip IntSet.insert) visited kids
+                            in go visited' (kids ++ rest)
+                        interior = go (IntSet.singleton interiorRootKey) [interiorRootKey]
+                        computed =
+                            fromListInterior
+                                [ nid
+                                | key <- IntSet.toList interior
+                                , TypeRef nid <- [nodeRefFromKey key]
+                                ]
+                    pure computed
+        let cache' = IntMap.insert rootKey interiorNodes cache
+            acc' = IntMap.insert eid (tr { etInterior = interiorNodes }) acc
+        pure (cache', acc')
+
 mkInitialPresolutionState :: Constraint 'Acyclic -> PresolutionState 'Acyclic
 mkInitialPresolutionState constraint =
-    PresolutionState
+    PresolutionStateInternal
         { psConstraint = constraint
         , psPresolution = Presolution IntMap.empty
         , psUnionFind = IntMap.empty
@@ -486,6 +648,12 @@ mkInitialPresolutionState constraint =
         , psPendingWeakens = IntSet.empty
         , psPendingWeakenOwners = IntMap.empty
         , psBinderCache = IntMap.empty
+        , psGraphVersion = 0
+        , psUnionFindVersion = 0
+        , psBindParentsVersion = 0
+        , psBindingModelCache = Nothing
+        , psBindingRepairCache = Nothing
+        , psBindingRepairDirty = Just dirtyAllBindingRepair
         , psEdgeExpansions = IntMap.empty
         , psEdgeWitnesses = IntMap.empty
         , psEdgeTraces = IntMap.empty

@@ -1,6 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeFamilies #-}
 
@@ -12,7 +13,41 @@ module MLF.Constraint.Presolution.Base (
     PresolutionPlanBuilder(..),
     PresolutionError(..),
     TranslatabilityIssue(..),
-    PresolutionState(..),
+    PresolutionState
+        ( PresolutionState
+        , PresolutionStateInternal
+        , psConstraint
+        , psPresolution
+        , psUnionFind
+        , psNextNodeId
+        , psPendingWeakens
+        , psPendingWeakenOwners
+        , psBinderCache
+        , psGraphVersion
+        , psUnionFindVersion
+        , psBindParentsVersion
+        , psBindingModelCache
+        , psBindingRepairCache
+        , psBindingRepairDirty
+        , psEdgeExpansions
+        , psEdgeWitnesses
+        , psEdgeTraces
+        ),
+    CachedBindingModel(..),
+    CachedBindingRepairModel(..),
+    emptyBindingRepairDirty,
+    dirtyAllBindingRepair,
+    modifyConstraintState,
+    modifyConstraintDirtyTypesState,
+    setConstraintDirtyBindRefsState,
+    modifyBindParentsState,
+    setBindParentState,
+    setConstraintState,
+    setUnionFindState,
+    modifyUnionFindState,
+    mergeUnionFindState,
+    compressUnionFindState,
+    setBindingModelCacheState,
     PendingWeakenOwner(..),
     pendingWeakenOwnerFromMaybe,
     pendingWeakenOwnerToMaybe,
@@ -39,6 +74,9 @@ module MLF.Constraint.Presolution.Base (
     runPresolutionM,
     MonadPresolution(..),
     bindingPathToRootUnderM,
+    ensureBindingParents,
+    ensureBindingParentsWithOutcome,
+    BindingRepairOutcome(..),
     requireValidBindingTree,
     edgeInteriorExact,
     traceInteriorRootRef,
@@ -52,7 +90,7 @@ import Control.Applicative ((<|>))
 import Control.Monad.State (MonadState, StateT, get, gets, modify', put, runStateT)
 import Control.Monad.Reader (MonadReader, ReaderT, ask, lift, runReaderT)
 import Control.Monad.Except (MonadError, throwError)
-import Control.Monad (forM_, when)
+import Control.Monad (forM_, void, when)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
@@ -61,7 +99,6 @@ import Data.Maybe (listToMaybe)
 import qualified MLF.Binding.Canonicalization as BindingCanonical
 import qualified MLF.Binding.Path as BindingPath
 import qualified MLF.Binding.Tree as Binding
-import qualified MLF.Constraint.Canonicalize as Canonicalize
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Phase (Phase(Presolved))
 import qualified MLF.Constraint.Types.Graph as Types
@@ -73,6 +110,14 @@ import qualified MLF.Constraint.Traversal as Traversal
 import qualified MLF.Util.Order as Order
 import qualified MLF.Util.UnionFind as UnionFind
 import MLF.Util.Trace (TraceConfig, traceBindingM)
+import MLF.Constraint.Presolution.BindingRepair
+    ( BindingRepairDirty
+    , BindingRepairModel(..)
+    , buildBindingRepairModel
+    , dirtyAllBindingRepair
+    , emptyBindingRepairDirty
+    , repairBindingParentsWithModel
+    )
 import MLF.Constraint.Presolution.Plan (GeneralizePlan, ReifyPlan)
 import MLF.Constraint.Presolution.Plan.Context (GaBindParents)
 import MLF.Constraint.Presolution.View (PresolutionView)
@@ -155,7 +200,30 @@ data TranslatabilityIssue
     deriving (Eq, Show)
 
 -- | State maintained during the presolution process.
-data PresolutionState p = PresolutionState
+data CachedBindingModel p = CachedBindingModel
+    { cbmGraphVersion :: !Int
+    , cbmUnionFindVersion :: !Int
+    , cbmBindParentsVersion :: !Int
+    , cbmConstraint :: Constraint p
+    , cbmUnionFind :: IntMap NodeId
+    , cbmQuotient :: Binding.QuotientBindParents
+    }
+    deriving (Eq, Show)
+
+data CachedBindingRepairModel p = CachedBindingRepairModel
+    { cbrmGraphVersion :: !Int
+    , cbrmUnionFindVersion :: !Int
+    , cbrmModel :: BindingRepairModel p
+    }
+    deriving (Eq, Show)
+
+data BindingRepairOutcome
+    = BindingRepairSkipped
+    | BindingRepairFull
+    | BindingRepairIncremental
+    deriving (Eq, Show)
+
+data PresolutionState p = PresolutionStateInternal
     { psConstraint :: Constraint p
     , psPresolution :: Presolution
     , psUnionFind :: IntMap NodeId
@@ -163,11 +231,214 @@ data PresolutionState p = PresolutionState
     , psPendingWeakens :: IntSet.IntSet
     , psPendingWeakenOwners :: IntMap PendingWeakenOwner
     , psBinderCache :: IntMap [NodeId]
+    , psGraphVersion :: !Int
+    , psUnionFindVersion :: !Int
+    , psBindParentsVersion :: !Int
+    , psBindingModelCache :: Maybe (CachedBindingModel p)
+    , psBindingRepairCache :: Maybe (CachedBindingRepairModel p)
+    , psBindingRepairDirty :: Maybe BindingRepairDirty
     , psEdgeExpansions :: IntMap Expansion
     , psEdgeWitnesses :: IntMap EdgeWitness
     , psEdgeTraces :: IntMap EdgeTrace
     }
     deriving (Eq, Show)
+
+pattern PresolutionState
+    :: Constraint p
+    -> Presolution
+    -> IntMap NodeId
+    -> Int
+    -> IntSet.IntSet
+    -> IntMap PendingWeakenOwner
+    -> IntMap [NodeId]
+    -> IntMap Expansion
+    -> IntMap EdgeWitness
+    -> IntMap EdgeTrace
+    -> PresolutionState p
+pattern PresolutionState constraint presolution unionFind nextNodeId pendingWeakens pendingWeakenOwners binderCache edgeExpansions edgeWitnesses edgeTraces <-
+    PresolutionStateInternal
+        constraint
+        presolution
+        unionFind
+        nextNodeId
+        pendingWeakens
+        pendingWeakenOwners
+        binderCache
+        _
+        _
+        _
+        _
+        _
+        _
+        edgeExpansions
+        edgeWitnesses
+        edgeTraces
+  where
+    PresolutionState constraint presolution unionFind nextNodeId pendingWeakens pendingWeakenOwners binderCache edgeExpansions edgeWitnesses edgeTraces =
+        PresolutionStateInternal
+            constraint
+            presolution
+            unionFind
+            nextNodeId
+            pendingWeakens
+            pendingWeakenOwners
+            binderCache
+            0
+            0
+            0
+            Nothing
+            Nothing
+            (Just dirtyAllBindingRepair)
+            edgeExpansions
+            edgeWitnesses
+            edgeTraces
+
+{-# COMPLETE PresolutionState #-}
+
+invalidateBindingModelState :: PresolutionState p -> PresolutionState p
+invalidateBindingModelState st = st { psBindingModelCache = Nothing }
+
+invalidateBindingRepairModelState :: PresolutionState p -> PresolutionState p
+invalidateBindingRepairModelState st =
+    st
+        { psBindingRepairCache = Nothing
+        , psBindingRepairDirty = Just dirtyAllBindingRepair
+        }
+
+modifyConstraintState :: (Constraint p -> Constraint p) -> PresolutionState p -> PresolutionState p
+modifyConstraintState f st =
+    invalidateBindingRepairModelState $
+    invalidateBindingModelState $
+        st
+            { psConstraint = f (psConstraint st)
+            , psGraphVersion = psGraphVersion st + 1
+            , psBindParentsVersion = psBindParentsVersion st + 1
+            }
+
+modifyConstraintDirtyTypesState
+    :: IntSet.IntSet
+    -> (Constraint p -> Constraint p)
+    -> PresolutionState p
+    -> PresolutionState p
+modifyConstraintDirtyTypesState _dirtyTypes f st =
+    invalidateBindingRepairModelState $
+    invalidateBindingModelState $
+        st
+            { psConstraint = f (psConstraint st)
+            , psGraphVersion = psGraphVersion st + 1
+            , psBindParentsVersion = psBindParentsVersion st + 1
+            }
+
+setConstraintDirtyBindRefsState
+    :: IntSet.IntSet
+    -> Constraint p
+    -> PresolutionState p
+    -> PresolutionState p
+setConstraintDirtyBindRefsState _dirtyBindRefs constraint st =
+    invalidateBindingRepairModelState $
+    invalidateBindingModelState $
+        st
+            { psConstraint = constraint
+            , psBindParentsVersion = psBindParentsVersion st + 1
+            }
+
+modifyBindParentsState :: (BindParents -> BindParents) -> PresolutionState p -> PresolutionState p
+modifyBindParentsState f st =
+    invalidateBindingRepairModelState $
+    invalidateBindingModelState $
+        st
+            { psConstraint = (psConstraint st) { cBindParents = f (cBindParents (psConstraint st)) }
+            , psBindParentsVersion = psBindParentsVersion st + 1
+            }
+
+setBindParentState :: NodeRef -> (NodeRef, BindFlag) -> PresolutionState p -> PresolutionState p
+setBindParentState child parentInfo st =
+    invalidateBindingRepairModelState $
+    invalidateBindingModelState $
+        st
+            { psConstraint =
+                (psConstraint st)
+                    { cBindParents =
+                        IntMap.insert
+                            (nodeRefKey child)
+                            parentInfo
+                            (cBindParents (psConstraint st))
+                    }
+            , psBindParentsVersion = psBindParentsVersion st + 1
+            }
+
+setConstraintState :: Constraint p -> PresolutionState p -> PresolutionState p
+setConstraintState constraint =
+    modifyConstraintState (const constraint)
+
+setUnionFindState :: IntMap NodeId -> PresolutionState p -> PresolutionState p
+setUnionFindState unionFind st =
+    invalidateBindingRepairModelState $
+    invalidateBindingModelState $
+        st
+            { psUnionFind = unionFind
+            , psUnionFindVersion = psUnionFindVersion st + 1
+            }
+
+modifyUnionFindState :: (IntMap NodeId -> IntMap NodeId) -> PresolutionState p -> PresolutionState p
+modifyUnionFindState f st =
+    setUnionFindState (f (psUnionFind st)) st
+
+mergeUnionFindState :: NodeId -> NodeId -> PresolutionState p -> PresolutionState p
+mergeUnionFindState fromRoot toRoot st =
+    invalidateBindingRepairModelState $
+    invalidateBindingModelState $
+        st
+            { psUnionFind =
+                IntMap.insert
+                    (getNodeId fromRoot)
+                    toRoot
+                    (psUnionFind st)
+            , psUnionFindVersion = psUnionFindVersion st + 1
+            }
+
+-- | Path compression does not change canonical representatives, so cached
+-- quotient binding models remain semantically valid.
+compressUnionFindState :: IntMap NodeId -> PresolutionState p -> PresolutionState p
+compressUnionFindState unionFind st =
+    st { psUnionFind = unionFind }
+
+setBindingModelCacheState :: CachedBindingModel p -> PresolutionState p -> PresolutionState p
+setBindingModelCacheState cache st =
+    st { psBindingModelCache = Just cache }
+
+cachedBindingModelM :: PresolutionM p (Constraint p, NodeId -> NodeId, Binding.QuotientBindParents)
+cachedBindingModelM = do
+    st <- get
+    case psBindingModelCache st of
+        Just cached
+            | cbmGraphVersion cached == psGraphVersion st
+            , cbmUnionFindVersion cached == psUnionFindVersion st
+            , cbmBindParentsVersion cached == psBindParentsVersion st ->
+                pure
+                    ( cbmConstraint cached
+                    , UnionFind.frWith (cbmUnionFind cached)
+                    , cbmQuotient cached
+                    )
+        _ -> do
+            let c0 = psConstraint st
+                uf = psUnionFind st
+                canonical = UnionFind.frWith uf
+            quotient <-
+                case Binding.quotientBindParentsContextUnder canonical c0 of
+                    Left err -> throwError (BindingTreeError err)
+                    Right result -> pure result
+            let cached =
+                    CachedBindingModel
+                        { cbmGraphVersion = psGraphVersion st
+                        , cbmUnionFindVersion = psUnionFindVersion st
+                        , cbmBindParentsVersion = psBindParentsVersion st
+                        , cbmConstraint = c0
+                        , cbmUnionFind = uf
+                        , cbmQuotient = quotient
+                        }
+            modify' (setBindingModelCacheState cached)
+            pure (c0, canonical, quotient)
 
 -- | Ownership bucket used by owner-aware pending-weaken scheduling.
 --
@@ -355,16 +626,15 @@ class Monad m => MonadPresolution m where
 instance {-# OVERLAPPING #-} MonadPresolution (PresolutionM p) where
     type PresolutionPhaseOf (PresolutionM p) = p
     getConstraint = gets psConstraint
-    modifyConstraint f = modify' $ \st -> st { psConstraint = f (psConstraint st) }
+    modifyConstraint f = modify' (modifyConstraintState f)
     getPresolutionState = get
     putPresolutionState = put
     throwPresolutionError = throwError
     modifyPresolution f = modify' $ \st -> st { psPresolution = f (psPresolution st) }
     bindExpansionArgs expansionRoot pairs = do
-        c0 <- gets psConstraint
-        uf <- gets psUnionFind
-        let canonical = UnionFind.frWith uf
+        (c0, canonical, quotient) <- cachedBindingModelM
         let expansionRootC = canonical expansionRoot
+            bindParents = Binding.qbpBindParents quotient
             rootGen =
                 let genIds = IntMap.keys (getGenNodeMap (cGenNodes c0))
                     pickRoot acc gidInt =
@@ -372,23 +642,27 @@ instance {-# OVERLAPPING #-} MonadPresolution (PresolutionM p) where
                             Just _ -> acc
                             Nothing ->
                                 let gref = genRef (GenNodeId gidInt)
-                                in case Binding.lookupBindParentUnder canonical c0 gref of
-                                    Right Nothing -> Just gref
-                                    _ -> Nothing
+                                in case IntMap.lookup (nodeRefKey gref) bindParents of
+                                    Nothing -> Just gref
+                                    Just _ -> Nothing
                 in foldl' pickRoot Nothing genIds
         forM_ pairs $ \(_bv, arg) -> do
             let argC = canonical arg
-            case Binding.lookupBindParent c0 (typeRef argC) of
+            case IntMap.lookup (nodeRefKey (typeRef argC)) bindParents of
                 Just _ -> pure ()
                 Nothing ->
                     case rootGen of
                         Just gref ->
-                            modifyConstraint $ \c ->
-                                Binding.setBindParent (typeRef argC) (gref, BindFlex) c
+                            modify' $
+                                setBindParentState
+                                    (typeRef argC)
+                                    (gref, BindFlex)
                         Nothing ->
                             when (Binding.isUpper c0 (typeRef expansionRootC) (typeRef argC)) $
-                                modifyConstraint $ \c ->
-                                    Binding.setBindParent (typeRef argC) (typeRef expansionRootC, BindFlex) c
+                                modify' $
+                                    setBindParentState
+                                        (typeRef argC)
+                                        (typeRef expansionRootC, BindFlex)
 
 bindingPathToRootUnderM
     :: (NodeId -> NodeId)
@@ -412,141 +686,64 @@ requireValidBindingTree = do
         Right () -> pure ()
 
 ensureBindingParents :: PresolutionM p ()
-ensureBindingParents = do
+ensureBindingParents =
+    void ensureBindingParentsWithOutcome
+
+ensureBindingParentsWithOutcome :: PresolutionM p BindingRepairOutcome
+ensureBindingParentsWithOutcome = do
     st0 <- get
     let c0 = psConstraint st0
         uf = psUnionFind st0
         canonical = UnionFind.frWith uf
-    case Binding.canonicalizeBindParentsUnder canonical c0 of
-        Left err -> throwError (BindingTreeError err)
-        Right bp0 -> do
-            let nodes = cNodes c0
-                nodeIds = map fst (toListNode nodes)
-                nodeValues = map snd (toListNode nodes)
-                allTypeIds =
-                    IntSet.fromList
-                        [ getNodeId (canonical nid)
-                        | nid <- nodeIds
-                        ]
-                rootGen =
-                    let genRefs =
-                            [ genRef (GenNodeId gid)
-                            | gid <- IntMap.keys (getGenNodeMap (cGenNodes c0))
-                            ]
-                        isRoot ref = not (IntMap.member (nodeRefKey ref) bp0)
-                    in case filter isRoot genRefs of
-                        (g:_) -> Just g
-                        [] -> Nothing
-                incomingParents =
-                    let addOne parent child m =
-                            IntMap.insertWith
-                                IntSet.union
-                                (getNodeId child)
-                                (IntSet.singleton (getNodeId parent))
-                                m
-                        addNode m node =
-                            let parent = canonical (tnId node)
-                                kids = map canonical (structuralChildrenWithBounds node)
-                            in foldl' (flip (addOne parent)) m kids
-                    in foldl' addNode IntMap.empty nodeValues
-                termRoots = Binding.computeTermDagRootsUnder canonical c0
-                canonicalRef = Canonicalize.canonicalRef canonical
-                addTypeEdges m node =
-                    let parentKey = nodeRefKey (TypeRef (canonical (tnId node)))
-                        childKeys =
-                            IntSet.fromList
-                                [ nodeRefKey (TypeRef (canonical child))
-                                | child <- structuralChildrenWithBounds node
-                                , canonical child /= canonical (tnId node)
-                                ]
-                    in if IntSet.null childKeys
-                        then m
-                        else IntMap.insertWith IntSet.union parentKey childKeys m
-                addGenEdges m genNode =
-                    let parentKey = nodeRefKey (GenRef (gnId genNode))
-                        childKeys =
-                            IntSet.fromList
-                                [ nodeRefKey (TypeRef (canonical child))
-                                | child <- gnSchemes genNode
-                                ]
-                    in if IntSet.null childKeys
-                        then m
-                        else IntMap.insertWith IntSet.union parentKey childKeys m
-                structEdges =
-                    foldl'
-                        addTypeEdges
-                        (foldl' addGenEdges IntMap.empty (NodeAccess.allGenNodes c0))
-                        nodeValues
-                isUpperUnder parent child =
-                    let parentKey = nodeRefKey (canonicalRef parent)
-                        childKey = nodeRefKey (canonicalRef child)
-                        go visited key =
-                            if IntSet.member key visited
-                                then False
-                                else if key == childKey
-                                    then True
-                                    else
-                                        let visited' = IntSet.insert key visited
-                                            kids = IntSet.toList (IntMap.findWithDefault IntSet.empty key structEdges)
-                                        in any (go visited') kids
-                    in if parentKey == childKey
-                        then True
-                        else go IntSet.empty parentKey
-                addMissing bp nidInt =
-                    let childRef = typeRef (NodeId nidInt)
-                        childKey = nodeRefKey childRef
-                    in if IntMap.member childKey bp
-                        then bp
-                        else
-                            let parentRef =
-                                    case IntMap.lookup nidInt incomingParents of
-                                        Just ps ->
-                                            case IntSet.toList ps of
-                                                [] -> Nothing
-                                                (p:_) -> Just (typeRef (NodeId p))
-                                        Nothing ->
-                                            if IntSet.member nidInt termRoots
-                                                then rootGen
-                                                else Nothing
-                            in case parentRef of
-                                Nothing -> bp
-                                Just p ->
-                                    if p == childRef
-                                        then bp
-                                        else IntMap.insert childKey (p, BindFlex) bp
-                bp1 = IntSet.foldl' addMissing bp0 allTypeIds
-                pickUpperParent childN =
-                    case IntMap.lookup (getNodeId childN) incomingParents of
-                        Just ps ->
-                            case IntSet.toList ps of
-                                (p:_) -> Just (typeRef (NodeId p))
-                                [] -> rootGen
-                        Nothing -> rootGen
-                fixUpper bp =
-                    IntMap.mapWithKey
-                        (\childKey (parentRef, flag) ->
-                            case nodeRefFromKey childKey of
-                                GenRef _ -> (parentRef, flag)
-                                TypeRef childN ->
-                                    case parentRef of
-                                        GenRef _ -> (parentRef, flag)
-                                        _ ->
-                                            if isUpperUnder parentRef (typeRef childN)
-                                                then (parentRef, flag)
-                                                else
-                                                    case pickUpperParent childN of
-                                                        Just pRef ->
-                                                            if pRef == typeRef childN
-                                                                then
-                                                                    case rootGen of
-                                                                        Just gref -> (gref, flag)
-                                                                        Nothing -> (parentRef, flag)
-                                                                else (pRef, flag)
-                                                        Nothing -> (parentRef, flag)
-                        )
-                        bp
-                bp2 = fixUpper bp1
-            put st0 { psConstraint = c0 { cBindParents = bp2 } }
+    qbp0 <-
+        case Binding.quotientBindParentsContextUnder canonical c0 of
+            Left err -> throwError (BindingTreeError err)
+            Right result -> pure result
+    let bp0 = Binding.qbpBindParents qbp0
+        repairModel = buildBindingRepairModel canonical c0
+        bp1 = repairBindingParentsWithModel repairModel bp0
+        changed = bp1 /= cBindParents c0
+        cFinal = c0 { cBindParents = bp1 }
+        bindParentsVersion =
+            if changed
+                then psBindParentsVersion st0 + 1
+                else psBindParentsVersion st0
+        qbpFinal =
+            qbp0
+                { Binding.qbpBindParents = bp1
+                , Binding.qbpChildrenByParent = quotientChildrenByParent bp1
+                }
+        bindingCache =
+            CachedBindingModel
+                { cbmGraphVersion = psGraphVersion st0
+                , cbmUnionFindVersion = psUnionFindVersion st0
+                , cbmBindParentsVersion = bindParentsVersion
+                , cbmConstraint = cFinal
+                , cbmUnionFind = uf
+                , cbmQuotient = qbpFinal
+                }
+        stFinal =
+            st0
+                { psConstraint = cFinal
+                , psBindParentsVersion = bindParentsVersion
+                , psBindingModelCache = Just bindingCache
+                , psBindingRepairCache = Nothing
+                , psBindingRepairDirty = Nothing
+                }
+    put stFinal
+    pure $
+        if changed
+            then BindingRepairFull
+            else BindingRepairSkipped
+
+quotientChildrenByParent :: BindParents -> IntMap [(Int, (NodeRef, BindFlag))]
+quotientChildrenByParent =
+    IntMap.map reverse
+        . IntMap.foldlWithKey'
+            ( \m childKey info@(parentRoot, _flag) ->
+                IntMap.insertWith (++) (nodeRefKey parentRoot) [(childKey, info)] m
+            )
+            IntMap.empty
 
 edgeInteriorExact :: NodeId -> PresolutionM p IntSet.IntSet
 edgeInteriorExact root0 = do
@@ -580,7 +777,7 @@ traceInteriorRootRef canonical c0 root0 =
                 [ gnId gen
                 | gen <- NodeAccess.allGenNodes c0
                 , any
-                    (\r ->
+                    ( \r ->
                         case VarStore.lookupVarBound c0 (canonical r) of
                             Just bnd -> canonical bnd == rootC
                             Nothing -> False

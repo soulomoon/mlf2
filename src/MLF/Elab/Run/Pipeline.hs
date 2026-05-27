@@ -7,22 +7,31 @@ module MLF.Elab.Run.Pipeline
     runPipelineElabWithEnv,
     runPipelineElabWithConfigAndEnv,
     PipelineElabDetailedResult (..),
+    PreparedExternalBindings,
+    prepareExternalBindings,
+    restrictPreparedExternalBindings,
+    unionPreparedExternalBindings,
     runPipelineElabDetailedWithEnv,
     runPipelineElabDetailedWithConfigAndEnv,
     runPipelineElabDetailedWithExternalBindings,
     runPipelineElabDetailedWithConfigAndExternalBindings,
+    runPipelineElabDetailedWithPreparedExternalBindings,
+    runPipelineElabDetailedWithPreparedExternalBindingsWithTiming,
     runPipelineElabDetailedUncheckedWithExternalBindings,
+    runPipelineElabDetailedUncheckedWithPreparedExternalBindings,
+    runPipelineElabDetailedUncheckedWithPreparedExternalBindingsWithTiming,
   )
 where
 
+import Control.Exception (evaluate)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import MLF.Constraint.Acyclicity (breakCyclesAndCheckAcyclicity)
 import MLF.Constraint.Normalize (normalize)
-import MLF.Constraint.Presolution (computePresolution)
+import MLF.Constraint.Presolution (computePresolution, computePresolutionWithTiming)
 import MLF.Constraint.Types.Graph (BaseTy (..), PolySyms)
-import MLF.Constraint.Types.Phase (Phase(Raw))
+import MLF.Constraint.Types.Phase (Phase (Raw))
 import MLF.Elab.Elaborate (elaborateWithEnv)
 import MLF.Elab.Inst (schemeToType)
 import MLF.Elab.PipelineConfig (PipelineConfig (..), defaultPipelineConfig)
@@ -60,12 +69,12 @@ import MLF.Frontend.ConstraintGen
     ExternalBindingMode (..),
     ExternalBindings,
     ExternalEnv,
-    generateConstraints,
     generateConstraintsWithExternalBindings,
   )
-import MLF.Frontend.Syntax (NormSrcType, NormSurfaceExpr, StructBound)
+import MLF.Frontend.Syntax (NormSrcType, NormSurfaceExpr, StructBound, VarName)
 import qualified MLF.Frontend.Syntax as Surface
 import MLF.Reify.TypeOps (freeTypeVarsType, freshNameLike, substTypeCapture)
+import MLF.Util.Timing (TimingConfig, timeProgramOperationIO)
 import MLF.Util.Trace (TraceConfig, traceGeneralize)
 
 data PipelineElabDetailedResult = PipelineElabDetailedResult
@@ -73,6 +82,12 @@ data PipelineElabDetailedResult = PipelineElabDetailedResult
     pedType :: ElabType,
     pedRootAnn :: AnnExpr,
     pedTypeCheckEnv :: TypeCheck.Env
+  }
+
+data PreparedExternalBindings = PreparedExternalBindings
+  { pebBindings :: ExternalBindings,
+    pebSchemeInfos :: Map.Map VarName SchemeInfo,
+    pebTypeCheckEnv :: TypeCheck.Env
   }
 
 validateDirectRecursiveAnnotations :: NormSurfaceExpr -> Either ConstraintError ()
@@ -148,7 +163,7 @@ runPipelineElab = runPipelineElabWithConfig defaultPipelineConfig
 
 runPipelineElabWithConfig :: PipelineConfig -> PolySyms -> NormSurfaceExpr -> Either PipelineError (ElabTerm, ElabType)
 runPipelineElabWithConfig config polySyms expr =
-  detailedPair <$> runPipelineElabWith True (pcTraceConfig config) Map.empty (generateConstraints polySyms) expr
+  detailedPair <$> runPipelineElabWith True (pcTraceConfig config) polySyms Map.empty expr
 
 -- | Run the pipeline with an external environment of type assumptions
 -- for free variables, avoiding the ELamAnn wrapping approach.
@@ -172,15 +187,79 @@ runPipelineElabDetailedWithExternalBindings =
 
 runPipelineElabDetailedWithConfigAndExternalBindings :: PipelineConfig -> PolySyms -> ExternalBindings -> NormSurfaceExpr -> Either PipelineError PipelineElabDetailedResult
 runPipelineElabDetailedWithConfigAndExternalBindings config polySyms extBindings =
-  runPipelineElabWith True (pcTraceConfig config) extBindings (generateConstraintsWithExternalBindings polySyms extBindings)
+  runPipelineElabWith True (pcTraceConfig config) polySyms extBindings
 
 runPipelineElabDetailedUncheckedWithExternalBindings :: PolySyms -> ExternalBindings -> NormSurfaceExpr -> Either PipelineError PipelineElabDetailedResult
 runPipelineElabDetailedUncheckedWithExternalBindings polySyms extBindings =
-  runPipelineElabWith False (pcTraceConfig defaultPipelineConfig) extBindings (generateConstraintsWithExternalBindings polySyms extBindings)
+  runPipelineElabWith False (pcTraceConfig defaultPipelineConfig) polySyms extBindings
+
+runPipelineElabDetailedWithPreparedExternalBindings :: PolySyms -> PreparedExternalBindings -> NormSurfaceExpr -> Either PipelineError PipelineElabDetailedResult
+runPipelineElabDetailedWithPreparedExternalBindings =
+  runPipelineElabWithPrepared True (pcTraceConfig defaultPipelineConfig)
+
+runPipelineElabDetailedWithPreparedExternalBindingsWithTiming :: TimingConfig -> String -> PolySyms -> PreparedExternalBindings -> NormSurfaceExpr -> IO (Either PipelineError PipelineElabDetailedResult)
+runPipelineElabDetailedWithPreparedExternalBindingsWithTiming timing label =
+  runPipelineElabWithPreparedWithTiming timing label True (pcTraceConfig defaultPipelineConfig)
+
+runPipelineElabDetailedUncheckedWithPreparedExternalBindings :: PolySyms -> PreparedExternalBindings -> NormSurfaceExpr -> Either PipelineError PipelineElabDetailedResult
+runPipelineElabDetailedUncheckedWithPreparedExternalBindings =
+  runPipelineElabWithPrepared False (pcTraceConfig defaultPipelineConfig)
+
+runPipelineElabDetailedUncheckedWithPreparedExternalBindingsWithTiming :: TimingConfig -> String -> PolySyms -> PreparedExternalBindings -> NormSurfaceExpr -> IO (Either PipelineError PipelineElabDetailedResult)
+runPipelineElabDetailedUncheckedWithPreparedExternalBindingsWithTiming timing label =
+  runPipelineElabWithPreparedWithTiming timing label False (pcTraceConfig defaultPipelineConfig)
 
 schemeExternalBindings :: ExternalEnv -> ExternalBindings
 schemeExternalBindings =
   Map.map (\srcTy -> ExternalBinding {externalBindingType = srcTy, externalBindingMode = ExternalBindingScheme})
+
+prepareExternalBindings :: ExternalBindings -> Either ConstraintError PreparedExternalBindings
+prepareExternalBindings extBindings = do
+  schemeInfos <- traverse externalBindingSchemeInfo extBindings
+  pure
+    PreparedExternalBindings
+      { pebBindings = extBindings,
+        pebSchemeInfos = schemeInfos,
+        pebTypeCheckEnv = typeCheckEnvFromSchemeInfos schemeInfos
+      }
+
+restrictPreparedExternalBindings :: Set.Set VarName -> PreparedExternalBindings -> PreparedExternalBindings
+restrictPreparedExternalBindings names prepared =
+  let schemeInfos = Map.restrictKeys (pebSchemeInfos prepared) names
+   in PreparedExternalBindings
+        { pebBindings = Map.restrictKeys (pebBindings prepared) names,
+          pebSchemeInfos = schemeInfos,
+          pebTypeCheckEnv = restrictTypeCheckEnv names (pebTypeCheckEnv prepared)
+        }
+
+unionPreparedExternalBindings :: PreparedExternalBindings -> PreparedExternalBindings -> PreparedExternalBindings
+unionPreparedExternalBindings preferred fallback =
+  let schemeInfos = pebSchemeInfos preferred `Map.union` pebSchemeInfos fallback
+   in PreparedExternalBindings
+        { pebBindings = pebBindings preferred `Map.union` pebBindings fallback,
+          pebSchemeInfos = schemeInfos,
+          pebTypeCheckEnv = unionTypeCheckEnv (pebTypeCheckEnv preferred) (pebTypeCheckEnv fallback)
+        }
+
+typeCheckEnvFromSchemeInfos :: Map.Map VarName SchemeInfo -> TypeCheck.Env
+typeCheckEnvFromSchemeInfos schemeInfos =
+  TypeCheck.Env
+    { TypeCheck.termEnv = Map.map (schemeToType . siScheme) schemeInfos,
+      TypeCheck.typeEnv = Map.empty
+    }
+
+restrictTypeCheckEnv :: Set.Set VarName -> TypeCheck.Env -> TypeCheck.Env
+restrictTypeCheckEnv names env =
+  env
+    { TypeCheck.termEnv = Map.restrictKeys (TypeCheck.termEnv env) names
+    }
+
+unionTypeCheckEnv :: TypeCheck.Env -> TypeCheck.Env -> TypeCheck.Env
+unionTypeCheckEnv preferred fallback =
+  TypeCheck.Env
+    { TypeCheck.termEnv = TypeCheck.termEnv preferred `Map.union` TypeCheck.termEnv fallback,
+      TypeCheck.typeEnv = TypeCheck.typeEnv preferred `Map.union` TypeCheck.typeEnv fallback
+    }
 
 detailedPair :: PipelineElabDetailedResult -> (ElabTerm, ElabType)
 detailedPair result = (pedTerm result, pedType result)
@@ -188,14 +267,40 @@ detailedPair result = (pedTerm result, pedType result)
 runPipelineElabWith ::
   Bool ->
   TraceConfig ->
+  PolySyms ->
   ExternalBindings ->
+  NormSurfaceExpr ->
+  Either PipelineError PipelineElabDetailedResult
+runPipelineElabWith requireFinalTypeCheck traceCfg polySyms extBindings expr = do
+  extPrepared <- fromConstraintError (prepareExternalBindings extBindings)
+  runPipelineElabWithPrepared requireFinalTypeCheck traceCfg polySyms extPrepared expr
+
+runPipelineElabWithPrepared ::
+  Bool ->
+  TraceConfig ->
+  PolySyms ->
+  PreparedExternalBindings ->
+  NormSurfaceExpr ->
+  Either PipelineError PipelineElabDetailedResult
+runPipelineElabWithPrepared requireFinalTypeCheck traceCfg polySyms extPrepared =
+  runPipelineElabWithPreparedGenerated
+    requireFinalTypeCheck
+    traceCfg
+    extPrepared
+    (generateConstraintsWithExternalBindings polySyms (pebBindings extPrepared))
+
+runPipelineElabWithPreparedGenerated ::
+  Bool ->
+  TraceConfig ->
+  PreparedExternalBindings ->
   (NormSurfaceExpr -> Either ConstraintError (ConstraintResult 'Raw)) ->
   NormSurfaceExpr ->
   Either PipelineError PipelineElabDetailedResult
-runPipelineElabWith requireFinalTypeCheck traceCfg extBindings genConstraints expr = do
+runPipelineElabWithPreparedGenerated requireFinalTypeCheck traceCfg extPrepared generateConstraints expr = do
   () <- fromConstraintError (validateDirectRecursiveAnnotations expr)
-  initialSchemeInfos <- fromConstraintError (traverse externalBindingSchemeInfo extBindings)
-  ConstraintResult {crConstraint = c0, crAnnotated = ann, crAnnSourceTypes = annSourceTypes, crInitialEnv = _initialBindings} <- fromConstraintError (genConstraints expr)
+  let initialSchemeInfos = pebSchemeInfos extPrepared
+  ConstraintResult {crConstraint = c0, crAnnotated = ann, crAnnSourceTypes = annSourceTypes, crInitialEnv = _initialBindings} <-
+    fromConstraintError (generateConstraints expr)
   let c1 = normalize c0
   (cAcyclic, acyc) <- fromCycleError (breakCyclesAndCheckAcyclicity c1)
   pres <- fromPresolutionError (computePresolution traceCfg acyc cAcyclic)
@@ -207,12 +312,8 @@ runPipelineElabWith requireFinalTypeCheck traceCfg extBindings genConstraints ex
   -- NormSrcType values (which preserve lowerType naming) instead of
   -- re-generalizing through the constraint graph, which would produce
   -- graph-internal variable names that conflict with constructor types.
-  let initialTcEnv =
-        TypeCheck.Env
-          { TypeCheck.termEnv = Map.map (schemeToType . siScheme) initialSchemeInfos,
-            TypeCheck.typeEnv = Map.empty
-          }
-  let annCanon = preparedAnnotated prepared
+  let initialTcEnv = pebTypeCheckEnv extPrepared
+      annCanon = preparedAnnotated prepared
       elabConfig = preparedElaborationConfig traceCfg prepared
       elabEnv = preparedElaborationEnv annSourceTypes initialSchemeInfos prepared
   term <- fromElabError (elaborateWithEnv elabConfig elabEnv annCanon)
@@ -285,6 +386,161 @@ runPipelineElabWith requireFinalTypeCheck traceCfg extBindings genConstraints ex
     else do
       _ <- fromElabError (computePreparedResultType prepared authoritativeAnnCanonFinal authoritativeAnnPreFinal)
       authoritativeResult
+
+runPipelineElabWithPreparedWithTiming ::
+  TimingConfig ->
+  String ->
+  Bool ->
+  TraceConfig ->
+  PolySyms ->
+  PreparedExternalBindings ->
+  NormSurfaceExpr ->
+  IO (Either PipelineError PipelineElabDetailedResult)
+runPipelineElabWithPreparedWithTiming timing label requireFinalTypeCheck traceCfg polySyms extPrepared =
+  runPipelineElabWithPreparedGeneratedWithTiming
+    timing
+    label
+    requireFinalTypeCheck
+    traceCfg
+    extPrepared
+    (generateConstraintsWithExternalBindings polySyms (pebBindings extPrepared))
+
+runPipelineElabWithPreparedGeneratedWithTiming ::
+  TimingConfig ->
+  String ->
+  Bool ->
+  TraceConfig ->
+  PreparedExternalBindings ->
+  (NormSurfaceExpr -> Either ConstraintError (ConstraintResult 'Raw)) ->
+  NormSurfaceExpr ->
+  IO (Either PipelineError PipelineElabDetailedResult)
+runPipelineElabWithPreparedGeneratedWithTiming timing label requireFinalTypeCheck traceCfg extPrepared generateConstraints expr = do
+  validationResult <-
+    timeProgramOperationIO timing (label ++ ".validate_annotations") $
+      evaluate (fromConstraintError (validateDirectRecursiveAnnotations expr))
+  case validationResult of
+    Left err -> pure (Left err)
+    Right () -> do
+      let initialSchemeInfos = pebSchemeInfos extPrepared
+      constraintResult <-
+        timeProgramOperationIO timing (label ++ ".generate_constraints") $
+          evaluate (fromConstraintError (generateConstraints expr))
+      case constraintResult of
+        Left err -> pure (Left err)
+        Right ConstraintResult {crConstraint = c0, crAnnotated = ann, crAnnSourceTypes = annSourceTypes, crInitialEnv = _initialBindings} -> do
+          normalizeResult <-
+            timeProgramOperationIO timing (label ++ ".constraint_normalize") $
+              evaluate (normalize c0)
+          acycResult <-
+            timeProgramOperationIO timing (label ++ ".acyclicity") $
+              evaluate (fromCycleError (breakCyclesAndCheckAcyclicity normalizeResult))
+          case acycResult of
+            Left err -> pure (Left err)
+            Right (cAcyclic, acyc) -> do
+              presResult <-
+                timeProgramOperationIO timing (label ++ ".presolution") $
+                  fromPresolutionError <$> computePresolutionWithTiming timing (label ++ ".presolution") traceCfg acyc cAcyclic
+              case presResult of
+                Left err -> pure (Left err)
+                Right pres -> do
+                  preparedResult <-
+                    timeProgramOperationIO timing (label ++ ".prepare_generalization") $
+                      evaluate (fromSolveError (prepareGeneralizationArtifact traceCfg cAcyclic pres ann))
+                  case preparedResult of
+                    Left err -> pure (Left err)
+                    Right prepared -> do
+                      let initialTcEnv = pebTypeCheckEnv extPrepared
+                          annCanon = preparedAnnotated prepared
+                          elabConfig = preparedElaborationConfig traceCfg prepared
+                          elabEnv = preparedElaborationEnv annSourceTypes initialSchemeInfos prepared
+                      termResult <-
+                        timeProgramOperationIO timing (label ++ ".elaborate") $
+                          evaluate (fromElabError (elaborateWithEnv elabConfig elabEnv annCanon))
+                      case termResult of
+                        Left err -> pure (Left err)
+                        Right term -> do
+                          case traceGeneralize traceCfg ("pipeline elaborated term=" ++ show term) () of
+                            () -> pure ()
+                          let authoritativeAnnCanon = authoritativeRootAnn term annCanon
+                              authoritativeAnnPre = authoritativeRootAnn term ann
+                              (authoritativeAnnCanonFinal, authoritativeAnnPreFinal) =
+                                stripPreparedWitnesslessAuthoritativeAnn prepared authoritativeAnnCanon authoritativeAnnPre
+                          rootResult <-
+                            timeProgramOperationIO timing (label ++ ".generalize_root") $
+                              evaluate (fromElabError (generalizePreparedRoot prepared authoritativeAnnCanonFinal authoritativeAnnPreFinal))
+                          case rootResult of
+                            Left err -> pure (Left err)
+                            Right (rootScheme, rootSubst) -> do
+                              termSubst <-
+                                timeProgramOperationIO timing (label ++ ".subst_root") $
+                                  evaluate (substInTerm rootSubst term)
+                              termClosed <-
+                                timeProgramOperationIO timing (label ++ ".close_term") $
+                                  evaluate (closePipelineTerm initialTcEnv rootSubst rootScheme term termSubst)
+                              termClosedFresh <-
+                                timeProgramOperationIO timing (label ++ ".freshen_type_abs") $
+                                  evaluate (freshenTypeAbsAgainstEnv initialTcEnv termClosed)
+                              let uncheckedAuthoritative =
+                                    Right
+                                      PipelineElabDetailedResult
+                                        { pedTerm = termClosedFresh,
+                                          pedType = schemeToType rootScheme,
+                                          pedRootAnn = authoritativeAnnCanonFinal,
+                                          pedTypeCheckEnv = initialTcEnv
+                                        }
+                              authoritativeResult <-
+                                if requireFinalTypeCheck
+                                  then
+                                    timeProgramOperationIO timing (label ++ ".final_typecheck") $
+                                      evaluate $ do
+                                        tyChecked <-
+                                          case typeCheckWithEnv initialTcEnv termClosedFresh of
+                                            Right ty -> pure ty
+                                            Left err -> fromTypeCheckError (Left err)
+                                        pure
+                                          PipelineElabDetailedResult
+                                            { pedTerm = termClosedFresh,
+                                              pedType = tyChecked,
+                                              pedRootAnn = authoritativeAnnCanonFinal,
+                                              pedTypeCheckEnv = initialTcEnv
+                                            }
+                                  else pure uncheckedAuthoritative
+                              if not requireFinalTypeCheck
+                                then pure authoritativeResult
+                                else do
+                                  resultTypeResult <-
+                                    timeProgramOperationIO timing (label ++ ".result_type_reconstruction") $
+                                      evaluate (fromElabError (computePreparedResultType prepared authoritativeAnnCanonFinal authoritativeAnnPreFinal))
+                                  pure $ do
+                                    _ <- resultTypeResult
+                                    authoritativeResult
+
+closePipelineTerm :: TypeCheck.Env -> IntMap.IntMap String -> ElabScheme -> ElabTerm -> ElabTerm -> ElabTerm
+closePipelineTerm initialTcEnv rootSubst rootScheme term termSubst =
+  let retainedChildAuthoritativeCandidate =
+        case preserveRetainedChildAuthoritativeResult termSubst of
+          Just _ -> True
+          Nothing -> False
+      termClosed0 =
+        if retainedChildAuthoritativeCandidate
+          then closeTermWithSchemeSubstIfNeeded rootSubst rootScheme term
+          else case typeCheckWithEnv initialTcEnv termSubst of
+            Right ty | null (freeTypeVarsType ty) -> termSubst
+            Right ty ->
+              case rootScheme of
+                Forall binds _
+                  | null binds ->
+                      let freeBinds =
+                            [ (name, Nothing)
+                              | name <- Set.toList (freeTypeVarsType ty)
+                            ]
+                          freeScheme = Forall freeBinds ty
+                       in closeTermWithSchemeSubstIfNeeded IntMap.empty freeScheme termSubst
+                _ -> closeTermWithSchemeSubstIfNeeded rootSubst rootScheme term
+            Left _ -> closeTermWithSchemeSubstIfNeeded rootSubst rootScheme term
+   in case preserveRetainedChildAuthoritativeResult termClosed0 of
+        Just termAdjusted -> closeTermWithSchemeSubstIfNeeded rootSubst rootScheme termAdjusted
+        Nothing -> termClosed0
 
 freshenTypeAbsAgainstEnv :: TypeCheck.Env -> ElabTerm -> ElabTerm
 freshenTypeAbsAgainstEnv env term0 = pruneVacuousLeadingTyAbsAgainstEnv env (go reserved term0)

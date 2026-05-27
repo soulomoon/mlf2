@@ -3,6 +3,7 @@ module MLF.Frontend.ConstraintGen.Scope (
     popScope,
     peekScope,
     registerScopeNode,
+    registerRootScopeNode,
     rebindScopeNodes
 ) where
 
@@ -44,6 +45,17 @@ registerScopeNode ref =
             (frame:rest) ->
                 let frame' = frame { sfNodes = IntSet.insert (nodeRefKey ref) (sfNodes frame) }
                 in st { bsScopes = frame' : rest }
+
+registerRootScopeNode :: NodeRef -> ConstraintM ()
+registerRootScopeNode ref =
+    modify' $ \st ->
+        st { bsScopes = markRoot (bsScopes st) }
+  where
+    markRoot [] = []
+    markRoot [frame] =
+        [ frame { sfNodes = IntSet.insert (nodeRefKey ref) (sfNodes frame) }
+        ]
+    markRoot (frame:rest) = frame : markRoot rest
 
 rebindScopeNodes :: NodeRef -> NodeId -> ScopeFrame -> ConstraintM ()
 rebindScopeNodes binder root frame = do

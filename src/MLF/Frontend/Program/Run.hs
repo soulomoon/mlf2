@@ -11,11 +11,13 @@ module MLF.Frontend.Program.Run
     runProgramPackageOutput,
     runLocatedProgramOutput,
     runLocatedProgramPackageOutput,
+    runLocatedProgramPackageOutputWithTiming,
     programRunOutput,
     prettyValue,
   )
 where
 
+import Control.Exception (evaluate)
 import Control.Monad (foldM)
 import Data.Foldable (toList)
 import Data.List (elemIndex, find, findIndex, intercalate, isInfixOf, isPrefixOf, isSuffixOf, stripPrefix, tails)
@@ -23,7 +25,7 @@ import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import MLF.Elab.Pipeline (ElabTerm (..), Pretty (..), Ty (..), freeTypeVarsType, normalize, schemeFromType, typeCheck)
-import MLF.Frontend.Program.Check (checkLocatedProgram, checkLocatedProgramPackage, checkProgram, checkProgramPackage)
+import MLF.Frontend.Program.Check (checkLocatedProgram, checkLocatedProgramPackage, checkLocatedProgramPackageWithTiming, checkProgram, checkProgramPackage)
 import MLF.Frontend.Program.Elaborate
   ( ElaborateScope,
     classInfoForConstraint,
@@ -82,6 +84,7 @@ import MLF.Frontend.Syntax (Lit (..), SrcBound (..), SrcTy (..), SrcType, Surfac
 import qualified MLF.Frontend.Syntax as Surface
 import qualified MLF.Frontend.Syntax.Program as ProgramSyntax
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
+import MLF.Util.Timing (TimingConfig, timeProgramIO)
 
 data Value
   = VLit Lit
@@ -142,6 +145,23 @@ runLocatedProgramPackageOutput package = do
   case runCheckedProgramOutput checked of
     Left err -> Left (diagnosticForProgramError (Just (locatedProgramPackageProgram package)) err)
     Right result -> pure result
+
+runLocatedProgramPackageOutputWithTiming :: TimingConfig -> LocatedProgramPackage -> IO (Either ProgramDiagnostic ProgramRunResult)
+runLocatedProgramPackageOutputWithTiming timing package = do
+  checkedResult <- checkLocatedProgramPackageWithTiming timing package
+  case checkedResult of
+    Left diagnostic ->
+      pure (Left diagnostic)
+    Right checked -> do
+      outputResult <-
+        timeProgramIO
+          timing
+          "program.run.output"
+          (evaluate (runCheckedProgramOutput checked))
+      pure $
+        case outputResult of
+          Left err -> Left (diagnosticForProgramError (Just (locatedProgramPackageProgram package)) err)
+          Right result -> Right result
 
 programRunOutput :: ProgramRunResult -> String
 programRunOutput result =

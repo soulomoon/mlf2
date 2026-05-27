@@ -54,6 +54,8 @@ mkResultTypeInputs canonical edgeArtifacts presolutionView bindParentsGa planBui
     { rtcCanonical = canonical,
       rtcEdgeArtifacts = edgeArtifacts,
       rtcPresolutionView = presolutionView,
+      rtcReadModel = Nothing,
+      rtcBaseReadModel = Nothing,
       rtcBindParentsGa = bindParentsGa,
       rtcPlanBuilder = planBuilder,
       rtcBaseConstraint = baseConstraint,

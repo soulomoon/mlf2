@@ -52,6 +52,13 @@ module MLF.Constraint.Presolution.StateAccess (
     boundFlexChildrenAllM,
     orderedBindersM,
     checkBindingTreeM,
+    PresolutionBindingSnapshot(..),
+    getBindingSnapshot,
+    bindingSnapshotLookupBindParent,
+    bindingSnapshotInteriorOf,
+    bindingSnapshotBoundFlexChildren,
+    bindingSnapshotFindSchemeIntroducer,
+    bindingSnapshotPathToRoot,
 
     -- * Node lookups with canonicalization
     lookupNodeCanonM,
@@ -69,20 +76,25 @@ module MLF.Constraint.Presolution.StateAccess (
 import Control.Monad.State (gets, modify')
 import Control.Monad.Except (throwError)
 import Data.IntMap.Strict (IntMap)
+import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.IntSet (IntSet)
 
 import qualified MLF.Binding.Tree as Binding
+import qualified MLF.Constraint.Canonicalize as Canonicalize
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Util.UnionFind as UnionFind
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Presolution.Base (
+    CachedBindingModel(..),
     PendingWeakenOwner(..),
     PresolutionM,
     PresolutionError(..),
     PresolutionState(..),
-    bindingPathToRootUnderM,
-    pendingWeakenOwnerFromMaybe
+    pendingWeakenOwnerFromMaybe,
+    setBindingModelCacheState,
+    setConstraintState,
+    setUnionFindState
     )
 
 -- -----------------------------------------------------------------------------
@@ -130,10 +142,7 @@ getConstraintAndUnionFind = do
 putConstraintAndUnionFind :: Constraint p -> IntMap NodeId -> PresolutionM p ()
 putConstraintAndUnionFind constraint uf = do
     modify' $ \st ->
-        st
-            { psConstraint = constraint
-            , psUnionFind = uf
-            }
+        setUnionFindState uf (setConstraintState constraint st)
 
 getPendingUnifyEdgesM :: PresolutionM p [UnifyEdge]
 getPendingUnifyEdgesM = cUnifyEdges . fst <$> getConstraintAndUnionFind
@@ -165,8 +174,8 @@ liftBindingError = \case
 -- @
 lookupBindParentM :: NodeRef -> PresolutionM p (Maybe (NodeRef, BindFlag))
 lookupBindParentM ref = do
-    (c, canonical) <- getConstraintAndCanonical
-    liftBindingError $ Binding.lookupBindParentUnder canonical c ref
+    snapshot <- getBindingSnapshot
+    bindingSnapshotLookupBindParent snapshot ref
 
 -- | Trace the binding-parent chain from a node to a root.
 --
@@ -174,57 +183,192 @@ lookupBindParentM ref = do
 -- and ending with a root.
 bindingPathToRootM :: NodeRef -> PresolutionM p [NodeRef]
 bindingPathToRootM start = do
-    (c, canonical) <- getConstraintAndCanonical
-    go canonical c IntSet.empty [start] start
-  where
-    go canonical c visited path ref
-        | IntSet.member (nodeRefKey ref) visited =
-            throwError (BindingTreeError (BindingCycleDetected (reverse path)))
-        | otherwise = do
-            mbParentInfo <- liftBindingError $ Binding.lookupBindParentUnder canonical c ref
-            case mbParentInfo of
-                Nothing -> pure (reverse path)
-                Just (parent, _flag) ->
-                    go canonical c
-                       (IntSet.insert (nodeRefKey ref) visited)
-                       (parent : path)
-                       parent
+    snapshot <- getBindingSnapshot
+    startC <- requireSnapshotRef "bindingPathToRootM" snapshot start
+    liftBindingError $
+        Binding.bindingPathToRootLocal
+            (Binding.qbpBindParents (pbsQuotient snapshot))
+            startC
 
 -- | Compute the interior I(r): all nodes transitively bound to r.
 --
 -- The returned set contains canonical node keys.
 interiorOfM :: NodeRef -> PresolutionM p IntSet
 interiorOfM root = do
-    (c, canonical) <- getConstraintAndCanonical
-    liftBindingError $ Binding.interiorOfUnder canonical c root
+    snapshot <- getBindingSnapshot
+    bindingSnapshotInteriorOf snapshot root
 
 -- | Get flexibly-bound TyVar children of a binder node.
 --
 -- This corresponds to Q(n) in the paper, restricted to variable nodes.
 boundFlexChildrenM :: NodeRef -> PresolutionM p [NodeId]
 boundFlexChildrenM binder = do
-    (c, canonical) <- getConstraintAndCanonical
-    liftBindingError $ Binding.boundFlexChildrenUnder canonical c binder
+    snapshot <- getBindingSnapshot
+    bindingSnapshotBoundFlexChildren snapshot binder
 
 -- | Get flexibly-bound children (any node type) of a binder node.
 --
 -- TyExp is internal and skipped; TyBase/TyBottom are atomic.
 boundFlexChildrenAllM :: NodeRef -> PresolutionM p [NodeId]
 boundFlexChildrenAllM binder = do
-    (c, canonical) <- getConstraintAndCanonical
-    liftBindingError $ Binding.boundFlexChildrenAllUnder canonical c binder
+    snapshot <- getBindingSnapshot
+    bindingSnapshotBoundFlexChildrenAll snapshot binder
 
 -- | Get ordered binders for a binder node (leftmost-lowermost, paper ≺).
 orderedBindersM :: NodeRef -> PresolutionM p [NodeId]
 orderedBindersM binder = do
-    (c, canonical) <- getConstraintAndCanonical
-    liftBindingError $ Binding.orderedBinders canonical c binder
+    snapshot <- getBindingSnapshot
+    binderC <- requireSnapshotRef "orderedBindersM" snapshot binder
+    liftBindingError $
+        Binding.orderedBindersInQuotient
+            (pbsCanonical snapshot)
+            (pbsConstraint snapshot)
+            (pbsQuotient snapshot)
+            binderC
 
 -- | Validate binding-tree invariants on the quotient graph.
 checkBindingTreeM :: PresolutionM p ()
 checkBindingTreeM = do
     (c, canonical) <- getConstraintAndCanonical
     liftBindingError $ Binding.checkBindingTreeUnder canonical c
+
+-- | Snapshot the quotient binding tree for a stable read phase.
+--
+-- Several edge-loop operations need multiple binding queries against the same
+-- constraint/UF snapshot. Building the quotient once avoids repeatedly scanning
+-- the whole binding-parent map inside one edge-local copy or planning step.
+data PresolutionBindingSnapshot p = PresolutionBindingSnapshot
+    { pbsConstraint :: Constraint p
+    , pbsCanonical :: NodeId -> NodeId
+    , pbsQuotient :: Binding.QuotientBindParents
+    }
+
+getBindingSnapshot :: PresolutionM p (PresolutionBindingSnapshot p)
+getBindingSnapshot = do
+    st <- gets id
+    case psBindingModelCache st of
+        Just cached
+            | cbmGraphVersion cached == psGraphVersion st
+            , cbmUnionFindVersion cached == psUnionFindVersion st
+            , cbmBindParentsVersion cached == psBindParentsVersion st ->
+                pure (snapshotFromCached cached)
+        _ -> do
+            let c = psConstraint st
+                uf = psUnionFind st
+                canonical = UnionFind.frWith uf
+            qbp <- liftBindingError $
+                Binding.quotientBindParentsContextUnder canonical c
+            let cached =
+                    CachedBindingModel
+                        { cbmGraphVersion = psGraphVersion st
+                        , cbmUnionFindVersion = psUnionFindVersion st
+                        , cbmBindParentsVersion = psBindParentsVersion st
+                        , cbmConstraint = c
+                        , cbmUnionFind = uf
+                        , cbmQuotient = qbp
+                        }
+            modify' (setBindingModelCacheState cached)
+            pure (snapshotFromCached cached)
+  where
+    snapshotFromCached cached =
+        let canonical = UnionFind.frWith (cbmUnionFind cached)
+        in PresolutionBindingSnapshot
+            { pbsConstraint = cbmConstraint cached
+            , pbsCanonical = canonical
+            , pbsQuotient = cbmQuotient cached
+            }
+
+canonicalRefInSnapshot :: PresolutionBindingSnapshot p -> NodeRef -> NodeRef
+canonicalRefInSnapshot snapshot =
+    Canonicalize.canonicalRef (pbsCanonical snapshot)
+
+requireSnapshotRef :: String -> PresolutionBindingSnapshot p -> NodeRef -> PresolutionM p NodeRef
+requireSnapshotRef ctx snapshot ref0 = do
+    let refC = canonicalRefInSnapshot snapshot ref0
+    if IntSet.member (nodeRefKey refC) (Binding.qbpAllRoots (pbsQuotient snapshot))
+        then pure refC
+        else
+            throwError $
+                BindingTreeError $
+                    InvalidBindingTree $
+                        ctx ++ ": node " ++ show refC ++ " not in constraint"
+
+bindingSnapshotLookupBindParent
+    :: PresolutionBindingSnapshot p
+    -> NodeRef
+    -> PresolutionM p (Maybe (NodeRef, BindFlag))
+bindingSnapshotLookupBindParent snapshot ref0 = do
+    refC <- requireSnapshotRef "bindingSnapshotLookupBindParent" snapshot ref0
+    pure $ IntMap.lookup (nodeRefKey refC) (Binding.qbpBindParents (pbsQuotient snapshot))
+
+bindingSnapshotPathToRoot
+    :: PresolutionBindingSnapshot p
+    -> NodeRef
+    -> PresolutionM p [NodeRef]
+bindingSnapshotPathToRoot snapshot start0 = do
+    startC <- requireSnapshotRef "bindingSnapshotPathToRoot" snapshot start0
+    liftBindingError $
+        Binding.bindingPathToRootLocal
+            (Binding.qbpBindParents (pbsQuotient snapshot))
+            startC
+
+bindingSnapshotInteriorOf :: PresolutionBindingSnapshot p -> NodeRef -> PresolutionM p IntSet
+bindingSnapshotInteriorOf snapshot root0 = do
+    rootC <- requireSnapshotRef "bindingSnapshotInteriorOf" snapshot root0
+    let childrenByParent = Binding.qbpChildrenByParent (pbsQuotient snapshot)
+        go visited [] = visited
+        go visited (key : rest) =
+            let kids =
+                    IntSet.fromList
+                        [ childKey
+                        | (childKey, _info) <- IntMap.findWithDefault [] key childrenByParent
+                        ]
+                newKids = IntSet.difference kids visited
+            in go (IntSet.union visited newKids) (IntSet.toList newKids ++ rest)
+        rootKey = nodeRefKey rootC
+    pure (go (IntSet.singleton rootKey) [rootKey])
+
+bindingSnapshotBoundFlexChildren
+    :: PresolutionBindingSnapshot p
+    -> NodeRef
+    -> PresolutionM p [NodeId]
+bindingSnapshotBoundFlexChildren snapshot binder0 = do
+    binderC <- requireSnapshotRef "bindingSnapshotBoundFlexChildren" snapshot binder0
+    liftBindingError $
+        Binding.boundFlexChildrenInQuotient
+            (pbsConstraint snapshot)
+            (pbsQuotient snapshot)
+            binderC
+
+bindingSnapshotBoundFlexChildrenAll
+    :: PresolutionBindingSnapshot p
+    -> NodeRef
+    -> PresolutionM p [NodeId]
+bindingSnapshotBoundFlexChildrenAll snapshot binder0 = do
+    binderC <- requireSnapshotRef "bindingSnapshotBoundFlexChildrenAll" snapshot binder0
+    liftBindingError $
+        Binding.boundFlexChildrenAllInQuotient
+            (pbsConstraint snapshot)
+            (pbsQuotient snapshot)
+            binderC
+
+bindingSnapshotFindSchemeIntroducer
+    :: PresolutionBindingSnapshot p
+    -> NodeId
+    -> PresolutionM p GenNodeId
+bindingSnapshotFindSchemeIntroducer snapshot root0 = do
+    let root = pbsCanonical snapshot root0
+        start = typeRef root
+    startC <- requireSnapshotRef "bindingSnapshotFindSchemeIntroducer" snapshot start
+    path <- liftBindingError $
+        Binding.bindingPathToRootLocal
+            (Binding.qbpBindParents (pbsQuotient snapshot))
+            startC
+    case [gid | GenRef gid <- path] of
+        (gid:_) -> pure gid
+        [] ->
+            throwError
+                (InternalError ("scheme introducer not found for " ++ show root))
 
 -- -----------------------------------------------------------------------------
 -- Node lookups with canonicalization
@@ -268,22 +412,8 @@ getCanonicalNodeM nid = do
 -- conservative when a scheme owner cannot be proven.
 pendingWeakenOwnerM :: NodeId -> PresolutionM p PendingWeakenOwner
 pendingWeakenOwnerM nid = do
-    (c, canonical) <- getConstraintAndCanonical
-    pure (pendingWeakenOwnerUnder canonical c nid)
-
-pendingWeakenOwnerUnder :: (NodeId -> NodeId) -> Constraint p -> NodeId -> PendingWeakenOwner
-pendingWeakenOwnerUnder canonical c0 nid0 = go IntSet.empty (typeRef (canonical nid0))
-  where
-    go :: IntSet -> NodeRef -> PendingWeakenOwner
-    go visited ref
-        | IntSet.member (nodeRefKey ref) visited = PendingWeakenOwnerUnknown
-        | otherwise =
-            case Binding.lookupBindParentUnder canonical c0 ref of
-                Left _ -> PendingWeakenOwnerUnknown
-                Right Nothing -> PendingWeakenOwnerUnknown
-                Right (Just (GenRef gid, _flag)) -> pendingWeakenOwnerFromMaybe (Just gid)
-                Right (Just (TypeRef parent, _flag)) ->
-                    go (IntSet.insert (nodeRefKey ref) visited) (typeRef parent)
+    snapshot <- getBindingSnapshot
+    pendingWeakenOwnerInSnapshot snapshot nid
 
 -- | Find the nearest gen-node ancestor on the binding path from a type node.
 --
@@ -291,11 +421,21 @@ pendingWeakenOwnerUnder canonical c0 nid0 = go IntSet.empty (typeRef (canonical 
 -- instantiation.  The function canonicalizes the root, walks the binding path
 -- upward, and returns the first 'GenNodeId' encountered.
 findSchemeIntroducerM :: (NodeId -> NodeId) -> Constraint q -> NodeId -> PresolutionM p GenNodeId
-findSchemeIntroducerM canonical c0 root0 = do
-    let root = canonical root0
-    path <- bindingPathToRootUnderM canonical c0 (typeRef root)
-    case [gid | GenRef gid <- path] of
-        (gid:_) -> pure gid
-        [] ->
-            throwError
-                (InternalError ("scheme introducer not found for " ++ show root))
+findSchemeIntroducerM _canonical _c0 root0 = do
+    snapshot <- getBindingSnapshot
+    bindingSnapshotFindSchemeIntroducer snapshot root0
+
+pendingWeakenOwnerInSnapshot :: PresolutionBindingSnapshot p -> NodeId -> PresolutionM p PendingWeakenOwner
+pendingWeakenOwnerInSnapshot snapshot nid0 =
+    go IntSet.empty (typeRef (pbsCanonical snapshot nid0))
+  where
+    go visited ref
+        | IntSet.member (nodeRefKey ref) visited =
+            pure PendingWeakenOwnerUnknown
+        | otherwise = do
+            mbParent <- bindingSnapshotLookupBindParent snapshot ref
+            case mbParent of
+                Nothing -> pure PendingWeakenOwnerUnknown
+                Just (GenRef gid, _flag) -> pure (pendingWeakenOwnerFromMaybe (Just gid))
+                Just (TypeRef parent, _flag) ->
+                    go (IntSet.insert (nodeRefKey ref) visited) (typeRef parent)

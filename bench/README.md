@@ -1,0 +1,112 @@
+# Benchmarks
+
+This directory holds focused frontend and typechecker performance artifacts.
+The active benchmark runner uses the canonical repo fixture:
+
+```text
+test/programs/packages/cross-module-let
+```
+
+The generated `.mlfp` package fixtures are kept as historical/ad hoc inputs,
+but they are not part of the default repeated benchmark because they exercise
+the same shape.
+
+Regenerate the checked-in baseline fixture:
+
+```bash
+./bench/generate-benchmarks.sh
+```
+
+Generate a larger cross-module let fixture:
+
+```bash
+./bench/generate-benchmarks.sh --name cross-module-let-depth-25 --let-depth 25
+```
+
+Run the canonical fixture and write the timing summary:
+
+```bash
+./bench/run-benchmarks.sh --runs 1 --output bench/results/latest.tsv
+```
+
+That command writes:
+
+```text
+bench/results/latest.tsv
+bench/results/latest.runs.tsv
+```
+
+Run a specific package fixture through the same harness:
+
+```bash
+./bench/run-benchmarks.sh \
+  --runs 1 \
+  --benchmark parser-library test/programs/compiler-parser-parity/parser-library \
+  --output bench/results/parser-library-latest.tsv
+```
+
+For library-only package roots that intentionally have no `main`, allow the
+expected CLI status while still collecting module-check timings:
+
+```bash
+./bench/run-benchmarks.sh \
+  --runs 1 \
+  --allow-status 1 \
+  --benchmark parser-library test/programs/compiler-parser-parity/parser-library \
+  --output bench/results/parser-library-latest.tsv
+```
+
+Run the canonical fixture through the same CLI path used by normal package checks:
+
+```bash
+cabal build exe:mlf2
+MLF_PROGRAM_TIMING_DETAIL=1 MLF_PROGRAM_TIMING_OPERATIONS=1 \
+  "$(cabal list-bin exe:mlf2)" check-program test/programs/packages/cross-module-let
+```
+
+Per-definition nested pipeline timing is opt-in because it adds substantial
+measurement overhead on generated libraries:
+
+```bash
+MLF_PROGRAM_TIMING_DETAIL=1 MLF_PROGRAM_TIMING_OPERATIONS=1 MLF_PROGRAM_TIMING_DEF_DETAILS=1 \
+  "$(cabal list-bin exe:mlf2)" check-program test/programs/compiler-parser-parity/parser-library
+```
+
+The committed before/after records for the group-finalizer run are stored in:
+
+```text
+bench/baselines/cross-module-let-baseline.before-group-finalizer.tsv
+bench/baselines/cross-module-let-baseline.after-group-finalizer.tsv
+```
+
+A standalone comparison table for later optimization rounds is stored in:
+
+```text
+bench/cross-module-let-baseline-performance.md
+```
+
+The parser-library exact module read-context comparison is stored in:
+
+```text
+bench/parser-library-performance.md
+```
+
+To compare a future run, capture stderr and read the same top-level timing:
+
+```bash
+MLF_PROGRAM_TIMING_DETAIL=1 MLF_PROGRAM_TIMING_OPERATIONS=1 \
+  "$(cabal list-bin exe:mlf2)" check-program test/programs/packages/cross-module-let \
+  >/tmp/cross-module-let-baseline.stdout \
+  2>/tmp/cross-module-let-baseline.stderr
+rg "program\.check\.modules |program\.check\.module\.Prelude\.(constructor|instance|def)-bindings|real |user |sys " \
+  /tmp/cross-module-let-baseline.stderr
+```
+
+For cost-center profiles, build the profiled executable once and run the same
+package root:
+
+```bash
+cabal build exe:mlf2 --enable-profiling --enable-library-profiling --ghc-options='-fprof-auto -rtsopts'
+"$(cabal list-bin exe:mlf2 --enable-profiling --enable-library-profiling --ghc-options='-fprof-auto -rtsopts')" \
+  check-program test/programs/packages/cross-module-let +RTS -p -s -RTS
+```

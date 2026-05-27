@@ -21,11 +21,15 @@ module MLF.Frontend.Program.Check
     checkResolvedProgram,
     checkLocatedProgram,
     checkLocatedProgramPackage,
+    checkLocatedProgramPackageWithTiming,
   )
 where
 
+import Control.Exception (evaluate)
 import Control.Monad (foldM, forM, when, zipWithM)
 import Control.Monad.Except (MonadError (throwError))
+import Data.Char (isAlphaNum)
+import Data.Graph (SCC (..), stronglyConnComp)
 import Data.List (find, intercalate, nub, transpose)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
@@ -43,7 +47,19 @@ import MLF.Frontend.Program.Elaborate
     resolveInstanceInfoWithIdentityType,
     sourceTypeViewInScope,
   )
-import MLF.Frontend.Program.Finalize (finalizeBinding, finalizeBindingAllowOpaque)
+import MLF.Frontend.Program.Finalize
+  ( FinalizeContext,
+    ModuleFinalizeContext,
+    finalizeBindingsAllowOpaqueWithContext,
+    finalizeBindingsAllowOpaqueWithContextWithTiming,
+    finalizeBindingAllowOpaqueWithModuleContext,
+    finalizeBindingAllowOpaqueWithModuleContextWithTiming,
+    finalizeBindingWithContext,
+    finalizeBindingAllowOpaqueWithContext,
+    finalizeBindingAllowOpaqueWithContextWithTiming,
+    mkFinalizeContext,
+    mkModuleFinalizeContext,
+  )
 import MLF.Frontend.Program.Interface
   ( ModuleInterface,
     ProgramInterfaceError,
@@ -82,6 +98,7 @@ import MLF.Frontend.Program.Types
     DataInfo (..),
     ExportedTypeInfo (..),
     InstanceInfo (..),
+    LoweredBinding (..),
     MethodInfo (..),
     ModuleExports (..),
     ProgramDiagnostic (..),
@@ -118,6 +135,13 @@ import MLF.Frontend.Program.Types
     splitArrows,
     splitForalls,
     valueInfoSymbolIdentity,
+  )
+import MLF.Util.Timing
+  ( TimingConfig,
+    timingProgramDefDetails,
+    timeProgramDetailIO,
+    timeProgramIO,
+    timeProgramOperationIO,
   )
 import MLF.Frontend.Syntax
   ( Lit (..),
@@ -403,7 +427,19 @@ checkResolvedProgramWithPackageGraph graph =
 
 checkResolvedProgramWithContext :: Maybe PackageModuleGraph -> ResolvedProgram -> Either ProgramError CheckedProgram
 checkResolvedProgramWithContext mbGraph resolved = runTcM $ do
+  checkedProgram <- checkResolvedProgramCore mbGraph resolved
+  case mbGraph of
+    Nothing -> pure ()
+    Just graph -> validateCheckedPackageInterface graph checkedProgram
+  pure checkedProgram
+
+checkResolvedProgramCore :: Maybe PackageModuleGraph -> ResolvedProgram -> TcM CheckedProgram
+checkResolvedProgramCore mbGraph resolved = do
   modulesChecked <- checkModules mbGraph (resolvedProgramSemanticArtifact resolved)
+  checkedProgramFromCheckedModules resolved modulesChecked
+
+checkedProgramFromCheckedModules :: ResolvedProgram -> [CheckedModule] -> TcM CheckedProgram
+checkedProgramFromCheckedModules resolved modulesChecked = do
   let mainNames =
         [ checkedBindingName binding
           | checked <- modulesChecked,
@@ -415,11 +451,7 @@ checkResolvedProgramWithContext mbGraph resolved = runTcM $ do
       [] -> throwError ProgramMainNotFound
       [name] -> pure name
       names -> throwError (ProgramMultipleMainDefinitions names)
-  let checkedProgram = checkedProgramFromModules resolved modulesChecked mainRuntime
-  case mbGraph of
-    Nothing -> pure ()
-    Just graph -> validateCheckedPackageInterface graph checkedProgram
-  pure checkedProgram
+  pure (checkedProgramFromModules resolved modulesChecked mainRuntime)
 
 checkLocatedProgram :: P.LocatedProgram -> Either ProgramDiagnostic CheckedProgram
 checkLocatedProgram located =
@@ -438,6 +470,88 @@ checkLocatedProgramPackage package =
         checkResolvedProgramWithPackageGraph graph resolved of
         Right checked -> Right checked
         Left err -> Left (diagnosticForProgramError (Just orderedProgram) err)
+
+checkLocatedProgramPackageWithTiming :: TimingConfig -> LocatedProgramPackage -> IO (Either ProgramDiagnostic CheckedProgram)
+checkLocatedProgramPackageWithTiming timing package = do
+  graphResult <-
+    timeProgramIO
+      timing
+      "program.check.module-graph"
+      (evaluate (locatedProgramPackageModuleGraph package))
+  case graphResult of
+    Left err ->
+      pure (Left (diagnosticForProgramError (Just (locatedProgramPackageProgram package)) err))
+    Right graph -> do
+      orderedResult <-
+        timeProgramIO
+          timing
+          "program.check.module-order"
+          (evaluate (locatedProgramPackageOrderedProgram package))
+      case orderedResult of
+        Left err ->
+          pure (Left (diagnosticForProgramError (Just (locatedProgramPackageProgram package)) err))
+        Right orderedProgram -> do
+          normalizedResult <-
+            timeProgramIO
+              timing
+              "program.check.normalize-type-families"
+              (evaluate (normalizeTypeFamiliesInProgram (P.locatedProgram orderedProgram)))
+          case normalizedResult of
+            Left err ->
+              pure (Left (diagnosticForProgramError (Just orderedProgram) err))
+            Right normalized -> do
+              generalizedClassResult <-
+                timeProgramIO
+                  timing
+                  "program.check.reject-generalized-class-features"
+                  (evaluate (rejectUnsupportedGeneralizedClassFeatures normalized))
+              case generalizedClassResult of
+                Left err ->
+                  pure (Left (diagnosticForProgramError (Just orderedProgram) err))
+                Right () -> do
+                  resolvedResult <-
+                    timeProgramIO
+                      timing
+                      "program.check.resolve"
+                      (evaluate (resolveProgram normalized))
+                  case resolvedResult of
+                    Left err ->
+                      pure (Left (diagnosticForProgramError (Just orderedProgram) err))
+                    Right resolved -> do
+                      checkedResult <-
+                        timeProgramIO
+                          timing
+                          "program.check.modules"
+                          (checkResolvedProgramCoreWithTiming timing (Just graph) resolved)
+                      case checkedResult of
+                        Left err ->
+                          pure (Left (diagnosticForProgramError (Just orderedProgram) err))
+                        Right checked -> do
+                          interfaceResult <-
+                            timeProgramIO
+                              timing
+                              "program.check.package-interface"
+                              (evaluate (runTcM (validateCheckedPackageInterface graph checked)))
+                          pure $
+                            case interfaceResult of
+                              Left err -> Left (diagnosticForProgramError (Just orderedProgram) err)
+                              Right () -> Right checked
+
+checkResolvedProgramCoreWithTiming :: TimingConfig -> Maybe PackageModuleGraph -> ResolvedProgram -> IO (Either ProgramError CheckedProgram)
+checkResolvedProgramCoreWithTiming timing mbGraph resolved = do
+  modulesResult <-
+    checkModulesWithTiming
+      timing
+      mbGraph
+      (resolvedProgramSemanticArtifact resolved)
+  case modulesResult of
+    Left err ->
+      pure (Left err)
+    Right modulesChecked ->
+      timeProgramDetailIO
+        timing
+        "program.check.modules.main-binding"
+        (evaluate (runTcM (checkedProgramFromCheckedModules resolved modulesChecked)))
 
 checkedProgramFromModules :: ResolvedProgram -> [CheckedModule] -> String -> CheckedProgram
 checkedProgramFromModules resolved modulesChecked mainRuntime =
@@ -545,6 +659,52 @@ checkModules mbGraph (ResolvedSemanticProgramArtifact resolvedModules) = do
       interface <- liftEitherWithInterface (moduleInterfaceFromCheckedModule node checked)
       go (interface : interfaceAcc) (checked : checkedAcc) rest
 
+checkModulesWithTiming :: TimingConfig -> Maybe PackageModuleGraph -> ResolvedSemanticProgramArtifact -> IO (TcM [CheckedModule])
+checkModulesWithTiming timing mbGraph (ResolvedSemanticProgramArtifact resolvedModules) = do
+  distinctResult <-
+    timeProgramDetailIO
+      timing
+      "program.check.modules.distinct"
+      (evaluate (ensureDistinctBy ProgramDuplicateModule resolvedSemanticModuleName resolvedModules))
+  case distinctResult of
+    Left err ->
+      pure (Left err)
+    Right () ->
+      go [] [] resolvedModules
+  where
+    nodesByModule =
+      Map.fromList
+        [ (packageModuleName (packageModuleGraphNodeId node), node)
+          | graph <- maybe [] pure mbGraph,
+            node <- packageModuleGraphNodes graph
+        ]
+
+    go _ checkedAcc [] =
+      pure (Right (reverse checkedAcc))
+    go interfaceAcc checkedAcc (resolvedModule : rest) = do
+      let moduleName0 = resolvedSemanticModuleName resolvedModule
+      checkedResult <-
+        timeProgramDetailIO
+          timing
+          ("program.check.module." ++ moduleName0)
+          (checkModuleWithTiming timing resolvedModule interfaceAcc)
+      case checkedResult of
+        Left err ->
+          pure (Left err)
+        Right checked -> do
+          interfaceResult <-
+            timeProgramDetailIO
+              timing
+              ("program.check.module-interface." ++ moduleName0)
+              (evaluate $ do
+                node <- moduleInterfaceNodeForResolved nodesByModule mbGraph resolvedModule
+                liftEitherWithInterface (moduleInterfaceFromCheckedModule node checked))
+          case interfaceResult of
+            Left err ->
+              pure (Left err)
+            Right interface ->
+              go (interface : interfaceAcc) (checked : checkedAcc) rest
+
 moduleInterfaceNodeForResolved ::
   Map P.ModuleName PackageModuleGraphNode ->
   Maybe PackageModuleGraph ->
@@ -623,15 +783,16 @@ checkModule resolvedModule priorInterfaces = do
   instanceSkeletons <- buildInstanceSkeletons fullNameEnv scope0 resolvedSyntax derivedInstances
   let scope1 = withScopeInstances (scopeInstances scope0 ++ instanceSkeletons) scope0
   let elaborateScope = mkElaborateScope (scopeValues scope1) (scopeElaborateTypes scope1) (scopeClasses scope1) (scopeInstances scope1)
+  finalizeContext <- mkFinalizeContext elaborateScope
   constructorBindings <-
     mapM
-      (liftEither . (finalizeBinding elaborateScope . lowerConstructorBinding elaborateScope))
+      (liftEither . (finalizeBindingWithContext finalizeContext . lowerConstructorBinding elaborateScope))
       [ ctor
         | dataInfo <- Map.elems localData,
           ctor <- dataConstructors dataInfo
       ]
-  instanceBindings <- concat <$> mapM (checkInstance elaborateScope scope1) (derivedInstances ++ explicitInstances resolvedSyntax)
-  defBindings <- mapM (checkDef elaborateScope scope1) (moduleDefDecls resolvedSyntax)
+  instanceBindings <- checkInstances finalizeContext elaborateScope scope1 (derivedInstances ++ explicitInstances resolvedSyntax)
+  defBindings <- mapM (checkDef finalizeContext elaborateScope scope1) (moduleDefDecls resolvedSyntax)
   exports <- buildExports resolvedSyntax localData localClasses localValues
   let exportedMainRuntime =
         case Map.lookup "main" (exportedValues exports) of
@@ -651,6 +812,500 @@ checkModule resolvedModule priorInterfaces = do
         checkedModuleInstances = instanceSkeletons,
         checkedModuleExports = exports
       }
+
+checkModuleWithTiming :: TimingConfig -> ResolvedSemanticModule -> [ModuleInterface] -> IO (TcM CheckedModule)
+checkModuleWithTiming timing resolvedModule priorInterfaces = do
+  let resolvedSyntax = resolvedSemanticModuleSyntax resolvedModule
+      moduleName0 = resolvedSemanticModuleName resolvedModule
+      priorExports = Map.fromList [(moduleInterfaceName interface, moduleInterfaceExports interface) | interface <- priorInterfaces]
+      priorData = Map.fromList [(moduleInterfaceName interface, moduleInterfaceData interface) | interface <- priorInterfaces]
+      priorInstances = concatMap moduleInterfaceInstances priorInterfaces
+      unqualifiedClassIdentities = importedUnqualifiedClassIdentities priorExports (P.moduleImports resolvedSyntax)
+      visibleImportedInstances =
+        visibleInstancesForImports priorExports priorData priorInstances unqualifiedClassIdentities (P.moduleImports resolvedSyntax)
+      timePhase :: String -> TcM a -> IO (TcM a)
+      timePhase = timeCheckModulePhase timing moduleName0
+  preflightResult <-
+    timePhase "preflight" $ do
+      ensureDistinctImportAliases (P.moduleImports resolvedSyntax)
+      rejectUnsupportedTypeFamilies resolvedSyntax
+      rejectUnsupportedGeneralizedClassFeaturesModule P.refDisplayName resolvedSrcTypeToSrcType resolvedSyntax
+  case preflightResult of
+    Left err -> pure (Left err)
+    Right () -> do
+      importScopeResult <- timePhase "import-scope" (buildImportScopeResolved priorExports (P.moduleImports resolvedSyntax))
+      case importScopeResult of
+        Left err -> pure (Left err)
+        Right importScope -> do
+          let importedEnv = displayNameEnvFromScope importScope
+              localSymbolEnv = displayNameEnvFromResolvedLocals resolvedModule
+              baseNameEnv = localSymbolEnv `preferDisplayNames` importedEnv
+          localDataResult <- timePhase "local-data" (buildLocalDataInfo baseNameEnv resolvedModule resolvedSyntax)
+          case localDataResult of
+            Left err -> pure (Left err)
+            Right localData -> do
+              let dataNameEnv = displayNameEnvFromData localData `preferDisplayNames` baseNameEnv
+              localClassesResult <- timePhase "local-classes" (buildLocalClassInfo dataNameEnv resolvedModule resolvedSyntax)
+              case localClassesResult of
+                Left err -> pure (Left err)
+                Right localClasses -> do
+                  let classNameEnv = displayNameEnvFromClasses localClasses `preferDisplayNames` dataNameEnv
+                  localDefsResult <- timePhase "local-defs" (buildLocalDefInfo classNameEnv resolvedModule resolvedSyntax)
+                  case localDefsResult of
+                    Left err -> pure (Left err)
+                    Right localDefs -> do
+                      localValuesResult <-
+                        timePhase "local-values" $ do
+                          localValues0 <- addConstructorValues moduleName0 localData
+                          localValues1 <- mergeMaps ProgramDuplicateValue localValues0 localDefs
+                          let localMethodValues =
+                                Map.fromList
+                                  [ ( methodName method,
+                                      OverloadedMethod
+                                        { valueDisplayName = methodName method,
+                                          valueInfoSymbol = methodInfoSymbolIdentity method,
+                                          valueMethodInfo = method,
+                                          valueOriginModule = moduleName0
+                                        }
+                                    )
+                                    | classInfo <- Map.elems localClasses,
+                                      method <- Map.elems (classMethods classInfo)
+                                  ]
+                          mergeMaps ProgramDuplicateValue localValues1 localMethodValues
+                      case localValuesResult of
+                        Left err -> pure (Left err)
+                        Right localValues -> do
+                          let valueNameEnv = displayNameEnvFromValues localValues `preferDisplayNames` classNameEnv
+                          scopeResult <-
+                            timePhase "scopes" $ do
+                              valueScope <- liftEither (addValues (scopeValues importScope) localValues)
+                              typeScope <- liftEither (addTypes (scopeTypes importScope) localData)
+                              classScope <- liftEither (addClasses (scopeClasses importScope) localClasses)
+                              let scope0 = mkScopeWithHidden valueScope typeScope (scopeHiddenTypes importScope) classScope (scopeInstances importScope ++ visibleImportedInstances)
+                                  fullNameEnv = valueNameEnv `preferDisplayNames` displayNameEnvFromScope scope0
+                              pure (scope0, fullNameEnv)
+                          case scopeResult of
+                            Left err -> pure (Left err)
+                            Right (scope0, fullNameEnv) -> do
+                              validationResult <-
+                                timePhase "validations" $ do
+                                  validateModuleKinds scope0 resolvedSyntax
+                                  validateLocalClassMethodConstraints scope0 resolvedSyntax
+                              case validationResult of
+                                Left err -> pure (Left err)
+                                Right () -> do
+                                  derivedInstancesResult <- timePhase "derived-instances" (synthesizeDerivedInstances fullNameEnv scope0 resolvedModule resolvedSyntax)
+                                  case derivedInstancesResult of
+                                    Left err -> pure (Left err)
+                                    Right derivedInstances -> do
+                                      instanceSkeletonsResult <- timePhase "instance-skeletons" (buildInstanceSkeletons fullNameEnv scope0 resolvedSyntax derivedInstances)
+                                      case instanceSkeletonsResult of
+                                        Left err -> pure (Left err)
+                                        Right instanceSkeletons -> do
+                                          let scope1 = withScopeInstances (scopeInstances scope0 ++ instanceSkeletons) scope0
+                                              elaborateScope = mkElaborateScope (scopeValues scope1) (scopeElaborateTypes scope1) (scopeClasses scope1) (scopeInstances scope1)
+                                          finalizeContextResult <- timePhase "finalize-context" (mkFinalizeContext elaborateScope)
+                                          case finalizeContextResult of
+                                            Left err -> pure (Left err)
+                                            Right finalizeContext -> do
+                                              finalizeCheckedModuleWithTiming timing moduleName0 resolvedSyntax localData localClasses localValues instanceSkeletons finalizeContext elaborateScope scope1 derivedInstances
+
+finalizeCheckedModuleWithTiming ::
+  TimingConfig ->
+  P.ModuleName ->
+  P.ResolvedModuleSyntax ->
+  Map String DataInfo ->
+  Map String ClassInfo ->
+  Map String ValueInfo ->
+  [InstanceInfo] ->
+  FinalizeContext ->
+  ElaborateScope ->
+  Scope ->
+  [P.ResolvedInstanceDecl] ->
+  IO (TcM CheckedModule)
+finalizeCheckedModuleWithTiming timing moduleName0 resolvedSyntax localData localClasses localValues instanceSkeletons finalizeContext elaborateScope scope1 derivedInstances = do
+  constructorBindingsResult <-
+    timeCheckModulePhaseIO timing moduleName0 "constructor-bindings" $
+      checkConstructorsWithTiming timing moduleName0 finalizeContext elaborateScope localData
+  case constructorBindingsResult of
+    Left err -> pure (Left err)
+    Right constructorBindings -> do
+      instanceBindingsResult <-
+        timeCheckModulePhaseIO timing moduleName0 "instance-bindings" $
+          checkInstancesWithTiming timing moduleName0 finalizeContext elaborateScope scope1 (derivedInstances ++ explicitInstances resolvedSyntax)
+      case instanceBindingsResult of
+        Left err -> pure (Left err)
+        Right instanceBindings -> do
+          defBindingsResult <-
+            timeCheckModulePhaseIO timing moduleName0 "def-bindings" $
+              checkDefsWithTiming timing moduleName0 finalizeContext elaborateScope scope1 (moduleDefDecls resolvedSyntax)
+          case defBindingsResult of
+            Left err -> pure (Left err)
+            Right defBindings -> do
+              exportsResult <- timeCheckModulePhase timing moduleName0 "exports" (buildExports resolvedSyntax localData localClasses localValues)
+              pure $ do
+                exports <- exportsResult
+                let exportedMainRuntime =
+                      case Map.lookup "main" (exportedValues exports) of
+                        Just OrdinaryValue {valueRuntimeName = runtimeName} -> Just runtimeName
+                        _ -> Nothing
+                    markExportedMain binding =
+                      binding
+                        { checkedBindingExportedAsMain =
+                            Just (checkedBindingName binding) == exportedMainRuntime
+                        }
+                pure
+                  CheckedModule
+                    { checkedModuleName = moduleName0,
+                      checkedModuleBindings = constructorBindings ++ instanceBindings ++ map markExportedMain defBindings,
+                      checkedModuleData = localData,
+                      checkedModuleClasses = localClasses,
+                      checkedModuleInstances = instanceSkeletons,
+                      checkedModuleExports = exports
+                    }
+
+timeCheckModulePhase :: TimingConfig -> P.ModuleName -> String -> TcM a -> IO (TcM a)
+timeCheckModulePhase timing moduleName0 phase action =
+  timeProgramDetailIO
+    timing
+    ("program.check.module." ++ moduleName0 ++ "." ++ phase)
+    (evaluate action)
+
+timeCheckModulePhaseIO :: TimingConfig -> P.ModuleName -> String -> IO (TcM a) -> IO (TcM a)
+timeCheckModulePhaseIO timing moduleName0 phase action =
+  timeProgramDetailIO
+    timing
+    ("program.check.module." ++ moduleName0 ++ "." ++ phase)
+    action
+
+timeCheckModuleOperation :: TimingConfig -> P.ModuleName -> String -> TcM a -> IO (TcM a)
+timeCheckModuleOperation timing moduleName0 operation action =
+  timeProgramOperationIO
+    timing
+    (checkModuleOperationLabel moduleName0 operation)
+    (evaluate action)
+
+checkModuleOperationLabel :: P.ModuleName -> String -> String
+checkModuleOperationLabel moduleName0 operation =
+  "program.check.operation." ++ moduleName0 ++ "." ++ sanitizeTimingLabel operation
+
+sanitizeTimingLabel :: String -> String
+sanitizeTimingLabel =
+  map sanitizeChar
+  where
+    sanitizeChar char
+      | isAlphaNum char = char
+      | otherwise = '_'
+
+checkConstructorsWithTiming :: TimingConfig -> P.ModuleName -> FinalizeContext -> ElaborateScope -> Map String DataInfo -> IO (TcM [CheckedBinding])
+checkConstructorsWithTiming timing moduleName0 finalizeContext elaborateScope localData =
+  go []
+    [ ctor
+      | dataInfo <- Map.elems localData,
+        ctor <- dataConstructors dataInfo
+    ]
+  where
+    go acc [] = pure (Right (reverse acc))
+    go acc (ctor : rest) = do
+      result <-
+        timeCheckModuleOperation timing moduleName0 ("constructor." ++ ctorName ctor) $
+          liftEither (finalizeBindingWithContext finalizeContext (lowerConstructorBinding elaborateScope ctor))
+      case result of
+        Left err -> pure (Left err)
+        Right binding -> go (binding : acc) rest
+
+checkInstancesWithTiming :: TimingConfig -> P.ModuleName -> FinalizeContext -> ElaborateScope -> Scope -> [P.ResolvedInstanceDecl] -> IO (TcM [CheckedBinding])
+checkInstancesWithTiming timing moduleName0 finalizeContext elaborateScope scope instDecls =
+  go [] (zip [(1 :: Int) ..] instDecls)
+  where
+    go acc [] =
+      finalizeBindingsAllowOpaqueWithContextWithTiming
+        timing
+        (checkModuleOperationLabel moduleName0 "instance_methods.group_finalize")
+        finalizeContext
+        (concat (reverse acc))
+    go acc ((index, instDecl) : rest) = do
+      result <-
+        lowerInstanceWithTiming
+          timing
+          moduleName0
+          (instanceTimingLabel index instDecl)
+          elaborateScope
+          scope
+          instDecl
+      case result of
+        Left err -> pure (Left err)
+        Right lowereds -> go (lowereds : acc) rest
+
+instanceTimingLabel :: Int -> P.ResolvedInstanceDecl -> String
+instanceTimingLabel index instDecl =
+  "instance."
+    ++ show index
+    ++ "."
+    ++ P.refDisplayName (P.instanceDeclClass instDecl)
+    ++ "."
+    ++ intercalate "_" (map (sanitizeType . resolvedSrcTypeToSrcType) (NE.toList (P.instanceDeclTypes instDecl)))
+
+lowerInstanceWithTiming :: TimingConfig -> P.ModuleName -> String -> ElaborateScope -> Scope -> P.ResolvedInstanceDecl -> IO (TcM [LoweredBinding])
+lowerInstanceWithTiming timing moduleName0 instanceLabel elaborateScope scope instDecl = do
+  instanceResult <-
+    timeCheckModuleOperation timing moduleName0 (instanceLabel ++ ".lookup") $
+      lookupInstanceForDecl scope instDecl
+  case instanceResult of
+    Left err -> pure (Left err)
+    Right (classInfo, instanceInfo) ->
+      lowerInstanceMethodsWithTiming timing moduleName0 instanceLabel elaborateScope classInfo instanceInfo (P.instanceDeclMethods instDecl)
+
+lowerInstanceMethodsWithTiming :: TimingConfig -> P.ModuleName -> String -> ElaborateScope -> ClassInfo -> InstanceInfo -> [P.ResolvedMethodDef] -> IO (TcM [LoweredBinding])
+lowerInstanceMethodsWithTiming timing moduleName0 instanceLabel elaborateScope classInfo instanceInfo methodDefs =
+  go [] methodDefs
+  where
+    go acc [] = pure (Right (reverse acc))
+    go acc (methodDef : rest) = do
+      result <-
+        timeCheckModuleOperation timing moduleName0 (instanceLabel ++ ".method." ++ P.methodDefName methodDef ++ ".lower") $
+          lowerInstanceMethod elaborateScope classInfo instanceInfo methodDef
+      case result of
+        Left err -> pure (Left err)
+        Right lowered -> go (lowered : acc) rest
+
+checkInstances :: FinalizeContext -> ElaborateScope -> Scope -> [P.ResolvedInstanceDecl] -> TcM [CheckedBinding]
+checkInstances finalizeContext elaborateScope scope instDecls = do
+  lowereds <- concat <$> mapM (lowerInstance elaborateScope scope) instDecls
+  liftEither (finalizeBindingsAllowOpaqueWithContext finalizeContext lowereds)
+
+lowerInstance :: ElaborateScope -> Scope -> P.ResolvedInstanceDecl -> TcM [LoweredBinding]
+lowerInstance elaborateScope scope instDecl = do
+  (classInfo, instanceInfo) <- lookupInstanceForDecl scope instDecl
+  mapM (lowerInstanceMethod elaborateScope classInfo instanceInfo) (P.instanceDeclMethods instDecl)
+
+lookupInstanceForDecl :: Scope -> P.ResolvedInstanceDecl -> TcM (ClassInfo, InstanceInfo)
+lookupInstanceForDecl scope instDecl = do
+  classInfo <- lookupClassInfoBySymbol scope (P.instanceDeclClass instDecl)
+  let headTys = fmap resolvedSrcTypeToSrcType (P.instanceDeclTypes instDecl)
+      headIdentityTys = fmap resolvedSrcTypeIdentityType (P.instanceDeclTypes instDecl)
+  instanceInfo <-
+    case findInstance classInfo headIdentityTys of
+      Just info -> pure info
+      Nothing ->
+        throwError $
+          case headTys of
+            headTy :| [] -> ProgramNoMatchingInstance (className classInfo) headTy
+            tys -> ProgramNoMatchingInstanceHead (className classInfo) (NE.toList tys)
+  pure (classInfo, instanceInfo)
+  where
+    findInstance classInfo headIdentityTys =
+      find
+        ( \info ->
+            instanceClassIdentity info == classIdentity classInfo
+              && instanceHeadIdentityTypes info == headIdentityTys
+        )
+        (scopeInstances scope)
+
+lowerInstanceMethod :: ElaborateScope -> ClassInfo -> InstanceInfo -> P.ResolvedMethodDef -> TcM LoweredBinding
+lowerInstanceMethod elaborateScope classInfo instanceInfo methodDef =
+  case instanceMethods instanceInfo Map.! P.methodDefName methodDef of
+    valueInfo@OrdinaryValue {} -> do
+      let methodRuntimeName = valueRuntimeName valueInfo
+          methodSourceView =
+            TypeView
+              { typeViewDisplay = valueType valueInfo,
+                typeViewIdentity = valueIdentityType valueInfo
+              }
+      liftEither
+        (lowerConstrainedResolvedExprBinding elaborateScope methodRuntimeName (valueConstraintInfos valueInfo) methodSourceView False (P.methodDefExpr methodDef))
+    _ -> throwError (ProgramUnexpectedInstanceMethod (className classInfo) (P.methodDefName methodDef))
+
+data DefWorkItem = DefWorkItem
+  { defWorkItemDecl :: P.ResolvedDefDecl,
+    defWorkItemLowered :: LoweredBinding,
+    defWorkItemDependencies :: [String]
+  }
+
+checkDefsWithTiming :: TimingConfig -> P.ModuleName -> FinalizeContext -> ElaborateScope -> Scope -> [P.ResolvedDefDecl] -> IO (TcM [CheckedBinding])
+checkDefsWithTiming timing moduleName0 finalizeContext elaborateScope scope defDecls = do
+  workItemsResult <- lowerDefWorkItemsWithTiming timing moduleName0 elaborateScope scope defDecls
+  case workItemsResult of
+    Left err -> pure (Left err)
+    Right workItems -> do
+      nonRecursiveNamesResult <-
+        timeCheckModuleOperation timing moduleName0 "defs.scc_classification" $
+          Right (nonRecursiveDefNames workItems)
+      case nonRecursiveNamesResult of
+        Left err -> pure (Left err)
+        Right nonRecursiveNames
+          | length workItems >= moduleDefContextMinDefs -> do
+              moduleContextResult <-
+                timeCheckModuleOperation timing moduleName0 "defs.module_finalize_context" $
+                  mkModuleFinalizeContext finalizeContext (map defWorkItemLowered workItems)
+              case moduleContextResult of
+                Left err -> pure (Left err)
+                Right moduleContext ->
+                  finalizeDefWorkItemsWithTiming
+                    timing
+                    moduleName0
+                    finalizeContext
+                    (Just moduleContext)
+                    nonRecursiveNames
+                    workItems
+          | otherwise ->
+              finalizeDefWorkItemsWithTiming
+                timing
+                moduleName0
+                finalizeContext
+                Nothing
+                nonRecursiveNames
+                workItems
+
+lowerDefWorkItemsWithTiming ::
+  TimingConfig ->
+  P.ModuleName ->
+  ElaborateScope ->
+  Scope ->
+  [P.ResolvedDefDecl] ->
+  IO (TcM [DefWorkItem])
+lowerDefWorkItemsWithTiming timing moduleName0 elaborateScope scope defDecls =
+  go [] defDecls
+  where
+    localDefNames = Set.fromList (map P.defDeclName defDecls)
+
+    go acc [] = pure (Right (reverse acc))
+    go acc (defDecl : rest) = do
+      result <-
+        timeCheckModuleOperation timing moduleName0 ("def." ++ P.defDeclName defDecl ++ ".lower") $
+          lowerDefWorkItem elaborateScope scope localDefNames defDecl
+      case result of
+        Left err -> pure (Left err)
+        Right workItem -> go (workItem : acc) rest
+
+lowerDefWorkItem ::
+  ElaborateScope ->
+  Scope ->
+  Set.Set String ->
+  P.ResolvedDefDecl ->
+  TcM DefWorkItem
+lowerDefWorkItem elaborateScope scope localDefNames defDecl = do
+  valueInfo <- lookupValueInfo scope (P.defDeclName defDecl)
+  case valueInfo of
+    ordinary@OrdinaryValue {} -> do
+      lowered <-
+        liftEither $
+          lowerResolvedConstrainedExprBinding
+            elaborateScope
+            (valueRuntimeName ordinary)
+            (P.defDeclType defDecl)
+            (P.defDeclName defDecl == "main")
+            (P.defDeclExpr defDecl)
+      pure
+        DefWorkItem
+          { defWorkItemDecl = defDecl,
+            defWorkItemLowered = lowered,
+            defWorkItemDependencies = localResolvedDefDependencies localDefNames (P.defDeclExpr defDecl)
+          }
+    _ -> throwError (ProgramDuplicateValue (P.defDeclName defDecl))
+
+localResolvedDefDependencies :: Set.Set String -> P.ResolvedExpr -> [String]
+localResolvedDefDependencies localDefNames expr =
+  Set.toList (Set.fromList (collectFreeResolvedValues Set.empty expr) `Set.intersection` localDefNames)
+
+collectFreeResolvedValues :: Set.Set String -> P.ResolvedExpr -> [String]
+collectFreeResolvedValues bound expr =
+  case expr of
+    P.EVar (P.ResolvedLocalValue name)
+      | name `Set.member` bound -> []
+      | otherwise -> [name]
+    P.EVar P.ResolvedGlobalValue {} -> []
+    P.ELit {} -> []
+    P.ELam param body -> collectFreeResolvedValues (Set.insert (P.paramName param) bound) body
+    P.EApp fun arg -> collectFreeResolvedValues bound fun ++ collectFreeResolvedValues bound arg
+    P.ELet name _ rhs body -> collectFreeResolvedValues bound rhs ++ collectFreeResolvedValues (Set.insert name bound) body
+    P.EAnn inner _ -> collectFreeResolvedValues bound inner
+    P.ECase scrutinee alts -> collectFreeResolvedValues bound scrutinee ++ concatMap collectAlt alts
+  where
+    collectAlt (P.Alt pattern0 body) =
+      collectFreeResolvedValues (bound `Set.union` Set.fromList (patternBinders pattern0)) body
+
+    patternBinders = \case
+      P.PatCtor _ patterns -> concatMap patternBinders patterns
+      P.PatVar name -> [name]
+      P.PatWildcard -> []
+      P.PatAnn inner _ -> patternBinders inner
+
+nonRecursiveDefNames :: [DefWorkItem] -> Set.Set String
+nonRecursiveDefNames workItems =
+  Set.fromList
+    [ P.defDeclName (defWorkItemDecl workItem)
+    | AcyclicSCC workItem <- stronglyConnComp (map graphNode workItems)
+    ]
+  where
+    graphNode workItem =
+      ( workItem,
+        P.defDeclName (defWorkItemDecl workItem),
+        defWorkItemDependencies workItem
+      )
+
+finalizeDefWorkItemsWithTiming ::
+  TimingConfig ->
+  P.ModuleName ->
+  FinalizeContext ->
+  Maybe ModuleFinalizeContext ->
+  Set.Set String ->
+  [DefWorkItem] ->
+  IO (TcM [CheckedBinding])
+finalizeDefWorkItemsWithTiming timing moduleName0 finalizeContext moduleContext nonRecursiveNames =
+  go []
+  where
+    go acc [] = pure (Right (reverse acc))
+    go acc (workItem : rest) = do
+      result <- finalizeDefWorkItemWithTiming timing moduleName0 finalizeContext moduleContext nonRecursiveNames workItem
+      case result of
+        Left err -> pure (Left err)
+        Right binding -> go (binding : acc) rest
+
+finalizeDefWorkItemWithTiming ::
+  TimingConfig ->
+  P.ModuleName ->
+  FinalizeContext ->
+  Maybe ModuleFinalizeContext ->
+  Set.Set String ->
+  DefWorkItem ->
+  IO (TcM CheckedBinding)
+finalizeDefWorkItemWithTiming timing moduleName0 finalizeContext moduleContext nonRecursiveNames workItem =
+  timeProgramOperationIO timing label $
+    case moduleContext of
+      Just moduleContext0
+        | moduleContextEligibleDefWorkItem nonRecursiveNames workItem ->
+            if timingProgramDefDetails timing
+              then
+                finalizeBindingAllowOpaqueWithModuleContextWithTiming
+                  timing
+                  label
+                  moduleContext0
+                  False
+                  lowered
+              else
+                evaluate (finalizeBindingAllowOpaqueWithModuleContext moduleContext0 lowered)
+      _ ->
+        if timingProgramDefDetails timing
+          then
+            finalizeBindingAllowOpaqueWithContextWithTiming
+              timing
+              label
+              finalizeContext
+              lowered
+          else
+            evaluate (finalizeBindingAllowOpaqueWithContext finalizeContext lowered)
+  where
+    defName = P.defDeclName (defWorkItemDecl workItem)
+    lowered = defWorkItemLowered workItem
+    label = checkModuleOperationLabel moduleName0 ("def." ++ defName)
+
+moduleDefContextMinDefs :: Int
+moduleDefContextMinDefs = 150
+
+moduleContextEligibleDefWorkItem :: Set.Set String -> DefWorkItem -> Bool
+moduleContextEligibleDefWorkItem nonRecursiveNames workItem =
+  P.defDeclName (defWorkItemDecl workItem) `Set.member` nonRecursiveNames
 
 moduleInterfaceName :: ModuleInterface -> P.ModuleName
 moduleInterfaceName =
@@ -3023,49 +3678,14 @@ sanitizeType = \case
       | c `elem` ['0' .. '9'] = [c]
       | otherwise = "_u" ++ show (fromEnum c) ++ "_"
 
-checkInstance :: ElaborateScope -> Scope -> P.ResolvedInstanceDecl -> TcM [CheckedBinding]
-checkInstance elaborateScope scope instDecl = do
-  classInfo <- lookupClassInfoBySymbol scope (P.instanceDeclClass instDecl)
-  let headTys = fmap resolvedSrcTypeToSrcType (P.instanceDeclTypes instDecl)
-  instanceInfo <-
-    case findInstance classInfo (fmap resolvedSrcTypeIdentityType (P.instanceDeclTypes instDecl)) of
-      Just info -> pure info
-      Nothing ->
-        throwError $
-          case headTys of
-            headTy :| [] -> ProgramNoMatchingInstance (className classInfo) headTy
-            tys -> ProgramNoMatchingInstanceHead (className classInfo) (NE.toList tys)
-  forM (P.instanceDeclMethods instDecl) $ \methodDef -> do
-    case instanceMethods instanceInfo Map.! P.methodDefName methodDef of
-      valueInfo@OrdinaryValue {} -> do
-        let methodRuntimeName = valueRuntimeName valueInfo
-            methodSourceView =
-              TypeView
-                { typeViewDisplay = valueType valueInfo,
-                  typeViewIdentity = valueIdentityType valueInfo
-                }
-        liftEither
-          ( lowerConstrainedResolvedExprBinding elaborateScope methodRuntimeName (valueConstraintInfos valueInfo) methodSourceView False (P.methodDefExpr methodDef)
-              >>= finalizeBindingAllowOpaque elaborateScope
-          )
-      _ -> throwError (ProgramUnexpectedInstanceMethod (className classInfo) (P.methodDefName methodDef))
-  where
-    findInstance classInfo headIdentityTys =
-      find
-        ( \info ->
-            instanceClassIdentity info == classIdentity classInfo
-              && instanceHeadIdentityTypes info == headIdentityTys
-        )
-        (scopeInstances scope)
-
-checkDef :: ElaborateScope -> Scope -> P.ResolvedDefDecl -> TcM CheckedBinding
-checkDef elaborateScope scope defDecl = do
+checkDef :: FinalizeContext -> ElaborateScope -> Scope -> P.ResolvedDefDecl -> TcM CheckedBinding
+checkDef finalizeContext elaborateScope scope defDecl = do
   valueInfo <- lookupValueInfo scope (P.defDeclName defDecl)
   case valueInfo of
     ordinary@OrdinaryValue {} -> do
       liftEither
         ( lowerResolvedConstrainedExprBinding elaborateScope (valueRuntimeName ordinary) (P.defDeclType defDecl) (P.defDeclName defDecl == "main") (P.defDeclExpr defDecl)
-            >>= finalizeBindingAllowOpaque elaborateScope
+            >>= finalizeBindingAllowOpaqueWithContext finalizeContext
         )
     _ -> throwError (ProgramDuplicateValue (P.defDeclName defDecl))
 

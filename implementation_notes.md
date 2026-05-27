@@ -1,3 +1,54 @@
+## 2026-05-25 - Parser parity batch driver
+
+- Replaced the repeated public `.mlfp` parser-parity fixture executions with
+  one generated aggregate driver under `dist-newstyle/parser-parity-batch`.
+  The generated driver imports the shared parser library once through
+  `--search-path`, embeds the carried positive fixture source texts, and
+  renders the positive projections, negative diagnostic evidence, and retry
+  evidence as labelled sections.
+- Kept canonical-parser projection checks in Haskell for each positive fixture
+  so committed oracles still compare against the current canonical parser
+  independently of the generated `.mlfp` batch driver.
+- Scope remains bounded parser parity only. This is a test harness performance
+  refactor, not a full parser parity, resolver, checker, backend,
+  compiler-package, driver, platform, proof, or self-boot claim.
+
+## 2026-05-25 - Program frontend timing diagnostics
+
+- Added `MLF_PROGRAM_TIMING=1` as an opt-in CLI timing flag. `check-program`
+  and `run-program` now emit package-load and frontend-check stage timings to
+  stderr while preserving normal stdout. `MLF_PROGRAM_TIMING_DETAIL=1` adds
+  per-module and per-module-phase timings inside `program.check.modules`.
+  `MLF_PROGRAM_TIMING_OPERATIONS=1` is the narrow profiling mode for
+  per-constructor, per-instance-method, and per-definition timings.
+- The parser-parity batch check measured the slowdown in
+  `program.check.modules`: `254060.643ms` out of `real 254.18s`. Package
+  loading, module graph/order, type-family normalization, resolver, and package
+  interface validation were all millisecond-scale in that run.
+- The detailed parser-parity batch check measured `program.check.modules` at
+  `253027.244ms`, led by `ParserParityParser` at `160623.202ms`,
+  `ParserParityParserCombinator` at `33107.746ms`, `ParserParityLexer` at
+  `28116.792ms`, and `ParserParityAst` at `26240.458ms`.
+- A `cross-module-let` calibration run showed the small-package `Prelude`
+  checker cost was dominated by `instance-bindings` (`329.396ms` of
+  `456.941ms`). The parser-parity batch was different: it was dominated by
+  `def-bindings`, especially `ParserParityParser.def-bindings`
+  (`155502.345ms`), `ParserParityParserCombinator.def-bindings`
+  (`31699.633ms`), `ParserParityLexer.def-bindings` (`26351.485ms`), and
+  `ParserParityAst.def-bindings` (`25614.077ms`).
+- An operation-level `cross-module-let` run showed the current small-package
+  hot spots are Prelude-owned operations: `Eq (List a).eq` (`213.304ms`),
+  `Eq Nat.eq` (`64.126ms`), `Eq (Option a).eq` (`50.795ms`), then
+  constructor bindings such as `Cons` (`24.587ms`) and `Succ` (`15.929ms`).
+- Added a module-level finalization context that prepares the shared runtime
+  external-binding environment once per checked module, while keeping
+  binding-local deferred placeholders outside that cache to avoid name
+  collisions. This shares normalized runtime bindings and authoritative scheme
+  info across binding finalization calls, but it did not materially move the
+  parser-parity batch: the generated batch still measured
+  `program.check.modules` at `245423.268ms` (`real 262.28s`), with
+  `ParserParityParser.def-bindings` still dominant at `153617.643ms`.
+
 ## 2026-05-24 - Round 317 parser parity qualified import/reference extension
 
 - Extended the shared parser-owned parser-parity source-text lexer/parser

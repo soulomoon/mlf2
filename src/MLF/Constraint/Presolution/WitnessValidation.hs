@@ -33,6 +33,7 @@ data OmegaNormalizeEnv p = OmegaNormalizeEnv
     , canonical :: NodeId -> NodeId
     , constraint :: Constraint p
     , binderArgs :: IntMap.IntMap NodeId
+    , precomputedDescendants :: IntMap.IntMap IntSet.IntSet
     , binderReplayMap :: IntMap.IntMap NodeId
     , replayContract :: ReplayContract
     , replayDomainBinders :: [NodeId]

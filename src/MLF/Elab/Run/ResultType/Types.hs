@@ -6,6 +6,8 @@ module MLF.Elab.Run.ResultType.Types (
         , rtcCanonical
         , rtcEdgeArtifacts
         , rtcPresolutionView
+        , rtcReadModel
+        , rtcBaseReadModel
         , rtcBindParentsGa
         , rtcPlanBuilder
         , rtcBaseConstraint
@@ -26,6 +28,8 @@ import MLF.Constraint.Presolution.View (PresolutionView(..))
 import MLF.Constraint.Types.Witness (EdgeWitness, Expansion)
 import MLF.Constraint.Types.Phase (Phase)
 import MLF.Elab.Generalize (GaBindParents)
+import MLF.Elab.ReadModel (ElabReadModel)
+import MLF.Elab.Types (ElabError)
 import MLF.Util.Trace (TraceConfig)
 
 -- | Context for result type computation, bundling shared state.
@@ -36,6 +40,8 @@ data ResultTypeInputs (p :: Phase) = ResultTypeInputs
     { rtcCanonical :: NodeId -> NodeId
     , rtcEdgeArtifacts :: EdgeArtifacts
     , rtcPresolutionView :: PresolutionView p
+    , rtcReadModel :: Maybe (Either ElabError (ElabReadModel p))
+    , rtcBaseReadModel :: Maybe (Either ElabError (ElabReadModel p))
     , rtcBindParentsGa :: GaBindParents p
     , rtcPlanBuilder :: PresolutionPlanBuilder
     , rtcBaseConstraint :: Constraint p

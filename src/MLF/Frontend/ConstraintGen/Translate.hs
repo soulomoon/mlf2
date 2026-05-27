@@ -38,37 +38,50 @@ schemeExternalBindings =
           }
     )
 
--- | Like 'buildRootExpr', but first injects external type assumptions
--- into the constraint graph as let-bound polymorphic schemes.  Each
--- entry in the 'ExternalEnv' becomes a binding whose scheme root is
--- the flexible internalization of the given 'NormSrcType', so that
--- variable references in the expression get proper expansion nodes.
+-- | Like 'buildRootExpr', but with external type assumptions available as
+-- let-bound polymorphic schemes.  The external environment starts as compact
+-- lazy entries; referenced free variables are materialized before expression
+-- translation so variable references still get proper expansion nodes.
 buildRootExprWithEnv :: ExternalEnv -> NormCoreExpr -> ConstraintM (GenNodeId, Env, NodeId, AnnExpr)
 buildRootExprWithEnv extEnv =
   buildRootExprWithExternalBindings (schemeExternalBindings extEnv)
 
 buildRootExprWithExternalBindings :: ExternalBindings -> NormCoreExpr -> ConstraintM (GenNodeId, Env, NodeId, AnnExpr)
 buildRootExprWithExternalBindings extBindings expr = do
+  (rootGen, initialBindings) <- buildInitialExternalBindings extBindings
+  referencedBindings <- materializeReferencedExternalBindings expr initialBindings
+  (rootNode, annRoot) <- buildRootExprFromInitialEnv rootGen referencedBindings expr
+  pure (rootGen, referencedBindings, rootNode, annRoot)
+
+buildInitialExternalBindings :: ExternalBindings -> ConstraintM (GenNodeId, Env)
+buildInitialExternalBindings extBindings = do
   rootGen <- allocGenNode []
   initialBindings <- buildInitialEnv rootGen extBindings
+  pure (rootGen, initialBindings)
+
+buildRootExprFromInitialEnv :: GenNodeId -> Env -> NormCoreExpr -> ConstraintM (NodeId, AnnExpr)
+buildRootExprFromInitialEnv rootGen initialBindings expr = do
   (rootNode, annRoot) <- buildExpr initialBindings rootGen expr
   topFrame <- Scope.peekScope
   rebindScopeRoot (genRef rootGen) rootNode topFrame
   setBindParentIfMissing (typeRef rootNode) (genRef rootGen) BindFlex
   setGenNodeSchemes rootGen [rootNode]
-  pure (rootGen, initialBindings, rootNode, annRoot)
+  pure (rootNode, annRoot)
 
--- | Build an initial 'Env' from an 'ExternalEnv' by internalizing each
--- source type as a let-bound polymorphic scheme under the given root gen.
+-- | Build an initial 'Env' from an 'ExternalEnv' without allocating every
+-- external scheme graph.  Referenced free variables are materialized before
+-- translating the expression, preserving the eager binding shape for used
+-- entries while avoiding the unused external graph.
 buildInitialEnv :: GenNodeId -> ExternalBindings -> ConstraintM Env
-buildInitialEnv rootGen extBindings =
-  foldM
-    ( \env (name, externalBinding) -> do
-        binding <- buildExternalBinding rootGen name externalBinding
-        pure (Map.insert name binding env)
-    )
-    Map.empty
-    (Map.toList extBindings)
+buildInitialEnv rootGen =
+  pure
+    . Map.map
+      ( \externalBinding ->
+          LazyExternalBinding
+            { bindingExternalRoot = rootGen,
+              bindingExternal = externalBinding
+            }
+      )
 
 -- | Create a let-bound polymorphic 'Binding' for an external variable.
 -- Allocates a child gen node under the root, internalizes the source
@@ -217,20 +230,52 @@ rhsMentionsBinder needle expr =
           rhsMentionsBinder needle rhs || rhsMentionsBinder needle body
     ECoerceConst {} -> False
 
+freeCoreVars :: NormCoreExpr -> Set.Set VarName
+freeCoreVars = go Set.empty
+  where
+    go :: Set.Set VarName -> NormCoreExpr -> Set.Set VarName
+    go bound expr =
+      case expr of
+        EVar name
+          | Set.member name bound -> Set.empty
+          | otherwise -> Set.singleton name
+        ELit _ -> Set.empty
+        ELam param body ->
+          go (Set.insert param bound) body
+        EApp fun arg ->
+          go bound fun <> go bound arg
+        ELet name rhs body ->
+          go bound rhs <> go (Set.insert name bound) body
+        ECoerceConst {} -> Set.empty
+
+materializeReferencedExternalBindings :: NormCoreExpr -> Env -> ConstraintM Env
+materializeReferencedExternalBindings expr env0 =
+  foldM materializeOne env0 (Set.toAscList (freeCoreVars expr))
+  where
+    materializeOne acc name =
+      case Map.lookup name acc of
+        Just lazy@LazyExternalBinding{} -> do
+          binding <- materializeBinding name lazy
+          pure (Map.insert name binding acc)
+        _ -> pure acc
+
 buildExprRaw :: Env -> GenNodeId -> NormCoreExpr -> ConstraintM (NodeId, AnnExpr)
 buildExprRaw env scopeRoot expr =
   case expr of
     EVar name -> do
-      binding <- lookupVar env name
-      let nid = bindingNode binding
-      case bindingGen binding of
-        -- Polymorphic bindings (let-bound schemes) get a fresh expansion node.
-        Just _ -> do
-          (expNode, _) <- allocExpNode nid
-          pure (expNode, AVar name expNode)
-        -- Monomorphic bindings (e.g. lambda parameters) do not need expansion.
-        Nothing ->
-          pure (nid, AVar name nid)
+      binding <- lookupVar env name >>= materializeBinding name
+      case binding of
+        Binding nid mGen ->
+          case mGen of
+            -- Polymorphic bindings (let-bound schemes) get a fresh expansion node.
+            Just _ -> do
+              (expNode, _) <- allocExpNode nid
+              pure (expNode, AVar name expNode)
+            -- Monomorphic bindings (e.g. lambda parameters) do not need expansion.
+            Nothing ->
+              pure (nid, AVar name nid)
+        LazyExternalBinding {} ->
+          throwError (InternalConstraintError ("unmaterialized external binding for " ++ name))
     ELit lit -> do
       baseNode <- allocBase (baseFor lit)
       varNode <- allocVar
@@ -570,6 +615,31 @@ lookupVar :: Env -> VarName -> ConstraintM Binding
 lookupVar env name = case Map.lookup name env of
   Just binding -> pure binding
   Nothing -> throwError (UnknownVariable name)
+
+materializeBinding :: VarName -> Binding -> ConstraintM Binding
+materializeBinding _ binding@Binding{} =
+  pure binding
+materializeBinding name LazyExternalBinding {bindingExternalRoot = rootGen, bindingExternal = externalBinding} = do
+  cache <- gets bsExternalBindingCache
+  case Map.lookup name cache of
+    Just binding -> pure binding
+    Nothing -> do
+      binding <- buildExternalBinding rootGen name externalBinding
+      registerLazyExternalRootScope binding
+      modify' $ \st ->
+        st
+          { bsExternalBindingCache =
+              Map.insert name binding (bsExternalBindingCache st)
+          }
+      pure binding
+
+registerLazyExternalRootScope :: Binding -> ConstraintM ()
+registerLazyExternalRootScope Binding {bindingNode = nid, bindingGen = mbGen} =
+  case mbGen of
+    Just gid -> Scope.registerRootScopeNode (genRef gid)
+    Nothing -> Scope.registerRootScopeNode (typeRef nid)
+registerLazyExternalRootScope LazyExternalBinding {} =
+  pure ()
 
 lookupSchemeGenForRoot :: NodeId -> ConstraintM (Maybe GenNodeId)
 lookupSchemeGenForRoot root = do

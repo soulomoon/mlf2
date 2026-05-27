@@ -1,0 +1,3 @@
+module Core export (applyId) {
+  def applyId : Int = let id1 = λx x in id1 1;
+}

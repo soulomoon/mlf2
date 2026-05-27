@@ -14,14 +14,19 @@ Extracted from MLF.Binding.Tree for modularity.
 -}
 module MLF.Binding.Canonicalization (
     -- * Canonicalization
+    QuotientBindParents(..),
     canonicalizeBindParentsUnder,
     quotientBindParentsUnder,
+    quotientBindParentsContextUnder,
+    quotientChildrenForParent,
     -- * Helpers
     withQuotientBindParents,
+    withQuotientBindParentsContext,
 ) where
 
 import Control.Monad (forM_, unless)
 import qualified Data.IntMap.Strict as IntMap
+import Data.IntMap.Strict (IntMap)
 import qualified Data.IntSet as IntSet
 import Data.IntSet (IntSet)
 
@@ -30,6 +35,13 @@ import MLF.Binding.NodeRefs (
     )
 import qualified MLF.Constraint.Canonicalize as Canonicalize
 import MLF.Constraint.Types.Graph
+
+data QuotientBindParents = QuotientBindParents
+    { qbpAllRoots :: !IntSet
+    , qbpBindParents :: !BindParents
+    , qbpChildrenByParent :: !(IntMap [(Int, (NodeRef, BindFlag))])
+    }
+    deriving (Eq, Show)
 
 -- | Canonicalize the binding-parent relation under a canonicalization function.
 --
@@ -117,6 +129,31 @@ quotientBindParentsUnder canonical c0 = do
         go acc [] = Right acc
         go acc (x:rest) = f acc x >>= \acc' -> go acc' rest
 
+quotientBindParentsContextUnder
+    :: (NodeId -> NodeId)
+    -> Constraint p
+    -> Either BindingError QuotientBindParents
+quotientBindParentsContextUnder canonical c0 = do
+    (allRoots, bindParents) <- quotientBindParentsUnder canonical c0
+    let childrenByParent =
+            IntMap.map reverse $
+                IntMap.foldlWithKey'
+                    (\m childKey info@(parentRoot, _flag) ->
+                        IntMap.insertWith (++) (nodeRefKey parentRoot) [(childKey, info)] m
+                    )
+                    IntMap.empty
+                    bindParents
+    pure
+        QuotientBindParents
+            { qbpAllRoots = allRoots
+            , qbpBindParents = bindParents
+            , qbpChildrenByParent = childrenByParent
+            }
+
+quotientChildrenForParent :: NodeRef -> QuotientBindParents -> [(Int, (NodeRef, BindFlag))]
+quotientChildrenForParent parent qbp =
+    IntMap.findWithDefault [] (nodeRefKey parent) (qbpChildrenByParent qbp)
+
 -- | Helper: run an action with canonicalized binding parents and validated node.
 --
 -- This is the shared core for quotient-aware binding-tree operations.
@@ -135,3 +172,17 @@ withQuotientBindParents errCtx canonical c0 ref0 f = do
     unless (IntSet.member (nodeRefKey refC) allRoots) $
         Left $ InvalidBindingTree $ errCtx ++ ": node " ++ show refC ++ " not in constraint"
     f refC bindParents
+
+withQuotientBindParentsContext
+    :: String  -- ^ Error context for validation failures
+    -> (NodeId -> NodeId)
+    -> Constraint p
+    -> NodeRef
+    -> (NodeRef -> QuotientBindParents -> Either BindingError a)
+    -> Either BindingError a
+withQuotientBindParentsContext errCtx canonical c0 ref0 f = do
+    let refC = Canonicalize.canonicalRef canonical ref0
+    qbp <- quotientBindParentsContextUnder canonical c0
+    unless (IntSet.member (nodeRefKey refC) (qbpAllRoots qbp)) $
+        Left $ InvalidBindingTree $ errCtx ++ ": node " ++ show refC ++ " not in constraint"
+    f refC qbp

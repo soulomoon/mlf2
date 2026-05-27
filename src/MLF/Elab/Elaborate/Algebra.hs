@@ -8,6 +8,7 @@ module MLF.Elab.Elaborate.Algebra
     ElabOut (..),
     AlgebraContext (..),
     elabAlg,
+    mkEnv,
     mkEnvBinding,
     resolvedLambdaParamNode,
   )
@@ -55,7 +56,11 @@ import MLF.Elab.Run.ResultType.Util
   ( CandidateSelection (..),
     selectUniqueCandidateBy,
   )
-import MLF.Elab.Run.TypeOps (inlineBoundVarsType, simplifyAnnotationType)
+import MLF.Elab.Run.TypeOps
+  ( InlineBoundVarsContext,
+    inlineBoundVarsTypeWithContext,
+    simplifyAnnotationType,
+  )
 import MLF.Elab.TermClosure (closeTermWithSchemeSubstIfNeeded)
 import qualified MLF.Elab.TypeCheck as TypeCheck (Env (..), typeCheckWithEnv)
 import MLF.Elab.Types
@@ -79,6 +84,7 @@ import MLF.Util.Trace (TraceConfig, traceGeneralize)
 
 data EnvBinding = EnvBinding
   { ebSchemeInfo :: SchemeInfo,
+    ebSchemeType :: ElabType,
     ebTransparentMediator :: Bool,
     ebAliasTarget :: Maybe VarName,
     ebExplicitRecursiveParam :: Bool
@@ -105,7 +111,10 @@ pattern AmbiguousStructuralRecursiveCandidate = AmbiguousCandidateSelection
 
 {-# COMPLETE NoStructuralRecursiveCandidate, UniqueStructuralRecursiveCandidate, AmbiguousStructuralRecursiveCandidate #-}
 
-type Env = Map.Map VarName EnvBinding
+data Env = Env
+  { envBindings :: Map.Map VarName EnvBinding,
+    envTypeCheck :: TypeCheck.Env
+  }
 
 data ElabOut = ElabOut
   { elabTerm :: Env -> Either ElabError ElabTerm,
@@ -119,6 +128,7 @@ data AlgebraContext (p :: Phase) = AlgebraContext
     algResolvedLambdaParamNode :: NodeId -> Maybe NodeId,
     algAnnotationContext :: AnnotationContext p,
     algNamedSetReify :: IntSet.IntSet,
+    algInlineBoundVarsContext :: InlineBoundVarsContext p,
     -- | Original source annotation types from constraint generation, keyed by
     -- canonicalized AAnn codomain NodeId.  Used in ALamF to recover annotation
     -- types that presolution strips (e.g. TForall inside a μ body).
@@ -178,21 +188,64 @@ mkEnvBinding :: SchemeInfo -> Bool -> EnvBinding
 mkEnvBinding schemeInfo transparentMediator =
   EnvBinding
     { ebSchemeInfo = schemeInfo,
+      ebSchemeType = schemeToType (siScheme schemeInfo),
       ebTransparentMediator = transparentMediator,
       ebAliasTarget = Nothing,
       ebExplicitRecursiveParam = False
     }
 
+mkEnv :: Map.Map VarName SchemeInfo -> Env
+mkEnv schemeInfos =
+  Env
+    { envBindings = bindings,
+      envTypeCheck =
+        TypeCheck.Env
+          { TypeCheck.termEnv = Map.map ebSchemeType bindings,
+            TypeCheck.typeEnv = Map.empty
+          }
+    }
+  where
+    bindings = Map.map (`mkEnvBinding` False) schemeInfos
+
 envSchemeInfos :: Env -> Map.Map VarName SchemeInfo
-envSchemeInfos = Map.map ebSchemeInfo
+envSchemeInfos = Map.map ebSchemeInfo . envBindings
+
+envSchemeTypes :: Env -> Map.Map VarName ElabType
+envSchemeTypes = TypeCheck.termEnv . envTypeCheck
+
+typeCheckEnvFrom :: Env -> TypeCheck.Env
+typeCheckEnvFrom = envTypeCheck
+
+lookupEnvBinding :: VarName -> Env -> Maybe EnvBinding
+lookupEnvBinding name env = Map.lookup name (envBindings env)
+
+insertEnvBinding :: VarName -> EnvBinding -> Env -> Env
+insertEnvBinding name binding env =
+  env
+    { envBindings = Map.insert name binding (envBindings env),
+      envTypeCheck =
+        (envTypeCheck env)
+          { TypeCheck.termEnv =
+              Map.insert name (ebSchemeType binding) (TypeCheck.termEnv (envTypeCheck env))
+          }
+    }
+
+adjustEnvBinding :: (EnvBinding -> EnvBinding) -> VarName -> Env -> Env
+adjustEnvBinding f name env =
+  case lookupEnvBinding name env of
+    Nothing -> env
+    Just binding -> insertEnvBinding name (f binding) env
 
 lookupSchemeInfo :: VarName -> Env -> Maybe SchemeInfo
-lookupSchemeInfo name env = ebSchemeInfo <$> Map.lookup name env
+lookupSchemeInfo name env = ebSchemeInfo <$> lookupEnvBinding name env
+
+lookupSchemeType :: VarName -> Env -> Maybe ElabType
+lookupSchemeType name env = ebSchemeType <$> lookupEnvBinding name env
 
 sourceAnnotatedTypeFrom :: AlgebraContext p -> Env -> AnnExpr -> Either ElabError (Maybe ElabType)
 sourceAnnotatedTypeFrom algebraContext env ann =
   case ann of
-    AVar name _ -> pure (schemeToType . siScheme <$> lookupSchemeInfo name env)
+    AVar name _ -> pure (lookupSchemeType name env)
     AAnn inner annNodeId _ ->
       case IntMap.lookup (getNodeId annNodeId) (algAnnSourceTypes algebraContext) of
         Just srcTy -> Just <$> srcTypeToElabType srcTy
@@ -251,7 +304,7 @@ firstJustE left right = do
     Nothing -> right
 
 lookupAliasTarget :: VarName -> Env -> Maybe VarName
-lookupAliasTarget name env = Map.lookup name env >>= ebAliasTarget
+lookupAliasTarget name env = lookupEnvBinding name env >>= ebAliasTarget
 
 resolveAliasVar :: Env -> VarName -> VarName
 resolveAliasVar env name =
@@ -260,13 +313,13 @@ resolveAliasVar env name =
     Nothing -> name
 
 isTransparentMediatorVar :: VarName -> Env -> Bool
-isTransparentMediatorVar name env = maybe False ebTransparentMediator (Map.lookup name env)
+isTransparentMediatorVar name env = maybe False ebTransparentMediator (lookupEnvBinding name env)
 
 freeTypeVarsEnvSchemes :: Env -> Set.Set String
 freeTypeVarsEnvSchemes env =
   Set.unions
-    [ freeTypeVarsType (schemeToType (siScheme schemeInfo))
-      | schemeInfo <- Map.elems (envSchemeInfos env)
+    [ freeTypeVarsType schemeTy
+      | schemeTy <- Map.elems (envSchemeTypes env)
     ]
 
 applyTypeVarRenames :: [(String, String)] -> ElabType -> ElabType
@@ -469,7 +522,7 @@ elabAlg :: AlgebraContext p -> AnnExprF (AnnExpr, ElabOut) -> ElabOut
 elabAlg algebraContext layer =
   case layer of
     AVarF v _ -> mkOut $ \env ->
-      maybe (Left (EnvLookup v)) (const (Right (EVar v))) (Map.lookup v env)
+      maybe (Left (EnvLookup v)) (const (Right (EVar v))) (lookupEnvBinding v env)
     ALitF lit _ -> mkOut $ \_ -> Right (ELit lit)
     ALamF v paramNode _ (bodyAnn, bodyOut) lamNodeId ->
       let f env = do
@@ -496,8 +549,8 @@ elabAlg algebraContext layer =
                         case expr of
                           AApp (AVar recurName _) arg _ _ _
                             | mediatedVarUse arg,
-                              Just schemeInfo <- lookupSchemeInfo recurName env ->
-                                case schemeToType (siScheme schemeInfo) of
+                              Just schemeTy <- lookupSchemeType recurName env ->
+                                case schemeTy of
                                   muTy@(TMu muName muBody)
                                     | hasContractiveRecursiveWitness muTy ->
                                         case substTypeCapture muName muTy muBody of
@@ -625,9 +678,9 @@ elabAlg algebraContext layer =
                           siSubst = IntMap.empty
                         }
                     )
-            let env' = Map.insert v (mkEnvBinding paramSchemeInfo False) env
+            let env' = insertEnvBinding v (mkEnvBinding paramSchemeInfo False) env
                 env'' =
-                  Map.adjust
+                  adjustEnvBinding
                     ( \binding ->
                         binding
                           { ebExplicitRecursiveParam =
@@ -637,7 +690,7 @@ elabAlg algebraContext layer =
                     v
                     env'
             bodyRaw <- elabTerm bodyElabOut env''
-            let bodyTcEnv = TypeCheck.Env (Map.map (schemeToType . siScheme) (envSchemeInfos env'')) Map.empty
+            let bodyTcEnv = typeCheckEnvFrom env''
                 body' = stripUnusedTopTyAbsWithEnv bodyTcEnv bodyRaw
             pure (ELam v paramTy body')
        in mkOut f
@@ -647,7 +700,10 @@ elabAlg algebraContext layer =
             a' <- elabTerm aOut env
             argSourceSchemeTy <- sourceAnnotatedTypeFrom algebraContext env aAnn
             let schemeEnv = envSchemeInfos env
-                tcEnv = TypeCheck.Env (Map.map (schemeToType . siScheme) schemeEnv) Map.empty
+                tcEnv = typeCheckEnvFrom env
+                typeCheckLocal = TypeCheck.typeCheckWithEnv tcEnv
+                fTyChecked = typeCheckLocal f'
+                argTyChecked = typeCheckLocal a'
                 appTargetTy =
                   let directTy = either (const Nothing) Just (reifyNodeTypeDirect scopeContext appNodeId)
                       boundTy = either (const Nothing) Just (reifyNodeTypePreferringBound scopeContext appNodeId)
@@ -663,14 +719,14 @@ elabAlg algebraContext layer =
                               boundTy
                         _ -> directTy
                 annHasMuScheme ann =
-                  case sourceVarName ann >>= (`lookupSchemeInfo` env) of
-                    Just schemeInfo ->
-                      case schemeToType (siScheme schemeInfo) of
+                  case sourceVarName ann >>= (`lookupSchemeType` env) of
+                    Just schemeTy ->
+                      case schemeTy of
                         TMu {} -> True
                         _ -> False
                     Nothing -> False
                 argIsExplicitRecursiveParam ann =
-                  case sourceVarName ann >>= (`Map.lookup` env) of
+                  case sourceVarName ann >>= (`lookupEnvBinding` env) of
                     Just binding -> ebExplicitRecursiveParam binding
                     Nothing -> False
                 sourceMuMatchesActualType sourceTy actualTy =
@@ -691,7 +747,7 @@ elabAlg algebraContext layer =
                       | sourceMuMatchesActualType sourceTy actualTy -> sourceTy
                     _ -> actualTy
                 recoverIdentityLikeRecursiveFunInst ann =
-                  case (sourceVarName ann, TypeCheck.typeCheckWithEnv tcEnv a') of
+                  case (sourceVarName ann, argTyChecked) of
                     (Just fName, Right argTy)
                       | hasContractiveRecursiveWitness argTy ->
                           case lookupSchemeInfo fName env of
@@ -699,14 +755,14 @@ elabAlg algebraContext layer =
                               | isSingleBinderIdentityScheme schemeInfo ->
                                   let candidate = InstApp argTy
                                       fAppCandidate = ETyInst f' candidate
-                                   in case TypeCheck.typeCheckWithEnv tcEnv (EApp fAppCandidate a') of
+                                   in case typeCheckLocal (EApp fAppCandidate a') of
                                         Right _ -> Just candidate
                                         Left _ -> Nothing
                             _ -> Nothing
                     _ -> Nothing
-                reifyInstWithRecovery ann eid term
+                reifyInstWithRecovery ann eid _term termTy
                   | Nothing <- sourceVarName ann,
-                    Right ty <- TypeCheck.typeCheckWithEnv tcEnv term,
+                    Right ty <- termTy,
                     not (case ty of TForall {} -> True; _ -> False) =
                       Right InstId
                   | otherwise =
@@ -717,18 +773,18 @@ elabAlg algebraContext layer =
                           | annHasMuScheme ann -> Right InstId
                           | otherwise -> Left err
                         Left err -> Left err
-                reifyInstIfPolymorphic ann eid term
+                reifyInstIfPolymorphic ann eid term termTy
                   | sourceAnnIsPolymorphic schemeEnv ann =
-                      reifyInstWithRecovery ann eid term
+                      reifyInstWithRecovery ann eid term termTy
                   | otherwise = Right InstId
                 recursiveWitnessArgTerm =
-                  case TypeCheck.typeCheckWithEnv tcEnv a' of
+                  case argTyChecked of
                     Right argTy
                       | hasContractiveRecursiveWitness argTy -> Just a'
                     _ ->
-                      case sourceVarName aAnn >>= (`lookupSchemeInfo` env) of
-                        Just argSchemeInfo
-                          | hasContractiveRecursiveWitness (schemeToType (siScheme argSchemeInfo)) ->
+                      case sourceVarName aAnn >>= (`lookupSchemeType` env) of
+                        Just argSchemeTy
+                          | hasContractiveRecursiveWitness argSchemeTy ->
                               Just a'
                         _ -> Nothing
                 transparentOrIdentityBypassTerm =
@@ -746,15 +802,16 @@ elabAlg algebraContext layer =
             funInst <-
               case transparentOrIdentityBypassTerm of
                 Just _ -> Right InstId
-                Nothing -> reifyInstIfPolymorphic fAnn funEid f'
+                Nothing -> reifyInstIfPolymorphic fAnn funEid f' fTyChecked
             argInst <-
               case transparentOrIdentityBypassTerm of
                 Just _ -> Right InstId
-                Nothing -> reifyInstIfPolymorphic aAnn argEid a'
-            let fHeadTy = appHeadType tcEnv f'
-                fHead = appHeadTerm tcEnv f'
+                Nothing -> reifyInstIfPolymorphic aAnn argEid a' argTyChecked
+            let fHead = appHeadTermFromType fTyChecked f'
+                fHeadTyChecked = typeCheckLocal fHead
+                fHeadTy = either (const Nothing) Just fHeadTyChecked
                 fIsMuHead =
-                  case TypeCheck.typeCheckWithEnv tcEnv f' of
+                  case fTyChecked of
                     Right TMu {} -> True
                     _ -> False
                 recoveredArgTy =
@@ -767,7 +824,7 @@ elabAlg algebraContext layer =
                         )
                     )
                     (Just . preferSourceMuArgTy)
-                    (TypeCheck.typeCheckWithEnv tcEnv a')
+                    argTyChecked
                 funInstByFunType =
                   case funInst of
                     inst0@(InstApp _) ->
@@ -859,7 +916,7 @@ elabAlg algebraContext layer =
                     _ -> []
                 validatesTargetResultInst instCandidate =
                   let fCandidate = ETyInst fHead instCandidate
-                   in case TypeCheck.typeCheckWithEnv tcEnv (EApp fCandidate a') of
+                   in case typeCheckLocal (EApp fCandidate a') of
                         Right _ -> True
                         Left _ -> False
                 funInstNorm0 = normalizeFunInst funInst'
@@ -871,22 +928,22 @@ elabAlg algebraContext layer =
                   let fApp0 = case funInstNorm of
                         InstId -> fHead
                         _ -> ETyInst fHead funInstNorm
-                   in case ( TypeCheck.typeCheckWithEnv tcEnv (EApp fApp0 a'),
+                   in case ( typeCheckLocal (EApp fApp0 a'),
                              sourceVarName fAnn,
                              sourceVarName aAnn,
-                             TypeCheck.typeCheckWithEnv tcEnv a'
+                             argTyChecked
                            ) of
                         (Right (TArrow _ TBottom), Just fName, mArgName, Right argTy) ->
-                          case lookupSchemeInfo fName env of
-                            Just fSchemeInfo ->
+                          case lookupSchemeType fName env of
+                            Just fSchemeTy ->
                               let argTyPreferred =
-                                    case mArgName >>= (`lookupSchemeInfo` env) of
-                                      Just argSchemeInfo ->
-                                        case Inst.splitForalls (schemeToType (siScheme argSchemeInfo)) of
+                                    case mArgName >>= (`lookupSchemeType` env) of
+                                      Just argSchemeTy ->
+                                        case Inst.splitForalls argSchemeTy of
                                           ([], monoTy) -> monoTy
                                           _ -> argTy
                                       Nothing -> argTy
-                                  (fBinds, fBodyTy) = Inst.splitForalls (schemeToType (siScheme fSchemeInfo))
+                                  (fBinds, fBodyTy) = Inst.splitForalls fSchemeTy
                                   fBinderNames = map fst fBinds
                                in case fBodyTy of
                                     TArrow (TVar headBinder) retTy
@@ -897,7 +954,7 @@ elabAlg algebraContext layer =
                             Nothing -> funInstNorm
                         (Left _, _, _, _) ->
                           fromMaybe funInstNorm $
-                            case (sourceVarName fAnn, TypeCheck.typeCheckWithEnv tcEnv a') of
+                            case (sourceVarName fAnn, argTyChecked) of
                               (Just fName, Right argTy)
                                 | hasContractiveRecursiveWitness argTy ->
                                     case lookupSchemeInfo fName env of
@@ -907,7 +964,7 @@ elabAlg algebraContext layer =
                                                 fAppCandidate = case candidate of
                                                   InstId -> fHead
                                                   _ -> ETyInst fHead candidate
-                                             in case TypeCheck.typeCheckWithEnv tcEnv (EApp fAppCandidate a') of
+                                             in case typeCheckLocal (EApp fAppCandidate a') of
                                                   Right _ -> Just candidate
                                                   Left _ -> Nothing
                                       _ -> Nothing
@@ -924,16 +981,17 @@ elabAlg algebraContext layer =
                               InstSeq (InstInside (InstApp _)) InstElim -> True
                               _ -> False
                           fCandidate = ETyInst fHead instCandidate
+                          fCandidateTy = typeCheckLocal fCandidate
                           keepCandidate =
                             case (isAppLikeInst instCandidate, fHeadTy, sourceVarName fAnn) of
                               (True, Just TForall {}, _) ->
-                                case TypeCheck.typeCheckWithEnv tcEnv fCandidate of
+                                case fCandidateTy of
                                   Right _ -> True
                                   Left _ -> False
                               (True, Nothing, Nothing) -> False
                               (True, _, _) -> False
                               _ ->
-                                case TypeCheck.typeCheckWithEnv tcEnv fCandidate of
+                                case fCandidateTy of
                                   Right _ -> True
                                   Left _ -> False
                        in if keepCandidate
@@ -945,18 +1003,19 @@ elabAlg algebraContext layer =
                                       InstId -> InstId
                                       _ ->
                                         let fRecovered = ETyInst fHead recoveredCandidate
-                                         in case TypeCheck.typeCheckWithEnv tcEnv fRecovered of
+                                         in case typeCheckLocal fRecovered of
                                               Right _ -> recoveredCandidate
                                               Left _ -> InstId
                               Nothing -> InstId
                 fAppForArgInference = case funInstValidated of
                   InstId -> fHead
                   _ -> ETyInst fHead funInstValidated
+                fAppForArgInferenceTy = typeCheckLocal fAppForArgInference
                 firstClassPolymorphicArgInst =
-                  case (sourceAnnIsPolymorphic schemeEnv aAnn, argSourceSchemeTy, TypeCheck.typeCheckWithEnv tcEnv fAppForArgInference) of
+                  case (sourceAnnIsPolymorphic schemeEnv aAnn, argSourceSchemeTy, fAppForArgInferenceTy) of
                     (True, Just sourceTy, Right (TArrow paramTy _))
                       | alphaEqType paramTy sourceTy || churchAwareEqType paramTy sourceTy,
-                        Right _ <- TypeCheck.typeCheckWithEnv tcEnv (EApp fAppForArgInference a') ->
+                        Right _ <- typeCheckLocal (EApp fAppForArgInference a') ->
                           Just InstId
                     _ -> Nothing
                 argInstFromFun =
@@ -975,24 +1034,24 @@ elabAlg algebraContext layer =
                             schemeInfo <- lookupSchemeInfo vName env
                             let paramTy' =
                                   if shouldInlineParamTy
-                                    then inlineBoundVarsType presolutionView paramTy
+                                    then inlineBoundVarsTypeWithContext inlineBoundVarsContext paramTy
                                     else paramTy
                             args <- inferInstAppArgs (siScheme schemeInfo) paramTy'
-                            pure (instSeqApps (map (inlineBoundVarsType presolutionView) args))
+                            pure (instSeqApps (map (inlineBoundVarsTypeWithContext inlineBoundVarsContext) args))
                           (Just vName, _) -> do
                             schemeInfo <- lookupSchemeInfo vName env
-                            case TypeCheck.typeCheckWithEnv tcEnv fAppForArgInference of
+                            case fAppForArgInferenceTy of
                               Right (TArrow paramTy _) -> do
                                 let paramTy' =
                                       if shouldInlineParamTy
-                                        then inlineBoundVarsType presolutionView paramTy
+                                        then inlineBoundVarsTypeWithContext inlineBoundVarsContext paramTy
                                         else paramTy
                                 args <- inferInstAppArgs (siScheme schemeInfo) paramTy'
-                                pure (instSeqApps (map (inlineBoundVarsType presolutionView) args))
+                                pure (instSeqApps (map (inlineBoundVarsTypeWithContext inlineBoundVarsContext) args))
                               _ -> Nothing
                           _ -> Nothing
                 argInstFallback =
-                  case (sourceVarName fAnn, sourceVarName aAnn, TypeCheck.typeCheckWithEnv tcEnv fAppForArgInference, argInst) of
+                  case (sourceVarName fAnn, sourceVarName aAnn, fAppForArgInferenceTy, argInst) of
                     (Just fName, Just argName, Right (TArrow paramTy _), InstApp argTy)
                       | fName == argName,
                         Just schemeInfo <- lookupSchemeInfo fName env,
@@ -1000,7 +1059,7 @@ elabAlg algebraContext layer =
                           Forall [(_, Nothing)] _ -> True
                           _ -> False,
                         let instCandidate = InstApp argTy,
-                        Right argTy' <- TypeCheck.typeCheckWithEnv tcEnv (ETyInst a' instCandidate),
+                        Right argTy' <- typeCheckLocal (ETyInst a' instCandidate),
                         alphaEqType argTy' paramTy ->
                           instCandidate
                     (Just fName, Just argName, Right (TArrow paramTy _), InstInside (InstBot argTy))
@@ -1010,7 +1069,7 @@ elabAlg algebraContext layer =
                           Forall [(_, Nothing)] _ -> True
                           _ -> False,
                         let instCandidate = InstApp argTy,
-                        Right argTy' <- TypeCheck.typeCheckWithEnv tcEnv (ETyInst a' instCandidate),
+                        Right argTy' <- typeCheckLocal (ETyInst a' instCandidate),
                         alphaEqType argTy' paramTy ->
                           instCandidate
                     (Just fName, Just argName, Right (TArrow paramTy _), InstInside (InstApp argTy))
@@ -1020,7 +1079,7 @@ elabAlg algebraContext layer =
                           Forall [(_, Nothing)] _ -> True
                           _ -> False,
                         let instCandidate = InstApp argTy,
-                        Right argTy' <- TypeCheck.typeCheckWithEnv tcEnv (ETyInst a' instCandidate),
+                        Right argTy' <- typeCheckLocal (ETyInst a' instCandidate),
                         alphaEqType argTy' paramTy ->
                           instCandidate
                     (Just fName, Just argName, Right (TArrow paramTy _), InstSeq (InstInside (InstBot argTy)) InstElim)
@@ -1030,7 +1089,7 @@ elabAlg algebraContext layer =
                           Forall [(_, Nothing)] _ -> True
                           _ -> False,
                         let instCandidate = InstApp argTy,
-                        Right argTy' <- TypeCheck.typeCheckWithEnv tcEnv (ETyInst a' instCandidate),
+                        Right argTy' <- typeCheckLocal (ETyInst a' instCandidate),
                         alphaEqType argTy' paramTy ->
                           instCandidate
                     (Just fName, Just argName, Right (TArrow paramTy _), InstSeq (InstInside (InstApp argTy)) InstElim)
@@ -1040,7 +1099,7 @@ elabAlg algebraContext layer =
                           Forall [(_, Nothing)] _ -> True
                           _ -> False,
                         let instCandidate = InstApp argTy,
-                        Right argTy' <- TypeCheck.typeCheckWithEnv tcEnv (ETyInst a' instCandidate),
+                        Right argTy' <- typeCheckLocal (ETyInst a' instCandidate),
                         alphaEqType argTy' paramTy ->
                           instCandidate
                     _ ->
@@ -1069,11 +1128,11 @@ elabAlg algebraContext layer =
                             InstId -> InstId
                             _
                               | isAppLikeInst argInst' ->
-                                  case TypeCheck.typeCheckWithEnv tcEnv a' of
+                                  case argTyChecked of
                                     Right TForall {} -> canonicalizeAppLikeInst argInst'
                                     _ -> InstId
                               | otherwise ->
-                                  case TypeCheck.typeCheckWithEnv tcEnv a' of
+                                  case argTyChecked of
                                     Right (TForall _ (Just _) _) -> InstElim
                                     Right TForall {} -> argInst'
                                     _ -> InstId
@@ -1084,6 +1143,7 @@ elabAlg algebraContext layer =
                       case argInstFinal of
                         InstId -> a'
                         _ -> ETyInst a' argInstFinal
+                aAppTyChecked = typeCheckLocal aApp
                 fApp =
                   let fApp0 = case funInstValidated of
                         InstId -> fHead
@@ -1109,12 +1169,12 @@ elabAlg algebraContext layer =
                         case body of
                           EVar bodyName -> bodyName == paramName
                           _ -> False
-                   in case (TypeCheck.typeCheckWithEnv tcEnv (EApp fApp0 aApp), fApp0, sourceVarName aAnn, TypeCheck.typeCheckWithEnv tcEnv aApp) of
+                   in case (typeCheckLocal (EApp fApp0 aApp), fApp0, sourceVarName aAnn, aAppTyChecked) of
                         (Left _, ELam paramName paramTy body, Just argName, Right argTy)
                           | containsInternalTyVar paramTy
                               && isIdentityLambdaBody paramName body
                               && hasContractiveRecursiveWitness argTy
-                              && maybe False (hasContractiveRecursiveWitness . schemeToType . siScheme) (lookupSchemeInfo argName env) ->
+                              && maybe False hasContractiveRecursiveWitness (lookupSchemeType argName env) ->
                               ELam paramName argTy body
                         _ -> fApp0
                 bypassApp = transparentOrIdentityBypassTerm
@@ -1156,7 +1216,7 @@ elabAlg algebraContext layer =
                                _ -> False
                         in go
                      ),
-                   TypeCheck.typeCheckWithEnv tcEnv app
+                   typeCheckLocal app
                  ) of
               (True, Left tcErr) ->
                 if take (length "TCArgumentMismatch") (show tcErr) == "TCArgumentMismatch"
@@ -1616,7 +1676,8 @@ elabAlg algebraContext layer =
                         { ebAliasTarget = Just (resolveAliasVar env sourceName)
                         }
                     Nothing -> mkEnvBinding bindingSchemeInfo transparentMediator
-                tcEnvBase = TypeCheck.Env (Map.map (schemeToType . siScheme) (envSchemeInfos env)) Map.empty
+                tcEnvBase = typeCheckEnvFrom env
+                typeCheckBase = TypeCheck.typeCheckWithEnv tcEnvBase
                 authoritativeSourceSchemeInfo =
                   case rhsOuterSourceScheme <|> explicitRhsSourceScheme <|> letResultSourceScheme <|> schemeRootSourceScheme of
                     Just (schemeSrc, substSrc) ->
@@ -1630,8 +1691,9 @@ elabAlg algebraContext layer =
                         )
                     Nothing -> Nothing
                 envSchemeInfoForRhs = fromMaybe schemeInfo authoritativeSourceSchemeInfo
-                env' = Map.insert v (envBindingFor envSchemeInfoForRhs) env
-                tcEnv = TypeCheck.Env (Map.map (schemeToType . siScheme) (envSchemeInfos env')) Map.empty
+                env' = insertEnvBinding v (envBindingFor envSchemeInfoForRhs) env
+                tcEnv = typeCheckEnvFrom env'
+                typeCheckLet = TypeCheck.typeCheckWithEnv tcEnv
             rhs' <- elabTerm rhsOut env'
             let closeFreeVarsToScheme ty =
                   let (binds, body) = Inst.splitForalls ty
@@ -1761,7 +1823,7 @@ elabAlg algebraContext layer =
                                           rhsScheme
                                           structuralMediatorTerm,
                                   let candidateSchemeAdmitsRhs =
-                                        case TypeCheck.typeCheckWithEnv tcEnvBase rhsClosed of
+                                        case typeCheckBase rhsClosed of
                                           Right rhsTy -> alphaEqType rhsTy (schemeToType rhsScheme)
                                           Left _ -> False,
                                   candidateSchemeAdmitsRhs
@@ -1792,7 +1854,7 @@ elabAlg algebraContext layer =
                               rhsClosed =
                                 closeTermWithSchemeSubstIfNeeded candidateSubst rhsScheme rhsTerm
                               candidateSchemeAdmitsRhs =
-                                case TypeCheck.typeCheckWithEnv tcEnvBase rhsClosed of
+                                case typeCheckBase rhsClosed of
                                   Right rhsTy -> alphaEqType rhsTy (schemeToType rhsScheme)
                                   Left _ -> False
                               generalizedSchemeTy = schemeToType scheme
@@ -1811,7 +1873,7 @@ elabAlg algebraContext layer =
                                 else Nothing
                     _ -> Nothing
                 rhsAliasOverride =
-                  case (rhsAliasTerm, TypeCheck.typeCheckWithEnv tcEnvBase rhsAliasTerm) of
+                  case (rhsAliasTerm, rhsAliasTy) of
                     (EVar _, Right rhsTy)
                       | not (alphaEqType rhsTy (schemeToType scheme)) ->
                           let rhsScheme = closeFreeVarsToScheme rhsTy
@@ -1839,6 +1901,7 @@ elabAlg algebraContext layer =
                   case effectiveRhsOverride of
                     Just (overrideTerm, _) -> overrideTerm
                     Nothing -> rhs'
+                effectiveRhsTy = typeCheckLet effectiveRhsTerm
                 authoritativeEnvSchemeInfo =
                   fromMaybe
                     (freshenSchemeInfoAgainstEnv env schemeInfo)
@@ -1852,8 +1915,10 @@ elabAlg algebraContext layer =
                     || isJust schemeRootSourceScheme
                     then authoritativeEnvSchemeInfo
                     else effectiveSchemeInfo
-                envForBody = Map.insert v (envBindingFor envSchemeInfoForBody) env
-                tcEnvForBody = TypeCheck.Env (Map.map (schemeToType . siScheme) (envSchemeInfos envForBody)) Map.empty
+                envForBody = insertEnvBinding v (envBindingFor envSchemeInfoForBody) env
+                tcEnvForBody = typeCheckEnvFrom envForBody
+                typeCheckForBody = TypeCheck.typeCheckWithEnv tcEnvForBody
+                rhsAliasTy = typeCheckBase rhsAliasTerm
             let rhsAbs0 =
                   let schemeTy = schemeToType effectiveScheme
                       rhsMatchesScheme rhsTy =
@@ -1863,7 +1928,7 @@ elabAlg algebraContext layer =
                               let expectedBodyTy = substTypeCapture muName muTy muBody
                                in alphaEqType rhsTy expectedBodyTy
                             _ -> False
-                   in case (effectiveRhsTerm, TypeCheck.typeCheckWithEnv tcEnv effectiveRhsTerm) of
+                   in case (effectiveRhsTerm, effectiveRhsTy) of
                         (EVar _, _) ->
                           closeTermWithSchemeSubstIfNeeded effectiveSubst effectiveScheme effectiveRhsTerm
                         (_, Right rhsTy)
@@ -1871,54 +1936,55 @@ elabAlg algebraContext layer =
                         _ -> closeTermWithSchemeSubstIfNeeded effectiveSubst effectiveScheme effectiveRhsTerm
                 rhsAbs =
                   let schemeTy = schemeToType effectiveScheme
+                      rhsAbs0Ty = typeCheckLet rhsAbs0
                       rhsAbsBase =
-                        case TypeCheck.typeCheckWithEnv tcEnv rhsAbs0 of
-                          rhsAbs0Ty ->
-                            case effectiveScheme of
-                              Forall binds _
-                                | not (null binds),
-                                  Right rhsTy <- rhsAbs0Ty,
-                                  alphaEqType rhsTy schemeTy ->
-                                    rhsAbs0
-                                | not (null binds) ->
-                                    case case (rhsAbs0, rhsAbs0Ty) of
-                                      (ETyAbs _ _ body, Right (TForall _ _ bodyTy))
-                                        | alphaEqType bodyTy schemeTy ->
-                                            body
-                                      _ -> stripUnusedTopTyAbsWithEnv tcEnv rhsAbs0 of
-                                      rhsAbsCandidate ->
-                                        case TypeCheck.typeCheckWithEnv tcEnv rhsAbsCandidate of
-                                          Right rhsTy
-                                            | alphaEqType rhsTy schemeTy ->
-                                                rhsAbsCandidate
-                                          _ ->
-                                            case rhsAbs0Ty of
-                                              Left _ -> rhsAbsCandidate
-                                              _ -> rhsAbs0
-                              _ ->
-                                case (rhsAbs0, rhsAbs0Ty) of
+                        case effectiveScheme of
+                          Forall binds _
+                            | not (null binds),
+                              Right rhsTy <- rhsAbs0Ty,
+                              alphaEqType rhsTy schemeTy ->
+                                rhsAbs0
+                            | not (null binds) ->
+                                case case (rhsAbs0, rhsAbs0Ty) of
                                   (ETyAbs _ _ body, Right (TForall _ _ bodyTy))
                                     | alphaEqType bodyTy schemeTy ->
                                         body
-                                  _ -> stripUnusedTopTyAbsWithEnv tcEnv rhsAbs0
+                                  _ -> stripUnusedTopTyAbsWithEnv tcEnv rhsAbs0 of
+                                  rhsAbsCandidate ->
+                                    case typeCheckLet rhsAbsCandidate of
+                                      Right rhsTy
+                                        | alphaEqType rhsTy schemeTy ->
+                                            rhsAbsCandidate
+                                      _ ->
+                                        case rhsAbs0Ty of
+                                          Left _ -> rhsAbsCandidate
+                                          _ -> rhsAbs0
+                          _ ->
+                            case (rhsAbs0, rhsAbs0Ty) of
+                              (ETyAbs _ _ body, Right (TForall _ _ bodyTy))
+                                | alphaEqType bodyTy schemeTy ->
+                                    body
+                              _ -> stripUnusedTopTyAbsWithEnv tcEnv rhsAbs0
                       rhsAbsAligned =
                         let aligned = alignLeadingLambdasToType schemeTy rhsAbsBase
                          in if v == "_"
                               then
                                 let stripped = stripUnusedTopTyAbsWithEnv tcEnv aligned
-                                 in case TypeCheck.typeCheckWithEnv tcEnv stripped of
+                                 in case typeCheckLet stripped of
                                       Right _ -> stripped
                                       Left _ -> aligned
                               else aligned
-                   in case TypeCheck.typeCheckWithEnv tcEnv rhsAbsBase of
+                      rhsAbsBaseTy = typeCheckLet rhsAbsBase
+                      rhsAbsAlignedTy = typeCheckLet rhsAbsAligned
+                   in case rhsAbsBaseTy of
                         Right rhsTy
                           | alphaEqType rhsTy schemeTy -> rhsAbsBase
                         _ ->
-                          case TypeCheck.typeCheckWithEnv tcEnv rhsAbsAligned of
+                          case rhsAbsAlignedTy of
                             Right rhsTy
                               | alphaEqType rhsTy schemeTy -> rhsAbsAligned
                             _ -> rhsAbsBase
-                rhsAbsTyChecked = TypeCheck.typeCheckWithEnv tcEnv rhsAbs
+                rhsAbsTyChecked = typeCheckLet rhsAbs
             case debugGeneralize
               ( "elaborate let("
                   ++ v
@@ -1933,20 +1999,23 @@ elabAlg algebraContext layer =
               )
               () of
               () -> pure ()
-            let rhsForRoll =
+            let effectiveRhsTyForBody = typeCheckForBody effectiveRhsTerm
+                rhsAbsTyForBody = typeCheckForBody rhsAbs
+                rhsForRoll =
                   case schemeToType effectiveScheme of
                     muTy@(TMu muName muBody) ->
                       let expectedBodyTy = substTypeCapture muName muTy muBody
                           rhsRollAligned = alignLeadingLambdasToType expectedBodyTy rhsAbs
-                       in case TypeCheck.typeCheckWithEnv tcEnvForBody effectiveRhsTerm of
+                          rhsRollAlignedTy = typeCheckForBody rhsRollAligned
+                       in case effectiveRhsTyForBody of
                             Right rhsTy
                               | alphaEqType rhsTy expectedBodyTy -> effectiveRhsTerm
                             _ ->
-                              case TypeCheck.typeCheckWithEnv tcEnvForBody rhsAbs of
+                              case rhsAbsTyForBody of
                                 Right rhsTy
                                   | alphaEqType rhsTy expectedBodyTy -> rhsAbs
                                 _ ->
-                                  case TypeCheck.typeCheckWithEnv tcEnvForBody rhsRollAligned of
+                                  case rhsRollAlignedTy of
                                     Right rhsTy
                                       | alphaEqType rhsTy expectedBodyTy -> rhsRollAligned
                                     _ -> rhsAbs
@@ -1959,12 +2028,12 @@ elabAlg algebraContext layer =
             body' <-
               bodyElab
                 ( case rhsAliasOverride of
-                    Just (_, aliasInfo) -> Map.insert v (envBindingFor aliasInfo) env
+                    Just (_, aliasInfo) -> insertEnvBinding v (envBindingFor aliasInfo) env
                     Nothing ->
-                      Map.insert
+                      insertEnvBinding
                         v
                         ( envBindingFor
-                            ( case (effectiveRhsTerm, TypeCheck.typeCheckWithEnv tcEnv effectiveRhsTerm) of
+                            ( case (effectiveRhsTerm, effectiveRhsTy) of
                                 (EVar _, Right rhsTy)
                                   | not (alphaEqType rhsTy (schemeToType effectiveScheme)) ->
                                       SchemeInfo
@@ -1982,17 +2051,18 @@ elabAlg algebraContext layer =
                     Nothing ->
                       case schemeToType effectiveScheme of
                         muTy@TMu {} ->
-                          case TypeCheck.typeCheckWithEnv tcEnvForBody effectiveRhsTerm of
+                          case effectiveRhsTyForBody of
                             Right rhsTy
                               | alphaEqType rhsTy muTy -> effectiveRhsTerm
                             _ ->
-                              case TypeCheck.typeCheckWithEnv tcEnvForBody rhsAbs of
+                              case rhsAbsTyForBody of
                                 Right rhsTy
                                   | alphaEqType rhsTy muTy -> rhsAbs
                                 _ -> ERoll muTy rhsForRoll
                         _ -> rhsAbs
+                rhsFinalTy = typeCheckForBody rhsFinal
             let schemeFinal =
-                  case TypeCheck.typeCheckWithEnv tcEnvForBody rhsFinal of
+                  case rhsFinalTy of
                     Right rhsTy
                       | v == "_" ->
                           schemeFromType rhsTy
@@ -2053,9 +2123,9 @@ elabAlg algebraContext layer =
   where
     annotationContext = algAnnotationContext algebraContext
     scopeContext = acScopeContext annotationContext
-    presolutionView = algPresolutionView algebraContext
     canonical = algCanonical algebraContext
     namedSetReify = algNamedSetReify algebraContext
+    inlineBoundVarsContext = algInlineBoundVarsContext algebraContext
 
     inferInstAppArgs scheme targetTy =
       let (binds, body) = Inst.splitForalls (schemeToType scheme)
@@ -2087,24 +2157,17 @@ elabAlg algebraContext layer =
        When such a term is used in function position, we need to unroll the μ
        to expose the leading TForall/TArrow for instantiation and application.
 
-       appHeadTerm:  wraps the term in EUnroll when its type is a TMu whose
-                     unfolding eventually reaches TForall or TArrow.
-       appHeadType:  returns the type of appHeadTerm — i.e. the unfolded μ body.
+       appHeadTermFromType: wraps the term in EUnroll when its known type is a
+                     TMu whose unfolding eventually reaches TForall or TArrow.
 
        These helpers allow the existing InstApp/InstElim machinery in AAppF to
        work transparently on Church-encoded eliminators without duplicating
        instantiation logic inside insertMuUseSiteCoercions. -}
-    appHeadTerm :: TypeCheck.Env -> ElabTerm -> ElabTerm
-    appHeadTerm tcEnv term =
-      case TypeCheck.typeCheckWithEnv tcEnv term of
+    appHeadTermFromType :: Either err ElabType -> ElabTerm -> ElabTerm
+    appHeadTermFromType termTy term =
+      case termTy of
         Right TMu {} -> EUnroll term
         _ -> term
-
-    appHeadType :: TypeCheck.Env -> ElabTerm -> Maybe ElabType
-    appHeadType tcEnv term =
-      case TypeCheck.typeCheckWithEnv tcEnv (appHeadTerm tcEnv term) of
-        Right ty -> Just ty
-        Left _ -> Nothing
 
     finalCodomain :: ElabType -> ElabType
     finalCodomain = go . peelLeadingForalls
