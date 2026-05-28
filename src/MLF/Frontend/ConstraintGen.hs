@@ -4,6 +4,10 @@
 module MLF.Frontend.ConstraintGen
   ( ConstraintError (..),
     ConstraintResult (..),
+    ModuleRootId (..),
+    RootOwnershipIndex (..),
+    ModuleConstraintRoot (..),
+    ModuleConstraintResult (..),
     AnnExpr (..),
     ExternalEnv,
     ExternalBindingMode (..),
@@ -13,6 +17,7 @@ module MLF.Frontend.ConstraintGen
     generateConstraintsCore,
     generateConstraintsWithEnv,
     generateConstraintsWithExternalBindings,
+    generateModuleConstraintsWithExternalBindings,
     generateConstraintsCoreWithEnv,
     generateConstraintsCoreWithExternalBindings,
   )
@@ -23,12 +28,13 @@ import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
 import MLF.Constraint.Types.Graph (NodeId, PolySyms, cAnnEdges, getEdgeId)
 import MLF.Frontend.ConstraintGen.State
-import MLF.Frontend.ConstraintGen.Translate (buildRootExprWithExternalBindings)
+import MLF.Frontend.ConstraintGen.Translate (buildModuleRootExprsWithExternalBindings, buildRootExprWithExternalBindings)
 import MLF.Frontend.ConstraintGen.Types
 import MLF.Frontend.Desugar (desugarSurface)
 import MLF.Frontend.Syntax
   ( NormCoreExpr,
     NormSurfaceExpr,
+    VarName,
   )
 
 {- Note [Phase 1: Constraint Generation]
@@ -152,6 +158,17 @@ generateConstraintsCoreWithExternalBindings polySyms extBindings expr = do
     runConstraintM (buildRootExprWithExternalBindings extBindings expr) initialState
   constraintResultFromState initialEnv rootNode annRoot finalState
 
+generateModuleConstraintsWithExternalBindings :: PolySyms -> ExternalBindings -> [(VarName, NormSurfaceExpr)] -> Either ConstraintError (ModuleConstraintResult p)
+generateModuleConstraintsWithExternalBindings polySyms extBindings namedExprs = do
+  let initialState = mkInitialStateWithPolySyms polySyms
+      namedCoreExprs =
+        [ (name, desugarSurface expr)
+        | (name, expr) <- namedExprs
+        ]
+  ((_rootGen, initialEnv, roots), finalState) <-
+    runConstraintM (buildModuleRootExprsWithExternalBindings extBindings namedCoreExprs) initialState
+  constraintModuleResultFromState initialEnv roots finalState
+
 constraintResultFromState :: Env -> NodeId -> AnnExpr -> BuildState -> Either ConstraintError (ConstraintResult p)
 constraintResultFromState initialEnv rootNode annRoot finalState = do
   let annEdges = collectAnnEdges annRoot
@@ -162,6 +179,29 @@ constraintResultFromState initialEnv rootNode annRoot finalState = do
         crAnnotated = annRoot,
         crAnnSourceTypes = bsAnnSourceTypes finalState,
         crInitialEnv = initialEnv
+      }
+
+constraintModuleResultFromState :: Env -> Map.Map VarName (ModuleRootId, NodeId, AnnExpr) -> BuildState -> Either ConstraintError (ModuleConstraintResult p)
+constraintModuleResultFromState initialEnv roots finalState = do
+  let annEdges = IntSet.unions [collectAnnEdges annRoot | (_, _rootNode, annRoot) <- Map.elems roots]
+      constraint = (buildConstraint finalState) {cAnnEdges = annEdges}
+      rootMap =
+        Map.map
+          ( \(rootId, rootNode, annRoot) ->
+              ModuleConstraintRoot
+                { mcrRootId = rootId,
+                  mcrRoot = rootNode,
+                  mcrAnnotated = annRoot
+                }
+          )
+          roots
+  pure
+    ModuleConstraintResult
+      { mcrConstraint = constraint,
+        mcrRoots = rootMap,
+        mcrAnnSourceTypes = bsAnnSourceTypes finalState,
+        mcrInitialEnv = initialEnv,
+        mcrRootOwnership = bsRootOwnership finalState
       }
 
 data AnnEdges = AnnEdges

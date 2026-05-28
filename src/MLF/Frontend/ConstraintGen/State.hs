@@ -6,15 +6,21 @@ module MLF.Frontend.ConstraintGen.State
     mkInitialState,
     mkInitialStateWithPolySyms,
     buildConstraint,
+    withModuleRootOwner,
+    recordNodeRootOwner,
+    recordGenRootOwner,
+    recordExpVarRootOwner,
+    recordEdgeRootOwner,
   )
 where
 
 import Control.Monad.Except (Except, runExcept)
-import Control.Monad.State.Strict (StateT, runStateT)
+import Control.Monad.State.Strict (StateT, gets, modify', runStateT)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import MLF.Constraint.RootOwnership
 import MLF.Constraint.Types.Graph
 import MLF.Frontend.ConstraintGen.Types (Binding, ConstraintError)
 import MLF.Frontend.Syntax (NormSrcType)
@@ -59,7 +65,14 @@ data BuildState = BuildState
     -- variables.  The initial environment keeps compact lazy entries; once a
     -- variable is needed, its graph binding is cached here so later
     -- occurrences share the same scheme graph within this definition.
-    bsExternalBindingCache :: !(Map.Map String Binding)
+    bsExternalBindingCache :: !(Map.Map String Binding),
+    -- | Current module root being generated.  This is only populated by the
+    -- diagnostic multi-root .mlfp checker path.
+    bsCurrentRootOwner :: !(Maybe ModuleRootId),
+    -- | Side-channel ownership index for module-local batching.  It is kept
+    -- outside 'Constraint' so ordinary graph fixtures and golden Show output stay
+    -- unchanged.
+    bsRootOwnership :: !RootOwnershipIndex
   }
 
 type ConstraintM = StateT BuildState (Except ConstraintError)
@@ -87,7 +100,9 @@ mkInitialStateWithPolySyms polySyms =
       bsLetEdges = IntSet.empty,
       bsTyConArity = Map.empty,
       bsAnnSourceTypes = IntMap.empty,
-      bsExternalBindingCache = Map.empty
+      bsExternalBindingCache = Map.empty,
+      bsCurrentRootOwner = Nothing,
+      bsRootOwnership = emptyRootOwnershipIndex
     }
 
 buildConstraint :: BuildState -> Constraint p
@@ -104,3 +119,43 @@ buildConstraint st =
       cLetEdges = bsLetEdges st,
       cGenNodes = bsGenNodes st
     }
+
+withModuleRootOwner :: ModuleRootId -> ConstraintM a -> ConstraintM a
+withModuleRootOwner owner action = do
+  oldOwner <- gets bsCurrentRootOwner
+  modify' $ \st ->
+    st
+      { bsCurrentRootOwner = Just owner,
+        bsRootOwnership = ensureRootOwner owner (bsRootOwnership st)
+      }
+  out <- action
+  modify' $ \st -> st {bsCurrentRootOwner = oldOwner}
+  pure out
+
+recordNodeRootOwner :: NodeId -> ConstraintM ()
+recordNodeRootOwner nid =
+  recordCurrentRootOwner $ \owner -> insertNodeOwner owner (getNodeId nid)
+
+recordGenRootOwner :: GenNodeId -> ConstraintM ()
+recordGenRootOwner gid =
+  recordCurrentRootOwner $ \owner -> insertGenOwner owner (getGenNodeId gid)
+
+recordExpVarRootOwner :: ExpVarId -> ConstraintM ()
+recordExpVarRootOwner expVar =
+  recordCurrentRootOwner $ \owner -> insertExpVarOwner owner (getExpVarId expVar)
+
+recordEdgeRootOwner :: EdgeId -> ConstraintM ()
+recordEdgeRootOwner edgeId =
+  recordCurrentRootOwner $ \owner -> insertEdgeOwner owner (getEdgeId edgeId)
+
+recordCurrentRootOwner :: (ModuleRootId -> RootOwnershipIndex -> RootOwnershipIndex) -> ConstraintM ()
+recordCurrentRootOwner insertOwner = do
+  mbOwner <- gets bsCurrentRootOwner
+  case mbOwner of
+    Nothing -> pure ()
+    Just owner ->
+      modify' $ \st ->
+        st
+          { bsRootOwnership =
+              insertOwner owner (bsRootOwnership st)
+          }

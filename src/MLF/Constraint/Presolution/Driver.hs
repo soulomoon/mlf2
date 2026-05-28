@@ -32,6 +32,7 @@ to extract shared state into explicit parameter passing or reader patterns.
 module MLF.Constraint.Presolution.Driver (
     computePresolution,
     computePresolutionWithTiming,
+    computePresolutionWithTimingAndRootOwnership,
     validateReplayMapTraceContract
 ) where
 
@@ -51,6 +52,7 @@ import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Phase (Phase(Acyclic))
 import MLF.Constraint.Types.Witness
 import MLF.Constraint.Types.Presolution
+import MLF.Constraint.RootOwnership (RootOwnershipIndex, emptyRootOwnershipIndex)
 import MLF.Constraint.Presolution.Base
 import MLF.Constraint.Presolution.Plan (buildGeneralizePlans)
 import MLF.Constraint.Presolution.Rewrite (
@@ -116,6 +118,17 @@ computePresolutionWithTiming
     -> Constraint 'Acyclic
     -> IO (Either PresolutionError PresolutionResult)
 computePresolutionWithTiming timing label traceCfg acyclicityResult constraint =
+    computePresolutionWithTimingAndRootOwnership timing label traceCfg emptyRootOwnershipIndex acyclicityResult constraint
+
+computePresolutionWithTimingAndRootOwnership
+    :: TimingConfig
+    -> String
+    -> TraceConfig
+    -> RootOwnershipIndex
+    -> AcyclicityResult
+    -> Constraint 'Acyclic
+    -> IO (Either PresolutionError PresolutionResult)
+computePresolutionWithTimingAndRootOwnership timing label traceCfg rootOwnership acyclicityResult constraint =
     runExceptT $ do
         initialState <-
             ExceptT $
@@ -131,6 +144,7 @@ computePresolutionWithTiming timing label traceCfg acyclicityResult constraint =
                         timing
                         (label ++ ".edge_loop")
                         traceCfg
+                        rootOwnership
                         (arSortedEdges acyclicityResult)
                         initialState
         (redirects, finalState) <-

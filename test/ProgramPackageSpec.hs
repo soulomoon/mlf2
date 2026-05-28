@@ -1,6 +1,14 @@
 module ProgramPackageSpec (spec) where
 
+import Control.Exception (bracket)
 import Data.Either (isRight)
+import qualified Data.IntMap.Strict as IntMap
+import qualified Data.IntSet as IntSet
+import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
+import System.Directory (getTemporaryDirectory, removePathForcibly)
+import System.Environment (lookupEnv, setEnv, unsetEnv)
+import System.IO (hClose, hPutStr, openTempFile)
 import Test.Hspec
 
 import MLF.Backend.Emission.Prepare (prepareBackendEmissionFromSource)
@@ -8,6 +16,13 @@ import MLF.Frontend.Parse.Program
     ( parseLocatedProgramWithFile
     , parseRawProgram
     , renderProgramParseError
+    )
+import MLF.Frontend.ConstraintGen
+    ( ExternalBinding (..)
+    , ExternalBindingMode (..)
+    , ModuleConstraintResult (..)
+    , RootOwnershipIndex (..)
+    , generateModuleConstraintsWithExternalBindings
     )
 import MLF.Frontend.Program.Check
     ( checkLocatedProgramPackage
@@ -28,8 +43,14 @@ import MLF.Frontend.Program.Types
     ( CheckedModule (..)
     , CheckedProgram (..)
     )
+import MLF.Frontend.Syntax
+    ( Expr (..)
+    , NormSrcType
+    , NormSurfaceExpr
+    , SrcTy (..)
+    )
 import qualified MLF.Frontend.Syntax.Program as P
-import MLF.Program.CLI (runProgramFile)
+import MLF.Program.CLI (checkProgramArgs, runProgramFile)
 
 spec :: Spec
 spec =
@@ -98,6 +119,38 @@ spec =
 
             map checkedModuleName (checkedProgramModules checked) `shouldBe` ["Prelude", "Main"]
 
+        it "checks independent annotated defs equivalently through CLI batch size 2" $
+            withBatchEquivalenceFile $ \path -> do
+                oneRoot <- checkProgramArgsWithBatchSize Nothing [path]
+                batch2 <- checkProgramArgsWithBatchSize (Just "2") [path]
+
+                batch2 `shouldBe` oneRoot
+                batch2 `shouldBe` Right "OK\n"
+
+        it "keeps external scheme instantiations root-local in module constraint batches" $ do
+            ModuleConstraintResult {mcrRootOwnership = rootOwnership} <-
+                requireRight $
+                    generateModuleConstraintsWithExternalBindings
+                        Set.empty
+                        ( Map.singleton
+                            "one"
+                            ExternalBinding
+                                { externalBindingType = intSourceType
+                                , externalBindingMode = ExternalBindingScheme
+                                }
+                        )
+                        [ ("value1", externalOneExpr)
+                        , ("value2", externalOneExpr)
+                        ]
+            let root0Nodes = nodesOwnedByRoot 0 rootOwnership
+                root1Nodes = nodesOwnedByRoot 1 rootOwnership
+
+            root0Nodes `shouldSatisfy` (not . IntSet.null)
+            root1Nodes `shouldSatisfy` (not . IntSet.null)
+            root0Nodes `IntSet.intersection` root1Nodes `shouldBe` IntSet.empty
+            all ((== 1) . IntSet.size) (IntMap.elems (roiNodeOwners rootOwnership))
+                `shouldBe` True
+
 multiModuleSource :: String
 multiModuleSource =
     unlines
@@ -109,6 +162,64 @@ multiModuleSource =
         , "  def main : Int = one;"
         , "}"
         ]
+
+batchEquivalenceSource :: String
+batchEquivalenceSource =
+    unlines $
+        [ "module Helper export (one) {"
+        , "  def one : Int = 1;"
+        , "}"
+        , "module Main export (main) {"
+        , "  import Helper exposing (one);"
+        ]
+            ++ [ "  def value" ++ show index ++ " : Int = one;"
+               | index <- [(1 :: Int) .. 150]
+               ]
+            ++ [ "  def main : Int = value1;"
+               , "}"
+               ]
+
+intSourceType :: NormSrcType
+intSourceType = STBase "Int"
+
+externalOneExpr :: NormSurfaceExpr
+externalOneExpr = EAnn (EVar "one") intSourceType
+
+nodesOwnedByRoot :: Int -> RootOwnershipIndex -> IntSet.IntSet
+nodesOwnedByRoot rootKey =
+    IntMap.keysSet . IntMap.filter (IntSet.member rootKey) . roiNodeOwners
+
+withBatchEquivalenceFile :: (FilePath -> IO a) -> IO a
+withBatchEquivalenceFile =
+    bracket setup removePathForcibly
+  where
+    setup = do
+        tmpDir <- getTemporaryDirectory
+        (path, handle) <- openTempFile tmpDir "batch-equivalence.mlfp"
+        hPutStr handle batchEquivalenceSource
+        hClose handle
+        pure path
+
+checkProgramArgsWithBatchSize ::
+    Maybe String ->
+    [String] ->
+    IO (Either String String)
+checkProgramArgsWithBatchSize mbBatchSize args =
+    withEnv "MLF_MODULE_DEF_BATCH_SIZE" mbBatchSize $
+        checkProgramArgs args
+
+withEnv :: String -> Maybe String -> IO a -> IO a
+withEnv name value action =
+    bracket (lookupEnv name) restore (const (setRequested >> action))
+  where
+    setRequested =
+        case value of
+            Nothing -> unsetEnv name
+            Just value0 -> setEnv name value0
+    restore oldValue =
+        case oldValue of
+            Nothing -> unsetEnv name
+            Just value0 -> setEnv name value0
 
 requireParsed :: String -> IO P.Program
 requireParsed input =

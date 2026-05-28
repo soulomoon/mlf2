@@ -31,13 +31,15 @@ import Control.Monad (foldM, forM, when, zipWithM)
 import Control.Monad.Except (MonadError (throwError))
 import Data.Char (isAlphaNum)
 import Data.Graph (SCC (..), stronglyConnComp)
-import Data.List (find, intercalate, nub, transpose)
+import Data.List (find, intercalate, nub, partition, transpose)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (mapMaybe)
 import qualified Data.Set as Set
+import System.Environment (lookupEnv)
+import Text.Read (readMaybe)
 import qualified MLF.Frontend.Program.Builtins as Builtins
 import MLF.Frontend.Program.Elaborate
   ( ElaborateScope,
@@ -55,6 +57,8 @@ import MLF.Frontend.Program.Finalize
     finalizeBindingsAllowOpaqueWithContextWithTiming,
     finalizeBindingAllowOpaqueWithModuleContext,
     finalizeBindingAllowOpaqueWithModuleContextWithTiming,
+    finalizeBindingLayerAllowOpaqueWithModuleContext,
+    finalizeBindingLayerAllowOpaqueWithModuleContextWithTiming,
     finalizeBindingWithContext,
     finalizeBindingAllowOpaqueWithContext,
     finalizeBindingAllowOpaqueWithContextWithTiming,
@@ -1176,6 +1180,7 @@ checkDefsWithTiming timing moduleName0 finalizeContext elaborateScope scope defD
   case workItemsResult of
     Left err -> pure (Left err)
     Right workItems -> do
+      batchSize <- moduleDefBatchSize
       nonRecursiveNamesResult <-
         timeCheckModuleOperation timing moduleName0 "defs.scc_classification" $
           Right (nonRecursiveDefNames workItems)
@@ -1194,6 +1199,7 @@ checkDefsWithTiming timing moduleName0 finalizeContext elaborateScope scope defD
                     moduleName0
                     finalizeContext
                     (Just moduleContext)
+                    batchSize
                     nonRecursiveNames
                     workItems
           | otherwise ->
@@ -1202,6 +1208,7 @@ checkDefsWithTiming timing moduleName0 finalizeContext elaborateScope scope defD
                 moduleName0
                 finalizeContext
                 Nothing
+                batchSize
                 nonRecursiveNames
                 workItems
 
@@ -1297,11 +1304,15 @@ finalizeDefWorkItemsWithTiming ::
   P.ModuleName ->
   FinalizeContext ->
   Maybe ModuleFinalizeContext ->
+  Int ->
   Set.Set String ->
   [DefWorkItem] ->
   IO (TcM [CheckedBinding])
-finalizeDefWorkItemsWithTiming timing moduleName0 finalizeContext moduleContext nonRecursiveNames =
-  go []
+finalizeDefWorkItemsWithTiming timing moduleName0 finalizeContext moduleContext batchSize nonRecursiveNames workItems
+  | Just moduleContext0 <- moduleContext =
+      finalizeDefWorkItemLayersWithTiming timing moduleName0 finalizeContext moduleContext0 batchSize nonRecursiveNames workItems
+  | otherwise =
+      go [] workItems
   where
     go acc [] = pure (Right (reverse acc))
     go acc (workItem : rest) = do
@@ -1309,6 +1320,155 @@ finalizeDefWorkItemsWithTiming timing moduleName0 finalizeContext moduleContext 
       case result of
         Left err -> pure (Left err)
         Right binding -> go (binding : acc) rest
+
+finalizeDefWorkItemLayersWithTiming ::
+  TimingConfig ->
+  P.ModuleName ->
+  FinalizeContext ->
+  ModuleFinalizeContext ->
+  Int ->
+  Set.Set String ->
+  [DefWorkItem] ->
+  IO (TcM [CheckedBinding])
+finalizeDefWorkItemLayersWithTiming timing moduleName0 finalizeContext moduleContext batchSize nonRecursiveNames workItems = do
+  let layers = nonRecursiveDefLayers batchSize nonRecursiveNames workItems
+      layeredNames = Set.unions (map (Set.fromList . map defWorkItemName) layers)
+      fallbackItems =
+        [ workItem
+        | workItem <- workItems
+        , defWorkItemName workItem `Set.notMember` layeredNames
+        ]
+  layerResults <- finalizeLayers Map.empty (1 :: Int) layers
+  case layerResults of
+    Left err -> pure (Left err)
+    Right checkedByName0 -> do
+      fallbackResult <- finalizeFallbackItems checkedByName0 fallbackItems
+      pure $ do
+        checkedByName <- fallbackResult
+        traverse
+          ( \workItem ->
+              case Map.lookup (defWorkItemRuntimeName workItem) checkedByName of
+                Just checked -> Right checked
+                Nothing -> Left (ProgramPipelineError ("missing checked definition `" ++ defWorkItemName workItem ++ "`"))
+          )
+          workItems
+  where
+    finalizeLayers checkedByName _ [] =
+      pure (Right checkedByName)
+    finalizeLayers checkedByName index (layer : rest) = do
+      let layerOperation = "defs.layer_" ++ show index
+          layerLabel = checkModuleOperationLabel moduleName0 layerOperation
+      layerResult <-
+        if length layer > 1 && all moduleLayerEligibleDefWorkItem layer
+          then
+            if timingProgramDefDetails timing
+              then
+                finalizeBindingLayerAllowOpaqueWithModuleContextWithTiming
+                  timing
+                  layerLabel
+                  moduleContext
+                  (map defWorkItemLowered layer)
+              else
+                timeProgramOperationIO timing layerLabel $
+                  finalizeBindingLayerAllowOpaqueWithModuleContext
+                    moduleContext
+                    (map defWorkItemLowered layer)
+          else
+            finalizeLayerIndividually index layer
+      case layerResult of
+        Left err -> pure (Left err)
+        Right checkedLayer -> do
+          let checkedByName' =
+                foldl'
+                  ( \acc checked ->
+                      Map.insert (checkedBindingName checked) checked acc
+                  )
+                  checkedByName
+                  checkedLayer
+          finalizeLayers checkedByName' (index + 1) rest
+
+    finalizeLayerIndividually _layerIndex layer =
+      goLayer [] (1 :: Int) layer
+      where
+        goLayer acc _ [] = pure (Right (reverse acc))
+        goLayer acc itemIndex (workItem : rest) = do
+          result <-
+            finalizeDefWorkItemWithTiming
+              timing
+              moduleName0
+              finalizeContext
+              (Just moduleContext)
+              nonRecursiveNames
+              workItem
+          case result of
+            Left err -> pure (Left err)
+            Right checked ->
+              checked `seq` goLayer (checked : acc) (itemIndex + 1) rest
+
+    finalizeFallbackItems checkedByName [] =
+      pure (Right checkedByName)
+    finalizeFallbackItems checkedByName (workItem : rest) = do
+      result <-
+        finalizeDefWorkItemWithTiming
+          timing
+          moduleName0
+          finalizeContext
+          (Just moduleContext)
+          nonRecursiveNames
+          workItem
+      case result of
+        Left err -> pure (Left err)
+        Right checked ->
+          finalizeFallbackItems (Map.insert (checkedBindingName checked) checked checkedByName) rest
+
+defWorkItemName :: DefWorkItem -> String
+defWorkItemName = P.defDeclName . defWorkItemDecl
+
+defWorkItemRuntimeName :: DefWorkItem -> String
+defWorkItemRuntimeName = loweredBindingName . defWorkItemLowered
+
+moduleLayerEligibleDefWorkItem :: DefWorkItem -> Bool
+moduleLayerEligibleDefWorkItem workItem =
+  let lowered = defWorkItemLowered workItem
+   in Map.null (loweredBindingDeferredObligations lowered)
+        && not (Builtins.srcTypeMentionsOpaqueBuiltin (loweredBindingSourceType lowered))
+
+nonRecursiveDefLayers :: Int -> Set.Set String -> [DefWorkItem] -> [[DefWorkItem]]
+nonRecursiveDefLayers batchSize nonRecursiveNames workItems =
+  concatMap (chunksOf batchSize) (dependencyLayers eligible)
+  where
+    -- Local references are still checked through the declared source types,
+    -- as in the old per-def path.  Keep the SCC/layer classification in place,
+    -- but only enable multi-root batches once the exact graph path is measured
+    -- faster than the per-def module read-context path.
+    eligible =
+      [ workItem
+      | workItem <- workItems
+      , defWorkItemName workItem `Set.member` nonRecursiveNames
+      , moduleLayerEligibleDefWorkItem workItem
+      ]
+    eligibleNames = Set.fromList (map defWorkItemName eligible)
+    eligibleDependencies workItem =
+      Set.fromList
+        [ dep
+        | dep <- defWorkItemDependencies workItem
+        , dep `Set.member` eligibleNames
+        ]
+
+    dependencyLayers [] = []
+    dependencyLayers remaining =
+      let remainingNames = Set.fromList (map defWorkItemName remaining)
+          isReady workItem =
+            Set.null (eligibleDependencies workItem `Set.intersection` remainingNames)
+          (ready, blocked) = partition isReady remaining
+       in case ready of
+            [] -> [remaining]
+            _ -> ready : dependencyLayers blocked
+
+    chunksOf _ [] = []
+    chunksOf n xs =
+      let (chunk, rest) = splitAt n xs
+       in chunk : chunksOf n rest
 
 finalizeDefWorkItemWithTiming ::
   TimingConfig ->
@@ -1350,6 +1510,14 @@ finalizeDefWorkItemWithTiming timing moduleName0 finalizeContext moduleContext n
 
 moduleDefContextMinDefs :: Int
 moduleDefContextMinDefs = 150
+
+moduleDefBatchSize :: IO Int
+moduleDefBatchSize = do
+  mbValue <- lookupEnv "MLF_MODULE_DEF_BATCH_SIZE"
+  pure $
+    case mbValue >>= readMaybe of
+      Just n | n > 1 -> n
+      _ -> 1
 
 moduleContextEligibleDefWorkItem :: Set.Set String -> DefWorkItem -> Bool
 moduleContextEligibleDefWorkItem nonRecursiveNames workItem =

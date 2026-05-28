@@ -101,7 +101,6 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.Maybe (listToMaybe)
 
-import qualified MLF.Binding.Canonicalization as BindingCanonical
 import qualified MLF.Binding.Path as BindingPath
 import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Types.Graph
@@ -118,9 +117,15 @@ import MLF.Util.Trace (TraceConfig, traceBindingM)
 import MLF.Constraint.Presolution.BindingRepair
     ( BindingRepairDirty
     , BindingRepairModel(..)
+    , bindingRepairDirtyIsEmpty
+    , brdDirtyAll
     , buildBindingRepairModel
+    , dirtyBindingRepairBindRefs
+    , dirtyBindingRepairTypes
     , dirtyAllBindingRepair
     , emptyBindingRepairDirty
+    , mergeBindingRepairDirty
+    , repairBindingParentsDirtyWithModel
     , repairBindingParentsWithModel
     )
 import MLF.Constraint.Presolution.Plan (GeneralizePlan, ReifyPlan)
@@ -315,6 +320,25 @@ invalidateBindingRepairModelState st =
         , psBindingRepairDirty = Just dirtyAllBindingRepair
         }
 
+{-# INLINE markBindingRepairDirtyState #-}
+markBindingRepairDirtyState :: BindingRepairDirty -> PresolutionState p -> PresolutionState p
+markBindingRepairDirtyState dirty st =
+    st
+        { psBindingRepairDirty =
+            Just $
+                maybe dirty (mergeBindingRepairDirty dirty) (psBindingRepairDirty st)
+        }
+
+{-# INLINE markBindingRepairDirtyTypesState #-}
+markBindingRepairDirtyTypesState :: IntSet.IntSet -> PresolutionState p -> PresolutionState p
+markBindingRepairDirtyTypesState dirtyTypes st =
+    markBindingRepairDirtyState (dirtyBindingRepairTypes dirtyTypes) st
+
+{-# INLINE markBindingRepairDirtyBindRefsState #-}
+markBindingRepairDirtyBindRefsState :: IntSet.IntSet -> PresolutionState p -> PresolutionState p
+markBindingRepairDirtyBindRefsState dirtyBindRefs st =
+    markBindingRepairDirtyState (dirtyBindingRepairBindRefs dirtyBindRefs) st
+
 {-# INLINE modifyConstraintState #-}
 modifyConstraintState :: (Constraint p -> Constraint p) -> PresolutionState p -> PresolutionState p
 modifyConstraintState f st =
@@ -337,11 +361,13 @@ modifyConstraintDirtyTypesState
     -> (Constraint p -> Constraint p)
     -> PresolutionState p
     -> PresolutionState p
-modifyConstraintDirtyTypesState _dirtyTypes f st =
-    st
-        { psConstraint = f (psConstraint st)
-        , psGraphVersion = psGraphVersion st + 1
-        }
+modifyConstraintDirtyTypesState dirtyTypes f st =
+    markBindingRepairDirtyTypesState dirtyTypes $
+        st
+            { psConstraint = f (psConstraint st)
+            , psGraphVersion = psGraphVersion st + 1
+            , psBindingRepairCache = Nothing
+            }
 
 {-# INLINE setConstraintDirtyBindRefsState #-}
 setConstraintDirtyBindRefsState
@@ -349,9 +375,9 @@ setConstraintDirtyBindRefsState
     -> Constraint p
     -> PresolutionState p
     -> PresolutionState p
-setConstraintDirtyBindRefsState _dirtyBindRefs constraint st =
-    invalidateBindingRepairModelState $
+setConstraintDirtyBindRefsState dirtyBindRefs constraint st =
     invalidateBindingModelState $
+    markBindingRepairDirtyBindRefsState dirtyBindRefs $
         st
             { psConstraint = constraint
             , psBindParentsVersion = psBindParentsVersion st + 1
@@ -370,8 +396,8 @@ modifyBindParentsState f st =
 {-# INLINE setBindParentState #-}
 setBindParentState :: NodeRef -> (NodeRef, BindFlag) -> PresolutionState p -> PresolutionState p
 setBindParentState child parentInfo st =
-    invalidateBindingRepairModelState $
     invalidateBindingModelState $
+    markBindingRepairDirtyBindRefsState (IntSet.singleton (nodeRefKey child)) $
         st
             { psConstraint =
                 (psConstraint st)
@@ -746,13 +772,57 @@ ensureBindingParentsWithOutcome = do
     let c0 = psConstraint st0
         uf = psUnionFind st0
         canonical = UnionFind.frWith uf
+        repairCacheValid cached =
+            cbrmGraphVersion cached == psGraphVersion st0
+                && cbrmUnionFindVersion cached == psUnionFindVersion st0
+        mbValidRepairCache =
+            case psBindingRepairCache st0 of
+                Just cached | repairCacheValid cached -> Just cached
+                _ -> Nothing
+        dirty0 =
+            case psBindingRepairDirty st0 of
+                Just dirty
+                    | not (bindingRepairDirtyIsEmpty dirty) -> dirty
+                _ ->
+                    case mbValidRepairCache of
+                        Just _ -> emptyBindingRepairDirty
+                        Nothing -> dirtyAllBindingRepair
+    case (mbValidRepairCache, psBindingModelCache st0, bindingRepairDirtyIsEmpty dirty0) of
+        (Just _, Just cached, True)
+            | cbmGraphVersion cached == psGraphVersion st0
+            , cbmUnionFindVersion cached == psUnionFindVersion st0
+            , cbmBindParentsVersion cached == psBindParentsVersion st0 ->
+                pure BindingRepairSkipped
+        _ -> repairBindingParentsFromScratchOrDirty c0 uf canonical mbValidRepairCache dirty0
+
+repairBindingParentsFromScratchOrDirty
+    :: Constraint p
+    -> IntMap NodeId
+    -> (NodeId -> NodeId)
+    -> Maybe (CachedBindingRepairModel p)
+    -> BindingRepairDirty
+    -> PresolutionM p BindingRepairOutcome
+repairBindingParentsFromScratchOrDirty c0 uf canonical mbValidRepairCache dirty0 = do
+    st0 <- get
     qbp0 <-
         case Binding.quotientBindParentsContextUnder canonical c0 of
             Left err -> throwError (BindingTreeError err)
             Right result -> pure result
     let bp0 = Binding.qbpBindParents qbp0
-        repairModel = buildBindingRepairModel canonical c0
-        bp1 = repairBindingParentsWithModel repairModel bp0
+        repairModel =
+            case mbValidRepairCache of
+                Just cached -> cbrmModel cached
+                Nothing -> buildBindingRepairModel canonical c0
+        repairCache =
+            CachedBindingRepairModel
+                { cbrmGraphVersion = psGraphVersion st0
+                , cbrmUnionFindVersion = psUnionFindVersion st0
+                , cbrmModel = repairModel
+                }
+        bp1 =
+            if brdDirtyAll dirty0
+                then repairBindingParentsWithModel repairModel bp0
+                else repairBindingParentsDirtyWithModel dirty0 repairModel bp0
         changed = bp1 /= cBindParents c0
         cFinal = c0 { cBindParents = bp1 }
         bindParentsVersion =
@@ -778,14 +848,18 @@ ensureBindingParentsWithOutcome = do
                 { psConstraint = cFinal
                 , psBindParentsVersion = bindParentsVersion
                 , psBindingModelCache = Just bindingCache
-                , psBindingRepairCache = Nothing
+                , psBindingRepairCache = Just repairCache
                 , psBindingRepairDirty = Nothing
                 }
     put stFinal
-    pure $
-        if changed
-            then BindingRepairFull
-            else BindingRepairSkipped
+    pure
+        ( if not changed
+            then BindingRepairSkipped
+            else
+                if brdDirtyAll dirty0
+                    then BindingRepairFull
+                    else BindingRepairIncremental
+        )
 
 quotientChildrenByParent :: BindParents -> IntMap [(Int, (NodeRef, BindFlag))]
 quotientChildrenByParent =
@@ -798,7 +872,7 @@ quotientChildrenByParent =
 
 edgeInteriorExact :: NodeId -> PresolutionM p IntSet.IntSet
 edgeInteriorExact root0 = do
-    (c0, canonical, qbp) <- cachedBindingModelM
+    (c0, canonical, _qbp) <- cachedBindingModelM
     let interiorRootRef = traceInteriorRootRef canonical c0 root0
     interiorOfUnderCachedM canonical interiorRootRef
 

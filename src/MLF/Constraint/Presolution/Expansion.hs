@@ -16,6 +16,7 @@ module MLF.Constraint.Presolution.Expansion (
     applyExpansionEdgeTracedWithBinders,
     bindExpansionRootLikeTarget,
     bindUnboundCopiedNodes,
+    copyBinderBounds,
     MinimalExpansionDecision(..),
     decideMinimalExpansion,
     decideMinimalExpansionDetailed,
@@ -27,7 +28,7 @@ module MLF.Constraint.Presolution.Expansion (
     setExpansion
 ) where
 
-import Control.Monad (foldM, zipWithM, zipWithM_)
+import Control.Monad (foldM, forM, zipWithM, zipWithM_)
 import Control.Monad.Except (throwError)
 import Control.Monad.Reader (ask)
 import Control.Monad.State (gets, modify)
@@ -53,7 +54,8 @@ import MLF.Constraint.Presolution.Copy (
     bindExpansionRootLikeTarget,
     bindUnboundCopiedNodes,
     instantiateScheme,
-    instantiateSchemeWithTrace
+    instantiateSchemeWithTrace,
+    instantiateSchemeWithTraceSnapshot
     )
 import MLF.Constraint.Presolution.ForallIntro (introduceForallFromSpec)
 import MLF.Constraint.Presolution.Ops (
@@ -63,6 +65,8 @@ import MLF.Constraint.Presolution.Ops (
     setVarBound
     )
 import MLF.Constraint.Presolution.StateAccess (
+    PresolutionBindingSnapshot(..),
+    getBindingSnapshot,
     lookupBindParentM
     )
 import MLF.Constraint.Types.Graph
@@ -591,29 +595,68 @@ copyBinderBounds :: [(NodeId, NodeId)] -> [(NodeId, NodeId)] -> PresolutionM p (
 copyBinderBounds binderMetas binderArgs = do
     let binderMetaMap = IntMap.fromList [(getNodeId bv, meta) | (bv, meta) <- binderMetas]
         binderArgMap = IntMap.fromList [(getNodeId bv, arg) | (bv, arg) <- binderArgs]
-    foldM
-        (\(cmapAcc, intAcc, frontierAcc) (bv, meta) -> do
+    binderBounds <-
+        forM binderMetas $ \(bv, meta) -> do
             mbBound <- lookupVarBound bv
-            case mbBound of
-                Nothing -> pure (cmapAcc, intAcc, frontierAcc)
-                Just bnd ->
-                    case IntMap.lookup (getNodeId bnd) binderMetaMap of
-                        Just bndMeta -> do
-                            setVarBound meta (Just bndMeta)
-                            case IntMap.lookup (getNodeId bv) binderArgMap of
-                                Just arg -> setVarBound arg (Just bndMeta)
-                                Nothing -> pure ()
-                            pure (cmapAcc, intAcc, frontierAcc)
-                        Nothing -> do
-                            (bndCopy, cmapB, intB, frontierB) <- instantiateSchemeWithTrace bnd binderMetas
-                            setVarBound meta (Just bndCopy)
-                            case IntMap.lookup (getNodeId bv) binderArgMap of
-                                Just arg -> setVarBound arg (Just bndCopy)
-                                Nothing -> pure ()
-                            pure (cmapAcc <> cmapB, IntSet.union intAcc intB, IntSet.union frontierAcc frontierB)
-        )
-        (mempty, IntSet.empty, IntSet.empty)
-        binderMetas
+            pure (bv, meta, mbBound)
+    let needsCopy =
+            any
+                ( \(_, _, mbBound) ->
+                    case mbBound of
+                        Just bnd -> IntMap.notMember (getNodeId bnd) binderMetaMap
+                        Nothing -> False
+                )
+                binderBounds
+    mbSnapshot <-
+        if needsCopy
+            then Just <$> getBindingSnapshot
+            else pure Nothing
+    (traceResult, _copiedBounds) <-
+        foldM
+            (copyBinderBoundWith mbSnapshot binderMetaMap binderArgMap binderMetas)
+            (emptyTrace, IntMap.empty)
+            binderBounds
+    pure traceResult
+
+copyBinderBoundWith
+    :: Maybe (PresolutionBindingSnapshot p)
+    -> IntMap.IntMap NodeId
+    -> IntMap.IntMap NodeId
+    -> [(NodeId, NodeId)]
+    -> ((CopyMap, InteriorSet, FrontierSet), IntMap.IntMap NodeId)
+    -> (NodeId, NodeId, Maybe NodeId)
+    -> PresolutionM p ((CopyMap, InteriorSet, FrontierSet), IntMap.IntMap NodeId)
+copyBinderBoundWith mbSnapshot binderMetaMap binderArgMap binderMetas (traceAcc, copiedBounds) (bv, meta, mbBound) =
+    case mbBound of
+        Nothing -> pure (traceAcc, copiedBounds)
+        Just bnd ->
+            case IntMap.lookup (getNodeId bnd) binderMetaMap of
+                Just bndMeta -> do
+                    setInstantiatedBound bv meta bndMeta
+                    pure (traceAcc, copiedBounds)
+                Nothing ->
+                    case mbSnapshot of
+                        Nothing -> pure (traceAcc, copiedBounds)
+                        Just snapshot -> do
+                            let bndKey = getNodeId (pbsCanonical snapshot bnd)
+                            case IntMap.lookup bndKey copiedBounds of
+                                Just bndCopy -> do
+                                    setInstantiatedBound bv meta bndCopy
+                                    pure (traceAcc, copiedBounds)
+                                Nothing -> do
+                                    (bndCopy, cmapB, intB, frontierB) <-
+                                        instantiateSchemeWithTraceSnapshot snapshot bnd binderMetas
+                                    setInstantiatedBound bv meta bndCopy
+                                    pure
+                                        ( unionTrace traceAcc (cmapB, intB, frontierB)
+                                        , IntMap.insert bndKey bndCopy copiedBounds
+                                        )
+  where
+    setInstantiatedBound bv0 meta0 bound = do
+        setVarBound meta0 (Just bound)
+        case IntMap.lookup (getNodeId bv0) binderArgMap of
+            Just arg -> setVarBound arg (Just bound)
+            Nothing -> pure ()
 
 -- Copying helpers (`instantiateScheme*` + binding fixes) live in
 -- `MLF.Constraint.Presolution.Copy`.

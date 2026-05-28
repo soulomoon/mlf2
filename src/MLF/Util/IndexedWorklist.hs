@@ -31,6 +31,7 @@ module MLF.Util.IndexedWorklist
     , indexWorkItemKeyList
     , indexWorkItemKeys
     , invalidateIndexedKeysExcept
+    , invalidateIndexedKeysExceptWithin
     , invalidateQueuedIndexedKeysExcept
     , queuedIndexedItemCount
     ) where
@@ -189,6 +190,26 @@ invalidateIndexedKeysExcept
     -> (IndexedWorklistInvalidation, IndexedWorklist a)
 invalidateIndexedKeysExcept excluded indexName keys worklist =
     let affected = IntSet.difference (itemsFor indexName keys worklist) excluded
+    in ( IndexedWorklistInvalidation
+            { iwiInvalidatedIndexKeys = keys
+            , iwiInvalidatedItemKeys = affected
+            }
+       , markStaleAndRequeue affected worklist
+       )
+
+invalidateIndexedKeysExceptWithin
+    :: IntSet
+    -> WorklistIndex
+    -> IntSet
+    -> WorklistIndex
+    -> IntSet
+    -> IndexedWorklist a
+    -> (IndexedWorklistInvalidation, IndexedWorklist a)
+invalidateIndexedKeysExceptWithin excluded indexName keys withinIndex withinKeys worklist =
+    let affected =
+            IntSet.difference
+                (IntSet.intersection (itemsFor indexName keys worklist) (itemsFor withinIndex withinKeys worklist))
+                excluded
     in ( IndexedWorklistInvalidation
             { iwiInvalidatedIndexKeys = keys
             , iwiInvalidatedItemKeys = affected

@@ -102,7 +102,7 @@ orderKeysFromRootWithExtra canonical nodes extraChildren root0 mbAllowed =
                             else (m, False)
             rest' =
                 if enqueueKids && allowed nid
-                    then rest ++ children nid (depth + 1) path pathNodes
+                    then children nid (depth + 1) path pathNodes ++ rest
                     else rest
         in go m' rest'
 

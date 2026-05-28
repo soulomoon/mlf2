@@ -24,6 +24,7 @@ Captured with:
 ./bench/run-benchmarks.sh \
   --runs 1 \
   --allow-status 1 \
+  --no-build \
   --benchmark parser-library test/programs/compiler-parser-parity/parser-library \
   --output bench/results/parser-library-latest.tsv
 ```
@@ -39,7 +40,7 @@ generated definition.
 
 | System / metric | Workload | Total checked defs | Current total | Current per def | Ratio vs GHC reference |
 | --- | --- | ---: | ---: | ---: | ---: |
-| `mlf2` exact pipeline, `ParserParityParser.def-bindings` | generated `.mlfp` parser definitions | 914 | 95814.535ms | 104.830ms | 187.9x |
+| `mlf2` exact pipeline, `ParserParityParser.def-bindings` | generated `.mlfp` parser definitions | 914 | 97575.976ms | 106.757ms | 191.3x |
 | GHC 9.12.2 local reference, `-fforce-recomp -fno-code -O0` | persisted synthetic module with 914 parser-shaped top-level defs | 914 | 510.000ms | 0.558ms | 1.0x |
 
 The comparable real GHC artifact is not a testsuite module. It is
@@ -100,12 +101,12 @@ caches are useful only if they reduce these totals.
 
 | Metric | Before module def checker (ms) | Current exact module read context (ms) | Saved vs baseline (ms) | Reduction | Speedup | Rejected direct-bypass reference (ms) | Reading |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| `program.check.modules` | 161077.348 | 141906.520 | 19170.828 | 11.90% | 1.14x | 67796.970 | Direct bypass is removed; the current win comes from keeping the full pipeline while sharing exact read-only prep, carrying edge instantiation metadata, reusing result-type/source-type read context, carrying elaboration typecheck environments incrementally, sharing prepared elaboration/result-type read models, reusing result-type reification read models, avoiding duplicate edge-local interior root lookups, indexing read-model binding children for reification, reusing the base read-model var-only node map in result-type reconstruction, avoiding edge-local order-key construction for zero/one-binder edges, reading presolution copy sources from the stable snapshot, selectively materializing only referenced external schemes, seeding presolution edge owner/root indexes once per edge loop, recording guarded edge fingerprints without replaying non-idempotent processed expansions, and using a sequence-backed generic indexed worklist queue with direct requeue. |
-| `program.check.module.ParserParityParser` | 112892.114 | 96016.283 | 16875.831 | 14.95% | 1.18x | 23814.194 | Main target module remains the dominant cost; every accepted definition still runs the normal checker path. |
-| `program.check.module.ParserParityParser.def-bindings` | 112683.979 | 95814.535 | 16869.444 | 14.97% | 1.18x | 23622.957 | 914 generated defs pay the full pipeline; the per-def cost is still about 104.830ms, so the remaining win requires deeper edge execution, result-type reconstruction, and generalization work. |
-| `program.check.module.ParserParityParserCombinator` | 17656.853 | 15336.248 | 2320.605 | 13.14% | 1.15x | 15440.448 | Below the module read-context gate; compare as current checkout context, not direct evidence for the gate. |
-| `program.check.module.ParserParityLexer` | 16997.185 | 15276.513 | 1720.672 | 10.12% | 1.11x | 15507.747 | Below the module read-context gate at 130 defs; still full per-def pipeline. |
-| `program.check.module.ParserParityAst` | 10838.915 | 12316.624 | -1477.709 | -13.63% | 0.88x | 9469.193 | Mostly constructor-heavy; no direct bypass and no module read-context gate. This one-run snapshot regressed against the historical baseline and should be treated as variance until repeated. |
+| `program.check.modules` | 161077.348 | 139511.385 | 21565.963 | 13.39% | 1.15x | 67796.970 | Direct bypass is removed; the current win comes from keeping the full pipeline while sharing exact read-only prep, carrying edge instantiation metadata, reusing result-type/source-type read context, carrying elaboration typecheck environments incrementally, sharing prepared elaboration/result-type read models, reusing result-type reification read models, avoiding duplicate edge-local interior root lookups, indexing read-model binding children for reification, reusing the base read-model var-only node map in result-type reconstruction, avoiding edge-local order-key construction for zero/one-binder edges, reading presolution copy sources from the stable snapshot, selectively materializing only referenced external schemes, seeding presolution edge owner/root indexes once per edge loop, recording guarded edge fingerprints without replaying non-idempotent processed expansions, using a sequence-backed generic indexed worklist queue with direct requeue, removing avoidable order-key queue appends, carrying known app argument/function types through the μ-use helper, preserving dirty binding-repair sets instead of invalidating the whole repair model, carrying the typed application result through μ result rolling, reusing known application result types when the function and argument types already prove the app, carrying known coerced argument types through μ argument coercion, carrying a root generalization into result-type reconstruction when the exact `(scope,target)` key matches, caching result-type fallback summaries plus scheme-root ownership/body lookup in the shared `ResultTypeView`, reusing the cached scheme-body target during root generalization, carrying checked function candidates through the μ-use helper, splitting edge-expansion timing to expose copy-bound work, reusing one binding snapshot plus duplicate canonical bound copies inside `copyBinderBounds`, adding diagnostic root-ownership indexes, replacing independent diagnostic multi-root graphs with root-local partitions, restricting module-root external environments to referenced names, keeping normal-mode batch layers out of nested detailed timing, building root partitions with one bucketed graph pass instead of one graph scan per root, and running independent root partitions concurrently only in opt-in multi-root batches. |
+| `program.check.module.ParserParityParser` | 112892.114 | 97803.532 | 15088.582 | 13.37% | 1.15x | 23814.194 | Main target module remains the dominant cost; every accepted definition still runs the normal checker path. |
+| `program.check.module.ParserParityParser.def-bindings` | 112683.979 | 97575.976 | 15108.003 | 13.41% | 1.15x | 23622.957 | 914 generated defs pay the full pipeline; the per-def cost is still about 106.757ms in one-root mode, so the remaining single-root win requires deeper edge execution, safe external-scheme sharing, result-type reconstruction, and generalization work. |
+| `program.check.module.ParserParityParserCombinator` | 17656.853 | 14426.187 | 3230.666 | 18.30% | 1.22x | 15440.448 | Below the module read-context gate; compare as current checkout context, not direct evidence for the gate. |
+| `program.check.module.ParserParityLexer` | 16997.185 | 14587.420 | 2409.765 | 14.18% | 1.17x | 15507.747 | Below the module read-context gate at 130 defs; still full per-def pipeline. |
+| `program.check.module.ParserParityAst` | 10838.915 | 9887.806 | 951.109 | 8.77% | 1.10x | 9469.193 | Mostly constructor-heavy; no direct bypass and no module read-context gate. This one-run snapshot improved against the historical baseline, but it remains a small-module context metric rather than evidence for the parser-module gate. |
 
 ## Current exact-pipeline snapshot
 
@@ -117,11 +118,11 @@ bench/results/parser-library-latest.tsv
 
 | Module | Def count | Uses module read context | Module time (ms) | Def-bindings time (ms) |
 | --- | ---: | --- | ---: | ---: |
-| `ParserParityParser` | 914 | yes | 96016.283 | 95814.535 |
-| `ParserParitySource` | 160 | yes | 358.613 | 259.145 |
-| `ParserParityLexer` | 130 | no | 15276.513 | 14675.852 |
-| `ParserParityParserCombinator` | 26 | no | 15336.248 | 14940.855 |
-| `ParserParityAst` | 21 | no | 12316.624 | 12276.288 |
+| `ParserParityParser` | 914 | yes | 97803.532 | 97575.976 |
+| `ParserParitySource` | 160 | yes | 328.365 | 233.725 |
+| `ParserParityLexer` | 130 | no | 14587.420 | 14014.858 |
+| `ParserParityParserCombinator` | 26 | no | 14426.187 | 14052.349 |
+| `ParserParityAst` | 21 | no | 9887.806 | 9837.554 |
 
 The gate is `moduleDefContextMinDefs = 150`. It avoids adding module-context
 overhead to small ordinary modules such as Prelude while still covering the
@@ -185,6 +186,90 @@ and rejected: both a full left-reachability index and endpoint reachability
 memoization regressed the parser-library package benchmark, so acyclicity keeps
 the original pairwise dependency scan.
 
+The result-type view reuse, order-key traversal cleanup, typed app-helper
+carry, dirty binding repair, typed μ result-roll carry, and known application
+result-type reuse moved the one-run parser-library artifact from
+`141906.520ms` to `130486.229ms`, an `11420.291ms` (`8.05%`) improvement.
+The dirty binding-repair slice alone moved the immediately previous
+parser-library snapshot from `136737.298ms` to `133332.860ms`, a `3404.438ms`
+(`2.49%`) improvement, while `ParserParityParser.def-bindings` moved from
+`92550.602ms` to `90975.131ms` (`1575.471ms`, `1.70%`). A raw shared
+external-scheme graph was tested during this slice and rejected for now: it can
+fail presolution with `ArityMismatch "applyExpansion" 7 2`, so production keeps
+root-local external scheme copies until external scheme sharing is
+copy/idempotence-aware.
+The latest typed μ result-roll carry then moved the immediately previous
+snapshot from `133332.860ms` to `132752.201ms`, a `580.659ms` (`0.44%`)
+package improvement, while `ParserParityParser.def-bindings` moved from
+`90975.131ms` to `90453.862ms` (`521.269ms`, `0.57%`).
+Reusing known application result types in the same helper then moved
+`132752.201ms` to `130486.229ms`, a `2265.972ms` (`1.71%`) package
+improvement, while `ParserParityParser.def-bindings` moved from `90453.862ms`
+to `88986.911ms` (`1466.951ms`, `1.62%`).
+A follow-up root-generalization carry lets result-type reconstruction reuse a
+just-computed root scheme only when the exact `(scope,target)` key matches. The
+next result-type fallback index moved the current one-run artifact to
+`129687.360ms` overall and `88066.676ms` for
+`ParserParityParser.def-bindings`. Treat the one-root delta as small and within
+one-run-noise territory, but the code keeps the exact pipeline and removes
+repeated fallback summary and scheme-root-owner scans from
+`ResultType.Fallback.Core`.
+A narrow `ALetF` typecheck-carry experiment was tested after this and
+rejected: reusing locally checked RHS variants moved the default artifact to
+`130467.122ms` and batch2 to `201149.010ms`, so the code was reverted.
+Adding focused edge-expansion subcounters moved the current one-run artifact to
+`128672.769ms` overall and `88351.376ms` for
+`ParserParityParser.def-bindings`. Treat this as measurement groundwork, not a
+claimed algorithmic win: the normal `MLF_MODULE_DEF_BATCH_SIZE=2` diagnostic
+artifact remains slower at `200427.987ms` overall and `158759.657ms` for
+`ParserParityParser.def-bindings`.
+A follow-up cached scheme-body lookup in the shared `ResultTypeView` kept the
+exact pipeline and removed another graph-wide scan from result-type target
+selection. The refreshed one-run artifact is noisy rather than a headline win:
+`program.check.modules` is `130862.089ms`, while
+`ParserParityParser.def-bindings` is `89397.987ms`. Treat this
+as retained exact read-context cleanup, not proof that result-type-side caching
+can solve the native multi-root regression by itself. A follow-up attempt to
+reuse overlay read-model indexes instead of rebuilding them was measured and
+rejected: it moved the one-root default to `130712.985ms` in that run and batch2
+to `202139.784ms`, then was reverted. Root generalization now reuses the same
+cached scheme-body target in `ResultTypeView`; the refreshed batch2 artifact
+is `200081.198ms`, still far slower than the one-root default.
+
+Native multi-root batching is available only as a diagnostic path through
+`MLF_MODULE_DEF_BATCH_SIZE`; the production default remains `1`. Earlier
+global multi-root attempts were measured and rejected because they made batch 2
+roughly 1.5x-1.8x slower than one-root. Those runs showed no shared parser
+edges, so the accepted follow-up changed the diagnostic path from one mutable
+global graph to independent root-local partitions when ownership is exact.
+
+The latest batch-2 capture clears the first production gate for the diagnostic
+multi-root path: `program.check.modules` is `20.46%` faster than one-root and
+`ParserParityParser.def-bindings` is `30.12%` faster. The win comes from
+keeping independent root partitions exact but executing them concurrently in
+opt-in batches; mutable graph nodes remain root-local and final validation is
+unchanged. The production default remains `MLF_MODULE_DEF_BATCH_SIZE=1` until
+the larger-batch setting is chosen deliberately and repeated runs confirm the
+one-run shape. Batch 4, 8, and 16 below are the previous same-branch one-run
+captures; the post-merge verification refreshed one-root and batch 2.
+
+| Parser-library batch gate | One-root | Batch 2 | Batch 4 | Batch 8 | Batch 16 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `program.check.modules` | 139511.385ms | 110967.252ms | 96035.435ms | 90997.719ms | 92018.259ms |
+| Total improvement | 0.00% | 20.46% | 31.16% | 34.77% | 34.04% |
+| `ParserParityParser.def-bindings` | 97575.976ms | 68182.797ms | 49566.815ms | 43200.135ms | 43844.366ms |
+| Parser def improvement | 0.00% | 30.12% | 49.20% | 55.73% | 55.07% |
+| Parser per def | 106.757ms | 74.598ms | 54.231ms | 47.265ms | 47.970ms |
+
+Historical rejected experiments remain useful as guardrails: lazy shared
+result-type fallback summaries, per-call alias-bound reify memoization,
+pre-canonicalized annotation source types, module-owned external scheme graphs,
+retained-child fallback indexes, seeded multi-root root generalizations,
+edge-local `RaiseMerge` ancestry caches, eager `ResultTypeView` scope caches,
+and equality-based elaboration term reuse all failed to beat the then-current
+one-root or batch-2 artifacts. Do not repeat those shapes without a narrower
+measured reason.
+
 ## Notes
 
 - The production optimization is exact: it still runs constraint generation,
@@ -196,7 +281,8 @@ the original pairwise dependency scan.
   `MLF_PROGRAM_TIMING_DEF_DETAILS=1`. The canonical benchmark script leaves it
   off so `bench/results/parser-library-latest.tsv` remains a lower-overhead
   top-level timing artifact.
-- Bounded grouping was tested and rejected: even 8-definition batches were
-  superlinear on `ParserParityParser` and could fail before falling back.
+- Bounded grouping is gated by `MLF_MODULE_DEF_BATCH_SIZE`. The production
+  default remains one definition per exact pipeline until the faster one-run
+  batch shape is confirmed with repeated runs and chosen deliberately.
 - The direct annotated checker numbers are intentionally not counted as an
   accepted improvement because that path skipped checker semantics.

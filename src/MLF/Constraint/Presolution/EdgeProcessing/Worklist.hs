@@ -18,21 +18,27 @@ module MLF.Constraint.Presolution.EdgeProcessing.Worklist
     , WorklistInvalidation(..)
     , buildEdgeWorklist
     , buildIndexedEdgeWorklist
+    , buildIndexedEdgeWorklistWithRootOwnership
     , popEdgeWorkItem
     , notePlannedEdge
     , noteProcessedEdge
     , noteInertEdge
     , invalidateRoots
     , invalidateRootsExcept
+    , invalidateRootsWithinRootOwnersExcept
     , invalidateQueuedRootsExcept
     , invalidateOwners
     , invalidateOwnersExcept
+    , invalidateOwnersWithinRootOwnersExcept
     , invalidateQueuedOwnersExcept
     , invalidateExpansions
     , invalidateExpansionsExcept
+    , invalidateExpansionsWithinRootOwnersExcept
     , invalidateQueuedExpansionsExcept
     , queuedEdgeCount
     , indexedEdgeCount
+    , rootOwnershipOfWorklist
+    , rootOwnersForPlan
     ) where
 
 import Control.Monad (forM)
@@ -51,6 +57,7 @@ import MLF.Constraint.Presolution.StateAccess
     , getBindingSnapshot
     )
 import MLF.Constraint.Types.Graph
+import MLF.Constraint.RootOwnership
 import MLF.Constraint.Types.Witness (Expansion)
 import qualified MLF.Util.IndexedWorklist as Indexed
 
@@ -78,6 +85,7 @@ data EdgeWorkItem = EdgeWorkItem
     { ewiEdge :: !InstEdge
     , ewiPlanSeed :: !(Maybe EdgePlanSeed)
     , ewiFingerprint :: !(Maybe EdgeFingerprint)
+    , ewiRootOwners :: !IntSet
     , ewiStale :: !Bool
     }
     deriving (Eq, Show)
@@ -85,6 +93,7 @@ data EdgeWorkItem = EdgeWorkItem
 data EdgeWorklist = EdgeWorklist
     { ewCore :: !(Indexed.IndexedWorklist EdgeWorkItem)
     , ewPlannedEdges :: !IntSet
+    , ewRootOwnership :: !RootOwnershipIndex
     }
     deriving (Eq, Show)
 
@@ -103,19 +112,28 @@ buildEdgeWorklist edges =
             { ewiEdge = edge
             , ewiPlanSeed = Nothing
             , ewiFingerprint = Nothing
+            , ewiRootOwners = IntSet.empty
             , ewiStale = False
             }
         | edge <- edges
         ]
 
 buildIndexedEdgeWorklist :: [InstEdge] -> PresolutionM p EdgeWorklist
-buildIndexedEdgeWorklist edges = do
+buildIndexedEdgeWorklist =
+    buildIndexedEdgeWorklistWithRootOwnership emptyRootOwnershipIndex
+
+buildIndexedEdgeWorklistWithRootOwnership :: RootOwnershipIndex -> [InstEdge] -> PresolutionM p EdgeWorklist
+buildIndexedEdgeWorklistWithRootOwnership ownership edges = do
     snapshot <- getBindingSnapshot
-    items <- forM edges (workItemFromSnapshot snapshot)
-    pure (buildEdgeWorklistFromItems items)
+    items <- forM edges (workItemFromSnapshot ownership snapshot)
+    pure (buildEdgeWorklistFromItemsWithRootOwnership ownership items)
 
 buildEdgeWorklistFromItems :: [EdgeWorkItem] -> EdgeWorklist
-buildEdgeWorklistFromItems items =
+buildEdgeWorklistFromItems =
+    buildEdgeWorklistFromItemsWithRootOwnership emptyRootOwnershipIndex
+
+buildEdgeWorklistFromItemsWithRootOwnership :: RootOwnershipIndex -> [EdgeWorkItem] -> EdgeWorklist
+buildEdgeWorklistFromItemsWithRootOwnership ownership items =
     foldl' indexSeed base items
   where
     base =
@@ -126,6 +144,7 @@ buildEdgeWorklistFromItems items =
                     | item <- items
                     ]
             , ewPlannedEdges = IntSet.empty
+            , ewRootOwnership = ownership
             }
 
     indexSeed worklist item =
@@ -137,10 +156,11 @@ buildEdgeWorklistFromItems items =
                     [epsLeftRoot seed, epsRightRoot seed, epsBodyRoot seed]
                     (Just (epsSchemeOwnerGen seed))
                     (Just (epsExpansionVar seed))
+                    (ewiRootOwners item)
                     worklist
 
-workItemFromSnapshot :: PresolutionBindingSnapshot p -> InstEdge -> PresolutionM p EdgeWorkItem
-workItemFromSnapshot snapshot edge = do
+workItemFromSnapshot :: RootOwnershipIndex -> PresolutionBindingSnapshot p -> InstEdge -> PresolutionM p EdgeWorkItem
+workItemFromSnapshot ownership snapshot edge = do
     let constraint0 = pbsConstraint snapshot
         canonical = pbsCanonical snapshot
         leftId = instLeft edge
@@ -160,11 +180,16 @@ workItemFromSnapshot snapshot edge = do
                         , epsSchemeOwnerGen = owner
                         , epsExpansionVar = rteExpVar leftTyExp
                         }
+    let rootOwners =
+            case seed of
+                Nothing -> ownersForEdge ownership (getEdgeId (instEdgeId edge))
+                Just seed0 -> rootOwnersForSeed ownership edge seed0
     pure
         EdgeWorkItem
             { ewiEdge = edge
             , ewiPlanSeed = seed
             , ewiFingerprint = Nothing
+            , ewiRootOwners = rootOwners
             , ewiStale = False
             }
 
@@ -186,6 +211,7 @@ notePlannedEdge plan worklist =
                 [eprLeftCanonical plan, eprRightCanonical plan, rteBodyId (eprLeftTyExp plan)]
                 (Just (eprSchemeOwnerGen plan))
                 (Just (rteExpVar (eprLeftTyExp plan)))
+                (rootOwnersForPlan (ewRootOwnership worklist) plan)
                 worklist
         core' = Indexed.markIndexedWorkItemClean edgeKey (ewCore worklist')
     in worklist'
@@ -207,6 +233,7 @@ noteProcessedEdge edge mbFacts worklist =
             let processedItem = baseItem
                     { ewiPlanSeed = Just seed
                     , ewiFingerprint = Just fingerprint
+                    , ewiRootOwners = rootOwners
                     , ewiStale = False
                     }
             in
@@ -215,9 +242,14 @@ noteProcessedEdge edge mbFacts worklist =
                 [epsLeftRoot seed, epsRightRoot seed, epsBodyRoot seed]
                 (Just (epsSchemeOwnerGen seed))
                 (Just (epsExpansionVar seed))
+                rootOwners
                 (clearStaleEdge edgeKey (updateStoredItem processedItem worklist))
   where
     edgeKey = getEdgeId (instEdgeId edge)
+    rootOwners =
+        case mbFacts of
+            Nothing -> ownersForEdge (ewRootOwnership worklist) edgeKey
+            Just (seed, _) -> rootOwnersForSeed (ewRootOwnership worklist) edge seed
     baseItem =
         case Indexed.lookupIndexedWorkItem edgeKey (ewCore worklist) of
             Just item -> Indexed.iwiValue item
@@ -226,6 +258,7 @@ noteProcessedEdge edge mbFacts worklist =
                     { ewiEdge = edge
                     , ewiPlanSeed = Nothing
                     , ewiFingerprint = Nothing
+                    , ewiRootOwners = rootOwners
                     , ewiStale = False
                     }
     clearedItem = baseItem { ewiStale = False }
@@ -251,6 +284,21 @@ invalidateRootsExcept excluded roots worklist =
             }
        , worklist { ewCore = core' }
        )
+
+invalidateRootsWithinRootOwnersExcept :: IntSet -> IntSet -> IntSet -> EdgeWorklist -> (WorklistInvalidation, EdgeWorklist)
+invalidateRootsWithinRootOwnersExcept excluded roots rootOwners worklist
+    | IntSet.null rootOwners = invalidateRootsExcept excluded roots worklist
+    | otherwise =
+        let (invalidation, core') =
+                Indexed.invalidateIndexedKeysExceptWithin excluded rootIndex roots rootOwnerIndex rootOwners (ewCore worklist)
+        in ( WorklistInvalidation
+                { wiRoots = roots
+                , wiOwners = IntSet.empty
+                , wiExpansions = IntSet.empty
+                , wiEdges = Indexed.iwiInvalidatedItemKeys invalidation
+                }
+           , worklist { ewCore = core' }
+           )
 
 invalidateQueuedRootsExcept :: IntSet -> IntSet -> EdgeWorklist -> (WorklistInvalidation, EdgeWorklist)
 invalidateQueuedRootsExcept excluded roots worklist =
@@ -281,6 +329,21 @@ invalidateOwnersExcept excluded owners worklist =
        , worklist { ewCore = core' }
        )
 
+invalidateOwnersWithinRootOwnersExcept :: IntSet -> IntSet -> IntSet -> EdgeWorklist -> (WorklistInvalidation, EdgeWorklist)
+invalidateOwnersWithinRootOwnersExcept excluded owners rootOwners worklist
+    | IntSet.null rootOwners = invalidateOwnersExcept excluded owners worklist
+    | otherwise =
+        let (invalidation, core') =
+                Indexed.invalidateIndexedKeysExceptWithin excluded ownerIndex owners rootOwnerIndex rootOwners (ewCore worklist)
+        in ( WorklistInvalidation
+                { wiRoots = IntSet.empty
+                , wiOwners = owners
+                , wiExpansions = IntSet.empty
+                , wiEdges = Indexed.iwiInvalidatedItemKeys invalidation
+                }
+           , worklist { ewCore = core' }
+           )
+
 invalidateQueuedOwnersExcept :: IntSet -> IntSet -> EdgeWorklist -> (WorklistInvalidation, EdgeWorklist)
 invalidateQueuedOwnersExcept excluded owners worklist =
     let (invalidation, core') =
@@ -310,6 +373,21 @@ invalidateExpansionsExcept excluded expansions worklist =
        , worklist { ewCore = core' }
        )
 
+invalidateExpansionsWithinRootOwnersExcept :: IntSet -> IntSet -> IntSet -> EdgeWorklist -> (WorklistInvalidation, EdgeWorklist)
+invalidateExpansionsWithinRootOwnersExcept excluded expansions rootOwners worklist
+    | IntSet.null rootOwners = invalidateExpansionsExcept excluded expansions worklist
+    | otherwise =
+        let (invalidation, core') =
+                Indexed.invalidateIndexedKeysExceptWithin excluded expansionIndex expansions rootOwnerIndex rootOwners (ewCore worklist)
+        in ( WorklistInvalidation
+                { wiRoots = IntSet.empty
+                , wiOwners = IntSet.empty
+                , wiExpansions = expansions
+                , wiEdges = Indexed.iwiInvalidatedItemKeys invalidation
+                }
+           , worklist { ewCore = core' }
+           )
+
 invalidateQueuedExpansionsExcept :: IntSet -> IntSet -> EdgeWorklist -> (WorklistInvalidation, EdgeWorklist)
 invalidateQueuedExpansionsExcept excluded expansions worklist =
     let (invalidation, core') =
@@ -329,23 +407,43 @@ queuedEdgeCount = Indexed.queuedIndexedItemCount . ewCore
 indexedEdgeCount :: EdgeWorklist -> Int
 indexedEdgeCount = IntSet.size . ewPlannedEdges
 
+rootOwnershipOfWorklist :: EdgeWorklist -> RootOwnershipIndex
+rootOwnershipOfWorklist = ewRootOwnership
+
+rootOwnersForPlan :: RootOwnershipIndex -> EdgePlan -> IntSet
+rootOwnersForPlan ownership plan =
+    rootOwnersForSeed ownership (eprEdge plan) seed
+  where
+    leftTyExp = eprLeftTyExp plan
+    seed =
+        EdgePlanSeed
+            { epsLeftTyExp = leftTyExp
+            , epsLeftRoot = eprLeftCanonical plan
+            , epsRightRoot = eprRightCanonical plan
+            , epsBodyRoot = rteBodyId leftTyExp
+            , epsSchemeOwnerGen = eprSchemeOwnerGen plan
+            , epsExpansionVar = rteExpVar leftTyExp
+            }
+
 indexEdge
     :: Int
     -> [NodeId]
     -> Maybe GenNodeId
     -> Maybe ExpVarId
+    -> IntSet
     -> EdgeWorklist
     -> EdgeWorklist
-indexEdge edgeKey roots mbOwner mbExpVar worklist =
+indexEdge edgeKey roots mbOwner mbExpVar rootOwners worklist =
     worklist
         { ewCore =
-            indexExpansion $
-                indexOwner $
-                    Indexed.indexWorkItemKeyList
-                        edgeKey
-                        rootIndex
-                        (map getNodeId roots)
-                        (ewCore worklist)
+            indexRootOwners $
+                indexExpansion $
+                    indexOwner $
+                        Indexed.indexWorkItemKeyList
+                            edgeKey
+                            rootIndex
+                            (map getNodeId roots)
+                            (ewCore worklist)
         }
   where
     indexOwner core =
@@ -359,6 +457,25 @@ indexEdge edgeKey roots mbOwner mbExpVar worklist =
             Nothing -> core
             Just expVar ->
                 Indexed.indexWorkItemKey edgeKey expansionIndex (getExpVarId expVar) core
+
+    indexRootOwners core =
+        Indexed.indexWorkItemKeys edgeKey rootOwnerIndex rootOwners core
+
+rootOwnersForSeed :: RootOwnershipIndex -> InstEdge -> EdgePlanSeed -> IntSet
+rootOwnersForSeed ownership edge seed =
+    IntSet.unions
+        [ ownersForEdge ownership (getEdgeId (instEdgeId edge))
+        , ownersForNodes ownership $
+            IntSet.fromList
+                [ getNodeId (epsLeftRoot seed)
+                , getNodeId (epsRightRoot seed)
+                , getNodeId (epsBodyRoot seed)
+                , getNodeId (instLeft edge)
+                , getNodeId (instRight edge)
+                ]
+        , ownersForGens ownership (IntSet.singleton (getGenNodeId (epsSchemeOwnerGen seed)))
+        , ownersForExpVars ownership (IntSet.singleton (getExpVarId (epsExpansionVar seed)))
+        ]
 
 updateStoredItem :: EdgeWorkItem -> EdgeWorklist -> EdgeWorklist
 updateStoredItem item worklist =
@@ -386,3 +503,6 @@ ownerIndex = Indexed.WorklistIndex 1
 
 expansionIndex :: Indexed.WorklistIndex
 expansionIndex = Indexed.WorklistIndex 2
+
+rootOwnerIndex :: Indexed.WorklistIndex
+rootOwnerIndex = Indexed.WorklistIndex 3

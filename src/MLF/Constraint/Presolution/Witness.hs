@@ -151,7 +151,7 @@ buildEdgeTrace input gid bas (copyMap0, _interior0, _frontier0) = do
         TyExp {tnBody = b} -> b
         _ -> left
   root <- findRoot rootSeed
-  (constraint0, canonicalizeNode) <- getConstraintAndCanonical
+  (_constraint0, canonicalizeNode) <- getConstraintAndCanonical
   let interiorRootRef = genRef gid
   interiorNodesRaw <- do
     s <- interiorOfUnderCachedM canonicalizeNode interiorRootRef

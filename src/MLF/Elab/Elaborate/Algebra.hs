@@ -121,6 +121,11 @@ data ElabOut = ElabOut
     elabStripped :: Env -> Either ElabError ElabTerm
   }
 
+data TypedTerm = TypedTerm
+  { ttTerm :: !ElabTerm,
+    ttType :: !ElabType
+  }
+
 data AlgebraContext (p :: Phase) = AlgebraContext
   { algPresolutionView :: PresolutionView p,
     algTraceConfig :: TraceConfig,
@@ -914,12 +919,12 @@ elabAlg algebraContext layer =
                            | Just targetTy <- [appTargetTy]
                            ]
                     _ -> []
+                funInstNorm0 = normalizeFunInst funInst'
                 validatesTargetResultInst instCandidate =
                   let fCandidate = ETyInst fHead instCandidate
                    in case typeCheckLocal (EApp fCandidate a') of
                         Right _ -> True
                         Left _ -> False
-                funInstNorm0 = normalizeFunInst funInst'
                 funInstNorm =
                   fromMaybe
                     funInstNorm0
@@ -1178,18 +1183,26 @@ elabAlg algebraContext layer =
                               ELam paramName argTy body
                         _ -> fApp0
                 bypassApp = transparentOrIdentityBypassTerm
-            app0 <-
+            let fAppTyChecked = typeCheckLocal fApp
+            (app0, mbApp0Ty) <-
               case bypassApp of
-                Just bypassTerm -> Right bypassTerm
+                Just bypassTerm -> Right (bypassTerm, Nothing)
                 Nothing ->
                   insertMuUseSiteCoercions
                     tcEnv
                     (argIsExplicitRecursiveParam aAnn)
                     (isJust (sourceVarName aAnn))
                     argSourceSchemeTy
+                    (either (const Nothing) Just fAppTyChecked)
+                    (either (const Nothing) Just aAppTyChecked)
                     fApp
                     aApp
-            let app = rollResultToExpectedMu tcEnv appTargetTy app0
+            let (app, appTyChecked) =
+                  case maybe (typeCheckLocal app0) Right mbApp0Ty of
+                    Right app0Ty ->
+                      let appTyped = rollResultToExpectedMu tcEnv appTargetTy (TypedTerm app0 app0Ty)
+                       in (ttTerm appTyped, Right (ttType appTyped))
+                    Left tcErr -> (app0, Left tcErr)
             case ( ( \go ->
                        sourceAnnIsPolymorphic schemeEnv aAnn
                          && ( case funInst of
@@ -1216,7 +1229,7 @@ elabAlg algebraContext layer =
                                _ -> False
                         in go
                      ),
-                   typeCheckLocal app
+                   appTyChecked
                  ) of
               (True, Left tcErr) ->
                 if take (length "TCArgumentMismatch") (show tcErr) == "TCArgumentMismatch"
@@ -2181,44 +2194,56 @@ elabAlg algebraContext layer =
             TArrow _ cod -> go cod
             _ -> ty
 
-    insertMuUseSiteCoercions :: TypeCheck.Env -> Bool -> Bool -> Maybe ElabType -> ElabTerm -> ElabTerm -> Either ElabError ElabTerm
-    insertMuUseSiteCoercions tcEnv preserveRecursiveArg sourceArgIsVar mbArgSourceTy fTerm aTerm = do
+    insertMuUseSiteCoercions :: TypeCheck.Env -> Bool -> Bool -> Maybe ElabType -> Maybe ElabType -> Maybe ElabType -> ElabTerm -> ElabTerm -> Either ElabError (ElabTerm, Maybe ElabType)
+    insertMuUseSiteCoercions tcEnv preserveRecursiveArg sourceArgIsVar mbArgSourceTy mbFTy mbArgTy fTerm aTerm = do
+      let fTermTy =
+            maybe (TypeCheck.typeCheckWithEnv tcEnv fTerm) Right mbFTy
+          argTermTy =
+            maybe (TypeCheck.typeCheckWithEnv tcEnv aTerm) Right mbArgTy
       let (fUnrolled, unfoldedFromMu) =
-            case TypeCheck.typeCheckWithEnv tcEnv fTerm of
+            case fTermTy of
               Right muTy@TMu {} ->
                 case unfoldMuOnce muTy of
                   Just TArrow {} -> (EUnroll fTerm, True)
                   Just TForall {} -> (EUnroll fTerm, True)
                   _ -> (fTerm, False)
               _ -> (fTerm, False)
+          fUnrolledTy =
+            if unfoldedFromMu
+              then TypeCheck.typeCheckWithEnv tcEnv fUnrolled
+              else fTermTy
+          fUnrolledChecked = (fUnrolled, fUnrolledTy)
       {- Note [Instantiate leading ∀ after μ-unfold]
          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
          Church-encoded ADTs unfold to ∀result. arrow → ... → result.
          After EUnroll the type is TForall, not TArrow, so we must
          instantiate the leading quantifier before applying arguments.
          We infer the instantiation type from the argument's type. -}
-      let peelLeadingUnboundedForalls inst0 =
-            let go n instN
-                  | n >= (8 :: Int) = instN
+      let checkFunctionCandidate instN =
+            case instN of
+              InstId -> fUnrolledChecked
+              _ ->
+                let candidate = ETyInst fUnrolled instN
+                 in (candidate, TypeCheck.typeCheckWithEnv tcEnv candidate)
+          peelLeadingUnboundedForalls inst0 =
+            let go n candidate
+                  | n >= (8 :: Int) = candidate
                   | otherwise =
-                      case TypeCheck.typeCheckWithEnv tcEnv (ETyInst fUnrolled instN) of
-                        Right (TForall _ Nothing _) -> instN
-                        _ -> instN
-             in go 0 inst0
-          validatedForVarArg instN =
-            let candidate =
-                  case instN of
-                    InstId -> fUnrolled
-                    _ -> ETyInst fUnrolled instN
+                      case snd candidate of
+                        Right (TForall _ Nothing _) -> candidate
+                        _ -> candidate
+             in go 0 (checkFunctionCandidate inst0)
+          validatedForVarArg candidate =
+            let candidateTy = snd candidate
              in if sourceArgIsVar
-                  then case TypeCheck.typeCheckWithEnv tcEnv candidate of
+                  then case candidateTy of
                     Right TArrow {} -> candidate
-                    _ -> fUnrolled
+                    _ -> fUnrolledChecked
                   else candidate
-          fInstantiated =
-            case (unfoldedFromMu, TypeCheck.typeCheckWithEnv tcEnv fUnrolled) of
+          fInstantiatedChecked =
+            case (unfoldedFromMu, fUnrolledTy) of
               (True, Right (TForall _v Nothing _arrowBody)) ->
-                case TypeCheck.typeCheckWithEnv tcEnv aTerm of
+                case argTermTy of
                   Right argTy ->
                     let sourceMuMatchesActual sourceTy =
                           alphaEqType sourceTy argTy
@@ -2239,24 +2264,45 @@ elabAlg algebraContext layer =
                               | sourceMuMatchesActual sourceTy -> sourceTy
                             _ -> argTy
                         inst0 = InstApp instArgTy
-                     in case peelLeadingUnboundedForalls inst0 of
-                          instN -> validatedForVarArg instN
-                  Left _ -> fUnrolled
+                     in validatedForVarArg (peelLeadingUnboundedForalls inst0)
+                  Left _ -> fUnrolledChecked
               (_, Right _) ->
-                case peelLeadingUnboundedForalls InstId of
-                  instN -> validatedForVarArg instN
-              _ -> fUnrolled
-      aCoerced <-
-        case TypeCheck.typeCheckWithEnv tcEnv fInstantiated of
-          Right (TArrow paramTy _resTy)
+                validatedForVarArg (peelLeadingUnboundedForalls InstId)
+              _ -> fUnrolledChecked
+          fInstantiated = fst fInstantiatedChecked
+          fInstantiatedTy = snd fInstantiatedChecked
+          appArgTypesCompatible expectedTy actualTy =
+            let expectedTy' = stripVacuousForallsDeep expectedTy
+                actualTy' = stripVacuousForallsDeep actualTy
+             in expectedTy' == TBottom
+                  || alphaEqType expectedTy' actualTy'
+                  || churchAwareEqType expectedTy' actualTy'
+      (aCoerced, mbKnownAppTy) <-
+        case fInstantiatedTy of
+          Right (TArrow paramTy resTy)
             | preserveRecursiveArg,
               TMu {} <- paramTy,
-              Right argTy <- TypeCheck.typeCheckWithEnv tcEnv aTerm,
+              Right argTy <- argTermTy,
               (alphaEqType argTy paramTy || churchAwareEqType argTy paramTy) ->
-                Right aTerm
-            | otherwise -> coerceArgForParam tcEnv sourceArgIsVar mbArgSourceTy paramTy aTerm
-          _ -> Right aTerm
-      pure (EApp fInstantiated aCoerced)
+                Right (aTerm, Just resTy)
+            | Right argTy <- argTermTy,
+              appArgTypesCompatible paramTy argTy ->
+                Right (aTerm, Just resTy)
+            | otherwise -> do
+                coerced <- coerceArgForParam tcEnv sourceArgIsVar mbArgSourceTy (either (const Nothing) Just argTermTy) paramTy aTerm
+                let mbCoercedAppTy =
+                      case argTermTy of
+                        Left _
+                          | ttTerm coerced == aTerm,
+                            ttType coerced == TBottom -> Nothing
+                        _ ->
+                          let coercedTy = ttType coerced
+                           in if appArgTypesCompatible paramTy coercedTy
+                                then Just resTy
+                                else Nothing
+                Right (ttTerm coerced, mbCoercedAppTy)
+          _ -> Right (aTerm, Nothing)
+      pure (EApp fInstantiated aCoerced, mbKnownAppTy)
 
     unfoldMuOnce :: ElabType -> Maybe ElabType
     unfoldMuOnce muTy =
@@ -2270,30 +2316,30 @@ elabAlg algebraContext layer =
         TForall _ Nothing body -> peelLeadingUnboundedForallsType body
         _ -> ty
 
-    coerceArgForParam :: TypeCheck.Env -> Bool -> Maybe ElabType -> ElabType -> ElabTerm -> Either ElabError ElabTerm
-    coerceArgForParam tcEnv sourceArgIsVar mbArgSourceTy paramTy argTerm =
-      case TypeCheck.typeCheckWithEnv tcEnv argTerm of
-        Left _ -> Right argTerm
+    coerceArgForParam :: TypeCheck.Env -> Bool -> Maybe ElabType -> Maybe ElabType -> ElabType -> ElabTerm -> Either ElabError TypedTerm
+    coerceArgForParam tcEnv sourceArgIsVar mbArgSourceTy mbArgTy paramTy argTerm =
+      case maybe (TypeCheck.typeCheckWithEnv tcEnv argTerm) Right mbArgTy of
+        Left _ -> Right (TypedTerm argTerm TBottom)
         Right argTy ->
           case paramTy of
             TVar _
               | Just muTy@TMu {} <- mbArgSourceTy ->
                   case unfoldMuOnce muTy of
                     Just unfoldedTy
-                      | alphaEqType unfoldedTy argTy || churchAwareEqType unfoldedTy argTy -> Right (ERoll muTy argTerm)
+                      | alphaEqType unfoldedTy argTy || churchAwareEqType unfoldedTy argTy -> Right (TypedTerm (ERoll muTy argTerm) muTy)
                       | otherwise ->
                           let argAligned = alignLeadingLambdasToType unfoldedTy argTerm
                               argStripped = stripUnusedTyAbsAlongType tcEnv unfoldedTy argAligned
                               argRebuilt = rebuildRecursiveArgAlongType tcEnv unfoldedTy argTerm
                            in case TypeCheck.typeCheckWithEnv tcEnv argStripped of
                                 Right argTy'
-                                  | alphaEqType unfoldedTy argTy' || churchAwareEqType unfoldedTy argTy' -> Right (ERoll muTy argStripped)
+                                  | alphaEqType unfoldedTy argTy' || churchAwareEqType unfoldedTy argTy' -> Right (TypedTerm (ERoll muTy argStripped) muTy)
                                 _ ->
                                   case TypeCheck.typeCheckWithEnv tcEnv argRebuilt of
                                     Right argTy'
-                                      | alphaEqType unfoldedTy argTy' || churchAwareEqType unfoldedTy argTy' -> Right (ERoll muTy argRebuilt)
-                                    _ -> Right argTerm
-                    _ -> Right argTerm
+                                      | alphaEqType unfoldedTy argTy' || churchAwareEqType unfoldedTy argTy' -> Right (TypedTerm (ERoll muTy argRebuilt) muTy)
+                                    _ -> Right (TypedTerm argTerm argTy)
+                    _ -> Right (TypedTerm argTerm argTy)
             muTy@TMu {} ->
               let sourceMatchesMu =
                     maybe
@@ -2302,31 +2348,31 @@ elabAlg algebraContext layer =
                       mbArgSourceTy
                       && sourceArgIsVar
                   actualMatchesMu = alphaEqType argTy muTy || churchAwareEqType argTy muTy
-                  fallbackMuVar = Right argTerm
+                  fallbackMuVar = Right (TypedTerm argTerm argTy)
                   coerceMuFromUnfolded muTy0 argTy0 =
                     case unfoldMuOnce muTy0 of
                       Just unfoldedTy
-                        | alphaEqType unfoldedTy argTy0 || churchAwareEqType unfoldedTy argTy0 -> Right (ERoll muTy0 argTerm)
+                        | alphaEqType unfoldedTy argTy0 || churchAwareEqType unfoldedTy argTy0 -> Right (TypedTerm (ERoll muTy0 argTerm) muTy0)
                         | otherwise ->
                             let argAligned = alignLeadingLambdasToType unfoldedTy argTerm
                                 argStripped = stripUnusedTyAbsAlongType tcEnv unfoldedTy argAligned
                                 argRebuilt = rebuildRecursiveArgAlongType tcEnv unfoldedTy argTerm
                              in case TypeCheck.typeCheckWithEnv tcEnv argStripped of
                                   Right argTy'
-                                    | alphaEqType unfoldedTy argTy' || churchAwareEqType unfoldedTy argTy' -> Right (ERoll muTy0 argStripped)
+                                    | alphaEqType unfoldedTy argTy' || churchAwareEqType unfoldedTy argTy' -> Right (TypedTerm (ERoll muTy0 argStripped) muTy0)
                                   _ ->
                                     case TypeCheck.typeCheckWithEnv tcEnv argRebuilt of
                                       Right argTy'
-                                        | alphaEqType unfoldedTy argTy' || churchAwareEqType unfoldedTy argTy' -> Right (ERoll muTy0 argRebuilt)
+                                        | alphaEqType unfoldedTy argTy' || churchAwareEqType unfoldedTy argTy' -> Right (TypedTerm (ERoll muTy0 argRebuilt) muTy0)
                                       _ -> fallbackMuVar
-                      _ | shouldRollMuVar muTy0 argTy0 -> Right (ERoll muTy0 argTerm)
+                      _ | shouldRollMuVar muTy0 argTy0 -> Right (TypedTerm (ERoll muTy0 argTerm) muTy0)
                       _ -> fallbackMuVar
                in if sourceMatchesMu && actualMatchesMu
-                    then Right argTerm
+                    then Right (TypedTerm argTerm argTy)
                     else
                       if sourceMatchesMu
                         then case argTy of
-                          TMu {} -> Right (ERoll muTy (EUnroll argTerm))
+                          TMu {} -> Right (TypedTerm (ERoll muTy (EUnroll argTerm)) muTy)
                           _
                             | Just unfoldedTy <- unfoldMuOnce muTy,
                               let unfoldedTyPeeled = peelLeadingUnboundedForallsType unfoldedTy,
@@ -2334,18 +2380,18 @@ elabAlg algebraContext layer =
                                 let argRebuilt = rebuildRecursiveArgAlongType tcEnv unfoldedTy argTerm
                                  in case TypeCheck.typeCheckWithEnv tcEnv argRebuilt of
                                       Right argTy'
-                                        | alphaEqType unfoldedTy argTy' || churchAwareEqType unfoldedTy argTy' -> Right (ERoll muTy argRebuilt)
+                                        | alphaEqType unfoldedTy argTy' || churchAwareEqType unfoldedTy argTy' -> Right (TypedTerm (ERoll muTy argRebuilt) muTy)
                                       _ -> coerceMuFromUnfolded muTy argTy
                           _ -> coerceMuFromUnfolded muTy argTy
                         else case argTy of
                           argMu@TMu {}
                             | alphaEqType argMu muTy || churchAwareEqType argMu muTy ->
-                                Right argTerm
+                                Right (TypedTerm argTerm argTy)
                             | otherwise ->
                                 case (unfoldMuOnce muTy, unfoldMuOnce argMu) of
                                   (Just expectedBodyTy, Just argBodyTy)
                                     | alphaEqType expectedBodyTy argBodyTy || churchAwareEqType expectedBodyTy argBodyTy ->
-                                        Right (ERoll muTy (EUnroll argTerm))
+                                        Right (TypedTerm (ERoll muTy (EUnroll argTerm)) muTy)
                                     | otherwise ->
                                         let argUnrolled = EUnroll argTerm
                                             argAligned = alignLeadingLambdasToType expectedBodyTy argUnrolled
@@ -2354,12 +2400,12 @@ elabAlg algebraContext layer =
                                          in case TypeCheck.typeCheckWithEnv tcEnv argStripped of
                                               Right argTy'
                                                 | alphaEqType expectedBodyTy argTy' || churchAwareEqType expectedBodyTy argTy' ->
-                                                    Right (ERoll muTy argStripped)
+                                                    Right (TypedTerm (ERoll muTy argStripped) muTy)
                                               _ ->
                                                 case TypeCheck.typeCheckWithEnv tcEnv argRebuilt of
                                                   Right argTy'
                                                     | alphaEqType expectedBodyTy argTy' || churchAwareEqType expectedBodyTy argTy' ->
-                                                        Right (ERoll muTy argRebuilt)
+                                                        Right (TypedTerm (ERoll muTy argRebuilt) muTy)
                                                   _ -> coerceMuFromUnfolded muTy argTy
                                   _ -> coerceMuFromUnfolded muTy argTy
                           _ -> coerceMuFromUnfolded muTy argTy
@@ -2368,49 +2414,50 @@ elabAlg algebraContext layer =
                 muTy@TMu {} ->
                   case unfoldMuOnce muTy of
                     Just unfoldedTy
-                      | alphaEqType paramTy unfoldedTy || churchAwareEqType paramTy unfoldedTy -> Right (EUnroll argTerm)
-                    _ -> Right argTerm
-                _ -> Right argTerm
+                      | alphaEqType paramTy unfoldedTy || churchAwareEqType paramTy unfoldedTy -> Right (TypedTerm (EUnroll argTerm) unfoldedTy)
+                    _ -> Right (TypedTerm argTerm argTy)
+                _ -> Right (TypedTerm argTerm argTy)
 
-    rollResultToExpectedMu :: TypeCheck.Env -> Maybe ElabType -> ElabTerm -> ElabTerm
-    rollResultToExpectedMu tcEnv mbTargetTy term =
+    rollResultToExpectedMu :: TypeCheck.Env -> Maybe ElabType -> TypedTerm -> TypedTerm
+    rollResultToExpectedMu tcEnv mbTargetTy typedTerm =
       case mbTargetTy of
         Just muTy@TMu {} ->
-          case TypeCheck.typeCheckWithEnv tcEnv term of
-            Right termTy
-              | alphaEqType termTy muTy -> term
-              | otherwise,
-                actualMu@(TMu actualName actualBody) <- termTy,
-                churchAwareEqType termTy muTy ->
-                  case unfoldMuOnce muTy of
-                    Just expectedBodyTy ->
-                      let actualBodyTy = stripVacuousForallsDeep (substTypeCapture actualName actualMu actualBody)
-                       in if alphaEqType actualBodyTy expectedBodyTy || churchAwareEqType actualBodyTy expectedBodyTy
-                            then ERoll muTy (EUnroll term)
-                            else term
-                    _ -> term
-              | otherwise ->
-                  case unfoldMuOnce muTy of
-                    Just unfoldedTy
-                      | alphaEqType termTy unfoldedTy || churchAwareEqType termTy unfoldedTy ->
-                          ERoll muTy term
-                      | otherwise ->
-                          let termAligned = alignLeadingLambdasToType unfoldedTy term
-                              termStripped = stripUnusedTyAbsAlongType tcEnv unfoldedTy termAligned
-                              termRebuilt = rebuildRecursiveArgAlongType tcEnv unfoldedTy term
-                           in case TypeCheck.typeCheckWithEnv tcEnv termStripped of
-                                Right termTy'
-                                  | alphaEqType termTy' unfoldedTy || churchAwareEqType termTy' unfoldedTy ->
-                                      ERoll muTy termStripped
-                                _ ->
-                                  case TypeCheck.typeCheckWithEnv tcEnv termRebuilt of
+          let term = ttTerm typedTerm
+              termTy = ttType typedTerm
+           in if alphaEqType termTy muTy
+                then typedTerm
+                else
+                  case termTy of
+                    actualMu@(TMu actualName actualBody)
+                      | churchAwareEqType termTy muTy ->
+                          case unfoldMuOnce muTy of
+                            Just expectedBodyTy ->
+                              let actualBodyTy = stripVacuousForallsDeep (substTypeCapture actualName actualMu actualBody)
+                               in if alphaEqType actualBodyTy expectedBodyTy || churchAwareEqType actualBodyTy expectedBodyTy
+                                    then TypedTerm (ERoll muTy (EUnroll term)) muTy
+                                    else typedTerm
+                            _ -> typedTerm
+                    _ ->
+                      case unfoldMuOnce muTy of
+                        Just unfoldedTy
+                          | alphaEqType termTy unfoldedTy || churchAwareEqType termTy unfoldedTy ->
+                              TypedTerm (ERoll muTy term) muTy
+                          | otherwise ->
+                              let termAligned = alignLeadingLambdasToType unfoldedTy term
+                                  termStripped = stripUnusedTyAbsAlongType tcEnv unfoldedTy termAligned
+                                  termRebuilt = rebuildRecursiveArgAlongType tcEnv unfoldedTy term
+                               in case TypeCheck.typeCheckWithEnv tcEnv termStripped of
                                     Right termTy'
                                       | alphaEqType termTy' unfoldedTy || churchAwareEqType termTy' unfoldedTy ->
-                                          ERoll muTy termRebuilt
-                                    _ -> term
-                    _ -> term
-            Left _ -> term
-        _ -> term
+                                          TypedTerm (ERoll muTy termStripped) muTy
+                                    _ ->
+                                      case TypeCheck.typeCheckWithEnv tcEnv termRebuilt of
+                                        Right termTy'
+                                          | alphaEqType termTy' unfoldedTy || churchAwareEqType termTy' unfoldedTy ->
+                                              TypedTerm (ERoll muTy termRebuilt) muTy
+                                        _ -> typedTerm
+                        _ -> typedTerm
+        _ -> typedTerm
 
     stripVacuousForallsDeep :: ElabType -> ElabType
     stripVacuousForallsDeep ty = case ty of

@@ -17,8 +17,6 @@ module MLF.Constraint.Presolution.EdgeProcessing.Planner (
 import Control.Monad.Except (throwError)
 import Control.Monad.Reader (ask)
 import Control.Monad.State (gets)
-import Control.Monad.State (gets)
-import Control.Monad.State (gets)
 import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Presolution.Base (PresolutionError (..), PresolutionM, PresolutionState(..))

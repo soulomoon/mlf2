@@ -12,6 +12,7 @@ module MLF.Constraint.Presolution (
     -- * Main API
     computePresolution,
     computePresolutionWithTiming,
+    computePresolutionWithTimingAndRootOwnership,
     PresolutionResult(..),
     PresolutionView(..),
     PresolutionPlanBuilder(..),
@@ -25,7 +26,7 @@ import MLF.Constraint.Presolution.Base (
     PresolutionPlanBuilder(..),
     PresolutionResult(..)
     )
-import MLF.Constraint.Presolution.Driver (computePresolution, computePresolutionWithTiming)
+import MLF.Constraint.Presolution.Driver (computePresolution, computePresolutionWithTiming, computePresolutionWithTimingAndRootOwnership)
 import MLF.Constraint.Presolution.View
     ( PresolutionView(..)
     )

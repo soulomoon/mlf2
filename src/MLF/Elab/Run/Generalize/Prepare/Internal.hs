@@ -2,13 +2,20 @@
 
 module MLF.Elab.Run.Generalize.Prepare.Internal (
     PreparedGeneralizationArtifact(..),
+    PreparedRootGeneralization(..),
     prepareGeneralizationArtifact,
+    prepareGeneralizationArtifactForRoots,
     preparedAnnotated,
+    canonicalizePreparedAnn,
+    preparedReadContextReady,
+    preparedResultTypeViewReady,
     preparedElaborationConfig,
     preparedElaborationEnv,
     stripPreparedWitnesslessAuthoritativeAnn,
     generalizePreparedRoot,
+    generalizePreparedRootDetailed,
     computePreparedResultType,
+    computePreparedResultTypeWithRootGeneralization,
 ) where
 
 import qualified Data.IntMap.Strict as IntMap
@@ -51,10 +58,13 @@ import MLF.Elab.Run.Generalize
 import MLF.Elab.Run.Provenance (buildTraceCopyMap, collectBaseNamedKeys)
 import MLF.Elab.Run.ResultType
     ( ResultTypeInputs(..)
-    , computeResultTypeFallback
-    , computeResultTypeFromAnn
+    , ResultTypeView
+    , buildResultTypeView
+    , computeResultTypeFallbackWithView
+    , computeResultTypeFromAnnWithView
     , mkResultTypeInputs
     )
+import qualified MLF.Elab.Run.ResultType.View as View
 import MLF.Elab.Run.Scope
     ( letScopeOverrides
     , resolveCanonicalScope
@@ -114,6 +124,7 @@ data PreparedGeneralizationArtifact = PreparedGeneralizationArtifact
     , pgaResultTypeInputs :: ResultTypeInputs 'Presolved
     , pgaReadModel :: Either ElabError (ElabReadModel 'Presolved)
     , pgaBaseReadModel :: Either ElabError (ElabReadModel 'Presolved)
+    , pgaResultTypeView :: Either ElabError (ResultTypeView 'Presolved)
     , pgaEdgeArtifacts :: EdgeArtifacts
     , pgaScopeOverrides :: IntMap.IntMap NodeRef
     , pgaAnnotated :: AnnExpr
@@ -123,13 +134,39 @@ data PreparedGeneralizationArtifact = PreparedGeneralizationArtifact
     , pgaRedirects :: IntMap.IntMap NodeId
     }
 
+data PreparedRootGeneralization = PreparedRootGeneralization
+    { prgScopeRoot :: NodeRef
+    , prgTarget :: NodeId
+    , prgScheme :: ElabScheme
+    , prgSubst :: IntMap.IntMap String
+    }
+
 prepareGeneralizationArtifact
     :: TraceConfig
     -> Constraint 'Acyclic
     -> PresolutionResult
     -> AnnExpr
     -> Either SolveError PreparedGeneralizationArtifact
-prepareGeneralizationArtifact traceCfg acyclicBase pres ann = do
+prepareGeneralizationArtifact traceCfg acyclicBase pres ann =
+    prepareGeneralizationArtifactForRoots traceCfg acyclicBase pres [ann]
+
+prepareGeneralizationArtifactForRoots
+    :: TraceConfig
+    -> Constraint 'Acyclic
+    -> PresolutionResult
+    -> [AnnExpr]
+    -> Either SolveError PreparedGeneralizationArtifact
+prepareGeneralizationArtifactForRoots traceCfg acyclicBase pres anns0 = do
+    let anns =
+            case anns0 of
+                [] -> [snapshotAnnFallback]
+                _ -> anns0
+        snapshotAnnFallback =
+            error "prepareGeneralizationArtifactForRoots: empty annotation roots"
+        annForGeneralization =
+            case anns of
+                firstAnn : _ -> firstAnn
+                [] -> snapshotAnnFallback
     let preRewrite = snapshotConstraint pres
     (solvedClean, presolutionViewClean) <-
         Finalize.finalizeSnapshotArtifacts preRewrite (snapshotUnionFind pres)
@@ -154,13 +191,20 @@ prepareGeneralizationArtifact traceCfg acyclicBase pres ann = do
                 instCopyNodes
                 instCopyMapFull
                 acyclicBaseForGeneralization
-                ann
+                annForGeneralization
     presolutionViewForGen <-
         Finalize.finalizePresolutionViewFromSnapshot
             constraintForGen
             (Solved.canonicalMap solvedClean)
     let annNodeCanonical = canonicalizeNode canonNode
-        annCanon = redirectAndCanonicalizeAnn annNodeCanonical (prRedirects pres) ann
+        annCanons =
+            map
+                (redirectAndCanonicalizeAnn annNodeCanonical (prRedirects pres))
+                anns
+        annCanon =
+            case annCanons of
+                firstAnn : _ -> firstAnn
+                [] -> snapshotAnnFallback
         edgeArtifacts =
             EdgeArtifacts
                 { eaEdgeExpansions = IntMap.map (canonicalizeExpansion canonNode) (prEdgeExpansions pres)
@@ -168,12 +212,15 @@ prepareGeneralizationArtifact traceCfg acyclicBase pres ann = do
                 , eaEdgeTraces = IntMap.map (canonicalizeTrace canonNode) (prEdgeTraces pres)
                 }
         scopeOverrides =
-            letScopeOverrides
-                acyclicBaseForGeneralization
-                constraintForGen
-                presolutionViewClean
-                (prRedirects pres)
-                annCanon
+            IntMap.unions
+                [ letScopeOverrides
+                    acyclicBaseForGeneralization
+                    constraintForGen
+                    presolutionViewClean
+                    (prRedirects pres)
+                    annRoot
+                | annRoot <- annCanons
+                ]
         generalizeAtWithView mbGa =
             generalizeAtWithBuilder
                 planBuilder
@@ -198,6 +245,8 @@ prepareGeneralizationArtifact traceCfg acyclicBase pres ann = do
                 { rtcReadModel = Just readModel
                 , rtcBaseReadModel = Just baseReadModel
                 }
+        resultTypeView =
+            buildResultTypeView resultTypeInputsWithReadModels
     pure
         PreparedGeneralizationArtifact
             { pgaPresolutionView = presolutionViewForGen
@@ -206,6 +255,7 @@ prepareGeneralizationArtifact traceCfg acyclicBase pres ann = do
             , pgaResultTypeInputs = resultTypeInputsWithReadModels
             , pgaReadModel = readModel
             , pgaBaseReadModel = baseReadModel
+            , pgaResultTypeView = resultTypeView
             , pgaEdgeArtifacts = edgeArtifacts
             , pgaScopeOverrides = scopeOverrides
             , pgaAnnotated = annCanon
@@ -217,6 +267,21 @@ prepareGeneralizationArtifact traceCfg acyclicBase pres ann = do
 
 preparedAnnotated :: PreparedGeneralizationArtifact -> AnnExpr
 preparedAnnotated = pgaAnnotated
+
+canonicalizePreparedAnn :: PreparedGeneralizationArtifact -> AnnExpr -> AnnExpr
+canonicalizePreparedAnn artifact =
+    redirectAndCanonicalizeAnn (pgaAnnNodeCanonical artifact) (pgaRedirects artifact)
+
+preparedReadContextReady :: PreparedGeneralizationArtifact -> Either ElabError ()
+preparedReadContextReady artifact = do
+    _ <- pgaReadModel artifact
+    _ <- pgaBaseReadModel artifact
+    pure ()
+
+preparedResultTypeViewReady :: PreparedGeneralizationArtifact -> Either ElabError ()
+preparedResultTypeViewReady artifact = do
+    _ <- pgaResultTypeView artifact
+    pure ()
 
 preparedElaborationConfig :: TraceConfig -> PreparedGeneralizationArtifact -> ElabConfig 'Presolved
 preparedElaborationConfig traceCfg artifact =
@@ -267,6 +332,15 @@ generalizePreparedRoot
     -> AnnExpr
     -> Either ElabError (ElabScheme, IntMap.IntMap String)
 generalizePreparedRoot artifact authoritativeAnnCanon authoritativeAnnPre = do
+    detailed <- generalizePreparedRootDetailed artifact authoritativeAnnCanon authoritativeAnnPre
+    pure (prgScheme detailed, prgSubst detailed)
+
+generalizePreparedRootDetailed
+    :: PreparedGeneralizationArtifact
+    -> AnnExpr
+    -> AnnExpr
+    -> Either ElabError PreparedRootGeneralization
+generalizePreparedRootDetailed artifact authoritativeAnnCanon authoritativeAnnPre = do
     rootScope <-
         bindingToElab $
             resolveCanonicalScope
@@ -275,10 +349,22 @@ generalizePreparedRoot artifact authoritativeAnnCanon authoritativeAnnPre = do
                 (pgaRedirects artifact)
                 (annNode authoritativeAnnPre)
     let rootTarget =
-            schemeBodyTarget
-                (pgaPresolutionView artifact)
-                (annNode authoritativeAnnCanon)
-    pgaGeneralizeAt artifact (Just (pgaBindParentsGa artifact)) rootScope rootTarget
+            preparedSchemeBodyTarget artifact (annNode authoritativeAnnCanon)
+    (scheme, subst) <-
+        pgaGeneralizeAt artifact (Just (pgaBindParentsGa artifact)) rootScope rootTarget
+    pure
+        PreparedRootGeneralization
+            { prgScopeRoot = rootScope
+            , prgTarget = rootTarget
+            , prgScheme = scheme
+            , prgSubst = subst
+            }
+
+preparedSchemeBodyTarget :: PreparedGeneralizationArtifact -> NodeId -> NodeId
+preparedSchemeBodyTarget artifact target =
+    case pgaResultTypeView artifact of
+        Right view -> View.rtvSchemeBodyTarget view target
+        Left _ -> schemeBodyTarget (pgaPresolutionView artifact) target
 
 computePreparedResultType
     :: PreparedGeneralizationArtifact
@@ -286,20 +372,56 @@ computePreparedResultType
     -> AnnExpr
     -> Either ElabError ElabType
 computePreparedResultType artifact authoritativeAnnCanon authoritativeAnnPre =
-    case (authoritativeAnnCanon, authoritativeAnnPre) of
-        (AAnn inner annNodeId eid, AAnn innerPre _ _) ->
-            computeResultTypeFromAnn resultTypeInputs inner innerPre annNodeId eid
-        (AUnfold inner annNodeId eid, _) ->
-            let innerPre =
-                    case authoritativeAnnPre of
-                        AUnfold ip _ _ -> ip
-                        AAnn ip _ _ -> ip
-                        other -> other
-             in computeResultTypeFromAnn resultTypeInputs inner innerPre annNodeId eid
-        _ ->
-            computeResultTypeFallback resultTypeInputs authoritativeAnnCanon authoritativeAnnPre
+    computePreparedResultTypeWithReadyView
+        (pgaResultTypeView artifact)
+        artifact
+        authoritativeAnnCanon
+        authoritativeAnnPre
+
+computePreparedResultTypeWithRootGeneralization
+    :: PreparedGeneralizationArtifact
+    -> PreparedRootGeneralization
+    -> AnnExpr
+    -> AnnExpr
+    -> Either ElabError ElabType
+computePreparedResultTypeWithRootGeneralization artifact rootGen authoritativeAnnCanon authoritativeAnnPre =
+    let view =
+            fmap
+                ( View.rtvWithKnownGeneralization
+                    (prgScopeRoot rootGen)
+                    (prgTarget rootGen)
+                    (prgScheme rootGen, prgSubst rootGen)
+                )
+                (pgaResultTypeView artifact)
+    in computePreparedResultTypeWithReadyView view artifact authoritativeAnnCanon authoritativeAnnPre
+
+computePreparedResultTypeWithReadyView
+    :: Either ElabError (ResultTypeView 'Presolved)
+    -> PreparedGeneralizationArtifact
+    -> AnnExpr
+    -> AnnExpr
+    -> Either ElabError ElabType
+computePreparedResultTypeWithReadyView resultTypeView artifact authoritativeAnnCanon authoritativeAnnPre =
+    case resultTypeView of
+        Left err -> Left err
+        Right view ->
+            computeWithReadyView view
   where
     resultTypeInputs = pgaResultTypeInputs artifact
+
+    computeWithReadyView view =
+        case (authoritativeAnnCanon, authoritativeAnnPre) of
+            (AAnn inner annNodeId eid, AAnn innerPre _ _) ->
+                computeResultTypeFromAnnWithView resultTypeInputs view inner innerPre annNodeId eid
+            (AUnfold inner annNodeId eid, _) ->
+                let innerPre =
+                        case authoritativeAnnPre of
+                            AUnfold ip _ _ -> ip
+                            AAnn ip _ _ -> ip
+                            other -> other
+                 in computeResultTypeFromAnnWithView resultTypeInputs view inner innerPre annNodeId eid
+            _ ->
+                computeResultTypeFallbackWithView resultTypeInputs view authoritativeAnnCanon authoritativeAnnPre
 
 stripWitnesslessAuthoritativeAnnWith
     :: IntMap.IntMap edgeWitness

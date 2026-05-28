@@ -41,7 +41,6 @@ import qualified Data.IntSet as IntSet
 import qualified Data.List.NonEmpty as NE
 import qualified MLF.Constraint.Canonicalize as Canonicalize
 import MLF.Constraint.Presolution.View (PresolutionView (..))
-import qualified MLF.Constraint.Traversal as Traversal
 import MLF.Constraint.Types.Graph hiding (lookupNode)
 import MLF.Elab.ReadModel
   ( ElabReadModel (..),
@@ -570,11 +569,7 @@ reifyWithReadModel _contextLabel readModel nameForVar isNamed rootMode nid =
               TyForall {tnBody = body} -> canonical body
               TyMu {tnBody = body} -> canonical body
               _ -> n
-          reachable =
-            Traversal.reachableFromWithBounds
-              canonical
-              (lookupNodeIn nodes)
-              orderRoot
+          orderKeys = Order.orderKeysFromConstraintWith canonical originalConstraint orderRoot Nothing
       let includeRigid =
             isForall node
               || mode == ModeBound
@@ -604,7 +599,7 @@ reifyWithReadModel _contextLabel readModel nameForVar isNamed rootMode nid =
             [ canonical b
               | b <- bindersBase,
                 isBinderNode b,
-                IntSet.member (getNodeId (canonical b)) reachable
+                IntMap.member (getNodeId (canonical b)) orderKeys
             ]
           bindersReachable =
             case mode of
@@ -620,7 +615,6 @@ reifyWithReadModel _contextLabel readModel nameForVar isNamed rootMode nid =
               _ -> bindersReachable0
           binderKeys = map (getNodeId . canonical) bindersReachable
           binderSet = IntSet.fromList binderKeys
-          orderKeys = Order.orderKeysFromConstraintWith canonical originalConstraint orderRoot Nothing
           missing =
             [ NodeId k
               | k <- binderKeys,

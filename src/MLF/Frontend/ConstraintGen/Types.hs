@@ -4,6 +4,10 @@
 module MLF.Frontend.ConstraintGen.Types
   ( ConstraintError (..),
     ConstraintResult (..),
+    ModuleRootId (..),
+    RootOwnershipIndex (..),
+    ModuleConstraintRoot (..),
+    ModuleConstraintResult (..),
     AnnExpr (..),
     AnnExprF (..),
     Binding (..),
@@ -19,6 +23,7 @@ where
 import Data.Functor.Foldable (Base, Corecursive (..), Recursive (..), cata)
 import qualified Data.IntMap.Strict as IntMap
 import Data.Map.Strict (Map)
+import MLF.Constraint.RootOwnership (ModuleRootId (..), RootOwnershipIndex (..))
 import MLF.Constraint.Types.Graph
 import MLF.Frontend.Syntax (Lit, NormSrcType, VarName)
 
@@ -49,6 +54,22 @@ data ConstraintResult p = ConstraintResult { crConstraint :: Constraint p,
     -- The pipeline uses this to seed the elaboration and type-check
     -- environments for free variables that were not wrapped in ELamAnn.
     crInitialEnv :: Env
+  }
+  deriving (Eq, Show)
+
+data ModuleConstraintRoot = ModuleConstraintRoot
+  { mcrRootId :: ModuleRootId,
+    mcrRoot :: NodeId,
+    mcrAnnotated :: AnnExpr
+  }
+  deriving (Eq, Show)
+
+data ModuleConstraintResult p = ModuleConstraintResult
+  { mcrConstraint :: Constraint p,
+    mcrRoots :: Map VarName ModuleConstraintRoot,
+    mcrAnnSourceTypes :: IntMap.IntMap NormSrcType,
+    mcrInitialEnv :: Env,
+    mcrRootOwnership :: RootOwnershipIndex
   }
   deriving (Eq, Show)
 

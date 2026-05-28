@@ -18,6 +18,7 @@ import Control.Monad.State (get, modify, put)
 import Control.Monad.Except (throwError)
 import Control.Monad (when)
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.IntSet as IntSet
 
 import qualified MLF.Binding.Adjustment as BindingAdjustment
 import qualified MLF.Constraint.Traversal as Traversal
@@ -27,8 +28,8 @@ import MLF.Constraint.Presolution.Base
     ( PresolutionError(..)
     , PresolutionM
     , PresolutionState(..)
-    , modifyConstraintState
-    , modifyUnionFindState
+    , setConstraintDirtyBindRefsState
+    , mergeUnionFindState
     )
 import MLF.Constraint.Presolution.Ops (findRoot)
 import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical)
@@ -80,7 +81,9 @@ unifyAcyclicRootsWithRaiseTracePrefer prefer root1 root2 = do
             Left err -> throwError (BindingTreeError err)
             Right result -> pure result
 
-    put (modifyConstraintState (const c1) st0)
+    let dirtyBindRefs = changedBindParentRefs c0 c1
+    when (c1 /= c0) $
+        put (setConstraintDirtyBindRefsState dirtyBindRefs c1 st0)
     let nodes = cNodes c1
         aElim = VarStore.isEliminatedVar c1 root1
         bElim = VarStore.isEliminatedVar c1 root2
@@ -115,9 +118,22 @@ unifyAcyclicRootsWithRaiseTracePrefer prefer root1 root2 = do
                     | p == root2 && not bElim -> (root1, root2)
                     | otherwise -> (fromRoot, toRoot)
                 Nothing -> (fromRoot, toRoot)
-    modify $ modifyUnionFindState (IntMap.insert (getNodeId fromRoot') toRoot')
+    modify $ mergeUnionFindState fromRoot' toRoot'
 
     pure trace0
+
+changedBindParentRefs :: Constraint p -> Constraint p -> IntSet.IntSet
+changedBindParentRefs before after =
+    IntSet.filter changed allKeys
+  where
+    beforeParents = cBindParents before
+    afterParents = cBindParents after
+    allKeys =
+        IntSet.union
+            (IntSet.fromList (IntMap.keys beforeParents))
+            (IntSet.fromList (IntMap.keys afterParents))
+    changed key =
+        IntMap.lookup key beforeParents /= IntMap.lookup key afterParents
 
 unifyAcyclicRawWithRaiseCounts :: NodeId -> NodeId -> PresolutionM p (Int, Int)
 unifyAcyclicRawWithRaiseCounts n1 n2 = do

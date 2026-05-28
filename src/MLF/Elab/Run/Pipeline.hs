@@ -17,22 +17,59 @@ module MLF.Elab.Run.Pipeline
     runPipelineElabDetailedWithConfigAndExternalBindings,
     runPipelineElabDetailedWithPreparedExternalBindings,
     runPipelineElabDetailedWithPreparedExternalBindingsWithTiming,
+    runPipelineElabDetailedModuleWithPreparedExternalBindingsWithTiming,
     runPipelineElabDetailedUncheckedWithExternalBindings,
     runPipelineElabDetailedUncheckedWithPreparedExternalBindings,
     runPipelineElabDetailedUncheckedWithPreparedExternalBindingsWithTiming,
   )
 where
 
-import Control.Exception (evaluate)
+import Control.Concurrent (forkIO, newEmptyMVar, putMVar, rtsSupportsBoundThreads, takeMVar)
+import Control.Exception (SomeException, evaluate, throwIO, try)
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import GHC.Conc (getNumCapabilities, getNumProcessors, setNumCapabilities)
 import MLF.Constraint.Acyclicity (breakCyclesAndCheckAcyclicity)
 import MLF.Constraint.Normalize (normalize)
-import MLF.Constraint.Presolution (computePresolution, computePresolutionWithTiming)
-import MLF.Constraint.Types.Graph (BaseTy (..), PolySyms)
-import MLF.Constraint.Types.Phase (Phase (Raw))
-import MLF.Elab.Elaborate (elaborateWithEnv)
+import MLF.Constraint.Presolution (computePresolution, computePresolutionWithTiming, computePresolutionWithTimingAndRootOwnership)
+import MLF.Constraint.RootOwnership
+  ( ModuleRootId (..),
+    RootOwnershipIndex (..),
+    ownersForEdge,
+    rootOwnershipOwnedEdgeCount,
+    rootOwnershipOwnedEdgeCounts,
+    rootOwnershipOwnedExpVarCount,
+    rootOwnershipOwnedGenCount,
+    rootOwnershipOwnedNodeCount,
+    rootOwnershipRootCount,
+    rootOwnershipSharedEdgeCount,
+    ownersForGen,
+    ownersForNode,
+  )
+import MLF.Constraint.Types.Graph
+  ( BaseTy (..),
+    BindFlag,
+    Constraint (..),
+    EdgeId (..),
+    GenNode,
+    GenNodeId (..),
+    InstEdge (..),
+    NodeId (..),
+    NodeMap (..),
+    NodeRef,
+    PolySyms,
+    TyNode,
+    UnifyEdge (..),
+    fromListGen,
+    fromListNode,
+    nodeRefKey,
+    toListGen,
+    toListNode,
+  )
+import MLF.Constraint.Types.Phase (Phase (Presolved, Raw))
+import MLF.Elab.Elaborate (ElabConfig, ElabEnv, elaborateWithEnv)
 import MLF.Elab.Inst (schemeToType)
 import MLF.Elab.PipelineConfig (PipelineConfig (..), defaultPipelineConfig)
 import MLF.Elab.PipelineError
@@ -45,12 +82,20 @@ import MLF.Elab.PipelineError
     fromTypeCheckError,
   )
 import MLF.Elab.Run.Generalize.Prepare
-  ( computePreparedResultType,
+  ( PreparedGeneralizationArtifact,
+    PreparedRootGeneralization (..),
+    canonicalizePreparedAnn,
+    computePreparedResultType,
+    computePreparedResultTypeWithRootGeneralization,
     generalizePreparedRoot,
+    generalizePreparedRootDetailed,
     prepareGeneralizationArtifact,
+    prepareGeneralizationArtifactForRoots,
     preparedAnnotated,
     preparedElaborationConfig,
     preparedElaborationEnv,
+    preparedReadContextReady,
+    preparedResultTypeViewReady,
     stripPreparedWitnesslessAuthoritativeAnn,
   )
 import MLF.Elab.TermClosure
@@ -69,12 +114,15 @@ import MLF.Frontend.ConstraintGen
     ExternalBindingMode (..),
     ExternalBindings,
     ExternalEnv,
+    ModuleConstraintRoot (..),
+    ModuleConstraintResult (..),
     generateConstraintsWithExternalBindings,
+    generateModuleConstraintsWithExternalBindings,
   )
 import MLF.Frontend.Syntax (NormSrcType, NormSurfaceExpr, StructBound, VarName)
 import qualified MLF.Frontend.Syntax as Surface
 import MLF.Reify.TypeOps (freeTypeVarsType, freshNameLike, substTypeCapture)
-import MLF.Util.Timing (TimingConfig, timeProgramOperationIO)
+import MLF.Util.Timing (TimingConfig, emitProgramOperationMetricIO, timeProgramOperationIO, timingProgramOperations)
 import MLF.Util.Trace (TraceConfig, traceGeneralize)
 
 data PipelineElabDetailedResult = PipelineElabDetailedResult
@@ -88,6 +136,62 @@ data PreparedExternalBindings = PreparedExternalBindings
   { pebBindings :: ExternalBindings,
     pebSchemeInfos :: Map.Map VarName SchemeInfo,
     pebTypeCheckEnv :: TypeCheck.Env
+  }
+
+data ModuleBatchSharedContext = ModuleBatchSharedContext
+  { mbscPreparedExternalBindings :: !PreparedExternalBindings,
+    mbscFrozenExternalSchemeTemplates :: !(Map.Map VarName FrozenExternalSchemeTemplate),
+    mbscRootTemplateInstantiations :: !(Map.Map VarName RootTemplateInstantiation)
+  }
+
+data FrozenExternalSchemeTemplate = FrozenExternalSchemeTemplate
+  { festName :: !VarName,
+    festMode :: !ExternalBindingMode,
+    festSourceType :: !NormSrcType,
+    festHasSchemeInfo :: !Bool
+  }
+
+data RootTemplateInstantiation = RootTemplateInstantiation
+  { rtiRootName :: !VarName,
+    rtiTemplateNames :: ![VarName],
+    rtiTemplateCount :: !Int,
+    rtiMissingTemplateCount :: !Int
+  }
+
+data ModuleBatchPlan p = ModuleBatchPlan
+  { mbpRoots :: [(VarName, ModuleConstraintRoot)],
+    mbpPartitions :: [(VarName, RootPartition p)],
+    mbpSharedEdgeCount :: !Int,
+    mbpUnknownEdgeCount :: !Int
+  }
+
+data RootPartition p = RootPartition
+  { rpRootId :: !ModuleRootId,
+    rpRootName :: !VarName,
+    rpConstraint :: Constraint p,
+    rpAnnotated :: !AnnExpr,
+    rpAnnSourceTypes :: !(IntMap.IntMap NormSrcType),
+    rpPreparedExternalBindings :: !PreparedExternalBindings,
+    rpOwnedEdgeCount :: !Int,
+    rpExternalSchemeUseCount :: !Int
+  }
+
+data RootPartitionBucket = RootPartitionBucket
+  { rpbNodes :: ![(NodeId, TyNode)],
+    rpbGens :: ![(GenNodeId, GenNode)],
+    rpbInstEdges :: ![InstEdge],
+    rpbUnifyEdges :: ![UnifyEdge],
+    rpbBindParents :: !(IntMap.IntMap (NodeRef, BindFlag)),
+    rpbNodeKeys :: !IntSet.IntSet,
+    rpbGenKeys :: !IntSet.IntSet,
+    rpbEdgeKeys :: !IntSet.IntSet
+  }
+
+data RootFinalizationContext p = RootFinalizationContext
+  { rfcPartition :: !(RootPartition p),
+    rfcPreparedExternalBindings :: !PreparedExternalBindings,
+    rfcSharedContext :: !(Maybe ModuleBatchSharedContext),
+    rfcTemplateInstantiation :: !(Maybe RootTemplateInstantiation)
   }
 
 validateDirectRecursiveAnnotations :: NormSurfaceExpr -> Either ConstraintError ()
@@ -514,6 +618,795 @@ runPipelineElabWithPreparedGeneratedWithTiming timing label requireFinalTypeChec
                                   pure $ do
                                     _ <- resultTypeResult
                                     authoritativeResult
+
+runPipelineElabWithPreparedConstraintWithTiming ::
+  TimingConfig ->
+  String ->
+  Bool ->
+  TraceConfig ->
+  PreparedExternalBindings ->
+  Constraint 'Raw ->
+  AnnExpr ->
+  IntMap.IntMap NormSrcType ->
+  IO (Either PipelineError PipelineElabDetailedResult)
+runPipelineElabWithPreparedConstraintWithTiming timing label requireFinalTypeCheck traceCfg extPrepared c0 ann annSourceTypes = do
+  let initialSchemeInfos = pebSchemeInfos extPrepared
+  normalizeResult <-
+    timeProgramOperationIO timing (label ++ ".constraint_normalize") $
+      evaluate (normalize c0)
+  acycResult <-
+    timeProgramOperationIO timing (label ++ ".acyclicity") $
+      evaluate (fromCycleError (breakCyclesAndCheckAcyclicity normalizeResult))
+  case acycResult of
+    Left err -> pure (Left err)
+    Right (cAcyclic, acyc) -> do
+      presResult <-
+        timeProgramOperationIO timing (label ++ ".presolution") $
+          fromPresolutionError <$> computePresolutionWithTiming timing (label ++ ".presolution") traceCfg acyc cAcyclic
+      case presResult of
+        Left err -> pure (Left err)
+        Right pres -> do
+          preparedResult <-
+            timeProgramOperationIO timing (label ++ ".prepare_generalization") $
+              evaluate (fromSolveError (prepareGeneralizationArtifact traceCfg cAcyclic pres ann))
+          case preparedResult of
+            Left err -> pure (Left err)
+            Right prepared -> do
+              readContextResult <-
+                timeProgramOperationIO timing (label ++ ".root_finalization.prepare_read_context") $
+                  evaluate (fromElabError (preparedReadContextReady prepared))
+              resultTypeReadContextResult <-
+                timeProgramOperationIO timing (label ++ ".root_finalization.result_type_read_context") $
+                  evaluate (fromElabError (preparedResultTypeViewReady prepared))
+              case (readContextResult, resultTypeReadContextResult) of
+                (Left err, _) -> pure (Left err)
+                (_, Left err) -> pure (Left err)
+                (Right (), Right ()) -> do
+                  let initialTcEnv = pebTypeCheckEnv extPrepared
+                      annCanon = preparedAnnotated prepared
+                      elabConfig = preparedElaborationConfig traceCfg prepared
+                      elabEnv = preparedElaborationEnv annSourceTypes initialSchemeInfos prepared
+                  termResult <-
+                    timeProgramOperationIO timing (label ++ ".elaborate") $
+                      evaluate (fromElabError (elaborateWithEnv elabConfig elabEnv annCanon))
+                  case termResult of
+                    Left err -> pure (Left err)
+                    Right term -> do
+                      case traceGeneralize traceCfg ("pipeline elaborated term=" ++ show term) () of
+                        () -> pure ()
+                      let authoritativeAnnCanon = authoritativeRootAnn term annCanon
+                          authoritativeAnnPre = authoritativeRootAnn term ann
+                          (authoritativeAnnCanonFinal, authoritativeAnnPreFinal) =
+                            stripPreparedWitnesslessAuthoritativeAnn prepared authoritativeAnnCanon authoritativeAnnPre
+                      rootResult <-
+                        timeProgramOperationIO timing (label ++ ".generalize_root") $
+                          evaluate (fromElabError (generalizePreparedRoot prepared authoritativeAnnCanonFinal authoritativeAnnPreFinal))
+                      case rootResult of
+                        Left err -> pure (Left err)
+                        Right (rootScheme, rootSubst) -> do
+                          termSubst <-
+                            timeProgramOperationIO timing (label ++ ".subst_root") $
+                              evaluate (substInTerm rootSubst term)
+                          termClosed <-
+                            timeProgramOperationIO timing (label ++ ".close_term") $
+                              evaluate (closePipelineTerm initialTcEnv rootSubst rootScheme term termSubst)
+                          termClosedFresh <-
+                            timeProgramOperationIO timing (label ++ ".freshen_type_abs") $
+                              evaluate (freshenTypeAbsAgainstEnv initialTcEnv termClosed)
+                          let uncheckedAuthoritative =
+                                Right
+                                  PipelineElabDetailedResult
+                                    { pedTerm = termClosedFresh,
+                                      pedType = schemeToType rootScheme,
+                                      pedRootAnn = authoritativeAnnCanonFinal,
+                                      pedTypeCheckEnv = initialTcEnv
+                                    }
+                          authoritativeResult <-
+                            if requireFinalTypeCheck
+                              then
+                                timeProgramOperationIO timing (label ++ ".final_typecheck") $
+                                  evaluate $ do
+                                    tyChecked <-
+                                      case typeCheckWithEnv initialTcEnv termClosedFresh of
+                                        Right ty -> pure ty
+                                        Left err -> fromTypeCheckError (Left err)
+                                    pure
+                                      PipelineElabDetailedResult
+                                        { pedTerm = termClosedFresh,
+                                          pedType = tyChecked,
+                                          pedRootAnn = authoritativeAnnCanonFinal,
+                                          pedTypeCheckEnv = initialTcEnv
+                                        }
+                              else pure uncheckedAuthoritative
+                          if not requireFinalTypeCheck
+                            then pure authoritativeResult
+                            else do
+                              resultTypeResult <-
+                                timeProgramOperationIO timing (label ++ ".result_type_reconstruction") $
+                                  evaluate (fromElabError (computePreparedResultType prepared authoritativeAnnCanonFinal authoritativeAnnPreFinal))
+                              pure $ do
+                                _ <- resultTypeResult
+                                authoritativeResult
+
+runPipelineElabDetailedModuleWithPreparedExternalBindingsWithTiming ::
+  TimingConfig ->
+  String ->
+  PolySyms ->
+  PreparedExternalBindings ->
+  Map.Map VarName PreparedExternalBindings ->
+  [(VarName, NormSurfaceExpr)] ->
+  IO (Either PipelineError (Map.Map VarName PipelineElabDetailedResult))
+runPipelineElabDetailedModuleWithPreparedExternalBindingsWithTiming timing label polySyms extPrepared rootPrepared namedExprs = do
+  let traceCfg = pcTraceConfig defaultPipelineConfig
+  validationResult <-
+    timeProgramOperationIO timing (label ++ ".validate_annotations") $
+      evaluate (mapM_ (fromConstraintError . validateDirectRecursiveAnnotations . snd) namedExprs)
+  case validationResult of
+    Left err -> pure (Left err)
+    Right () -> do
+      constraintResult <-
+        timeProgramOperationIO timing (label ++ ".generate_constraints") $
+          evaluate (fromConstraintError (generateModuleConstraintsWithExternalBindings polySyms (pebBindings extPrepared) namedExprs))
+      case constraintResult of
+        Left err -> pure (Left err)
+        Right ModuleConstraintResult {mcrConstraint = c0, mcrRoots = roots, mcrAnnSourceTypes = annSourceTypes, mcrRootOwnership = rootOwnership} -> do
+          emitModuleBatchGraphMetrics timing (label ++ ".graph") c0 rootOwnership roots annSourceTypes extPrepared rootPrepared
+          let batchPlan = buildModuleBatchPlan c0 rootOwnership roots annSourceTypes extPrepared rootPrepared
+          mbSharedContext <-
+            if timingProgramOperations timing
+              then do
+                let sharedContext = buildModuleBatchSharedContext extPrepared (mbpPartitions batchPlan)
+                _ <-
+                  timeProgramOperationIO timing (label ++ ".batch_context.prepare_templates") $
+                    evaluate (moduleBatchSharedTemplatePayloadMeasure sharedContext)
+                _ <-
+                  timeProgramOperationIO timing (label ++ ".batch_context.instantiate_templates") $
+                    evaluate (moduleBatchSharedInstantiationPayloadMeasure sharedContext)
+                emitModuleBatchSharedContextMetrics timing (label ++ ".batch_context") sharedContext
+                pure (Just sharedContext)
+              else pure Nothing
+          emitModuleBatchPlanMetrics timing (label ++ ".partition") batchPlan
+          if moduleBatchPlanRootLocalEligible batchPlan
+            then runModuleBatchPlanRootLocalWithTiming timing (label ++ ".partitioned_roots") traceCfg mbSharedContext batchPlan
+            else runModuleBatchPlanGlobalWithTiming timing label traceCfg extPrepared rootPrepared c0 rootOwnership roots annSourceTypes
+
+runModuleBatchPlanGlobalWithTiming ::
+  TimingConfig ->
+  String ->
+  TraceConfig ->
+  PreparedExternalBindings ->
+  Map.Map VarName PreparedExternalBindings ->
+  Constraint 'Raw ->
+  RootOwnershipIndex ->
+  Map.Map VarName ModuleConstraintRoot ->
+  IntMap.IntMap NormSrcType ->
+  IO (Either PipelineError (Map.Map VarName PipelineElabDetailedResult))
+runModuleBatchPlanGlobalWithTiming timing label traceCfg extPrepared rootPrepared c0 rootOwnership roots annSourceTypes = do
+  normalizeResult <-
+    timeProgramOperationIO timing (label ++ ".constraint_normalize") $
+      evaluate (normalize c0)
+  acycResult <-
+    timeProgramOperationIO timing (label ++ ".acyclicity") $
+      evaluate (fromCycleError (breakCyclesAndCheckAcyclicity normalizeResult))
+  case acycResult of
+    Left err -> pure (Left err)
+    Right (cAcyclic, acyc) -> do
+      presResult <-
+        timeProgramOperationIO timing (label ++ ".presolution") $
+          fromPresolutionError <$> computePresolutionWithTimingAndRootOwnership timing (label ++ ".presolution") traceCfg rootOwnership acyc cAcyclic
+      case presResult of
+        Left err -> pure (Left err)
+        Right pres -> do
+          preparedResult <-
+            timeProgramOperationIO timing (label ++ ".prepare_generalization") $
+              evaluate $
+                fromSolveError $
+                  prepareGeneralizationArtifactForRoots
+                    traceCfg
+                    cAcyclic
+                    pres
+                    [mcrAnnotated root | root <- Map.elems roots]
+          case preparedResult of
+            Left err -> pure (Left err)
+            Right prepared ->
+              let elabConfig = preparedElaborationConfig traceCfg prepared
+               in
+              timeProgramOperationIO timing (label ++ ".roots") $
+                finishPreparedPipelineRootsWithTiming
+                  timing
+                  (label ++ ".roots")
+                  traceCfg
+                  extPrepared
+                  rootPrepared
+                  prepared
+                  elabConfig
+                  annSourceTypes
+                  (Map.toList roots)
+
+runModuleBatchPlanRootLocalWithTiming ::
+  TimingConfig ->
+  String ->
+  TraceConfig ->
+  Maybe ModuleBatchSharedContext ->
+  ModuleBatchPlan 'Raw ->
+  IO (Either PipelineError (Map.Map VarName PipelineElabDetailedResult))
+runModuleBatchPlanRootLocalWithTiming timing label traceCfg mbSharedContext plan =
+  timeProgramOperationIO timing label $
+    case mbpPartitions plan of
+      [] -> pure (Right Map.empty)
+      [_] -> goSequential (1 :: Int) Map.empty (mbpPartitions plan)
+      partitions -> goConcurrent partitions
+  where
+    goSequential _ acc [] =
+      pure (Right acc)
+    goSequential index acc ((name, partition) : rest) = do
+      result <-
+        runRootFinalizationContextWithTiming
+          timing
+          (label ++ ".root_" ++ show index)
+          traceCfg
+          (mkRootFinalizationContext name partition)
+      case result of
+        Left err -> pure (Left err)
+        Right out -> goSequential (index + 1) (Map.insert name out acc) rest
+
+    goConcurrent partitions = do
+      ensureConcurrentCapabilities (length partitions)
+      workers <-
+        mapM
+          ( \(index, (name, partition)) -> do
+              done <- newEmptyMVar
+              _ <-
+                forkIO $
+                  try
+                    ( runRootFinalizationContextWithTiming
+                        timing
+                        (label ++ ".root_" ++ show index)
+                        traceCfg
+                        (mkRootFinalizationContext name partition)
+                    )
+                    >>= putMVar done
+              pure (name, done)
+          )
+          (zip [(1 :: Int) ..] partitions)
+      settled <- mapM (\(name, done) -> (\result -> (name, result)) <$> takeMVar done) workers
+      case [ex | (_, Left ex) <- settled] of
+        ex : _ -> throwIO (ex :: SomeException)
+        [] ->
+          case [err | (_, Right (Left err)) <- settled] of
+            err : _ -> pure (Left err)
+            [] ->
+              pure $
+                Right $
+                  Map.fromList
+                    [ (name, out)
+                    | (name, Right (Right out)) <- settled
+                    ]
+
+    mkRootFinalizationContext name partition =
+      RootFinalizationContext
+        { rfcPartition = partition,
+          rfcPreparedExternalBindings = rpPreparedExternalBindings partition,
+          rfcSharedContext = mbSharedContext,
+          rfcTemplateInstantiation =
+            Map.lookup name . mbscRootTemplateInstantiations =<< mbSharedContext
+        }
+
+    ensureConcurrentCapabilities workerCount =
+      if rtsSupportsBoundThreads && workerCount > 1
+        then do
+          processorCount <- getNumProcessors
+          currentCapabilities <- getNumCapabilities
+          let targetCapabilities = max 1 (min workerCount processorCount)
+          if currentCapabilities < targetCapabilities
+            then setNumCapabilities targetCapabilities
+            else pure ()
+        else pure ()
+
+runRootFinalizationContextWithTiming ::
+  TimingConfig ->
+  String ->
+  TraceConfig ->
+  RootFinalizationContext 'Raw ->
+  IO (Either PipelineError PipelineElabDetailedResult)
+runRootFinalizationContextWithTiming
+  timing
+  label
+  traceCfg
+  RootFinalizationContext
+    { rfcPartition = partition,
+      rfcPreparedExternalBindings = extPrepared,
+      rfcSharedContext = mbSharedContext,
+      rfcTemplateInstantiation = mbInstantiation
+    } = do
+    case (mbSharedContext, mbInstantiation) of
+      (Just sharedContext, Just instantiation) -> do
+        emitProgramOperationMetricIO timing (label ++ ".batch_context.frozen_templates") (fromIntegral (moduleBatchSharedTemplateCount sharedContext))
+        emitProgramOperationMetricIO timing (label ++ ".batch_context.template_uses") (fromIntegral (rtiTemplateCount instantiation))
+        emitProgramOperationMetricIO timing (label ++ ".batch_context.missing_templates") (fromIntegral (rtiMissingTemplateCount instantiation))
+      _ -> pure ()
+    runPipelineElabWithPreparedConstraintWithTiming
+      timing
+      label
+      True
+      traceCfg
+      extPrepared
+      (rpConstraint partition)
+      (rpAnnotated partition)
+      (rpAnnSourceTypes partition)
+
+moduleBatchPlanRootLocalEligible :: ModuleBatchPlan p -> Bool
+moduleBatchPlanRootLocalEligible plan =
+  mbpSharedEdgeCount plan == 0
+    && mbpUnknownEdgeCount plan == 0
+    && not (null (mbpPartitions plan))
+
+buildModuleBatchPlan ::
+  Constraint 'Raw ->
+  RootOwnershipIndex ->
+  Map.Map VarName ModuleConstraintRoot ->
+  IntMap.IntMap NormSrcType ->
+  PreparedExternalBindings ->
+  Map.Map VarName PreparedExternalBindings ->
+  ModuleBatchPlan 'Raw
+buildModuleBatchPlan constraint rootOwnership roots annSourceTypes extPrepared rootPrepared =
+  ModuleBatchPlan
+    { mbpRoots = orderedRoots,
+      mbpPartitions = partitions,
+      mbpSharedEdgeCount = rootOwnershipSharedEdgeCount rootOwnership,
+      mbpUnknownEdgeCount =
+        length
+          [ ()
+          | edge <- cInstEdges constraint,
+            IntSet.null (ownersForEdge rootOwnership (getEdgeId (instEdgeId edge)))
+          ]
+    }
+  where
+    orderedRoots = Map.toList roots
+    partitionBuckets = buildRootPartitionBuckets constraint rootOwnership orderedRoots
+    partitions =
+        [ ( name,
+            buildRootPartitionFromBucket
+              constraint
+              annSourceTypes
+              extPrepared
+              rootPrepared
+              name
+              root
+              (IntMap.findWithDefault emptyRootPartitionBucket (getModuleRootId (mcrRootId root)) partitionBuckets)
+          )
+        | (name, root) <- orderedRoots
+        ]
+
+buildRootPartitionBuckets ::
+  Constraint 'Raw ->
+  RootOwnershipIndex ->
+  [(VarName, ModuleConstraintRoot)] ->
+  IntMap.IntMap RootPartitionBucket
+buildRootPartitionBuckets constraint rootOwnership orderedRoots =
+  bucketBindParents
+    $ bucketUnifyEdges
+    $ bucketInstEdges
+    $ bucketGens
+    $ bucketNodes initialBuckets
+  where
+    initialBuckets =
+      IntMap.fromList
+        [ (getModuleRootId (mcrRootId root), emptyRootPartitionBucket)
+        | (_name, root) <- orderedRoots
+        ]
+
+    bucketNodes buckets0 =
+      foldl'
+        ( \buckets (nid, node) ->
+            insertForOwners
+              (ownersForNode rootOwnership (getNodeId nid))
+              (addBucketNode nid node)
+              buckets
+        )
+        buckets0
+        (toListNode (cNodes constraint))
+
+    bucketGens buckets0 =
+      foldl'
+        ( \buckets (gid, genNode) ->
+            insertForOwners
+              (ownersForGen rootOwnership (getGenNodeId gid))
+              (addBucketGen gid genNode)
+              buckets
+        )
+        buckets0
+        (toListGen (cGenNodes constraint))
+
+    bucketInstEdges buckets0 =
+      foldl'
+        ( \buckets edge ->
+            insertForOwners
+              (ownersForEdge rootOwnership (getEdgeId (instEdgeId edge)))
+              (addBucketInstEdge edge)
+              buckets
+        )
+        buckets0
+        (cInstEdges constraint)
+
+    bucketUnifyEdges buckets0 =
+      foldl'
+        ( \buckets edge ->
+            let ownerRoots =
+                  IntSet.intersection
+                    (ownersForNode rootOwnership (getNodeId (uniLeft edge)))
+                    (ownersForNode rootOwnership (getNodeId (uniRight edge)))
+             in insertForOwners ownerRoots (addBucketUnifyEdge edge) buckets
+        )
+        buckets0
+        (cUnifyEdges constraint)
+
+    bucketBindParents buckets0 =
+      IntMap.foldlWithKey'
+        ( \buckets childKey bindParent@(parent, _) ->
+            let ownerRoots =
+                  IntSet.intersection
+                    (ownersForRefKey rootOwnership childKey)
+                    (ownersForRefKey rootOwnership (nodeRefKey parent))
+             in insertForOwners ownerRoots (addBucketBindParent childKey bindParent) buckets
+        )
+        buckets0
+        (cBindParents constraint)
+
+emptyRootPartitionBucket :: RootPartitionBucket
+emptyRootPartitionBucket =
+  RootPartitionBucket
+    { rpbNodes = [],
+      rpbGens = [],
+      rpbInstEdges = [],
+      rpbUnifyEdges = [],
+      rpbBindParents = IntMap.empty,
+      rpbNodeKeys = IntSet.empty,
+      rpbGenKeys = IntSet.empty,
+      rpbEdgeKeys = IntSet.empty
+    }
+
+insertForOwners ::
+  IntSet.IntSet ->
+  (RootPartitionBucket -> RootPartitionBucket) ->
+  IntMap.IntMap RootPartitionBucket ->
+  IntMap.IntMap RootPartitionBucket
+insertForOwners owners updateBucket buckets =
+  IntSet.foldl' (\acc rootKey -> IntMap.adjust updateBucket rootKey acc) buckets owners
+
+addBucketNode :: NodeId -> TyNode -> RootPartitionBucket -> RootPartitionBucket
+addBucketNode nid node bucket =
+  bucket
+    { rpbNodes = (nid, node) : rpbNodes bucket,
+      rpbNodeKeys = IntSet.insert (getNodeId nid) (rpbNodeKeys bucket)
+    }
+
+addBucketGen :: GenNodeId -> GenNode -> RootPartitionBucket -> RootPartitionBucket
+addBucketGen gid genNode bucket =
+  bucket
+    { rpbGens = (gid, genNode) : rpbGens bucket,
+      rpbGenKeys = IntSet.insert (getGenNodeId gid) (rpbGenKeys bucket)
+    }
+
+addBucketInstEdge :: InstEdge -> RootPartitionBucket -> RootPartitionBucket
+addBucketInstEdge edge bucket =
+  bucket
+    { rpbInstEdges = edge : rpbInstEdges bucket,
+      rpbEdgeKeys = IntSet.insert (getEdgeId (instEdgeId edge)) (rpbEdgeKeys bucket)
+    }
+
+addBucketUnifyEdge :: UnifyEdge -> RootPartitionBucket -> RootPartitionBucket
+addBucketUnifyEdge edge bucket =
+  bucket {rpbUnifyEdges = edge : rpbUnifyEdges bucket}
+
+addBucketBindParent :: Int -> (NodeRef, BindFlag) -> RootPartitionBucket -> RootPartitionBucket
+addBucketBindParent childKey bindParent bucket =
+  bucket {rpbBindParents = IntMap.insert childKey bindParent (rpbBindParents bucket)}
+
+ownersForRefKey :: RootOwnershipIndex -> Int -> IntSet.IntSet
+ownersForRefKey rootOwnership key
+  | even key = ownersForNode rootOwnership (key `div` 2)
+  | otherwise = ownersForGen rootOwnership ((key - 1) `div` 2)
+
+buildModuleBatchSharedContext :: PreparedExternalBindings -> [(VarName, RootPartition p)] -> ModuleBatchSharedContext
+buildModuleBatchSharedContext extPrepared partitions =
+  ModuleBatchSharedContext
+    { mbscPreparedExternalBindings = extPrepared,
+      mbscFrozenExternalSchemeTemplates = templates,
+      mbscRootTemplateInstantiations =
+        Map.fromList
+          [ (name, buildRootTemplateInstantiation name (rpPreparedExternalBindings partition) templates)
+          | (name, partition) <- partitions
+          ]
+    }
+  where
+    templates =
+      Map.mapMaybeWithKey freezeExternalSchemeTemplate (pebBindings extPrepared)
+    schemeInfoNames = Map.keysSet (pebSchemeInfos extPrepared)
+
+    freezeExternalSchemeTemplate name ExternalBinding {externalBindingType = srcTy, externalBindingMode = mode} =
+      case mode of
+        ExternalBindingScheme ->
+          Just
+            FrozenExternalSchemeTemplate
+              { festName = name,
+                festMode = mode,
+                festSourceType = srcTy,
+                festHasSchemeInfo = name `Set.member` schemeInfoNames
+              }
+        ExternalBindingMonomorphic -> Nothing
+
+buildRootTemplateInstantiation ::
+  VarName ->
+  PreparedExternalBindings ->
+  Map.Map VarName FrozenExternalSchemeTemplate ->
+  RootTemplateInstantiation
+buildRootTemplateInstantiation rootName prepared templates =
+  RootTemplateInstantiation
+    { rtiRootName = rootName,
+      rtiTemplateNames = templateNames,
+      rtiTemplateCount = length templateNames,
+      rtiMissingTemplateCount = missingTemplateCount
+    }
+  where
+    externalNames = Map.keys (pebBindings prepared)
+    templateNames = filter (`Map.member` templates) externalNames
+    missingTemplateCount =
+      length
+        [ ()
+        | name <- externalNames,
+          name `Map.notMember` templates
+        ]
+
+moduleBatchSharedTemplateCount :: ModuleBatchSharedContext -> Int
+moduleBatchSharedTemplateCount =
+  Map.size . mbscFrozenExternalSchemeTemplates
+
+moduleBatchSharedInstantiationCount :: ModuleBatchSharedContext -> Int
+moduleBatchSharedInstantiationCount =
+  sum . map rtiTemplateCount . Map.elems . mbscRootTemplateInstantiations
+
+moduleBatchSharedMissingTemplateCount :: ModuleBatchSharedContext -> Int
+moduleBatchSharedMissingTemplateCount =
+  sum . map rtiMissingTemplateCount . Map.elems . mbscRootTemplateInstantiations
+
+moduleBatchSharedTemplatePayloadMeasure :: ModuleBatchSharedContext -> Int
+moduleBatchSharedTemplatePayloadMeasure sharedContext =
+  sum (map measureTemplate (Map.elems (mbscFrozenExternalSchemeTemplates sharedContext)))
+  where
+    measureTemplate template =
+      festSourceType template `seq`
+        length (festName template)
+          + modeTag (festMode template)
+          + if festHasSchemeInfo template then 1 else 0
+
+    modeTag mode =
+      case mode of
+        ExternalBindingScheme -> 1
+        ExternalBindingMonomorphic -> 0
+
+moduleBatchSharedInstantiationPayloadMeasure :: ModuleBatchSharedContext -> Int
+moduleBatchSharedInstantiationPayloadMeasure sharedContext =
+  sum (map measureInstantiation (Map.elems (mbscRootTemplateInstantiations sharedContext)))
+  where
+    measureInstantiation instantiation =
+      length (rtiRootName instantiation)
+        + length (rtiTemplateNames instantiation)
+        + rtiTemplateCount instantiation
+        + rtiMissingTemplateCount instantiation
+
+emitModuleBatchSharedContextMetrics :: TimingConfig -> String -> ModuleBatchSharedContext -> IO ()
+emitModuleBatchSharedContextMetrics timing label sharedContext = do
+  emitProgramOperationMetricIO timing (label ++ ".template_count") (fromIntegral (moduleBatchSharedTemplateCount sharedContext))
+  emitProgramOperationMetricIO timing (label ++ ".template_instantiations") (fromIntegral (moduleBatchSharedInstantiationCount sharedContext))
+  emitProgramOperationMetricIO timing (label ++ ".missing_templates") (fromIntegral (moduleBatchSharedMissingTemplateCount sharedContext))
+  emitProgramOperationMetricIO timing (label ++ ".prepared_external_bindings") (fromIntegral (Map.size (pebBindings (mbscPreparedExternalBindings sharedContext))))
+  mapM_
+    ( \(index, instantiation) -> do
+        emitProgramOperationMetricIO timing (label ++ ".root_" ++ show index ++ ".template_uses") (fromIntegral (rtiTemplateCount instantiation))
+        emitProgramOperationMetricIO timing (label ++ ".root_" ++ show index ++ ".missing_templates") (fromIntegral (rtiMissingTemplateCount instantiation))
+    )
+    (zip [(1 :: Int) ..] (Map.elems (mbscRootTemplateInstantiations sharedContext)))
+
+buildRootPartitionFromBucket ::
+  Constraint 'Raw ->
+  IntMap.IntMap NormSrcType ->
+  PreparedExternalBindings ->
+  Map.Map VarName PreparedExternalBindings ->
+  VarName ->
+  ModuleConstraintRoot ->
+  RootPartitionBucket ->
+  RootPartition 'Raw
+buildRootPartitionFromBucket constraint annSourceTypes extPrepared rootPrepared name root bucket =
+  RootPartition
+    { rpRootId = rootId,
+      rpRootName = name,
+      rpConstraint = partitionConstraint,
+      rpAnnotated = mcrAnnotated root,
+      rpAnnSourceTypes = IntMap.restrictKeys annSourceTypes (rpbNodeKeys bucket),
+      rpPreparedExternalBindings = rootExtPrepared,
+      rpOwnedEdgeCount = IntSet.size (rpbEdgeKeys bucket),
+      rpExternalSchemeUseCount = Map.size (pebSchemeInfos rootExtPrepared)
+    }
+  where
+    rootId = mcrRootId root
+    rootExtPrepared = Map.findWithDefault extPrepared name rootPrepared
+    partitionConstraint =
+      constraint
+        { cNodes =
+            fromListNode (rpbNodes bucket),
+          cInstEdges = reverse (rpbInstEdges bucket),
+          cUnifyEdges = reverse (rpbUnifyEdges bucket),
+          cBindParents = rpbBindParents bucket,
+          cEliminatedVars = cEliminatedVars constraint `IntSet.intersection` rpbNodeKeys bucket,
+          cWeakenedVars = cWeakenedVars constraint `IntSet.intersection` rpbNodeKeys bucket,
+          cAnnEdges = cAnnEdges constraint `IntSet.intersection` rpbEdgeKeys bucket,
+          cLetEdges = cLetEdges constraint `IntSet.intersection` rpbEdgeKeys bucket,
+          cGenNodes =
+            fromListGen (rpbGens bucket)
+        }
+
+emitModuleBatchPlanMetrics :: TimingConfig -> String -> ModuleBatchPlan p -> IO ()
+emitModuleBatchPlanMetrics timing label plan = do
+  emitProgramOperationMetricIO timing (label ++ ".roots") (fromIntegral (length (mbpRoots plan)))
+  emitProgramOperationMetricIO timing (label ++ ".shared_edges") (fromIntegral (mbpSharedEdgeCount plan))
+  emitProgramOperationMetricIO timing (label ++ ".unknown_edges") (fromIntegral (mbpUnknownEdgeCount plan))
+  emitProgramOperationMetricIO timing (label ++ ".root_local_enabled") (if moduleBatchPlanRootLocalEligible plan then 1 else 0)
+  mapM_
+    ( \(index, (_name, partition)) -> do
+        emitProgramOperationMetricIO timing (label ++ ".root_" ++ show index ++ ".owned_edges") (fromIntegral (rpOwnedEdgeCount partition))
+        emitProgramOperationMetricIO timing (label ++ ".root_" ++ show index ++ ".external_scheme_uses") (fromIntegral (rpExternalSchemeUseCount partition))
+    )
+    (zip [(1 :: Int) ..] (mbpPartitions plan))
+
+emitModuleBatchGraphMetrics ::
+  TimingConfig ->
+  String ->
+  Constraint p ->
+  RootOwnershipIndex ->
+  Map.Map VarName ModuleConstraintRoot ->
+  IntMap.IntMap NormSrcType ->
+  PreparedExternalBindings ->
+  Map.Map VarName PreparedExternalBindings ->
+  IO ()
+emitModuleBatchGraphMetrics timing label constraint rootOwnership roots annSourceTypes extPrepared rootPrepared = do
+  emitProgramOperationMetricIO timing (label ++ ".roots") (fromIntegral (Map.size roots))
+  emitProgramOperationMetricIO timing (label ++ ".nodes") (fromIntegral (IntMap.size (getNodeMap (cNodes constraint))))
+  emitProgramOperationMetricIO timing (label ++ ".inst_edges") (fromIntegral (length (cInstEdges constraint)))
+  emitProgramOperationMetricIO timing (label ++ ".unify_edges") (fromIntegral (length (cUnifyEdges constraint)))
+  emitProgramOperationMetricIO timing (label ++ ".bind_parents") (fromIntegral (IntMap.size (cBindParents constraint)))
+  emitProgramOperationMetricIO timing (label ++ ".annotation_roots") (fromIntegral (IntMap.size annSourceTypes))
+  emitProgramOperationMetricIO timing (label ++ ".external_scheme_unique") (fromIntegral (Map.size (pebSchemeInfos extPrepared)))
+  emitProgramOperationMetricIO timing (label ++ ".external_scheme_uses") (fromIntegral (sum (map (Map.size . pebSchemeInfos) (Map.elems rootPrepared))))
+  emitProgramOperationMetricIO timing (label ++ ".owned_roots") (fromIntegral (rootOwnershipRootCount rootOwnership))
+  emitProgramOperationMetricIO timing (label ++ ".owned_nodes") (fromIntegral (rootOwnershipOwnedNodeCount rootOwnership))
+  emitProgramOperationMetricIO timing (label ++ ".owned_gens") (fromIntegral (rootOwnershipOwnedGenCount rootOwnership))
+  emitProgramOperationMetricIO timing (label ++ ".owned_exp_vars") (fromIntegral (rootOwnershipOwnedExpVarCount rootOwnership))
+  emitProgramOperationMetricIO timing (label ++ ".owned_edges") (fromIntegral (rootOwnershipOwnedEdgeCount rootOwnership))
+  emitProgramOperationMetricIO timing (label ++ ".shared_edges") (fromIntegral (rootOwnershipSharedEdgeCount rootOwnership))
+  mapM_
+    ( \(rootId, edgeCount) ->
+        emitProgramOperationMetricIO timing (label ++ ".root_" ++ show rootId ++ ".owned_edges") (fromIntegral edgeCount)
+    )
+    (IntMap.toAscList (rootOwnershipOwnedEdgeCounts rootOwnership))
+
+finishPreparedPipelineRootsWithTiming ::
+  TimingConfig ->
+  String ->
+  TraceConfig ->
+  PreparedExternalBindings ->
+  Map.Map VarName PreparedExternalBindings ->
+  PreparedGeneralizationArtifact ->
+  ElabConfig 'Presolved ->
+  IntMap.IntMap NormSrcType ->
+  [(VarName, ModuleConstraintRoot)] ->
+  IO (Either PipelineError (Map.Map VarName PipelineElabDetailedResult))
+finishPreparedPipelineRootsWithTiming timing label traceCfg extPrepared rootPrepared prepared elabConfig annSourceTypes roots =
+  go (1 :: Int) Map.empty roots
+  where
+    go _ acc [] =
+      pure (Right acc)
+    go index acc ((name, root) : rest) = do
+      let rootExtPrepared =
+            Map.findWithDefault extPrepared name rootPrepared
+          elabEnv =
+            preparedElaborationEnv
+              annSourceTypes
+              (pebSchemeInfos rootExtPrepared)
+              prepared
+          rootLabel = label ++ ".root_" ++ show index
+      result <-
+        finishPreparedPipelineRootWithTiming
+          timing
+          rootLabel
+          True
+          traceCfg
+          rootExtPrepared
+          prepared
+          elabConfig
+          elabEnv
+          (mcrAnnotated root)
+      case result of
+        Left err -> pure (Left err)
+        Right out -> go (index + 1) (Map.insert name out acc) rest
+
+finishPreparedPipelineRootWithTiming ::
+  TimingConfig ->
+  String ->
+  Bool ->
+  TraceConfig ->
+  PreparedExternalBindings ->
+  PreparedGeneralizationArtifact ->
+  ElabConfig 'Presolved ->
+  ElabEnv 'Presolved ->
+  AnnExpr ->
+  IO (Either PipelineError PipelineElabDetailedResult)
+finishPreparedPipelineRootWithTiming timing label requireFinalTypeCheck traceCfg extPrepared prepared elabConfig elabEnv annPre = do
+  let initialTcEnv = pebTypeCheckEnv extPrepared
+      annCanon = canonicalizePreparedAnn prepared annPre
+  termResult <-
+    timeProgramOperationIO timing (label ++ ".elaborate") $
+      evaluate (fromElabError (elaborateWithEnv elabConfig elabEnv annCanon))
+  case termResult of
+    Left err -> pure (Left err)
+    Right term -> do
+      case traceGeneralize traceCfg ("pipeline elaborated term=" ++ show term) () of
+        () -> pure ()
+      let authoritativeAnnCanon = authoritativeRootAnn term annCanon
+          authoritativeAnnPre = authoritativeRootAnn term annPre
+          (authoritativeAnnCanonFinal, authoritativeAnnPreFinal) =
+            stripPreparedWitnesslessAuthoritativeAnn prepared authoritativeAnnCanon authoritativeAnnPre
+      rootResult <-
+        timeProgramOperationIO timing (label ++ ".generalize_root") $
+          evaluate (fromElabError (generalizePreparedRootDetailed prepared authoritativeAnnCanonFinal authoritativeAnnPreFinal))
+      case rootResult of
+        Left err -> pure (Left err)
+        Right rootGeneralization -> do
+          let rootScheme = prgScheme rootGeneralization
+              rootSubst = prgSubst rootGeneralization
+          termSubst <-
+            timeProgramOperationIO timing (label ++ ".subst_root") $
+              evaluate (substInTerm rootSubst term)
+          termClosed <-
+            timeProgramOperationIO timing (label ++ ".close_term") $
+              evaluate (closePipelineTerm initialTcEnv rootSubst rootScheme term termSubst)
+          termClosedFresh <-
+            timeProgramOperationIO timing (label ++ ".freshen_type_abs") $
+              evaluate (freshenTypeAbsAgainstEnv initialTcEnv termClosed)
+          let uncheckedAuthoritative =
+                Right
+                  PipelineElabDetailedResult
+                    { pedTerm = termClosedFresh,
+                      pedType = schemeToType rootScheme,
+                      pedRootAnn = authoritativeAnnCanonFinal,
+                      pedTypeCheckEnv = initialTcEnv
+                    }
+          authoritativeResult <-
+            if requireFinalTypeCheck
+              then
+                timeProgramOperationIO timing (label ++ ".final_typecheck") $
+                  evaluate $ do
+                    tyChecked <-
+                      case typeCheckWithEnv initialTcEnv termClosedFresh of
+                        Right ty -> pure ty
+                        Left err -> fromTypeCheckError (Left err)
+                    pure
+                      PipelineElabDetailedResult
+                        { pedTerm = termClosedFresh,
+                          pedType = tyChecked,
+                          pedRootAnn = authoritativeAnnCanonFinal,
+                          pedTypeCheckEnv = initialTcEnv
+                        }
+              else pure uncheckedAuthoritative
+          if not requireFinalTypeCheck
+            then pure authoritativeResult
+            else do
+              resultTypeResult <-
+                timeProgramOperationIO timing (label ++ ".result_type_reconstruction") $
+                  evaluate (fromElabError (computePreparedResultTypeWithRootGeneralization prepared rootGeneralization authoritativeAnnCanonFinal authoritativeAnnPreFinal))
+              pure $ do
+                _ <- resultTypeResult
+                authoritativeResult
 
 closePipelineTerm :: TypeCheck.Env -> IntMap.IntMap String -> ElabScheme -> ElabTerm -> ElabTerm -> ElabTerm
 closePipelineTerm initialTcEnv rootSubst rootScheme term termSubst =

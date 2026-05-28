@@ -4,10 +4,11 @@ module MLF.Frontend.ConstraintGen.Translate
   ( buildRootExpr,
     buildRootExprWithEnv,
     buildRootExprWithExternalBindings,
+    buildModuleRootExprsWithExternalBindings,
   )
 where
 
-import Control.Monad (foldM)
+import Control.Monad (foldM, forM)
 import Control.Monad.Except (MonadError (throwError))
 import Control.Monad.State.Strict (gets, modify')
 import qualified Data.IntMap.Strict as IntMap
@@ -21,7 +22,7 @@ import qualified Data.Set as Set
 import MLF.Constraint.Types.Graph
 import MLF.Frontend.ConstraintGen.Emit
 import qualified MLF.Frontend.ConstraintGen.Scope as Scope
-import MLF.Frontend.ConstraintGen.State (BuildState (..), ConstraintM, ScopeFrame)
+import MLF.Frontend.ConstraintGen.State (BuildState (..), ConstraintM, ScopeFrame, withModuleRootOwner)
 import MLF.Frontend.ConstraintGen.Types
 import MLF.Frontend.Syntax
 
@@ -53,6 +54,57 @@ buildRootExprWithExternalBindings extBindings expr = do
   (rootNode, annRoot) <- buildRootExprFromInitialEnv rootGen referencedBindings expr
   pure (rootGen, referencedBindings, rootNode, annRoot)
 
+buildModuleRootExprsWithExternalBindings :: ExternalBindings -> [(VarName, NormCoreExpr)] -> ConstraintM (GenNodeId, Env, Map VarName (ModuleRootId, NodeId, AnnExpr))
+buildModuleRootExprsWithExternalBindings extBindings namedExprs = do
+  moduleGen <- allocGenNode []
+  builtRoots <-
+    forM (zip [0 ..] namedExprs) $ \(rootIndex, (name, expr)) -> do
+      let referencedNames = Set.toAscList (freeCoreVars expr)
+      let rootId = ModuleRootId rootIndex
+      (referencedBindings, rootNode, annRoot) <-
+        withModuleRootOwner rootId $ do
+          rootGen <- allocChildGenUnder moduleGen
+          initialBindings <- buildInitialEnvForNames rootGen referencedNames extBindings
+          withRootLocalExternalBindingCache $ do
+            referencedBindings <- materializeExternalBindingNames referencedNames initialBindings
+            (rootNode, annRoot) <- buildModuleRootExprFromInitialEnv rootGen referencedBindings expr
+            pure (referencedBindings, rootNode, annRoot)
+      pure (name, rootId, referencedBindings, rootNode, annRoot)
+  let rootMap =
+        Map.fromList
+          [ (name, (rootId, rootNode, annRoot))
+          | (name, rootId, _, rootNode, annRoot) <- builtRoots
+          ]
+      mergedEnv =
+        foldl'
+          (Map.unionWith preferMaterializedBinding)
+          Map.empty
+          [referencedBindings | (_, _, referencedBindings, _, _) <- builtRoots]
+  pure (moduleGen, mergedEnv, rootMap)
+  where
+    preferMaterializedBinding old new =
+      case (old, new) of
+        (Binding {}, _) -> old
+        (_, Binding {}) -> new
+        _ -> old
+
+withRootLocalExternalBindingCache :: ConstraintM a -> ConstraintM a
+withRootLocalExternalBindingCache action = do
+  oldCache <- gets bsExternalBindingCache
+  modify' $ \st -> st {bsExternalBindingCache = Map.empty}
+  out <- action
+  modify' $ \st -> st {bsExternalBindingCache = oldCache}
+  pure out
+
+buildModuleRootExprFromInitialEnv :: GenNodeId -> Env -> NormCoreExpr -> ConstraintM (NodeId, AnnExpr)
+buildModuleRootExprFromInitialEnv rootGen initialBindings expr = do
+  ((rootNode, annRoot), frame) <-
+    withScopedBuild (buildExpr initialBindings rootGen expr)
+  rebindScopeRoot (genRef rootGen) rootNode frame
+  setBindParentIfMissing (typeRef rootNode) (genRef rootGen) BindFlex
+  setGenNodeSchemes rootGen [rootNode]
+  pure (rootNode, annRoot)
+
 buildInitialExternalBindings :: ExternalBindings -> ConstraintM (GenNodeId, Env)
 buildInitialExternalBindings extBindings = do
   rootGen <- allocGenNode []
@@ -82,6 +134,10 @@ buildInitialEnv rootGen =
               bindingExternal = externalBinding
             }
       )
+
+buildInitialEnvForNames :: GenNodeId -> [VarName] -> ExternalBindings -> ConstraintM Env
+buildInitialEnvForNames rootGen names extBindings =
+  buildInitialEnv rootGen (Map.restrictKeys extBindings (Set.fromList names))
 
 -- | Create a let-bound polymorphic 'Binding' for an external variable.
 -- Allocates a child gen node under the root, internalizes the source
@@ -250,7 +306,11 @@ freeCoreVars = go Set.empty
 
 materializeReferencedExternalBindings :: NormCoreExpr -> Env -> ConstraintM Env
 materializeReferencedExternalBindings expr env0 =
-  foldM materializeOne env0 (Set.toAscList (freeCoreVars expr))
+  materializeExternalBindingNames (Set.toAscList (freeCoreVars expr)) env0
+
+materializeExternalBindingNames :: [VarName] -> Env -> ConstraintM Env
+materializeExternalBindingNames names env0 =
+  foldM materializeOne env0 names
   where
     materializeOne acc name =
       case Map.lookup name acc of

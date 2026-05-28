@@ -9,27 +9,21 @@ where
 import Data.Functor.Foldable (cata)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+import qualified Data.Map.Strict as Map
 import Data.List (nub)
-import Data.Maybe (listToMaybe)
 import MLF.Constraint.Presolution (EdgeTrace (..), PresolutionView (..))
-import MLF.Constraint.Presolution.Base (CopyMapping (..), lookupCopy)
+import MLF.Constraint.Presolution.Base (lookupCopy)
 import MLF.Constraint.Types.Graph
   ( EdgeId (..),
-    GenNode (..),
     NodeId (..),
     NodeRef (..),
     TyNode (..),
     cBindParents,
-    cGenNodes,
     cNodes,
-    genNodeKey,
     getEdgeId,
     getNodeId,
-    gnId,
-    gnSchemes,
     lookupNodeIn,
     nodeRefFromKey,
-    toListGen,
     toListNode,
   )
 import MLF.Constraint.Types.Witness (ewRight)
@@ -37,7 +31,6 @@ import MLF.Elab.Phi (phiFromEdgeWitnessWithTrace)
 import MLF.Elab.Run.Annotation (annNode)
 import MLF.Elab.Run.Debug (debugGaScope, debugGaScopeEnabled, debugWhenCondM, debugWhenM)
 import MLF.Elab.Run.Generalize (generalizeAtWithBuilder)
-import MLF.Elab.Run.Generalize.Common (canonicalSchemeRootOwners)
 import MLF.Elab.Run.ResultType.Types
   ( ResultTypeInputs (..),
     rtcEdgeExpansions,
@@ -125,13 +118,15 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
       traceCfg = rtcTraceConfig ctx
       generalizeAtWith mbGa =
         generalizeAtWithBuilder planBuilder mbGa presolutionView
-
-  let edgeTraceCounts =
-        IntMap.fromListWith
-          (+)
-          [ (getNodeId (etRoot tr), 1 :: Int)
-            | tr <- IntMap.elems edgeTraces
-          ]
+      fallbackIndex = View.rtvFallbackIndex viewBase
+      edgeTraceCounts = View.rtfiEdgeTraceCounts fallbackIndex
+      traceBinderArgBaseBounds = View.rtfiTraceBinderArgBaseBounds fallbackIndex
+      instArgBaseBounds = View.rtfiInstArgBaseBounds fallbackIndex
+      rootBounds = View.rtfiRootBounds fallbackIndex
+      instArgRootMultiBase = View.rtfiInstArgRootMultiBase fallbackIndex
+      baseNodeByTy = View.rtfiBaseNodeByTy fallbackIndex
+      schemeRootSetBase = View.rtfiSchemeRootSet fallbackIndex
+      schemeRootOwnerBase = View.rtfiSchemeRootOwner fallbackIndex
   let (rootForTypeAnn, rootForTypePreAnn) =
         resultTypeRoots
           canonical
@@ -154,7 +149,6 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
     _ -> do
       let rootC = canonical rootForType
           nodes = cNodes (pvConstraint presolutionView)
-          nodeList = map snd (toListNode nodes)
           resolveBaseBoundCanonical start =
             let go visited nid0 =
                   let nid = canonical nid0
@@ -191,11 +185,7 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
           baseNodeForTy ty =
             case ty of
               TBase base ->
-                listToMaybe
-                  [ tnId node
-                    | node@TyBase {tnBase = nodeBase} <- nodeList,
-                      nodeBase == base
-                  ]
+                Map.lookup base baseNodeByTy
               _ -> Nothing
           instAppBasesFromWitness funEid =
             case IntMap.lookup (getEdgeId funEid) edgeWitnesses of
@@ -209,34 +199,9 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                       ]
                   Left _ -> IntSet.empty
               Nothing -> IntSet.empty
-          argBounds arg = do
-            baseC <- resolveBaseBoundCanonical arg
-            case lookupNodeIn nodes baseC of
-              Just TyBase {} -> Just baseC
-              Just TyBottom {} -> Just baseC
-              _ -> Nothing
-          instArgNode tr binder arg =
-            case lookupCopy binder (etCopyMap tr) of
-              Just copyN -> copyN
-              Nothing -> arg
-          edgeBaseBounds =
-            IntSet.fromList
-              [ getNodeId baseC
-                | ew <- IntMap.elems edgeWitnesses,
-                  Just baseC <- [argBounds (ewRight ew)]
-              ]
           rootArgBaseBounds =
             let argEdgeBases eid =
-                  case IntMap.lookup (getEdgeId eid) edgeTraces of
-                    Nothing -> IntSet.empty
-                    Just tr ->
-                      IntSet.fromList
-                        [ getNodeId baseC
-                          | (binder, arg) <- etBinderArgs tr,
-                            let argNode =
-                                  instArgNode tr binder arg,
-                            Just baseC <- [argBounds argNode]
-                        ]
+                  IntMap.findWithDefault IntSet.empty (getEdgeId eid) traceBinderArgBaseBounds
              in case stripAnn rootForTypeAnn of
                   AApp _ arg funEid argEid _ ->
                     let fromWitness = instAppBasesFromWitness funEid
@@ -246,53 +211,10 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                           else
                             if not (IntSet.null fromArgEdge)
                               then fromArgEdge
-                              else case resolveBaseBoundCanonical (annNode arg) of
-                                Just baseC -> IntSet.singleton (getNodeId baseC)
-                                Nothing -> IntSet.empty
+                            else case resolveBaseBoundCanonical (annNode arg) of
+                              Just baseC -> IntSet.singleton (getNodeId baseC)
+                              Nothing -> IntSet.empty
                   _ -> IntSet.empty
-          instArgBaseBounds =
-            let binderBounds =
-                  IntMap.fromListWith
-                    IntSet.union
-                    [ (getNodeId (canonical binderRoot), IntSet.singleton (getNodeId baseC))
-                      | tr <- IntMap.elems edgeTraces,
-                        let copyMapInv =
-                              IntMap.fromListWith
-                                min
-                                [ (getNodeId copyN, getNodeId origN)
-                                  | (origKey, copyN) <- IntMap.toList (getCopyMapping (etCopyMap tr)),
-                                    let origN = NodeId origKey
-                                ],
-                        (binder, arg) <- etBinderArgs tr,
-                        let binderRoot =
-                              case IntMap.lookup (getNodeId binder) copyMapInv of
-                                Just origKey -> NodeId origKey
-                                Nothing -> binder,
-                        let argNode = instArgNode tr binder arg,
-                        Just baseC <- [argBounds argNode]
-                    ]
-             in IntSet.union
-                  ( IntSet.unions
-                      [ bounds
-                        | bounds <- IntMap.elems binderBounds,
-                          IntSet.size bounds > 1
-                      ]
-                  )
-                  edgeBaseBounds
-          (rootBounds, instArgRootMultiBase) =
-            let rootBounds' =
-                  IntMap.fromListWith
-                    IntSet.union
-                    [ (getNodeId (canonical (etRoot tr)), IntSet.singleton (getNodeId baseC))
-                      | tr <- IntMap.elems edgeTraces,
-                        (binder, arg) <- etBinderArgs tr,
-                        let argNode = instArgNode tr binder arg,
-                        Just baseC <- [argBounds argNode]
-                    ]
-                multiBase =
-                  any (\s -> IntSet.size s > 1) (IntMap.elems rootBounds')
-                    || IntSet.size edgeBaseBounds > 1
-             in (rootBounds', multiBase)
 
       let rootBaseBounds =
             IntMap.findWithDefault IntSet.empty (getNodeId rootC) rootBounds
@@ -449,7 +371,6 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
       let canonicalFinal = rtcCanonical ctx
           rootFinal = canonicalFinal rootC
           nodesFinal = cNodes (pvConstraint presolutionViewFinal)
-          genNodesFinal = map snd (toListGen (cGenNodes (pvConstraint presolutionViewFinal)))
           targetView =
             if rootBindingIsLocalType
               then viewFinalBounded
@@ -510,9 +431,7 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                           _ -> False
              in go IntSet.empty rootFinal
           rootIsSchemeRoot =
-            any
-              (\gen -> any (\root -> canonicalFinal root == rootFinal) (gnSchemes gen))
-              genNodesFinal
+            IntSet.member (getNodeId rootFinal) schemeRootSetBase
           rootIsSchemeAlias =
             rootIsSchemeRoot
               && maybe False (const True) rootBound
@@ -562,10 +481,8 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
               Just resolvedBaseC -> classifyBaseTargetAdmission resolvedBaseC
               Nothing -> Nothing
           boundVarTargetRoot = canonicalFinal (View.rtvSchemeBodyTarget targetView rootC)
-          (schemeRootSetFinal, schemeRootOwnerFinal) =
-            canonicalSchemeRootOwners
-              canonicalFinal
-              (IntMap.fromList [(genNodeKey (gnId gen), gen) | gen <- genNodesFinal])
+          schemeRootSetFinal = schemeRootSetBase
+          schemeRootOwnerFinal = schemeRootOwnerBase
           alignedScopeRootFor target =
             case View.rtvBindingScopeRefCanonical retainedChildView target of
               Right ref -> View.rtvScopeRefCanonical retainedChildView ref

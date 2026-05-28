@@ -45,7 +45,7 @@ import MLF.Constraint.Presolution.Base (
     PresolutionError(..),
     PresolutionM,
     PresolutionState(..),
-    modifyUnionFindState,
+    mergeUnionFindState,
     setBindParentState
     )
 import qualified MLF.Constraint.Presolution.Ops as Ops
@@ -394,8 +394,7 @@ unifyWithLockedFallback prefer left right =
                             | p == rootRight -> (rootLeft, rootRight)
                         _ -> (rootLeft, rootRight)
             liftPresolution $
-                modify' $ \st ->
-                    modifyUnionFindState (IntMap.insert (getNodeId fromRoot) toRoot) st
+                modify' (mergeUnionFindState fromRoot toRoot)
         pure []
 
     retryAfterFlush :: EdgeUnifyM p [NodeId]

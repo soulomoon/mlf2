@@ -25,6 +25,13 @@ import Data.Word (Word64)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
+import MLF.Constraint.RootOwnership
+    ( RootOwnershipIndex
+    , emptyRootOwnershipIndex
+    , ownersForExpVars
+    , ownersForGens
+    , ownersForNodes
+    )
 import MLF.Constraint.Types.Graph
     ( Constraint(..)
     , EdgeId(..)
@@ -33,7 +40,7 @@ import MLF.Constraint.Types.Graph
     , InstEdge(..)
     , NodeId(..)
     )
-import MLF.Constraint.Types.Witness (Expansion(..))
+import MLF.Constraint.Types.Witness (Expansion(..), InstanceOp)
 import MLF.Constraint.Types.Presolution (Presolution(..))
 import MLF.Constraint.Presolution.Base
     ( MonadPresolution(..)
@@ -55,8 +62,7 @@ import MLF.Constraint.Presolution.EdgeUnify.Omega
     ( pendingWeakenOwners
     )
 import MLF.Constraint.Presolution.StateAccess
-    ( PresolutionBindingSnapshot(..)
-    , bindingSnapshotFindSchemeIntroducer
+    ( bindingSnapshotFindSchemeIntroducer
     , getBindingSnapshot
     , getCanonical
     , getConstraintAndUnionFind
@@ -89,12 +95,21 @@ import MLF.Constraint.Presolution.EdgeProcessing.Solve
     ( canonicalizeEdgeTraceInteriorsWith
     )
 import MLF.Constraint.Presolution.EdgeProcessing.Unify
-    ( EdgeExpansionResult
-    , applyEdgeExpansion
+    ( EdgeExpansionApplied
+    , EdgeExpansionInput
+    , EdgeExpansionResult
+    , EdgeExpansionApplyPlan(..)
+    , applyGenericEdgeExpansion
     , bindEdgeExpansionRoot
+    , copyEdgeExpansionBinderBounds
     , prepareEdgeExpansionOmega
+    , prepareEdgeExpansionApply
     , executeEdgeExpansionOmega
+    , finishEdgeExpansionInstantiateApply
     , finishEdgeExpansionUnify
+    , freshEdgeExpansionBinderMetas
+    , instantiateEdgeExpansionScheme
+    , unifyEdgeExpansionInstantiateArgs
     )
 import MLF.Constraint.Presolution.EdgeProcessing.Worklist
     ( EdgeFingerprint(..)
@@ -102,13 +117,15 @@ import MLF.Constraint.Presolution.EdgeProcessing.Worklist
     , EdgeWorkItem(..)
     , EdgeWorklist
     , WorklistInvalidation(..)
-    , buildIndexedEdgeWorklist
-    , invalidateExpansionsExcept
-    , invalidateOwnersExcept
-    , invalidateRootsExcept
+    , buildIndexedEdgeWorklistWithRootOwnership
+    , invalidateExpansionsWithinRootOwnersExcept
+    , invalidateOwnersWithinRootOwnersExcept
+    , invalidateRootsWithinRootOwnersExcept
     , noteInertEdge
     , noteProcessedEdge
     , popEdgeWorkItem
+    , rootOwnershipOfWorklist
+    , rootOwnersForPlan
     )
 import MLF.Constraint.Presolution.Witness (EdgeWitnessPlan(..))
 import MLF.Constraint.Presolution.Ops
@@ -132,7 +149,7 @@ runPresolutionLoop :: TraceConfig -> [InstEdge] -> PresolutionM p ()
 runPresolutionLoop traceCfg edges = do
     requireValidBindingTree
     drainPendingUnifyClosure traceCfg
-    worklist0 <- buildIndexedEdgeWorklist edges
+    worklist0 <- buildIndexedEdgeWorklistWithRootOwnership emptyRootOwnershipIndex edges
     (mbLastOwner, _worklist) <-
         runScheduledWorklist traceCfg Nothing worklist0
     scheduleWeakensByOwnerBoundary mbLastOwner Nothing Nothing
@@ -151,6 +168,12 @@ data PresolutionLoopCounters = PresolutionLoopCounters
     , plcExecuteWitnessPlan :: !Word64
     , plcExecuteExpansionUnify :: !Word64
     , plcExecuteExpansionApply :: !Word64
+    , plcExecuteExpansionApplyPlan :: !Word64
+    , plcExecuteExpansionApplyArgUnify :: !Word64
+    , plcExecuteExpansionApplyFreshMetas :: !Word64
+    , plcExecuteExpansionApplyCopyScheme :: !Word64
+    , plcExecuteExpansionApplyCopyBounds :: !Word64
+    , plcExecuteExpansionApplyOther :: !Word64
     , plcExecuteExpansionBindRoot :: !Word64
     , plcExecuteExpansionPrepareOmega :: !Word64
     , plcExecuteExpansionExecuteOmega :: !Word64
@@ -200,9 +223,10 @@ data EdgeInvalidation = EdgeInvalidation
 The indexed worklist can mark already-processed edges stale when a later edge
 changes roots, owners, or expansion assignments.  Stale processed edges must go
 through planning again so their fingerprint/index entries stay current.  They
-do not re-execute from the worklist yet: replay is currently only safe for
-direct repeated edge execution, where the final expansion matches the recorded
-expansion and trace/witness artifacts are already present.
+do not re-execute from the worklist yet: the normal fingerprint check still
+skips stale-but-unchanged edges, but stale changed edges only refresh their
+indexes.  This keeps expansion/copy/witness execution single-shot until processed
+edge replay has a complete idempotence proof.
 -}
 
 emptyPresolutionLoopCounters :: PresolutionLoopCounters
@@ -219,6 +243,12 @@ emptyPresolutionLoopCounters =
         , plcExecuteWitnessPlan = 0
         , plcExecuteExpansionUnify = 0
         , plcExecuteExpansionApply = 0
+        , plcExecuteExpansionApplyPlan = 0
+        , plcExecuteExpansionApplyArgUnify = 0
+        , plcExecuteExpansionApplyFreshMetas = 0
+        , plcExecuteExpansionApplyCopyScheme = 0
+        , plcExecuteExpansionApplyCopyBounds = 0
+        , plcExecuteExpansionApplyOther = 0
         , plcExecuteExpansionBindRoot = 0
         , plcExecuteExpansionPrepareOmega = 0
         , plcExecuteExpansionExecuteOmega = 0
@@ -252,6 +282,12 @@ addPresolutionLoopCounters a b =
         , plcExecuteWitnessPlan = plcExecuteWitnessPlan a + plcExecuteWitnessPlan b
         , plcExecuteExpansionUnify = plcExecuteExpansionUnify a + plcExecuteExpansionUnify b
         , plcExecuteExpansionApply = plcExecuteExpansionApply a + plcExecuteExpansionApply b
+        , plcExecuteExpansionApplyPlan = plcExecuteExpansionApplyPlan a + plcExecuteExpansionApplyPlan b
+        , plcExecuteExpansionApplyArgUnify = plcExecuteExpansionApplyArgUnify a + plcExecuteExpansionApplyArgUnify b
+        , plcExecuteExpansionApplyFreshMetas = plcExecuteExpansionApplyFreshMetas a + plcExecuteExpansionApplyFreshMetas b
+        , plcExecuteExpansionApplyCopyScheme = plcExecuteExpansionApplyCopyScheme a + plcExecuteExpansionApplyCopyScheme b
+        , plcExecuteExpansionApplyCopyBounds = plcExecuteExpansionApplyCopyBounds a + plcExecuteExpansionApplyCopyBounds b
+        , plcExecuteExpansionApplyOther = plcExecuteExpansionApplyOther a + plcExecuteExpansionApplyOther b
         , plcExecuteExpansionBindRoot = plcExecuteExpansionBindRoot a + plcExecuteExpansionBindRoot b
         , plcExecuteExpansionPrepareOmega = plcExecuteExpansionPrepareOmega a + plcExecuteExpansionPrepareOmega b
         , plcExecuteExpansionExecuteOmega = plcExecuteExpansionExecuteOmega a + plcExecuteExpansionExecuteOmega b
@@ -310,10 +346,11 @@ runPresolutionLoopWithTiming
     :: TimingConfig
     -> String
     -> TraceConfig
+    -> RootOwnershipIndex
     -> [InstEdge]
     -> PresolutionState p
     -> IO (Either PresolutionError ((), PresolutionState p))
-runPresolutionLoopWithTiming timing label traceCfg edges initialState = do
+runPresolutionLoopWithTiming timing label traceCfg rootOwnership edges initialState = do
     startResult <- runMeasuredStage traceCfg timing initialState requireValidBindingTree
     case startResult of
         Left err -> pure (Left err)
@@ -323,7 +360,7 @@ runPresolutionLoopWithTiming timing label traceCfg edges initialState = do
                 Left err -> pure (Left err)
                 Right ((), st2, drainNs) -> do
                     buildResult <-
-                        runMeasuredStage traceCfg timing st2 (buildIndexedEdgeWorklist edges)
+                        runMeasuredStage traceCfg timing st2 (buildIndexedEdgeWorklistWithRootOwnership rootOwnership edges)
                     case buildResult of
                         Left err -> pure (Left err)
                         Right (worklist0, st3, indexNs) -> do
@@ -544,7 +581,7 @@ runTimedPostProcessedEdge traceCfg timing stBefore stExecuted counters0 nextOwne
                                 worklistProcessed =
                                     noteProcessedEdge edge (Just (edgeFactsFromPlanState (UnionFind.frWith (psUnionFind stAfter)) stAfter plan)) worklist1
                                 (invalidation, worklistInvalidated) =
-                                    invalidateWorklistAfterMutation edge mutation worklistProcessed
+                                    invalidateWorklistAfterMutation edge plan mutation worklistProcessed
                                 stageCounters =
                                     emptyPresolutionLoopCounters
                                         { plcValidation = assertAfterNs
@@ -658,6 +695,12 @@ runTimedEdgeExecution traceCfg timing st0 _reason plan = do
                                                                             , plcExecuteWitnessPlan = witnessPlanNs
                                                                             , plcExecuteExpansionUnify = expansionUnifyNs
                                                                             , plcExecuteExpansionApply = plcExecuteExpansionApply expansionCounters
+                                                                            , plcExecuteExpansionApplyPlan = plcExecuteExpansionApplyPlan expansionCounters
+                                                                            , plcExecuteExpansionApplyArgUnify = plcExecuteExpansionApplyArgUnify expansionCounters
+                                                                            , plcExecuteExpansionApplyFreshMetas = plcExecuteExpansionApplyFreshMetas expansionCounters
+                                                                            , plcExecuteExpansionApplyCopyScheme = plcExecuteExpansionApplyCopyScheme expansionCounters
+                                                                            , plcExecuteExpansionApplyCopyBounds = plcExecuteExpansionApplyCopyBounds expansionCounters
+                                                                            , plcExecuteExpansionApplyOther = plcExecuteExpansionApplyOther expansionCounters
                                                                             , plcExecuteExpansionBindRoot = plcExecuteExpansionBindRoot expansionCounters
                                                                             , plcExecuteExpansionPrepareOmega = plcExecuteExpansionPrepareOmega expansionCounters
                                                                             , plcExecuteExpansionExecuteOmega = plcExecuteExpansionExecuteOmega expansionCounters
@@ -692,10 +735,10 @@ runTimedEdgeExpansionUnify traceCfg timing st0 witnessContext
     | otherwise = do
         let input = eewExpansionInput witnessContext
             baseOps = ewpBaseOps (eewWitnessPlan witnessContext)
-        applyResult <- runMeasuredStage traceCfg timing st0 (applyEdgeExpansion input baseOps)
+        applyResult <- runTimedEdgeExpansionApply traceCfg timing st0 input baseOps
         case applyResult of
             Left err -> pure (Left err)
-            Right (applied, st1, applyNs) -> do
+            Right (applied, st1, applyNs, applyCounters) -> do
                 bindResult <- runMeasuredStage traceCfg timing st1 (bindEdgeExpansionRoot applied)
                 case bindResult of
                     Left err -> pure (Left err)
@@ -715,6 +758,12 @@ runTimedEdgeExpansionUnify traceCfg timing st0 witnessContext
                                                 let counters =
                                                         emptyPresolutionLoopCounters
                                                             { plcExecuteExpansionApply = applyNs
+                                                            , plcExecuteExpansionApplyPlan = plcExecuteExpansionApplyPlan applyCounters
+                                                            , plcExecuteExpansionApplyArgUnify = plcExecuteExpansionApplyArgUnify applyCounters
+                                                            , plcExecuteExpansionApplyFreshMetas = plcExecuteExpansionApplyFreshMetas applyCounters
+                                                            , plcExecuteExpansionApplyCopyScheme = plcExecuteExpansionApplyCopyScheme applyCounters
+                                                            , plcExecuteExpansionApplyCopyBounds = plcExecuteExpansionApplyCopyBounds applyCounters
+                                                            , plcExecuteExpansionApplyOther = plcExecuteExpansionApplyOther applyCounters
                                                             , plcExecuteExpansionBindRoot = bindNs
                                                             , plcExecuteExpansionPrepareOmega = prepareNs
                                                             , plcExecuteExpansionExecuteOmega = executeNs
@@ -722,6 +771,76 @@ runTimedEdgeExpansionUnify traceCfg timing st0 witnessContext
                                                             }
                                                     totalNs = applyNs + bindNs + prepareNs + executeNs + finishNs
                                                  in Right (expansionResult, st5, totalNs, counters)
+
+runTimedEdgeExpansionApply
+    :: TraceConfig
+    -> TimingConfig
+    -> PresolutionState p
+    -> EdgeExpansionInput
+    -> [InstanceOp]
+    -> IO (Either PresolutionError (EdgeExpansionApplied, PresolutionState p, Word64, PresolutionLoopCounters))
+runTimedEdgeExpansionApply traceCfg timing st0 input baseOps = do
+    planResult <- runMeasuredStage traceCfg timing st0 (prepareEdgeExpansionApply input baseOps)
+    case planResult of
+        Left err -> pure (Left err)
+        Right (plan, st1, planNs) ->
+            case plan of
+                EdgeExpansionApplyReady applied ->
+                    pure $
+                        Right
+                            ( applied
+                            , st1
+                            , planNs
+                            , emptyPresolutionLoopCounters { plcExecuteExpansionApplyPlan = planNs }
+                            )
+                EdgeExpansionApplyGeneric genericInput genericBaseOps -> do
+                    genericResult <- runMeasuredStage traceCfg timing st1 (applyGenericEdgeExpansion genericInput genericBaseOps)
+                    pure $ case genericResult of
+                        Left err -> Left err
+                        Right (applied, st2, genericNs) ->
+                            Right
+                                ( applied
+                                , st2
+                                , planNs + genericNs
+                                , emptyPresolutionLoopCounters
+                                    { plcExecuteExpansionApplyPlan = planNs
+                                    , plcExecuteExpansionApplyOther = genericNs
+                                    }
+                                )
+                EdgeExpansionApplyInstantiate instantiatePlan -> do
+                    argUnifyResult <- runMeasuredStage traceCfg timing st1 (unifyEdgeExpansionInstantiateArgs instantiatePlan)
+                    case argUnifyResult of
+                        Left err -> pure (Left err)
+                        Right ((), st2, argUnifyNs) -> do
+                            metasResult <- runMeasuredStage traceCfg timing st2 (freshEdgeExpansionBinderMetas instantiatePlan)
+                            case metasResult of
+                                Left err -> pure (Left err)
+                                Right (binderMetas, st3, metasNs) -> do
+                                    schemeResult <- runMeasuredStage traceCfg timing st3 (instantiateEdgeExpansionScheme instantiatePlan binderMetas)
+                                    case schemeResult of
+                                        Left err -> pure (Left err)
+                                        Right (schemeTrace, st4, schemeNs) -> do
+                                            boundsResult <- runMeasuredStage traceCfg timing st4 (copyEdgeExpansionBinderBounds instantiatePlan binderMetas)
+                                            case boundsResult of
+                                                Left err -> pure (Left err)
+                                                Right (boundsTrace, st5, boundsNs) -> do
+                                                    finishResult <-
+                                                        runMeasuredStage traceCfg timing st5 $
+                                                            finishEdgeExpansionInstantiateApply instantiatePlan schemeTrace boundsTrace
+                                                    pure $ case finishResult of
+                                                        Left err -> Left err
+                                                        Right (applied, st6, finishNs) ->
+                                                            let totalNs = planNs + argUnifyNs + metasNs + schemeNs + boundsNs + finishNs
+                                                                counters =
+                                                                    emptyPresolutionLoopCounters
+                                                                        { plcExecuteExpansionApplyPlan = planNs
+                                                                        , plcExecuteExpansionApplyArgUnify = argUnifyNs
+                                                                        , plcExecuteExpansionApplyFreshMetas = metasNs
+                                                                        , plcExecuteExpansionApplyCopyScheme = schemeNs
+                                                                        , plcExecuteExpansionApplyCopyBounds = boundsNs
+                                                                        , plcExecuteExpansionApplyOther = finishNs
+                                                                        }
+                                                            in Right (applied, st6, totalNs, counters)
 
 runMeasuredStage
     :: TraceConfig
@@ -750,6 +869,12 @@ emitPresolutionLoopCounters timing label counters = do
     emitProgramOperationDurationIO timing (label ++ ".execute.witness_plan") (plcExecuteWitnessPlan counters)
     emitProgramOperationDurationIO timing (label ++ ".execute.expansion_unify") (plcExecuteExpansionUnify counters)
     emitProgramOperationDurationIO timing (label ++ ".execute.expansion_unify.apply_expansion") (plcExecuteExpansionApply counters)
+    emitProgramOperationDurationIO timing (label ++ ".execute.expansion_unify.apply_expansion.plan") (plcExecuteExpansionApplyPlan counters)
+    emitProgramOperationDurationIO timing (label ++ ".execute.expansion_unify.apply_expansion.argument_unify") (plcExecuteExpansionApplyArgUnify counters)
+    emitProgramOperationDurationIO timing (label ++ ".execute.expansion_unify.apply_expansion.fresh_metas") (plcExecuteExpansionApplyFreshMetas counters)
+    emitProgramOperationDurationIO timing (label ++ ".execute.expansion_unify.apply_expansion.copy_scheme") (plcExecuteExpansionApplyCopyScheme counters)
+    emitProgramOperationDurationIO timing (label ++ ".execute.expansion_unify.apply_expansion.copy_binder_bounds") (plcExecuteExpansionApplyCopyBounds counters)
+    emitProgramOperationDurationIO timing (label ++ ".execute.expansion_unify.apply_expansion.other") (plcExecuteExpansionApplyOther counters)
     emitProgramOperationDurationIO timing (label ++ ".execute.expansion_unify.bind_root") (plcExecuteExpansionBindRoot counters)
     emitProgramOperationDurationIO timing (label ++ ".execute.expansion_unify.prepare_omega") (plcExecuteExpansionPrepareOmega counters)
     emitProgramOperationDurationIO timing (label ++ ".execute.expansion_unify.execute_omega") (plcExecuteExpansionExecuteOmega counters)
@@ -831,17 +956,18 @@ prepareInstEdgePlanFromSeed canonical edge seed = do
                                 }
         _ -> planEdge canonical edge
 
-invalidateWorklistAfterMutation :: InstEdge -> EdgeMutation -> EdgeWorklist -> (EdgeInvalidation, EdgeWorklist)
-invalidateWorklistAfterMutation edge mutation worklist0
+invalidateWorklistAfterMutation :: InstEdge -> EdgePlan -> EdgeMutation -> EdgeWorklist -> (EdgeInvalidation, EdgeWorklist)
+invalidateWorklistAfterMutation edge plan mutation worklist0
     | edgeMutationIsEmpty mutation = (emptyEdgeInvalidation, worklist0)
     | otherwise =
         let excluded = IntSet.singleton (getEdgeId (instEdgeId edge))
+            rootScope = mutationRootOwners worklist0 mutation `IntSet.union` rootOwnersForPlan (rootOwnershipOfWorklist worklist0) plan
             (rootInvalidation, worklist1) =
-                invalidateRootsExcept excluded (emRoots mutation) worklist0
+                invalidateRootsWithinRootOwnersExcept excluded (emRoots mutation) rootScope worklist0
             (ownerInvalidation, worklist2) =
-                invalidateOwnersExcept excluded (emOwners mutation) worklist1
+                invalidateOwnersWithinRootOwnersExcept excluded (emOwners mutation) rootScope worklist1
             (expInvalidation, worklist3) =
-                invalidateExpansionsExcept excluded (emExpansions mutation) worklist2
+                invalidateExpansionsWithinRootOwnersExcept excluded (emExpansions mutation) rootScope worklist2
             invalidation =
                 EdgeInvalidation
                     { eiRootEdges = wiEdges rootInvalidation
@@ -853,6 +979,15 @@ invalidateWorklistAfterMutation edge mutation worklist0
                             `IntSet.union` wiEdges expInvalidation
                     }
         in (invalidation, worklist3)
+
+mutationRootOwners :: EdgeWorklist -> EdgeMutation -> IntSet.IntSet
+mutationRootOwners worklist mutation =
+    let ownership = rootOwnershipOfWorklist worklist
+    in IntSet.unions
+        [ ownersForNodes ownership (emRoots mutation)
+        , ownersForGens ownership (emOwners mutation)
+        , ownersForExpVars ownership (emExpansions mutation)
+        ]
 
 edgeFactsFromPlanState :: (NodeId -> NodeId) -> PresolutionState p -> EdgePlan -> (EdgePlanSeed, EdgeFingerprint)
 edgeFactsFromPlanState canonical st plan =
@@ -1025,7 +1160,7 @@ runScheduledWorklist traceCfg mbActiveOwner worklist0 =
                                 worklistProcessed =
                                     noteProcessedEdge edge (Just (edgeFactsFromPlanState (UnionFind.frWith (psUnionFind stAfter)) stAfter plan)) worklist1
                                 (_invalidation, worklistInvalidated) =
-                                    invalidateWorklistAfterMutation edge mutation worklistProcessed
+                                    invalidateWorklistAfterMutation edge plan mutation worklistProcessed
                             runScheduledWorklist traceCfg nextOwner worklistInvalidated
 
 -- | Boundary scheduler for delayed weakens.

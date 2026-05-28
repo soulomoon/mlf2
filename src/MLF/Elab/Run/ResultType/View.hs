@@ -3,8 +3,11 @@
 {-# LANGUAGE KindSignatures #-}
 module MLF.Elab.Run.ResultType.View (
     ResultTypeView,
+    ResultTypeFallbackIndex(..),
     buildResultTypeView,
+    rtvWithKnownGeneralization,
     rtvWithBoundOverlay,
+    rtvFallbackIndex,
     rtvLookupNode,
     rtvLookupVarBound,
     rtvPresolutionViewOverlay,
@@ -22,20 +25,30 @@ module MLF.Elab.Run.ResultType.View (
 
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
 
 import qualified MLF.Constraint.Finalize as Finalize
-import MLF.Constraint.Presolution (PresolutionView(..))
+import MLF.Constraint.Presolution (EdgeTrace(..), PresolutionView(..))
+import MLF.Constraint.Presolution.Base (CopyMapping(..), lookupCopy)
 import MLF.Constraint.Types.Graph
-    ( Constraint(..)
+    ( BaseTy
+    , Constraint(..)
+    , GenNodeId
+    , GenNode(..)
     , NodeId(..)
     , NodeMap
     , NodeRef
     , TyNode(..)
     , fromListNode
+    , gnSchemes
+    , getGenNodeMap
     , getNodeId
+    , lookupNodeIn
+    , nodeRefKey
     , toListNode
     )
+import MLF.Constraint.Types.Witness (ewRight)
 import MLF.Constraint.Types.Phase (Phase)
 import MLF.Elab.ReadModel
     ( ElabReadModel
@@ -45,13 +58,17 @@ import MLF.Elab.ReadModel
     )
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Elab.Run.Generalize (generalizeAtWithBuilder)
+import MLF.Elab.Run.Generalize.Common (canonicalSchemeRootOwners)
 import MLF.Elab.Run.Scope
     ( bindingScopeRefCanonical
     , canonicalizeScopeRef
     , resolveCanonicalScope
-    , schemeBodyTarget
     )
-import MLF.Elab.Run.ResultType.Types (ResultTypeInputs(..))
+import MLF.Elab.Run.ResultType.Types
+    ( ResultTypeInputs(..)
+    , rtcEdgeTraces
+    , rtcEdgeWitnesses
+    )
 import MLF.Elab.Types (ElabScheme)
 import MLF.Reify.Core
     ( reifyTypeWithNamedSetNoFallbackReadModel
@@ -66,6 +83,21 @@ data ResultTypeView (p :: Phase) = ResultTypeView
     , rtvReadModel0 :: Either ElabError (ElabReadModel p)
     , rtvBaseReadModel0 :: Either ElabError (ElabReadModel p)
     , rtvBaseVarOnlyNodes0 :: NodeMap TyNode
+    , rtvGeneralizeCache0 :: Map.Map (Int, Int) (ElabScheme, IntMap.IntMap String)
+    , rtvFallbackIndex0 :: ResultTypeFallbackIndex
+    }
+
+data ResultTypeFallbackIndex = ResultTypeFallbackIndex
+    { rtfiEdgeTraceCounts :: IntMap.IntMap Int
+    , rtfiTraceBinderArgBaseBounds :: IntMap.IntMap IntSet.IntSet
+    , rtfiEdgeBaseBounds :: IntSet.IntSet
+    , rtfiInstArgBaseBounds :: IntSet.IntSet
+    , rtfiRootBounds :: IntMap.IntMap IntSet.IntSet
+    , rtfiInstArgRootMultiBase :: Bool
+    , rtfiBaseNodeByTy :: Map.Map BaseTy NodeId
+    , rtfiSchemeRootSet :: IntSet.IntSet
+    , rtfiSchemeRootOwner :: IntMap.IntMap GenNodeId
+    , rtfiSchemeBodyRoot :: IntMap.IntMap NodeId
     }
 
 buildResultTypeView :: ResultTypeInputs p -> Either ElabError (ResultTypeView p)
@@ -92,6 +124,8 @@ buildResultTypeView inputs = do
             case baseReadModel of
                 Right model -> ermNodesVarOnly model
                 Left _ -> baseVarOnlyNodes
+        , rtvGeneralizeCache0 = Map.empty
+        , rtvFallbackIndex0 = buildResultTypeFallbackIndex inputs
         }
   where
     isTyVar node = case node of
@@ -104,6 +138,21 @@ buildResultTypeView inputs = do
             , isTyVar node
             ]
 
+rtvWithKnownGeneralization
+    :: NodeRef
+    -> NodeId
+    -> (ElabScheme, IntMap.IntMap String)
+    -> ResultTypeView p
+    -> ResultTypeView p
+rtvWithKnownGeneralization scopeRoot target result view =
+    view
+        { rtvGeneralizeCache0 =
+            Map.insert
+                (generalizeCacheKey scopeRoot target)
+                result
+                (rtvGeneralizeCache0 view)
+        }
+
 rtvWithBoundOverlay :: NodeId -> NodeId -> ResultTypeView p -> ResultTypeView p
 rtvWithBoundOverlay rootNid baseBound view =
     let canonical = rtcCanonical (rtvInputs0 view)
@@ -112,6 +161,7 @@ rtvWithBoundOverlay rootNid baseBound view =
         viewWithOverlay =
             view
                 { rtvBoundOverlay0 = IntMap.insert rootKey boundC (rtvBoundOverlay0 view)
+                , rtvGeneralizeCache0 = Map.empty
                 }
     in viewWithOverlay
         { rtvReadModel0 = buildElabReadModel (rtvPresolutionViewOverlay viewWithOverlay)
@@ -137,6 +187,9 @@ rtvLookupVarBound view nid =
 
 rtvPresolutionViewBase :: ResultTypeView p -> PresolutionView p
 rtvPresolutionViewBase = rtcPresolutionView . rtvInputs0
+
+rtvFallbackIndex :: ResultTypeView p -> ResultTypeFallbackIndex
+rtvFallbackIndex = rtvFallbackIndex0
 
 rtvPresolutionViewOverlay :: ResultTypeView p -> PresolutionView p
 rtvPresolutionViewOverlay view
@@ -189,8 +242,33 @@ rtvReifyBaseWithNamesNoFallback view subst nid = do
     reifyTypeWithNamesNoFallbackReadModel readModel subst nid
 
 rtvSchemeBodyTarget :: ResultTypeView p -> NodeId -> NodeId
-rtvSchemeBodyTarget view =
-    schemeBodyTarget (rtvPresolutionViewOverlay view)
+rtvSchemeBodyTarget view target =
+    let canonical = rtcCanonical (rtvInputs0 view)
+        fallbackIndex = rtvFallbackIndex view
+        targetC = canonical target
+        targetNode = rtvLookupNode view targetC
+        boundCanonical =
+            case targetNode of
+                Just TyVar{tnBound = Just bnd} -> Just (canonical bnd)
+                _ -> Nothing
+        boundNode = boundCanonical >>= rtvLookupNode view
+        isSchemeRoot =
+            IntSet.member (getNodeId targetC) (rtfiSchemeRootSet fallbackIndex)
+        boundIsSchemeBody =
+            maybe
+                False
+                (\bndC -> IntMap.member (getNodeId bndC) (rtfiSchemeBodyRoot fallbackIndex))
+                boundCanonical
+    in case targetNode of
+        Just TyVar{tnBound = Just _} ->
+            if isSchemeRoot || boundIsSchemeBody
+                then case (boundCanonical, boundNode) of
+                    (Just _, Just TyForall{tnBody = body}) -> canonical body
+                    (Just bndC, _) -> bndC
+                    _ -> targetC
+                else targetC
+        Just TyForall{tnBody = body} -> canonical body
+        _ -> targetC
 
 rtvResolveCanonicalScope :: ResultTypeView p -> NodeId -> Either ElabError NodeRef
 rtvResolveCanonicalScope view =
@@ -214,11 +292,165 @@ rtvGeneralizeTarget
     -> NodeRef
     -> NodeId
     -> Either ElabError (ElabScheme, IntMap.IntMap String)
-rtvGeneralizeTarget view =
-    generalizeAtWithBuilder
-        (rtcPlanBuilder (rtvInputs0 view))
-        (Just (rtvGaBindParents view))
-        (rtvPresolutionViewOverlay view)
+rtvGeneralizeTarget view scopeRoot target =
+    case Map.lookup (generalizeCacheKey scopeRoot target) (rtvGeneralizeCache0 view) of
+        Just result -> Right result
+        Nothing ->
+            generalizeAtWithBuilder
+                (rtcPlanBuilder (rtvInputs0 view))
+                (Just (rtvGaBindParents view))
+                (rtvPresolutionViewOverlay view)
+                scopeRoot
+                target
+
+generalizeCacheKey :: NodeRef -> NodeId -> (Int, Int)
+generalizeCacheKey scopeRoot target =
+    (nodeRefKey scopeRoot, getNodeId target)
+
+buildResultTypeFallbackIndex :: ResultTypeInputs p -> ResultTypeFallbackIndex
+buildResultTypeFallbackIndex inputs =
+    ResultTypeFallbackIndex
+        { rtfiEdgeTraceCounts = edgeTraceCounts
+        , rtfiTraceBinderArgBaseBounds = traceBinderArgBaseBounds
+        , rtfiEdgeBaseBounds = edgeBaseBounds
+        , rtfiInstArgBaseBounds = instArgBaseBounds
+        , rtfiRootBounds = rootBounds
+        , rtfiInstArgRootMultiBase = instArgRootMultiBase
+        , rtfiBaseNodeByTy = baseNodeByTy
+        , rtfiSchemeRootSet = schemeRootSet
+        , rtfiSchemeRootOwner = schemeRootOwner
+        , rtfiSchemeBodyRoot = schemeBodyRoot
+        }
+  where
+    presolutionView = rtcPresolutionView inputs
+    canonical = rtcCanonical inputs
+    nodes = cNodes (pvConstraint presolutionView)
+    edgeWitnesses = rtcEdgeWitnesses inputs
+    edgeTraces = rtcEdgeTraces inputs
+    (schemeRootSet, schemeRootOwner) =
+        canonicalSchemeRootOwners canonical genNodes
+    genNodes = getGenNodeMap (cGenNodes (pvConstraint presolutionView))
+
+    schemeBodyRoot =
+        IntMap.fromListWith
+            (\existing _ -> existing)
+            [ (getNodeId (canonical bnd), canonical root)
+            | gen <- IntMap.elems genNodes
+            , root <- gnSchemes gen
+            , Just bnd <- [pvLookupVarBound presolutionView root]
+            , case pvLookupNode presolutionView (canonical bnd) of
+                Just TyBase{} -> False
+                Just TyBottom{} -> False
+                _ -> True
+            ]
+
+    edgeTraceCounts =
+        IntMap.fromListWith
+            (+)
+            [ (getNodeId (etRoot tr), 1 :: Int)
+            | tr <- IntMap.elems edgeTraces
+            ]
+
+    baseNodeByTy =
+        foldl'
+            ( \acc node ->
+                case node of
+                    TyBase{tnId = nid, tnBase = base} ->
+                        Map.insertWith (\_old existing -> existing) base nid acc
+                    _ -> acc
+            )
+            Map.empty
+            (map snd (toListNode nodes))
+
+    resolveBaseBoundCanonical start =
+        let go visited nid0 =
+                let nid = canonical nid0
+                    key = getNodeId nid
+                in if IntSet.member key visited
+                    then Nothing
+                    else case pvLookupNode presolutionView nid of
+                        Just TyBase{} -> Just nid
+                        Just TyBottom{} -> Just nid
+                        Just TyVar{} ->
+                            case pvLookupVarBound presolutionView nid of
+                                Just bnd -> go (IntSet.insert key visited) bnd
+                                Nothing -> Nothing
+                        _ -> Nothing
+        in go IntSet.empty start
+
+    argBounds arg = do
+        baseC <- resolveBaseBoundCanonical arg
+        case lookupNodeIn nodes baseC of
+            Just TyBase{} -> Just baseC
+            Just TyBottom{} -> Just baseC
+            _ -> Nothing
+
+    instArgNode tr binder arg =
+        case lookupCopy binder (etCopyMap tr) of
+            Just copyN -> copyN
+            Nothing -> arg
+
+    traceBinderArgBaseBounds =
+        IntMap.map
+            ( \tr ->
+                IntSet.fromList
+                    [ getNodeId baseC
+                    | (binder, arg) <- etBinderArgs tr
+                    , let argNode = instArgNode tr binder arg
+                    , Just baseC <- [argBounds argNode]
+                    ]
+            )
+            edgeTraces
+
+    edgeBaseBounds =
+        IntSet.fromList
+            [ getNodeId baseC
+            | ew <- IntMap.elems edgeWitnesses
+            , Just baseC <- [argBounds (ewRight ew)]
+            ]
+
+    instArgBaseBounds =
+        let binderBounds =
+                IntMap.fromListWith
+                    IntSet.union
+                    [ (getNodeId (canonical binderRoot), IntSet.singleton (getNodeId baseC))
+                    | tr <- IntMap.elems edgeTraces
+                    , let copyMapInv =
+                            IntMap.fromListWith
+                                min
+                                [ (getNodeId copyN, origKey)
+                                | (origKey, copyN) <- IntMap.toList (getCopyMapping (etCopyMap tr))
+                                ]
+                    , (binder, arg) <- etBinderArgs tr
+                    , let binderRoot =
+                            case IntMap.lookup (getNodeId binder) copyMapInv of
+                                Just origKey -> NodeId origKey
+                                Nothing -> binder
+                    , let argNode = instArgNode tr binder arg
+                    , Just baseC <- [argBounds argNode]
+                    ]
+        in IntSet.union
+            ( IntSet.unions
+                [ bounds
+                | bounds <- IntMap.elems binderBounds
+                , IntSet.size bounds > 1
+                ]
+            )
+            edgeBaseBounds
+
+    rootBounds =
+        IntMap.fromListWith
+            IntSet.union
+            [ (getNodeId (canonical (etRoot tr)), IntSet.singleton (getNodeId baseC))
+            | tr <- IntMap.elems edgeTraces
+            , (binder, arg) <- etBinderArgs tr
+            , let argNode = instArgNode tr binder arg
+            , Just baseC <- [argBounds argNode]
+            ]
+
+    instArgRootMultiBase =
+        any (\s -> IntSet.size s > 1) (IntMap.elems rootBounds)
+            || IntSet.size edgeBaseBounds > 1
 
 overlayBound :: ResultTypeView p -> NodeId -> Maybe NodeId
 overlayBound view nid =

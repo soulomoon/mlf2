@@ -12,8 +12,17 @@ module MLF.Constraint.Presolution.EdgeProcessing.Unify
     EdgeExpansionBound (..),
     EdgeExpansionPrepared (..),
     EdgeExpansionExecuted (..),
+    EdgeExpansionApplyPlan (..),
+    EdgeExpansionInstantiatePlan (..),
     runExpansionUnify,
     applyEdgeExpansion,
+    prepareEdgeExpansionApply,
+    applyGenericEdgeExpansion,
+    unifyEdgeExpansionInstantiateArgs,
+    freshEdgeExpansionBinderMetas,
+    instantiateEdgeExpansionScheme,
+    copyEdgeExpansionBinderBounds,
+    finishEdgeExpansionInstantiateApply,
     bindEdgeExpansionRoot,
     prepareEdgeExpansionOmega,
     executeEdgeExpansionOmega,
@@ -60,6 +69,7 @@ import MLF.Constraint.Presolution.Base
     PresolutionM,
     bindExpansionArgs,
     edgeInteriorExact,
+    emptyTrace,
     getConstraint,
     getCopyMapping,
     lookupCopy,
@@ -76,12 +86,16 @@ import MLF.Constraint.Presolution.EdgeUnify
 import MLF.Constraint.Presolution.Expansion
   ( applyExpansionEdgeTracedWithBinders,
     bindExpansionRootLikeTarget,
+    copyBinderBounds,
+    instantiateSchemeWithTrace,
   )
 import MLF.Constraint.Presolution.Ops
-  ( findRoot,
+  ( createFreshVar,
+    findRoot,
     setBindParentM,
   )
 import MLF.Constraint.Presolution.StateAccess (getCanonical)
+import MLF.Constraint.Presolution.Unify (unifyAcyclic)
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness
 import MLF.Util.Trace (traceBindingM)
@@ -139,6 +153,18 @@ data EdgeExpansionExecuted = EdgeExpansionExecuted
     eexExtraOps :: [InstanceOp]
   }
 
+data EdgeExpansionApplyPlan
+  = EdgeExpansionApplyReady EdgeExpansionApplied
+  | EdgeExpansionApplyGeneric EdgeExpansionInput [InstanceOp]
+  | EdgeExpansionApplyInstantiate EdgeExpansionInstantiatePlan
+
+data EdgeExpansionInstantiatePlan = EdgeExpansionInstantiatePlan
+  { eeipInput :: EdgeExpansionInput,
+    eeipBaseOps :: [InstanceOp],
+    eeipArgs :: [NodeId],
+    eeipArgUnifications :: [(NodeId, NodeId)]
+  }
+
 -- | Apply an expansion and run edge-local unification for a single edge.
 runExpansionUnify ::
   EdgeExpansionInput ->
@@ -155,7 +181,78 @@ applyEdgeExpansion ::
   EdgeExpansionInput ->
   [InstanceOp] ->
   PresolutionM p EdgeExpansionApplied
-applyEdgeExpansion input baseOps =
+applyEdgeExpansion input baseOps = do
+  plan <- prepareEdgeExpansionApply input baseOps
+  case plan of
+    EdgeExpansionApplyReady applied ->
+      pure applied
+    EdgeExpansionApplyGeneric genericInput genericBaseOps ->
+      applyGenericEdgeExpansion genericInput genericBaseOps
+    EdgeExpansionApplyInstantiate instantiatePlan -> do
+      unifyEdgeExpansionInstantiateArgs instantiatePlan
+      binderMetas <- freshEdgeExpansionBinderMetas instantiatePlan
+      schemeTrace <- instantiateEdgeExpansionScheme instantiatePlan binderMetas
+      boundsTrace <- copyEdgeExpansionBinderBounds instantiatePlan binderMetas
+      finishEdgeExpansionInstantiateApply instantiatePlan schemeTrace boundsTrace
+
+prepareEdgeExpansionApply ::
+  EdgeExpansionInput ->
+  [InstanceOp] ->
+  PresolutionM p EdgeExpansionApplyPlan
+prepareEdgeExpansionApply input baseOps =
+  case eeiLeftRaw input of
+    TyExp {}
+      | ExpInstantiate args <- eeiExpansion input ->
+          prepareEdgeExpansionInstantiateApply input baseOps args
+      | otherwise ->
+          pure (EdgeExpansionApplyGeneric input baseOps)
+    _ ->
+      throwError (InternalError ("runExpansionUnify: expected TyExp for edge " ++ show (eeiEdgeId input)))
+
+prepareEdgeExpansionInstantiateApply ::
+  EdgeExpansionInput ->
+  [InstanceOp] ->
+  [NodeId] ->
+  PresolutionM p EdgeExpansionApplyPlan
+prepareEdgeExpansionInstantiateApply input baseOps args
+  | null boundVars =
+      if null args
+        then do
+          applied <- finishEdgeExpansionApply input baseOps bodyRoot emptyTrace
+          pure (EdgeExpansionApplyReady applied)
+        else throwError $ InstantiateOnNonForall (tnId (eeiLeftRaw input))
+  | length boundVars == length args =
+      pure $
+        EdgeExpansionApplyInstantiate
+          EdgeExpansionInstantiatePlan
+            { eeipInput = input,
+              eeipBaseOps = baseOps,
+              eeipArgs = args,
+              eeipArgUnifications = []
+            }
+  | length boundVars == 1 && length args > 1 =
+      case args of
+        [] -> throwError $ ArityMismatch "applyExpansionEdgeTracedWithBinders" (length boundVars) (length args)
+        arg0 : rest ->
+          pure $
+            EdgeExpansionApplyInstantiate
+              EdgeExpansionInstantiatePlan
+                { eeipInput = input,
+                  eeipBaseOps = baseOps,
+                  eeipArgs = [arg0],
+                  eeipArgUnifications = [(arg0, arg) | arg <- rest]
+                }
+  | otherwise =
+      throwError $ ArityMismatch "applyExpansionEdgeTracedWithBinders" (length boundVars) (length args)
+  where
+    boundVars = eeiBoundVars input
+    bodyRoot = eeiBodyRoot input
+
+applyGenericEdgeExpansion ::
+  EdgeExpansionInput ->
+  [InstanceOp] ->
+  PresolutionM p EdgeExpansionApplied
+applyGenericEdgeExpansion input baseOps =
   let gid = eeiGenId input
       edgeId = eeiEdgeId input
       leftRaw = eeiLeftRaw input
@@ -169,25 +266,75 @@ applyEdgeExpansion input baseOps =
               leftRaw
               (eeiBodyRoot input)
               (eeiBoundVars input)
-          debugBindParents
-            ( "processInstEdge: expansion result resNodeId="
-                ++ show resNodeId
-                ++ " copyMap0="
-                ++ show copyMap0
-                ++ " frontier0="
-                ++ show frontier0
-            )
-          pure
-            EdgeExpansionApplied
-              { eeaInput = input,
-                eeaBaseOps = baseOps,
-                eeaResultNodeId = resNodeId,
-                eeaCopyMap = copyMap0,
-                eeaInterior = interior0,
-                eeaFrontier = frontier0
-              }
+          finishEdgeExpansionApply input baseOps resNodeId (copyMap0, interior0, frontier0)
         _ ->
           throwError (InternalError ("runExpansionUnify: expected TyExp for edge " ++ show edgeId))
+
+unifyEdgeExpansionInstantiateArgs :: EdgeExpansionInstantiatePlan -> PresolutionM p ()
+unifyEdgeExpansionInstantiateArgs plan =
+  forM_ (eeipArgUnifications plan) (uncurry unifyAcyclic)
+
+freshEdgeExpansionBinderMetas :: EdgeExpansionInstantiatePlan -> PresolutionM p [(NodeId, NodeId)]
+freshEdgeExpansionBinderMetas plan = do
+  let boundVars = eeiBoundVars (eeipInput plan)
+  metas <- forM boundVars $ \bv -> do
+    meta <- createFreshVar
+    pure (bv, meta)
+  pure metas
+
+instantiateEdgeExpansionScheme ::
+  EdgeExpansionInstantiatePlan ->
+  [(NodeId, NodeId)] ->
+  PresolutionM p (NodeId, CopyMap, InteriorSet, FrontierSet)
+instantiateEdgeExpansionScheme plan binderMetas =
+  instantiateSchemeWithTrace (eeiBodyRoot (eeipInput plan)) binderMetas
+
+copyEdgeExpansionBinderBounds ::
+  EdgeExpansionInstantiatePlan ->
+  [(NodeId, NodeId)] ->
+  PresolutionM p (CopyMap, InteriorSet, FrontierSet)
+copyEdgeExpansionBinderBounds plan binderMetas =
+  copyBinderBounds binderMetas binderArgs
+  where
+    boundVars = eeiBoundVars (eeipInput plan)
+    binderArgs = zip boundVars (eeipArgs plan)
+
+finishEdgeExpansionInstantiateApply ::
+  EdgeExpansionInstantiatePlan ->
+  (NodeId, CopyMap, InteriorSet, FrontierSet) ->
+  (CopyMap, InteriorSet, FrontierSet) ->
+  PresolutionM p EdgeExpansionApplied
+finishEdgeExpansionInstantiateApply plan (root, cmap0, interior0, frontier0) (cmapB, interiorB, frontierB) =
+  finishEdgeExpansionApply
+    (eeipInput plan)
+    (eeipBaseOps plan)
+    root
+    (cmap0 <> cmapB, IntSet.union interior0 interiorB, IntSet.union frontier0 frontierB)
+
+finishEdgeExpansionApply ::
+  EdgeExpansionInput ->
+  [InstanceOp] ->
+  NodeId ->
+  (CopyMap, InteriorSet, FrontierSet) ->
+  PresolutionM p EdgeExpansionApplied
+finishEdgeExpansionApply input baseOps resNodeId (copyMap0, interior0, frontier0) = do
+  debugBindParents
+    ( "processInstEdge: expansion result resNodeId="
+        ++ show resNodeId
+        ++ " copyMap0="
+        ++ show copyMap0
+        ++ " frontier0="
+        ++ show frontier0
+    )
+  pure
+    EdgeExpansionApplied
+      { eeaInput = input,
+        eeaBaseOps = baseOps,
+        eeaResultNodeId = resNodeId,
+        eeaCopyMap = copyMap0,
+        eeaInterior = interior0,
+        eeaFrontier = frontier0
+      }
 
 bindEdgeExpansionRoot :: EdgeExpansionApplied -> PresolutionM p EdgeExpansionBound
 bindEdgeExpansionRoot applied = do

@@ -10,6 +10,7 @@ module MLF.Constraint.Presolution.Copy (
     expansionCopySetsM,
     instantiateScheme,
     instantiateSchemeWithTrace,
+    instantiateSchemeWithTraceSnapshot,
     bindExpansionRootLikeTarget,
     bindUnboundCopiedNodes
 ) where
@@ -207,6 +208,14 @@ instantiateSchemeWithTrace :: NodeId -> [(NodeId, NodeId)] -> PresolutionM p (No
 instantiateSchemeWithTrace bodyId substList =
     instantiateSchemeWithMode True bodyId substList
 
+instantiateSchemeWithTraceSnapshot
+    :: PresolutionBindingSnapshot p
+    -> NodeId
+    -> [(NodeId, NodeId)]
+    -> PresolutionM p (NodeId, CopyMap, IntSet.IntSet, IntSet.IntSet)
+instantiateSchemeWithTraceSnapshot snapshot bodyId substList =
+    instantiateSchemeWithModeSnapshot True snapshot bodyId substList
+
 instantiateSchemeWithMode
     :: Bool
     -> NodeId
@@ -214,6 +223,15 @@ instantiateSchemeWithMode
     -> PresolutionM p (NodeId, CopyMap, IntSet.IntSet, IntSet.IntSet)
 instantiateSchemeWithMode replaceFrontier bodyId substList = do
     snapshot <- getBindingSnapshot
+    instantiateSchemeWithModeSnapshot replaceFrontier snapshot bodyId substList
+
+instantiateSchemeWithModeSnapshot
+    :: Bool
+    -> PresolutionBindingSnapshot p
+    -> NodeId
+    -> [(NodeId, NodeId)]
+    -> PresolutionM p (NodeId, CopyMap, IntSet.IntSet, IntSet.IntSet)
+instantiateSchemeWithModeSnapshot replaceFrontier snapshot bodyId substList = do
     let c0 = pbsConstraint snapshot
         canonical = pbsCanonical snapshot
 
@@ -294,9 +312,9 @@ instantiateSchemeWithMode replaceFrontier bodyId substList = do
         -> CopyMap
         -> IntSet.IntSet
         -> PresolutionM p ()
-    resetBindingsForCopies snapshot gid schemeRootId copyRoot frontierSet cmap0 substKeys = do
-        let canonical = pbsCanonical snapshot
-            qbp = Binding.qbpBindParents (pbsQuotient snapshot)
+    resetBindingsForCopies snapshot0 gid schemeRootId copyRoot frontierSet cmap0 substKeys = do
+        let canonical = pbsCanonical snapshot0
+            qbp = Binding.qbpBindParents (pbsQuotient snapshot0)
         let cmap =
                 IntMap.fromListWith
                     (\a _ -> a)
@@ -336,7 +354,7 @@ instantiateSchemeWithMode replaceFrontier bodyId substList = do
                         case IntMap.lookup (nodeRefKey (typeRef copy)) qbp of
                             Just _ -> pure ()
                             Nothing -> do
-                                mbParent <- bindingSnapshotLookupBindParent snapshot (typeRef origC)
+                                mbParent <- bindingSnapshotLookupBindParent snapshot0 (typeRef origC)
                                 case mbParent of
                                     Nothing ->
                                         throwError (BindingTreeError (MissingBindParent (typeRef origC)))

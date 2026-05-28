@@ -46,8 +46,6 @@ import MLF.Constraint.Presolution.EdgeProcessing.Solve
     unifyStructure,
   )
 import MLF.Constraint.Presolution.StateAccess (getCanonical)
-import MLF.Constraint.Presolution.StateAccess (getCanonical)
-import MLF.Constraint.Presolution.StateAccess (getCanonical)
 import MLF.Constraint.Presolution.EdgeProcessing.Unify
   ( EdgeExpansionInput (..),
     EdgeExpansionResult (..),

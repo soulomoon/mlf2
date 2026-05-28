@@ -4,14 +4,18 @@
 
 module MLF.Elab.Run.ResultType
   ( ResultTypeInputs (..),
+    View.ResultTypeView,
     rtcEdgeWitnesses,
     rtcEdgeTraces,
     rtcEdgeExpansions,
     generalizeWithPlan,
     inferInstAppArgsFromScheme,
     mkResultTypeInputs,
+    buildResultTypeView,
     computeResultTypeFromAnn,
+    computeResultTypeFromAnnWithView,
     computeResultTypeFallback,
+    computeResultTypeFallbackWithView,
   )
 where
 
@@ -63,11 +67,26 @@ mkResultTypeInputs canonical edgeArtifacts presolutionView bindParentsGa planBui
       rtcTraceConfig = traceCfg
     }
 
+buildResultTypeView :: ResultTypeInputs p -> Either ElabError (View.ResultTypeView p)
+buildResultTypeView =
+  View.buildResultTypeView
+
 -- Re-export computeResultTypeFromAnn from Ann module
 computeResultTypeFromAnn :: ResultTypeInputs p -> AnnExpr -> AnnExpr -> NodeId -> EdgeId -> Either ElabError ElabType
 computeResultTypeFromAnn ctx inner innerPre annNodeId eid = do
   view <- View.buildResultTypeView ctx
-  Ann.computeResultTypeFromAnnWithView ctx view inner innerPre annNodeId eid
+  computeResultTypeFromAnnWithView ctx view inner innerPre annNodeId eid
+
+computeResultTypeFromAnnWithView ::
+  ResultTypeInputs p ->
+  View.ResultTypeView p ->
+  AnnExpr ->
+  AnnExpr ->
+  NodeId ->
+  EdgeId ->
+  Either ElabError ElabType
+computeResultTypeFromAnnWithView =
+  Ann.computeResultTypeFromAnnWithView
 
 {- Note [Annotation dispatch and fallback overlays]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -97,7 +116,18 @@ computeResultTypeFallback ::
   Either ElabError ElabType
 computeResultTypeFallback ctx annCanon ann = do
   view <- View.buildResultTypeView ctx
-  computeResultTypeDispatch ctx view annCanon ann
+  computeResultTypeFallbackWithView ctx view annCanon ann
+
+computeResultTypeFallbackWithView ::
+  ResultTypeInputs p ->
+  View.ResultTypeView p ->
+  -- | annCanon (post-redirect)
+  AnnExpr ->
+  -- | ann (pre-redirect)
+  AnnExpr ->
+  Either ElabError ElabType
+computeResultTypeFallbackWithView =
+  computeResultTypeDispatch
 
 computeResultTypeDispatch ::
   ResultTypeInputs p ->

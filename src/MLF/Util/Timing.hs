@@ -7,6 +7,7 @@ module MLF.Util.Timing
     , timeProgramOperationIO
     , measureProgramOperationIO
     , emitProgramOperationDurationIO
+    , emitProgramOperationMetricIO
     ) where
 
 import Control.Exception (onException)
@@ -87,6 +88,12 @@ emitProgramOperationDurationIO config label elapsed
     | not (timingProgramOperations config) = pure ()
     | otherwise =
         hPutStrLn stderr ("[MLF_PROGRAM_TIMING] done  " ++ label ++ " " ++ formatMillis elapsed)
+
+emitProgramOperationMetricIO :: TimingConfig -> String -> Word64 -> IO ()
+emitProgramOperationMetricIO config label value
+    | not (timingProgramOperations config) = pure ()
+    | otherwise =
+        hPutStrLn stderr ("[MLF_PROGRAM_TIMING] metric " ++ label ++ " " ++ show value)
 
 isEnvSet :: String -> IO Bool
 isEnvSet name = do

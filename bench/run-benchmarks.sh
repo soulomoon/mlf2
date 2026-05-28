@@ -132,6 +132,11 @@ parse_metrics() {
       sub(/ms$/, "", value)
       print metric "\t" value
     }
+    /^\[MLF_PROGRAM_TIMING\] metric / {
+      metric = $3
+      value = $4
+      print metric "\t" value
+    }
     /^real / { printf "real\t%.3f\n", $2 * 1000 }
     /^user / { printf "user\t%.3f\n", $2 * 1000 }
     /^sys / { printf "sys\t%.3f\n", $2 * 1000 }

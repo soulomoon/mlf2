@@ -25,7 +25,14 @@ import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
 
 import MLF.Constraint.Types.Graph hiding (insertNode)
-import MLF.Frontend.ConstraintGen.State (BuildState(..), ConstraintM)
+import MLF.Frontend.ConstraintGen.State
+    ( BuildState(..)
+    , ConstraintM
+    , recordEdgeRootOwner
+    , recordExpVarRootOwner
+    , recordGenRootOwner
+    , recordNodeRootOwner
+    )
 import qualified MLF.Frontend.ConstraintGen.Scope as Scope
 
 -- | Allocate a TyForall node.
@@ -128,6 +135,7 @@ allocGenNode schemes = do
     modify' $ \st ->
         let gens = insertGen gid genNode (bsGenNodes st)
         in st { bsGenNodes = gens }
+    recordGenRootOwner gid
     Scope.registerScopeNode (genRef gid)
     pure gid
 
@@ -147,6 +155,7 @@ setGenNodeSchemes gid schemes =
 allocExpNode :: NodeId -> ConstraintM (NodeId, ExpVarId)
 allocExpNode bodyNode = do
     expVar <- freshExpVarId
+    recordExpVarRootOwner expVar
     nid <- freshNodeId
     insertNode TyExp
         { tnId = nid
@@ -180,6 +189,7 @@ addInstEdge left right = do
     let edgeId = EdgeId eid
         edge = InstEdge edgeId left right
     modify' $ \st -> st { bsInstEdges = edge : bsInstEdges st }
+    recordEdgeRootOwner edgeId
     pure edgeId
 
 -- | Record a let-scope instantiation edge so we can drop its witness later.
@@ -217,6 +227,7 @@ insertNode node = do
     modify' $ \st ->
         let nodes' = IntMap.insert (intFromNode (tnId node)) node (bsNodes st)
         in st { bsNodes = nodes' }
+    recordNodeRootOwner (tnId node)
     Scope.registerScopeNode (typeRef (tnId node))
 
 -- | Set the binding parent for a node only if it doesn't already have one.
