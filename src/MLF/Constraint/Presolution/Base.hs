@@ -317,19 +317,21 @@ modifyConstraintState f st =
             , psBindParentsVersion = psBindParentsVersion st + 1
             }
 
+-- | Modify constraint types/nodes without touching bind parents.
+--
+-- Only bumps 'psGraphVersion'.  The quotient binding-model cache depends on
+-- 'psUnionFindVersion' and 'psBindParentsVersion' so it remains valid across
+-- type-only mutations.  The repair model is also unaffected.
 modifyConstraintDirtyTypesState
     :: IntSet.IntSet
     -> (Constraint p -> Constraint p)
     -> PresolutionState p
     -> PresolutionState p
 modifyConstraintDirtyTypesState _dirtyTypes f st =
-    invalidateBindingRepairModelState $
-    invalidateBindingModelState $
-        st
-            { psConstraint = f (psConstraint st)
-            , psGraphVersion = psGraphVersion st + 1
-            , psBindParentsVersion = psBindParentsVersion st + 1
-            }
+    st
+        { psConstraint = f (psConstraint st)
+        , psGraphVersion = psGraphVersion st + 1
+        }
 
 setConstraintDirtyBindRefsState
     :: IntSet.IntSet
@@ -414,11 +416,13 @@ cachedBindingModelM = do
     st <- get
     case psBindingModelCache st of
         Just cached
-            | cbmGraphVersion cached == psGraphVersion st
-            , cbmUnionFindVersion cached == psUnionFindVersion st
+            | cbmUnionFindVersion cached == psUnionFindVersion st
             , cbmBindParentsVersion cached == psBindParentsVersion st ->
+                -- Quotient is valid; return current constraint (types may have
+                -- changed via modifyConstraintDirtyTypesState without bumping
+                -- psBindParentsVersion).
                 pure
-                    ( cbmConstraint cached
+                    ( psConstraint st
                     , UnionFind.frWith (cbmUnionFind cached)
                     , cbmQuotient cached
                     )

@@ -248,10 +248,12 @@ getBindingSnapshot = do
     st <- gets id
     case psBindingModelCache st of
         Just cached
-            | cbmGraphVersion cached == psGraphVersion st
-            , cbmUnionFindVersion cached == psUnionFindVersion st
+            | cbmUnionFindVersion cached == psUnionFindVersion st
             , cbmBindParentsVersion cached == psBindParentsVersion st ->
-                pure (snapshotFromCached cached)
+                -- Quotient is valid; return current constraint (types may have
+                -- changed via modifyConstraintDirtyTypesState without bumping
+                -- psBindParentsVersion).
+                pure (snapshotFromCached (psConstraint st) cached)
         _ -> do
             let c = psConstraint st
                 uf = psUnionFind st
@@ -268,12 +270,12 @@ getBindingSnapshot = do
                         , cbmQuotient = qbp
                         }
             modify' (setBindingModelCacheState cached)
-            pure (snapshotFromCached cached)
+            pure (snapshotFromCached c cached)
   where
-    snapshotFromCached cached =
+    snapshotFromCached currentConstraint cached =
         let canonical = UnionFind.frWith (cbmUnionFind cached)
         in PresolutionBindingSnapshot
-            { pbsConstraint = cbmConstraint cached
+            { pbsConstraint = currentConstraint
             , pbsCanonical = canonical
             , pbsQuotient = cbmQuotient cached
             }
