@@ -130,7 +130,7 @@ rewriteConstraintWithUF :: IntMap NodeId -> Constraint p -> Constraint p
 rewriteConstraintWithUF = applyUFConstraint
 
 applyUFConstraint :: IntMap NodeId -> Constraint p -> Constraint p
-applyUFConstraint uf c =
+applyUFConstraint ufRaw c =
     let canonical = frWith uf
         nodes' = IntMap.fromListWith Canonicalize.chooseRepNode (map rewriteNode (NodeAccess.allNodes c))
         bindParents0 = cBindParents c
@@ -167,6 +167,7 @@ applyUFConstraint uf c =
         , cGenNodes = genNodes'
         }
   where
+    uf = compressAllUF ufRaw
     rewriteNode :: TyNode -> (Int, TyNode)
     rewriteNode n =
         let nid' = frWith uf (tnId n)
@@ -480,6 +481,13 @@ rewriteEliminatedBinders c0
 -- | Read-only UF canonicalization helper for immutable rewrite passes.
 frWith :: IntMap NodeId -> NodeId -> NodeId
 frWith = UnionFind.frWith
+
+-- | Compress all chains in a union-find map to depth 1 in a single pass.
+--
+-- For N nodes with average chain depth D, this costs O(N * D) once.
+-- After compression every 'frWith' call on the result is O(1).
+compressAllUF :: IntMap NodeId -> IntMap NodeId
+compressAllUF uf = IntMap.mapWithKey (\k _ -> frWith uf (NodeId k)) uf
 
 -- | Debug validator for solved-graph invariants. Returns an empty list on success.
 validateSolvedGraph :: SolveResult p -> [String]
