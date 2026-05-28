@@ -42,10 +42,9 @@ import qualified Data.IntSet as IntSet
 import Data.List (mapAccumL, partition, sortOn)
 import qualified Data.List.NonEmpty as NE
 import Data.Ord (Down (..))
-import qualified MLF.Binding.Tree as Binding
-import MLF.Constraint.Presolution.Base (CopyMap, EdgeTrace (..), FrontierSet, InteriorSet, PresolutionError (..), PresolutionM, fromListInterior, instantiationBindersM)
+import MLF.Constraint.Presolution.Base (CopyMap, EdgeTrace (..), FrontierSet, InteriorSet, PresolutionError (..), PresolutionM, fromListInterior, instantiationBindersM, interiorOfUnderCachedM)
 import MLF.Constraint.Presolution.Ops (findRoot, getCanonicalNode, lookupVarBound)
-import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical, liftBindingError)
+import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical)
 import MLF.Constraint.Presolution.WitnessCanon
   ( assertNoStandaloneGrafts,
     coalesceRaiseMergeWithEnv,
@@ -155,7 +154,7 @@ buildEdgeTrace input gid bas (copyMap0, _interior0, _frontier0) = do
   (constraint0, canonicalizeNode) <- getConstraintAndCanonical
   let interiorRootRef = genRef gid
   interiorNodesRaw <- do
-    s <- liftBindingError $ Binding.interiorOfUnder canonicalizeNode constraint0 interiorRootRef
+    s <- interiorOfUnderCachedM canonicalizeNode interiorRootRef
     pure
       [ nid
       | key <- IntSet.toList s,

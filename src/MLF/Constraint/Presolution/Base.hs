@@ -74,11 +74,13 @@ module MLF.Constraint.Presolution.Base (
     runPresolutionM,
     MonadPresolution(..),
     bindingPathToRootUnderM,
+    cachedBindingModelM,
     ensureBindingParents,
     ensureBindingParentsWithOutcome,
     BindingRepairOutcome(..),
     requireValidBindingTree,
     edgeInteriorExact,
+    interiorOfUnderCachedM,
     traceInteriorRootRef,
     instantiationBindersM,
     instantiationBindersFromGenM,
@@ -669,9 +671,13 @@ bindingPathToRootUnderM
     -> Constraint q
     -> NodeRef
     -> PresolutionM p [NodeRef]
-bindingPathToRootUnderM canonical c start =
-    case BindingCanonical.withQuotientBindParents "bindingPathToRootUnderM" canonical c start $ \startC bindParents ->
-        BindingPath.bindingPathToRootLocal bindParents startC of
+bindingPathToRootUnderM _canonical _c start = do
+    (_c0, canonical, qbp) <- cachedBindingModelM
+    let startC = case start of
+            TypeRef nid -> TypeRef (canonical nid)
+            GenRef _    -> start
+    case BindingPath.bindingPathToRootLocal
+            (Binding.qbpBindParents qbp) startC of
         Left err -> throwError (BindingTreeError err)
         Right path -> pure path
 
@@ -747,19 +753,27 @@ quotientChildrenByParent =
 
 edgeInteriorExact :: NodeId -> PresolutionM p IntSet.IntSet
 edgeInteriorExact root0 = do
-    c0 <- gets psConstraint
-    uf <- gets psUnionFind
-    let canonical = UnionFind.frWith uf
-        interiorRootRef = traceInteriorRootRef canonical c0 root0
-    case Binding.interiorOfUnder canonical c0 interiorRootRef of
-        Left err -> throwError (BindingTreeError err)
-        Right interior ->
-            pure $
-                IntSet.fromList
-                    [ getNodeId nid
-                    | key <- IntSet.toList interior
-                    , TypeRef nid <- [nodeRefFromKey key]
-                    ]
+    (c0, canonical, qbp) <- cachedBindingModelM
+    let interiorRootRef = traceInteriorRootRef canonical c0 root0
+    interiorOfUnderCachedM canonical interiorRootRef
+
+-- | Compute interior I(r) using the cached quotient binding model.
+interiorOfUnderCachedM :: (NodeId -> NodeId) -> NodeRef -> PresolutionM p IntSet.IntSet
+interiorOfUnderCachedM canonical rootRef = do
+    (_c0, _canonical, qbp) <- cachedBindingModelM
+    let rootC = case rootRef of
+            TypeRef nid -> TypeRef (canonical nid)
+            r -> r
+        rootKey = nodeRefKey rootC
+        childrenByParent = Binding.qbpChildrenByParent qbp
+        -- BFS from root through children
+        go visited [] = visited
+        go visited (nid : rest) =
+            let kids = IntSet.fromList
+                    [ ck | (ck, _) <- IntMap.findWithDefault [] nid childrenByParent ]
+                newKids = IntSet.difference kids visited
+            in go (IntSet.union visited newKids) (IntSet.toList newKids ++ rest)
+    pure (go (IntSet.singleton rootKey) [rootKey])
 
 -- | Choose the binding-tree root reference used for exact I(r) computation in
 -- edge traces and post-rewrite trace refresh.

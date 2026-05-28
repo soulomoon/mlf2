@@ -219,21 +219,27 @@ unifyStructure n1 n2 = do
             Left _ -> pure ()
 
 isSchemeRootNode :: (NodeId -> NodeId) -> Constraint p -> NodeId -> PresolutionM p Bool
-isSchemeRootNode canonical c0 nid =
-    case Binding.lookupBindParentUnder canonical c0 (typeRef nid) of
-        Left _ -> pure False
-        Right (Just (GenRef gid, _)) ->
+isSchemeRootNode canonical c0 nid = do
+    (_c, _canonical, qbp) <- cachedBindingModelM
+    let refC = case typeRef nid of
+            TypeRef n -> TypeRef (canonical n)
+            r -> r
+    case IntMap.lookup (nodeRefKey refC) (Binding.qbpBindParents qbp) of
+        Just (GenRef gid, _) ->
             case NodeAccess.lookupGenNode c0 gid of
                 Nothing -> pure False
                 Just gen -> pure (nid `elem` map canonical (gnSchemes gen))
         _ -> pure False
 
 getBindingPermission :: (NodeId -> NodeId) -> Constraint p -> NodeId -> PresolutionM p (Bool, Maybe GenNodeId)
-getBindingPermission canonical c0 nid =
-    case Binding.lookupBindParentUnder canonical c0 (typeRef nid) of
-        Left err -> throwError (BindingTreeError err)
-        Right (Just (GenRef gid, BindFlex)) -> pure (True, Just gid)
-        Right (Just (GenRef gid, BindRigid)) -> pure (False, Just gid)
+getBindingPermission canonical _c0 nid = do
+    (_c, _canonical, qbp) <- cachedBindingModelM
+    let refC = case typeRef nid of
+            TypeRef n -> TypeRef (canonical n)
+            r -> r
+    case IntMap.lookup (nodeRefKey refC) (Binding.qbpBindParents qbp) of
+        Just (GenRef gid, BindFlex) -> pure (True, Just gid)
+        Just (GenRef gid, BindRigid) -> pure (False, Just gid)
         _ -> pure (False, Nothing)
 
 solveNonExpInstantiation :: NodeId -> NodeId -> PresolutionM p ()
