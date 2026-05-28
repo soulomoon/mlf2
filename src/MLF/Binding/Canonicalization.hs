@@ -30,9 +30,6 @@ import Data.IntMap.Strict (IntMap)
 import qualified Data.IntSet as IntSet
 import Data.IntSet (IntSet)
 
-import MLF.Binding.NodeRefs (
-    allNodeRefs,
-    )
 import qualified MLF.Constraint.Canonicalize as Canonicalize
 import MLF.Constraint.Types.Graph
 
@@ -79,8 +76,12 @@ quotientBindParentsUnder canonical c0 = do
         allRoots :: IntSet
         allRoots =
             IntSet.fromList
-                [ nodeRefKey (Canonicalize.canonicalRef canonical ref)
-                | ref <- allNodeRefs c0
+                [ nodeRefKey (TypeRef (canonical (NodeId k)))
+                | k <- IntMap.keys (getNodeMap (cNodes c0))
+                ]
+                `IntSet.union` IntSet.fromList
+                [ nodeRefKey (GenRef (GenNodeId k))
+                | k <- IntMap.keys (getGenNodeMap (cGenNodes c0))
                 ]
 
         entries0 =

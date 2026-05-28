@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DataKinds #-}
 {- |
 Module      : MLF.Constraint.Inert
@@ -27,6 +28,7 @@ module MLF.Constraint.Inert (
 ) where
 
 import Control.Monad (foldM)
+import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Set as Set
 
@@ -37,11 +39,11 @@ import MLF.Constraint.Types.Graph
     , BindingError
     , Constraint(..)
     , NodeId(..)
+    , NodeMap(..)
     , NodeRef(..)
     , NodeRefTag(..)
     , TyNode(..)
     , getNodeId
-    , toListNode
     , typeRef
     )
 
@@ -61,28 +63,32 @@ isPolymorphicAnchor _ _ = False
 -- Definition 5.2.2 (Inert nodes).
 inertNodes :: Constraint p -> Either BindingError IntSet.IntSet
 inertNodes c = do
-    let nodes = cNodes c
-        anchors0 =
-            [ nid
-            | (nid, node) <- toListNode nodes
-            , isPolymorphicAnchor c node || isImplicitBottomAnchor node
-            ]
-        anchorSet0 = IntSet.fromList (map getNodeId anchors0)
-        anchorSet = closeBoundAnchors anchorSet0
+    let nodeMap = getNodeMap (cNodes c)
+        -- Single pass: collect anchors AND all node IDs
+        (anchors0, allNodes) =
+            IntMap.foldlWithKey'
+                (\(!anc, !all') nid node ->
+                    let all'' = IntSet.insert nid all'
+                    in if isPolymorphicAnchor c node || isImplicitBottomAnchor node
+                        then (IntSet.insert nid anc, all'')
+                        else (anc, all'')
+                )
+                (IntSet.empty, IntSet.empty)
+                nodeMap
+        anchorSet = closeBoundAnchors nodeMap anchors0
         anchors = map NodeId (IntSet.toList anchorSet)
         nonInert = collectFlexAncestors c anchors
-        allNodes = IntSet.fromList (map (getNodeId . fst) (toListNode nodes))
     pure (IntSet.difference allNodes nonInert)
   where
-    closeBoundAnchors set0 =
-        let addBound acc (nid, node) = case node of
+    closeBoundAnchors nodeMap set0 =
+        let addBound acc nid node = case node of
                 TyVar{ tnBound = Just bnd } ->
                     if IntSet.member (getNodeId bnd) acc
-                        then IntSet.insert (getNodeId nid) acc
+                        then IntSet.insert nid acc
                         else acc
                 _ -> acc
-            set1 = foldl' addBound set0 (toListNode (cNodes c))
-        in if set1 == set0 then set0 else closeBoundAnchors set1
+            set1 = IntMap.foldlWithKey' addBound set0 nodeMap
+        in if set1 == set0 then set0 else closeBoundAnchors nodeMap set1
 
 isImplicitBottomAnchor :: TyNode -> Bool
 isImplicitBottomAnchor node = case node of
