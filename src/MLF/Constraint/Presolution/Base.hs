@@ -27,6 +27,7 @@ module MLF.Constraint.Presolution.Base (
         , psUnionFindVersion
         , psBindParentsVersion
         , psBindingModelCache
+        , psEdgeLocalSnapshot
         , psBindingRepairCache
         , psBindingRepairDirty
         , psEdgeExpansions
@@ -48,6 +49,8 @@ module MLF.Constraint.Presolution.Base (
     mergeUnionFindState,
     compressUnionFindState,
     setBindingModelCacheState,
+    setEdgeLocalSnapshot,
+    clearEdgeLocalSnapshot,
     PendingWeakenOwner(..),
     pendingWeakenOwnerFromMaybe,
     pendingWeakenOwnerToMaybe,
@@ -237,6 +240,7 @@ data PresolutionState p = PresolutionStateInternal
     , psUnionFindVersion :: !Int
     , psBindParentsVersion :: !Int
     , psBindingModelCache :: Maybe (CachedBindingModel p)
+    , psEdgeLocalSnapshot :: Maybe (CachedBindingModel p)
     , psBindingRepairCache :: Maybe (CachedBindingRepairModel p)
     , psBindingRepairDirty :: Maybe BindingRepairDirty
     , psEdgeExpansions :: IntMap Expansion
@@ -272,6 +276,7 @@ pattern PresolutionState constraint presolution unionFind nextNodeId pendingWeak
         _
         _
         _
+        _
         edgeExpansions
         edgeWitnesses
         edgeTraces
@@ -290,6 +295,7 @@ pattern PresolutionState constraint presolution unionFind nextNodeId pendingWeak
             0
             Nothing
             Nothing
+            Nothing
             (Just dirtyAllBindingRepair)
             edgeExpansions
             edgeWitnesses
@@ -299,7 +305,7 @@ pattern PresolutionState constraint presolution unionFind nextNodeId pendingWeak
 
 {-# INLINE invalidateBindingModelState #-}
 invalidateBindingModelState :: PresolutionState p -> PresolutionState p
-invalidateBindingModelState st = st { psBindingModelCache = Nothing }
+invalidateBindingModelState st = st { psBindingModelCache = Nothing, psEdgeLocalSnapshot = Nothing }
 
 {-# INLINE invalidateBindingRepairModelState #-}
 invalidateBindingRepairModelState :: PresolutionState p -> PresolutionState p
@@ -424,40 +430,56 @@ setBindingModelCacheState :: CachedBindingModel p -> PresolutionState p -> Preso
 setBindingModelCacheState cache st =
     st { psBindingModelCache = Just cache }
 
+{-# INLINE setEdgeLocalSnapshot #-}
+setEdgeLocalSnapshot :: CachedBindingModel p -> PresolutionState p -> PresolutionState p
+setEdgeLocalSnapshot snap st = st { psEdgeLocalSnapshot = Just snap }
+
+{-# INLINE clearEdgeLocalSnapshot #-}
+clearEdgeLocalSnapshot :: PresolutionState p -> PresolutionState p
+clearEdgeLocalSnapshot st = st { psEdgeLocalSnapshot = Nothing }
+
 cachedBindingModelM :: PresolutionM p (Constraint p, NodeId -> NodeId, Binding.QuotientBindParents)
 cachedBindingModelM = do
     st <- get
-    case psBindingModelCache st of
-        Just cached
-            | cbmUnionFindVersion cached == psUnionFindVersion st
-            , cbmBindParentsVersion cached == psBindParentsVersion st ->
-                -- Quotient is valid; return current constraint (types may have
-                -- changed via modifyConstraintDirtyTypesState without bumping
-                -- psBindParentsVersion).
-                pure
-                    ( psConstraint st
-                    , UnionFind.frWith (cbmUnionFind cached)
-                    , cbmQuotient cached
-                    )
-        _ -> do
-            let c0 = psConstraint st
-                uf = psUnionFind st
-                canonical = UnionFind.frWith uf
-            quotient <-
-                case Binding.quotientBindParentsContextUnder canonical c0 of
-                    Left err -> throwError (BindingTreeError err)
-                    Right result -> pure result
-            let cached =
-                    CachedBindingModel
-                        { cbmGraphVersion = psGraphVersion st
-                        , cbmUnionFindVersion = psUnionFindVersion st
-                        , cbmBindParentsVersion = psBindParentsVersion st
-                        , cbmConstraint = c0
-                        , cbmUnionFind = uf
-                        , cbmQuotient = quotient
-                        }
-            modify' (setBindingModelCacheState cached)
-            pure (c0, canonical, quotient)
+    case psEdgeLocalSnapshot st of
+        Just frozen ->
+            pure
+                ( psConstraint st
+                , UnionFind.frWith (cbmUnionFind frozen)
+                , cbmQuotient frozen
+                )
+        Nothing ->
+            case psBindingModelCache st of
+                Just cached
+                    | cbmUnionFindVersion cached == psUnionFindVersion st
+                    , cbmBindParentsVersion cached == psBindParentsVersion st ->
+                        -- Quotient is valid; return current constraint (types may have
+                        -- changed via modifyConstraintDirtyTypesState without bumping
+                        -- psBindParentsVersion).
+                        pure
+                            ( psConstraint st
+                            , UnionFind.frWith (cbmUnionFind cached)
+                            , cbmQuotient cached
+                            )
+                _ -> do
+                    let c0 = psConstraint st
+                        uf = psUnionFind st
+                        canonical = UnionFind.frWith uf
+                    quotient <-
+                        case Binding.quotientBindParentsContextUnder canonical c0 of
+                            Left err -> throwError (BindingTreeError err)
+                            Right result -> pure result
+                    let cached =
+                            CachedBindingModel
+                                { cbmGraphVersion = psGraphVersion st
+                                , cbmUnionFindVersion = psUnionFindVersion st
+                                , cbmBindParentsVersion = psBindParentsVersion st
+                                , cbmConstraint = c0
+                                , cbmUnionFind = uf
+                                , cbmQuotient = quotient
+                                }
+                    modify' (setBindingModelCacheState cached)
+                    pure (c0, canonical, quotient)
 
 -- | Ownership bucket used by owner-aware pending-weaken scheduling.
 --

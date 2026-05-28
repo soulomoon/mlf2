@@ -652,6 +652,7 @@ mkInitialPresolutionState constraint =
         , psUnionFindVersion = 0
         , psBindParentsVersion = 0
         , psBindingModelCache = Nothing
+        , psEdgeLocalSnapshot = Nothing
         , psBindingRepairCache = Nothing
         , psBindingRepairDirty = Just dirtyAllBindingRepair
         , psEdgeExpansions = IntMap.empty
