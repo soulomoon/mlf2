@@ -34,6 +34,7 @@ import MLF.Util.Trace (traceBindingM)
 -- Reads the canonicalized left and right nodes and per-edge flags
 -- ('cLetEdges') from the presolution state, then
 -- rejects non-`TyExp` left nodes (fail-fast invariant).
+{-# INLINABLE planEdge #-}
 planEdge :: (NodeId -> NodeId) -> InstEdge -> PresolutionM p EdgePlan
 planEdge canonical edge = do
     cfg <- ask

@@ -149,6 +149,7 @@ executeFreshDecision decision = do
   recordEdgeExecutionWitness witnessContext expansionResult
   pure EdgeExecutionFreshOutcome
 
+{-# INLINABLE prepareEdgeExecutionDecision #-}
 prepareEdgeExecutionDecision :: (NodeId -> NodeId) -> EdgePlan -> PresolutionM p EdgeExecutionDecision
 prepareEdgeExecutionDecision canonical plan = do
   mbReplayDecision <- prepareRecordedEdgeExecutionDecision plan
@@ -237,6 +238,7 @@ prepareRecordedEdgeExecutionDecision plan = do
     _ ->
       pure Nothing
 
+{-# INLINE recordEdgeExecutionExpansion #-}
 recordEdgeExecutionExpansion :: EdgeExecutionDecision -> PresolutionM p ()
 recordEdgeExecutionExpansion decision =
   case eedLeftRaw decision of
@@ -246,10 +248,12 @@ recordEdgeExecutionExpansion decision =
     _ ->
       throwError (InternalError ("recordEdgeExecutionExpansion: expected TyExp for edge " ++ show (eedEdgeId decision)))
 
+{-# INLINE unifyEdgeExecutionStructure #-}
 unifyEdgeExecutionStructure :: EdgeExecutionDecision -> PresolutionM p ()
 unifyEdgeExecutionStructure decision =
   mapM_ (uncurry unifyStructure) (eedUnifications decision)
 
+{-# INLINABLE prepareEdgeExecutionWitness #-}
 prepareEdgeExecutionWitness :: EdgeExecutionDecision -> PresolutionM p EdgeExecutionWitnessContext
 prepareEdgeExecutionWitness decision = do
   witnessPlan <- edgeWitnessPlanFromBinders (eedBoundVars decision) (eedFinalExpansion decision)

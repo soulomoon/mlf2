@@ -97,6 +97,7 @@ buildIndexedWorklist keyedItems =
         | (key, value) <- keyedItems
         ]
 
+{-# INLINE popIndexedWorkItem #-}
 popIndexedWorkItem :: IndexedWorklist a -> Maybe (IndexedWorkItem a, IndexedWorklist a)
 popIndexedWorkItem worklist =
     case Seq.viewl (iwQueue worklist) of
@@ -238,6 +239,7 @@ invalidateQueuedIndexedKeysExcept excluded indexName keys worklist =
 queuedIndexedItemCount :: IndexedWorklist a -> Int
 queuedIndexedItemCount = Seq.length . iwQueue
 
+{-# INLINE itemsFor #-}
 itemsFor :: WorklistIndex -> IntSet -> IndexedWorklist a -> IntSet
 itemsFor (WorklistIndex indexName) keys worklist =
     case IntMap.lookup indexName (iwIndexes worklist) of
@@ -254,6 +256,7 @@ markStale affected worklist
     | otherwise =
         worklist { iwStaleKeys = IntSet.union affected (iwStaleKeys worklist) }
 
+{-# INLINABLE markStaleAndRequeue #-}
 markStaleAndRequeue :: IntSet -> IndexedWorklist a -> IndexedWorklist a
 markStaleAndRequeue affected worklist
     | IntSet.null affected = worklist

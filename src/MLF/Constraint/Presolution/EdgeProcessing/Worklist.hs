@@ -193,6 +193,7 @@ workItemFromSnapshot ownership snapshot edge = do
             , ewiStale = False
             }
 
+{-# INLINE popEdgeWorkItem #-}
 popEdgeWorkItem :: EdgeWorklist -> Maybe (EdgeWorkItem, EdgeWorklist)
 popEdgeWorkItem worklist =
     case Indexed.popIndexedWorkItem (ewCore worklist) of
@@ -221,6 +222,7 @@ notePlannedEdge plan worklist =
   where
     edgeKey = getEdgeId (instEdgeId (eprEdge plan))
 
+{-# INLINABLE noteProcessedEdge #-}
 noteProcessedEdge
     :: InstEdge
     -> Maybe (EdgePlanSeed, EdgeFingerprint)
@@ -263,6 +265,7 @@ noteProcessedEdge edge mbFacts worklist =
                     }
     clearedItem = baseItem { ewiStale = False }
 
+{-# INLINE noteInertEdge #-}
 noteInertEdge :: EdgeWorkItem -> EdgeWorklist -> EdgeWorklist
 noteInertEdge item worklist =
     let edgeKey = getEdgeId (instEdgeId (ewiEdge item))
@@ -407,6 +410,8 @@ queuedEdgeCount = Indexed.queuedIndexedItemCount . ewCore
 indexedEdgeCount :: EdgeWorklist -> Int
 indexedEdgeCount = IntSet.size . ewPlannedEdges
 
+{-# INLINABLE indexEdge #-}
+
 rootOwnershipOfWorklist :: EdgeWorklist -> RootOwnershipIndex
 rootOwnershipOfWorklist = ewRootOwnership
 
@@ -424,6 +429,7 @@ rootOwnersForPlan ownership plan =
             , epsSchemeOwnerGen = eprSchemeOwnerGen plan
             , epsExpansionVar = rteExpVar leftTyExp
             }
+
 
 indexEdge
     :: Int
@@ -492,6 +498,7 @@ clearStaleEdge :: Int -> EdgeWorklist -> EdgeWorklist
 clearStaleEdge edgeKey worklist =
     worklist { ewCore = Indexed.markIndexedWorkItemClean edgeKey (ewCore worklist) }
 
+{-# INLINE edgeKeyOfItem #-}
 edgeKeyOfItem :: EdgeWorkItem -> Int
 edgeKeyOfItem = getEdgeId . instEdgeId . ewiEdge
 

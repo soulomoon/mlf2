@@ -77,12 +77,14 @@ import MLF.Constraint.Presolution.Unify (unifyAcyclic)
 import MLF.Util.Trace (traceBindingM)
 
 -- | Get the current expansion for an expansion variable.
+{-# INLINE getExpansion #-}
 getExpansion :: ExpVarId -> PresolutionM p Expansion
 getExpansion s = do
     Presolution m <- gets psPresolution
     return $ fromMaybe ExpIdentity (IntMap.lookup (getExpVarId s) m)
 
 -- | Set the expansion for an expansion variable.
+{-# INLINE setExpansion #-}
 setExpansion :: ExpVarId -> Expansion -> PresolutionM p ()
 setExpansion s expansion = do
     modify $ \st ->
@@ -92,6 +94,7 @@ setExpansion s expansion = do
                     IntMap.insert (getExpVarId s) expansion (getAssignments (psPresolution st))
             }
 
+{-# INLINE recordEdgeExpansion #-}
 recordEdgeExpansion :: EdgeId -> Expansion -> PresolutionM p ()
 recordEdgeExpansion (EdgeId eid) expn =
     modify $ \st -> st { psEdgeExpansions = IntMap.insert eid expn (psEdgeExpansions st) }
