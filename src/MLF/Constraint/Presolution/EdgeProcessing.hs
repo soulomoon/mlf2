@@ -139,6 +139,7 @@ import MLF.Util.Timing
     ( TimingConfig
     , emitProgramOperationDurationIO
     , measureProgramOperationIO
+    , timingProgramOperations
     )
 import MLF.Util.Trace (TraceConfig)
 import MLF.Constraint.Types.SynthesizedExpVar (isSynthesizedExpVar)
@@ -307,6 +308,12 @@ addPresolutionLoopCounters a b =
         , plcInvalidatedEdges = plcInvalidatedEdges a + plcInvalidatedEdges b
         }
 
+-- | Add two optional counter records; Nothing short-circuits to Nothing,
+-- avoiding all counter allocation when timing is disabled.
+addMaybeCounters :: Maybe PresolutionLoopCounters -> Maybe PresolutionLoopCounters -> Maybe PresolutionLoopCounters
+addMaybeCounters (Just a) (Just b) = Just $! addPresolutionLoopCounters a b
+addMaybeCounters _ _ = Nothing
+
 edgeProcessReasonCounters :: EdgeProcessReason -> PresolutionLoopCounters
 edgeProcessReasonCounters reason =
     case reason of
@@ -364,16 +371,20 @@ runPresolutionLoopWithTiming timing label traceCfg rootOwnership edges initialSt
                     case buildResult of
                         Left err -> pure (Left err)
                         Right (worklist0, st3, indexNs) -> do
+                            let initialCounters
+                                    | timingProgramOperations timing =
+                                        Just $! emptyPresolutionLoopCounters
+                                            { plcValidation = startNs
+                                            , plcIndex = indexNs
+                                            , plcDrainUnifyClosure = drainNs
+                                            }
+                                    | otherwise = Nothing
                             scheduledResult <-
                                 runTimedScheduledEdges
                                     traceCfg
                                     timing
                                     st3
-                                    emptyPresolutionLoopCounters
-                                        { plcValidation = startNs
-                                        , plcIndex = indexNs
-                                        , plcDrainUnifyClosure = drainNs
-                                        }
+                                    initialCounters
                                     Nothing
                                     worklist0
                             case scheduledResult of
@@ -395,13 +406,14 @@ runPresolutionLoopWithTiming timing label traceCfg rootOwnership edges initialSt
                                                     case endResult of
                                                         Left err -> pure (Left err)
                                                         Right ((), st7, endNs) -> do
-                                                            let counters =
-                                                                    counters3
-                                                                        { plcValidation =
-                                                                            plcValidation counters3 + validationNs + endNs
-                                                                        , plcScheduleWeakens =
-                                                                            plcScheduleWeakens counters3 + scheduleNs
-                                                                        }
+                                                            let counters = case counters3 of
+                                                                    Nothing -> Nothing
+                                                                    Just c -> Just $!
+                                                                        c { plcValidation =
+                                                                                plcValidation c + validationNs + endNs
+                                                                          , plcScheduleWeakens =
+                                                                                plcScheduleWeakens c + scheduleNs
+                                                                          }
                                                             emitPresolutionLoopCounters timing label counters
                                                             pure (Right ((), st7))
 
@@ -409,10 +421,10 @@ runTimedScheduledEdges
     :: TraceConfig
     -> TimingConfig
     -> PresolutionState p
-    -> PresolutionLoopCounters
+    -> Maybe PresolutionLoopCounters
     -> Maybe GenNodeId
     -> EdgeWorklist
-    -> IO (Either PresolutionError (Maybe GenNodeId, PresolutionState p, PresolutionLoopCounters))
+    -> IO (Either PresolutionError (Maybe GenNodeId, PresolutionState p, Maybe PresolutionLoopCounters))
 runTimedScheduledEdges traceCfg timing st0 counters0 mbActiveOwner worklist0 =
     case popEdgeWorkItem worklist0 of
         Nothing -> pure (Right (mbActiveOwner, st0, counters0))
@@ -422,11 +434,11 @@ runTimedScheduledEdge
     :: TraceConfig
     -> TimingConfig
     -> PresolutionState p
-    -> PresolutionLoopCounters
+    -> Maybe PresolutionLoopCounters
     -> Maybe GenNodeId
     -> EdgeWorkItem
     -> EdgeWorklist
-    -> IO (Either PresolutionError (Maybe GenNodeId, PresolutionState p, PresolutionLoopCounters))
+    -> IO (Either PresolutionError (Maybe GenNodeId, PresolutionState p, Maybe PresolutionLoopCounters))
 runTimedScheduledEdge traceCfg timing st0 counters0 mbActiveOwner item worklist1 = do
     let edge = ewiEdge item
     assertBeforeResult <-
@@ -441,25 +453,27 @@ runTimedScheduledEdge traceCfg timing st0 counters0 mbActiveOwner item worklist1
                 Right (action, st2, planNs) ->
                     case action of
                         EdgeWorkSkip -> do
-                            let counters =
-                                    counters0
-                                        { plcValidation = plcValidation counters0 + assertBeforeNs
-                                        , plcPlan = plcPlan counters0 + planNs
-                                        }
+                            let counters = case counters0 of
+                                    Nothing -> Nothing
+                                    Just c -> Just $!
+                                        c { plcValidation = plcValidation c + assertBeforeNs
+                                          , plcPlan = plcPlan c + planNs
+                                          }
                                 worklist2 = noteInertEdge item worklist1
                             runTimedScheduledEdges traceCfg timing st2 counters mbActiveOwner worklist2
                         EdgeWorkRefresh plan -> do
                             let worklist2 =
                                     noteProcessedEdge edge (Just (edgeFactsFromPlanState (UnionFind.frWith (psUnionFind st2)) st2 plan)) worklist1
-                                stageCounters =
-                                    emptyPresolutionLoopCounters
-                                        { plcValidation = assertBeforeNs
-                                        , plcPlan = planNs
-                                        }
-                                counters =
-                                    counters0
-                                        `addPresolutionLoopCounters` stageCounters
-                                        `addPresolutionLoopCounters` edgeProcessReasonCounters EdgeProcessStaleChanged
+                                counters = case counters0 of
+                                    Nothing -> Nothing
+                                    Just c -> Just $!
+                                        addPresolutionLoopCounters
+                                            (addPresolutionLoopCounters c
+                                                emptyPresolutionLoopCounters
+                                                    { plcValidation = assertBeforeNs
+                                                    , plcPlan = planNs
+                                                    })
+                                            (edgeProcessReasonCounters EdgeProcessStaleChanged)
                             runTimedScheduledEdges traceCfg timing st2 counters mbActiveOwner worklist2
                         EdgeWorkProcess reason plan ->
                             runTimedProcessedEdge
@@ -481,7 +495,7 @@ runTimedProcessedEdge
     -> TimingConfig
     -> PresolutionState p
     -> PresolutionState p
-    -> PresolutionLoopCounters
+    -> Maybe PresolutionLoopCounters
     -> Maybe GenNodeId
     -> InstEdge
     -> EdgeProcessReason
@@ -489,7 +503,7 @@ runTimedProcessedEdge
     -> EdgeWorklist
     -> Word64
     -> Word64
-    -> IO (Either PresolutionError (Maybe GenNodeId, PresolutionState p, PresolutionLoopCounters))
+    -> IO (Either PresolutionError (Maybe GenNodeId, PresolutionState p, Maybe PresolutionLoopCounters))
 runTimedProcessedEdge
     traceCfg
     timing
@@ -515,18 +529,20 @@ runTimedProcessedEdge
                 case executeResult of
                     Left err -> pure (Left err)
                     Right (stExecuted, executeNs, executeCounters, outcome) -> do
-                        let baseCounters =
-                                emptyPresolutionLoopCounters
-                                    { plcValidation = assertBeforeNs
-                                    , plcPlan = planNs
-                                    , plcScheduleWeakens = scheduleNs
-                                    , plcExecute = executeNs
-                                    }
-                            countersAfterExecute =
-                                counters0
-                                    `addPresolutionLoopCounters` baseCounters
-                                    `addPresolutionLoopCounters` executeCounters
-                                    `addPresolutionLoopCounters` edgeProcessReasonCounters reason
+                        let countersAfterExecute = case (counters0, executeCounters) of
+                                (Just c, Just ec) -> Just $!
+                                    addPresolutionLoopCounters
+                                        (addPresolutionLoopCounters
+                                            (addPresolutionLoopCounters c
+                                                emptyPresolutionLoopCounters
+                                                    { plcValidation = assertBeforeNs
+                                                    , plcPlan = planNs
+                                                    , plcScheduleWeakens = scheduleNs
+                                                    , plcExecute = executeNs
+                                                    })
+                                            ec)
+                                        (edgeProcessReasonCounters reason)
+                                _ -> Nothing
                             replayMutation = edgeMutationFromPlanVersions stBefore stExecuted plan
                         case outcome of
                             EdgeExecutionReplayNoop
@@ -551,12 +567,12 @@ runTimedPostProcessedEdge
     -> TimingConfig
     -> PresolutionState p
     -> PresolutionState p
-    -> PresolutionLoopCounters
+    -> Maybe PresolutionLoopCounters
     -> Maybe GenNodeId
     -> InstEdge
     -> EdgePlan
     -> EdgeWorklist
-    -> IO (Either PresolutionError (Maybe GenNodeId, PresolutionState p, PresolutionLoopCounters))
+    -> IO (Either PresolutionError (Maybe GenNodeId, PresolutionState p, Maybe PresolutionLoopCounters))
 runTimedPostProcessedEdge traceCfg timing stBefore stExecuted counters0 nextOwner edge plan worklist1 = do
     canonicalizeResult <-
         runMeasuredStage traceCfg timing stExecuted $ do
@@ -582,16 +598,17 @@ runTimedPostProcessedEdge traceCfg timing stBefore stExecuted counters0 nextOwne
                                     noteProcessedEdge edge (Just (edgeFactsFromPlanState (UnionFind.frWith (psUnionFind stAfter)) stAfter plan)) worklist1
                                 (invalidation, worklistInvalidated) =
                                     invalidateWorklistAfterMutation edge plan mutation worklistProcessed
-                                stageCounters =
-                                    emptyPresolutionLoopCounters
-                                        { plcValidation = assertAfterNs
-                                        , plcCanonicalizeTraceInteriors = canonicalizeNs
-                                        , plcDrainUnifyClosure = drainNs
-                                        }
-                                counters =
-                                    counters0
-                                        `addPresolutionLoopCounters` stageCounters
-                                        `addPresolutionLoopCounters` edgeInvalidationCounters invalidation
+                                counters = case counters0 of
+                                    Nothing -> Nothing
+                                    Just c -> Just $!
+                                        addPresolutionLoopCounters
+                                            (addPresolutionLoopCounters c
+                                                emptyPresolutionLoopCounters
+                                                    { plcValidation = assertAfterNs
+                                                    , plcCanonicalizeTraceInteriors = canonicalizeNs
+                                                    , plcDrainUnifyClosure = drainNs
+                                                    })
+                                            (edgeInvalidationCounters invalidation)
                             runTimedScheduledEdges traceCfg timing stAfter counters nextOwner worklistInvalidated
 
 runTimedInstEdgeAction
@@ -611,7 +628,7 @@ runTimedEdgeExecution
     -> PresolutionState p
     -> EdgeProcessReason
     -> EdgePlan
-    -> IO (Either PresolutionError (PresolutionState p, Word64, PresolutionLoopCounters, EdgeExecutionOutcome))
+    -> IO (Either PresolutionError (PresolutionState p, Word64, Maybe PresolutionLoopCounters, EdgeExecutionOutcome))
 runTimedEdgeExecution traceCfg timing st0 _reason plan = do
     -- Freeze binding snapshot for edge-local execution to avoid quotient rebuilds.
     decisionResult <- runMeasuredStage traceCfg timing st0 $ do
@@ -640,16 +657,18 @@ runTimedEdgeExecution traceCfg timing st0 _reason plan = do
                                         pure $ case traceResult of
                                             Left err -> Left err
                                             Right ((), st5, traceNs) ->
-                                                let counters =
-                                                        emptyPresolutionLoopCounters
-                                                            { plcExecuteDecideExpansion = decideNs
-                                                            , plcExecuteRecordExpansion = recordExpansionNs
-                                                            , plcExecuteUnifyStructure = unifyNs
-                                                            , plcExecuteWitnessPlan = witnessPlanNs
-                                                            , plcExecuteRecordTrace = traceNs
-                                                            , plcReplayHit = 1
-                                                            , plcReplayTraceRebuild = 1
-                                                            }
+                                                let counters
+                                                        | timingProgramOperations timing =
+                                                            Just $! emptyPresolutionLoopCounters
+                                                                { plcExecuteDecideExpansion = decideNs
+                                                                , plcExecuteRecordExpansion = recordExpansionNs
+                                                                , plcExecuteUnifyStructure = unifyNs
+                                                                , plcExecuteWitnessPlan = witnessPlanNs
+                                                                , plcExecuteRecordTrace = traceNs
+                                                                , plcReplayHit = 1
+                                                                , plcReplayTraceRebuild = 1
+                                                                }
+                                                        | otherwise = Nothing
                                                     totalNs =
                                                         decideNs
                                                             + recordExpansionNs
@@ -687,28 +706,33 @@ runTimedEdgeExecution traceCfg timing st0 _reason plan = do
                                                         case witnessResult of
                                                             Left err -> pure (Left err)
                                                             Right ((), st7, witnessNs) -> do
-                                                                let counters =
-                                                                        emptyPresolutionLoopCounters
-                                                                            { plcExecuteDecideExpansion = decideNs
-                                                                            , plcExecuteRecordExpansion = recordExpansionNs
-                                                                            , plcExecuteUnifyStructure = unifyNs
-                                                                            , plcExecuteWitnessPlan = witnessPlanNs
-                                                                            , plcExecuteExpansionUnify = expansionUnifyNs
-                                                                            , plcExecuteExpansionApply = plcExecuteExpansionApply expansionCounters
-                                                                            , plcExecuteExpansionApplyPlan = plcExecuteExpansionApplyPlan expansionCounters
-                                                                            , plcExecuteExpansionApplyArgUnify = plcExecuteExpansionApplyArgUnify expansionCounters
-                                                                            , plcExecuteExpansionApplyFreshMetas = plcExecuteExpansionApplyFreshMetas expansionCounters
-                                                                            , plcExecuteExpansionApplyCopyScheme = plcExecuteExpansionApplyCopyScheme expansionCounters
-                                                                            , plcExecuteExpansionApplyCopyBounds = plcExecuteExpansionApplyCopyBounds expansionCounters
-                                                                            , plcExecuteExpansionApplyOther = plcExecuteExpansionApplyOther expansionCounters
-                                                                            , plcExecuteExpansionBindRoot = plcExecuteExpansionBindRoot expansionCounters
-                                                                            , plcExecuteExpansionPrepareOmega = plcExecuteExpansionPrepareOmega expansionCounters
-                                                                            , plcExecuteExpansionExecuteOmega = plcExecuteExpansionExecuteOmega expansionCounters
-                                                                            , plcExecuteExpansionFinish = plcExecuteExpansionFinish expansionCounters
-                                                                            , plcExecuteRecordTrace = traceNs
-                                                                            , plcExecuteRecordWitness = witnessNs
-                                                                            , plcReplayFresh = 1
-                                                                            }
+                                                                let counters
+                                                                        | timingProgramOperations timing =
+                                                                            let ec = case expansionCounters of
+                                                                                    Just x -> x
+                                                                                    Nothing -> emptyPresolutionLoopCounters
+                                                                            in Just $! emptyPresolutionLoopCounters
+                                                                                { plcExecuteDecideExpansion = decideNs
+                                                                                , plcExecuteRecordExpansion = recordExpansionNs
+                                                                                , plcExecuteUnifyStructure = unifyNs
+                                                                                , plcExecuteWitnessPlan = witnessPlanNs
+                                                                                , plcExecuteExpansionUnify = expansionUnifyNs
+                                                                                , plcExecuteExpansionApply = plcExecuteExpansionApply ec
+                                                                                , plcExecuteExpansionApplyPlan = plcExecuteExpansionApplyPlan ec
+                                                                                , plcExecuteExpansionApplyArgUnify = plcExecuteExpansionApplyArgUnify ec
+                                                                                , plcExecuteExpansionApplyFreshMetas = plcExecuteExpansionApplyFreshMetas ec
+                                                                                , plcExecuteExpansionApplyCopyScheme = plcExecuteExpansionApplyCopyScheme ec
+                                                                                , plcExecuteExpansionApplyCopyBounds = plcExecuteExpansionApplyCopyBounds ec
+                                                                                , plcExecuteExpansionApplyOther = plcExecuteExpansionApplyOther ec
+                                                                                , plcExecuteExpansionBindRoot = plcExecuteExpansionBindRoot ec
+                                                                                , plcExecuteExpansionPrepareOmega = plcExecuteExpansionPrepareOmega ec
+                                                                                , plcExecuteExpansionExecuteOmega = plcExecuteExpansionExecuteOmega ec
+                                                                                , plcExecuteExpansionFinish = plcExecuteExpansionFinish ec
+                                                                                , plcExecuteRecordTrace = traceNs
+                                                                                , plcExecuteRecordWitness = witnessNs
+                                                                                , plcReplayFresh = 1
+                                                                                }
+                                                                        | otherwise = Nothing
                                                                     totalNs =
                                                                         decideNs
                                                                             + recordExpansionNs
@@ -724,14 +748,14 @@ runTimedEdgeExpansionUnify
     -> TimingConfig
     -> PresolutionState p
     -> EdgeExecutionWitnessContext
-    -> IO (Either PresolutionError (EdgeExpansionResult, PresolutionState p, Word64, PresolutionLoopCounters))
+    -> IO (Either PresolutionError (EdgeExpansionResult, PresolutionState p, Word64, Maybe PresolutionLoopCounters))
 runTimedEdgeExpansionUnify traceCfg timing st0 witnessContext
     | eedFinalExpansion (eewDecision witnessContext) == ExpIdentity = do
         result <- runMeasuredStage traceCfg timing st0 (runEdgeExecutionExpansionUnify witnessContext)
         pure $ case result of
             Left err -> Left err
             Right (expansionResult, st1, elapsed) ->
-                Right (expansionResult, st1, elapsed, emptyPresolutionLoopCounters)
+                Right (expansionResult, st1, elapsed, Nothing)
     | otherwise = do
         let input = eewExpansionInput witnessContext
             baseOps = ewpBaseOps (eewWitnessPlan witnessContext)
@@ -770,7 +794,7 @@ runTimedEdgeExpansionUnify traceCfg timing st0 witnessContext
                                                             , plcExecuteExpansionFinish = finishNs
                                                             }
                                                     totalNs = applyNs + bindNs + prepareNs + executeNs + finishNs
-                                                 in Right (expansionResult, st5, totalNs, counters)
+                                                 in Right (expansionResult, st5, totalNs, Just counters)
 
 runTimedEdgeExpansionApply
     :: TraceConfig
@@ -856,8 +880,9 @@ runMeasuredStage traceCfg timing st action = do
         Left err -> Left err
         Right (value, st') -> Right (value, st', elapsed)
 
-emitPresolutionLoopCounters :: TimingConfig -> String -> PresolutionLoopCounters -> IO ()
-emitPresolutionLoopCounters timing label counters = do
+emitPresolutionLoopCounters :: TimingConfig -> String -> Maybe PresolutionLoopCounters -> IO ()
+emitPresolutionLoopCounters _ _ Nothing = pure ()
+emitPresolutionLoopCounters timing label (Just counters) = do
     emitProgramOperationDurationIO timing (label ++ ".validation") (plcValidation counters)
     emitProgramOperationDurationIO timing (label ++ ".index") (plcIndex counters)
     emitProgramOperationDurationIO timing (label ++ ".plan") (plcPlan counters)
