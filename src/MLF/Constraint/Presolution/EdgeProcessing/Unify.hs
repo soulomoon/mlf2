@@ -15,6 +15,7 @@ module MLF.Constraint.Presolution.EdgeProcessing.Unify
     EdgeExpansionApplyPlan (..),
     EdgeExpansionInstantiatePlan (..),
     runExpansionUnify,
+    executeEdgeExpansionPipeline,
     applyEdgeExpansion,
     prepareEdgeExpansionApply,
     applyGenericEdgeExpansion,
@@ -170,12 +171,112 @@ runExpansionUnify ::
   EdgeExpansionInput ->
   [InstanceOp] ->
   PresolutionM p EdgeExpansionResult
-runExpansionUnify input baseOps = do
+runExpansionUnify = executeEdgeExpansionPipeline
+
+-- | Fused expansion pipeline that avoids intermediate record allocations.
+-- Takes the raw input and base ops, applies the expansion, binds the root,
+-- prepares and executes omega ops, and finishes unification -- all without
+-- constructing EdgeExpansionBound, EdgeExpansionPrepared, or EdgeExpansionExecuted.
+executeEdgeExpansionPipeline ::
+  EdgeExpansionInput ->
+  [InstanceOp] ->
+  PresolutionM p EdgeExpansionResult
+executeEdgeExpansionPipeline input baseOps = do
+  -- Step 1: Apply expansion (complex branching; keep as a separate call)
   applied <- applyEdgeExpansion input baseOps
-  bound <- bindEdgeExpansionRoot applied
-  prepared <- prepareEdgeExpansionOmega bound
-  executed <- executeEdgeExpansionOmega prepared
-  finishEdgeExpansionUnify executed
+
+  -- Extract fields from applied into local bindings (avoids repeated accessor chains)
+  let resNodeId = eeaResultNodeId applied
+      copyMap0 = eeaCopyMap applied
+      interior0 = eeaInterior applied
+      frontier0 = eeaFrontier applied
+      target = eeiRightRaw input
+      targetNodeId = tnId target
+      leftRaw = eeiLeftRaw input
+      gid = eeiGenId input
+      bas = eeiBinderArgs input
+
+  -- Step 2: Bind expansion root (inlined from bindEdgeExpansionRoot)
+  cBeforeBind <- getConstraint
+  let targetParent = Binding.lookupBindParent cBeforeBind (typeRef targetNodeId)
+  debugBindParents
+    ( "processInstEdge: expansion root bind target="
+        ++ show targetNodeId
+        ++ " parent="
+        ++ show targetParent
+    )
+  targetBinder <- bindExpansionRootLikeTarget resNodeId targetNodeId
+
+  canonical <- getCanonical
+  let copyMapCanon =
+        IntMap.foldlWithKey'
+          (\acc orig copy ->
+            IntMap.insert (getNodeId (canonical (NodeId orig))) copy acc)
+          IntMap.empty
+          (getCopyMapping copyMap0)
+  forM_ (IntSet.toList frontier0) $ \nidInt ->
+    case IntMap.lookup nidInt copyMapCanon of
+      Nothing -> pure ()
+      Just copy -> setBindParentIfUpper copy targetBinder
+
+  -- Step 3: Prepare omega (inlined from prepareEdgeExpansionOmega)
+  binderMetas <- forM bas $ \(bv, _arg) ->
+    case lookupCopy bv copyMap0 of
+      Just meta -> pure (bv, meta)
+      Nothing ->
+        throwError (InternalError ("runExpansionUnify: missing binder-meta copy for " ++ show bv))
+
+  canonInterior <- getCanonical
+  let canonInteriorSet =
+        IntSet.fromList
+          [ getNodeId (canonInterior (NodeId i))
+          | i <- IntSet.toList interior0
+          ]
+  interiorExact <- edgeInteriorExact resNodeId
+  let interior = IntSet.union canonInteriorSet interiorExact
+
+  -- Step 4: Execute omega (inlined from executeEdgeExpansionOmega)
+  eu0 <- initEdgeUnifyState binderMetas interior resNodeId (pendingWeakenOwnerFromMaybe (Just gid))
+  let omegaEnv = mkOmegaExecEnv copyMap0
+  (_a, eu1) <-
+    runStateT
+      ( executeEdgeLocalOmegaOps omegaEnv baseOps $ do
+          bindExpansionArgs resNodeId bas
+          forM_ (IntSet.toList frontier0) $ \nidInt ->
+            case IntMap.lookup nidInt copyMapCanon of
+              Nothing -> pure ()
+              Just copy -> unifyStructureEdge copy (NodeId nidInt)
+          unifyStructureEdge resNodeId (tnId target)
+          unifyAcyclicEdge (tnId leftRaw) resNodeId
+      )
+      eu0
+
+  -- Step 5: Finish (inlined from finishEdgeExpansionUnify)
+  resRoot <- findRoot resNodeId
+  setBindParentIfUpper resRoot targetBinder
+  setBindParentIfUpper (tnId leftRaw) targetBinder
+
+  cAfterBind <- getConstraint
+  let resParent = Binding.lookupBindParent cAfterBind (typeRef resRoot)
+  debugBindParents
+    ( "processInstEdge: expansion root bound resRoot="
+        ++ show resRoot
+        ++ " parent="
+        ++ show resParent
+        ++ " targetBinder="
+        ++ show targetBinder
+    )
+
+  c1 <- getConstraint
+  case Binding.lookupBindParent c1 (typeRef resRoot) of
+    Nothing -> setBindParentIfUpper resRoot targetBinder
+    Just _ -> pure ()
+
+  pure
+    EdgeExpansionResult
+      { eerTrace = (copyMap0, interior, frontier0),
+        eerExtraOps = eusOps eu1
+      }
 
 applyEdgeExpansion ::
   EdgeExpansionInput ->

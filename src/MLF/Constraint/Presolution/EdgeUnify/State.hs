@@ -25,7 +25,7 @@ module MLF.Constraint.Presolution.EdgeUnify.State (
     unifyWithLockedFallback
 ) where
 
-import Control.Monad (foldM, forM, forM_, when)
+import Control.Monad (foldM, forM_, when)
 import Control.Monad.Except (catchError, throwError)
 import Control.Monad.State
 import Data.IntMap.Strict (IntMap)
@@ -49,6 +49,7 @@ import MLF.Constraint.Presolution.Base (
     mergeUnionFindState,
     setBindParentState
     )
+import qualified MLF.Util.UnionFind as UnionFind
 import qualified MLF.Constraint.Presolution.Ops as Ops
 import qualified MLF.Constraint.Presolution.Unify as PresolutionUnify
 import MLF.Constraint.Presolution.StateAccess (
@@ -295,14 +296,11 @@ initEdgeUnifyState
     -> PresolutionM p EdgeUnifyState
 initEdgeUnifyState binderArgs interior edgeRoot pendingOwner = do
     inheritedPendingWeakens <- gets psPendingWeakens
-    interiorRootEntries <- forM (IntSet.toList interior) $ \i -> do
-        r <- Ops.findRoot (NodeId i)
-        pure (i, r)
+    uf <- gets psUnionFind
+    let interiorRootEntries = [(i, UnionFind.frWith uf (NodeId i)) | i <- IntSet.toList interior]
     let interiorRoots =
             InteriorNodes (IntSet.fromList [getNodeId r | (_i, r) <- interiorRootEntries])
-    binderRootEntries <- forM binderArgs $ \(bv, arg) -> do
-        r <- Ops.findRoot arg
-        pure (bv, r)
+    let binderRootEntries = [(bv, UnionFind.frWith uf arg) | (bv, arg) <- binderArgs]
     let bindersByRoot =
             IntMap.fromListWith
                 IntSet.union

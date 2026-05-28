@@ -1058,12 +1058,12 @@ edgeFactsFromSeed canonical edge seed = do
     case mkResolvedTyExp n1Raw of
         Just leftTyExp
             | leftTyExp == epsLeftTyExp seed ->
-                Just <$> edgeFactsFromTyExp canonical edge leftTyExp
+                Just <$> edgeFactsFromTyExp canonical edge leftTyExp (Just (epsSchemeOwnerGen seed))
         _ -> pure Nothing
 
-edgeFactsFromTyExp :: (NodeId -> NodeId) -> InstEdge -> ResolvedTyExp -> PresolutionM p (EdgePlanSeed, EdgeFingerprint)
-edgeFactsFromTyExp canonical edge leftTyExp = do
-    fingerprint <- edgeFingerprintFromTyExp canonical edge leftTyExp
+edgeFactsFromTyExp :: (NodeId -> NodeId) -> InstEdge -> ResolvedTyExp -> Maybe GenNodeId -> PresolutionM p (EdgePlanSeed, EdgeFingerprint)
+edgeFactsFromTyExp canonical edge leftTyExp mbOwner = do
+    fingerprint <- edgeFingerprintFromTyExp canonical edge leftTyExp mbOwner
     pure
         ( EdgePlanSeed
             { epsLeftTyExp = leftTyExp
@@ -1076,10 +1076,13 @@ edgeFactsFromTyExp canonical edge leftTyExp = do
         , fingerprint
         )
 
-edgeFingerprintFromTyExp :: (NodeId -> NodeId) -> InstEdge -> ResolvedTyExp -> PresolutionM p EdgeFingerprint
-edgeFingerprintFromTyExp canonical edge leftTyExp = do
-    snapshot <- getBindingSnapshot
-    owner <- bindingSnapshotFindSchemeIntroducer snapshot (rteBodyId leftTyExp)
+edgeFingerprintFromTyExp :: (NodeId -> NodeId) -> InstEdge -> ResolvedTyExp -> Maybe GenNodeId -> PresolutionM p EdgeFingerprint
+edgeFingerprintFromTyExp canonical edge leftTyExp mbOwner = do
+    owner <- case mbOwner of
+        Just o  -> pure o
+        Nothing -> do
+            snapshot <- getBindingSnapshot
+            bindingSnapshotFindSchemeIntroducer snapshot (rteBodyId leftTyExp)
     st <- getPresolutionState
     let
         expVar = rteExpVar leftTyExp
