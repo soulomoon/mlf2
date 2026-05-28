@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE StrictData #-}
 {-# LANGUAGE TypeFamilies #-}
 
 {- |
@@ -118,12 +119,12 @@ class MonadPresolution m => MonadEdgeUnify m where
 instance MonadEdgeUnify (EdgeUnifyM p) where
     getEdgeUnifyState = get
     putEdgeUnifyState = put
-    modifyEdgeUnifyState = modify
+    modifyEdgeUnifyState = modify'
     getInteriorRoots = gets eusInteriorRoots
     getEdgeRoot = gets eusEdgeRoot
     getBinderMeta = gets eusBinderMeta
     getOrderKeys = gets eusOrderKeys
-    recordInstanceOp op = modify $ \st -> st { eusOps = op : eusOps st }
+    recordInstanceOp op = modify' $ \st -> st { eusOps = op : eusOps st }
     liftPresolution = lift
     findRootM nid = lift $ Ops.findRoot nid
     unifyAcyclicRawWithRaiseTracePreferM prefer n1 n2 =
@@ -256,7 +257,7 @@ unifyAcyclicEdgeNoMerge n1 n2 = do
             intAll = int1 <> int2
         recordRaisesFromTrace intAll raiseTrace
 
-        modify $ \st ->
+        modify' $ \st ->
             let roots' =
                     if inInt1 || inInt2
                         then
@@ -363,7 +364,7 @@ flushInheritedPendingWeakensOnce = do
         else do
             pendingNow <- liftPresolution (psPendingWeakens <$> getPresolutionState)
             let toFlush = IntSet.intersection inherited pendingNow
-            modify $ \st -> st { eusInheritedPendingWeakens = IntSet.empty }
+            modify' $ \st -> st { eusInheritedPendingWeakens = IntSet.empty }
             if IntSet.null toFlush
                 then pure False
                 else do
@@ -426,7 +427,7 @@ unifyWithLockedFallback prefer left right =
 recordEliminate :: NodeId -> EdgeUnifyM p ()
 recordEliminate bv = do
     dropVarBindM bv
-    modify $ \st ->
+    modify' $ \st ->
         st { eusEliminatedBinders = IntSet.insert (getNodeId bv) (eusEliminatedBinders st) }
 
 isEliminated :: NodeId -> EdgeUnifyM p Bool
