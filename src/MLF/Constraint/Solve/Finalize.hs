@@ -426,7 +426,7 @@ rewriteEliminatedBinders c0
                                     else IntMap.insert childKey (rootRef, BindFlex) bp
                             )
                             bindParents0'
-                            (IntSet.fromList (IntMap.keys nodes'))
+                            (IntSet.fromAscList (IntMap.keys nodes'))
 
             instEdges' =
                 [ InstEdge eid (substNode l) (substNode r)

@@ -422,7 +422,7 @@ normalizeEdgeWitnessesM = do
             ]
     let interiorWithBinders =
           if IntMap.size binderArgs > 1
-            then IntSet.union interiorNorm (IntSet.fromList (IntMap.keys binderArgs))
+            then IntSet.union interiorNorm (IntSet.fromAscList (IntMap.keys binderArgs))
             else interiorNorm
         isAnnEdge =
           IntSet.member eid (cAnnEdges c0)

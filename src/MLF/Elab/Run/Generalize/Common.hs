@@ -203,7 +203,7 @@ canonicalSchemeRootOwners canonical genNodes =
                 | gen <- IntMap.elems genNodes
                 , root <- gnSchemes gen
                 ]
-    in (IntSet.fromList (IntMap.keys ownerMap), ownerMap)
+    in (IntSet.fromAscList (IntMap.keys ownerMap), ownerMap)
 
 -- | Check if a gen node ID differs from the given one.
 ownerIsOther :: GenNodeId -> Maybe GenNodeId -> Bool

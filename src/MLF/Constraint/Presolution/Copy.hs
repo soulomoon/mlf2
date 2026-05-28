@@ -118,7 +118,7 @@ expansionCopySetsWithSnapshot snapshot bodyId = do
     let reachFromS =
             Traversal.reachableFromNodes canonical children [bodyC]
         reachFromSKeys =
-            IntSet.fromList [typeRefKey (NodeId nid) | nid <- IntSet.toList reachFromS]
+            IntSet.fromAscList [typeRefKey (NodeId nid) | nid <- IntSet.toList reachFromS]
     let interiorAll = interiorAll0'
     (_root, binders) <- instantiationBindersM gid bodyC
     let binderKeys =

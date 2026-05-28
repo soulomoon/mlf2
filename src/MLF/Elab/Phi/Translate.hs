@@ -298,13 +298,13 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith readModel mbGaParents mSchemeIn
                     traceBinderSourceKeys = map getNodeId traceBinderSourcesInOrder
                     traceBinderSourceSet = IntSet.fromList traceBinderSourceKeys
                     replayMapRaw = etBinderReplayMap tr
-                    replayMapDomain = IntSet.fromList (IntMap.keys replayMapRaw)
+                    replayMapDomain = IntSet.fromAscList (IntMap.keys replayMapRaw)
                     replayBinderDomainRaw =
                         case etReplayDomainBinders tr of
                             replayBinders@(_ : _) ->
                                 IntSet.fromList (map getNodeId replayBinders)
                             [] ->
-                                IntSet.fromList (IntMap.keys (siSubst siReplay))
+                                IntSet.fromAscList (IntMap.keys (siSubst siReplay))
                     targetInReplayDomainRaw replayTarget =
                         IntSet.member (getNodeId replayTarget) replayBinderDomainRaw
                     missingSources =

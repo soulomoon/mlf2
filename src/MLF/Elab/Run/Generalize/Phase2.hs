@@ -77,7 +77,7 @@ buildNodeMappings env phase1 =
                         )
                 baseKeys =
                     IntSet.unions
-                        [ IntSet.fromList (IntMap.keys baseNodes)
+                        [ IntSet.fromAscList (IntMap.keys baseNodes)
                         , schemeInteriorKeys
                         , bindParentKeys
                         ]

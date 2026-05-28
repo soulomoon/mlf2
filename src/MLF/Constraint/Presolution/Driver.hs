@@ -185,8 +185,8 @@ finishPresolutionResult traceCfg constraint redirects finalState = do
                 | edge <- cInstEdges constraint
                 , IntSet.notMember (getEdgeId (instEdgeId edge)) (cLetEdges finalConstraint)
                 ]
-        witnessKeys = IntSet.fromList (IntMap.keys edgeWitnesses)
-        traceKeys = IntSet.fromList (IntMap.keys edgeTraces)
+        witnessKeys = IntSet.fromAscList (IntMap.keys edgeWitnesses)
+        traceKeys = IntSet.fromAscList (IntMap.keys edgeTraces)
         missingWitnesses =
             map EdgeId (IntSet.toList (IntSet.difference nonTrivialEdgeKeys witnessKeys))
         missingTraces =
@@ -336,8 +336,8 @@ assertNoResidualTyExp phase = do
 assertWitnessTraceDomain :: String -> PresolutionM 'Acyclic ()
 assertWitnessTraceDomain phase = do
     st <- getPresolutionState
-    let witnessKeys = IntSet.fromList (IntMap.keys (psEdgeWitnesses st))
-        traceKeys = IntSet.fromList (IntMap.keys (psEdgeTraces st))
+    let witnessKeys = IntSet.fromAscList (IntMap.keys (psEdgeWitnesses st))
+        traceKeys = IntSet.fromAscList (IntMap.keys (psEdgeTraces st))
     when (witnessKeys /= traceKeys) $
         throwError $
             InternalError $
@@ -361,7 +361,7 @@ validateReplayMapTraceContract canonical _sourceConstraint finalConstraint eid t
                 | (binder, _arg) <- etBinderArgs tr
                 ]
         replayDomain =
-            IntSet.fromList (IntMap.keys (etBinderReplayMap tr))
+            IntSet.fromAscList (IntMap.keys (etBinderReplayMap tr))
         replayBinderDomain =
             IntSet.fromList [getNodeId b | b <- replayBindersForTrace tr]
         missingReplay =
@@ -514,11 +514,11 @@ rewriteConstraint mapping = do
         touchedKeys =
             IntSet.unions
                 [ IntSet.fromList [getNodeId (tnId node) | node <- allNodes0]
-                , IntSet.fromList (IntMap.keys mapping)
+                , IntSet.fromAscList (IntMap.keys mapping)
                 , IntSet.fromList [getNodeId nid | nid <- IntMap.elems mapping]
-                , IntSet.fromList (IntMap.keys identityRootMap)
+                , IntSet.fromAscList (IntMap.keys identityRootMap)
                 , IntSet.fromList [getNodeId nid | nid <- IntMap.elems identityRootMap]
-                , IntSet.fromList (IntMap.keys (psUnionFind st))
+                , IntSet.fromAscList (IntMap.keys (psUnionFind st))
                 , IntSet.fromList [getNodeId nid | nid <- IntMap.elems (psUnionFind st)]
                 ]
         canonicalMemo =

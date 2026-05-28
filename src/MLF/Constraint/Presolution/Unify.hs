@@ -130,8 +130,8 @@ changedBindParentRefs before after =
     afterParents = cBindParents after
     allKeys =
         IntSet.union
-            (IntSet.fromList (IntMap.keys beforeParents))
-            (IntSet.fromList (IntMap.keys afterParents))
+            (IntSet.fromAscList (IntMap.keys beforeParents))
+            (IntSet.fromAscList (IntMap.keys afterParents))
     changed key =
         IntMap.lookup key beforeParents /= IntMap.lookup key afterParents
 

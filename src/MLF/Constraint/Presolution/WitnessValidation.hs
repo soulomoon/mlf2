@@ -87,9 +87,9 @@ validateNormalizedWitness env ops = do
     canon = canonical env
 
     validateReplayMapContract = do
-        let sourceDomain = IntSet.fromList (IntMap.keys (binderArgs env))
+        let sourceDomain = IntSet.fromAscList (IntMap.keys (binderArgs env))
             replayMap = binderReplayMap env
-            replayDomain = IntSet.fromList (IntMap.keys replayMap)
+            replayDomain = IntSet.fromAscList (IntMap.keys replayMap)
             missingSources = IntSet.toList (IntSet.difference sourceDomain replayDomain)
             strictContract = isStrictReplayContract (replayContract env)
         if strictContract

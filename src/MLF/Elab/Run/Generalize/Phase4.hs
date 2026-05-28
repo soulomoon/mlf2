@@ -162,7 +162,7 @@ computeSchemeOwnership env phase1 phase2 phase3 =
                 )
                 ()
         allSchemeRootsFiltered =
-            IntSet.fromList (IntMap.keys schemeRootOwnersFiltered)
+            IntSet.fromAscList (IntMap.keys schemeRootOwnersFiltered)
         bindParentsWithParentOwners =
             let attachParent acc nidInt gid =
                     case IntMap.lookup nidInt nodesSolved of
