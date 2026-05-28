@@ -20,6 +20,7 @@ import MLF.Constraint.Types.Graph (NodeId(..))
 -- | Read-only chase to the canonical representative in a union-find map.
 --
 -- This does not perform path compression.
+{-# INLINE frWith #-}
 frWith :: IntMap NodeId -> NodeId -> NodeId
 frWith uf nid =
     case IntMap.lookup (getNodeId nid) uf of
@@ -32,6 +33,7 @@ frWith uf nid =
 --
 -- Returns the representative and an updated map that includes compression links
 -- along the search path.
+{-# INLINE findRootWithCompression #-}
 findRootWithCompression :: IntMap NodeId -> NodeId -> (NodeId, IntMap NodeId)
 findRootWithCompression uf0 nid =
     case IntMap.lookup (getNodeId nid) uf0 of

@@ -66,6 +66,7 @@ setBindParentM child parentInfo =
     modify' (setBindParentState child parentInfo)
 
 -- | Lookup a node in the term-DAG or fail.
+{-# INLINE getNode #-}
 getNode :: NodeId -> PresolutionM p TyNode
 getNode nid = do
     nodes <- gets (cNodes . psConstraint)
@@ -74,6 +75,7 @@ getNode nid = do
         Nothing -> throwError $ NodeLookupFailed nid
 
 -- | Find the canonical representative of a node (with path compression).
+{-# INLINE findRoot #-}
 findRoot :: NodeId -> PresolutionM p NodeId
 findRoot nid = do
     uf <- gets psUnionFind
@@ -82,6 +84,7 @@ findRoot nid = do
     pure root
 
 -- | Lookup a node at its current canonical representative.
+{-# INLINE getCanonicalNode #-}
 getCanonicalNode :: NodeId -> PresolutionM p TyNode
 getCanonicalNode nid = do
     rootId <- findRoot nid
@@ -93,6 +96,7 @@ getCanonicalNode nid = do
 -- | Lookup the instance bound of a variable (⊥ represented as 'Nothing').
 --
 -- Uses canonical representatives so aliasing through UF stays coherent.
+{-# INLINE lookupVarBound #-}
 lookupVarBound :: NodeId -> PresolutionM p (Maybe NodeId)
 lookupVarBound bv = do
     root <- findRoot bv

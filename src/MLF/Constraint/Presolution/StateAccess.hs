@@ -111,6 +111,7 @@ import MLF.Constraint.Presolution.Base (
 -- uf <- gets psUnionFind
 -- let canonical = UnionFind.frWith uf
 -- @
+{-# INLINE getCanonical #-}
 getCanonical :: PresolutionM p (NodeId -> NodeId)
 getCanonical = do
     uf <- gets psUnionFind
@@ -127,26 +128,31 @@ getCanonical = do
 -- uf <- gets psUnionFind
 -- let canonical = UnionFind.frWith uf
 -- @
+{-# INLINE getConstraintAndCanonical #-}
 getConstraintAndCanonical :: PresolutionM p (Constraint p, NodeId -> NodeId)
 getConstraintAndCanonical = do
     c <- gets psConstraint
     uf <- gets psUnionFind
     pure (c, UnionFind.frWith uf)
 
+{-# INLINE getConstraintAndUnionFind #-}
 getConstraintAndUnionFind :: PresolutionM p (Constraint p, IntMap NodeId)
 getConstraintAndUnionFind = do
     c <- gets psConstraint
     uf <- gets psUnionFind
     pure (c, uf)
 
+{-# INLINE putConstraintAndUnionFind #-}
 putConstraintAndUnionFind :: Constraint p -> IntMap NodeId -> PresolutionM p ()
 putConstraintAndUnionFind constraint uf = do
     modify' $ \st ->
         setUnionFindState uf (setConstraintState constraint st)
 
+{-# INLINE getPendingUnifyEdgesM #-}
 getPendingUnifyEdgesM :: PresolutionM p [UnifyEdge]
 getPendingUnifyEdgesM = cUnifyEdges . fst <$> getConstraintAndUnionFind
 
+{-# INLINE getPendingWeakensM #-}
 getPendingWeakensM :: PresolutionM p IntSet
 getPendingWeakensM = gets psPendingWeakens
 
@@ -157,6 +163,7 @@ getPendingWeakensM = gets psPendingWeakens
 -- | Lift a BindingError to PresolutionError.
 --
 -- Use this when you need custom error handling for binding operations.
+{-# INLINE liftBindingError #-}
 liftBindingError :: Either BindingError a -> PresolutionM p a
 liftBindingError = \case
     Left err -> throwError (BindingTreeError err)
@@ -280,6 +287,7 @@ getBindingSnapshot = do
             , pbsQuotient = cbmQuotient cached
             }
 
+{-# INLINE canonicalRefInSnapshot #-}
 canonicalRefInSnapshot :: PresolutionBindingSnapshot p -> NodeRef -> NodeRef
 canonicalRefInSnapshot snapshot =
     Canonicalize.canonicalRef (pbsCanonical snapshot)
@@ -379,6 +387,7 @@ bindingSnapshotFindSchemeIntroducer snapshot root0 = do
 -- | Look up a type node using canonical representative.
 --
 -- Returns 'Nothing' if the node doesn't exist.
+{-# INLINE lookupNodeCanonM #-}
 lookupNodeCanonM :: NodeId -> PresolutionM p (Maybe TyNode)
 lookupNodeCanonM nid = do
     (c, canonical) <- getConstraintAndCanonical
@@ -387,6 +396,7 @@ lookupNodeCanonM nid = do
 -- | Look up a gen node using canonical representative.
 --
 -- Returns 'Nothing' if the gen node doesn't exist.
+{-# INLINE lookupGenNodeCanonM #-}
 lookupGenNodeCanonM :: GenNodeId -> PresolutionM p (Maybe GenNode)
 lookupGenNodeCanonM gid = do
     c <- gets psConstraint
@@ -395,6 +405,7 @@ lookupGenNodeCanonM gid = do
 -- | Look up a node at its canonical representative, failing if not found.
 --
 -- This is a common pattern that combines findRoot + lookup.
+{-# INLINE getCanonicalNodeM #-}
 getCanonicalNodeM :: NodeId -> PresolutionM p TyNode
 getCanonicalNodeM nid = do
     (c, canonical) <- getConstraintAndCanonical
