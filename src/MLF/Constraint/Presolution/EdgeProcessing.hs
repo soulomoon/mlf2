@@ -56,6 +56,7 @@ import MLF.Constraint.Presolution.StateAccess
     ( PresolutionBindingSnapshot(..)
     , bindingSnapshotFindSchemeIntroducer
     , getBindingSnapshot
+    , getCanonical
     , getConstraintAndUnionFind
     , getPendingUnifyEdgesM
     , getPendingWeakensM
@@ -83,7 +84,7 @@ import MLF.Constraint.Presolution.EdgeProcessing.Interpreter
     , recordEdgeExecutionWitness
     )
 import MLF.Constraint.Presolution.EdgeProcessing.Solve
-    ( canonicalizeEdgeTraceInteriorsM
+    ( canonicalizeEdgeTraceInteriorsWith
     )
 import MLF.Constraint.Presolution.EdgeProcessing.Unify
     ( EdgeExpansionResult
@@ -410,7 +411,7 @@ runTimedScheduledEdge traceCfg timing st0 counters0 mbActiveOwner item worklist1
                             runTimedScheduledEdges traceCfg timing st2 counters mbActiveOwner worklist2
                         EdgeWorkRefresh plan -> do
                             let worklist2 =
-                                    noteProcessedEdge edge (Just (edgeFactsFromPlanState st2 plan)) worklist1
+                                    noteProcessedEdge edge (Just (edgeFactsFromPlanState (UnionFind.frWith (psUnionFind st2)) st2 plan)) worklist1
                                 stageCounters =
                                     emptyPresolutionLoopCounters
                                         { plcValidation = assertBeforeNs
@@ -492,7 +493,7 @@ runTimedProcessedEdge
                             EdgeExecutionReplayNoop
                                 | edgeMutationIsEmpty replayMutation -> do
                                     let worklistProcessed =
-                                            noteProcessedEdge edge (Just (edgeFactsFromPlanState stExecuted plan)) worklist1
+                                            noteProcessedEdge edge (Just (edgeFactsFromPlanState (UnionFind.frWith (psUnionFind stExecuted)) stExecuted plan)) worklist1
                                     runTimedScheduledEdges traceCfg timing stExecuted countersAfterExecute nextOwner worklistProcessed
                             _ ->
                                 runTimedPostProcessedEdge
@@ -519,7 +520,9 @@ runTimedPostProcessedEdge
     -> IO (Either PresolutionError (Maybe GenNodeId, PresolutionState p, PresolutionLoopCounters))
 runTimedPostProcessedEdge traceCfg timing stBefore stExecuted counters0 nextOwner edge plan worklist1 = do
     canonicalizeResult <-
-        runMeasuredStage traceCfg timing stExecuted canonicalizeEdgeTraceInteriorsM
+        runMeasuredStage traceCfg timing stExecuted $ do
+            canonical' <- getCanonical
+            canonicalizeEdgeTraceInteriorsWith canonical' (instEdgeId edge)
     case canonicalizeResult of
         Left err -> pure (Left err)
         Right ((), stCanonicalized, canonicalizeNs) -> do
@@ -537,7 +540,7 @@ runTimedPostProcessedEdge traceCfg timing stBefore stExecuted counters0 nextOwne
                         Right ((), stAfter, assertAfterNs) -> do
                             let mutation = edgeMutationFromPlanVersions stBefore stAfter plan
                                 worklistProcessed =
-                                    noteProcessedEdge edge (Just (edgeFactsFromPlanState stAfter plan)) worklist1
+                                    noteProcessedEdge edge (Just (edgeFactsFromPlanState (UnionFind.frWith (psUnionFind stAfter)) stAfter plan)) worklist1
                                 (invalidation, worklistInvalidated) =
                                     invalidateWorklistAfterMutation edge mutation worklistProcessed
                                 stageCounters =
@@ -559,7 +562,9 @@ runTimedInstEdgeAction
     -> EdgeWorkItem
     -> IO (Either PresolutionError (EdgeWorkAction, PresolutionState p, Word64))
 runTimedInstEdgeAction traceCfg timing st0 item =
-    runMeasuredStage traceCfg timing st0 (prepareInstEdgeActionForWorkItem item)
+    runMeasuredStage traceCfg timing st0 $ do
+        canonical <- getCanonical
+        prepareInstEdgeActionForWorkItem canonical item
 
 runTimedEdgeExecution
     :: TraceConfig
@@ -569,7 +574,9 @@ runTimedEdgeExecution
     -> EdgePlan
     -> IO (Either PresolutionError (PresolutionState p, Word64, PresolutionLoopCounters, EdgeExecutionOutcome))
 runTimedEdgeExecution traceCfg timing st0 _reason plan = do
-    decisionResult <- runMeasuredStage traceCfg timing st0 (prepareEdgeExecutionDecision plan)
+    decisionResult <- runMeasuredStage traceCfg timing st0 $ do
+        canonical <- getCanonical
+        prepareEdgeExecutionDecision canonical plan
     case decisionResult of
         Left err -> pure (Left err)
         Right (decision, st1, decideNs)
@@ -761,34 +768,35 @@ emitPresolutionLoopCounters timing label counters = do
 processInstEdge :: InstEdge -> PresolutionM p ()
 processInstEdge edge = do
     requireValidBindingTree
-    plan <- prepareInstEdgePlan edge
-    executeEdgePlan plan
+    canonical <- getCanonical
+    plan <- prepareInstEdgePlan canonical edge
+    executeEdgePlan canonical plan
 
-prepareInstEdgePlan :: InstEdge -> PresolutionM p EdgePlan
-prepareInstEdgePlan edge = do
+prepareInstEdgePlan :: (NodeId -> NodeId) -> InstEdge -> PresolutionM p EdgePlan
+prepareInstEdgePlan canonical edge = do
     ensureBindingParents
-    planEdge edge
+    planEdge canonical edge
 
-prepareInstEdgeActionForWorkItem :: EdgeWorkItem -> PresolutionM p EdgeWorkAction
-prepareInstEdgeActionForWorkItem item = do
+prepareInstEdgeActionForWorkItem :: (NodeId -> NodeId) -> EdgeWorkItem -> PresolutionM p EdgeWorkAction
+prepareInstEdgeActionForWorkItem canonical item = do
     case (ewiStale item, ewiPlanSeed item, ewiFingerprint item) of
         (True, Just seed, Just previous) -> do
-            mbCurrent <- edgeFactsFromSeed (ewiEdge item) seed
+            mbCurrent <- edgeFactsFromSeed canonical (ewiEdge item) seed
             case mbCurrent of
                 Just (_, current)
                     | current == previous -> pure EdgeWorkSkip
-                    | otherwise -> EdgeWorkRefresh <$> prepareInstEdgePlanForWorkItem item
-                Nothing -> EdgeWorkRefresh <$> prepareInstEdgePlanForWorkItem item
-        _ -> EdgeWorkProcess EdgeProcessNormal <$> prepareInstEdgePlanForWorkItem item
+                    | otherwise -> EdgeWorkRefresh <$> prepareInstEdgePlanForWorkItem canonical item
+                Nothing -> EdgeWorkRefresh <$> prepareInstEdgePlanForWorkItem canonical item
+        _ -> EdgeWorkProcess EdgeProcessNormal <$> prepareInstEdgePlanForWorkItem canonical item
 
-prepareInstEdgePlanForWorkItem :: EdgeWorkItem -> PresolutionM p EdgePlan
-prepareInstEdgePlanForWorkItem item =
+prepareInstEdgePlanForWorkItem :: (NodeId -> NodeId) -> EdgeWorkItem -> PresolutionM p EdgePlan
+prepareInstEdgePlanForWorkItem canonical item =
     case (ewiStale item, ewiPlanSeed item) of
-        (False, Just seed) -> prepareInstEdgePlanFromSeed (ewiEdge item) seed
-        _ -> prepareInstEdgePlan (ewiEdge item)
+        (False, Just seed) -> prepareInstEdgePlanFromSeed canonical (ewiEdge item) seed
+        _ -> prepareInstEdgePlan canonical (ewiEdge item)
 
-prepareInstEdgePlanFromSeed :: InstEdge -> EdgePlanSeed -> PresolutionM p EdgePlan
-prepareInstEdgePlanFromSeed edge seed = do
+prepareInstEdgePlanFromSeed :: (NodeId -> NodeId) -> InstEdge -> EdgePlanSeed -> PresolutionM p EdgePlan
+prepareInstEdgePlanFromSeed canonical edge seed = do
     ensureBindingParents
     n1Raw <- getNode (instLeft edge)
     case mkResolvedTyExp n1Raw of
@@ -796,7 +804,7 @@ prepareInstEdgePlanFromSeed edge seed = do
             | leftTyExp == epsLeftTyExp seed -> do
                 bodyRoot <- findRoot (rteBodyId leftTyExp)
                 if bodyRoot /= epsBodyRoot seed
-                    then planEdge edge
+                    then planEdge canonical edge
                     else do
                         n2 <- getCanonicalNode (instRight edge)
                         leftRoot <- findRoot (instLeft edge)
@@ -817,7 +825,7 @@ prepareInstEdgePlanFromSeed edge seed = do
                                 , eprAllowTrivial = allowTrivial
                                 , eprSchemeOwnerGen = epsSchemeOwnerGen seed
                                 }
-        _ -> planEdge edge
+        _ -> planEdge canonical edge
 
 invalidateWorklistAfterMutation :: InstEdge -> EdgeMutation -> EdgeWorklist -> (EdgeInvalidation, EdgeWorklist)
 invalidateWorklistAfterMutation edge mutation worklist0
@@ -842,8 +850,8 @@ invalidateWorklistAfterMutation edge mutation worklist0
                     }
         in (invalidation, worklist3)
 
-edgeFactsFromPlanState :: PresolutionState p -> EdgePlan -> (EdgePlanSeed, EdgeFingerprint)
-edgeFactsFromPlanState st plan =
+edgeFactsFromPlanState :: (NodeId -> NodeId) -> PresolutionState p -> EdgePlan -> (EdgePlanSeed, EdgeFingerprint)
+edgeFactsFromPlanState canonical st plan =
     ( EdgePlanSeed
         { epsLeftTyExp = leftTyExp
         , epsLeftRoot = leftRoot
@@ -859,7 +867,6 @@ edgeFactsFromPlanState st plan =
     leftTyExp = eprLeftTyExp plan
     expVar = rteExpVar leftTyExp
     owner = eprSchemeOwnerGen plan
-    canonical = UnionFind.frWith (psUnionFind st)
     leftRoot = canonical (instLeft edge)
     rightRoot = canonical (instRight edge)
     bodyRoot = canonical (rteBodyId leftTyExp)
@@ -876,18 +883,18 @@ edgeFactsFromPlanState st plan =
             , efCurrentExpansion = currentExpansion
             }
 
-edgeFactsFromSeed :: InstEdge -> EdgePlanSeed -> PresolutionM p (Maybe (EdgePlanSeed, EdgeFingerprint))
-edgeFactsFromSeed edge seed = do
+edgeFactsFromSeed :: (NodeId -> NodeId) -> InstEdge -> EdgePlanSeed -> PresolutionM p (Maybe (EdgePlanSeed, EdgeFingerprint))
+edgeFactsFromSeed canonical edge seed = do
     n1Raw <- getNode (instLeft edge)
     case mkResolvedTyExp n1Raw of
         Just leftTyExp
             | leftTyExp == epsLeftTyExp seed ->
-                Just <$> edgeFactsFromTyExp edge leftTyExp
+                Just <$> edgeFactsFromTyExp canonical edge leftTyExp
         _ -> pure Nothing
 
-edgeFactsFromTyExp :: InstEdge -> ResolvedTyExp -> PresolutionM p (EdgePlanSeed, EdgeFingerprint)
-edgeFactsFromTyExp edge leftTyExp = do
-    fingerprint <- edgeFingerprintFromTyExp edge leftTyExp
+edgeFactsFromTyExp :: (NodeId -> NodeId) -> InstEdge -> ResolvedTyExp -> PresolutionM p (EdgePlanSeed, EdgeFingerprint)
+edgeFactsFromTyExp canonical edge leftTyExp = do
+    fingerprint <- edgeFingerprintFromTyExp canonical edge leftTyExp
     pure
         ( EdgePlanSeed
             { epsLeftTyExp = leftTyExp
@@ -900,12 +907,12 @@ edgeFactsFromTyExp edge leftTyExp = do
         , fingerprint
         )
 
-edgeFingerprintFromTyExp :: InstEdge -> ResolvedTyExp -> PresolutionM p EdgeFingerprint
-edgeFingerprintFromTyExp edge leftTyExp = do
+edgeFingerprintFromTyExp :: (NodeId -> NodeId) -> InstEdge -> ResolvedTyExp -> PresolutionM p EdgeFingerprint
+edgeFingerprintFromTyExp canonical edge leftTyExp = do
     snapshot <- getBindingSnapshot
     owner <- bindingSnapshotFindSchemeIntroducer snapshot (rteBodyId leftTyExp)
     st <- getPresolutionState
-    let canonical = pbsCanonical snapshot
+    let
         expVar = rteExpVar leftTyExp
         Presolution assignments = psPresolution st
         currentExpansion =
@@ -965,37 +972,39 @@ runScheduledWorklist traceCfg mbActiveOwner worklist0 =
         Nothing -> pure (mbActiveOwner, worklist0)
         Just (item, worklist1) -> do
             let edge = ewiEdge item
+            canonical <- getCanonical
             assertNoPendingUnifyEdgesOnly "before-inst-edge" (Just edge)
             stBefore <- getPresolutionState
-            action <- prepareInstEdgeActionForWorkItem item
+            action <- prepareInstEdgeActionForWorkItem canonical item
             case action of
                 EdgeWorkSkip ->
                     runScheduledWorklist traceCfg mbActiveOwner (noteInertEdge item worklist1)
                 EdgeWorkRefresh plan -> do
                     stRefreshed <- getPresolutionState
                     let worklistRefreshed =
-                            noteProcessedEdge edge (Just (edgeFactsFromPlanState stRefreshed plan)) worklist1
+                            noteProcessedEdge edge (Just (edgeFactsFromPlanState canonical stRefreshed plan)) worklist1
                     runScheduledWorklist traceCfg mbActiveOwner worklistRefreshed
                 EdgeWorkProcess _reason plan -> do
                     let nextOwner = Just (eprSchemeOwnerGen plan)
                     scheduleWeakensByOwnerBoundary mbActiveOwner nextOwner (Just edge)
-                    outcome <- executeEdgePlanWithoutTraceCanonicalizationWithOutcome plan
+                    outcome <- executeEdgePlanWithoutTraceCanonicalizationWithOutcome canonical plan
                     stExecuted <- getPresolutionState
                     let replayMutation = edgeMutationFromPlanVersions stBefore stExecuted plan
                     case outcome of
                         EdgeExecutionReplayNoop
                             | edgeMutationIsEmpty replayMutation -> do
                                 let worklistProcessed =
-                                        noteProcessedEdge edge (Just (edgeFactsFromPlanState stExecuted plan)) worklist1
+                                        noteProcessedEdge edge (Just (edgeFactsFromPlanState canonical stExecuted plan)) worklist1
                                 runScheduledWorklist traceCfg nextOwner worklistProcessed
                         _ -> do
-                            canonicalizeEdgeTraceInteriorsM
+                            canonical' <- getCanonical
+                            canonicalizeEdgeTraceInteriorsWith canonical' (instEdgeId edge)
                             drainPendingUnifyClosure traceCfg
                             assertNoPendingUnifyEdgesOnly "after-inst-edge-closure" (Just edge)
                             stAfter <- getPresolutionState
                             let mutation = edgeMutationFromPlanVersions stBefore stAfter plan
                                 worklistProcessed =
-                                    noteProcessedEdge edge (Just (edgeFactsFromPlanState stAfter plan)) worklist1
+                                    noteProcessedEdge edge (Just (edgeFactsFromPlanState (UnionFind.frWith (psUnionFind stAfter)) stAfter plan)) worklist1
                                 (_invalidation, worklistInvalidated) =
                                     invalidateWorklistAfterMutation edge mutation worklistProcessed
                             runScheduledWorklist traceCfg nextOwner worklistInvalidated

@@ -16,14 +16,16 @@ module MLF.Constraint.Presolution.EdgeProcessing.Planner (
 
 import Control.Monad.Except (throwError)
 import Control.Monad.Reader (ask)
+import Control.Monad.State (gets)
+import Control.Monad.State (gets)
+import Control.Monad.State (gets)
 import qualified Data.IntSet as IntSet
 
-import MLF.Constraint.Presolution.Base (PresolutionError (..), PresolutionM)
+import MLF.Constraint.Presolution.Base (PresolutionError (..), PresolutionM, PresolutionState(..))
 import MLF.Constraint.Presolution.EdgeProcessing.Plan
 import MLF.Constraint.Presolution.Ops (findRoot, getCanonicalNode, getNode)
 import MLF.Constraint.Presolution.StateAccess
     ( findSchemeIntroducerM
-    , getConstraintAndCanonical
     )
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.SynthesizedExpVar (isSynthesizedExpVar)
@@ -34,10 +36,10 @@ import MLF.Util.Trace (traceBindingM)
 -- Reads the canonicalized left and right nodes and per-edge flags
 -- ('cLetEdges') from the presolution state, then
 -- rejects non-`TyExp` left nodes (fail-fast invariant).
-planEdge :: InstEdge -> PresolutionM p EdgePlan
-planEdge edge = do
+planEdge :: (NodeId -> NodeId) -> InstEdge -> PresolutionM p EdgePlan
+planEdge canonical edge = do
     cfg <- ask
-    (constraint0, canonical) <- getConstraintAndCanonical
+    constraint0 <- gets psConstraint
     let edgeId = instEdgeId edge
         n1Id = instLeft edge
         n2Id = instRight edge

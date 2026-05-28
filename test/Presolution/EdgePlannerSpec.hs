@@ -213,7 +213,7 @@ spec = describe "Edge plan types" $ do
                 st0 = PresolutionState constraint (Presolution IntMap.empty)
                     IntMap.empty 4 IntSet.empty IntMap.empty
                     IntMap.empty IntMap.empty IntMap.empty IntMap.empty
-            case runPresolutionM defaultTraceConfig st0 (planEdge edge) of
+            case runPresolutionM defaultTraceConfig st0 (planEdge id edge) of
                 Left err -> expectationFailure ("planEdge failed: " ++ show err)
                 Right (plan, _) -> do
                     eprLeftTyExp plan `shouldBe` leftTyExp
@@ -230,7 +230,7 @@ spec = describe "Edge plan types" $ do
                 st0 = PresolutionState constraint (Presolution IntMap.empty)
                     IntMap.empty 2 IntSet.empty IntMap.empty
                     IntMap.empty IntMap.empty IntMap.empty IntMap.empty
-            case runPresolutionM defaultTraceConfig st0 (planEdge edge) of
+            case runPresolutionM defaultTraceConfig st0 (planEdge id edge) of
                 Left (PlanError (ExpectedTyExpLeftInPlanner edgeId leftNode)) -> do
                     edgeId `shouldBe` EdgeId 1
                     leftNode `shouldBe` n0
@@ -258,7 +258,7 @@ spec = describe "Edge plan types" $ do
                 st0 = PresolutionState constraint (Presolution IntMap.empty)
                     IntMap.empty 3 IntSet.empty IntMap.empty
                     IntMap.empty IntMap.empty IntMap.empty IntMap.empty
-            case runPresolutionM defaultTraceConfig st0 (planEdge edge) of
+            case runPresolutionM defaultTraceConfig st0 (planEdge id edge) of
                 Left err -> expectationFailure ("planEdge failed: " ++ show err)
                 Right (plan, _) -> do
                     eprAllowTrivial plan `shouldBe` True
@@ -283,7 +283,7 @@ spec = describe "Edge plan types" $ do
                 st0 = PresolutionState constraint (Presolution IntMap.empty)
                     IntMap.empty 3 IntSet.empty IntMap.empty
                     IntMap.empty IntMap.empty IntMap.empty IntMap.empty
-            case runPresolutionM defaultTraceConfig st0 (planEdge edge) of
+            case runPresolutionM defaultTraceConfig st0 (planEdge id edge) of
                 Left err -> expectationFailure ("planEdge failed: " ++ show err)
                 Right (plan, _) -> do
                     eprSchemeOwnerGen plan `shouldBe` GenNodeId 0
@@ -303,7 +303,7 @@ spec = describe "Edge plan types" $ do
                 st0 = PresolutionState constraint (Presolution IntMap.empty)
                     IntMap.empty 3 IntSet.empty IntMap.empty
                     IntMap.empty IntMap.empty IntMap.empty IntMap.empty
-            case runPresolutionM defaultTraceConfig st0 (planEdge edge) of
+            case runPresolutionM defaultTraceConfig st0 (planEdge id edge) of
                 Left (InternalError msg) ->
                     msg `shouldSatisfy` isInfixOf "scheme introducer not found"
                 Left err ->
@@ -329,7 +329,7 @@ spec = describe "Edge plan types" $ do
                 st0 = PresolutionState constraint (Presolution IntMap.empty)
                     IntMap.empty 3 IntSet.empty IntMap.empty
                     IntMap.empty IntMap.empty IntMap.empty IntMap.empty
-            case runPresolutionM defaultTraceConfig st0 (planEdge edge) of
+            case runPresolutionM defaultTraceConfig st0 (planEdge id edge) of
                 Left (InternalError msg) ->
                     msg `shouldSatisfy` isInfixOf "scheme introducer not found"
                 Left err ->
