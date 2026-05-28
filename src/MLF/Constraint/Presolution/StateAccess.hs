@@ -253,31 +253,35 @@ data PresolutionBindingSnapshot p = PresolutionBindingSnapshot
 getBindingSnapshot :: PresolutionM p (PresolutionBindingSnapshot p)
 getBindingSnapshot = do
     st <- gets id
-    case psBindingModelCache st of
-        Just cached
-            | cbmUnionFindVersion cached == psUnionFindVersion st
-            , cbmBindParentsVersion cached == psBindParentsVersion st ->
-                -- Quotient is valid; return current constraint (types may have
-                -- changed via modifyConstraintDirtyTypesState without bumping
-                -- psBindParentsVersion).
-                pure (snapshotFromCached (psConstraint st) cached)
-        _ -> do
-            let c = psConstraint st
-                uf = psUnionFind st
-                canonical = UnionFind.frWith uf
-            qbp <- liftBindingError $
-                Binding.quotientBindParentsContextUnder canonical c
-            let cached =
-                    CachedBindingModel
-                        { cbmGraphVersion = psGraphVersion st
-                        , cbmUnionFindVersion = psUnionFindVersion st
-                        , cbmBindParentsVersion = psBindParentsVersion st
-                        , cbmConstraint = c
-                        , cbmUnionFind = uf
-                        , cbmQuotient = qbp
-                        }
-            modify' (setBindingModelCacheState cached)
-            pure (snapshotFromCached c cached)
+    case psEdgeLocalSnapshot st of
+        Just frozen ->
+            pure (snapshotFromCached (psConstraint st) frozen)
+        Nothing ->
+            case psBindingModelCache st of
+                Just cached
+                    | cbmUnionFindVersion cached == psUnionFindVersion st
+                    , cbmBindParentsVersion cached == psBindParentsVersion st ->
+                        -- Quotient is valid; return current constraint (types may have
+                        -- changed via modifyConstraintDirtyTypesState without bumping
+                        -- psBindParentsVersion).
+                        pure (snapshotFromCached (psConstraint st) cached)
+                _ -> do
+                    let c = psConstraint st
+                        uf = psUnionFind st
+                        canonical = UnionFind.frWith uf
+                    qbp <- liftBindingError $
+                        Binding.quotientBindParentsContextUnder canonical c
+                    let cached =
+                            CachedBindingModel
+                                { cbmGraphVersion = psGraphVersion st
+                                , cbmUnionFindVersion = psUnionFindVersion st
+                                , cbmBindParentsVersion = psBindParentsVersion st
+                                , cbmConstraint = c
+                                , cbmUnionFind = uf
+                                , cbmQuotient = qbp
+                                }
+                    modify' (setBindingModelCacheState cached)
+                    pure (snapshotFromCached c cached)
   where
     snapshotFromCached currentConstraint cached =
         let canonical = UnionFind.frWith (cbmUnionFind cached)

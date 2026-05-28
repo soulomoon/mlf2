@@ -45,6 +45,8 @@ import MLF.Constraint.Presolution.Base
     , requireValidBindingTree
     , runPresolutionM
     , PresolutionState(..)
+    , setEdgeLocalSnapshot
+    , clearEdgeLocalSnapshot
     )
 import MLF.Constraint.Presolution.EdgeUnify
     ( flushPendingWeakensAtOwnerBoundary
@@ -574,7 +576,9 @@ runTimedEdgeExecution
     -> EdgePlan
     -> IO (Either PresolutionError (PresolutionState p, Word64, PresolutionLoopCounters, EdgeExecutionOutcome))
 runTimedEdgeExecution traceCfg timing st0 _reason plan = do
+    -- Freeze binding snapshot for edge-local execution to avoid quotient rebuilds.
     decisionResult <- runMeasuredStage traceCfg timing st0 $ do
+        freezeEdgeLocalBindingSnapshot
         canonical <- getCanonical
         prepareEdgeExecutionDecision canonical plan
     case decisionResult of
@@ -615,7 +619,7 @@ runTimedEdgeExecution traceCfg timing st0 _reason plan = do
                                                             + unifyNs
                                                             + witnessPlanNs
                                                             + traceNs
-                                                in Right (st5, totalNs, counters, EdgeExecutionReplayTraceRebuilt)
+                                                in Right (clearEdgeLocalSnapshot st5, totalNs, counters, EdgeExecutionReplayTraceRebuilt)
             | otherwise -> do
                 recordExpansionResult <- runMeasuredStage traceCfg timing st1 (recordEdgeExecutionExpansion decision)
                 case recordExpansionResult of
@@ -670,7 +674,7 @@ runTimedEdgeExecution traceCfg timing st0 _reason plan = do
                                                                             + expansionUnifyNs
                                                                             + traceNs
                                                                             + witnessNs
-                                                                pure (Right (st7, totalNs, counters, EdgeExecutionFreshOutcome))
+                                                                pure (Right (clearEdgeLocalSnapshot st7, totalNs, counters, EdgeExecutionFreshOutcome))
 
 runTimedEdgeExpansionUnify
     :: TraceConfig
@@ -962,6 +966,19 @@ edgeMutationFromPlanVersions before after plan =
             IntSet.singleton (getExpVarId expVar)
         | otherwise = IntSet.empty
 
+-- | Ensure the binding model cache is populated and freeze it as the edge-local
+-- snapshot.  During edge-local execution, UF path-compression bumps
+-- 'psUnionFindVersion', which would normally invalidate the cache and force a
+-- quotient rebuild.  The frozen snapshot bypasses the version check so the
+-- quotient built once before edge execution is reused throughout.
+freezeEdgeLocalBindingSnapshot :: PresolutionM p ()
+freezeEdgeLocalBindingSnapshot = do
+    _ <- getBindingSnapshot
+    st <- getPresolutionState
+    case psBindingModelCache st of
+        Just cached -> putPresolutionState (setEdgeLocalSnapshot cached st)
+        Nothing -> pure ()
+
 runScheduledWorklist
     :: TraceConfig
     -> Maybe GenNodeId
@@ -987,8 +1004,10 @@ runScheduledWorklist traceCfg mbActiveOwner worklist0 =
                 EdgeWorkProcess _reason plan -> do
                     let nextOwner = Just (eprSchemeOwnerGen plan)
                     scheduleWeakensByOwnerBoundary mbActiveOwner nextOwner (Just edge)
+                    freezeEdgeLocalBindingSnapshot
                     outcome <- executeEdgePlanWithoutTraceCanonicalizationWithOutcome canonical plan
                     stExecuted <- getPresolutionState
+                    putPresolutionState (clearEdgeLocalSnapshot stExecuted)
                     let replayMutation = edgeMutationFromPlanVersions stBefore stExecuted plan
                     case outcome of
                         EdgeExecutionReplayNoop
