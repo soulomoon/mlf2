@@ -31,6 +31,7 @@ data ResolvedTyExp = ResolvedTyExp
     deriving (Eq, Show)
 
 -- | Refine a raw node into a TyExp payload.
+{-# INLINE mkResolvedTyExp #-}
 mkResolvedTyExp :: TyNode -> Maybe ResolvedTyExp
 mkResolvedTyExp TyExp { tnId = nid, tnExpVar = s, tnBody = body } =
     Just ResolvedTyExp

@@ -297,9 +297,11 @@ pattern PresolutionState constraint presolution unionFind nextNodeId pendingWeak
 
 {-# COMPLETE PresolutionState #-}
 
+{-# INLINE invalidateBindingModelState #-}
 invalidateBindingModelState :: PresolutionState p -> PresolutionState p
 invalidateBindingModelState st = st { psBindingModelCache = Nothing }
 
+{-# INLINE invalidateBindingRepairModelState #-}
 invalidateBindingRepairModelState :: PresolutionState p -> PresolutionState p
 invalidateBindingRepairModelState st =
     st
@@ -307,6 +309,7 @@ invalidateBindingRepairModelState st =
         , psBindingRepairDirty = Just dirtyAllBindingRepair
         }
 
+{-# INLINE modifyConstraintState #-}
 modifyConstraintState :: (Constraint p -> Constraint p) -> PresolutionState p -> PresolutionState p
 modifyConstraintState f st =
     invalidateBindingRepairModelState $
@@ -322,6 +325,7 @@ modifyConstraintState f st =
 -- Only bumps 'psGraphVersion'.  The quotient binding-model cache depends on
 -- 'psUnionFindVersion' and 'psBindParentsVersion' so it remains valid across
 -- type-only mutations.  The repair model is also unaffected.
+{-# INLINE modifyConstraintDirtyTypesState #-}
 modifyConstraintDirtyTypesState
     :: IntSet.IntSet
     -> (Constraint p -> Constraint p)
@@ -333,6 +337,7 @@ modifyConstraintDirtyTypesState _dirtyTypes f st =
         , psGraphVersion = psGraphVersion st + 1
         }
 
+{-# INLINE setConstraintDirtyBindRefsState #-}
 setConstraintDirtyBindRefsState
     :: IntSet.IntSet
     -> Constraint p
@@ -346,6 +351,7 @@ setConstraintDirtyBindRefsState _dirtyBindRefs constraint st =
             , psBindParentsVersion = psBindParentsVersion st + 1
             }
 
+{-# INLINE modifyBindParentsState #-}
 modifyBindParentsState :: (BindParents -> BindParents) -> PresolutionState p -> PresolutionState p
 modifyBindParentsState f st =
     invalidateBindingRepairModelState $
@@ -355,6 +361,7 @@ modifyBindParentsState f st =
             , psBindParentsVersion = psBindParentsVersion st + 1
             }
 
+{-# INLINE setBindParentState #-}
 setBindParentState :: NodeRef -> (NodeRef, BindFlag) -> PresolutionState p -> PresolutionState p
 setBindParentState child parentInfo st =
     invalidateBindingRepairModelState $
@@ -371,10 +378,12 @@ setBindParentState child parentInfo st =
             , psBindParentsVersion = psBindParentsVersion st + 1
             }
 
+{-# INLINE setConstraintState #-}
 setConstraintState :: Constraint p -> PresolutionState p -> PresolutionState p
 setConstraintState constraint =
     modifyConstraintState (const constraint)
 
+{-# INLINE setUnionFindState #-}
 setUnionFindState :: IntMap NodeId -> PresolutionState p -> PresolutionState p
 setUnionFindState unionFind st =
     invalidateBindingRepairModelState $
@@ -384,10 +393,12 @@ setUnionFindState unionFind st =
             , psUnionFindVersion = psUnionFindVersion st + 1
             }
 
+{-# INLINE modifyUnionFindState #-}
 modifyUnionFindState :: (IntMap NodeId -> IntMap NodeId) -> PresolutionState p -> PresolutionState p
 modifyUnionFindState f st =
     setUnionFindState (f (psUnionFind st)) st
 
+{-# INLINE mergeUnionFindState #-}
 mergeUnionFindState :: NodeId -> NodeId -> PresolutionState p -> PresolutionState p
 mergeUnionFindState fromRoot toRoot st =
     invalidateBindingRepairModelState $
@@ -403,10 +414,12 @@ mergeUnionFindState fromRoot toRoot st =
 
 -- | Path compression does not change canonical representatives, so cached
 -- quotient binding models remain semantically valid.
+{-# INLINE compressUnionFindState #-}
 compressUnionFindState :: IntMap NodeId -> PresolutionState p -> PresolutionState p
 compressUnionFindState unionFind st =
     st { psUnionFind = unionFind }
 
+{-# INLINE setBindingModelCacheState #-}
 setBindingModelCacheState :: CachedBindingModel p -> PresolutionState p -> PresolutionState p
 setBindingModelCacheState cache st =
     st { psBindingModelCache = Just cache }
@@ -455,9 +468,11 @@ data PendingWeakenOwner
     | PendingWeakenOwnerUnknown
     deriving (Eq, Ord, Show)
 
+{-# INLINE pendingWeakenOwnerFromMaybe #-}
 pendingWeakenOwnerFromMaybe :: Maybe GenNodeId -> PendingWeakenOwner
 pendingWeakenOwnerFromMaybe = maybe PendingWeakenOwnerUnknown PendingWeakenOwnerGen
 
+{-# INLINE pendingWeakenOwnerToMaybe #-}
 pendingWeakenOwnerToMaybe :: PendingWeakenOwner -> Maybe GenNodeId
 pendingWeakenOwnerToMaybe owner = case owner of
     PendingWeakenOwnerGen gid -> Just gid
@@ -508,9 +523,11 @@ instance Semigroup CopyMapping where
 instance Monoid CopyMapping where
     mempty = CopyMapping IntMap.empty
 
+{-# INLINE lookupCopy #-}
 lookupCopy :: NodeId -> CopyMapping -> Maybe NodeId
 lookupCopy nid (CopyMapping m) = IntMap.lookup (getNodeId nid) m
 
+{-# INLINE insertCopy #-}
 insertCopy :: NodeId -> NodeId -> CopyMapping -> CopyMapping
 insertCopy src dst (CopyMapping m) = CopyMapping (IntMap.insert (getNodeId src) dst m)
 
@@ -542,9 +559,11 @@ instance Semigroup FrontierNodes where
 instance Monoid FrontierNodes where
     mempty = FrontierNodes IntSet.empty
 
+{-# INLINE memberInterior #-}
 memberInterior :: NodeId -> InteriorNodes -> Bool
 memberInterior nid (InteriorNodes s) = IntSet.member (getNodeId nid) s
 
+{-# INLINE memberFrontier #-}
 memberFrontier :: NodeId -> FrontierNodes -> Bool
 memberFrontier nid (FrontierNodes s) = IntSet.member (getNodeId nid) s
 

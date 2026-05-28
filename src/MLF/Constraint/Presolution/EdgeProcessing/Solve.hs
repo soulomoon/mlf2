@@ -57,10 +57,12 @@ import MLF.Constraint.Presolution.Unify (unifyAcyclic)
 import qualified MLF.Constraint.Unify.Decompose as UnifyDecompose
 
 -- | Record a witness for an instantiation edge.
+{-# INLINE recordEdgeWitness #-}
 recordEdgeWitness :: EdgeId -> EdgeWitness -> PresolutionM p ()
 recordEdgeWitness (EdgeId eid) w =
     modify $ \st -> st { psEdgeWitnesses = IntMap.insert eid w (psEdgeWitnesses st) }
 
+{-# INLINE recordEdgeTrace #-}
 recordEdgeTrace :: EdgeId -> EdgeTrace -> PresolutionM p ()
 recordEdgeTrace (EdgeId eid) tr =
     modify $ \st -> st { psEdgeTraces = IntMap.insert eid tr (psEdgeTraces st) }
