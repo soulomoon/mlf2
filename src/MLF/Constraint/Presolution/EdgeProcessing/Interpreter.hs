@@ -40,11 +40,14 @@ import MLF.Constraint.Presolution.Base
   )
 import MLF.Constraint.Presolution.EdgeProcessing.Plan
 import MLF.Constraint.Presolution.EdgeProcessing.Solve
-  ( canonicalizeEdgeTraceInteriorsM,
+  ( canonicalizeEdgeTraceInteriorsWith,
     recordEdgeTrace,
     recordEdgeWitness,
     unifyStructure,
   )
+import MLF.Constraint.Presolution.StateAccess (getCanonical)
+import MLF.Constraint.Presolution.StateAccess (getCanonical)
+import MLF.Constraint.Presolution.StateAccess (getCanonical)
 import MLF.Constraint.Presolution.EdgeProcessing.Unify
   ( EdgeExpansionInput (..),
     EdgeExpansionResult (..),
@@ -103,18 +106,19 @@ data EdgeExecutionOutcome
   deriving (Eq, Show)
 
 -- | Execute a resolved edge plan.
-executeEdgePlan :: EdgePlan -> PresolutionM p ()
-executeEdgePlan plan = do
-  executeEdgePlanWithoutTraceCanonicalization plan
-  canonicalizeEdgeTraceInteriorsM
+executeEdgePlan :: (NodeId -> NodeId) -> EdgePlan -> PresolutionM p ()
+executeEdgePlan canonical plan = do
+  executeEdgePlanWithoutTraceCanonicalization canonical plan
+  canonical' <- getCanonical
+  canonicalizeEdgeTraceInteriorsWith canonical' (instEdgeId (eprEdge plan))
 
-executeEdgePlanWithoutTraceCanonicalization :: EdgePlan -> PresolutionM p ()
-executeEdgePlanWithoutTraceCanonicalization plan =
-  () <$ executeEdgePlanWithoutTraceCanonicalizationWithOutcome plan
+executeEdgePlanWithoutTraceCanonicalization :: (NodeId -> NodeId) -> EdgePlan -> PresolutionM p ()
+executeEdgePlanWithoutTraceCanonicalization canonical plan =
+  () <$ executeEdgePlanWithoutTraceCanonicalizationWithOutcome canonical plan
 
-executeEdgePlanWithoutTraceCanonicalizationWithOutcome :: EdgePlan -> PresolutionM p EdgeExecutionOutcome
-executeEdgePlanWithoutTraceCanonicalizationWithOutcome plan =
-  catchError (executeUnifiedExpansionPath plan) (throwError . toExecError)
+executeEdgePlanWithoutTraceCanonicalizationWithOutcome :: (NodeId -> NodeId) -> EdgePlan -> PresolutionM p EdgeExecutionOutcome
+executeEdgePlanWithoutTraceCanonicalizationWithOutcome canonical plan =
+  catchError (executeUnifiedExpansionPath canonical plan) (throwError . toExecError)
 
 -- | Wrap non-tagged interpreter errors at the phase boundary.
 toExecError :: PresolutionError -> PresolutionError
@@ -124,9 +128,9 @@ toExecError err = ExecError err
 -- | Unified expansion-oriented execution path.
 --
 -- Frontend TyExp edges all use the same minimal-expansion + unification flow.
-executeUnifiedExpansionPath :: EdgePlan -> PresolutionM p EdgeExecutionOutcome
-executeUnifiedExpansionPath plan = do
-  decision <- prepareEdgeExecutionDecision plan
+executeUnifiedExpansionPath :: (NodeId -> NodeId) -> EdgePlan -> PresolutionM p EdgeExecutionOutcome
+executeUnifiedExpansionPath canonical plan = do
+  decision <- prepareEdgeExecutionDecision canonical plan
   case eedReplayTrace decision of
     Just previousTrace -> do
       recordEdgeExecutionExpansion decision
@@ -147,15 +151,15 @@ executeFreshDecision decision = do
   recordEdgeExecutionWitness witnessContext expansionResult
   pure EdgeExecutionFreshOutcome
 
-prepareEdgeExecutionDecision :: EdgePlan -> PresolutionM p EdgeExecutionDecision
-prepareEdgeExecutionDecision plan = do
+prepareEdgeExecutionDecision :: (NodeId -> NodeId) -> EdgePlan -> PresolutionM p EdgeExecutionDecision
+prepareEdgeExecutionDecision canonical plan = do
   mbReplayDecision <- prepareRecordedEdgeExecutionDecision plan
   case mbReplayDecision of
     Just decision -> pure decision
-    Nothing -> prepareFreshEdgeExecutionDecision plan
+    Nothing -> prepareFreshEdgeExecutionDecision canonical plan
 
-prepareFreshEdgeExecutionDecision :: EdgePlan -> PresolutionM p EdgeExecutionDecision
-prepareFreshEdgeExecutionDecision plan = do
+prepareFreshEdgeExecutionDecision :: (NodeId -> NodeId) -> EdgePlan -> PresolutionM p EdgeExecutionDecision
+prepareFreshEdgeExecutionDecision canonical plan = do
   let leftTyExp = eprLeftTyExp plan
       edge = eprEdge plan
       edgeId = instEdgeId edge
@@ -167,7 +171,7 @@ prepareFreshEdgeExecutionDecision plan = do
       ownerGen = eprSchemeOwnerGen plan
 
   currentExp <- getExpansion s
-  minimal <- decideMinimalExpansionDetailed ownerGen (eprAllowTrivial plan) n1Raw n2
+  minimal <- decideMinimalExpansionDetailed canonical ownerGen (eprAllowTrivial plan) n1Raw n2
   finalExp <- mergeExpansions s currentExp (medExpansion minimal)
   binderArgVars <- filterTyVarBinders (medBoundVars minimal)
   binderArgs <-

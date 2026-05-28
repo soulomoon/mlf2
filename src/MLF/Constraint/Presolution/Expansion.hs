@@ -63,8 +63,6 @@ import MLF.Constraint.Presolution.Ops (
     setVarBound
     )
 import MLF.Constraint.Presolution.StateAccess (
-    getCanonical,
-    getConstraintAndCanonical,
     lookupBindParentM
     )
 import MLF.Constraint.Types.Graph
@@ -188,9 +186,8 @@ alone would lose required polymorphism; ∀ alone would quantify at the wrong
 level. The sequence preserves sharing outside the binder and remains the least
 expansion that satisfies the edge (principality argument in §5).
 -}
-nearestGenAncestor :: NodeId -> PresolutionM p (Maybe GenNodeId)
-nearestGenAncestor nid0 = do
-    canonical <- getCanonical
+nearestGenAncestor :: (NodeId -> NodeId) -> NodeId -> PresolutionM p (Maybe GenNodeId)
+nearestGenAncestor canonical nid0 = do
     let start = typeRef (canonical nid0)
         go :: IntSet.IntSet -> NodeRef -> PresolutionM p (Maybe GenNodeId)
         go visited ref
@@ -213,13 +210,13 @@ data MinimalExpansionDecision = MinimalExpansionDecision
     }
     deriving (Eq, Show)
 
-decideMinimalExpansion :: GenNodeId -> Bool -> TyNode -> TyNode -> PresolutionM p (Expansion, [(NodeId, NodeId)])
-decideMinimalExpansion gid allowTrivial sourceNode targetNode = do
-    decision <- decideMinimalExpansionDetailed gid allowTrivial sourceNode targetNode
+decideMinimalExpansion :: (NodeId -> NodeId) -> GenNodeId -> Bool -> TyNode -> TyNode -> PresolutionM p (Expansion, [(NodeId, NodeId)])
+decideMinimalExpansion canonical gid allowTrivial sourceNode targetNode = do
+    decision <- decideMinimalExpansionDetailed canonical gid allowTrivial sourceNode targetNode
     pure (medExpansion decision, medUnifications decision)
 
-decideMinimalExpansionDetailed :: GenNodeId -> Bool -> TyNode -> TyNode -> PresolutionM p MinimalExpansionDecision
-decideMinimalExpansionDetailed gid allowTrivial (TyExp { tnBody = bodyId }) targetNode = do
+decideMinimalExpansionDetailed :: (NodeId -> NodeId) -> GenNodeId -> Bool -> TyNode -> TyNode -> PresolutionM p MinimalExpansionDecision
+decideMinimalExpansionDetailed canonical gid allowTrivial (TyExp { tnBody = bodyId }) targetNode = do
     (bodyRoot, boundVars) <- instantiationBindersM gid bodyId
     debugExpansion
         ( "decideMinimalExpansion: bodyId="
@@ -241,11 +238,11 @@ decideMinimalExpansionDetailed gid allowTrivial (TyExp { tnBody = bodyId }) targ
                     }
     isTrivialTarget <- case targetNode of
         TyVar { tnId = targetId, tnBound = Nothing } -> do
-            mbGen <- nearestGenAncestor targetId
+            mbGen <- nearestGenAncestor canonical targetId
             case mbGen of
                 Nothing -> pure False
                 Just targetGenId -> do
-                    (c0, canonical) <- getConstraintAndCanonical
+                    c0 <- gets psConstraint
                     let targetC = canonical targetId
                         schemeRoots =
                             case NodeAccess.lookupGenNode c0 targetGenId of
@@ -301,7 +298,7 @@ decideMinimalExpansionDetailed gid allowTrivial (TyExp { tnBody = bodyId }) targ
                         done expn []
                     _ -> done ExpIdentity [(bodyRoot, tnId targetNode)]
 
-decideMinimalExpansionDetailed _ _ sourceNode _ =
+decideMinimalExpansionDetailed _canonical _ _ sourceNode _ =
     pure
         MinimalExpansionDecision
             { medExpansion = ExpIdentity

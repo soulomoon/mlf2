@@ -1481,7 +1481,7 @@ decideMinimalFor :: Constraint 'Raw -> NodeId -> NodeId -> Either String (Expans
 decideMinimalFor c expNodeId targetNodeId =
   case (lookupNodeIn (cNodes c) expNodeId, lookupNodeIn (cNodes c) targetNodeId) of
     (Just expNode, Just targetNode) ->
-      case runPresolutionM defaultTraceConfig (emptyPresolutionState c) (decideMinimalExpansion (GenNodeId 0) True expNode targetNode) of
+      case runPresolutionM defaultTraceConfig (emptyPresolutionState c) (decideMinimalExpansion id (GenNodeId 0) True expNode targetNode) of
         Right (decision, _st) -> Right decision
         Left err -> Left (show err)
     (Nothing, _) -> Left ("missing expansion node " ++ show expNodeId)

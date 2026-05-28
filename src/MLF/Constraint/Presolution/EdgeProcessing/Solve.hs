@@ -14,7 +14,7 @@ module MLF.Constraint.Presolution.EdgeProcessing.Solve (
     solveNonExpInstantiation,
     recordEdgeWitness,
     recordEdgeTrace,
-    canonicalizeEdgeTraceInteriorsM,
+    canonicalizeEdgeTraceInteriorsWith,
 ) where
 
 import Control.Monad.State
@@ -67,9 +67,8 @@ recordEdgeTrace :: EdgeId -> EdgeTrace -> PresolutionM p ()
 recordEdgeTrace (EdgeId eid) tr =
     modify $ \st -> st { psEdgeTraces = IntMap.insert eid tr (psEdgeTraces st) }
 
-canonicalizeEdgeTraceInteriorsM :: PresolutionM p ()
-canonicalizeEdgeTraceInteriorsM = do
-    canonical <- getCanonical
+canonicalizeEdgeTraceInteriorsWith :: (NodeId -> NodeId) -> EdgeId -> PresolutionM p ()
+canonicalizeEdgeTraceInteriorsWith canonical (EdgeId eid) = do
     let canonInterior tr =
             let interior' =
                     fromListInterior
@@ -77,7 +76,7 @@ canonicalizeEdgeTraceInteriorsM = do
                         | nid <- toListInterior (etInterior tr)
                         ]
             in tr { etInterior = interior' }
-    modify' $ \st -> st { psEdgeTraces = IntMap.map canonInterior (psEdgeTraces st) }
+    modify' $ \st -> st { psEdgeTraces = IntMap.adjust canonInterior eid (psEdgeTraces st) }
 
 unifyStructure :: NodeId -> NodeId -> PresolutionM p ()
 unifyStructure n1 n2 = do
@@ -123,7 +122,7 @@ unifyStructure n1 n2 = do
                 ++ " targetNode="
                 ++ nodeTag targetNode
             )
-        (reqExp, unifications) <- decideMinimalExpansion gid True expNode targetNode
+        (reqExp, unifications) <- decideMinimalExpansion canonical gid True expNode targetNode
         debugBindParents
             ( "unifyExpansionNode: expNode="
                 ++ show (tnId expNode)
