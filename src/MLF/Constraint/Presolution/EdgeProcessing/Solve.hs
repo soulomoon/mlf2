@@ -70,11 +70,12 @@ recordEdgeTrace (EdgeId eid) tr =
 canonicalizeEdgeTraceInteriorsWith :: (NodeId -> NodeId) -> EdgeId -> PresolutionM p ()
 canonicalizeEdgeTraceInteriorsWith canonical (EdgeId eid) = do
     let canonInterior tr =
-            let interior' =
-                    fromListInterior
-                        [ canonical nid
-                        | nid <- toListInterior (etInterior tr)
-                        ]
+            let InteriorNodes s = etInterior tr
+                interior' =
+                    InteriorNodes
+                        (IntSet.fromList
+                            (Prelude.map (\i -> getNodeId (canonical (NodeId i)))
+                                (IntSet.toList s)))
             in tr { etInterior = interior' }
     modify' $ \st -> st { psEdgeTraces = IntMap.adjust canonInterior eid (psEdgeTraces st) }
 
@@ -148,11 +149,13 @@ unifyStructure n1 n2 = do
                 _targetBinder <- bindExpansionRootLikeTarget resNodeId targetId
                 canonicalizeNodeId <- getCanonical
                 let copyMapCanon =
-                        IntMap.fromListWith
-                            const
-                            [ (getNodeId (canonicalizeNodeId (NodeId orig)), copy)
-                            | (orig, copy) <- IntMap.toList (getCopyMapping copyMap)
-                            ]
+                        IntMap.foldlWithKey'
+                            (\acc orig copy ->
+                                IntMap.insert
+                                    (getNodeId (canonicalizeNodeId (NodeId orig)))
+                                    copy acc)
+                            IntMap.empty
+                            (getCopyMapping copyMap)
                 forM_ (IntSet.toList frontier) $ \nidInt -> do
                     case IntMap.lookup nidInt copyMapCanon of
                         Nothing -> pure ()

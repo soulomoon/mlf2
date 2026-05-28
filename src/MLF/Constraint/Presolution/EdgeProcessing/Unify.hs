@@ -356,11 +356,11 @@ bindEdgeExpansionRoot applied = do
 
   canonical <- getCanonical
   let copyMapCanon =
-        IntMap.fromListWith
-          const
-          [ (getNodeId (canonical (NodeId orig)), copy)
-          | (orig, copy) <- IntMap.toList (getCopyMapping copyMap0)
-          ]
+        IntMap.foldlWithKey'
+          (\acc orig copy ->
+            IntMap.insert (getNodeId (canonical (NodeId orig))) copy acc)
+          IntMap.empty
+          (getCopyMapping copyMap0)
   forM_ (IntSet.toList frontier0) $ \nidInt ->
     case IntMap.lookup nidInt copyMapCanon of
       Nothing -> pure ()
