@@ -184,7 +184,13 @@ applyRaiseStep tag c = do
 
 -- | Raise a node to a specific ancestor binder.
 --
--- This repeatedly applies Raise steps until the node's parent is the target.
+-- This walks the binding path once to verify the target is an ancestor,
+-- checks for rigid binders in a single pass, then directly rebinds the
+-- node to the target.  The previous implementation called 'applyRaiseStep'
+-- in a loop, which re-walked the path via 'isUnderRigidBinder' at every
+-- step (O(R * L) where R = raise count, L = path length).  The new
+-- implementation is O(L): one path walk, one rigid-binder check, one
+-- parent update.
 --
 -- Preconditions:
 --   - n must not be a binding root
@@ -201,24 +207,38 @@ applyRaiseStep tag c = do
 applyRaiseTo :: NodeRefTag 'TypeTag -> NodeRef -> Constraint p -> Either BindingError (Constraint p, [InstanceOp])
 applyRaiseTo tag target c = do
     let nid = fromNodeRefTag tag
-    -- Verify target is an ancestor of nid
+        nidT = nodeIdFromTypeRef tag
+    -- Walk the binding path once: verify target is an ancestor.
     path <- bindingPathToRoot c nid
     let pathSet = IntSet.fromList $ map nodeRefKey path
     if not (IntSet.member (nodeRefKey target) pathSet)
         then Left $ InvalidBindingTree $
             "Target " ++ show target ++
             " is not an ancestor of " ++ show nid
-        else go nid c []
-  where
-    go nid constraint ops =
-        case lookupBindParent constraint nid of
-            Nothing -> Left $ MissingBindParent nid
-            Just (parent, _) ->
-                if parent == target
-                    then return (constraint, reverse ops)
-                    else do
-                        (constraint', mOp) <- applyRaiseStep tag constraint
-                        case mOp of
-                            Nothing ->
-                                Left $ RaiseNotPossible nid
-                            Just op -> go nid constraint' (op : ops)
+        else do
+            -- Single rigid-binder check on the original path.
+            -- Ancestors' binding edges do not change across raise steps
+            -- (only nid's own parent pointer is mutated), so one check
+            -- is equivalent to checking at every step of the old loop.
+            locked <- isUnderRigidBinder c nid
+            if locked
+                then Left $ OperationOnLockedNode nid
+                else do
+                    -- Get current binding edge (parent and flag).
+                    case lookupBindParent c nid of
+                        Nothing -> Left $ MissingBindParent nid
+                        Just (parent, flag) ->
+                            if parent == target
+                                then return (c, [])
+                                else do
+                                    -- Count raise steps from the path:
+                                    -- nodes strictly between nid's parent and
+                                    -- the target correspond 1-to-1 with steps.
+                                    let numSteps =
+                                            length $
+                                            takeWhile (\r -> nodeRefKey r /= nodeRefKey target) $
+                                            drop 1 path
+                                    -- Directly rebind nid to target, preserving flag.
+                                    let c' = setBindParent nid (target, flag) c
+                                    let ops = replicate numSteps (OpRaise nidT)
+                                    return (c', ops)
