@@ -21,6 +21,7 @@ module MLF.Constraint.Presolution.EdgeProcessing (
 
 import Control.Exception (evaluate)
 import Control.Monad (unless, when)
+import Control.Monad.Reader (ask)
 import Data.Word (Word64)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
@@ -141,7 +142,7 @@ import MLF.Util.Timing
     , measureProgramOperationIO
     , timingProgramOperations
     )
-import MLF.Util.Trace (TraceConfig)
+import MLF.Util.Trace (TraceConfig(..))
 import MLF.Constraint.Types.SynthesizedExpVar (isSynthesizedExpVar)
 import qualified MLF.Util.UnionFind as UnionFind
 
@@ -154,7 +155,8 @@ runPresolutionLoop traceCfg edges = do
     (mbLastOwner, _worklist) <-
         runScheduledWorklist traceCfg Nothing worklist0
     scheduleWeakensByOwnerBoundary mbLastOwner Nothing Nothing
-    assertNoPendingUnifyEdges "after-inst-edge-closure" Nothing
+    when (tcDebugAssertions traceCfg) $
+        assertNoPendingUnifyEdges "after-inst-edge-closure" Nothing
     requireValidBindingTree
 
 data PresolutionLoopCounters = PresolutionLoopCounters
@@ -398,7 +400,8 @@ runPresolutionLoopWithTiming timing label traceCfg rootOwnership edges initialSt
                                         Right ((), st5, scheduleNs) -> do
                                             closureResult <-
                                                 runMeasuredStage traceCfg timing st5 $
-                                                    assertNoPendingUnifyEdges "after-inst-edge-closure" Nothing
+                                                    when (tcDebugAssertions traceCfg) $
+                                                        assertNoPendingUnifyEdges "after-inst-edge-closure" Nothing
                                             case closureResult of
                                                 Left err -> pure (Left err)
                                                 Right ((), st6, validationNs) -> do
@@ -443,7 +446,8 @@ runTimedScheduledEdge traceCfg timing st0 counters0 mbActiveOwner item worklist1
     let edge = ewiEdge item
     assertBeforeResult <-
         runMeasuredStage traceCfg timing st0 $
-            assertNoPendingUnifyEdgesOnly "before-inst-edge" (Just edge)
+            when (tcDebugAssertions traceCfg) $
+                assertNoPendingUnifyEdgesOnly "before-inst-edge" (Just edge)
     case assertBeforeResult of
         Left err -> pure (Left err)
         Right ((), st1, assertBeforeNs) -> do
@@ -589,7 +593,8 @@ runTimedPostProcessedEdge traceCfg timing stBefore stExecuted counters0 nextOwne
                 Right ((), stDrained, drainNs) -> do
                     assertAfterResult <-
                         runMeasuredStage traceCfg timing stDrained $
-                            assertNoPendingUnifyEdgesOnly "after-inst-edge-closure" (Just edge)
+                            when (tcDebugAssertions traceCfg) $
+                                assertNoPendingUnifyEdgesOnly "after-inst-edge-closure" (Just edge)
                     case assertAfterResult of
                         Left err -> pure (Left err)
                         Right ((), stAfter, assertAfterNs) -> do
@@ -1150,7 +1155,8 @@ runScheduledWorklist traceCfg mbActiveOwner worklist0 =
         Just (item, worklist1) -> do
             let edge = ewiEdge item
             canonical <- getCanonical
-            assertNoPendingUnifyEdgesOnly "before-inst-edge" (Just edge)
+            when (tcDebugAssertions traceCfg) $
+                assertNoPendingUnifyEdgesOnly "before-inst-edge" (Just edge)
             stBefore <- getPresolutionState
             action <- prepareInstEdgeActionForWorkItem canonical item
             case action of
@@ -1179,7 +1185,8 @@ runScheduledWorklist traceCfg mbActiveOwner worklist0 =
                             canonical' <- getCanonical
                             canonicalizeEdgeTraceInteriorsWith canonical' (instEdgeId edge)
                             drainPendingUnifyClosure traceCfg
-                            assertNoPendingUnifyEdgesOnly "after-inst-edge-closure" (Just edge)
+                            when (tcDebugAssertions traceCfg) $
+                                assertNoPendingUnifyEdgesOnly "after-inst-edge-closure" (Just edge)
                             stAfter <- getPresolutionState
                             let mutation = edgeMutationFromPlanVersions stBefore stAfter plan
                                 worklistProcessed =
@@ -1195,14 +1202,17 @@ runScheduledWorklist traceCfg mbActiveOwner worklist0 =
 scheduleWeakensByOwnerBoundary :: Maybe GenNodeId -> Maybe GenNodeId -> Maybe InstEdge -> PresolutionM p ()
 scheduleWeakensByOwnerBoundary mbCurrentOwner mbNextOwner mbEdge =
     when (ownerBoundaryChanged mbCurrentOwner mbNextOwner) $ do
-        assertNoPendingUnifyEdgesOnly "owner-boundary-before-weaken-flush" mbEdge
+        cfg <- ask
+        when (tcDebugAssertions cfg) $
+            assertNoPendingUnifyEdgesOnly "owner-boundary-before-weaken-flush" mbEdge
         let boundaryOwner = pendingWeakenOwnerFromMaybe mbCurrentOwner
         flushPendingWeakensAtOwnerBoundary boundaryOwner
-        assertNoPendingWeakensOutsideOwnerBoundary
-            "owner-boundary-after-weaken-flush"
-            boundaryOwner
-            mbNextOwner
-            mbEdge
+        when (tcDebugAssertions cfg) $
+            assertNoPendingWeakensOutsideOwnerBoundary
+                "owner-boundary-after-weaken-flush"
+                boundaryOwner
+                mbNextOwner
+                mbEdge
   where
     ownerBoundaryChanged :: Maybe GenNodeId -> Maybe GenNodeId -> Bool
     ownerBoundaryChanged (Just ownerA) (Just ownerB) = ownerA /= ownerB

@@ -60,6 +60,7 @@ data TraceConfig = TraceConfig
     , tcElab :: !Bool         -- ^ Elaboration phase (MLF_DEBUG_ELAB)
     , tcNormalize :: !Bool    -- ^ Normalization phase (MLF_DEBUG_NORMALIZE)
     , tcGeneralize :: !Bool   -- ^ Generalization phase (MLF_DEBUG_GENERALIZE)
+    , tcDebugAssertions :: !Bool  -- ^ Debug assertions on hot paths (MLF_DEBUG_ASSERTIONS)
     } deriving (Eq, Show)
 
 -- | Default configuration with all tracing disabled.
@@ -71,6 +72,7 @@ defaultTraceConfig = TraceConfig
     , tcElab = False
     , tcNormalize = False
     , tcGeneralize = False
+    , tcDebugAssertions = False
     }
 
 -- | Check if an environment variable is set (non-empty).
@@ -90,6 +92,7 @@ isEnvSet name = do
 --   * @MLF_DEBUG_SOLVE@ - Enable solve phase tracing
 --   * @MLF_DEBUG_ELAB@ - Enable elaboration tracing
 --   * @MLF_DEBUG_NORMALIZE@ - Enable normalization tracing
+--   * @MLF_DEBUG_ASSERTIONS@ - Enable debug assertions on hot paths
 --   * @MLF_DEBUG_ALL@ - Enable all tracing
 traceConfigFromEnv :: IO TraceConfig
 traceConfigFromEnv = do
@@ -102,6 +105,7 @@ traceConfigFromEnv = do
             , tcElab = True
             , tcNormalize = True
             , tcGeneralize = True
+            , tcDebugAssertions = True
             }
         else TraceConfig
             <$> isEnvSet "MLF_DEBUG_BINDING"
@@ -110,6 +114,7 @@ traceConfigFromEnv = do
             <*> isEnvSet "MLF_DEBUG_ELAB"
             <*> isEnvSet "MLF_DEBUG_NORMALIZE"
             <*> isEnvSet "MLF_DEBUG_GENERALIZE"
+            <*> isEnvSet "MLF_DEBUG_ASSERTIONS"
 
 -- | Conditionally trace a message.
 traceWhen :: Bool -> String -> a -> a
