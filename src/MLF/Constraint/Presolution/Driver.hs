@@ -669,6 +669,7 @@ mkInitialPresolutionState constraint =
         , psEdgeLocalSnapshot = Nothing
         , psBindingRepairCache = Nothing
         , psBindingRepairDirty = Just dirtyAllBindingRepair
+        , psCachedRootGen = Nothing
         , psEdgeExpansions = IntMap.empty
         , psEdgeWitnesses = IntMap.empty
         , psEdgeTraces = IntMap.empty

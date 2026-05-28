@@ -30,6 +30,7 @@ module MLF.Constraint.Presolution.Base (
         , psEdgeLocalSnapshot
         , psBindingRepairCache
         , psBindingRepairDirty
+        , psCachedRootGen
         , psEdgeExpansions
         , psEdgeWitnesses
         , psEdgeTraces
@@ -248,6 +249,7 @@ data PresolutionState p = PresolutionStateInternal
     , psEdgeLocalSnapshot :: Maybe (CachedBindingModel p)
     , psBindingRepairCache :: Maybe (CachedBindingRepairModel p)
     , psBindingRepairDirty :: Maybe BindingRepairDirty
+    , psCachedRootGen :: !(Maybe (Maybe NodeRef))
     , psEdgeExpansions :: IntMap Expansion
     , psEdgeWitnesses :: IntMap EdgeWitness
     , psEdgeTraces :: IntMap EdgeTrace
@@ -282,6 +284,7 @@ pattern PresolutionState constraint presolution unionFind nextNodeId pendingWeak
         _
         _
         _
+        _
         edgeExpansions
         edgeWitnesses
         edgeTraces
@@ -302,6 +305,7 @@ pattern PresolutionState constraint presolution unionFind nextNodeId pendingWeak
             Nothing
             Nothing
             (Just dirtyAllBindingRepair)
+            Nothing
             edgeExpansions
             edgeWitnesses
             edgeTraces
@@ -348,6 +352,7 @@ modifyConstraintState f st =
             { psConstraint = f (psConstraint st)
             , psGraphVersion = psGraphVersion st + 1
             , psBindParentsVersion = psBindParentsVersion st + 1
+            , psCachedRootGen = Nothing
             }
 
 -- | Modify constraint types/nodes without touching bind parents.
@@ -381,6 +386,7 @@ setConstraintDirtyBindRefsState dirtyBindRefs constraint st =
         st
             { psConstraint = constraint
             , psBindParentsVersion = psBindParentsVersion st + 1
+            , psCachedRootGen = Nothing
             }
 
 {-# INLINE modifyBindParentsState #-}
@@ -391,6 +397,7 @@ modifyBindParentsState f st =
         st
             { psConstraint = (psConstraint st) { cBindParents = f (cBindParents (psConstraint st)) }
             , psBindParentsVersion = psBindParentsVersion st + 1
+            , psCachedRootGen = Nothing
             }
 
 {-# INLINE setBindParentState #-}
@@ -423,6 +430,7 @@ setUnionFindState unionFind st =
         st
             { psUnionFind = unionFind
             , psUnionFindVersion = psUnionFindVersion st + 1
+            , psCachedRootGen = Nothing
             }
 
 {-# INLINE modifyUnionFindState #-}
@@ -442,6 +450,7 @@ mergeUnionFindState fromRoot toRoot st =
                     toRoot
                     (psUnionFind st)
             , psUnionFindVersion = psUnionFindVersion st + 1
+            , psCachedRootGen = Nothing
             }
 
 -- | Path compression does not change canonical representatives, so cached
@@ -708,7 +717,10 @@ instance {-# OVERLAPPING #-} MonadPresolution (PresolutionM p) where
         (c0, canonical, quotient) <- cachedBindingModelM
         let expansionRootC = canonical expansionRoot
             bindParents = Binding.qbpBindParents quotient
-            rootGen =
+        st <- get
+        rootGen <- case psCachedRootGen st of
+            Just cached -> pure cached
+            Nothing -> do
                 let genIds = IntMap.keys (getGenNodeMap (cGenNodes c0))
                     pickRoot acc gidInt =
                         case acc of
@@ -718,7 +730,10 @@ instance {-# OVERLAPPING #-} MonadPresolution (PresolutionM p) where
                                 in case IntMap.lookup (nodeRefKey gref) bindParents of
                                     Nothing -> Just gref
                                     Just _ -> Nothing
-                in foldl' pickRoot Nothing genIds
+                    result :: Maybe NodeRef
+                    result = foldl' pickRoot Nothing genIds
+                modify' $ \s -> s { psCachedRootGen = Just result }
+                pure result
         forM_ pairs $ \(_bv, arg) -> do
             let argC = canonical arg
             case IntMap.lookup (nodeRefKey (typeRef argC)) bindParents of
@@ -850,6 +865,7 @@ repairBindingParentsFromScratchOrDirty c0 uf canonical mbValidRepairCache dirty0
                 , psBindingModelCache = Just bindingCache
                 , psBindingRepairCache = Just repairCache
                 , psBindingRepairDirty = Nothing
+                , psCachedRootGen = if changed then Nothing else psCachedRootGen st0
                 }
     put stFinal
     pure
