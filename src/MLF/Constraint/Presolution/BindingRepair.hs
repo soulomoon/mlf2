@@ -61,13 +61,12 @@ buildBindingRepairModel canonical c0 =
         , brmStructuralEdges = structuralEdges
         }
   where
-    nodes = cNodes c0
-    nodeIds = map fst (toListNode nodes)
-    nodeValues = map snd (toListNode nodes)
+    nodeMap = getNodeMap (cNodes c0)
+    nodeValues = IntMap.elems nodeMap
     allTypeIds =
         IntSet.fromList
-            [ getNodeId (canonical nid)
-            | nid <- nodeIds
+            [ getNodeId (canonical (NodeId k))
+            | k <- IntMap.keys nodeMap
             ]
     genRefs =
         [ genRef (GenNodeId gid)

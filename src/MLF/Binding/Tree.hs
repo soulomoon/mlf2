@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {- |
 Module      : MLF.Binding.Tree
 Description : Paper-style binding tree operations
@@ -506,14 +507,20 @@ rebuildGenNodesFromBinding c0
 -- node points to it via TyArrow dom/cod, TyForall body, or TyExp body.
 computeTermDagRoots :: Constraint p -> IntSet
 computeTermDagRoots c =
-    let nodes = cNodes c
-        referencedNodes =
-            IntSet.fromList
-                [ getNodeId child
-                | node <- map snd (toListNode nodes)
-                , child <- structuralChildrenWithBounds node
-                ]
-    in IntSet.difference (IntSet.fromList (map (getNodeId . fst) (toListNode nodes))) referencedNodes
+    let nodeMap = getNodeMap (cNodes c)
+        (allNodes, referencedNodes) =
+            IntMap.foldlWithKey'
+                (\(!an, !rn) nid node ->
+                    let an' = IntSet.insert nid an
+                        rn' = foldl'
+                            (\acc child -> IntSet.insert (getNodeId child) acc)
+                            rn
+                            (structuralChildrenWithBounds node)
+                    in (an', rn')
+                )
+                (IntSet.empty, IntSet.empty)
+                nodeMap
+    in IntSet.difference allNodes referencedNodes
 
 -- | Compute term-DAG roots under a canonicalization function.
 --
@@ -521,18 +528,26 @@ computeTermDagRoots c =
 -- through the provided canonicalization function and deduplicates via IntSet.
 computeTermDagRootsUnder :: (NodeId -> NodeId) -> Constraint p -> IntSet
 computeTermDagRootsUnder canonical c =
-    let nodes = cNodes c
-        rootIdOf = getNodeId . canonical
-        allRoots = IntSet.fromList [rootIdOf nid | (nid, _node) <- toListNode nodes]
-        referencedRoots =
-            IntSet.fromList
-                [ childRoot
-                | node <- map snd (toListNode nodes)
-                , let parentRoot = rootIdOf (tnId node)
-                , child <- structuralChildrenWithBounds node
-                , let childRoot = rootIdOf child
-                , childRoot /= parentRoot
-                ]
+    let rootIdOf = getNodeId . canonical
+        nodeMap = getNodeMap (cNodes c)
+        (allRoots, referencedRoots) =
+            IntMap.foldlWithKey'
+                (\(!ar, !rr) nid node ->
+                    let ar' = IntSet.insert (rootIdOf (NodeId nid)) ar
+                        parentRoot = rootIdOf (tnId node)
+                        rr' = foldl'
+                            (\acc child ->
+                                let childRoot = rootIdOf child
+                                in if childRoot /= parentRoot
+                                    then IntSet.insert childRoot acc
+                                    else acc
+                            )
+                            rr
+                            (structuralChildrenWithBounds node)
+                    in (ar', rr')
+                )
+                (IntSet.empty, IntSet.empty)
+                nodeMap
     in IntSet.difference allRoots referencedRoots
 
 -- | Get all NodeIds in the constraint.

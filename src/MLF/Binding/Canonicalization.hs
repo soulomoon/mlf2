@@ -30,9 +30,6 @@ import Data.IntMap.Strict (IntMap)
 import qualified Data.IntSet as IntSet
 import Data.IntSet (IntSet)
 
-import MLF.Binding.NodeRefs (
-    allNodeRefs,
-    )
 import qualified MLF.Constraint.Canonicalize as Canonicalize
 import MLF.Constraint.Types.Graph
 
@@ -79,33 +76,37 @@ quotientBindParentsUnder canonical c0 = do
         allRoots :: IntSet
         allRoots =
             IntSet.fromList
-                [ nodeRefKey (Canonicalize.canonicalRef canonical ref)
-                | ref <- allNodeRefs c0
+                [ typeRefKey (canonical (NodeId k))
+                | k <- IntMap.keys (getNodeMap (cNodes c0))
+                ]
+                `IntSet.union` IntSet.fromList
+                [ genRefKey (GenNodeId k)
+                | k <- IntMap.keys (getGenNodeMap (cGenNodes c0))
                 ]
 
-        entries0 =
-            [ (childRootKey, (parentRoot, flag))
-            | (childKey, (parent0, flag)) <- IntMap.toList bindParents0
-            , let childRef0 = nodeRefFromKey childKey
-            , let childRoot = Canonicalize.canonicalRef canonical childRef0
-            , let parentRoot = Canonicalize.canonicalRef canonical parent0
-            , childRoot /= parentRoot
-            , let childRootKey = nodeRefKey childRoot
-            , IntSet.member childRootKey allRoots
-            , IntSet.member (nodeRefKey parentRoot) allRoots
-            ]
-
+        -- Fuse entries0 + foldME: canonicalize, filter, and insert in one pass.
         -- Union-find canonicalization can transiently create multiple
         -- binding parents for the same canonical node. We resolve this
         -- deterministically by keeping the first parent we saw and
         -- taking the max flag.
-        insertOne bp (childRootKey, (parentRoot, flag)) =
-            Right $ case IntMap.lookup childRootKey bp of
-                Nothing -> IntMap.insert childRootKey (parentRoot, flag) bp
-                Just (parent0, flag0) ->
-                    IntMap.insert childRootKey (parent0, max flag0 flag) bp
-
-    bindParents <- foldME insertOne IntMap.empty entries0
+        bindParents =
+            IntMap.foldlWithKey'
+                (\bp childKey (parent0, flag) ->
+                    let childRootKey = Canonicalize.canonicalRefKey canonical (nodeRefFromKey childKey)
+                        parentRootKey = Canonicalize.canonicalRefKey canonical parent0
+                    in if childRootKey == parentRootKey
+                          || not (IntSet.member childRootKey allRoots)
+                          || not (IntSet.member parentRootKey allRoots)
+                        then bp
+                        else
+                            let parentRoot = Canonicalize.canonicalRef canonical parent0
+                            in case IntMap.lookup childRootKey bp of
+                                Nothing -> IntMap.insert childRootKey (parentRoot, flag) bp
+                                Just (parentOld, flagOld) ->
+                                    IntMap.insert childRootKey (parentOld, max flagOld flag) bp
+                )
+                IntMap.empty
+                bindParents0
 
     -- Sanity: rewritten nodes must correspond to canonical reps of live nodes.
     forM_ (IntMap.keys bindParents) $ \childRootKey ->
@@ -123,11 +124,6 @@ quotientBindParentsUnder canonical c0 = do
                         ++ " of node " ++ show childRootKey ++ " not in constraint"
 
     pure (allRoots, bindParents)
-  where
-    foldME f z xs = go z xs
-      where
-        go acc [] = Right acc
-        go acc (x:rest) = f acc x >>= \acc' -> go acc' rest
 
 quotientBindParentsContextUnder
     :: (NodeId -> NodeId)

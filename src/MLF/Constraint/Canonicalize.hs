@@ -10,6 +10,7 @@ share the same behavior without coupling higher-level responsibilities
 -}
 module MLF.Constraint.Canonicalize (
     canonicalRef,
+    canonicalRefKey,
     chooseRepNode,
     rewriteInstEdges,
     rewriteUnifyEdges,
@@ -28,12 +29,23 @@ import MLF.Constraint.Types.Graph
     , UnifyEdge(..)
     , nodeRefFromKey
     , nodeRefKey
+    , typeRefKey
+    , genRefKey
     )
 
 canonicalRef :: (NodeId -> NodeId) -> NodeRef -> NodeRef
 canonicalRef canonical ref = case ref of
     TypeRef nid -> TypeRef (canonical nid)
     GenRef _ -> ref
+{-# INLINE canonicalRef #-}
+
+-- | Compute the key of a canonicalized reference without allocating an
+-- intermediate 'NodeRef'.
+canonicalRefKey :: (NodeId -> NodeId) -> NodeRef -> Int
+canonicalRefKey canonical ref = case ref of
+    TypeRef nid -> typeRefKey (canonical nid)
+    GenRef gid -> genRefKey gid
+{-# INLINE canonicalRefKey #-}
 
 -- | Prefer a structured node over a variable when collapsing duplicates.
 --
