@@ -214,17 +214,21 @@ nodeRefKey :: NodeRef -> Int
 nodeRefKey ref = case ref of
     TypeRef (NodeId i) -> i * 2
     GenRef (GenNodeId i) -> i * 2 + 1
+{-# INLINE nodeRefKey #-}
 
 nodeRefFromKey :: Int -> NodeRef
 nodeRefFromKey k
     | even k = TypeRef (NodeId (k `div` 2))
     | otherwise = GenRef (GenNodeId ((k - 1) `div` 2))
+{-# INLINE nodeRefFromKey #-}
 
 typeRefKey :: NodeId -> Int
-typeRefKey = nodeRefKey . TypeRef
+typeRefKey (NodeId i) = i * 2
+{-# INLINE typeRefKey #-}
 
 genRefKey :: GenNodeId -> Int
-genRefKey = nodeRefKey . GenRef
+genRefKey (GenNodeId i) = i * 2 + 1
+{-# INLINE genRefKey #-}
 
 genNodeKey :: GenNodeId -> Int
 genNodeKey = getGenNodeId
