@@ -7,13 +7,19 @@ helpers used during presolution, while the implementation lives in focused
 child modules under @MLF.Constraint.Presolution.EdgeUnify.@
 -}
 module MLF.Constraint.Presolution.EdgeUnify (
+    EdgeUnifyStats(..),
     EdgeUnifyState(..),
     EdgeUnifyM,
     MonadEdgeUnify(..),
+    addEdgeUnifyStats,
+    emptyEdgeUnifyStats,
     executeEdgeLocalOmegaOps,
     flushPendingWeakensAtOwnerBoundary,
     initEdgeUnifyState,
+    initEdgeUnifyStateWithStats,
     mkOmegaExecEnv,
+    recordEdgeUnifyStat,
+    recordEdgeUnifyStatN,
     runEdgeUnifyForTest,
     unifyAcyclicEdge,
     unifyStructureEdge
@@ -28,11 +34,17 @@ import MLF.Constraint.Presolution.Base (
     requireValidBindingTree
     )
 import MLF.Constraint.Presolution.EdgeUnify.State (
+    EdgeUnifyStats(..),
     EdgeUnifyM,
     EdgeUnifyState(..),
     MonadEdgeUnify(..),
+    addEdgeUnifyStats,
+    emptyEdgeUnifyStats,
     initEdgeUnifyState,
-    mkOmegaExecEnv
+    initEdgeUnifyStateWithStats,
+    mkOmegaExecEnv,
+    recordEdgeUnifyStat,
+    recordEdgeUnifyStatN
     )
 import qualified MLF.Constraint.Presolution.EdgeUnify.Omega as Omega
 import MLF.Constraint.Presolution.EdgeUnify.Omega (

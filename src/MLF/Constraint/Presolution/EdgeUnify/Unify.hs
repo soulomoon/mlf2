@@ -10,6 +10,7 @@ module MLF.Constraint.Presolution.EdgeUnify.Unify (
 import Control.Monad (foldM, forM_, when)
 import Control.Monad.Reader (ask)
 import Control.Monad.State (gets)
+import qualified Data.List.NonEmpty as NE
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
@@ -21,8 +22,10 @@ import MLF.Constraint.Presolution.Base (
 import qualified MLF.Constraint.Presolution.Ops as Ops
 import MLF.Constraint.Presolution.EdgeUnify.State (
     EdgeUnifyM,
+    EdgeUnifyStats(..),
     EdgeUnifyState(..),
     MonadEdgeUnify(..),
+    clearEdgeUnifyStructureCache,
     deleteInteriorKey,
     insertInteriorKey,
     isEliminated,
@@ -30,12 +33,14 @@ import MLF.Constraint.Presolution.EdgeUnify.State (
     nullInteriorNodes,
     preferBinderMetaRoot,
     recordEliminate,
+    recordEdgeUnifyStat,
+    recordEdgeUnifyStatN,
     recordRaisesFromTrace,
+    structurePairSeenOrInsert,
     unifyWithLockedFallback
     )
 import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical)
 import qualified MLF.Constraint.Traversal as Traversal
-import qualified MLF.Constraint.Unify.Decompose as UnifyDecompose
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness
 import qualified MLF.Util.Order as Order
@@ -44,11 +49,27 @@ import MLF.Util.Trace (traceBindingM)
 recordOp :: InstanceOp -> EdgeUnifyM p ()
 recordOp = recordInstanceOp
 
+recordChildEdges :: Int -> EdgeUnifyM p ()
+recordChildEdges count =
+    recordEdgeUnifyStatN (fromIntegral count) $ \n stats ->
+        stats { eusUnifyStructureChildEdges = eusUnifyStructureChildEdges stats + n }
+
+recordCanonicalNodeLookups :: Int -> EdgeUnifyM p ()
+recordCanonicalNodeLookups count =
+    recordEdgeUnifyStatN (fromIntegral count) $ \n stats ->
+        stats { eusCanonicalNodeLookups = eusCanonicalNodeLookups stats + n }
+
+getCanonicalNodeEdge :: NodeId -> EdgeUnifyM p TyNode
+getCanonicalNodeEdge nid = do
+    root <- findRootM nid
+    liftPresolution $ Ops.getNode root
+
 compareBinderIdsByPrec :: Int -> Int -> EdgeUnifyM p Ordering
 compareBinderIdsByPrec bid1 bid2 = do
-    keys <- gets eusOrderKeys
+    mbKeys <- gets eusOrderKeys
     binderMeta <- gets eusBinderMeta
     let keyFor bid = do
+            keys <- mbKeys
             meta <- IntMap.lookup bid binderMeta
             IntMap.lookup (getNodeId meta) keys
         k1 = keyFor bid1
@@ -117,6 +138,8 @@ and must not record/source-write `OpMerge n n` side effects.
 
 unifyAcyclicEdge :: NodeId -> NodeId -> EdgeUnifyM p ()
 unifyAcyclicEdge n1 n2 = do
+    recordEdgeUnifyStat $ \stats ->
+        stats { eusUnifyAcyclicCalls = eusUnifyAcyclicCalls stats + 1 }
     root1 <- findRootM n1
     root2 <- findRootM n2
     when (root1 /= root2) $ do
@@ -291,104 +314,144 @@ debugEdgeUnify msg = do
 
 unifyStructureEdge :: NodeId -> NodeId -> EdgeUnifyM p ()
 unifyStructureEdge n1 n2 = do
-    root1 <- findRootM n1
-    root2 <- findRootM n2
-    debugEdgeUnify
-        ( "unifyStructureEdge: n1="
-            ++ show n1
-            ++ " root1="
-            ++ show root1
-            ++ " n2="
-            ++ show n2
-            ++ " root2="
-            ++ show root2
-        )
-    if root1 == root2 then pure ()
-    else do
-        node1 <- liftPresolution $ Ops.getCanonicalNode n1
-        node2 <- liftPresolution $ Ops.getCanonicalNode n2
-        isMeta1 <- isBinderMetaRoot root1
-        isMeta2 <- isBinderMetaRoot root2
-        let isVar1 = case node1 of
-                TyVar{} -> True
-                _ -> False
-            isVar2 = case node2 of
-                TyVar{} -> True
-                _ -> False
-            unifyVarBounds nA nB =
-                case (nA, nB) of
-                    (TyVar { tnBound = mb1 }, TyVar { tnBound = mb2 }) ->
-                        case (mb1, mb2) of
-                            (Just b1, Just b2) ->
-                                when (b1 /= b2) (unifyStructureEdge b1 b2)
-                            _ -> pure ()
-                    _ -> pure ()
-            trySetBound target bnd = do
-                (c0, canonical) <- liftPresolution getConstraintAndCanonical
-                let targetC = canonical target
-                    bndC = canonical bnd
-                occurs <-
-                    case Traversal.occursInUnder canonical (NodeAccess.lookupNode c0) targetC bndC of
-                        Left _ -> pure True
-                        Right ok -> pure ok
-                if occurs
-                    then throwPresolutionErrorM (OccursCheckPresolution targetC bndC)
-                    else
-                        if bndC /= targetC
-                            then setVarBoundM targetC (Just bndC) >> pure True
-                            else pure False
-            unifyStructureChildren nodeA nodeB =
-                case (nodeA, nodeB) of
-                    (TyVar{}, _) -> pure ()
-                    (_, TyVar{}) -> pure ()
-                    (TyExp{}, _) -> pure ()
-                    (_, TyExp{}) -> pure ()
-                    _ ->
-                        case UnifyDecompose.decomposeUnifyChildren nodeA nodeB of
-                            Right edges ->
-                                mapM_ (\edge -> unifyStructureEdge (uniLeft edge) (uniRight edge)) edges
-                            Left _ -> pure ()
-        if isMeta1 || isMeta2
-            then
-                if isVar1 && isVar2
-                    then do
-                        unifyAcyclicEdge n1 n2
-                        unifyVarBounds node1 node2
-                    else do
-                        let (metaRoot, otherNode) =
-                                if isMeta1 then (root1, node2) else (root2, node1)
-                        mbMetaBound <- lookupVarBoundM metaRoot
-                        case mbMetaBound of
-                            Just bMeta -> do
-                                bMetaNode <- liftPresolution $ Ops.getCanonicalNode bMeta
-                                case bMetaNode of
-                                    TyVar{} -> do
-                                        _ <- trySetBound bMeta (tnId otherNode)
-                                        pure ()
-                                    _ -> unifyStructureEdge bMeta (tnId otherNode)
-                            Nothing -> do
-                                _ <- trySetBound metaRoot (tnId otherNode)
-                                pure ()
-            else do
-                unifyAcyclicEdge n1 n2
-                case (node1, node2) of
-                    (TyVar { tnBound = mb1 }, TyVar { tnBound = mb2 }) ->
-                        case (mb1, mb2) of
-                            (Just b1, Just b2) ->
-                                when (b1 /= b2) (unifyStructureEdge b1 b2)
-                            (Just b1, Nothing) -> do
-                                _ <- trySetBound (tnId node2) b1
-                                pure ()
-                            (Nothing, Just b2) -> do
-                                _ <- trySetBound (tnId node1) b2
-                                pure ()
-                            _ -> pure ()
-                    (TyVar { tnBound = Just b1 }, _) ->
-                        when (b1 /= tnId node2) (unifyStructureEdge b1 (tnId node2))
-                    (_, TyVar { tnBound = Just b2 }) ->
-                        when (b2 /= tnId node1) (unifyStructureEdge (tnId node1) b2)
-                    _ ->
-                        unifyStructureChildren node1 node2
+    when (n1 /= n2) $ do
+        seen <- structurePairSeenOrInsert n1 n2
+        when (not seen) $ do
+            root1 <- findRootM n1
+            root2 <- findRootM n2
+            if root1 == root2
+                then
+                    recordEdgeUnifyStat $ \stats ->
+                        stats { eusUnifyStructureSameRoot = eusUnifyStructureSameRoot stats + 1 }
+                else do
+                    seenRoots <- structurePairSeenOrInsert root1 root2
+                    when (not seenRoots) $ do
+                        recordEdgeUnifyStat $ \stats ->
+                            stats { eusUnifyStructureCalls = eusUnifyStructureCalls stats + 1 }
+                        unifyStructureRoots root1 root2
+
+unifyStructureRoots :: NodeId -> NodeId -> EdgeUnifyM p ()
+unifyStructureRoots root1 root2 = do
+    recordCanonicalNodeLookups 2
+    node1 <- liftPresolution $ Ops.getNode root1
+    node2 <- liftPresolution $ Ops.getNode root2
+    isMeta1 <- isBinderMetaRoot root1
+    isMeta2 <- isBinderMetaRoot root2
+    let isVar1 = case node1 of
+            TyVar{} -> True
+            _ -> False
+        isVar2 = case node2 of
+            TyVar{} -> True
+            _ -> False
+        unifyVarBounds nA nB =
+            case (nA, nB) of
+                (TyVar { tnBound = mb1 }, TyVar { tnBound = mb2 }) ->
+                    case (mb1, mb2) of
+                        (Just b1, Just b2) ->
+                            when (b1 /= b2) (unifyStructureEdge b1 b2)
+                        _ -> pure ()
+                _ -> pure ()
+        trySetBound target bnd = do
+            recordEdgeUnifyStat $ \stats ->
+                stats { eusSetVarBoundAttempts = eusSetVarBoundAttempts stats + 1 }
+            if target == bnd
+                then pure False
+                else do
+                    targetC <- findRootM target
+                    bndC <- findRootM bnd
+                    if bndC == targetC
+                        then pure False
+                        else do
+                            (c0, canonical) <- liftPresolution getConstraintAndCanonical
+                            recordEdgeUnifyStat $ \stats ->
+                                stats { eusOccursChecks = eusOccursChecks stats + 1 }
+                            occurs <-
+                                case Traversal.occursInUnder canonical (NodeAccess.lookupNode c0) targetC bndC of
+                                    Left _ -> pure True
+                                    Right ok -> pure ok
+                            if occurs
+                                then throwPresolutionErrorM (OccursCheckPresolution targetC bndC)
+                                else do
+                                    liftPresolution (Ops.setCanonicalVarBound targetC (Just bndC))
+                                    clearEdgeUnifyStructureCache
+                                    pure True
+        unifyStructureChildren nodeA nodeB =
+            case (nodeA, nodeB) of
+                (TyVar{}, _) -> pure ()
+                (_, TyVar{}) -> pure ()
+                (TyExp{}, _) -> pure ()
+                (_, TyExp{}) -> pure ()
+                (TyArrow { tnDom = d1, tnCod = c1 }, TyArrow { tnDom = d2, tnCod = c2 }) -> do
+                    recordChildEdges 2
+                    unifyStructureEdge d1 d2
+                    unifyStructureEdge c1 c2
+                (TyForall { tnBody = b1 }, TyForall { tnBody = b2 }) -> do
+                    recordChildEdges 1
+                    unifyStructureEdge b1 b2
+                (TyMu { tnBody = b1 }, TyMu { tnBody = b2 }) -> do
+                    recordChildEdges 1
+                    unifyStructureEdge b1 b2
+                (TyBase { tnBase = b1 }, TyBase { tnBase = b2 })
+                    | b1 == b2 -> pure ()
+                (TyBottom{}, TyBottom{}) ->
+                    pure ()
+                (TyCon { tnCon = c1, tnArgs = args1 }, TyCon { tnCon = c2, tnArgs = args2 })
+                    | c1 == c2
+                    , NE.length args1 == NE.length args2 -> do
+                        recordChildEdges (NE.length args1)
+                        mapM_ (uncurry unifyStructureEdge) (zip (NE.toList args1) (NE.toList args2))
+                (TyVarApp { tnVarHead = head1, tnArgs = args1 }, TyVarApp { tnVarHead = head2, tnArgs = args2 })
+                    | NE.length args1 == NE.length args2 -> do
+                        recordChildEdges (1 + NE.length args1)
+                        unifyStructureEdge head1 head2
+                        mapM_ (uncurry unifyStructureEdge) (zip (NE.toList args1) (NE.toList args2))
+                _ -> pure ()
+    if isMeta1 || isMeta2
+        then do
+            recordEdgeUnifyStat $ \stats ->
+                stats { eusUnifyStructureMetaPath = eusUnifyStructureMetaPath stats + 1 }
+            if isVar1 && isVar2
+                then do
+                    recordEdgeUnifyStat $ \stats ->
+                        stats { eusUnifyStructureVarVar = eusUnifyStructureVarVar stats + 1 }
+                    unifyAcyclicEdge root1 root2
+                    unifyVarBounds node1 node2
+                else do
+                    let (metaRoot, otherNode) =
+                            if isMeta1 then (root1, node2) else (root2, node1)
+                    mbMetaBound <- lookupVarBoundM metaRoot
+                    case mbMetaBound of
+                        Just bMeta -> do
+                            recordCanonicalNodeLookups 1
+                            bMetaNode <- getCanonicalNodeEdge bMeta
+                            case bMetaNode of
+                                TyVar{} -> do
+                                    _ <- trySetBound bMeta (tnId otherNode)
+                                    pure ()
+                                _ -> unifyStructureEdge bMeta (tnId otherNode)
+                        Nothing -> do
+                            _ <- trySetBound metaRoot (tnId otherNode)
+                            pure ()
+        else do
+            unifyAcyclicEdge root1 root2
+            case (node1, node2) of
+                (TyVar { tnBound = mb1 }, TyVar { tnBound = mb2 }) ->
+                    case (mb1, mb2) of
+                        (Just b1, Just b2) ->
+                            when (b1 /= b2) (unifyStructureEdge b1 b2)
+                        (Just b1, Nothing) -> do
+                            _ <- trySetBound (tnId node2) b1
+                            pure ()
+                        (Nothing, Just b2) -> do
+                            _ <- trySetBound (tnId node1) b2
+                            pure ()
+                        _ -> pure ()
+                (TyVar { tnBound = Just b1 }, _) ->
+                    when (b1 /= tnId node2) (unifyStructureEdge b1 (tnId node2))
+                (_, TyVar { tnBound = Just b2 }) ->
+                    when (b2 /= tnId node1) (unifyStructureEdge (tnId node1) b2)
+                _ ->
+                    unifyStructureChildren node1 node2
 
 isBinderMetaRoot :: NodeId -> EdgeUnifyM p Bool
 isBinderMetaRoot root = do

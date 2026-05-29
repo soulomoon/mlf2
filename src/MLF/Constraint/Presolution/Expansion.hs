@@ -28,7 +28,7 @@ module MLF.Constraint.Presolution.Expansion (
     setExpansion
 ) where
 
-import Control.Monad (foldM, forM, zipWithM, zipWithM_)
+import Control.Monad (foldM, zipWithM, zipWithM_)
 import Control.Monad.Except (throwError)
 import Control.Monad.Reader (ask)
 import Control.Monad.State (gets, modify)
@@ -61,11 +61,11 @@ import MLF.Constraint.Presolution.ForallIntro (introduceForallFromSpec)
 import MLF.Constraint.Presolution.Ops (
     createFreshVar,
     getCanonicalNode,
-    lookupVarBound,
     setVarBound
     )
 import MLF.Constraint.Presolution.StateAccess (
     PresolutionBindingSnapshot(..),
+    getConstraintAndCanonical,
     getBindingSnapshot,
     lookupBindParentM
     )
@@ -74,6 +74,7 @@ import MLF.Constraint.Types.Witness
 import MLF.Constraint.Types.Presolution
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution.Unify (unifyAcyclic)
+import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Util.Trace (traceBindingM)
 
 -- | Get the current expansion for an expansion variable.
@@ -596,17 +597,28 @@ instantiateEdgeTraceFromKnownBinders expNode bodyRoot boundVars args
 
 copyBinderBounds :: [(NodeId, NodeId)] -> [(NodeId, NodeId)] -> PresolutionM p (CopyMap, InteriorSet, FrontierSet)
 copyBinderBounds binderMetas binderArgs = do
+    (c0, canonical) <- getConstraintAndCanonical
     let binderMetaMap = IntMap.fromList [(getNodeId bv, meta) | (bv, meta) <- binderMetas]
+        binderMetaCanonicalMap =
+            IntMap.fromListWith
+                (\existing _ -> existing)
+                [ (getNodeId (canonical bv), meta)
+                | (bv, meta) <- binderMetas
+                ]
+        lookupBinderMetaForBound bnd =
+            case IntMap.lookup (getNodeId bnd) binderMetaMap of
+                Just meta -> Just meta
+                Nothing -> IntMap.lookup (getNodeId (canonical bnd)) binderMetaCanonicalMap
         binderArgMap = IntMap.fromList [(getNodeId bv, arg) | (bv, arg) <- binderArgs]
-    binderBounds <-
-        forM binderMetas $ \(bv, meta) -> do
-            mbBound <- lookupVarBound bv
-            pure (bv, meta, mbBound)
+    let binderBounds =
+            [ (bv, meta, VarStore.lookupVarBound c0 (canonical bv))
+            | (bv, meta) <- binderMetas
+            ]
     let needsCopy =
             any
                 ( \(_, _, mbBound) ->
                     case mbBound of
-                        Just bnd -> IntMap.notMember (getNodeId bnd) binderMetaMap
+                        Just bnd -> maybe True (const False) (lookupBinderMetaForBound bnd)
                         Nothing -> False
                 )
                 binderBounds
@@ -616,24 +628,24 @@ copyBinderBounds binderMetas binderArgs = do
             else pure Nothing
     (traceResult, _copiedBounds) <-
         foldM
-            (copyBinderBoundWith mbSnapshot binderMetaMap binderArgMap binderMetas)
+            (copyBinderBoundWith mbSnapshot lookupBinderMetaForBound binderArgMap binderMetas)
             (emptyTrace, IntMap.empty)
             binderBounds
     pure traceResult
 
 copyBinderBoundWith
     :: Maybe (PresolutionBindingSnapshot p)
-    -> IntMap.IntMap NodeId
+    -> (NodeId -> Maybe NodeId)
     -> IntMap.IntMap NodeId
     -> [(NodeId, NodeId)]
     -> ((CopyMap, InteriorSet, FrontierSet), IntMap.IntMap NodeId)
     -> (NodeId, NodeId, Maybe NodeId)
     -> PresolutionM p ((CopyMap, InteriorSet, FrontierSet), IntMap.IntMap NodeId)
-copyBinderBoundWith mbSnapshot binderMetaMap binderArgMap binderMetas (traceAcc, copiedBounds) (bv, meta, mbBound) =
+copyBinderBoundWith mbSnapshot lookupBinderMetaForBound binderArgMap binderMetas (traceAcc, copiedBounds) (bv, meta, mbBound) =
     case mbBound of
         Nothing -> pure (traceAcc, copiedBounds)
         Just bnd ->
-            case IntMap.lookup (getNodeId bnd) binderMetaMap of
+            case lookupBinderMetaForBound bnd of
                 Just bndMeta -> do
                     setInstantiatedBound bv meta bndMeta
                     pure (traceAcc, copiedBounds)
