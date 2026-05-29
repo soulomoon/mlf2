@@ -1187,28 +1187,18 @@ checkDefsWithTiming timing moduleName0 finalizeContext elaborateScope scope defD
           Right (nonRecursiveDefNames workItems)
       case nonRecursiveNamesResult of
         Left err -> pure (Left err)
-        Right nonRecursiveNames
-          | length workItems >= moduleDefContextMinDefs -> do
-              moduleContextResult <-
-                timeCheckModuleOperation timing moduleName0 "defs.module_finalize_context" $
-                  mkModuleFinalizeContext finalizeContext (map defWorkItemLowered workItems)
-              case moduleContextResult of
-                Left err -> pure (Left err)
-                Right moduleContext ->
-                  finalizeDefWorkItemsWithTiming
-                    timing
-                    moduleName0
-                    finalizeContext
-                    (Just moduleContext)
-                    batchSize
-                    nonRecursiveNames
-                    workItems
-          | otherwise ->
+        Right nonRecursiveNames -> do
+          moduleContextResult <-
+            timeCheckModuleOperation timing moduleName0 "defs.module_finalize_context" $
+              mkModuleFinalizeContext finalizeContext (map defWorkItemLowered workItems)
+          case moduleContextResult of
+            Left err -> pure (Left err)
+            Right moduleContext ->
               finalizeDefWorkItemsWithTiming
                 timing
                 moduleName0
                 finalizeContext
-                Nothing
+                (Just moduleContext)
                 batchSize
                 nonRecursiveNames
                 workItems
@@ -1545,16 +1535,13 @@ finalizeDefWorkItemWithTiming timing moduleName0 finalizeContext moduleContext n
     lowered = defWorkItemLowered workItem
     label = checkModuleOperationLabel moduleName0 ("def." ++ defName)
 
-moduleDefContextMinDefs :: Int
-moduleDefContextMinDefs = 150
-
 moduleDefBatchSize :: IO Int
 moduleDefBatchSize = do
   mbValue <- lookupEnv "MLF_MODULE_DEF_BATCH_SIZE"
   pure $
     case mbValue >>= readMaybe of
       Just n | n > 1 -> n
-      _ -> 1
+      _ -> 16
 
 moduleContextEligibleDefWorkItem :: Set.Set String -> DefWorkItem -> Bool
 moduleContextEligibleDefWorkItem nonRecursiveNames workItem =
