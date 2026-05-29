@@ -75,14 +75,13 @@ quotientBindParentsUnder canonical c0 = do
 
         allRoots :: IntSet
         allRoots =
-            IntSet.fromList
-                [ typeRefKey (canonical (NodeId k))
-                | k <- IntMap.keys (getNodeMap (cNodes c0))
-                ]
-                `IntSet.union` IntSet.fromList
-                [ genRefKey (GenNodeId k)
-                | k <- IntMap.keys (getGenNodeMap (cGenNodes c0))
-                ]
+            IntMap.foldlWithKey'
+                (\acc k _ -> IntSet.insert (typeRefKey (canonical (NodeId k))) acc)
+                (IntMap.foldlWithKey'
+                    (\acc k _ -> IntSet.insert (genRefKey (GenNodeId k)) acc)
+                    IntSet.empty
+                    (getGenNodeMap (cGenNodes c0)))
+                (getNodeMap (cNodes c0))
 
         -- Fuse entries0 + foldME: canonicalize, filter, and insert in one pass.
         -- Union-find canonicalization can transiently create multiple
@@ -100,10 +99,11 @@ quotientBindParentsUnder canonical c0 = do
                         then bp
                         else
                             let parentRoot = Canonicalize.canonicalRef canonical parent0
-                            in case IntMap.lookup childRootKey bp of
-                                Nothing -> IntMap.insert childRootKey (parentRoot, flag) bp
-                                Just (parentOld, flagOld) ->
-                                    IntMap.insert childRootKey (parentOld, max flagOld flag) bp
+                            in IntMap.insertWith
+                                (\(_, flagNew) (parentOld, flagOld) -> (parentOld, max flagOld flagNew))
+                                childRootKey
+                                (parentRoot, flag)
+                                bp
                 )
                 IntMap.empty
                 bindParents0
