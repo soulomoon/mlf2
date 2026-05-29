@@ -77,13 +77,13 @@ import MLF.Constraint.Presolution.Materialization (
     materializeExpansions
     )
 import MLF.Constraint.Presolution.EdgeProcessing (
-    runPresolutionLoop,
+    runPresolutionLoopWithRootOwnership,
     runPresolutionLoopWithTiming
     )
 import MLF.Constraint.Presolution.EdgeUnify.Omega (pendingWeakenOwners)
 import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical)
 import MLF.Constraint.Acyclicity (AcyclicityResult(..))
-import MLF.Util.Timing (TimingConfig, timeProgramOperationIO)
+import MLF.Util.Timing (TimingConfig, timeProgramOperationIO, timingProgramOperations)
 
 -- | Main entry point: compute principal presolution.
 computePresolution
@@ -92,13 +92,22 @@ computePresolution
     -> Constraint 'Acyclic
     -> Either PresolutionError PresolutionResult
 computePresolution traceCfg acyclicityResult constraint = do
+    computePresolutionWithRootOwnership traceCfg emptyRootOwnershipIndex acyclicityResult constraint
+
+computePresolutionWithRootOwnership
+    :: TraceConfig
+    -> RootOwnershipIndex
+    -> AcyclicityResult
+    -> Constraint 'Acyclic
+    -> Either PresolutionError PresolutionResult
+computePresolutionWithRootOwnership traceCfg rootOwnership acyclicityResult constraint = do
     -- Initialize state
     let initialState = mkInitialPresolutionState constraint
 
     -- Run the presolution loop.
     (_, presState) <- runPresolutionM traceCfg
         initialState
-        (runPresolutionLoop traceCfg (arSortedEdges acyclicityResult))
+        (runPresolutionLoopWithRootOwnership traceCfg rootOwnership (arSortedEdges acyclicityResult))
 
     -- Finalization stage (thesis-aligned post-loop artifact construction):
     --  1) materialize expansions
@@ -129,30 +138,33 @@ computePresolutionWithTimingAndRootOwnership
     -> Constraint 'Acyclic
     -> IO (Either PresolutionError PresolutionResult)
 computePresolutionWithTimingAndRootOwnership timing label traceCfg rootOwnership acyclicityResult constraint =
-    runExceptT $ do
-        initialState <-
-            ExceptT $
-                Right
-                    <$> timeProgramOperationIO
-                        timing
-                        (label ++ ".init")
-                        (evaluate (mkInitialPresolutionState constraint))
-        (_, presState) <-
-            ExceptT $
-                timeProgramOperationIO timing (label ++ ".edge_loop") $
-                    runPresolutionLoopWithTiming
-                        timing
-                        (label ++ ".edge_loop")
-                        traceCfg
-                        rootOwnership
-                        (arSortedEdges acyclicityResult)
-                        initialState
-        (redirects, finalState) <-
-            ExceptT $
-                runFinalizationStageWithTiming timing (label ++ ".finalize") traceCfg presState
-        ExceptT $
-            timeProgramOperationIO timing (label ++ ".post_validate") $
-                evaluate (finishPresolutionResult traceCfg constraint redirects finalState)
+    if not (timingProgramOperations timing)
+        then evaluate (computePresolutionWithRootOwnership traceCfg rootOwnership acyclicityResult constraint)
+        else
+            runExceptT $ do
+                initialState <-
+                    ExceptT $
+                        Right
+                            <$> timeProgramOperationIO
+                                timing
+                                (label ++ ".init")
+                                (evaluate (mkInitialPresolutionState constraint))
+                (_, presState) <-
+                    ExceptT $
+                        timeProgramOperationIO timing (label ++ ".edge_loop") $
+                            runPresolutionLoopWithTiming
+                                timing
+                                (label ++ ".edge_loop")
+                                traceCfg
+                                rootOwnership
+                                (arSortedEdges acyclicityResult)
+                                initialState
+                (redirects, finalState) <-
+                    ExceptT $
+                        runFinalizationStageWithTiming timing (label ++ ".finalize") traceCfg presState
+                ExceptT $
+                    timeProgramOperationIO timing (label ++ ".post_validate") $
+                        evaluate (finishPresolutionResult traceCfg constraint redirects finalState)
 
 finishPresolutionResult
     :: TraceConfig

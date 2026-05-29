@@ -3,11 +3,15 @@
 module MLF.Elab.Run.ResultType.Fallback
   ( computeResultTypeFallback,
     computeResultTypeFallbackWithView,
+    computeResultTypeFallbackWithRoots,
   )
 where
 
 import qualified Data.Set as Set
-import MLF.Elab.Run.ResultType.Fallback.Core (computeResultTypeFallbackCore)
+import MLF.Elab.Run.ResultType.Fallback.Core
+  ( computeResultTypeFallbackCore,
+    computeResultTypeFallbackCoreWithRoots,
+  )
 import MLF.Elab.Run.ResultType.Types
   ( ResultTypeInputs (..),
   )
@@ -47,6 +51,17 @@ computeResultTypeFallbackWithView ::
   AnnExpr ->
   Either ElabError ElabType
 computeResultTypeFallbackWithView recurse ctx view annCanon ann = do
+  computeResultTypeFallbackWithRoots recurse ctx view Nothing annCanon ann
+
+computeResultTypeFallbackWithRoots ::
+  ResultTypeRecursor p ->
+  ResultTypeInputs p ->
+  View.ResultTypeView p ->
+  Maybe (AnnExpr, AnnExpr) ->
+  AnnExpr ->
+  AnnExpr ->
+  Either ElabError ElabType
+computeResultTypeFallbackWithRoots recurse ctx view mbRoots annCanon ann = do
   let presolutionViewForGen = View.rtvPresolutionViewOverlay view
   -- Note [Annotated Lambda Result Type]
   -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -119,7 +134,10 @@ computeResultTypeFallbackWithView recurse ctx view annCanon ann = do
                 pure boundedResultTy
               else -- For simple annotations, just return the arrow type.
                 pure (TArrow paramTy bodyTy)
-    _ -> computeResultTypeFallbackCore ctx view annCanon ann
+    _ ->
+      case mbRoots of
+        Just roots -> computeResultTypeFallbackCoreWithRoots ctx view roots annCanon ann
+        Nothing -> computeResultTypeFallbackCore ctx view annCanon ann
 
 -- | Compute result type for the body of an annotated lambda.
 -- This handles the case where the body is wrapped in AAnn.

@@ -8,10 +8,15 @@ Module      : MLF.Constraint.Presolution.EdgeUnify.State
 Description : Edge-local unification state and shared primitives
 -}
 module MLF.Constraint.Presolution.EdgeUnify.State (
+    EdgeUnifyStats(..),
     EdgeUnifyState(..),
     EdgeUnifyM,
     MonadEdgeUnify(..),
+    addEdgeUnifyStats,
+    clearEdgeUnifyStructureCache,
+    emptyEdgeUnifyStats,
     initEdgeUnifyState,
+    initEdgeUnifyStateWithStats,
     mkOmegaExecEnv,
     applyPendingWeaken,
     deleteInteriorKey,
@@ -21,7 +26,10 @@ module MLF.Constraint.Presolution.EdgeUnify.State (
     nullInteriorNodes,
     preferBinderMetaRoot,
     recordEliminate,
+    recordEdgeUnifyStat,
+    recordEdgeUnifyStatN,
     recordRaisesFromTrace,
+    structurePairSeenOrInsert,
     unifyWithLockedFallback
 ) where
 
@@ -32,9 +40,11 @@ import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.Maybe (fromMaybe, listToMaybe)
+import Data.Word (Word64)
 
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.NodeAccess as NodeAccess
+import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Constraint.Presolution.Base (
     CopyMap,
     InteriorNodes(..),
@@ -64,6 +74,53 @@ import MLF.Constraint.Types.Witness
 import qualified MLF.Util.Order as Order
 import qualified MLF.Witness.OmegaExec as OmegaExec
 
+data EdgeUnifyStats = EdgeUnifyStats
+    { eusFindRootCalls :: !Word64
+    , eusCanonicalNodeLookups :: !Word64
+    , eusLookupVarBoundCalls :: !Word64
+    , eusSetVarBoundAttempts :: !Word64
+    , eusOccursChecks :: !Word64
+    , eusUnifyAcyclicCalls :: !Word64
+    , eusUnifyStructureCalls :: !Word64
+    , eusUnifyStructureSameRoot :: !Word64
+    , eusUnifyStructureMetaPath :: !Word64
+    , eusUnifyStructureVarVar :: !Word64
+    , eusUnifyStructureChildEdges :: !Word64
+    }
+    deriving (Eq, Show)
+
+emptyEdgeUnifyStats :: EdgeUnifyStats
+emptyEdgeUnifyStats =
+    EdgeUnifyStats
+        { eusFindRootCalls = 0
+        , eusCanonicalNodeLookups = 0
+        , eusLookupVarBoundCalls = 0
+        , eusSetVarBoundAttempts = 0
+        , eusOccursChecks = 0
+        , eusUnifyAcyclicCalls = 0
+        , eusUnifyStructureCalls = 0
+        , eusUnifyStructureSameRoot = 0
+        , eusUnifyStructureMetaPath = 0
+        , eusUnifyStructureVarVar = 0
+        , eusUnifyStructureChildEdges = 0
+        }
+
+addEdgeUnifyStats :: EdgeUnifyStats -> EdgeUnifyStats -> EdgeUnifyStats
+addEdgeUnifyStats a b =
+    EdgeUnifyStats
+        { eusFindRootCalls = eusFindRootCalls a + eusFindRootCalls b
+        , eusCanonicalNodeLookups = eusCanonicalNodeLookups a + eusCanonicalNodeLookups b
+        , eusLookupVarBoundCalls = eusLookupVarBoundCalls a + eusLookupVarBoundCalls b
+        , eusSetVarBoundAttempts = eusSetVarBoundAttempts a + eusSetVarBoundAttempts b
+        , eusOccursChecks = eusOccursChecks a + eusOccursChecks b
+        , eusUnifyAcyclicCalls = eusUnifyAcyclicCalls a + eusUnifyAcyclicCalls b
+        , eusUnifyStructureCalls = eusUnifyStructureCalls a + eusUnifyStructureCalls b
+        , eusUnifyStructureSameRoot = eusUnifyStructureSameRoot a + eusUnifyStructureSameRoot b
+        , eusUnifyStructureMetaPath = eusUnifyStructureMetaPath a + eusUnifyStructureMetaPath b
+        , eusUnifyStructureVarVar = eusUnifyStructureVarVar a + eusUnifyStructureVarVar b
+        , eusUnifyStructureChildEdges = eusUnifyStructureChildEdges a + eusUnifyStructureChildEdges b
+        }
+
 data EdgeUnifyState = EdgeUnifyState
     { eusInteriorRoots :: InteriorNodes
     , eusBindersByRoot :: IntMap IntSet.IntSet
@@ -73,9 +130,13 @@ data EdgeUnifyState = EdgeUnifyState
     , eusEliminatedBinders :: IntSet.IntSet
     , eusBinderMeta :: IntMap NodeId
     , eusBinderMetaRoots :: IntSet.IntSet
-    , eusOrderKeys :: IntMap Order.OrderKey
+    , eusOrderKeys :: Maybe (IntMap Order.OrderKey)
     , eusPendingWeakenOwner :: PendingWeakenOwner
     , eusOps :: [InstanceOp]
+    , eusRootCache :: IntMap NodeId
+    , eusStructurePairs :: IntMap IntSet.IntSet
+    , eusCollectStats :: !Bool
+    , eusStats :: !EdgeUnifyStats
     }
 
 type EdgeUnifyM p = StateT EdgeUnifyState (PresolutionM p)
@@ -88,6 +149,41 @@ deleteInteriorKey k (InteriorNodes s) = InteriorNodes (IntSet.delete k s)
 
 nullInteriorNodes :: InteriorNodes -> Bool
 nullInteriorNodes (InteriorNodes s) = IntSet.null s
+
+recordEdgeUnifyStat :: (EdgeUnifyStats -> EdgeUnifyStats) -> EdgeUnifyM p ()
+recordEdgeUnifyStat update = do
+    st <- get
+    when (eusCollectStats st) $
+        put $! st { eusStats = update (eusStats st) }
+
+recordEdgeUnifyStatN :: Word64 -> (Word64 -> EdgeUnifyStats -> EdgeUnifyStats) -> EdgeUnifyM p ()
+recordEdgeUnifyStatN count update =
+    recordEdgeUnifyStat (update count)
+
+clearEdgeUnifyRootCache :: EdgeUnifyM p ()
+clearEdgeUnifyRootCache =
+    modify' $ \st -> st { eusRootCache = IntMap.empty, eusStructurePairs = IntMap.empty }
+
+clearEdgeUnifyStructureCache :: EdgeUnifyM p ()
+clearEdgeUnifyStructureCache =
+    modify' $ \st -> st { eusStructurePairs = IntMap.empty }
+
+structurePairSeenOrInsert :: NodeId -> NodeId -> EdgeUnifyM p Bool
+structurePairSeenOrInsert left right = do
+    let leftKey = getNodeId left
+        rightKey = getNodeId right
+        (lo, hi) =
+            if leftKey <= rightKey
+                then (leftKey, rightKey)
+                else (rightKey, leftKey)
+    st <- get
+    let peers = IntMap.findWithDefault IntSet.empty lo (eusStructurePairs st)
+    if IntSet.member hi peers
+        then pure True
+        else do
+            let pairs' = IntMap.insert lo (IntSet.insert hi peers) (eusStructurePairs st)
+            put $! st { eusStructurePairs = pairs' }
+            pure False
 
 mergeBinderMetaRoots :: Int -> Int -> Int -> IntSet.IntSet -> IntSet.IntSet
 mergeBinderMetaRoots r1 r2 rep roots
@@ -105,7 +201,7 @@ class MonadPresolution m => MonadEdgeUnify m where
     getInteriorRoots :: m InteriorNodes
     getEdgeRoot :: m NodeId
     getBinderMeta :: m (IntMap NodeId)
-    getOrderKeys :: m (IntMap Order.OrderKey)
+    getOrderKeys :: m (Maybe (IntMap Order.OrderKey))
     recordInstanceOp :: InstanceOp -> m ()
     liftPresolution :: PresolutionM (PresolutionPhaseOf m) a -> m a
     findRootM :: NodeId -> m NodeId
@@ -127,20 +223,57 @@ instance MonadEdgeUnify (EdgeUnifyM p) where
     getOrderKeys = gets eusOrderKeys
     recordInstanceOp op = modify' $ \st -> st { eusOps = op : eusOps st }
     liftPresolution = lift
-    findRootM nid = lift $ Ops.findRoot nid
+    findRootM nid = do
+        st <- get
+        let key = getNodeId nid
+            collectStats = eusCollectStats st
+            stats' =
+                if collectStats
+                    then
+                        let stats = eusStats st
+                        in stats { eusFindRootCalls = eusFindRootCalls stats + 1 }
+                    else eusStats st
+        case IntMap.lookup key (eusRootCache st) of
+            Just root -> do
+                when collectStats $
+                    put $! st { eusStats = stats' }
+                pure root
+            Nothing -> do
+                root <- lift $ Ops.findRoot nid
+                let cache' =
+                        IntMap.insert
+                            (getNodeId root)
+                            root
+                            (IntMap.insert key root (eusRootCache st))
+                put $! st { eusRootCache = cache', eusStats = stats' }
+                pure root
     unifyAcyclicRawWithRaiseTracePreferM prefer n1 n2 =
         lift $ PresolutionUnify.unifyAcyclicRawWithRaiseTracePrefer prefer n1 n2
-    lookupVarBoundM nid = lift $ Ops.lookupVarBound nid
-    setVarBoundM nid mb =
+    lookupVarBoundM nid = do
+        recordEdgeUnifyStat $ \stats ->
+            stats { eusLookupVarBoundCalls = eusLookupVarBoundCalls stats + 1 }
+        root <- findRootM nid
+        c <- lift getConstraint
+        pure (VarStore.lookupVarBound c root)
+    setVarBoundM nid mb = do
+        recordEdgeUnifyStat $ \stats ->
+            stats { eusSetVarBoundAttempts = eusSetVarBoundAttempts stats + 1 }
         case mb of
-            Nothing -> lift $ Ops.setVarBound nid Nothing
+            Nothing -> do
+                nidRoot <- findRootM nid
+                lift $ Ops.setCanonicalVarBound nidRoot Nothing
+                clearEdgeUnifyStructureCache
             Just bnd -> do
                 nidRoot <- findRootM nid
                 bndRoot <- findRootM bnd
                 if nidRoot == bndRoot
                     then pure ()
-                    else lift $ Ops.setVarBound nid (Just bnd)
-    dropVarBindM nid = lift $ Ops.dropVarBind nid
+                    else do
+                        lift $ Ops.setCanonicalVarBound nidRoot (Just bndRoot)
+                        clearEdgeUnifyStructureCache
+    dropVarBindM nid = do
+        lift $ Ops.dropVarBind nid
+        clearEdgeUnifyStructureCache
     throwPresolutionErrorM err = lift $ throwError err
     isBoundAboveInBindingTreeM edgeRoot ext =
         liftPresolution $ isBoundAboveInBindingTree edgeRoot ext
@@ -237,6 +370,8 @@ applyPendingWeaken nid0 = do
 -- recorded in Ω) without accidentally introducing an opposing Phase-2 merge.
 unifyAcyclicEdgeNoMerge :: NodeId -> NodeId -> EdgeUnifyM p ()
 unifyAcyclicEdgeNoMerge n1 n2 = do
+    recordEdgeUnifyStat $ \stats ->
+        stats { eusUnifyAcyclicCalls = eusUnifyAcyclicCalls stats + 1 }
     root1 <- findRootM n1
     root2 <- findRootM n2
     when (root1 /= root2) $ do
@@ -294,7 +429,17 @@ initEdgeUnifyState
     -> NodeId
     -> PendingWeakenOwner
     -> PresolutionM p EdgeUnifyState
-initEdgeUnifyState binderArgs interior edgeRoot pendingOwner = do
+initEdgeUnifyState =
+    initEdgeUnifyStateWithStats False
+
+initEdgeUnifyStateWithStats
+    :: Bool
+    -> [(NodeId, NodeId)]
+    -> InteriorSet
+    -> NodeId
+    -> PendingWeakenOwner
+    -> PresolutionM p EdgeUnifyState
+initEdgeUnifyStateWithStats collectStats binderArgs interior edgeRoot pendingOwner = do
     inheritedPendingWeakens <- gets psPendingWeakens
     uf <- gets psUnionFind
     let interiorRootEntries = [(i, UnionFind.frWith uf (NodeId i)) | i <- IntSet.toList interior]
@@ -338,8 +483,8 @@ initEdgeUnifyState binderArgs interior edgeRoot pendingOwner = do
         binderMetaMap = IntMap.fromList [(getNodeId bv, meta) | (bv, meta) <- binderArgs]
     let keys =
             if length binderArgs <= 1
-                then IntMap.empty
-                else Order.orderKeysFromConstraintWith id constraint interiorRoot Nothing
+                then Nothing
+                else Just (Order.orderKeysFromConstraintWith id constraint interiorRoot Nothing)
     pure EdgeUnifyState
         { eusInteriorRoots = interiorRoots
         , eusBindersByRoot = bindersByRoot
@@ -352,6 +497,10 @@ initEdgeUnifyState binderArgs interior edgeRoot pendingOwner = do
         , eusOrderKeys = keys
         , eusPendingWeakenOwner = pendingOwner
         , eusOps = []
+        , eusRootCache = IntMap.empty
+        , eusStructurePairs = IntMap.empty
+        , eusCollectStats = collectStats
+        , eusStats = emptyEdgeUnifyStats
         }
 
 flushInheritedPendingWeakensOnce :: EdgeUnifyM p Bool
@@ -374,15 +523,21 @@ flushInheritedPendingWeakensOnce = do
                                 , psPendingWeakenOwners =
                                     IntMap.withoutKeys (psPendingWeakenOwners st) toFlush
                                 }
+                    clearEdgeUnifyRootCache
                     pure True
 
 unifyWithLockedFallback :: Maybe NodeId -> NodeId -> NodeId -> EdgeUnifyM p [NodeId]
-unifyWithLockedFallback prefer left right =
-    unifyAcyclicRawWithRaiseTracePreferM prefer left right
-        `catchError` handleLocked
+unifyWithLockedFallback prefer left right = do
+    clearEdgeUnifyRootCache
+    raiseTrace <-
+        unifyAcyclicRawWithRaiseTracePreferM prefer left right
+            `catchError` handleLocked
+    clearEdgeUnifyRootCache
+    pure raiseTrace
   where
     forceUnionWithoutRaise :: EdgeUnifyM p [NodeId]
     forceUnionWithoutRaise = do
+        clearEdgeUnifyRootCache
         rootLeft <- findRootM left
         rootRight <- findRootM right
         when (rootLeft /= rootRight) $ do
@@ -394,6 +549,7 @@ unifyWithLockedFallback prefer left right =
                         _ -> (rootLeft, rootRight)
             liftPresolution $
                 modify' (mergeUnionFindState fromRoot toRoot)
+            clearEdgeUnifyRootCache
         pure []
 
     retryAfterFlush :: EdgeUnifyM p [NodeId]
@@ -401,25 +557,30 @@ unifyWithLockedFallback prefer left right =
         recovered <- flushInheritedPendingWeakensOnce
         if recovered
             then
+                clearEdgeUnifyRootCache >>
                 unifyAcyclicRawWithRaiseTracePreferM prefer left right
                     `catchError` \retryErr ->
                         case retryErr of
-                            BindingTreeError OperationOnLockedNode{} -> forceUnionWithoutRaise
+                            BindingTreeError OperationOnLockedNode{} ->
+                                clearEdgeUnifyRootCache >> forceUnionWithoutRaise
                             _ -> throwPresolutionErrorM retryErr
             else forceUnionWithoutRaise
 
     trySwap :: EdgeUnifyM p [NodeId]
     trySwap =
+        clearEdgeUnifyRootCache >>
         unifyAcyclicRawWithRaiseTracePreferM prefer right left
             `catchError` \swapErr ->
                 case swapErr of
-                    BindingTreeError OperationOnLockedNode{} -> retryAfterFlush
+                    BindingTreeError OperationOnLockedNode{} ->
+                        clearEdgeUnifyRootCache >> retryAfterFlush
                     _ -> throwPresolutionErrorM swapErr
 
     handleLocked :: PresolutionError -> EdgeUnifyM p [NodeId]
     handleLocked err =
         case err of
-            BindingTreeError OperationOnLockedNode{} -> trySwap
+            BindingTreeError OperationOnLockedNode{} ->
+                clearEdgeUnifyRootCache >> trySwap
             _ -> throwPresolutionErrorM err
 
 recordEliminate :: NodeId -> EdgeUnifyM p ()

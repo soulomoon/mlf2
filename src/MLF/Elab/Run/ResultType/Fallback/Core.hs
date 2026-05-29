@@ -3,6 +3,7 @@
 
 module MLF.Elab.Run.ResultType.Fallback.Core
   ( computeResultTypeFallbackCore,
+    computeResultTypeFallbackCoreWithRoots,
   )
 where
 
@@ -108,13 +109,35 @@ computeResultTypeFallbackCore ::
   Either ElabError ElabType
 computeResultTypeFallbackCore ctx viewBase annCanon ann = do
   let canonical = rtcCanonical ctx
+      presolutionView = View.rtvPresolutionViewOverlay viewBase
+      c1 = rtcBaseConstraint ctx
+      roots =
+        resultTypeRoots
+          canonical
+          (pvConstraint presolutionView)
+          c1
+          annCanon
+          ann
+  computeResultTypeFallbackCoreWithRoots ctx viewBase roots annCanon ann
+
+computeResultTypeFallbackCoreWithRoots ::
+  ResultTypeInputs p ->
+  View.ResultTypeView p ->
+  -- | Roots computed by the outer result-type dispatcher.
+  (AnnExpr, AnnExpr) ->
+  -- | annCanon (post-redirect)
+  AnnExpr ->
+  -- | ann (pre-redirect)
+  AnnExpr ->
+  Either ElabError ElabType
+computeResultTypeFallbackCoreWithRoots ctx viewBase (rootForTypeAnn, rootForTypePreAnn) _annCanon _ann = do
+  let canonical = rtcCanonical ctx
       edgeWitnesses = rtcEdgeWitnesses ctx
       edgeTraces = rtcEdgeTraces ctx
       edgeExpansions = rtcEdgeExpansions ctx
       presolutionView = View.rtvPresolutionViewOverlay viewBase
       bindParentsGa = rtcBindParentsGa ctx
       planBuilder = rtcPlanBuilder ctx
-      c1 = rtcBaseConstraint ctx
       traceCfg = rtcTraceConfig ctx
       generalizeAtWith mbGa =
         generalizeAtWithBuilder planBuilder mbGa presolutionView
@@ -127,13 +150,6 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
       baseNodeByTy = View.rtfiBaseNodeByTy fallbackIndex
       schemeRootSetBase = View.rtfiSchemeRootSet fallbackIndex
       schemeRootOwnerBase = View.rtfiSchemeRootOwner fallbackIndex
-  let (rootForTypeAnn, rootForTypePreAnn) =
-        resultTypeRoots
-          canonical
-          (pvConstraint presolutionView)
-          c1
-          annCanon
-          ann
   let rootForType = annNode rootForTypeAnn
       rootForTypePre = annNode rootForTypePreAnn
   -- Note: The AAnn case is handled by the facade in ResultType.hs
@@ -591,6 +607,12 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                              in go visited' d ++ go visited' c
                           _ -> []
              in nub (go IntSet.empty start0)
+          instRootRecursiveTargetSelection =
+            uniqueCandidate
+              [ recursiveTarget
+                | instRoot <- rootInstRoots,
+                  recursiveTarget <- recursiveTargetsFrom instRoot
+              ]
           sameWrapperRetainedChildSelection =
             let sameLocalTypeLane parentRef child =
                   parentRef == scopeRootPost
@@ -605,12 +627,6 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                 recursiveTargetProofFor childTarget =
                   let directRecursiveTargetSelection =
                         uniqueCandidate (recursiveTargetsFrom childTarget)
-                      instRootRecursiveTargetSelection =
-                        uniqueCandidate
-                          [ recursiveTarget
-                            | instRoot <- rootInstRoots,
-                              recursiveTarget <- recursiveTargetsFrom instRoot
-                          ]
                       liftSelection selection =
                         case selection of
                           UniqueCandidate recursiveTarget ->

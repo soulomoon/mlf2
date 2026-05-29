@@ -15,13 +15,15 @@ The two-pass architecture delegates to:
 -}
 module MLF.Constraint.Presolution.EdgeProcessing (
     runPresolutionLoop,
+    runPresolutionLoopWithRootOwnership,
     runPresolutionLoopWithTiming,
     processInstEdge,
 ) where
 
 import Control.Exception (evaluate)
-import Control.Monad (unless, when)
+import Control.Monad (forM_, unless, when)
 import Control.Monad.Reader (ask)
+import Control.Monad.State (runStateT)
 import Data.Word (Word64)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
@@ -40,6 +42,7 @@ import MLF.Constraint.Types.Graph
     , GenNodeId(..)
     , InstEdge(..)
     , NodeId(..)
+    , tnId
     )
 import MLF.Constraint.Types.Witness (Expansion(..), InstanceOp)
 import MLF.Constraint.Types.Presolution (Presolution(..))
@@ -57,7 +60,13 @@ import MLF.Constraint.Presolution.Base
     , clearEdgeLocalSnapshot
     )
 import MLF.Constraint.Presolution.EdgeUnify
-    ( flushPendingWeakensAtOwnerBoundary
+    ( EdgeUnifyM
+    , EdgeUnifyState(..)
+    , flushPendingWeakensAtOwnerBoundary
+    , initEdgeUnifyState
+    , mkOmegaExecEnv
+    , unifyAcyclicEdge
+    , unifyStructureEdge
     )
 import MLF.Constraint.Presolution.EdgeUnify.Omega
     ( pendingWeakenOwners
@@ -96,8 +105,11 @@ import MLF.Constraint.Presolution.EdgeProcessing.Solve
     ( canonicalizeEdgeTraceInteriorsWith
     )
 import MLF.Constraint.Presolution.EdgeProcessing.Unify
-    ( EdgeExpansionApplied
-    , EdgeExpansionInput
+    ( EdgeExpansionApplied(..)
+    , EdgeExpansionBound(..)
+    , EdgeExpansionExecuted(..)
+    , EdgeExpansionInput(..)
+    , EdgeExpansionPrepared(..)
     , EdgeExpansionResult
     , EdgeExpansionApplyPlan(..)
     , applyGenericEdgeExpansion
@@ -105,7 +117,6 @@ import MLF.Constraint.Presolution.EdgeProcessing.Unify
     , copyEdgeExpansionBinderBounds
     , prepareEdgeExpansionOmega
     , prepareEdgeExpansionApply
-    , executeEdgeExpansionOmega
     , finishEdgeExpansionInstantiateApply
     , finishEdgeExpansionUnify
     , freshEdgeExpansionBinderMetas
@@ -145,13 +156,18 @@ import MLF.Util.Timing
 import MLF.Util.Trace (TraceConfig(..))
 import MLF.Constraint.Types.SynthesizedExpVar (isSynthesizedExpVar)
 import qualified MLF.Util.UnionFind as UnionFind
+import qualified MLF.Witness.OmegaExec as OmegaExec
 
 -- | The main loop processing sorted instantiation edges.
 runPresolutionLoop :: TraceConfig -> [InstEdge] -> PresolutionM p ()
-runPresolutionLoop traceCfg edges = do
+runPresolutionLoop traceCfg =
+    runPresolutionLoopWithRootOwnership traceCfg emptyRootOwnershipIndex
+
+runPresolutionLoopWithRootOwnership :: TraceConfig -> RootOwnershipIndex -> [InstEdge] -> PresolutionM p ()
+runPresolutionLoopWithRootOwnership traceCfg rootOwnership edges = do
     requireValidBindingTree
     drainPendingUnifyClosure traceCfg
-    worklist0 <- buildIndexedEdgeWorklistWithRootOwnership emptyRootOwnershipIndex edges
+    worklist0 <- buildIndexedEdgeWorklistWithRootOwnership rootOwnership edges
     (mbLastOwner, _worklist) <-
         runScheduledWorklist traceCfg Nothing worklist0
     scheduleWeakensByOwnerBoundary mbLastOwner Nothing Nothing
@@ -180,6 +196,13 @@ data PresolutionLoopCounters = PresolutionLoopCounters
     , plcExecuteExpansionBindRoot :: !Word64
     , plcExecuteExpansionPrepareOmega :: !Word64
     , plcExecuteExpansionExecuteOmega :: !Word64
+    , plcExecuteExpansionExecuteOmegaInit :: !Word64
+    , plcExecuteExpansionExecuteOmegaPre :: !Word64
+    , plcExecuteExpansionExecuteOmegaBindArgs :: !Word64
+    , plcExecuteExpansionExecuteOmegaFrontier :: !Word64
+    , plcExecuteExpansionExecuteOmegaTarget :: !Word64
+    , plcExecuteExpansionExecuteOmegaRoot :: !Word64
+    , plcExecuteExpansionExecuteOmegaPost :: !Word64
     , plcExecuteExpansionFinish :: !Word64
     , plcExecuteRecordTrace :: !Word64
     , plcExecuteRecordWitness :: !Word64
@@ -255,6 +278,13 @@ emptyPresolutionLoopCounters =
         , plcExecuteExpansionBindRoot = 0
         , plcExecuteExpansionPrepareOmega = 0
         , plcExecuteExpansionExecuteOmega = 0
+        , plcExecuteExpansionExecuteOmegaInit = 0
+        , plcExecuteExpansionExecuteOmegaPre = 0
+        , plcExecuteExpansionExecuteOmegaBindArgs = 0
+        , plcExecuteExpansionExecuteOmegaFrontier = 0
+        , plcExecuteExpansionExecuteOmegaTarget = 0
+        , plcExecuteExpansionExecuteOmegaRoot = 0
+        , plcExecuteExpansionExecuteOmegaPost = 0
         , plcExecuteExpansionFinish = 0
         , plcExecuteRecordTrace = 0
         , plcExecuteRecordWitness = 0
@@ -294,6 +324,13 @@ addPresolutionLoopCounters a b =
         , plcExecuteExpansionBindRoot = plcExecuteExpansionBindRoot a + plcExecuteExpansionBindRoot b
         , plcExecuteExpansionPrepareOmega = plcExecuteExpansionPrepareOmega a + plcExecuteExpansionPrepareOmega b
         , plcExecuteExpansionExecuteOmega = plcExecuteExpansionExecuteOmega a + plcExecuteExpansionExecuteOmega b
+        , plcExecuteExpansionExecuteOmegaInit = plcExecuteExpansionExecuteOmegaInit a + plcExecuteExpansionExecuteOmegaInit b
+        , plcExecuteExpansionExecuteOmegaPre = plcExecuteExpansionExecuteOmegaPre a + plcExecuteExpansionExecuteOmegaPre b
+        , plcExecuteExpansionExecuteOmegaBindArgs = plcExecuteExpansionExecuteOmegaBindArgs a + plcExecuteExpansionExecuteOmegaBindArgs b
+        , plcExecuteExpansionExecuteOmegaFrontier = plcExecuteExpansionExecuteOmegaFrontier a + plcExecuteExpansionExecuteOmegaFrontier b
+        , plcExecuteExpansionExecuteOmegaTarget = plcExecuteExpansionExecuteOmegaTarget a + plcExecuteExpansionExecuteOmegaTarget b
+        , plcExecuteExpansionExecuteOmegaRoot = plcExecuteExpansionExecuteOmegaRoot a + plcExecuteExpansionExecuteOmegaRoot b
+        , plcExecuteExpansionExecuteOmegaPost = plcExecuteExpansionExecuteOmegaPost a + plcExecuteExpansionExecuteOmegaPost b
         , plcExecuteExpansionFinish = plcExecuteExpansionFinish a + plcExecuteExpansionFinish b
         , plcExecuteRecordTrace = plcExecuteRecordTrace a + plcExecuteRecordTrace b
         , plcExecuteRecordWitness = plcExecuteRecordWitness a + plcExecuteRecordWitness b
@@ -628,119 +665,138 @@ runTimedEdgeExecution
     -> EdgeProcessReason
     -> EdgePlan
     -> IO (Either PresolutionError (PresolutionState p, Word64, Maybe PresolutionLoopCounters, EdgeExecutionOutcome))
-runTimedEdgeExecution traceCfg timing st0 _reason plan = do
-    -- Freeze binding snapshot for edge-local execution to avoid quotient rebuilds.
-    decisionResult <- runMeasuredStage traceCfg timing st0 $ do
-        freezeEdgeLocalBindingSnapshot
-        canonical <- getCanonical
-        prepareEdgeExecutionDecision canonical plan
-    case decisionResult of
-        Left err -> pure (Left err)
-        Right (decision, st1, decideNs)
-            | Just previousTrace <- eedReplayTrace decision -> do
-                recordExpansionResult <- runMeasuredStage traceCfg timing st1 (recordEdgeExecutionExpansion decision)
-                case recordExpansionResult of
-                    Left err -> pure (Left err)
-                    Right ((), st2, recordExpansionNs) -> do
-                        unifyResult <- runMeasuredStage traceCfg timing st2 (unifyEdgeExecutionStructure decision)
-                        case unifyResult of
-                            Left err -> pure (Left err)
-                            Right ((), st3, unifyNs) -> do
-                                witnessPlanResult <- runMeasuredStage traceCfg timing st3 (prepareEdgeExecutionWitness decision)
-                                case witnessPlanResult of
-                                    Left err -> pure (Left err)
-                                    Right (witnessContext, st4, witnessPlanNs) -> do
-                                        traceResult <-
-                                            runMeasuredStage traceCfg timing st4 $
-                                                recordEdgeExecutionReplayTrace witnessContext previousTrace
-                                        pure $ case traceResult of
-                                            Left err -> Left err
-                                            Right ((), st5, traceNs) ->
-                                                let counters
-                                                        | timingProgramOperations timing =
-                                                            Just $! emptyPresolutionLoopCounters
-                                                                { plcExecuteDecideExpansion = decideNs
-                                                                , plcExecuteRecordExpansion = recordExpansionNs
-                                                                , plcExecuteUnifyStructure = unifyNs
-                                                                , plcExecuteWitnessPlan = witnessPlanNs
-                                                                , plcExecuteRecordTrace = traceNs
-                                                                , plcReplayHit = 1
-                                                                , plcReplayTraceRebuild = 1
-                                                                }
-                                                        | otherwise = Nothing
-                                                    totalNs =
-                                                        decideNs
-                                                            + recordExpansionNs
-                                                            + unifyNs
-                                                            + witnessPlanNs
-                                                            + traceNs
-                                                in Right (clearEdgeLocalSnapshot st5, totalNs, counters, EdgeExecutionReplayTraceRebuilt)
-            | otherwise -> do
-                recordExpansionResult <- runMeasuredStage traceCfg timing st1 (recordEdgeExecutionExpansion decision)
-                case recordExpansionResult of
-                    Left err -> pure (Left err)
-                    Right ((), st2, recordExpansionNs) -> do
-                        unifyResult <- runMeasuredStage traceCfg timing st2 (unifyEdgeExecutionStructure decision)
-                        case unifyResult of
-                            Left err -> pure (Left err)
-                            Right ((), st3, unifyNs) -> do
-                                witnessPlanResult <- runMeasuredStage traceCfg timing st3 (prepareEdgeExecutionWitness decision)
-                                case witnessPlanResult of
-                                    Left err -> pure (Left err)
-                                    Right (witnessContext, st4, witnessPlanNs) -> do
-                                        expansionUnifyResult <-
-                                            runTimedEdgeExpansionUnify traceCfg timing st4 witnessContext
-                                        case expansionUnifyResult of
-                                            Left err -> pure (Left err)
-                                            Right (expansionResult, st5, expansionUnifyNs, expansionCounters) -> do
-                                                traceResult <-
-                                                    runMeasuredStage traceCfg timing st5 $
-                                                        recordEdgeExecutionTrace witnessContext expansionResult
-                                                case traceResult of
-                                                    Left err -> pure (Left err)
-                                                    Right ((), st6, traceNs) -> do
-                                                        witnessResult <-
-                                                            runMeasuredStage traceCfg timing st6 $
-                                                                recordEdgeExecutionWitness witnessContext expansionResult
-                                                        case witnessResult of
-                                                            Left err -> pure (Left err)
-                                                            Right ((), st7, witnessNs) -> do
-                                                                let counters
-                                                                        | timingProgramOperations timing =
-                                                                            let ec = case expansionCounters of
-                                                                                    Just x -> x
-                                                                                    Nothing -> emptyPresolutionLoopCounters
-                                                                            in Just $! emptyPresolutionLoopCounters
-                                                                                { plcExecuteDecideExpansion = decideNs
-                                                                                , plcExecuteRecordExpansion = recordExpansionNs
-                                                                                , plcExecuteUnifyStructure = unifyNs
-                                                                                , plcExecuteWitnessPlan = witnessPlanNs
-                                                                                , plcExecuteExpansionUnify = expansionUnifyNs
-                                                                                , plcExecuteExpansionApply = plcExecuteExpansionApply ec
-                                                                                , plcExecuteExpansionApplyPlan = plcExecuteExpansionApplyPlan ec
-                                                                                , plcExecuteExpansionApplyArgUnify = plcExecuteExpansionApplyArgUnify ec
-                                                                                , plcExecuteExpansionApplyFreshMetas = plcExecuteExpansionApplyFreshMetas ec
-                                                                                , plcExecuteExpansionApplyCopyScheme = plcExecuteExpansionApplyCopyScheme ec
-                                                                                , plcExecuteExpansionApplyCopyBounds = plcExecuteExpansionApplyCopyBounds ec
-                                                                                , plcExecuteExpansionApplyOther = plcExecuteExpansionApplyOther ec
-                                                                                , plcExecuteExpansionBindRoot = plcExecuteExpansionBindRoot ec
-                                                                                , plcExecuteExpansionPrepareOmega = plcExecuteExpansionPrepareOmega ec
-                                                                                , plcExecuteExpansionExecuteOmega = plcExecuteExpansionExecuteOmega ec
-                                                                                , plcExecuteExpansionFinish = plcExecuteExpansionFinish ec
-                                                                                , plcExecuteRecordTrace = traceNs
-                                                                                , plcExecuteRecordWitness = witnessNs
-                                                                                , plcReplayFresh = 1
-                                                                                }
-                                                                        | otherwise = Nothing
-                                                                    totalNs =
-                                                                        decideNs
-                                                                            + recordExpansionNs
-                                                                            + unifyNs
-                                                                            + witnessPlanNs
-                                                                            + expansionUnifyNs
-                                                                            + traceNs
-                                                                            + witnessNs
-                                                                pure (Right (clearEdgeLocalSnapshot st7, totalNs, counters, EdgeExecutionFreshOutcome))
+runTimedEdgeExecution traceCfg timing st0 _reason plan
+    | not (timingProgramOperations timing) = do
+        result <- runMeasuredStage traceCfg timing st0 $ do
+            freezeEdgeLocalBindingSnapshot
+            canonical <- getCanonical
+            outcome <- executeEdgePlanWithoutTraceCanonicalizationWithOutcome canonical plan
+            stExecuted <- getPresolutionState
+            putPresolutionState (clearEdgeLocalSnapshot stExecuted)
+            pure outcome
+        pure $ case result of
+            Left err -> Left err
+            Right (outcome, st1, executeNs) -> Right (st1, executeNs, Nothing, outcome)
+    | otherwise = do
+        -- Freeze binding snapshot for edge-local execution to avoid quotient rebuilds.
+        decisionResult <- runMeasuredStage traceCfg timing st0 $ do
+            freezeEdgeLocalBindingSnapshot
+            canonical <- getCanonical
+            prepareEdgeExecutionDecision canonical plan
+        case decisionResult of
+            Left err -> pure (Left err)
+            Right (decision, st1, decideNs)
+                | Just previousTrace <- eedReplayTrace decision -> do
+                    recordExpansionResult <- runMeasuredStage traceCfg timing st1 (recordEdgeExecutionExpansion decision)
+                    case recordExpansionResult of
+                        Left err -> pure (Left err)
+                        Right ((), st2, recordExpansionNs) -> do
+                            unifyResult <- runMeasuredStage traceCfg timing st2 (unifyEdgeExecutionStructure decision)
+                            case unifyResult of
+                                Left err -> pure (Left err)
+                                Right ((), st3, unifyNs) -> do
+                                    witnessPlanResult <- runMeasuredStage traceCfg timing st3 (prepareEdgeExecutionWitness decision)
+                                    case witnessPlanResult of
+                                        Left err -> pure (Left err)
+                                        Right (witnessContext, st4, witnessPlanNs) -> do
+                                            traceResult <-
+                                                runMeasuredStage traceCfg timing st4 $
+                                                    recordEdgeExecutionReplayTrace witnessContext previousTrace
+                                            pure $ case traceResult of
+                                                Left err -> Left err
+                                                Right ((), st5, traceNs) ->
+                                                    let counters
+                                                            | timingProgramOperations timing =
+                                                                Just $! emptyPresolutionLoopCounters
+                                                                    { plcExecuteDecideExpansion = decideNs
+                                                                    , plcExecuteRecordExpansion = recordExpansionNs
+                                                                    , plcExecuteUnifyStructure = unifyNs
+                                                                    , plcExecuteWitnessPlan = witnessPlanNs
+                                                                    , plcExecuteRecordTrace = traceNs
+                                                                    , plcReplayHit = 1
+                                                                    , plcReplayTraceRebuild = 1
+                                                                    }
+                                                            | otherwise = Nothing
+                                                        totalNs =
+                                                            decideNs
+                                                                + recordExpansionNs
+                                                                + unifyNs
+                                                                + witnessPlanNs
+                                                                + traceNs
+                                                     in Right (clearEdgeLocalSnapshot st5, totalNs, counters, EdgeExecutionReplayTraceRebuilt)
+                | otherwise -> do
+                    recordExpansionResult <- runMeasuredStage traceCfg timing st1 (recordEdgeExecutionExpansion decision)
+                    case recordExpansionResult of
+                        Left err -> pure (Left err)
+                        Right ((), st2, recordExpansionNs) -> do
+                            unifyResult <- runMeasuredStage traceCfg timing st2 (unifyEdgeExecutionStructure decision)
+                            case unifyResult of
+                                Left err -> pure (Left err)
+                                Right ((), st3, unifyNs) -> do
+                                    witnessPlanResult <- runMeasuredStage traceCfg timing st3 (prepareEdgeExecutionWitness decision)
+                                    case witnessPlanResult of
+                                        Left err -> pure (Left err)
+                                        Right (witnessContext, st4, witnessPlanNs) -> do
+                                            expansionUnifyResult <-
+                                                runTimedEdgeExpansionUnify traceCfg timing st4 witnessContext
+                                            case expansionUnifyResult of
+                                                Left err -> pure (Left err)
+                                                Right (expansionResult, st5, expansionUnifyNs, expansionCounters) -> do
+                                                    traceResult <-
+                                                        runMeasuredStage traceCfg timing st5 $
+                                                            recordEdgeExecutionTrace witnessContext expansionResult
+                                                    case traceResult of
+                                                        Left err -> pure (Left err)
+                                                        Right ((), st6, traceNs) -> do
+                                                            witnessResult <-
+                                                                runMeasuredStage traceCfg timing st6 $
+                                                                    recordEdgeExecutionWitness witnessContext expansionResult
+                                                            case witnessResult of
+                                                                Left err -> pure (Left err)
+                                                                Right ((), st7, witnessNs) -> do
+                                                                    let counters
+                                                                            | timingProgramOperations timing =
+                                                                                let ec = case expansionCounters of
+                                                                                        Just x -> x
+                                                                                        Nothing -> emptyPresolutionLoopCounters
+                                                                                in Just $! emptyPresolutionLoopCounters
+                                                                                    { plcExecuteDecideExpansion = decideNs
+                                                                                    , plcExecuteRecordExpansion = recordExpansionNs
+                                                                                    , plcExecuteUnifyStructure = unifyNs
+                                                                                    , plcExecuteWitnessPlan = witnessPlanNs
+                                                                                    , plcExecuteExpansionUnify = expansionUnifyNs
+                                                                                    , plcExecuteExpansionApply = plcExecuteExpansionApply ec
+                                                                                    , plcExecuteExpansionApplyPlan = plcExecuteExpansionApplyPlan ec
+                                                                                    , plcExecuteExpansionApplyArgUnify = plcExecuteExpansionApplyArgUnify ec
+                                                                                    , plcExecuteExpansionApplyFreshMetas = plcExecuteExpansionApplyFreshMetas ec
+                                                                                    , plcExecuteExpansionApplyCopyScheme = plcExecuteExpansionApplyCopyScheme ec
+                                                                                    , plcExecuteExpansionApplyCopyBounds = plcExecuteExpansionApplyCopyBounds ec
+                                                                                    , plcExecuteExpansionApplyOther = plcExecuteExpansionApplyOther ec
+                                                                                    , plcExecuteExpansionBindRoot = plcExecuteExpansionBindRoot ec
+                                                                                    , plcExecuteExpansionPrepareOmega = plcExecuteExpansionPrepareOmega ec
+                                                                                    , plcExecuteExpansionExecuteOmega = plcExecuteExpansionExecuteOmega ec
+                                                                                    , plcExecuteExpansionExecuteOmegaInit = plcExecuteExpansionExecuteOmegaInit ec
+                                                                                    , plcExecuteExpansionExecuteOmegaPre = plcExecuteExpansionExecuteOmegaPre ec
+                                                                                    , plcExecuteExpansionExecuteOmegaBindArgs = plcExecuteExpansionExecuteOmegaBindArgs ec
+                                                                                    , plcExecuteExpansionExecuteOmegaFrontier = plcExecuteExpansionExecuteOmegaFrontier ec
+                                                                                    , plcExecuteExpansionExecuteOmegaTarget = plcExecuteExpansionExecuteOmegaTarget ec
+                                                                                    , plcExecuteExpansionExecuteOmegaRoot = plcExecuteExpansionExecuteOmegaRoot ec
+                                                                                    , plcExecuteExpansionExecuteOmegaPost = plcExecuteExpansionExecuteOmegaPost ec
+                                                                                    , plcExecuteExpansionFinish = plcExecuteExpansionFinish ec
+                                                                                    , plcExecuteRecordTrace = traceNs
+                                                                                    , plcExecuteRecordWitness = witnessNs
+                                                                                    , plcReplayFresh = 1
+                                                                                    }
+                                                                            | otherwise = Nothing
+                                                                        totalNs =
+                                                                            decideNs
+                                                                                + recordExpansionNs
+                                                                                + unifyNs
+                                                                                + witnessPlanNs
+                                                                                + expansionUnifyNs
+                                                                                + traceNs
+                                                                                + witnessNs
+                                                                    pure (Right (clearEdgeLocalSnapshot st7, totalNs, counters, EdgeExecutionFreshOutcome))
 
 runTimedEdgeExpansionUnify
     :: TraceConfig
@@ -749,7 +805,8 @@ runTimedEdgeExpansionUnify
     -> EdgeExecutionWitnessContext
     -> IO (Either PresolutionError (EdgeExpansionResult, PresolutionState p, Word64, Maybe PresolutionLoopCounters))
 runTimedEdgeExpansionUnify traceCfg timing st0 witnessContext
-    | eedFinalExpansion (eewDecision witnessContext) == ExpIdentity = do
+    | not (timingProgramOperations timing)
+        || eedFinalExpansion (eewDecision witnessContext) == ExpIdentity = do
         result <- runMeasuredStage traceCfg timing st0 (runEdgeExecutionExpansionUnify witnessContext)
         pure $ case result of
             Left err -> Left err
@@ -770,10 +827,10 @@ runTimedEdgeExpansionUnify traceCfg timing st0 witnessContext
                         case prepareResult of
                             Left err -> pure (Left err)
                             Right (prepared, st3, prepareNs) -> do
-                                executeResult <- runMeasuredStage traceCfg timing st3 (executeEdgeExpansionOmega prepared)
+                                executeResult <- runTimedEdgeExpansionOmega traceCfg timing st3 prepared
                                 case executeResult of
                                     Left err -> pure (Left err)
-                                    Right (executed, st4, executeNs) -> do
+                                    Right (executed, st4, executeNs, executeCounters) -> do
                                         finishResult <- runMeasuredStage traceCfg timing st4 (finishEdgeExpansionUnify executed)
                                         pure $ case finishResult of
                                             Left err -> Left err
@@ -790,10 +847,122 @@ runTimedEdgeExpansionUnify traceCfg timing st0 witnessContext
                                                             , plcExecuteExpansionBindRoot = bindNs
                                                             , plcExecuteExpansionPrepareOmega = prepareNs
                                                             , plcExecuteExpansionExecuteOmega = executeNs
+                                                            , plcExecuteExpansionExecuteOmegaInit = plcExecuteExpansionExecuteOmegaInit executeCounters
+                                                            , plcExecuteExpansionExecuteOmegaPre = plcExecuteExpansionExecuteOmegaPre executeCounters
+                                                            , plcExecuteExpansionExecuteOmegaBindArgs = plcExecuteExpansionExecuteOmegaBindArgs executeCounters
+                                                            , plcExecuteExpansionExecuteOmegaFrontier = plcExecuteExpansionExecuteOmegaFrontier executeCounters
+                                                            , plcExecuteExpansionExecuteOmegaTarget = plcExecuteExpansionExecuteOmegaTarget executeCounters
+                                                            , plcExecuteExpansionExecuteOmegaRoot = plcExecuteExpansionExecuteOmegaRoot executeCounters
+                                                            , plcExecuteExpansionExecuteOmegaPost = plcExecuteExpansionExecuteOmegaPost executeCounters
                                                             , plcExecuteExpansionFinish = finishNs
                                                             }
                                                     totalNs = applyNs + bindNs + prepareNs + executeNs + finishNs
                                                  in Right (expansionResult, st5, totalNs, Just counters)
+
+runTimedEdgeExpansionOmega
+    :: TraceConfig
+    -> TimingConfig
+    -> PresolutionState p
+    -> EdgeExpansionPrepared
+    -> IO (Either PresolutionError (EdgeExpansionExecuted, PresolutionState p, Word64, PresolutionLoopCounters))
+runTimedEdgeExpansionOmega traceCfg timing st0 prepared = do
+    let bound = eepBound prepared
+        applied = eebApplied bound
+        input = eeaInput applied
+        gid = eeiGenId input
+        leftRaw = eeiLeftRaw input
+        target = eeiRightRaw input
+        baseOps = eeaBaseOps applied
+        resNodeId = eeaResultNodeId applied
+        copyMap0 = eeaCopyMap applied
+        frontier0 = eeaFrontier applied
+        copyMapCanon = eebCopyMapCanon bound
+        bas = eepBinderArgs prepared
+        binderMetas = eepBinderMetas prepared
+        interior = eepInterior prepared
+        omegaEnv = mkOmegaExecEnv copyMap0
+    initResult <-
+        runMeasuredStage traceCfg timing st0 $
+            initEdgeUnifyState binderMetas interior resNodeId (pendingWeakenOwnerFromMaybe (Just gid))
+    case initResult of
+        Left err -> pure (Left err)
+        Right (eu0, st1, initNs) -> do
+            preResult <-
+                runMeasuredEdgeUnifyStage traceCfg timing st1 eu0 $
+                    OmegaExec.executeOmegaBaseOpsPre omegaEnv baseOps
+            case preResult of
+                Left err -> pure (Left err)
+                Right ((), eu1, st2, preNs) -> do
+                    bindArgsResult <-
+                        runMeasuredEdgeUnifyStage traceCfg timing st2 eu1 $
+                            bindExpansionArgs resNodeId bas
+                    case bindArgsResult of
+                        Left err -> pure (Left err)
+                        Right ((), eu2, st3, bindArgsNs) -> do
+                            frontierResult <-
+                                runMeasuredEdgeUnifyStage traceCfg timing st3 eu2 $
+                                    forM_ (IntSet.toList frontier0) $ \nidInt ->
+                                        case IntMap.lookup nidInt copyMapCanon of
+                                            Nothing -> pure ()
+                                            Just copy -> unifyStructureEdge copy (NodeId nidInt)
+                            case frontierResult of
+                                Left err -> pure (Left err)
+                                Right ((), eu3, st4, frontierNs) -> do
+                                    targetResult <-
+                                        runMeasuredEdgeUnifyStage traceCfg timing st4 eu3 $
+                                            unifyStructureEdge resNodeId (tnId target)
+                                    case targetResult of
+                                        Left err -> pure (Left err)
+                                        Right ((), eu4, st5, targetNs) -> do
+                                            rootResult <-
+                                                runMeasuredEdgeUnifyStage traceCfg timing st5 eu4 $
+                                                    unifyAcyclicEdge (tnId leftRaw) resNodeId
+                                            case rootResult of
+                                                Left err -> pure (Left err)
+                                                Right ((), eu5, st6, rootNs) -> do
+                                                    postResult <-
+                                                        runMeasuredEdgeUnifyStage traceCfg timing st6 eu5 $
+                                                            OmegaExec.executeOmegaBaseOpsPost omegaEnv baseOps
+                                                    pure $ case postResult of
+                                                        Left err -> Left err
+                                                        Right ((), eu6, st7, postNs) ->
+                                                            let executeNs =
+                                                                    initNs
+                                                                        + preNs
+                                                                        + bindArgsNs
+                                                                        + frontierNs
+                                                                        + targetNs
+                                                                        + rootNs
+                                                                        + postNs
+                                                                counters =
+                                                                    emptyPresolutionLoopCounters
+                                                                        { plcExecuteExpansionExecuteOmegaInit = initNs
+                                                                        , plcExecuteExpansionExecuteOmegaPre = preNs
+                                                                        , plcExecuteExpansionExecuteOmegaBindArgs = bindArgsNs
+                                                                        , plcExecuteExpansionExecuteOmegaFrontier = frontierNs
+                                                                        , plcExecuteExpansionExecuteOmegaTarget = targetNs
+                                                                        , plcExecuteExpansionExecuteOmegaRoot = rootNs
+                                                                        , plcExecuteExpansionExecuteOmegaPost = postNs
+                                                                        }
+                                                                executed =
+                                                                    EdgeExpansionExecuted
+                                                                        { eexPrepared = prepared
+                                                                        , eexExtraOps = eusOps eu6
+                                                                        }
+                                                            in Right (executed, st7, executeNs, counters)
+
+runMeasuredEdgeUnifyStage
+    :: TraceConfig
+    -> TimingConfig
+    -> PresolutionState p
+    -> EdgeUnifyState
+    -> EdgeUnifyM p a
+    -> IO (Either PresolutionError (a, EdgeUnifyState, PresolutionState p, Word64))
+runMeasuredEdgeUnifyStage traceCfg timing st0 eu0 action = do
+    result <- runMeasuredStage traceCfg timing st0 (runStateT action eu0)
+    pure $ case result of
+        Left err -> Left err
+        Right ((value, eu1), st1, elapsed) -> Right (value, eu1, st1, elapsed)
 
 runTimedEdgeExpansionApply
     :: TraceConfig
@@ -902,6 +1071,13 @@ emitPresolutionLoopCounters timing label (Just counters) = do
     emitProgramOperationDurationIO timing (label ++ ".execute.expansion_unify.bind_root") (plcExecuteExpansionBindRoot counters)
     emitProgramOperationDurationIO timing (label ++ ".execute.expansion_unify.prepare_omega") (plcExecuteExpansionPrepareOmega counters)
     emitProgramOperationDurationIO timing (label ++ ".execute.expansion_unify.execute_omega") (plcExecuteExpansionExecuteOmega counters)
+    emitProgramOperationDurationIO timing (label ++ ".execute.expansion_unify.execute_omega.init") (plcExecuteExpansionExecuteOmegaInit counters)
+    emitProgramOperationDurationIO timing (label ++ ".execute.expansion_unify.execute_omega.pre") (plcExecuteExpansionExecuteOmegaPre counters)
+    emitProgramOperationDurationIO timing (label ++ ".execute.expansion_unify.execute_omega.bind_args") (plcExecuteExpansionExecuteOmegaBindArgs counters)
+    emitProgramOperationDurationIO timing (label ++ ".execute.expansion_unify.execute_omega.frontier") (plcExecuteExpansionExecuteOmegaFrontier counters)
+    emitProgramOperationDurationIO timing (label ++ ".execute.expansion_unify.execute_omega.target") (plcExecuteExpansionExecuteOmegaTarget counters)
+    emitProgramOperationDurationIO timing (label ++ ".execute.expansion_unify.execute_omega.root") (plcExecuteExpansionExecuteOmegaRoot counters)
+    emitProgramOperationDurationIO timing (label ++ ".execute.expansion_unify.execute_omega.post") (plcExecuteExpansionExecuteOmegaPost counters)
     emitProgramOperationDurationIO timing (label ++ ".execute.expansion_unify.finish") (plcExecuteExpansionFinish counters)
     emitProgramOperationDurationIO timing (label ++ ".execute.record_trace") (plcExecuteRecordTrace counters)
     emitProgramOperationDurationIO timing (label ++ ".execute.record_witness") (plcExecuteRecordWitness counters)

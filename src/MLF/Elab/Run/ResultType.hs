@@ -162,4 +162,10 @@ computeResultTypeDispatch ctx view annCanon ann = do
               _ -> rootForTypePreAnn
       Ann.computeResultTypeFromAnnWithView ctx view inner innerPre annNodeId eid
     _ ->
-      Fallback.computeResultTypeFallback computeResultTypeDispatch ctx view annCanon ann
+      Fallback.computeResultTypeFallbackWithRoots
+        computeResultTypeDispatch
+        ctx
+        view
+        (Just (rootForTypeAnn, rootForTypePreAnn))
+        annCanon
+        ann

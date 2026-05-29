@@ -164,10 +164,8 @@ rtvWithBoundOverlay rootNid baseBound view =
                 , rtvGeneralizeCache0 = Map.empty
                 }
     in viewWithOverlay
-        { rtvReadModel0 = buildElabReadModel (rtvPresolutionViewOverlay viewWithOverlay)
-        , rtvBaseReadModel0 =
-            buildElabReadModel
-                (Finalize.presolutionViewFromSnapshot (gaBaseConstraint (rtvGaBindParents viewWithOverlay)) IntMap.empty)
+        { rtvReadModel0 = rtvReadModel0 view
+        , rtvBaseReadModel0 = rtvBaseReadModel0 view
         }
 
 rtvLookupNode :: ResultTypeView p -> NodeId -> Maybe TyNode
@@ -204,7 +202,7 @@ rtvPresolutionViewOverlay view
             }
 
 rtvNamedNodes :: ResultTypeView p -> Either ElabError IntSet.IntSet
-rtvNamedNodes view = ermNamedNodes <$> rtvReadModel0 view
+rtvNamedNodes view = ermNamedNodes <$> rtvReadModel view
 
 rtvBaseVarOnlyNodes :: ResultTypeView p -> NodeMap TyNode
 rtvBaseVarOnlyNodes view
@@ -220,7 +218,7 @@ rtvReifyWithNamedSetNoFallback
     -> NodeId
     -> Either ElabError ElabType
 rtvReifyWithNamedSetNoFallback view subst namedSet nid = do
-    readModel <- rtvReadModel0 view
+    readModel <- rtvReadModel view
     reifyTypeWithNamedSetNoFallbackReadModel readModel subst namedSet nid
 
 rtvReifyWithNamesNoFallback
@@ -229,7 +227,7 @@ rtvReifyWithNamesNoFallback
     -> NodeId
     -> Either ElabError ElabType
 rtvReifyWithNamesNoFallback view subst nid = do
-    readModel <- rtvReadModel0 view
+    readModel <- rtvReadModel view
     reifyTypeWithNamesNoFallbackReadModel readModel subst nid
 
 rtvReifyBaseWithNamesNoFallback
@@ -238,8 +236,20 @@ rtvReifyBaseWithNamesNoFallback
     -> NodeId
     -> Either ElabError ElabType
 rtvReifyBaseWithNamesNoFallback view subst nid = do
-    readModel <- rtvBaseReadModel0 view
+    readModel <- rtvBaseReadModel view
     reifyTypeWithNamesNoFallbackReadModel readModel subst nid
+
+rtvReadModel :: ResultTypeView p -> Either ElabError (ElabReadModel p)
+rtvReadModel view
+    | IntMap.null (rtvBoundOverlay0 view) = rtvReadModel0 view
+    | otherwise = buildElabReadModel (rtvPresolutionViewOverlay view)
+
+rtvBaseReadModel :: ResultTypeView p -> Either ElabError (ElabReadModel p)
+rtvBaseReadModel view
+    | IntMap.null (rtvBoundOverlay0 view) = rtvBaseReadModel0 view
+    | otherwise =
+        buildElabReadModel
+            (Finalize.presolutionViewFromSnapshot (gaBaseConstraint (rtvGaBindParents view)) IntMap.empty)
 
 rtvSchemeBodyTarget :: ResultTypeView p -> NodeId -> NodeId
 rtvSchemeBodyTarget view target =

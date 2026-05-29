@@ -87,9 +87,7 @@ import MLF.Elab.Run.Generalize.Prepare
   ( PreparedGeneralizationArtifact,
     PreparedRootGeneralization (..),
     canonicalizePreparedAnn,
-    computePreparedResultType,
     computePreparedResultTypeWithRootGeneralization,
-    generalizePreparedRoot,
     generalizePreparedRootDetailed,
     prepareGeneralizationArtifact,
     prepareGeneralizationArtifactForRoots,
@@ -434,9 +432,11 @@ runPipelineElabWithPreparedGenerated finalCheckMode traceCfg extPrepared generat
       authoritativeAnnPre = authoritativeRootAnn term ann
       (authoritativeAnnCanonFinal, authoritativeAnnPreFinal) =
         stripPreparedWitnesslessAuthoritativeAnn prepared authoritativeAnnCanon authoritativeAnnPre
-  (rootScheme, rootSubst) <-
+  rootGeneralization <-
     fromElabError $
-      generalizePreparedRoot prepared authoritativeAnnCanonFinal authoritativeAnnPreFinal
+      generalizePreparedRootDetailed prepared authoritativeAnnCanonFinal authoritativeAnnPreFinal
+  let rootScheme = prgScheme rootGeneralization
+      rootSubst = prgSubst rootGeneralization
   let termSubst = substInTerm rootSubst term
 
   let retainedChildAuthoritativeCandidate =
@@ -495,7 +495,14 @@ runPipelineElabWithPreparedGenerated finalCheckMode traceCfg extPrepared generat
   case finalCheckMode of
     FinalCheckAfterDeferredRewrite -> authoritativeResult
     FinalCheckInPipeline -> do
-      _ <- fromElabError (computePreparedResultType prepared authoritativeAnnCanonFinal authoritativeAnnPreFinal)
+      _ <-
+        fromElabError
+          ( computePreparedResultTypeWithRootGeneralization
+              prepared
+              rootGeneralization
+              authoritativeAnnCanonFinal
+              authoritativeAnnPreFinal
+          )
       authoritativeResult
 
 runPipelineElabWithPreparedWithTiming ::
@@ -578,10 +585,12 @@ runPipelineElabWithPreparedGeneratedWithTiming timing label finalCheckMode trace
                                 stripPreparedWitnesslessAuthoritativeAnn prepared authoritativeAnnCanon authoritativeAnnPre
                           rootResult <-
                             timeProgramOperationIO timing (label ++ ".generalize_root") $
-                              evaluate (fromElabError (generalizePreparedRoot prepared authoritativeAnnCanonFinal authoritativeAnnPreFinal))
+                              evaluate (fromElabError (generalizePreparedRootDetailed prepared authoritativeAnnCanonFinal authoritativeAnnPreFinal))
                           case rootResult of
                             Left err -> pure (Left err)
-                            Right (rootScheme, rootSubst) -> do
+                            Right rootGeneralization -> do
+                              let rootScheme = prgScheme rootGeneralization
+                                  rootSubst = prgSubst rootGeneralization
                               termSubst <-
                                 timeProgramOperationIO timing (label ++ ".subst_root") $
                                   evaluate (substInTerm rootSubst term)
@@ -622,7 +631,15 @@ runPipelineElabWithPreparedGeneratedWithTiming timing label finalCheckMode trace
                                 FinalCheckInPipeline -> do
                                   resultTypeResult <-
                                     timeProgramOperationIO timing (label ++ ".result_type_reconstruction") $
-                                      evaluate (fromElabError (computePreparedResultType prepared authoritativeAnnCanonFinal authoritativeAnnPreFinal))
+                                      evaluate
+                                        ( fromElabError
+                                            ( computePreparedResultTypeWithRootGeneralization
+                                                prepared
+                                                rootGeneralization
+                                                authoritativeAnnCanonFinal
+                                                authoritativeAnnPreFinal
+                                            )
+                                        )
                                   pure $ do
                                     _ <- resultTypeResult
                                     authoritativeResult
@@ -688,10 +705,12 @@ runPipelineElabWithPreparedConstraintWithTiming timing label finalCheckMode trac
                             stripPreparedWitnesslessAuthoritativeAnn prepared authoritativeAnnCanon authoritativeAnnPre
                       rootResult <-
                         timeProgramOperationIO timing (label ++ ".generalize_root") $
-                          evaluate (fromElabError (generalizePreparedRoot prepared authoritativeAnnCanonFinal authoritativeAnnPreFinal))
+                          evaluate (fromElabError (generalizePreparedRootDetailed prepared authoritativeAnnCanonFinal authoritativeAnnPreFinal))
                       case rootResult of
                         Left err -> pure (Left err)
-                        Right (rootScheme, rootSubst) -> do
+                        Right rootGeneralization -> do
+                          let rootScheme = prgScheme rootGeneralization
+                              rootSubst = prgSubst rootGeneralization
                           termSubst <-
                             timeProgramOperationIO timing (label ++ ".subst_root") $
                               evaluate (substInTerm rootSubst term)
@@ -732,7 +751,15 @@ runPipelineElabWithPreparedConstraintWithTiming timing label finalCheckMode trac
                             FinalCheckInPipeline -> do
                               resultTypeResult <-
                                 timeProgramOperationIO timing (label ++ ".result_type_reconstruction") $
-                                  evaluate (fromElabError (computePreparedResultType prepared authoritativeAnnCanonFinal authoritativeAnnPreFinal))
+                                  evaluate
+                                    ( fromElabError
+                                        ( computePreparedResultTypeWithRootGeneralization
+                                            prepared
+                                            rootGeneralization
+                                            authoritativeAnnCanonFinal
+                                            authoritativeAnnPreFinal
+                                        )
+                                    )
                               pure $ do
                                 _ <- resultTypeResult
                                 authoritativeResult

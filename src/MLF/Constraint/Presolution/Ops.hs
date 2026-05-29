@@ -19,6 +19,7 @@ module MLF.Constraint.Presolution.Ops (
     lookupVarBound,
     createFreshVar,
     setVarBound,
+    setCanonicalVarBound,
     dropVarBind
 ) where
 
@@ -122,6 +123,22 @@ setVarBound vid mb = do
         TyVar{} -> do
             root <- findRoot vid
             mbRoot <- mapM findRoot mb
+            modify' $ \st ->
+                let c0 = psConstraint st
+                    c1 = VarStore.setVarBound root mbRoot c0
+                    dirty =
+                        IntSet.fromList $
+                            getNodeId root : maybe [] ((: []) . getNodeId) mbRoot
+                in modifyConstraintDirtyTypesState dirty (const c1) st
+        _ -> pure ()
+
+-- | Update the instance bound when caller already holds canonical
+-- representatives for the variable and optional bound.
+setCanonicalVarBound :: NodeId -> Maybe NodeId -> PresolutionM p ()
+setCanonicalVarBound root mbRoot = do
+    nodes <- gets (cNodes . psConstraint)
+    case lookupNode root nodes of
+        Just TyVar{} ->
             modify' $ \st ->
                 let c0 = psConstraint st
                     c1 = VarStore.setVarBound root mbRoot c0
