@@ -114,13 +114,13 @@ import MLF.Constraint.Presolution.EdgeProcessing.Unify
     , EdgeExpansionApplyPlan(..)
     , applyGenericEdgeExpansion
     , bindEdgeExpansionRoot
-    , copyEdgeExpansionBinderBounds
+    , copyEdgeExpansionBinderBoundsWithSnapshot
     , prepareEdgeExpansionOmega
     , prepareEdgeExpansionApply
     , finishEdgeExpansionInstantiateApply
     , finishEdgeExpansionUnify
     , freshEdgeExpansionBinderMetas
-    , instantiateEdgeExpansionScheme
+    , instantiateEdgeExpansionSchemeWithSnapshot
     , unifyEdgeExpansionInstantiateArgs
     )
 import MLF.Constraint.Presolution.EdgeProcessing.Worklist
@@ -1008,11 +1008,11 @@ runTimedEdgeExpansionApply traceCfg timing st0 input baseOps = do
                             case metasResult of
                                 Left err -> pure (Left err)
                                 Right (binderMetas, st3, metasNs) -> do
-                                    schemeResult <- runMeasuredStage traceCfg timing st3 (instantiateEdgeExpansionScheme instantiatePlan binderMetas)
+                                    schemeResult <- runMeasuredStage traceCfg timing st3 (instantiateEdgeExpansionSchemeWithSnapshot instantiatePlan binderMetas)
                                     case schemeResult of
                                         Left err -> pure (Left err)
-                                        Right (schemeTrace, st4, schemeNs) -> do
-                                            boundsResult <- runMeasuredStage traceCfg timing st4 (copyEdgeExpansionBinderBounds instantiatePlan binderMetas)
+                                        Right ((snapshot, schemeTrace), st4, schemeNs) -> do
+                                            boundsResult <- runMeasuredStage traceCfg timing st4 (copyEdgeExpansionBinderBoundsWithSnapshot snapshot instantiatePlan binderMetas)
                                             case boundsResult of
                                                 Left err -> pure (Left err)
                                                 Right (boundsTrace, st5, boundsNs) -> do

@@ -17,6 +17,7 @@ module MLF.Constraint.Presolution.Expansion (
     bindExpansionRootLikeTarget,
     bindUnboundCopiedNodes,
     copyBinderBounds,
+    copyBinderBoundsWithSnapshot,
     MinimalExpansionDecision(..),
     decideMinimalExpansion,
     decideMinimalExpansionDetailed,
@@ -598,6 +599,29 @@ instantiateEdgeTraceFromKnownBinders expNode bodyRoot boundVars args
 copyBinderBounds :: [(NodeId, NodeId)] -> [(NodeId, NodeId)] -> PresolutionM p (CopyMap, InteriorSet, FrontierSet)
 copyBinderBounds binderMetas binderArgs = do
     (c0, canonical) <- getConstraintAndCanonical
+    copyBinderBoundsWithContext Nothing c0 canonical binderMetas binderArgs
+
+copyBinderBoundsWithSnapshot
+    :: PresolutionBindingSnapshot p
+    -> [(NodeId, NodeId)]
+    -> [(NodeId, NodeId)]
+    -> PresolutionM p (CopyMap, InteriorSet, FrontierSet)
+copyBinderBoundsWithSnapshot snapshot binderMetas binderArgs =
+    copyBinderBoundsWithContext
+        (Just snapshot)
+        (pbsConstraint snapshot)
+        (pbsCanonical snapshot)
+        binderMetas
+        binderArgs
+
+copyBinderBoundsWithContext
+    :: Maybe (PresolutionBindingSnapshot p)
+    -> Constraint p
+    -> (NodeId -> NodeId)
+    -> [(NodeId, NodeId)]
+    -> [(NodeId, NodeId)]
+    -> PresolutionM p (CopyMap, InteriorSet, FrontierSet)
+copyBinderBoundsWithContext mbSnapshot0 c0 canonical binderMetas binderArgs = do
     let binderMetaMap = IntMap.fromList [(getNodeId bv, meta) | (bv, meta) <- binderMetas]
         binderMetaCanonicalMap =
             IntMap.fromListWith
@@ -624,7 +648,9 @@ copyBinderBounds binderMetas binderArgs = do
                 binderBounds
     mbSnapshot <-
         if needsCopy
-            then Just <$> getBindingSnapshot
+            then case mbSnapshot0 of
+                Just snapshot -> pure (Just snapshot)
+                Nothing -> Just <$> getBindingSnapshot
             else pure Nothing
     (traceResult, _copiedBounds) <-
         foldM
