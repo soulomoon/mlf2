@@ -310,12 +310,6 @@ addPresolutionLoopCounters a b =
         , plcInvalidatedEdges = plcInvalidatedEdges a + plcInvalidatedEdges b
         }
 
--- | Add two optional counter records; Nothing short-circuits to Nothing,
--- avoiding all counter allocation when timing is disabled.
-addMaybeCounters :: Maybe PresolutionLoopCounters -> Maybe PresolutionLoopCounters -> Maybe PresolutionLoopCounters
-addMaybeCounters (Just a) (Just b) = Just $! addPresolutionLoopCounters a b
-addMaybeCounters _ _ = Nothing
-
 edgeProcessReasonCounters :: EdgeProcessReason -> PresolutionLoopCounters
 edgeProcessReasonCounters reason =
     case reason of

@@ -29,6 +29,9 @@ Run the canonical fixture and write the timing summary:
 ./bench/run-benchmarks.sh --runs 1 --output bench/results/latest.tsv
 ```
 
+The benchmark runner applies `+RTS -A64m -RTS` to `mlf2`, matching the nursery
+setting used by the GHC reference benchmarks.
+
 That command writes:
 
 ```text
@@ -60,14 +63,20 @@ Run the canonical fixture through the same CLI path used by normal package check
 
 ```bash
 cabal build exe:mlf2
-MLF_PROGRAM_TIMING_DETAIL=1 MLF_PROGRAM_TIMING_OPERATIONS=1 \
+MLF_PROGRAM_TIMING_DETAIL=1 \
   "$(cabal list-bin exe:mlf2)" check-program test/programs/packages/cross-module-let
 ```
 
-Per-definition nested pipeline timing is opt-in because it adds substantial
-measurement overhead on generated libraries:
+Operation-level and per-definition nested pipeline timing are opt-in because
+they add substantial measurement overhead on generated libraries:
 
 ```bash
+./bench/run-benchmarks.sh \
+  --runs 1 \
+  --operations \
+  --benchmark parser-library test/programs/compiler-parser-parity/parser-library \
+  --output bench/results/parser-library-operation-latest.tsv
+
 MLF_PROGRAM_TIMING_DETAIL=1 MLF_PROGRAM_TIMING_OPERATIONS=1 MLF_PROGRAM_TIMING_DEF_DETAILS=1 \
   "$(cabal list-bin exe:mlf2)" check-program test/programs/compiler-parser-parity/parser-library
 ```
@@ -91,6 +100,12 @@ The parser-library exact module read-context comparison is stored in:
 bench/parser-library-performance.md
 ```
 
+The matched synthetic many-definition `.mlfp`/Haskell comparison is stored in:
+
+```text
+bench/many-defs-performance.md
+```
+
 The persisted GHC parser-shape scale reference is stored in:
 
 ```text
@@ -106,10 +121,30 @@ bench/run-ghc-parser-reference.sh \
   --output bench/results/ghc-per-def-reference.tsv
 ```
 
+Generate and compare a matched synthetic mixed many-definition module in
+`.mlfp` and Haskell:
+
+```bash
+bench/run-many-defs-comparison.sh \
+  --defs 1000 \
+  --runs 1 \
+  --output bench/results/many-defs-comparison.tsv
+```
+
+That command writes the generated sources and per-tool timing artifacts:
+
+```text
+bench/benchmarks/many-defs-1000/Main.mlfp
+bench/ghc-reference/ManyDefs1000.hs
+bench/results/many-defs-comparison.mlfp.tsv
+bench/results/many-defs-comparison.ghc.tsv
+bench/results/many-defs-comparison.tsv
+```
+
 To compare a future run, capture stderr and read the same top-level timing:
 
 ```bash
-MLF_PROGRAM_TIMING_DETAIL=1 MLF_PROGRAM_TIMING_OPERATIONS=1 \
+MLF_PROGRAM_TIMING_DETAIL=1 \
   "$(cabal list-bin exe:mlf2)" check-program test/programs/packages/cross-module-let \
   >/tmp/cross-module-let-baseline.stdout \
   2>/tmp/cross-module-let-baseline.stderr

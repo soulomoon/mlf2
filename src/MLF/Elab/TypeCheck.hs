@@ -77,12 +77,14 @@ typeCheckWithEnv env term = case term of
                           (TForall resultName Nothing resultBody, TArrow resultTy _) ->
                             Just (stripVacuousForallsDeep (substTypeCapture resultName (stripVacuousForallsDeep resultTy) resultBody))
                           _ -> Nothing
-                   in alphaEqType expectedBody' actualBody'
+                   in expectedBody' == actualBody'
+                        || alphaEqType expectedBody' actualBody'
                         || churchAwareEqType expectedBody' actualBody'
+                        || expectedBodyPeeled == actualBodyPeeled
                         || alphaEqType expectedBodyPeeled actualBodyPeeled
                         || churchAwareEqType expectedBodyPeeled actualBodyPeeled
-                        || maybe False (\ty -> alphaEqType expectedBody' ty || churchAwareEqType expectedBody' ty) instantiatedActual
-                        || maybe False (\ty -> alphaEqType ty actualBody' || churchAwareEqType ty actualBody') instantiatedExpected
+                        || maybe False (\ty -> expectedBody' == ty || alphaEqType expectedBody' ty || churchAwareEqType expectedBody' ty) instantiatedActual
+                        || maybe False (\ty -> ty == actualBody' || alphaEqType ty actualBody' || churchAwareEqType ty actualBody') instantiatedExpected
                 (expectedMu@(TMu expectedName expectedBody), actualTy) ->
                   let expectedBody' = stripVacuousForallsDeep (substTypeCapture expectedName expectedMu expectedBody)
                       expectedBodyPeeled = peelLeadingUnboundedForalls expectedBody'
@@ -92,13 +94,16 @@ typeCheckWithEnv env term = case term of
                             let resultTy' = stripVacuousForallsDeep resultTy
                              in Just (stripVacuousForallsDeep (substTypeCapture resultName resultTy' resultBody))
                           _ -> Nothing
-                   in alphaEqType expectedBody' actualTy
+                   in expectedBody' == actualTy
+                        || alphaEqType expectedBody' actualTy
                         || churchAwareEqType expectedBody' actualTy
+                        || expectedBodyPeeled == actualTy
                         || alphaEqType expectedBodyPeeled actualTy
                         || churchAwareEqType expectedBodyPeeled actualTy
-                        || maybe False (\ty -> alphaEqType ty actualTy || churchAwareEqType ty actualTy) instantiatedExpected
+                        || maybe False (\ty -> ty == actualTy || alphaEqType ty actualTy || churchAwareEqType ty actualTy) instantiatedExpected
                 _ -> False
          in if argTy' == TBottom
+              || argTy' == aTy'
               || alphaEqType argTy' aTy'
               || churchAwareEqType argTy' aTy'
               || opaqueIOCompatible argTy' aTy'
@@ -141,7 +146,9 @@ typeCheckWithEnv env term = case term of
             expectedBodyTy' = stripVacuousForallsDeep expectedBodyTy
             expectedBodyTyAlias' = stripVacuousForallsDeep expectedBodyTyAlias
             bodyTy' = stripVacuousForallsDeep bodyTy
-        if alphaEqType expectedBodyTy' bodyTy'
+        if expectedBodyTy' == bodyTy'
+          || expectedBodyTyAlias' == bodyTy'
+          || alphaEqType expectedBodyTy' bodyTy'
           || alphaEqType expectedBodyTyAlias' bodyTy'
           || churchAwareEqType expectedBodyTy' bodyTy'
           || churchAwareEqType expectedBodyTyAlias' bodyTy'
@@ -200,7 +207,7 @@ checkInstantiation env ty inst =
             case Map.lookup v (typeEnv env') of
               Nothing -> Left (TCUnboundTypeVar v)
               Just bound ->
-                if alphaEqType t bound
+                if t == bound || alphaEqType t bound
                   then Right (k, env', TVar v)
                   else Left (TCInstantiationError (InstAbstr v) t ("InstAbstr expects bound " ++ pretty bound)),
           instElimError = \inst0 t ->
@@ -271,7 +278,8 @@ letSchemeAccepts :: ElabType -> ElabType -> Bool
 letSchemeAccepts rhsTy schTy =
   let rhsTy' = stripVacuousForallsDeep rhsTy
       schTy' = stripVacuousForallsDeep schTy
-   in alphaEqType rhsTy' schTy'
+   in rhsTy' == schTy'
+        || alphaEqType rhsTy' schTy'
         || churchAwareEqType rhsTy' schTy'
         || rhsIsInstanceOfScheme rhsTy' schTy'
 
@@ -327,7 +335,8 @@ opaqueIOCompatible expected actual =
       name == "IO" || name == "<builtin>.IO"
 
     opaqueIODomainCompatible expectedDom actualDom =
-      alphaEqType expectedDom actualDom
+      expectedDom == actualDom
+        || alphaEqType expectedDom actualDom
         || churchAwareEqType expectedDom actualDom
         || case (expectedDom, actualDom) of
           (TVar {}, TVar {}) -> True
@@ -340,7 +349,7 @@ collapseRecursiveAlias :: String -> ElabType -> ElabType -> ElabType
 collapseRecursiveAlias muName recursiveTy = go
   where
     go ty
-      | alphaEqType ty recursiveTy = TVar muName
+      | ty == recursiveTy || alphaEqType ty recursiveTy = TVar muName
       | otherwise =
           case ty of
             TArrow dom cod -> TArrow (go dom) (go cod)

@@ -59,6 +59,7 @@ import MLF.Frontend.Program.Finalize
     finalizeBindingAllowOpaqueWithModuleContextWithTiming,
     finalizeBindingLayerAllowOpaqueWithModuleContext,
     finalizeBindingLayerAllowOpaqueWithModuleContextWithTiming,
+    finalizeDeferredBindingLayerAllowOpaqueWithModuleContextWithTiming,
     finalizeBindingWithContext,
     finalizeBindingAllowOpaqueWithContext,
     finalizeBindingAllowOpaqueWithContextWithTiming,
@@ -1407,7 +1408,36 @@ finalizeDefWorkItemLayersWithTiming timing moduleName0 finalizeContext moduleCon
 
     finalizeFallbackItems checkedByName [] =
       pure (Right checkedByName)
-    finalizeFallbackItems checkedByName (workItem : rest) = do
+    finalizeFallbackItems checkedByName workItems0@(workItem : rest)
+      | moduleDeferredLayerEligibleDefWorkItem nonRecursiveNames workItem = do
+          let (deferredLayer, remaining) =
+                splitAt
+                  batchSize
+                  (takeWhile (moduleDeferredLayerEligibleDefWorkItem nonRecursiveNames) workItems0)
+          if length deferredLayer <= 1
+            then finalizeFallbackItem checkedByName workItem rest
+            else do
+              layerResult <-
+                finalizeDeferredBindingLayerAllowOpaqueWithModuleContextWithTiming
+                  timing
+                  (checkModuleOperationLabel moduleName0 ("defs.deferred_layer_" ++ show (Map.size checkedByName + 1)))
+                  moduleContext
+                  (map defWorkItemLowered deferredLayer)
+              case layerResult of
+                Left err -> pure (Left err)
+                Right checkedLayer -> do
+                  let checkedByName' =
+                        foldl'
+                          ( \acc checked ->
+                              Map.insert (checkedBindingName checked) checked acc
+                          )
+                          checkedByName
+                          checkedLayer
+                  finalizeFallbackItems checkedByName' remaining
+    finalizeFallbackItems checkedByName (workItem : rest) =
+      finalizeFallbackItem checkedByName workItem rest
+
+    finalizeFallbackItem checkedByName workItem rest = do
       result <-
         finalizeDefWorkItemWithTiming
           timing
@@ -1432,6 +1462,13 @@ moduleLayerEligibleDefWorkItem workItem =
   let lowered = defWorkItemLowered workItem
    in Map.null (loweredBindingDeferredObligations lowered)
         && not (Builtins.srcTypeMentionsOpaqueBuiltin (loweredBindingSourceType lowered))
+
+moduleDeferredLayerEligibleDefWorkItem :: Set.Set String -> DefWorkItem -> Bool
+moduleDeferredLayerEligibleDefWorkItem nonRecursiveNames workItem =
+  defWorkItemName workItem `Set.member` nonRecursiveNames
+    && let lowered = defWorkItemLowered workItem
+        in not (Map.null (loweredBindingDeferredObligations lowered))
+             && not (Builtins.srcTypeMentionsOpaqueBuiltin (loweredBindingSourceType lowered))
 
 nonRecursiveDefLayers :: Int -> Set.Set String -> [DefWorkItem] -> [[DefWorkItem]]
 nonRecursiveDefLayers batchSize nonRecursiveNames workItems =

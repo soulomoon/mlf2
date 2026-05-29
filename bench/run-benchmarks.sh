@@ -4,6 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage: bench/run-benchmarks.sh [--runs N] [--output PATH] [--bin PATH] [--no-build]
+                               [--operations]
                                [--allow-status STATUS]
                                [--benchmark NAME PATH]
 
@@ -14,6 +15,7 @@ Defaults:
   --output bench/results/latest.tsv
   --allow-status 0
   --benchmark fixture-cross-module-let test/programs/packages/cross-module-let
+  mlf2 RTS: +RTS -A64m -RTS
 
 The script also writes raw per-run metrics next to the summary as
 <output>.runs.tsv.
@@ -29,6 +31,8 @@ bin_path=""
 build_first=1
 benchmarks=()
 allowed_statuses=(0)
+timing_operations=0
+mlf_rts_args=(+RTS -A64m -RTS)
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -50,6 +54,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --no-build)
       build_first=0
+      shift
+      ;;
+    --operations|--timing-operations)
+      timing_operations=1
       shift
       ;;
     --allow-status)
@@ -166,8 +174,12 @@ for benchmark_entry in "${benchmarks[@]}"; do
   for (( run = 1; run <= runs; run++ )); do
     stdout_path="$tmp_dir/$benchmark.$run.stdout"
     stderr_path="$tmp_dir/$benchmark.$run.stderr"
+    timing_env=(MLF_PROGRAM_TIMING_DETAIL=1)
+    if (( timing_operations )); then
+      timing_env+=(MLF_PROGRAM_TIMING_OPERATIONS=1)
+    fi
     set +e
-    /usr/bin/time -p env MLF_PROGRAM_TIMING_DETAIL=1 MLF_PROGRAM_TIMING_OPERATIONS=1 "$bin_path" check-program "$fixture_path" >"$stdout_path" 2>"$stderr_path"
+    /usr/bin/time -p env "${timing_env[@]}" "$bin_path" "${mlf_rts_args[@]}" check-program "$fixture_path" >"$stdout_path" 2>"$stderr_path"
     status=$?
     set -e
 

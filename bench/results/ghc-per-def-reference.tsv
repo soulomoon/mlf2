@@ -1,2 +1,0 @@
-tool	version	mode	defs	source	run	real_ms	per_def_ms	status
-ghc	9.12.2	-fforce-recomp -fno-code -O0 -v0 +RTS -A64m	914	bench/ghc-reference/ParserShape914.hs	1	510.000	0.558	0
