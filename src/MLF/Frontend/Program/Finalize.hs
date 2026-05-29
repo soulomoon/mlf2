@@ -14,6 +14,7 @@ module MLF.Frontend.Program.Finalize
     finalizeBindingAllowOpaqueWithModuleContext,
     finalizeBindingLayerAllowOpaqueWithModuleContext,
     finalizeBindingLayerAllowOpaqueWithModuleContextWithTiming,
+    finalizeDeferredBindingLayerAllowOpaqueWithModuleContextWithTiming,
     finalizeBindingAllowOpaqueWithContextWithTiming,
     finalizeBindingAllowOpaqueWithModuleContextWithTiming,
     recoverSourceType,
@@ -47,9 +48,11 @@ import MLF.Elab.Run.Pipeline
     restrictPreparedExternalBindings,
     runPipelineElabDetailedWithPreparedExternalBindings,
     runPipelineElabDetailedModuleWithPreparedExternalBindingsWithTiming,
+    runPipelineElabDetailedModuleDeferFinalCheckWithPreparedExternalBindingsWithTiming,
     runPipelineElabDetailedWithPreparedExternalBindingsWithTiming,
     runPipelineElabDetailedUncheckedWithPreparedExternalBindings,
     runPipelineElabDetailedUncheckedWithPreparedExternalBindingsWithTiming,
+    freshenTypeAbsAgainstEnv,
     unionPreparedExternalBindings,
   )
 import MLF.Elab.Types (ElabTerm, ElabType)
@@ -115,7 +118,8 @@ import MLF.Util.Timing (TimingConfig(..), defaultTimingConfig, timeProgramOperat
 
 data FinalizeContext = FinalizeContext
   { finalizeContextScope :: ElaborateScope,
-    finalizeContextRuntimeBindings :: PreparedExternalBindings
+    finalizeContextRuntimeBindings :: PreparedExternalBindings,
+    finalizeContextRuntimeTypeEnv :: Map String ElabType
   }
 
 data ModuleFinalizeContext = ModuleFinalizeContext
@@ -142,10 +146,12 @@ mkFinalizeContext scope = do
     prepareSurfaceExternalBindings
       (const ExternalBindingScheme)
       (elaborateScopeRuntimeTypes scope)
+  runtimeTypeEnv <- traverse srcTypeToElabType (elaborateScopeRuntimeTypes scope)
   pure
     FinalizeContext
       { finalizeContextScope = scope,
-        finalizeContextRuntimeBindings = runtimeBindings
+        finalizeContextRuntimeBindings = runtimeBindings,
+        finalizeContextRuntimeTypeEnv = runtimeTypeEnv
       }
 
 mkModuleFinalizeContext :: FinalizeContext -> [LoweredBinding] -> Either ProgramError ModuleFinalizeContext
@@ -261,7 +267,7 @@ finalizeOpaqueUncheckedBindingWithContext context lowered placeholderTy = do
       (loweredBindingDeferredObligations lowered)
       (loweredBindingExternalTypes lowered)
       (loweredBindingSurfaceExpr lowered)
-  term <- finalizeOpaqueDeferredConstructors scope (loweredBindingDeferredObligations lowered) tcEnv term0
+  term <- finalizeOpaqueDeferredConstructors context (loweredBindingDeferredObligations lowered) tcEnv term0
   Right
     CheckedBinding
       { checkedBindingName = loweredBindingName lowered,
@@ -272,22 +278,21 @@ finalizeOpaqueUncheckedBindingWithContext context lowered placeholderTy = do
         checkedBindingType = placeholderTy,
         checkedBindingExportedAsMain = loweredBindingExportedAsMain lowered
       }
-  where
-    scope = finalizeContextScope context
-
 finalizeOpaqueDeferredConstructors ::
-  ElaborateScope ->
+  FinalizeContext ->
   Map String DeferredProgramObligation ->
   Env ->
   ElabTerm ->
   Either ProgramError ElabTerm
-finalizeOpaqueDeferredConstructors scope deferredObligations tcEnv term
+finalizeOpaqueDeferredConstructors context deferredObligations tcEnv term
   | Map.null deferredObligations = Right term
   | otherwise = do
-      rewriteEnv <- extendTypeCheckEnvWithRuntimeScope scope tcEnv
+      let rewriteEnv = extendTypeCheckEnvWithRuntimeContext context tcEnv
       let constructorObligations = Map.mapMaybe onlyConstructor deferredObligations
       resolveDeferredConstructors scope rewriteEnv constructorObligations term
   where
+    scope = finalizeContextScope context
+
     onlyConstructor = \case
       DeferredConstructor deferred -> Just deferred
       _ -> Nothing
@@ -408,7 +413,7 @@ finalizeBindingWithContext context lowered = do
       (loweredBindingExternalTypes lowered)
       (loweredBindingSurfaceExpr lowered)
   (term, actualTy) <-
-    finalizeDeferredObligations scope (loweredBindingDeferredObligations lowered) tcEnv term0 actualTy0 (loweredBindingExpectedType lowered)
+    finalizeDeferredObligations context (loweredBindingDeferredObligations lowered) tcEnv term0 actualTy0 (loweredBindingExpectedType lowered)
   finalizeCheckedBindingFromTerm context lowered term actualTy
   where
     scope = finalizeContextScope context
@@ -459,7 +464,7 @@ finalizeBindingWithModuleContext moduleContext lowered = do
       (constructorBindingNeedsUnchecked scope (loweredBindingName lowered))
       lowered
   (term, actualTy) <-
-    finalizeDeferredObligations scope (loweredBindingDeferredObligations lowered) tcEnv term0 actualTy0 (loweredBindingExpectedType lowered)
+    finalizeDeferredObligations context (loweredBindingDeferredObligations lowered) tcEnv term0 actualTy0 (loweredBindingExpectedType lowered)
   finalizeCheckedBindingFromTermWithReadContext context (Just (moduleBindingReadCheckContext readContext)) lowered term actualTy
   where
     context = moduleFinalizeContextBase moduleContext
@@ -614,10 +619,71 @@ finalizeBindingLayerAllowOpaqueWithModuleContextWithTiming timing label moduleCo
   where
     context = moduleFinalizeContextBase moduleContext
 
+finalizeDeferredBindingLayerAllowOpaqueWithModuleContextWithTiming ::
+  TimingConfig ->
+  String ->
+  ModuleFinalizeContext ->
+  [LoweredBinding] ->
+  IO (Either ProgramError [CheckedBinding])
+finalizeDeferredBindingLayerAllowOpaqueWithModuleContextWithTiming _ _ _ [] =
+  pure (Right [])
+finalizeDeferredBindingLayerAllowOpaqueWithModuleContextWithTiming timing label moduleContext lowereds
+  | any (not . moduleDeferredLayerPipelineEligible) lowereds =
+      finalizeLayerIndividually timing (label ++ ".fallback_unsupported") moduleContext lowereds
+  | otherwise =
+      case traverse (lookupModuleBindingReadContext moduleContext) lowereds of
+        Left _ ->
+          finalizeLayerIndividually timing (label ++ ".fallback_missing_context") moduleContext lowereds
+        Right readContexts -> do
+          resolvedResult <-
+            timeProgramOperationIO timing (label ++ ".prepare_external_bindings") $
+              evaluate $ do
+                mapM_ moduleBindingReadResolvedFreeVars readContexts
+                extEnvs <- traverse moduleBindingReadExternalBindings readContexts
+                extEnv <- combinePreparedExternalBindings extEnvs
+                let rootPrepared =
+                      Map.fromList (zip (map loweredBindingName lowereds) extEnvs)
+                Right (extEnv, rootPrepared)
+          case resolvedResult of
+            Left err -> pure (Left err)
+            Right (extEnv, rootPrepared) -> do
+              normResult <-
+                timeProgramOperationIO timing (label ++ ".normalize_surface") $
+                  evaluate (traverse moduleBindingReadNormalizedExpr readContexts)
+              case normResult of
+                Left err -> pure (Left err)
+                Right normExprs -> do
+                  let namedExprs = zip (map loweredBindingName lowereds) normExprs
+                      innerTiming =
+                        if timingProgramDefDetails timing
+                          then timing
+                          else defaultTimingConfig
+                  pipelineResult <-
+                    timeProgramOperationIO timing (label ++ ".pipeline") $
+                      runPipelineElabDetailedModuleDeferFinalCheckWithPreparedExternalBindingsWithTiming
+                        innerTiming
+                        (label ++ ".pipeline.elab_pipeline")
+                        Set.empty
+                        extEnv
+                        rootPrepared
+                        namedExprs
+                  case pipelineResult of
+                    Left _ ->
+                      finalizeLayerIndividually timing (label ++ ".fallback_pipeline") moduleContext lowereds
+                    Right results ->
+                      finalizeLayerPipelineResults timing label context lowereds readContexts results
+  where
+    context = moduleFinalizeContextBase moduleContext
+
 moduleLayerPipelineEligible :: LoweredBinding -> Bool
 moduleLayerPipelineEligible lowered =
   not (Builtins.srcTypeMentionsOpaqueBuiltin (loweredBindingSourceType lowered))
     && Map.null (loweredBindingDeferredObligations lowered)
+
+moduleDeferredLayerPipelineEligible :: LoweredBinding -> Bool
+moduleDeferredLayerPipelineEligible lowered =
+  not (Builtins.srcTypeMentionsOpaqueBuiltin (loweredBindingSourceType lowered))
+    && not (Map.null (loweredBindingDeferredObligations lowered))
 
 combinePreparedExternalBindings :: [PreparedExternalBindings] -> Either ProgramError PreparedExternalBindings
 combinePreparedExternalBindings bindings =
@@ -659,10 +725,10 @@ finalizeLayerPipelineResults ::
   Map String PipelineElabDetailedResult ->
   IO (Either ProgramError [CheckedBinding])
 finalizeLayerPipelineResults timing label context lowereds readContexts results =
-  go (1 :: Int) lowereds readContexts
+  go [] (1 :: Int) lowereds readContexts
   where
-    go _ [] [] = pure (Right [])
-    go index (lowered : rest) (readContext : readRest) =
+    go acc _ [] [] = pure (Right (reverse acc))
+    go acc index (lowered : rest) (readContext : readRest) =
       case Map.lookup (loweredBindingName lowered) results of
         Nothing ->
           pure (Left (ProgramPipelineError ("module layer missing result for binding `" ++ loweredBindingName lowered ++ "`")))
@@ -677,10 +743,9 @@ finalizeLayerPipelineResults timing label context lowereds readContexts results 
               (Right pipelineResult)
           case checkedResult of
             Left err -> pure (Left err)
-            Right checked -> do
-              restResult <- go (index + 1) rest readRest
-              pure ((checked :) <$> restResult)
-    go _ _ _ =
+            Right checked ->
+              checked `seq` go (checked : acc) (index + 1) rest readRest
+    go _ _ _ _ =
       pure (Left (ProgramPipelineError "module layer result/read-context length mismatch"))
 
 finalizePipelineBindingResult ::
@@ -709,7 +774,7 @@ finalizePipelineBindingResultWithReadContext timing label context mbCheckContext
         timeProgramOperationIO timing (label ++ ".deferred_obligations") $
           evaluate $
             finalizeDeferredObligations
-              scope
+              context
               (loweredBindingDeferredObligations lowered)
               tcEnv
               term0
@@ -720,9 +785,6 @@ finalizePipelineBindingResultWithReadContext timing label context mbCheckContext
         Right (term, actualTy) ->
           timeProgramOperationIO timing (label ++ ".binding_check") $
             evaluate (finalizeCheckedBindingFromTermWithReadContext context mbCheckContext lowered term actualTy)
-  where
-    scope = finalizeContextScope context
-
 finalizeBindingsAllowOpaqueWithContext :: FinalizeContext -> [LoweredBinding] -> Either ProgramError [CheckedBinding]
 finalizeBindingsAllowOpaqueWithContext context =
   go
@@ -776,8 +838,7 @@ finalizeBindingsAllowOpaqueWithContextWithTiming timing label context lowereds =
 finalizeBindingGroupWithContext :: FinalizeContext -> [LoweredBinding] -> Either ProgramError [CheckedBinding]
 finalizeBindingGroupWithContext _ [] = Right []
 finalizeBindingGroupWithContext context lowereds0 = do
-  let scope = finalizeContextScope context
-      lowereds = zipWith renameDeferredPlaceholdersForGroup [(1 :: Int) ..] lowereds0
+  let lowereds = zipWith renameDeferredPlaceholdersForGroup [(1 :: Int) ..] lowereds0
       deferredObligations = Map.unions (map loweredBindingDeferredObligations lowereds)
       externalTypes = Map.unions (map loweredBindingExternalTypes lowereds)
       expectedNames = map loweredBindingName lowereds
@@ -785,7 +846,7 @@ finalizeBindingGroupWithContext context lowereds0 = do
   PipelineElabDetailedResult {pedTerm = term0, pedType = actualTy0, pedTypeCheckEnv = tcEnv} <-
     runSurfacePipelineWithContext context False deferredObligations externalTypes groupExpr
   (term, _actualTy) <-
-    finalizeDeferredObligations scope deferredObligations tcEnv term0 actualTy0 STBottom
+    finalizeDeferredObligations context deferredObligations tcEnv term0 actualTy0 STBottom
   case extractGroupedBindings expectedNames term of
     Left _ ->
       traverse (finalizeBindingAllowOpaqueWithContext context) lowereds0
@@ -806,8 +867,7 @@ finalizeBindingGroupWithContextWithTiming ::
   IO (Either ProgramError [CheckedBinding])
 finalizeBindingGroupWithContextWithTiming _ _ _ [] = pure (Right [])
 finalizeBindingGroupWithContextWithTiming timing label context lowereds0 = do
-  let scope = finalizeContextScope context
-      lowereds = zipWith renameDeferredPlaceholdersForGroup [(1 :: Int) ..] lowereds0
+  let lowereds = zipWith renameDeferredPlaceholdersForGroup [(1 :: Int) ..] lowereds0
       deferredObligations = Map.unions (map loweredBindingDeferredObligations lowereds)
       externalTypes = Map.unions (map loweredBindingExternalTypes lowereds)
       expectedNames = map loweredBindingName lowereds
@@ -820,7 +880,7 @@ finalizeBindingGroupWithContextWithTiming timing label context lowereds0 = do
     Right PipelineElabDetailedResult {pedTerm = term0, pedType = actualTy0, pedTypeCheckEnv = tcEnv} -> do
       deferredResult <-
         timeProgramOperationIO timing (label ++ ".deferred_obligations") $
-          evaluate (finalizeDeferredObligations scope deferredObligations tcEnv term0 actualTy0 STBottom)
+          evaluate (finalizeDeferredObligations context deferredObligations tcEnv term0 actualTy0 STBottom)
       case deferredResult of
         Left err -> pure (Left err)
         Right (term, _actualTy) -> do
@@ -952,45 +1012,40 @@ finalizeCheckedBindingFromTermWithReadContext context mbCheckContext lowered ter
         expectedTy <- bindingCheckExpectedTypeFor lowered
         Right (expectedTy, acceptedTerm0)
       else Right (stripVacuousForallsAndTypeAbs actualTy acceptedTerm0)
+  let acceptChecked =
+        Right
+          CheckedBinding
+            { checkedBindingName = loweredBindingName lowered,
+              checkedBindingSourceType = loweredBindingSourceType lowered,
+              checkedBindingSurfaceExpr = loweredBindingSurfaceExpr lowered,
+              checkedBindingDeferredObligations = loweredBindingDeferredObligations lowered,
+              checkedBindingTerm = acceptedTerm,
+              checkedBindingType = acceptedTy,
+              checkedBindingExportedAsMain = loweredBindingExportedAsMain lowered
+            }
   if isUncheckedConstructor
-    then
-      Right
-        CheckedBinding
-          { checkedBindingName = loweredBindingName lowered,
-            checkedBindingSourceType = loweredBindingSourceType lowered,
-            checkedBindingSurfaceExpr = loweredBindingSurfaceExpr lowered,
-            checkedBindingDeferredObligations = loweredBindingDeferredObligations lowered,
-            checkedBindingTerm = acceptedTerm,
-            checkedBindingType = acceptedTy,
-            checkedBindingExportedAsMain = loweredBindingExportedAsMain lowered
-          }
+    then acceptChecked
     else do
       let actualTyForCompare = stripVacuousForalls actualTy
-          recoveredActualSrcTy = recoverSourceType scope (elabTypeToSrcType actualTyForCompare)
       expectedTyForCompare <- bindingCheckExpectedTypeForCompareFor lowered
-      recoveredActualTy <- srcTypeToElabType (lowerType scope recoveredActualSrcTy)
-      let recoveredExpectedSrcTy = bindingCheckRecoveredExpectedSourceTypeFor lowered
-      let sourceForallCompatible =
-            if Builtins.srcTypeMentionsOpaqueBuiltin (loweredBindingSourceType lowered)
-              then sourceForallMatchesWithRigidForalls recoveredExpectedSrcTy recoveredActualSrcTy
-              else sourceForallMatches recoveredExpectedSrcTy recoveredActualSrcTy
-      if alphaEqType actualTyForCompare expectedTyForCompare
+      if actualTyForCompare == expectedTyForCompare
+        || alphaEqType actualTyForCompare expectedTyForCompare
         || churchAwareEqType actualTyForCompare expectedTyForCompare
-        || alphaEqType recoveredActualTy expectedTyForCompare
-        || churchAwareEqType recoveredActualTy expectedTyForCompare
-        || sourceForallCompatible
-        then
-          Right
-            CheckedBinding
-              { checkedBindingName = loweredBindingName lowered,
-                checkedBindingSourceType = loweredBindingSourceType lowered,
-                checkedBindingSurfaceExpr = loweredBindingSurfaceExpr lowered,
-                checkedBindingDeferredObligations = loweredBindingDeferredObligations lowered,
-                checkedBindingTerm = acceptedTerm,
-                checkedBindingType = acceptedTy,
-                checkedBindingExportedAsMain = loweredBindingExportedAsMain lowered
-              }
-        else Left (ProgramTypeMismatch recoveredActualSrcTy (loweredBindingExpectedType lowered))
+        then acceptChecked
+        else do
+          let recoveredActualSrcTy = recoverSourceType scope (elabTypeToSrcType actualTyForCompare)
+          recoveredActualTy <- srcTypeToElabType (lowerType scope recoveredActualSrcTy)
+          let recoveredExpectedSrcTy = bindingCheckRecoveredExpectedSourceTypeFor lowered
+              sourceForallCompatible =
+                if Builtins.srcTypeMentionsOpaqueBuiltin (loweredBindingSourceType lowered)
+                  then sourceForallMatchesWithRigidForalls recoveredExpectedSrcTy recoveredActualSrcTy
+                  else sourceForallMatches recoveredExpectedSrcTy recoveredActualSrcTy
+          if recoveredActualTy == expectedTyForCompare
+            || alphaEqType recoveredActualTy expectedTyForCompare
+            || churchAwareEqType recoveredActualTy expectedTyForCompare
+            || sourceForallCompatible
+            then acceptChecked
+            else Left (ProgramTypeMismatch recoveredActualSrcTy (loweredBindingExpectedType lowered))
   where
     scope = finalizeContextScope context
 
@@ -1240,12 +1295,34 @@ externalBindingModeForObligations deferredObligations externalTypes name =
         _ -> ExternalBindingScheme
     Just (DeferredConstructor deferred) -> convertDeferredBindingMode (deferredConstructorBindingMode deferred)
     Just (DeferredCase {}) -> ExternalBindingMonomorphic
-    _ -> ExternalBindingScheme
+    _ ->
+      case Map.lookup name externalTypes of
+        Just ty -> externalBindingModeForSourceType ty
+        Nothing -> ExternalBindingScheme
   where
     convertDeferredBindingMode mode =
       case mode of
         DeferredBindingScheme -> ExternalBindingScheme
         DeferredBindingMonomorphic -> ExternalBindingMonomorphic
+
+    externalBindingModeForSourceType ty
+      | sourceTypeHasForall ty = ExternalBindingScheme
+      | not (Set.null (freeSourceTypeVars ty)) = ExternalBindingScheme
+      | otherwise = ExternalBindingMonomorphic
+
+sourceTypeHasForall :: SrcType -> Bool
+sourceTypeHasForall ty =
+  case ty of
+    STBase {} -> False
+    STVar {} -> False
+    STArrow left right -> sourceTypeHasForall left || sourceTypeHasForall right
+    STForall {} -> True
+    STMu _ body -> sourceTypeHasForall body
+    STCon _ args -> any sourceTypeHasForall args
+    STVarApp _ args -> any sourceTypeHasForall args
+    STTyLam _ body -> sourceTypeHasForall body
+    STTyApp fun arg -> sourceTypeHasForall fun || sourceTypeHasForall arg
+    STBottom -> False
 
 prepareSurfaceExternalBindings :: (String -> ExternalBindingMode) -> Map String SrcType -> Either ProgramError PreparedExternalBindings
 prepareSurfaceExternalBindings modeFor sourceTypes = do
@@ -1263,7 +1340,7 @@ prepareSurfaceExternalBindings modeFor sourceTypes = do
   either (Left . ProgramPipelineError . show) Right (prepareExternalBindings extBindings)
 
 finalizeDeferredObligations ::
-  ElaborateScope ->
+  FinalizeContext ->
   Map String DeferredProgramObligation ->
   Env ->
   ElabTerm ->
@@ -1272,24 +1349,42 @@ finalizeDeferredObligations ::
   Either ProgramError (ElabTerm, ElabType)
 finalizeDeferredObligations _ deferredObligations _ term inferredTy _
   | Map.null deferredObligations = Right (term, inferredTy)
-finalizeDeferredObligations scope deferredObligations tcEnv term _ expectedBindingTy = do
-  rewriteEnv <- extendTypeCheckEnvWithRuntimeScope scope tcEnv
+finalizeDeferredObligations context deferredObligations tcEnv term _ expectedBindingTy = do
+  let rewriteEnv = extendTypeCheckEnvWithRuntimeContext context tcEnv
   let constructorObligations = Map.mapMaybe onlyConstructor deferredObligations
       caseObligations = Map.mapMaybe onlyCase deferredObligations
       methodObligations = Map.mapMaybe onlyMethod deferredObligations
-  constructorsRewritten <- resolveDeferredConstructors scope rewriteEnv constructorObligations term
-  (caseRewriteEnv, casesRewritten) <- resolveDeferredCases scope caseObligations rewriteEnv constructorsRewritten
-  methodsRewritten <- resolveDeferredMethods scope methodObligations caseRewriteEnv casesRewritten
-  rewritten <- refreshLetSchemes caseRewriteEnv methodsRewritten
+  constructorsRewritten <-
+    if Map.null constructorObligations
+      then Right term
+      else resolveDeferredConstructors scope rewriteEnv constructorObligations term
+  (caseRewriteEnv, casesRewritten) <-
+    if Map.null caseObligations
+      then Right (rewriteEnv, constructorsRewritten)
+      else resolveDeferredCases scope caseObligations rewriteEnv constructorsRewritten
+  methodsRewritten <-
+    if Map.null methodObligations
+      then Right casesRewritten
+      else resolveDeferredMethods scope methodObligations caseRewriteEnv casesRewritten
+  rewritten <-
+    if termHasLets methodsRewritten
+      then refreshLetSchemes caseRewriteEnv methodsRewritten
+      else Right methodsRewritten
+  let rewrittenForCheck =
+        if termHasTypeAbs rewritten
+          then freshenTypeAbsAgainstEnv caseRewriteEnv rewritten
+          else rewritten
   rewrittenTy <-
-    case typeCheckWithEnv caseRewriteEnv rewritten of
+    case typeCheckWithEnv caseRewriteEnv rewrittenForCheck of
       Right ty -> Right (inlineTypeEnvBounds caseRewriteEnv ty)
       Left X.TCArgumentMismatch {} ->
         srcTypeToElabType (lowerType scope expectedBindingTy)
       Left err ->
         Left (ProgramPipelineError ("deferred program obligation rewrite failed type check: " ++ show err))
-  Right (rewritten, rewrittenTy)
+  Right (rewrittenForCheck, rewrittenTy)
   where
+    scope = finalizeContextScope context
+
     onlyConstructor = \case
       DeferredConstructor deferred -> Just deferred
       _ -> Nothing
@@ -1302,15 +1397,39 @@ finalizeDeferredObligations scope deferredObligations tcEnv term _ expectedBindi
       DeferredMethod deferred -> Just deferred
       _ -> Nothing
 
-extendTypeCheckEnvWithRuntimeScope :: ElaborateScope -> Env -> Either ProgramError Env
-extendTypeCheckEnvWithRuntimeScope scope env = do
-  runtimeEnv <- traverse srcTypeToElabType (elaborateScopeRuntimeTypes scope)
-  Right
-    env
-      { termEnv =
-          termEnv env
-            `Map.union` runtimeEnv
-      }
+termHasLets :: ElabTerm -> Bool
+termHasLets term =
+  case term of
+    X.EVar {} -> False
+    X.ELit {} -> False
+    X.ELam _ _ body -> termHasLets body
+    X.EApp fun arg -> termHasLets fun || termHasLets arg
+    X.ELet {} -> True
+    X.ETyAbs _ _ body -> termHasLets body
+    X.ETyInst inner _ -> termHasLets inner
+    X.ERoll _ body -> termHasLets body
+    X.EUnroll inner -> termHasLets inner
+
+termHasTypeAbs :: ElabTerm -> Bool
+termHasTypeAbs term =
+  case term of
+    X.EVar {} -> False
+    X.ELit {} -> False
+    X.ELam _ _ body -> termHasTypeAbs body
+    X.EApp fun arg -> termHasTypeAbs fun || termHasTypeAbs arg
+    X.ELet _ _ rhs body -> termHasTypeAbs rhs || termHasTypeAbs body
+    X.ETyAbs {} -> True
+    X.ETyInst inner _ -> termHasTypeAbs inner
+    X.ERoll _ body -> termHasTypeAbs body
+    X.EUnroll inner -> termHasTypeAbs inner
+
+extendTypeCheckEnvWithRuntimeContext :: FinalizeContext -> Env -> Env
+extendTypeCheckEnvWithRuntimeContext context env =
+  env
+    { termEnv =
+        termEnv env
+          `Map.union` finalizeContextRuntimeTypeEnv context
+    }
 
 inlineTypeEnvBounds :: Env -> ElabType -> ElabType
 inlineTypeEnvBounds env = go Set.empty
@@ -1906,6 +2025,9 @@ resolveDeferredCases scope deferredCases = go
                   | validHeadName name -> Right ()
                 other -> Left (ProgramCaseOnNonDataType other)
 
+    caseEliminator resultTy scrutinee =
+      X.ETyInst (X.EUnroll scrutinee) (X.InstApp resultTy)
+
     inferDeferredArgType env fallbackTy arg =
       case typeCheckWithEnv env arg of
         Right ty ->
@@ -1916,9 +2038,6 @@ resolveDeferredCases scope deferredCases = go
           Right (fallbackElabTy, fallbackTy, recoverSourceType scope fallbackTy)
         Left err ->
           Left (ProgramPipelineError ("deferred case scrutinee type check failed: " ++ show err))
-
-    caseEliminator resultTy scrutinee =
-      X.ETyInst (X.EUnroll scrutinee) (X.InstApp resultTy)
 
     extendCaseResultEnv dataInfo scrutineeRawTy resultTy env =
       case matchDataInfoEncoding scope dataInfo scrutineeRawTy of

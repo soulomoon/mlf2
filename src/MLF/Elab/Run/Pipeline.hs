@@ -18,9 +18,11 @@ module MLF.Elab.Run.Pipeline
     runPipelineElabDetailedWithPreparedExternalBindings,
     runPipelineElabDetailedWithPreparedExternalBindingsWithTiming,
     runPipelineElabDetailedModuleWithPreparedExternalBindingsWithTiming,
+    runPipelineElabDetailedModuleDeferFinalCheckWithPreparedExternalBindingsWithTiming,
     runPipelineElabDetailedUncheckedWithExternalBindings,
     runPipelineElabDetailedUncheckedWithPreparedExternalBindings,
     runPipelineElabDetailedUncheckedWithPreparedExternalBindingsWithTiming,
+    freshenTypeAbsAgainstEnv,
   )
 where
 
@@ -267,7 +269,7 @@ runPipelineElab = runPipelineElabWithConfig defaultPipelineConfig
 
 runPipelineElabWithConfig :: PipelineConfig -> PolySyms -> NormSurfaceExpr -> Either PipelineError (ElabTerm, ElabType)
 runPipelineElabWithConfig config polySyms expr =
-  detailedPair <$> runPipelineElabWith True (pcTraceConfig config) polySyms Map.empty expr
+  detailedPair <$> runPipelineElabWith FinalCheckInPipeline (pcTraceConfig config) polySyms Map.empty expr
 
 -- | Run the pipeline with an external environment of type assumptions
 -- for free variables, avoiding the ELamAnn wrapping approach.
@@ -291,27 +293,27 @@ runPipelineElabDetailedWithExternalBindings =
 
 runPipelineElabDetailedWithConfigAndExternalBindings :: PipelineConfig -> PolySyms -> ExternalBindings -> NormSurfaceExpr -> Either PipelineError PipelineElabDetailedResult
 runPipelineElabDetailedWithConfigAndExternalBindings config polySyms extBindings =
-  runPipelineElabWith True (pcTraceConfig config) polySyms extBindings
+  runPipelineElabWith FinalCheckInPipeline (pcTraceConfig config) polySyms extBindings
 
 runPipelineElabDetailedUncheckedWithExternalBindings :: PolySyms -> ExternalBindings -> NormSurfaceExpr -> Either PipelineError PipelineElabDetailedResult
 runPipelineElabDetailedUncheckedWithExternalBindings polySyms extBindings =
-  runPipelineElabWith False (pcTraceConfig defaultPipelineConfig) polySyms extBindings
+  runPipelineElabWith FinalCheckAfterDeferredRewrite (pcTraceConfig defaultPipelineConfig) polySyms extBindings
 
 runPipelineElabDetailedWithPreparedExternalBindings :: PolySyms -> PreparedExternalBindings -> NormSurfaceExpr -> Either PipelineError PipelineElabDetailedResult
 runPipelineElabDetailedWithPreparedExternalBindings =
-  runPipelineElabWithPrepared True (pcTraceConfig defaultPipelineConfig)
+  runPipelineElabWithPrepared FinalCheckInPipeline (pcTraceConfig defaultPipelineConfig)
 
 runPipelineElabDetailedWithPreparedExternalBindingsWithTiming :: TimingConfig -> String -> PolySyms -> PreparedExternalBindings -> NormSurfaceExpr -> IO (Either PipelineError PipelineElabDetailedResult)
 runPipelineElabDetailedWithPreparedExternalBindingsWithTiming timing label =
-  runPipelineElabWithPreparedWithTiming timing label True (pcTraceConfig defaultPipelineConfig)
+  runPipelineElabWithPreparedWithTiming timing label FinalCheckInPipeline (pcTraceConfig defaultPipelineConfig)
 
 runPipelineElabDetailedUncheckedWithPreparedExternalBindings :: PolySyms -> PreparedExternalBindings -> NormSurfaceExpr -> Either PipelineError PipelineElabDetailedResult
 runPipelineElabDetailedUncheckedWithPreparedExternalBindings =
-  runPipelineElabWithPrepared False (pcTraceConfig defaultPipelineConfig)
+  runPipelineElabWithPrepared FinalCheckAfterDeferredRewrite (pcTraceConfig defaultPipelineConfig)
 
 runPipelineElabDetailedUncheckedWithPreparedExternalBindingsWithTiming :: TimingConfig -> String -> PolySyms -> PreparedExternalBindings -> NormSurfaceExpr -> IO (Either PipelineError PipelineElabDetailedResult)
 runPipelineElabDetailedUncheckedWithPreparedExternalBindingsWithTiming timing label =
-  runPipelineElabWithPreparedWithTiming timing label False (pcTraceConfig defaultPipelineConfig)
+  runPipelineElabWithPreparedWithTiming timing label FinalCheckAfterDeferredRewrite (pcTraceConfig defaultPipelineConfig)
 
 schemeExternalBindings :: ExternalEnv -> ExternalBindings
 schemeExternalBindings =
@@ -368,39 +370,44 @@ unionTypeCheckEnv preferred fallback =
 detailedPair :: PipelineElabDetailedResult -> (ElabTerm, ElabType)
 detailedPair result = (pedTerm result, pedType result)
 
+data PipelineFinalCheckMode
+  = FinalCheckInPipeline
+  | FinalCheckAfterDeferredRewrite
+  deriving (Eq, Show)
+
 runPipelineElabWith ::
-  Bool ->
+  PipelineFinalCheckMode ->
   TraceConfig ->
   PolySyms ->
   ExternalBindings ->
   NormSurfaceExpr ->
   Either PipelineError PipelineElabDetailedResult
-runPipelineElabWith requireFinalTypeCheck traceCfg polySyms extBindings expr = do
+runPipelineElabWith finalCheckMode traceCfg polySyms extBindings expr = do
   extPrepared <- fromConstraintError (prepareExternalBindings extBindings)
-  runPipelineElabWithPrepared requireFinalTypeCheck traceCfg polySyms extPrepared expr
+  runPipelineElabWithPrepared finalCheckMode traceCfg polySyms extPrepared expr
 
 runPipelineElabWithPrepared ::
-  Bool ->
+  PipelineFinalCheckMode ->
   TraceConfig ->
   PolySyms ->
   PreparedExternalBindings ->
   NormSurfaceExpr ->
   Either PipelineError PipelineElabDetailedResult
-runPipelineElabWithPrepared requireFinalTypeCheck traceCfg polySyms extPrepared =
+runPipelineElabWithPrepared finalCheckMode traceCfg polySyms extPrepared =
   runPipelineElabWithPreparedGenerated
-    requireFinalTypeCheck
+    finalCheckMode
     traceCfg
     extPrepared
     (generateConstraintsWithExternalBindings polySyms (pebBindings extPrepared))
 
 runPipelineElabWithPreparedGenerated ::
-  Bool ->
+  PipelineFinalCheckMode ->
   TraceConfig ->
   PreparedExternalBindings ->
   (NormSurfaceExpr -> Either ConstraintError (ConstraintResult 'Raw)) ->
   NormSurfaceExpr ->
   Either PipelineError PipelineElabDetailedResult
-runPipelineElabWithPreparedGenerated requireFinalTypeCheck traceCfg extPrepared generateConstraints expr = do
+runPipelineElabWithPreparedGenerated finalCheckMode traceCfg extPrepared generateConstraints expr = do
   () <- fromConstraintError (validateDirectRecursiveAnnotations expr)
   let initialSchemeInfos = pebSchemeInfos extPrepared
   ConstraintResult {crConstraint = c0, crAnnotated = ann, crAnnSourceTypes = annSourceTypes, crInitialEnv = _initialBindings} <-
@@ -479,32 +486,32 @@ runPipelineElabWithPreparedGenerated requireFinalTypeCheck traceCfg extPrepared 
               pedTypeCheckEnv = initialTcEnv
             }
       authoritativeResult =
-        if requireFinalTypeCheck
-          then checkedAuthoritative
-          else uncheckedAuthoritative
+        case finalCheckMode of
+          FinalCheckInPipeline -> checkedAuthoritative
+          FinalCheckAfterDeferredRewrite -> uncheckedAuthoritative
 
   -- Keep result-type reconstruction for diagnostics, but report the
   -- type-checker result as authoritative.
-  if not requireFinalTypeCheck
-    then authoritativeResult
-    else do
+  case finalCheckMode of
+    FinalCheckAfterDeferredRewrite -> authoritativeResult
+    FinalCheckInPipeline -> do
       _ <- fromElabError (computePreparedResultType prepared authoritativeAnnCanonFinal authoritativeAnnPreFinal)
       authoritativeResult
 
 runPipelineElabWithPreparedWithTiming ::
   TimingConfig ->
   String ->
-  Bool ->
+  PipelineFinalCheckMode ->
   TraceConfig ->
   PolySyms ->
   PreparedExternalBindings ->
   NormSurfaceExpr ->
   IO (Either PipelineError PipelineElabDetailedResult)
-runPipelineElabWithPreparedWithTiming timing label requireFinalTypeCheck traceCfg polySyms extPrepared =
+runPipelineElabWithPreparedWithTiming timing label finalCheckMode traceCfg polySyms extPrepared =
   runPipelineElabWithPreparedGeneratedWithTiming
     timing
     label
-    requireFinalTypeCheck
+    finalCheckMode
     traceCfg
     extPrepared
     (generateConstraintsWithExternalBindings polySyms (pebBindings extPrepared))
@@ -512,13 +519,13 @@ runPipelineElabWithPreparedWithTiming timing label requireFinalTypeCheck traceCf
 runPipelineElabWithPreparedGeneratedWithTiming ::
   TimingConfig ->
   String ->
-  Bool ->
+  PipelineFinalCheckMode ->
   TraceConfig ->
   PreparedExternalBindings ->
   (NormSurfaceExpr -> Either ConstraintError (ConstraintResult 'Raw)) ->
   NormSurfaceExpr ->
   IO (Either PipelineError PipelineElabDetailedResult)
-runPipelineElabWithPreparedGeneratedWithTiming timing label requireFinalTypeCheck traceCfg extPrepared generateConstraints expr = do
+runPipelineElabWithPreparedGeneratedWithTiming timing label finalCheckMode traceCfg extPrepared generateConstraints expr = do
   validationResult <-
     timeProgramOperationIO timing (label ++ ".validate_annotations") $
       evaluate (fromConstraintError (validateDirectRecursiveAnnotations expr))
@@ -593,8 +600,8 @@ runPipelineElabWithPreparedGeneratedWithTiming timing label requireFinalTypeChec
                                           pedTypeCheckEnv = initialTcEnv
                                         }
                               authoritativeResult <-
-                                if requireFinalTypeCheck
-                                  then
+                                case finalCheckMode of
+                                  FinalCheckInPipeline ->
                                     timeProgramOperationIO timing (label ++ ".final_typecheck") $
                                       evaluate $ do
                                         tyChecked <-
@@ -608,10 +615,11 @@ runPipelineElabWithPreparedGeneratedWithTiming timing label requireFinalTypeChec
                                               pedRootAnn = authoritativeAnnCanonFinal,
                                               pedTypeCheckEnv = initialTcEnv
                                             }
-                                  else pure uncheckedAuthoritative
-                              if not requireFinalTypeCheck
-                                then pure authoritativeResult
-                                else do
+                                  FinalCheckAfterDeferredRewrite ->
+                                    pure uncheckedAuthoritative
+                              case finalCheckMode of
+                                FinalCheckAfterDeferredRewrite -> pure authoritativeResult
+                                FinalCheckInPipeline -> do
                                   resultTypeResult <-
                                     timeProgramOperationIO timing (label ++ ".result_type_reconstruction") $
                                       evaluate (fromElabError (computePreparedResultType prepared authoritativeAnnCanonFinal authoritativeAnnPreFinal))
@@ -622,14 +630,14 @@ runPipelineElabWithPreparedGeneratedWithTiming timing label requireFinalTypeChec
 runPipelineElabWithPreparedConstraintWithTiming ::
   TimingConfig ->
   String ->
-  Bool ->
+  PipelineFinalCheckMode ->
   TraceConfig ->
   PreparedExternalBindings ->
   Constraint 'Raw ->
   AnnExpr ->
   IntMap.IntMap NormSrcType ->
   IO (Either PipelineError PipelineElabDetailedResult)
-runPipelineElabWithPreparedConstraintWithTiming timing label requireFinalTypeCheck traceCfg extPrepared c0 ann annSourceTypes = do
+runPipelineElabWithPreparedConstraintWithTiming timing label finalCheckMode traceCfg extPrepared c0 ann annSourceTypes = do
   let initialSchemeInfos = pebSchemeInfos extPrepared
   normalizeResult <-
     timeProgramOperationIO timing (label ++ ".constraint_normalize") $
@@ -702,8 +710,8 @@ runPipelineElabWithPreparedConstraintWithTiming timing label requireFinalTypeChe
                                       pedTypeCheckEnv = initialTcEnv
                                     }
                           authoritativeResult <-
-                            if requireFinalTypeCheck
-                              then
+                            case finalCheckMode of
+                              FinalCheckInPipeline ->
                                 timeProgramOperationIO timing (label ++ ".final_typecheck") $
                                   evaluate $ do
                                     tyChecked <-
@@ -717,10 +725,11 @@ runPipelineElabWithPreparedConstraintWithTiming timing label requireFinalTypeChe
                                           pedRootAnn = authoritativeAnnCanonFinal,
                                           pedTypeCheckEnv = initialTcEnv
                                         }
-                              else pure uncheckedAuthoritative
-                          if not requireFinalTypeCheck
-                            then pure authoritativeResult
-                            else do
+                              FinalCheckAfterDeferredRewrite ->
+                                pure uncheckedAuthoritative
+                          case finalCheckMode of
+                            FinalCheckAfterDeferredRewrite -> pure authoritativeResult
+                            FinalCheckInPipeline -> do
                               resultTypeResult <-
                                 timeProgramOperationIO timing (label ++ ".result_type_reconstruction") $
                                   evaluate (fromElabError (computePreparedResultType prepared authoritativeAnnCanonFinal authoritativeAnnPreFinal))
@@ -736,7 +745,30 @@ runPipelineElabDetailedModuleWithPreparedExternalBindingsWithTiming ::
   Map.Map VarName PreparedExternalBindings ->
   [(VarName, NormSurfaceExpr)] ->
   IO (Either PipelineError (Map.Map VarName PipelineElabDetailedResult))
-runPipelineElabDetailedModuleWithPreparedExternalBindingsWithTiming timing label polySyms extPrepared rootPrepared namedExprs = do
+runPipelineElabDetailedModuleWithPreparedExternalBindingsWithTiming =
+  runPipelineElabDetailedModuleWithPreparedExternalBindingsModeWithTiming FinalCheckInPipeline
+
+runPipelineElabDetailedModuleDeferFinalCheckWithPreparedExternalBindingsWithTiming ::
+  TimingConfig ->
+  String ->
+  PolySyms ->
+  PreparedExternalBindings ->
+  Map.Map VarName PreparedExternalBindings ->
+  [(VarName, NormSurfaceExpr)] ->
+  IO (Either PipelineError (Map.Map VarName PipelineElabDetailedResult))
+runPipelineElabDetailedModuleDeferFinalCheckWithPreparedExternalBindingsWithTiming =
+  runPipelineElabDetailedModuleWithPreparedExternalBindingsModeWithTiming FinalCheckAfterDeferredRewrite
+
+runPipelineElabDetailedModuleWithPreparedExternalBindingsModeWithTiming ::
+  PipelineFinalCheckMode ->
+  TimingConfig ->
+  String ->
+  PolySyms ->
+  PreparedExternalBindings ->
+  Map.Map VarName PreparedExternalBindings ->
+  [(VarName, NormSurfaceExpr)] ->
+  IO (Either PipelineError (Map.Map VarName PipelineElabDetailedResult))
+runPipelineElabDetailedModuleWithPreparedExternalBindingsModeWithTiming finalCheckMode timing label polySyms extPrepared rootPrepared namedExprs = do
   let traceCfg = pcTraceConfig defaultPipelineConfig
   validationResult <-
     timeProgramOperationIO timing (label ++ ".validate_annotations") $
@@ -767,12 +799,13 @@ runPipelineElabDetailedModuleWithPreparedExternalBindingsWithTiming timing label
               else pure Nothing
           emitModuleBatchPlanMetrics timing (label ++ ".partition") batchPlan
           if moduleBatchPlanRootLocalEligible batchPlan
-            then runModuleBatchPlanRootLocalWithTiming timing (label ++ ".partitioned_roots") traceCfg mbSharedContext batchPlan
-            else runModuleBatchPlanGlobalWithTiming timing label traceCfg extPrepared rootPrepared c0 rootOwnership roots annSourceTypes
+            then runModuleBatchPlanRootLocalWithTiming timing (label ++ ".partitioned_roots") finalCheckMode traceCfg mbSharedContext batchPlan
+            else runModuleBatchPlanGlobalWithTiming timing label finalCheckMode traceCfg extPrepared rootPrepared c0 rootOwnership roots annSourceTypes
 
 runModuleBatchPlanGlobalWithTiming ::
   TimingConfig ->
   String ->
+  PipelineFinalCheckMode ->
   TraceConfig ->
   PreparedExternalBindings ->
   Map.Map VarName PreparedExternalBindings ->
@@ -781,7 +814,7 @@ runModuleBatchPlanGlobalWithTiming ::
   Map.Map VarName ModuleConstraintRoot ->
   IntMap.IntMap NormSrcType ->
   IO (Either PipelineError (Map.Map VarName PipelineElabDetailedResult))
-runModuleBatchPlanGlobalWithTiming timing label traceCfg extPrepared rootPrepared c0 rootOwnership roots annSourceTypes = do
+runModuleBatchPlanGlobalWithTiming timing label finalCheckMode traceCfg extPrepared rootPrepared c0 rootOwnership roots annSourceTypes = do
   normalizeResult <-
     timeProgramOperationIO timing (label ++ ".constraint_normalize") $
       evaluate (normalize c0)
@@ -815,6 +848,7 @@ runModuleBatchPlanGlobalWithTiming timing label traceCfg extPrepared rootPrepare
                 finishPreparedPipelineRootsWithTiming
                   timing
                   (label ++ ".roots")
+                  finalCheckMode
                   traceCfg
                   extPrepared
                   rootPrepared
@@ -826,11 +860,12 @@ runModuleBatchPlanGlobalWithTiming timing label traceCfg extPrepared rootPrepare
 runModuleBatchPlanRootLocalWithTiming ::
   TimingConfig ->
   String ->
+  PipelineFinalCheckMode ->
   TraceConfig ->
   Maybe ModuleBatchSharedContext ->
   ModuleBatchPlan 'Raw ->
   IO (Either PipelineError (Map.Map VarName PipelineElabDetailedResult))
-runModuleBatchPlanRootLocalWithTiming timing label traceCfg mbSharedContext plan =
+runModuleBatchPlanRootLocalWithTiming timing label finalCheckMode traceCfg mbSharedContext plan =
   timeProgramOperationIO timing label $
     case mbpPartitions plan of
       [] -> pure (Right Map.empty)
@@ -844,6 +879,7 @@ runModuleBatchPlanRootLocalWithTiming timing label traceCfg mbSharedContext plan
         runRootFinalizationContextWithTiming
           timing
           (label ++ ".root_" ++ show index)
+          finalCheckMode
           traceCfg
           (mkRootFinalizationContext name partition)
       case result of
@@ -862,6 +898,7 @@ runModuleBatchPlanRootLocalWithTiming timing label traceCfg mbSharedContext plan
                     ( runRootFinalizationContextWithTiming
                         timing
                         (label ++ ".root_" ++ show index)
+                        finalCheckMode
                         traceCfg
                         (mkRootFinalizationContext name partition)
                     )
@@ -906,12 +943,14 @@ runModuleBatchPlanRootLocalWithTiming timing label traceCfg mbSharedContext plan
 runRootFinalizationContextWithTiming ::
   TimingConfig ->
   String ->
+  PipelineFinalCheckMode ->
   TraceConfig ->
   RootFinalizationContext 'Raw ->
   IO (Either PipelineError PipelineElabDetailedResult)
 runRootFinalizationContextWithTiming
   timing
   label
+  finalCheckMode
   traceCfg
   RootFinalizationContext
     { rfcPartition = partition,
@@ -928,7 +967,7 @@ runRootFinalizationContextWithTiming
     runPipelineElabWithPreparedConstraintWithTiming
       timing
       label
-      True
+      finalCheckMode
       traceCfg
       extPrepared
       (rpConstraint partition)
@@ -1293,6 +1332,7 @@ emitModuleBatchGraphMetrics timing label constraint rootOwnership roots annSourc
 finishPreparedPipelineRootsWithTiming ::
   TimingConfig ->
   String ->
+  PipelineFinalCheckMode ->
   TraceConfig ->
   PreparedExternalBindings ->
   Map.Map VarName PreparedExternalBindings ->
@@ -1301,7 +1341,7 @@ finishPreparedPipelineRootsWithTiming ::
   IntMap.IntMap NormSrcType ->
   [(VarName, ModuleConstraintRoot)] ->
   IO (Either PipelineError (Map.Map VarName PipelineElabDetailedResult))
-finishPreparedPipelineRootsWithTiming timing label traceCfg extPrepared rootPrepared prepared elabConfig annSourceTypes roots =
+finishPreparedPipelineRootsWithTiming timing label finalCheckMode traceCfg extPrepared rootPrepared prepared elabConfig annSourceTypes roots =
   go (1 :: Int) Map.empty roots
   where
     go _ acc [] =
@@ -1319,7 +1359,7 @@ finishPreparedPipelineRootsWithTiming timing label traceCfg extPrepared rootPrep
         finishPreparedPipelineRootWithTiming
           timing
           rootLabel
-          True
+          finalCheckMode
           traceCfg
           rootExtPrepared
           prepared
@@ -1333,7 +1373,7 @@ finishPreparedPipelineRootsWithTiming timing label traceCfg extPrepared rootPrep
 finishPreparedPipelineRootWithTiming ::
   TimingConfig ->
   String ->
-  Bool ->
+  PipelineFinalCheckMode ->
   TraceConfig ->
   PreparedExternalBindings ->
   PreparedGeneralizationArtifact ->
@@ -1341,7 +1381,7 @@ finishPreparedPipelineRootWithTiming ::
   ElabEnv 'Presolved ->
   AnnExpr ->
   IO (Either PipelineError PipelineElabDetailedResult)
-finishPreparedPipelineRootWithTiming timing label requireFinalTypeCheck traceCfg extPrepared prepared elabConfig elabEnv annPre = do
+finishPreparedPipelineRootWithTiming timing label finalCheckMode traceCfg extPrepared prepared elabConfig elabEnv annPre = do
   let initialTcEnv = pebTypeCheckEnv extPrepared
       annCanon = canonicalizePreparedAnn prepared annPre
   termResult <-
@@ -1382,8 +1422,8 @@ finishPreparedPipelineRootWithTiming timing label requireFinalTypeCheck traceCfg
                       pedTypeCheckEnv = initialTcEnv
                     }
           authoritativeResult <-
-            if requireFinalTypeCheck
-              then
+            case finalCheckMode of
+              FinalCheckInPipeline ->
                 timeProgramOperationIO timing (label ++ ".final_typecheck") $
                   evaluate $ do
                     tyChecked <-
@@ -1397,10 +1437,11 @@ finishPreparedPipelineRootWithTiming timing label requireFinalTypeCheck traceCfg
                           pedRootAnn = authoritativeAnnCanonFinal,
                           pedTypeCheckEnv = initialTcEnv
                         }
-              else pure uncheckedAuthoritative
-          if not requireFinalTypeCheck
-            then pure authoritativeResult
-            else do
+              FinalCheckAfterDeferredRewrite ->
+                pure uncheckedAuthoritative
+          case finalCheckMode of
+            FinalCheckAfterDeferredRewrite -> pure authoritativeResult
+            FinalCheckInPipeline -> do
               resultTypeResult <-
                 timeProgramOperationIO timing (label ++ ".result_type_reconstruction") $
                   evaluate (fromElabError (computePreparedResultTypeWithRootGeneralization prepared rootGeneralization authoritativeAnnCanonFinal authoritativeAnnPreFinal))

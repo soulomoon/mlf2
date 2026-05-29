@@ -2224,7 +2224,13 @@ deferCaseCall :: ElaborateScope -> DataInfo -> SrcType -> SrcType -> ElaborateM 
 deferCaseCall scope dataInfo scrutineeTy resultTy = do
   placeholder <- freshDeferredCaseName (dataName dataInfo)
   let resultTyElab = lowerType scope resultTy
-      handlerTys = replicate (length (dataConstructors dataInfo)) STBottom
+      handlerTys =
+        [ handlerSurfaceType
+            scope
+            ctorInfo {ctorArgs = specializeConstructorArgsForScrutineeType scope scrutineeTy ctorInfo}
+            resultTyElab
+        | ctorInfo <- dataConstructors dataInfo
+        ]
       placeholderTy = foldr STArrow resultTyElab (lowerType scope scrutineeTy : handlerTys)
       deferred =
         DeferredCaseCall
@@ -2827,10 +2833,8 @@ compileHandler scope scrutineeExpr scrutineeTy resultTy dataInfo alts forceAnnot
               let handlerTy = handlerSurfaceType scope specializedCtor (lowerType scope resultTy)
               pure (surfaceAnn handlerBody handlerTy)
 
-    specializeConstructorArgsForScrutinee actualScrutineeTy ctor =
-      case matchTypesInScope scope Map.empty (ctorResult ctor) actualScrutineeTy of
-        Just subst -> map (specializeSrcType subst) (ctorArgs ctor)
-        Nothing -> ctorArgs ctor
+    specializeConstructorArgsForScrutinee =
+      specializeConstructorArgsForScrutineeType scope
 
 compileResolvedHandler :: ElaborateScope -> SurfaceExpr -> SrcType -> SrcType -> DataInfo -> [P.ResolvedAlt] -> Bool -> ConstructorInfo -> ElaborateM SurfaceExpr
 compileResolvedHandler scope scrutineeExpr scrutineeTy resultTy dataInfo alts forceAnnotateHandlers ctorInfo = do
@@ -2939,10 +2943,14 @@ compileResolvedHandler scope scrutineeExpr scrutineeTy resultTy dataInfo alts fo
               let handlerTy = handlerSurfaceType scope specializedCtor (lowerType scope resultTy)
               pure (surfaceAnn handlerBody handlerTy)
 
-    specializeConstructorArgsForScrutinee actualScrutineeTy ctor =
-      case matchTypesInScope scope Map.empty (ctorResult ctor) actualScrutineeTy of
-        Just subst -> map (specializeSrcType subst) (ctorArgs ctor)
-        Nothing -> ctorArgs ctor
+    specializeConstructorArgsForScrutinee =
+      specializeConstructorArgsForScrutineeType scope
+
+specializeConstructorArgsForScrutineeType :: ElaborateScope -> SrcType -> ConstructorInfo -> [SrcType]
+specializeConstructorArgsForScrutineeType scope actualScrutineeTy ctor =
+  case matchTypesInScope scope Map.empty (ctorResult ctor) actualScrutineeTy of
+    Just subst -> map (specializeSrcType subst) (ctorArgs ctor)
+    Nothing -> ctorArgs ctor
 
 ctorOwners :: [P.Alt] -> [String]
 ctorOwners = foldr go []

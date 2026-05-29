@@ -1,5 +1,0 @@
-benchmark	path	run	metric	value_ms	status
-fixture-cross-module-let	test/programs/packages/cross-module-let	1	real	60.000	1
-fixture-cross-module-let	test/programs/packages/cross-module-let	1	user	0.000	1
-fixture-cross-module-let	test/programs/packages/cross-module-let	1	sys	10.000	1
-fixture-cross-module-let	test/programs/packages/cross-module-let	1	command.status	1	1

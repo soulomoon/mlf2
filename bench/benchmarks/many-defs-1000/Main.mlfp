@@ -1,0 +1,1846 @@
+module Main export (main) {
+  data Nat =
+      Zero : Nat
+    | Succ : Nat -> Nat;
+
+  data Box =
+      Box : Int -> Box;
+
+  def idPoly : ∀ a. a -> a = λx x;
+
+  def useInt : (Int -> Int) -> Int =
+    λ(f : Int -> Int) f 1;
+
+  def value0001 : Int = 1;
+  def value0002 : Int = value0001;
+  def value0003 : Int = let id = λx x in id value0002;
+  def value0004 : Int = idPoly value0003;
+  def value0005 : Int = useInt (λ(x : Int) value0004);
+  def value0006 : Int = case Succ Zero of {
+    Zero -> value0005;
+    Succ _ -> value0005
+  };
+  def value0007 : Int = case Box value0006 of {
+    Box x -> x
+  };
+  def value0008 : Int = value0007;
+  def value0009 : Int = let id = λx x in id value0008;
+  def value0010 : Int = idPoly value0009;
+  def value0011 : Int = useInt (λ(x : Int) value0010);
+  def value0012 : Int = case Succ Zero of {
+    Zero -> value0011;
+    Succ _ -> value0011
+  };
+  def value0013 : Int = case Box value0012 of {
+    Box x -> x
+  };
+  def value0014 : Int = value0013;
+  def value0015 : Int = let id = λx x in id value0014;
+  def value0016 : Int = idPoly value0015;
+  def value0017 : Int = useInt (λ(x : Int) value0016);
+  def value0018 : Int = case Succ Zero of {
+    Zero -> value0017;
+    Succ _ -> value0017
+  };
+  def value0019 : Int = case Box value0018 of {
+    Box x -> x
+  };
+  def value0020 : Int = value0019;
+  def value0021 : Int = let id = λx x in id value0020;
+  def value0022 : Int = idPoly value0021;
+  def value0023 : Int = useInt (λ(x : Int) value0022);
+  def value0024 : Int = case Succ Zero of {
+    Zero -> value0023;
+    Succ _ -> value0023
+  };
+  def value0025 : Int = case Box value0024 of {
+    Box x -> x
+  };
+  def value0026 : Int = value0025;
+  def value0027 : Int = let id = λx x in id value0026;
+  def value0028 : Int = idPoly value0027;
+  def value0029 : Int = useInt (λ(x : Int) value0028);
+  def value0030 : Int = case Succ Zero of {
+    Zero -> value0029;
+    Succ _ -> value0029
+  };
+  def value0031 : Int = case Box value0030 of {
+    Box x -> x
+  };
+  def value0032 : Int = value0031;
+  def value0033 : Int = let id = λx x in id value0032;
+  def value0034 : Int = idPoly value0033;
+  def value0035 : Int = useInt (λ(x : Int) value0034);
+  def value0036 : Int = case Succ Zero of {
+    Zero -> value0035;
+    Succ _ -> value0035
+  };
+  def value0037 : Int = case Box value0036 of {
+    Box x -> x
+  };
+  def value0038 : Int = value0037;
+  def value0039 : Int = let id = λx x in id value0038;
+  def value0040 : Int = idPoly value0039;
+  def value0041 : Int = useInt (λ(x : Int) value0040);
+  def value0042 : Int = case Succ Zero of {
+    Zero -> value0041;
+    Succ _ -> value0041
+  };
+  def value0043 : Int = case Box value0042 of {
+    Box x -> x
+  };
+  def value0044 : Int = value0043;
+  def value0045 : Int = let id = λx x in id value0044;
+  def value0046 : Int = idPoly value0045;
+  def value0047 : Int = useInt (λ(x : Int) value0046);
+  def value0048 : Int = case Succ Zero of {
+    Zero -> value0047;
+    Succ _ -> value0047
+  };
+  def value0049 : Int = case Box value0048 of {
+    Box x -> x
+  };
+  def value0050 : Int = value0049;
+  def value0051 : Int = let id = λx x in id value0050;
+  def value0052 : Int = idPoly value0051;
+  def value0053 : Int = useInt (λ(x : Int) value0052);
+  def value0054 : Int = case Succ Zero of {
+    Zero -> value0053;
+    Succ _ -> value0053
+  };
+  def value0055 : Int = case Box value0054 of {
+    Box x -> x
+  };
+  def value0056 : Int = value0055;
+  def value0057 : Int = let id = λx x in id value0056;
+  def value0058 : Int = idPoly value0057;
+  def value0059 : Int = useInt (λ(x : Int) value0058);
+  def value0060 : Int = case Succ Zero of {
+    Zero -> value0059;
+    Succ _ -> value0059
+  };
+  def value0061 : Int = case Box value0060 of {
+    Box x -> x
+  };
+  def value0062 : Int = value0061;
+  def value0063 : Int = let id = λx x in id value0062;
+  def value0064 : Int = idPoly value0063;
+  def value0065 : Int = useInt (λ(x : Int) value0064);
+  def value0066 : Int = case Succ Zero of {
+    Zero -> value0065;
+    Succ _ -> value0065
+  };
+  def value0067 : Int = case Box value0066 of {
+    Box x -> x
+  };
+  def value0068 : Int = value0067;
+  def value0069 : Int = let id = λx x in id value0068;
+  def value0070 : Int = idPoly value0069;
+  def value0071 : Int = useInt (λ(x : Int) value0070);
+  def value0072 : Int = case Succ Zero of {
+    Zero -> value0071;
+    Succ _ -> value0071
+  };
+  def value0073 : Int = case Box value0072 of {
+    Box x -> x
+  };
+  def value0074 : Int = value0073;
+  def value0075 : Int = let id = λx x in id value0074;
+  def value0076 : Int = idPoly value0075;
+  def value0077 : Int = useInt (λ(x : Int) value0076);
+  def value0078 : Int = case Succ Zero of {
+    Zero -> value0077;
+    Succ _ -> value0077
+  };
+  def value0079 : Int = case Box value0078 of {
+    Box x -> x
+  };
+  def value0080 : Int = value0079;
+  def value0081 : Int = let id = λx x in id value0080;
+  def value0082 : Int = idPoly value0081;
+  def value0083 : Int = useInt (λ(x : Int) value0082);
+  def value0084 : Int = case Succ Zero of {
+    Zero -> value0083;
+    Succ _ -> value0083
+  };
+  def value0085 : Int = case Box value0084 of {
+    Box x -> x
+  };
+  def value0086 : Int = value0085;
+  def value0087 : Int = let id = λx x in id value0086;
+  def value0088 : Int = idPoly value0087;
+  def value0089 : Int = useInt (λ(x : Int) value0088);
+  def value0090 : Int = case Succ Zero of {
+    Zero -> value0089;
+    Succ _ -> value0089
+  };
+  def value0091 : Int = case Box value0090 of {
+    Box x -> x
+  };
+  def value0092 : Int = value0091;
+  def value0093 : Int = let id = λx x in id value0092;
+  def value0094 : Int = idPoly value0093;
+  def value0095 : Int = useInt (λ(x : Int) value0094);
+  def value0096 : Int = case Succ Zero of {
+    Zero -> value0095;
+    Succ _ -> value0095
+  };
+  def value0097 : Int = case Box value0096 of {
+    Box x -> x
+  };
+  def value0098 : Int = value0097;
+  def value0099 : Int = let id = λx x in id value0098;
+  def value0100 : Int = idPoly value0099;
+  def value0101 : Int = useInt (λ(x : Int) value0100);
+  def value0102 : Int = case Succ Zero of {
+    Zero -> value0101;
+    Succ _ -> value0101
+  };
+  def value0103 : Int = case Box value0102 of {
+    Box x -> x
+  };
+  def value0104 : Int = value0103;
+  def value0105 : Int = let id = λx x in id value0104;
+  def value0106 : Int = idPoly value0105;
+  def value0107 : Int = useInt (λ(x : Int) value0106);
+  def value0108 : Int = case Succ Zero of {
+    Zero -> value0107;
+    Succ _ -> value0107
+  };
+  def value0109 : Int = case Box value0108 of {
+    Box x -> x
+  };
+  def value0110 : Int = value0109;
+  def value0111 : Int = let id = λx x in id value0110;
+  def value0112 : Int = idPoly value0111;
+  def value0113 : Int = useInt (λ(x : Int) value0112);
+  def value0114 : Int = case Succ Zero of {
+    Zero -> value0113;
+    Succ _ -> value0113
+  };
+  def value0115 : Int = case Box value0114 of {
+    Box x -> x
+  };
+  def value0116 : Int = value0115;
+  def value0117 : Int = let id = λx x in id value0116;
+  def value0118 : Int = idPoly value0117;
+  def value0119 : Int = useInt (λ(x : Int) value0118);
+  def value0120 : Int = case Succ Zero of {
+    Zero -> value0119;
+    Succ _ -> value0119
+  };
+  def value0121 : Int = case Box value0120 of {
+    Box x -> x
+  };
+  def value0122 : Int = value0121;
+  def value0123 : Int = let id = λx x in id value0122;
+  def value0124 : Int = idPoly value0123;
+  def value0125 : Int = useInt (λ(x : Int) value0124);
+  def value0126 : Int = case Succ Zero of {
+    Zero -> value0125;
+    Succ _ -> value0125
+  };
+  def value0127 : Int = case Box value0126 of {
+    Box x -> x
+  };
+  def value0128 : Int = value0127;
+  def value0129 : Int = let id = λx x in id value0128;
+  def value0130 : Int = idPoly value0129;
+  def value0131 : Int = useInt (λ(x : Int) value0130);
+  def value0132 : Int = case Succ Zero of {
+    Zero -> value0131;
+    Succ _ -> value0131
+  };
+  def value0133 : Int = case Box value0132 of {
+    Box x -> x
+  };
+  def value0134 : Int = value0133;
+  def value0135 : Int = let id = λx x in id value0134;
+  def value0136 : Int = idPoly value0135;
+  def value0137 : Int = useInt (λ(x : Int) value0136);
+  def value0138 : Int = case Succ Zero of {
+    Zero -> value0137;
+    Succ _ -> value0137
+  };
+  def value0139 : Int = case Box value0138 of {
+    Box x -> x
+  };
+  def value0140 : Int = value0139;
+  def value0141 : Int = let id = λx x in id value0140;
+  def value0142 : Int = idPoly value0141;
+  def value0143 : Int = useInt (λ(x : Int) value0142);
+  def value0144 : Int = case Succ Zero of {
+    Zero -> value0143;
+    Succ _ -> value0143
+  };
+  def value0145 : Int = case Box value0144 of {
+    Box x -> x
+  };
+  def value0146 : Int = value0145;
+  def value0147 : Int = let id = λx x in id value0146;
+  def value0148 : Int = idPoly value0147;
+  def value0149 : Int = useInt (λ(x : Int) value0148);
+  def value0150 : Int = case Succ Zero of {
+    Zero -> value0149;
+    Succ _ -> value0149
+  };
+  def value0151 : Int = case Box value0150 of {
+    Box x -> x
+  };
+  def value0152 : Int = value0151;
+  def value0153 : Int = let id = λx x in id value0152;
+  def value0154 : Int = idPoly value0153;
+  def value0155 : Int = useInt (λ(x : Int) value0154);
+  def value0156 : Int = case Succ Zero of {
+    Zero -> value0155;
+    Succ _ -> value0155
+  };
+  def value0157 : Int = case Box value0156 of {
+    Box x -> x
+  };
+  def value0158 : Int = value0157;
+  def value0159 : Int = let id = λx x in id value0158;
+  def value0160 : Int = idPoly value0159;
+  def value0161 : Int = useInt (λ(x : Int) value0160);
+  def value0162 : Int = case Succ Zero of {
+    Zero -> value0161;
+    Succ _ -> value0161
+  };
+  def value0163 : Int = case Box value0162 of {
+    Box x -> x
+  };
+  def value0164 : Int = value0163;
+  def value0165 : Int = let id = λx x in id value0164;
+  def value0166 : Int = idPoly value0165;
+  def value0167 : Int = useInt (λ(x : Int) value0166);
+  def value0168 : Int = case Succ Zero of {
+    Zero -> value0167;
+    Succ _ -> value0167
+  };
+  def value0169 : Int = case Box value0168 of {
+    Box x -> x
+  };
+  def value0170 : Int = value0169;
+  def value0171 : Int = let id = λx x in id value0170;
+  def value0172 : Int = idPoly value0171;
+  def value0173 : Int = useInt (λ(x : Int) value0172);
+  def value0174 : Int = case Succ Zero of {
+    Zero -> value0173;
+    Succ _ -> value0173
+  };
+  def value0175 : Int = case Box value0174 of {
+    Box x -> x
+  };
+  def value0176 : Int = value0175;
+  def value0177 : Int = let id = λx x in id value0176;
+  def value0178 : Int = idPoly value0177;
+  def value0179 : Int = useInt (λ(x : Int) value0178);
+  def value0180 : Int = case Succ Zero of {
+    Zero -> value0179;
+    Succ _ -> value0179
+  };
+  def value0181 : Int = case Box value0180 of {
+    Box x -> x
+  };
+  def value0182 : Int = value0181;
+  def value0183 : Int = let id = λx x in id value0182;
+  def value0184 : Int = idPoly value0183;
+  def value0185 : Int = useInt (λ(x : Int) value0184);
+  def value0186 : Int = case Succ Zero of {
+    Zero -> value0185;
+    Succ _ -> value0185
+  };
+  def value0187 : Int = case Box value0186 of {
+    Box x -> x
+  };
+  def value0188 : Int = value0187;
+  def value0189 : Int = let id = λx x in id value0188;
+  def value0190 : Int = idPoly value0189;
+  def value0191 : Int = useInt (λ(x : Int) value0190);
+  def value0192 : Int = case Succ Zero of {
+    Zero -> value0191;
+    Succ _ -> value0191
+  };
+  def value0193 : Int = case Box value0192 of {
+    Box x -> x
+  };
+  def value0194 : Int = value0193;
+  def value0195 : Int = let id = λx x in id value0194;
+  def value0196 : Int = idPoly value0195;
+  def value0197 : Int = useInt (λ(x : Int) value0196);
+  def value0198 : Int = case Succ Zero of {
+    Zero -> value0197;
+    Succ _ -> value0197
+  };
+  def value0199 : Int = case Box value0198 of {
+    Box x -> x
+  };
+  def value0200 : Int = value0199;
+  def value0201 : Int = let id = λx x in id value0200;
+  def value0202 : Int = idPoly value0201;
+  def value0203 : Int = useInt (λ(x : Int) value0202);
+  def value0204 : Int = case Succ Zero of {
+    Zero -> value0203;
+    Succ _ -> value0203
+  };
+  def value0205 : Int = case Box value0204 of {
+    Box x -> x
+  };
+  def value0206 : Int = value0205;
+  def value0207 : Int = let id = λx x in id value0206;
+  def value0208 : Int = idPoly value0207;
+  def value0209 : Int = useInt (λ(x : Int) value0208);
+  def value0210 : Int = case Succ Zero of {
+    Zero -> value0209;
+    Succ _ -> value0209
+  };
+  def value0211 : Int = case Box value0210 of {
+    Box x -> x
+  };
+  def value0212 : Int = value0211;
+  def value0213 : Int = let id = λx x in id value0212;
+  def value0214 : Int = idPoly value0213;
+  def value0215 : Int = useInt (λ(x : Int) value0214);
+  def value0216 : Int = case Succ Zero of {
+    Zero -> value0215;
+    Succ _ -> value0215
+  };
+  def value0217 : Int = case Box value0216 of {
+    Box x -> x
+  };
+  def value0218 : Int = value0217;
+  def value0219 : Int = let id = λx x in id value0218;
+  def value0220 : Int = idPoly value0219;
+  def value0221 : Int = useInt (λ(x : Int) value0220);
+  def value0222 : Int = case Succ Zero of {
+    Zero -> value0221;
+    Succ _ -> value0221
+  };
+  def value0223 : Int = case Box value0222 of {
+    Box x -> x
+  };
+  def value0224 : Int = value0223;
+  def value0225 : Int = let id = λx x in id value0224;
+  def value0226 : Int = idPoly value0225;
+  def value0227 : Int = useInt (λ(x : Int) value0226);
+  def value0228 : Int = case Succ Zero of {
+    Zero -> value0227;
+    Succ _ -> value0227
+  };
+  def value0229 : Int = case Box value0228 of {
+    Box x -> x
+  };
+  def value0230 : Int = value0229;
+  def value0231 : Int = let id = λx x in id value0230;
+  def value0232 : Int = idPoly value0231;
+  def value0233 : Int = useInt (λ(x : Int) value0232);
+  def value0234 : Int = case Succ Zero of {
+    Zero -> value0233;
+    Succ _ -> value0233
+  };
+  def value0235 : Int = case Box value0234 of {
+    Box x -> x
+  };
+  def value0236 : Int = value0235;
+  def value0237 : Int = let id = λx x in id value0236;
+  def value0238 : Int = idPoly value0237;
+  def value0239 : Int = useInt (λ(x : Int) value0238);
+  def value0240 : Int = case Succ Zero of {
+    Zero -> value0239;
+    Succ _ -> value0239
+  };
+  def value0241 : Int = case Box value0240 of {
+    Box x -> x
+  };
+  def value0242 : Int = value0241;
+  def value0243 : Int = let id = λx x in id value0242;
+  def value0244 : Int = idPoly value0243;
+  def value0245 : Int = useInt (λ(x : Int) value0244);
+  def value0246 : Int = case Succ Zero of {
+    Zero -> value0245;
+    Succ _ -> value0245
+  };
+  def value0247 : Int = case Box value0246 of {
+    Box x -> x
+  };
+  def value0248 : Int = value0247;
+  def value0249 : Int = let id = λx x in id value0248;
+  def value0250 : Int = idPoly value0249;
+  def value0251 : Int = useInt (λ(x : Int) value0250);
+  def value0252 : Int = case Succ Zero of {
+    Zero -> value0251;
+    Succ _ -> value0251
+  };
+  def value0253 : Int = case Box value0252 of {
+    Box x -> x
+  };
+  def value0254 : Int = value0253;
+  def value0255 : Int = let id = λx x in id value0254;
+  def value0256 : Int = idPoly value0255;
+  def value0257 : Int = useInt (λ(x : Int) value0256);
+  def value0258 : Int = case Succ Zero of {
+    Zero -> value0257;
+    Succ _ -> value0257
+  };
+  def value0259 : Int = case Box value0258 of {
+    Box x -> x
+  };
+  def value0260 : Int = value0259;
+  def value0261 : Int = let id = λx x in id value0260;
+  def value0262 : Int = idPoly value0261;
+  def value0263 : Int = useInt (λ(x : Int) value0262);
+  def value0264 : Int = case Succ Zero of {
+    Zero -> value0263;
+    Succ _ -> value0263
+  };
+  def value0265 : Int = case Box value0264 of {
+    Box x -> x
+  };
+  def value0266 : Int = value0265;
+  def value0267 : Int = let id = λx x in id value0266;
+  def value0268 : Int = idPoly value0267;
+  def value0269 : Int = useInt (λ(x : Int) value0268);
+  def value0270 : Int = case Succ Zero of {
+    Zero -> value0269;
+    Succ _ -> value0269
+  };
+  def value0271 : Int = case Box value0270 of {
+    Box x -> x
+  };
+  def value0272 : Int = value0271;
+  def value0273 : Int = let id = λx x in id value0272;
+  def value0274 : Int = idPoly value0273;
+  def value0275 : Int = useInt (λ(x : Int) value0274);
+  def value0276 : Int = case Succ Zero of {
+    Zero -> value0275;
+    Succ _ -> value0275
+  };
+  def value0277 : Int = case Box value0276 of {
+    Box x -> x
+  };
+  def value0278 : Int = value0277;
+  def value0279 : Int = let id = λx x in id value0278;
+  def value0280 : Int = idPoly value0279;
+  def value0281 : Int = useInt (λ(x : Int) value0280);
+  def value0282 : Int = case Succ Zero of {
+    Zero -> value0281;
+    Succ _ -> value0281
+  };
+  def value0283 : Int = case Box value0282 of {
+    Box x -> x
+  };
+  def value0284 : Int = value0283;
+  def value0285 : Int = let id = λx x in id value0284;
+  def value0286 : Int = idPoly value0285;
+  def value0287 : Int = useInt (λ(x : Int) value0286);
+  def value0288 : Int = case Succ Zero of {
+    Zero -> value0287;
+    Succ _ -> value0287
+  };
+  def value0289 : Int = case Box value0288 of {
+    Box x -> x
+  };
+  def value0290 : Int = value0289;
+  def value0291 : Int = let id = λx x in id value0290;
+  def value0292 : Int = idPoly value0291;
+  def value0293 : Int = useInt (λ(x : Int) value0292);
+  def value0294 : Int = case Succ Zero of {
+    Zero -> value0293;
+    Succ _ -> value0293
+  };
+  def value0295 : Int = case Box value0294 of {
+    Box x -> x
+  };
+  def value0296 : Int = value0295;
+  def value0297 : Int = let id = λx x in id value0296;
+  def value0298 : Int = idPoly value0297;
+  def value0299 : Int = useInt (λ(x : Int) value0298);
+  def value0300 : Int = case Succ Zero of {
+    Zero -> value0299;
+    Succ _ -> value0299
+  };
+  def value0301 : Int = case Box value0300 of {
+    Box x -> x
+  };
+  def value0302 : Int = value0301;
+  def value0303 : Int = let id = λx x in id value0302;
+  def value0304 : Int = idPoly value0303;
+  def value0305 : Int = useInt (λ(x : Int) value0304);
+  def value0306 : Int = case Succ Zero of {
+    Zero -> value0305;
+    Succ _ -> value0305
+  };
+  def value0307 : Int = case Box value0306 of {
+    Box x -> x
+  };
+  def value0308 : Int = value0307;
+  def value0309 : Int = let id = λx x in id value0308;
+  def value0310 : Int = idPoly value0309;
+  def value0311 : Int = useInt (λ(x : Int) value0310);
+  def value0312 : Int = case Succ Zero of {
+    Zero -> value0311;
+    Succ _ -> value0311
+  };
+  def value0313 : Int = case Box value0312 of {
+    Box x -> x
+  };
+  def value0314 : Int = value0313;
+  def value0315 : Int = let id = λx x in id value0314;
+  def value0316 : Int = idPoly value0315;
+  def value0317 : Int = useInt (λ(x : Int) value0316);
+  def value0318 : Int = case Succ Zero of {
+    Zero -> value0317;
+    Succ _ -> value0317
+  };
+  def value0319 : Int = case Box value0318 of {
+    Box x -> x
+  };
+  def value0320 : Int = value0319;
+  def value0321 : Int = let id = λx x in id value0320;
+  def value0322 : Int = idPoly value0321;
+  def value0323 : Int = useInt (λ(x : Int) value0322);
+  def value0324 : Int = case Succ Zero of {
+    Zero -> value0323;
+    Succ _ -> value0323
+  };
+  def value0325 : Int = case Box value0324 of {
+    Box x -> x
+  };
+  def value0326 : Int = value0325;
+  def value0327 : Int = let id = λx x in id value0326;
+  def value0328 : Int = idPoly value0327;
+  def value0329 : Int = useInt (λ(x : Int) value0328);
+  def value0330 : Int = case Succ Zero of {
+    Zero -> value0329;
+    Succ _ -> value0329
+  };
+  def value0331 : Int = case Box value0330 of {
+    Box x -> x
+  };
+  def value0332 : Int = value0331;
+  def value0333 : Int = let id = λx x in id value0332;
+  def value0334 : Int = idPoly value0333;
+  def value0335 : Int = useInt (λ(x : Int) value0334);
+  def value0336 : Int = case Succ Zero of {
+    Zero -> value0335;
+    Succ _ -> value0335
+  };
+  def value0337 : Int = case Box value0336 of {
+    Box x -> x
+  };
+  def value0338 : Int = value0337;
+  def value0339 : Int = let id = λx x in id value0338;
+  def value0340 : Int = idPoly value0339;
+  def value0341 : Int = useInt (λ(x : Int) value0340);
+  def value0342 : Int = case Succ Zero of {
+    Zero -> value0341;
+    Succ _ -> value0341
+  };
+  def value0343 : Int = case Box value0342 of {
+    Box x -> x
+  };
+  def value0344 : Int = value0343;
+  def value0345 : Int = let id = λx x in id value0344;
+  def value0346 : Int = idPoly value0345;
+  def value0347 : Int = useInt (λ(x : Int) value0346);
+  def value0348 : Int = case Succ Zero of {
+    Zero -> value0347;
+    Succ _ -> value0347
+  };
+  def value0349 : Int = case Box value0348 of {
+    Box x -> x
+  };
+  def value0350 : Int = value0349;
+  def value0351 : Int = let id = λx x in id value0350;
+  def value0352 : Int = idPoly value0351;
+  def value0353 : Int = useInt (λ(x : Int) value0352);
+  def value0354 : Int = case Succ Zero of {
+    Zero -> value0353;
+    Succ _ -> value0353
+  };
+  def value0355 : Int = case Box value0354 of {
+    Box x -> x
+  };
+  def value0356 : Int = value0355;
+  def value0357 : Int = let id = λx x in id value0356;
+  def value0358 : Int = idPoly value0357;
+  def value0359 : Int = useInt (λ(x : Int) value0358);
+  def value0360 : Int = case Succ Zero of {
+    Zero -> value0359;
+    Succ _ -> value0359
+  };
+  def value0361 : Int = case Box value0360 of {
+    Box x -> x
+  };
+  def value0362 : Int = value0361;
+  def value0363 : Int = let id = λx x in id value0362;
+  def value0364 : Int = idPoly value0363;
+  def value0365 : Int = useInt (λ(x : Int) value0364);
+  def value0366 : Int = case Succ Zero of {
+    Zero -> value0365;
+    Succ _ -> value0365
+  };
+  def value0367 : Int = case Box value0366 of {
+    Box x -> x
+  };
+  def value0368 : Int = value0367;
+  def value0369 : Int = let id = λx x in id value0368;
+  def value0370 : Int = idPoly value0369;
+  def value0371 : Int = useInt (λ(x : Int) value0370);
+  def value0372 : Int = case Succ Zero of {
+    Zero -> value0371;
+    Succ _ -> value0371
+  };
+  def value0373 : Int = case Box value0372 of {
+    Box x -> x
+  };
+  def value0374 : Int = value0373;
+  def value0375 : Int = let id = λx x in id value0374;
+  def value0376 : Int = idPoly value0375;
+  def value0377 : Int = useInt (λ(x : Int) value0376);
+  def value0378 : Int = case Succ Zero of {
+    Zero -> value0377;
+    Succ _ -> value0377
+  };
+  def value0379 : Int = case Box value0378 of {
+    Box x -> x
+  };
+  def value0380 : Int = value0379;
+  def value0381 : Int = let id = λx x in id value0380;
+  def value0382 : Int = idPoly value0381;
+  def value0383 : Int = useInt (λ(x : Int) value0382);
+  def value0384 : Int = case Succ Zero of {
+    Zero -> value0383;
+    Succ _ -> value0383
+  };
+  def value0385 : Int = case Box value0384 of {
+    Box x -> x
+  };
+  def value0386 : Int = value0385;
+  def value0387 : Int = let id = λx x in id value0386;
+  def value0388 : Int = idPoly value0387;
+  def value0389 : Int = useInt (λ(x : Int) value0388);
+  def value0390 : Int = case Succ Zero of {
+    Zero -> value0389;
+    Succ _ -> value0389
+  };
+  def value0391 : Int = case Box value0390 of {
+    Box x -> x
+  };
+  def value0392 : Int = value0391;
+  def value0393 : Int = let id = λx x in id value0392;
+  def value0394 : Int = idPoly value0393;
+  def value0395 : Int = useInt (λ(x : Int) value0394);
+  def value0396 : Int = case Succ Zero of {
+    Zero -> value0395;
+    Succ _ -> value0395
+  };
+  def value0397 : Int = case Box value0396 of {
+    Box x -> x
+  };
+  def value0398 : Int = value0397;
+  def value0399 : Int = let id = λx x in id value0398;
+  def value0400 : Int = idPoly value0399;
+  def value0401 : Int = useInt (λ(x : Int) value0400);
+  def value0402 : Int = case Succ Zero of {
+    Zero -> value0401;
+    Succ _ -> value0401
+  };
+  def value0403 : Int = case Box value0402 of {
+    Box x -> x
+  };
+  def value0404 : Int = value0403;
+  def value0405 : Int = let id = λx x in id value0404;
+  def value0406 : Int = idPoly value0405;
+  def value0407 : Int = useInt (λ(x : Int) value0406);
+  def value0408 : Int = case Succ Zero of {
+    Zero -> value0407;
+    Succ _ -> value0407
+  };
+  def value0409 : Int = case Box value0408 of {
+    Box x -> x
+  };
+  def value0410 : Int = value0409;
+  def value0411 : Int = let id = λx x in id value0410;
+  def value0412 : Int = idPoly value0411;
+  def value0413 : Int = useInt (λ(x : Int) value0412);
+  def value0414 : Int = case Succ Zero of {
+    Zero -> value0413;
+    Succ _ -> value0413
+  };
+  def value0415 : Int = case Box value0414 of {
+    Box x -> x
+  };
+  def value0416 : Int = value0415;
+  def value0417 : Int = let id = λx x in id value0416;
+  def value0418 : Int = idPoly value0417;
+  def value0419 : Int = useInt (λ(x : Int) value0418);
+  def value0420 : Int = case Succ Zero of {
+    Zero -> value0419;
+    Succ _ -> value0419
+  };
+  def value0421 : Int = case Box value0420 of {
+    Box x -> x
+  };
+  def value0422 : Int = value0421;
+  def value0423 : Int = let id = λx x in id value0422;
+  def value0424 : Int = idPoly value0423;
+  def value0425 : Int = useInt (λ(x : Int) value0424);
+  def value0426 : Int = case Succ Zero of {
+    Zero -> value0425;
+    Succ _ -> value0425
+  };
+  def value0427 : Int = case Box value0426 of {
+    Box x -> x
+  };
+  def value0428 : Int = value0427;
+  def value0429 : Int = let id = λx x in id value0428;
+  def value0430 : Int = idPoly value0429;
+  def value0431 : Int = useInt (λ(x : Int) value0430);
+  def value0432 : Int = case Succ Zero of {
+    Zero -> value0431;
+    Succ _ -> value0431
+  };
+  def value0433 : Int = case Box value0432 of {
+    Box x -> x
+  };
+  def value0434 : Int = value0433;
+  def value0435 : Int = let id = λx x in id value0434;
+  def value0436 : Int = idPoly value0435;
+  def value0437 : Int = useInt (λ(x : Int) value0436);
+  def value0438 : Int = case Succ Zero of {
+    Zero -> value0437;
+    Succ _ -> value0437
+  };
+  def value0439 : Int = case Box value0438 of {
+    Box x -> x
+  };
+  def value0440 : Int = value0439;
+  def value0441 : Int = let id = λx x in id value0440;
+  def value0442 : Int = idPoly value0441;
+  def value0443 : Int = useInt (λ(x : Int) value0442);
+  def value0444 : Int = case Succ Zero of {
+    Zero -> value0443;
+    Succ _ -> value0443
+  };
+  def value0445 : Int = case Box value0444 of {
+    Box x -> x
+  };
+  def value0446 : Int = value0445;
+  def value0447 : Int = let id = λx x in id value0446;
+  def value0448 : Int = idPoly value0447;
+  def value0449 : Int = useInt (λ(x : Int) value0448);
+  def value0450 : Int = case Succ Zero of {
+    Zero -> value0449;
+    Succ _ -> value0449
+  };
+  def value0451 : Int = case Box value0450 of {
+    Box x -> x
+  };
+  def value0452 : Int = value0451;
+  def value0453 : Int = let id = λx x in id value0452;
+  def value0454 : Int = idPoly value0453;
+  def value0455 : Int = useInt (λ(x : Int) value0454);
+  def value0456 : Int = case Succ Zero of {
+    Zero -> value0455;
+    Succ _ -> value0455
+  };
+  def value0457 : Int = case Box value0456 of {
+    Box x -> x
+  };
+  def value0458 : Int = value0457;
+  def value0459 : Int = let id = λx x in id value0458;
+  def value0460 : Int = idPoly value0459;
+  def value0461 : Int = useInt (λ(x : Int) value0460);
+  def value0462 : Int = case Succ Zero of {
+    Zero -> value0461;
+    Succ _ -> value0461
+  };
+  def value0463 : Int = case Box value0462 of {
+    Box x -> x
+  };
+  def value0464 : Int = value0463;
+  def value0465 : Int = let id = λx x in id value0464;
+  def value0466 : Int = idPoly value0465;
+  def value0467 : Int = useInt (λ(x : Int) value0466);
+  def value0468 : Int = case Succ Zero of {
+    Zero -> value0467;
+    Succ _ -> value0467
+  };
+  def value0469 : Int = case Box value0468 of {
+    Box x -> x
+  };
+  def value0470 : Int = value0469;
+  def value0471 : Int = let id = λx x in id value0470;
+  def value0472 : Int = idPoly value0471;
+  def value0473 : Int = useInt (λ(x : Int) value0472);
+  def value0474 : Int = case Succ Zero of {
+    Zero -> value0473;
+    Succ _ -> value0473
+  };
+  def value0475 : Int = case Box value0474 of {
+    Box x -> x
+  };
+  def value0476 : Int = value0475;
+  def value0477 : Int = let id = λx x in id value0476;
+  def value0478 : Int = idPoly value0477;
+  def value0479 : Int = useInt (λ(x : Int) value0478);
+  def value0480 : Int = case Succ Zero of {
+    Zero -> value0479;
+    Succ _ -> value0479
+  };
+  def value0481 : Int = case Box value0480 of {
+    Box x -> x
+  };
+  def value0482 : Int = value0481;
+  def value0483 : Int = let id = λx x in id value0482;
+  def value0484 : Int = idPoly value0483;
+  def value0485 : Int = useInt (λ(x : Int) value0484);
+  def value0486 : Int = case Succ Zero of {
+    Zero -> value0485;
+    Succ _ -> value0485
+  };
+  def value0487 : Int = case Box value0486 of {
+    Box x -> x
+  };
+  def value0488 : Int = value0487;
+  def value0489 : Int = let id = λx x in id value0488;
+  def value0490 : Int = idPoly value0489;
+  def value0491 : Int = useInt (λ(x : Int) value0490);
+  def value0492 : Int = case Succ Zero of {
+    Zero -> value0491;
+    Succ _ -> value0491
+  };
+  def value0493 : Int = case Box value0492 of {
+    Box x -> x
+  };
+  def value0494 : Int = value0493;
+  def value0495 : Int = let id = λx x in id value0494;
+  def value0496 : Int = idPoly value0495;
+  def value0497 : Int = useInt (λ(x : Int) value0496);
+  def value0498 : Int = case Succ Zero of {
+    Zero -> value0497;
+    Succ _ -> value0497
+  };
+  def value0499 : Int = case Box value0498 of {
+    Box x -> x
+  };
+  def value0500 : Int = value0499;
+  def value0501 : Int = let id = λx x in id value0500;
+  def value0502 : Int = idPoly value0501;
+  def value0503 : Int = useInt (λ(x : Int) value0502);
+  def value0504 : Int = case Succ Zero of {
+    Zero -> value0503;
+    Succ _ -> value0503
+  };
+  def value0505 : Int = case Box value0504 of {
+    Box x -> x
+  };
+  def value0506 : Int = value0505;
+  def value0507 : Int = let id = λx x in id value0506;
+  def value0508 : Int = idPoly value0507;
+  def value0509 : Int = useInt (λ(x : Int) value0508);
+  def value0510 : Int = case Succ Zero of {
+    Zero -> value0509;
+    Succ _ -> value0509
+  };
+  def value0511 : Int = case Box value0510 of {
+    Box x -> x
+  };
+  def value0512 : Int = value0511;
+  def value0513 : Int = let id = λx x in id value0512;
+  def value0514 : Int = idPoly value0513;
+  def value0515 : Int = useInt (λ(x : Int) value0514);
+  def value0516 : Int = case Succ Zero of {
+    Zero -> value0515;
+    Succ _ -> value0515
+  };
+  def value0517 : Int = case Box value0516 of {
+    Box x -> x
+  };
+  def value0518 : Int = value0517;
+  def value0519 : Int = let id = λx x in id value0518;
+  def value0520 : Int = idPoly value0519;
+  def value0521 : Int = useInt (λ(x : Int) value0520);
+  def value0522 : Int = case Succ Zero of {
+    Zero -> value0521;
+    Succ _ -> value0521
+  };
+  def value0523 : Int = case Box value0522 of {
+    Box x -> x
+  };
+  def value0524 : Int = value0523;
+  def value0525 : Int = let id = λx x in id value0524;
+  def value0526 : Int = idPoly value0525;
+  def value0527 : Int = useInt (λ(x : Int) value0526);
+  def value0528 : Int = case Succ Zero of {
+    Zero -> value0527;
+    Succ _ -> value0527
+  };
+  def value0529 : Int = case Box value0528 of {
+    Box x -> x
+  };
+  def value0530 : Int = value0529;
+  def value0531 : Int = let id = λx x in id value0530;
+  def value0532 : Int = idPoly value0531;
+  def value0533 : Int = useInt (λ(x : Int) value0532);
+  def value0534 : Int = case Succ Zero of {
+    Zero -> value0533;
+    Succ _ -> value0533
+  };
+  def value0535 : Int = case Box value0534 of {
+    Box x -> x
+  };
+  def value0536 : Int = value0535;
+  def value0537 : Int = let id = λx x in id value0536;
+  def value0538 : Int = idPoly value0537;
+  def value0539 : Int = useInt (λ(x : Int) value0538);
+  def value0540 : Int = case Succ Zero of {
+    Zero -> value0539;
+    Succ _ -> value0539
+  };
+  def value0541 : Int = case Box value0540 of {
+    Box x -> x
+  };
+  def value0542 : Int = value0541;
+  def value0543 : Int = let id = λx x in id value0542;
+  def value0544 : Int = idPoly value0543;
+  def value0545 : Int = useInt (λ(x : Int) value0544);
+  def value0546 : Int = case Succ Zero of {
+    Zero -> value0545;
+    Succ _ -> value0545
+  };
+  def value0547 : Int = case Box value0546 of {
+    Box x -> x
+  };
+  def value0548 : Int = value0547;
+  def value0549 : Int = let id = λx x in id value0548;
+  def value0550 : Int = idPoly value0549;
+  def value0551 : Int = useInt (λ(x : Int) value0550);
+  def value0552 : Int = case Succ Zero of {
+    Zero -> value0551;
+    Succ _ -> value0551
+  };
+  def value0553 : Int = case Box value0552 of {
+    Box x -> x
+  };
+  def value0554 : Int = value0553;
+  def value0555 : Int = let id = λx x in id value0554;
+  def value0556 : Int = idPoly value0555;
+  def value0557 : Int = useInt (λ(x : Int) value0556);
+  def value0558 : Int = case Succ Zero of {
+    Zero -> value0557;
+    Succ _ -> value0557
+  };
+  def value0559 : Int = case Box value0558 of {
+    Box x -> x
+  };
+  def value0560 : Int = value0559;
+  def value0561 : Int = let id = λx x in id value0560;
+  def value0562 : Int = idPoly value0561;
+  def value0563 : Int = useInt (λ(x : Int) value0562);
+  def value0564 : Int = case Succ Zero of {
+    Zero -> value0563;
+    Succ _ -> value0563
+  };
+  def value0565 : Int = case Box value0564 of {
+    Box x -> x
+  };
+  def value0566 : Int = value0565;
+  def value0567 : Int = let id = λx x in id value0566;
+  def value0568 : Int = idPoly value0567;
+  def value0569 : Int = useInt (λ(x : Int) value0568);
+  def value0570 : Int = case Succ Zero of {
+    Zero -> value0569;
+    Succ _ -> value0569
+  };
+  def value0571 : Int = case Box value0570 of {
+    Box x -> x
+  };
+  def value0572 : Int = value0571;
+  def value0573 : Int = let id = λx x in id value0572;
+  def value0574 : Int = idPoly value0573;
+  def value0575 : Int = useInt (λ(x : Int) value0574);
+  def value0576 : Int = case Succ Zero of {
+    Zero -> value0575;
+    Succ _ -> value0575
+  };
+  def value0577 : Int = case Box value0576 of {
+    Box x -> x
+  };
+  def value0578 : Int = value0577;
+  def value0579 : Int = let id = λx x in id value0578;
+  def value0580 : Int = idPoly value0579;
+  def value0581 : Int = useInt (λ(x : Int) value0580);
+  def value0582 : Int = case Succ Zero of {
+    Zero -> value0581;
+    Succ _ -> value0581
+  };
+  def value0583 : Int = case Box value0582 of {
+    Box x -> x
+  };
+  def value0584 : Int = value0583;
+  def value0585 : Int = let id = λx x in id value0584;
+  def value0586 : Int = idPoly value0585;
+  def value0587 : Int = useInt (λ(x : Int) value0586);
+  def value0588 : Int = case Succ Zero of {
+    Zero -> value0587;
+    Succ _ -> value0587
+  };
+  def value0589 : Int = case Box value0588 of {
+    Box x -> x
+  };
+  def value0590 : Int = value0589;
+  def value0591 : Int = let id = λx x in id value0590;
+  def value0592 : Int = idPoly value0591;
+  def value0593 : Int = useInt (λ(x : Int) value0592);
+  def value0594 : Int = case Succ Zero of {
+    Zero -> value0593;
+    Succ _ -> value0593
+  };
+  def value0595 : Int = case Box value0594 of {
+    Box x -> x
+  };
+  def value0596 : Int = value0595;
+  def value0597 : Int = let id = λx x in id value0596;
+  def value0598 : Int = idPoly value0597;
+  def value0599 : Int = useInt (λ(x : Int) value0598);
+  def value0600 : Int = case Succ Zero of {
+    Zero -> value0599;
+    Succ _ -> value0599
+  };
+  def value0601 : Int = case Box value0600 of {
+    Box x -> x
+  };
+  def value0602 : Int = value0601;
+  def value0603 : Int = let id = λx x in id value0602;
+  def value0604 : Int = idPoly value0603;
+  def value0605 : Int = useInt (λ(x : Int) value0604);
+  def value0606 : Int = case Succ Zero of {
+    Zero -> value0605;
+    Succ _ -> value0605
+  };
+  def value0607 : Int = case Box value0606 of {
+    Box x -> x
+  };
+  def value0608 : Int = value0607;
+  def value0609 : Int = let id = λx x in id value0608;
+  def value0610 : Int = idPoly value0609;
+  def value0611 : Int = useInt (λ(x : Int) value0610);
+  def value0612 : Int = case Succ Zero of {
+    Zero -> value0611;
+    Succ _ -> value0611
+  };
+  def value0613 : Int = case Box value0612 of {
+    Box x -> x
+  };
+  def value0614 : Int = value0613;
+  def value0615 : Int = let id = λx x in id value0614;
+  def value0616 : Int = idPoly value0615;
+  def value0617 : Int = useInt (λ(x : Int) value0616);
+  def value0618 : Int = case Succ Zero of {
+    Zero -> value0617;
+    Succ _ -> value0617
+  };
+  def value0619 : Int = case Box value0618 of {
+    Box x -> x
+  };
+  def value0620 : Int = value0619;
+  def value0621 : Int = let id = λx x in id value0620;
+  def value0622 : Int = idPoly value0621;
+  def value0623 : Int = useInt (λ(x : Int) value0622);
+  def value0624 : Int = case Succ Zero of {
+    Zero -> value0623;
+    Succ _ -> value0623
+  };
+  def value0625 : Int = case Box value0624 of {
+    Box x -> x
+  };
+  def value0626 : Int = value0625;
+  def value0627 : Int = let id = λx x in id value0626;
+  def value0628 : Int = idPoly value0627;
+  def value0629 : Int = useInt (λ(x : Int) value0628);
+  def value0630 : Int = case Succ Zero of {
+    Zero -> value0629;
+    Succ _ -> value0629
+  };
+  def value0631 : Int = case Box value0630 of {
+    Box x -> x
+  };
+  def value0632 : Int = value0631;
+  def value0633 : Int = let id = λx x in id value0632;
+  def value0634 : Int = idPoly value0633;
+  def value0635 : Int = useInt (λ(x : Int) value0634);
+  def value0636 : Int = case Succ Zero of {
+    Zero -> value0635;
+    Succ _ -> value0635
+  };
+  def value0637 : Int = case Box value0636 of {
+    Box x -> x
+  };
+  def value0638 : Int = value0637;
+  def value0639 : Int = let id = λx x in id value0638;
+  def value0640 : Int = idPoly value0639;
+  def value0641 : Int = useInt (λ(x : Int) value0640);
+  def value0642 : Int = case Succ Zero of {
+    Zero -> value0641;
+    Succ _ -> value0641
+  };
+  def value0643 : Int = case Box value0642 of {
+    Box x -> x
+  };
+  def value0644 : Int = value0643;
+  def value0645 : Int = let id = λx x in id value0644;
+  def value0646 : Int = idPoly value0645;
+  def value0647 : Int = useInt (λ(x : Int) value0646);
+  def value0648 : Int = case Succ Zero of {
+    Zero -> value0647;
+    Succ _ -> value0647
+  };
+  def value0649 : Int = case Box value0648 of {
+    Box x -> x
+  };
+  def value0650 : Int = value0649;
+  def value0651 : Int = let id = λx x in id value0650;
+  def value0652 : Int = idPoly value0651;
+  def value0653 : Int = useInt (λ(x : Int) value0652);
+  def value0654 : Int = case Succ Zero of {
+    Zero -> value0653;
+    Succ _ -> value0653
+  };
+  def value0655 : Int = case Box value0654 of {
+    Box x -> x
+  };
+  def value0656 : Int = value0655;
+  def value0657 : Int = let id = λx x in id value0656;
+  def value0658 : Int = idPoly value0657;
+  def value0659 : Int = useInt (λ(x : Int) value0658);
+  def value0660 : Int = case Succ Zero of {
+    Zero -> value0659;
+    Succ _ -> value0659
+  };
+  def value0661 : Int = case Box value0660 of {
+    Box x -> x
+  };
+  def value0662 : Int = value0661;
+  def value0663 : Int = let id = λx x in id value0662;
+  def value0664 : Int = idPoly value0663;
+  def value0665 : Int = useInt (λ(x : Int) value0664);
+  def value0666 : Int = case Succ Zero of {
+    Zero -> value0665;
+    Succ _ -> value0665
+  };
+  def value0667 : Int = case Box value0666 of {
+    Box x -> x
+  };
+  def value0668 : Int = value0667;
+  def value0669 : Int = let id = λx x in id value0668;
+  def value0670 : Int = idPoly value0669;
+  def value0671 : Int = useInt (λ(x : Int) value0670);
+  def value0672 : Int = case Succ Zero of {
+    Zero -> value0671;
+    Succ _ -> value0671
+  };
+  def value0673 : Int = case Box value0672 of {
+    Box x -> x
+  };
+  def value0674 : Int = value0673;
+  def value0675 : Int = let id = λx x in id value0674;
+  def value0676 : Int = idPoly value0675;
+  def value0677 : Int = useInt (λ(x : Int) value0676);
+  def value0678 : Int = case Succ Zero of {
+    Zero -> value0677;
+    Succ _ -> value0677
+  };
+  def value0679 : Int = case Box value0678 of {
+    Box x -> x
+  };
+  def value0680 : Int = value0679;
+  def value0681 : Int = let id = λx x in id value0680;
+  def value0682 : Int = idPoly value0681;
+  def value0683 : Int = useInt (λ(x : Int) value0682);
+  def value0684 : Int = case Succ Zero of {
+    Zero -> value0683;
+    Succ _ -> value0683
+  };
+  def value0685 : Int = case Box value0684 of {
+    Box x -> x
+  };
+  def value0686 : Int = value0685;
+  def value0687 : Int = let id = λx x in id value0686;
+  def value0688 : Int = idPoly value0687;
+  def value0689 : Int = useInt (λ(x : Int) value0688);
+  def value0690 : Int = case Succ Zero of {
+    Zero -> value0689;
+    Succ _ -> value0689
+  };
+  def value0691 : Int = case Box value0690 of {
+    Box x -> x
+  };
+  def value0692 : Int = value0691;
+  def value0693 : Int = let id = λx x in id value0692;
+  def value0694 : Int = idPoly value0693;
+  def value0695 : Int = useInt (λ(x : Int) value0694);
+  def value0696 : Int = case Succ Zero of {
+    Zero -> value0695;
+    Succ _ -> value0695
+  };
+  def value0697 : Int = case Box value0696 of {
+    Box x -> x
+  };
+  def value0698 : Int = value0697;
+  def value0699 : Int = let id = λx x in id value0698;
+  def value0700 : Int = idPoly value0699;
+  def value0701 : Int = useInt (λ(x : Int) value0700);
+  def value0702 : Int = case Succ Zero of {
+    Zero -> value0701;
+    Succ _ -> value0701
+  };
+  def value0703 : Int = case Box value0702 of {
+    Box x -> x
+  };
+  def value0704 : Int = value0703;
+  def value0705 : Int = let id = λx x in id value0704;
+  def value0706 : Int = idPoly value0705;
+  def value0707 : Int = useInt (λ(x : Int) value0706);
+  def value0708 : Int = case Succ Zero of {
+    Zero -> value0707;
+    Succ _ -> value0707
+  };
+  def value0709 : Int = case Box value0708 of {
+    Box x -> x
+  };
+  def value0710 : Int = value0709;
+  def value0711 : Int = let id = λx x in id value0710;
+  def value0712 : Int = idPoly value0711;
+  def value0713 : Int = useInt (λ(x : Int) value0712);
+  def value0714 : Int = case Succ Zero of {
+    Zero -> value0713;
+    Succ _ -> value0713
+  };
+  def value0715 : Int = case Box value0714 of {
+    Box x -> x
+  };
+  def value0716 : Int = value0715;
+  def value0717 : Int = let id = λx x in id value0716;
+  def value0718 : Int = idPoly value0717;
+  def value0719 : Int = useInt (λ(x : Int) value0718);
+  def value0720 : Int = case Succ Zero of {
+    Zero -> value0719;
+    Succ _ -> value0719
+  };
+  def value0721 : Int = case Box value0720 of {
+    Box x -> x
+  };
+  def value0722 : Int = value0721;
+  def value0723 : Int = let id = λx x in id value0722;
+  def value0724 : Int = idPoly value0723;
+  def value0725 : Int = useInt (λ(x : Int) value0724);
+  def value0726 : Int = case Succ Zero of {
+    Zero -> value0725;
+    Succ _ -> value0725
+  };
+  def value0727 : Int = case Box value0726 of {
+    Box x -> x
+  };
+  def value0728 : Int = value0727;
+  def value0729 : Int = let id = λx x in id value0728;
+  def value0730 : Int = idPoly value0729;
+  def value0731 : Int = useInt (λ(x : Int) value0730);
+  def value0732 : Int = case Succ Zero of {
+    Zero -> value0731;
+    Succ _ -> value0731
+  };
+  def value0733 : Int = case Box value0732 of {
+    Box x -> x
+  };
+  def value0734 : Int = value0733;
+  def value0735 : Int = let id = λx x in id value0734;
+  def value0736 : Int = idPoly value0735;
+  def value0737 : Int = useInt (λ(x : Int) value0736);
+  def value0738 : Int = case Succ Zero of {
+    Zero -> value0737;
+    Succ _ -> value0737
+  };
+  def value0739 : Int = case Box value0738 of {
+    Box x -> x
+  };
+  def value0740 : Int = value0739;
+  def value0741 : Int = let id = λx x in id value0740;
+  def value0742 : Int = idPoly value0741;
+  def value0743 : Int = useInt (λ(x : Int) value0742);
+  def value0744 : Int = case Succ Zero of {
+    Zero -> value0743;
+    Succ _ -> value0743
+  };
+  def value0745 : Int = case Box value0744 of {
+    Box x -> x
+  };
+  def value0746 : Int = value0745;
+  def value0747 : Int = let id = λx x in id value0746;
+  def value0748 : Int = idPoly value0747;
+  def value0749 : Int = useInt (λ(x : Int) value0748);
+  def value0750 : Int = case Succ Zero of {
+    Zero -> value0749;
+    Succ _ -> value0749
+  };
+  def value0751 : Int = case Box value0750 of {
+    Box x -> x
+  };
+  def value0752 : Int = value0751;
+  def value0753 : Int = let id = λx x in id value0752;
+  def value0754 : Int = idPoly value0753;
+  def value0755 : Int = useInt (λ(x : Int) value0754);
+  def value0756 : Int = case Succ Zero of {
+    Zero -> value0755;
+    Succ _ -> value0755
+  };
+  def value0757 : Int = case Box value0756 of {
+    Box x -> x
+  };
+  def value0758 : Int = value0757;
+  def value0759 : Int = let id = λx x in id value0758;
+  def value0760 : Int = idPoly value0759;
+  def value0761 : Int = useInt (λ(x : Int) value0760);
+  def value0762 : Int = case Succ Zero of {
+    Zero -> value0761;
+    Succ _ -> value0761
+  };
+  def value0763 : Int = case Box value0762 of {
+    Box x -> x
+  };
+  def value0764 : Int = value0763;
+  def value0765 : Int = let id = λx x in id value0764;
+  def value0766 : Int = idPoly value0765;
+  def value0767 : Int = useInt (λ(x : Int) value0766);
+  def value0768 : Int = case Succ Zero of {
+    Zero -> value0767;
+    Succ _ -> value0767
+  };
+  def value0769 : Int = case Box value0768 of {
+    Box x -> x
+  };
+  def value0770 : Int = value0769;
+  def value0771 : Int = let id = λx x in id value0770;
+  def value0772 : Int = idPoly value0771;
+  def value0773 : Int = useInt (λ(x : Int) value0772);
+  def value0774 : Int = case Succ Zero of {
+    Zero -> value0773;
+    Succ _ -> value0773
+  };
+  def value0775 : Int = case Box value0774 of {
+    Box x -> x
+  };
+  def value0776 : Int = value0775;
+  def value0777 : Int = let id = λx x in id value0776;
+  def value0778 : Int = idPoly value0777;
+  def value0779 : Int = useInt (λ(x : Int) value0778);
+  def value0780 : Int = case Succ Zero of {
+    Zero -> value0779;
+    Succ _ -> value0779
+  };
+  def value0781 : Int = case Box value0780 of {
+    Box x -> x
+  };
+  def value0782 : Int = value0781;
+  def value0783 : Int = let id = λx x in id value0782;
+  def value0784 : Int = idPoly value0783;
+  def value0785 : Int = useInt (λ(x : Int) value0784);
+  def value0786 : Int = case Succ Zero of {
+    Zero -> value0785;
+    Succ _ -> value0785
+  };
+  def value0787 : Int = case Box value0786 of {
+    Box x -> x
+  };
+  def value0788 : Int = value0787;
+  def value0789 : Int = let id = λx x in id value0788;
+  def value0790 : Int = idPoly value0789;
+  def value0791 : Int = useInt (λ(x : Int) value0790);
+  def value0792 : Int = case Succ Zero of {
+    Zero -> value0791;
+    Succ _ -> value0791
+  };
+  def value0793 : Int = case Box value0792 of {
+    Box x -> x
+  };
+  def value0794 : Int = value0793;
+  def value0795 : Int = let id = λx x in id value0794;
+  def value0796 : Int = idPoly value0795;
+  def value0797 : Int = useInt (λ(x : Int) value0796);
+  def value0798 : Int = case Succ Zero of {
+    Zero -> value0797;
+    Succ _ -> value0797
+  };
+  def value0799 : Int = case Box value0798 of {
+    Box x -> x
+  };
+  def value0800 : Int = value0799;
+  def value0801 : Int = let id = λx x in id value0800;
+  def value0802 : Int = idPoly value0801;
+  def value0803 : Int = useInt (λ(x : Int) value0802);
+  def value0804 : Int = case Succ Zero of {
+    Zero -> value0803;
+    Succ _ -> value0803
+  };
+  def value0805 : Int = case Box value0804 of {
+    Box x -> x
+  };
+  def value0806 : Int = value0805;
+  def value0807 : Int = let id = λx x in id value0806;
+  def value0808 : Int = idPoly value0807;
+  def value0809 : Int = useInt (λ(x : Int) value0808);
+  def value0810 : Int = case Succ Zero of {
+    Zero -> value0809;
+    Succ _ -> value0809
+  };
+  def value0811 : Int = case Box value0810 of {
+    Box x -> x
+  };
+  def value0812 : Int = value0811;
+  def value0813 : Int = let id = λx x in id value0812;
+  def value0814 : Int = idPoly value0813;
+  def value0815 : Int = useInt (λ(x : Int) value0814);
+  def value0816 : Int = case Succ Zero of {
+    Zero -> value0815;
+    Succ _ -> value0815
+  };
+  def value0817 : Int = case Box value0816 of {
+    Box x -> x
+  };
+  def value0818 : Int = value0817;
+  def value0819 : Int = let id = λx x in id value0818;
+  def value0820 : Int = idPoly value0819;
+  def value0821 : Int = useInt (λ(x : Int) value0820);
+  def value0822 : Int = case Succ Zero of {
+    Zero -> value0821;
+    Succ _ -> value0821
+  };
+  def value0823 : Int = case Box value0822 of {
+    Box x -> x
+  };
+  def value0824 : Int = value0823;
+  def value0825 : Int = let id = λx x in id value0824;
+  def value0826 : Int = idPoly value0825;
+  def value0827 : Int = useInt (λ(x : Int) value0826);
+  def value0828 : Int = case Succ Zero of {
+    Zero -> value0827;
+    Succ _ -> value0827
+  };
+  def value0829 : Int = case Box value0828 of {
+    Box x -> x
+  };
+  def value0830 : Int = value0829;
+  def value0831 : Int = let id = λx x in id value0830;
+  def value0832 : Int = idPoly value0831;
+  def value0833 : Int = useInt (λ(x : Int) value0832);
+  def value0834 : Int = case Succ Zero of {
+    Zero -> value0833;
+    Succ _ -> value0833
+  };
+  def value0835 : Int = case Box value0834 of {
+    Box x -> x
+  };
+  def value0836 : Int = value0835;
+  def value0837 : Int = let id = λx x in id value0836;
+  def value0838 : Int = idPoly value0837;
+  def value0839 : Int = useInt (λ(x : Int) value0838);
+  def value0840 : Int = case Succ Zero of {
+    Zero -> value0839;
+    Succ _ -> value0839
+  };
+  def value0841 : Int = case Box value0840 of {
+    Box x -> x
+  };
+  def value0842 : Int = value0841;
+  def value0843 : Int = let id = λx x in id value0842;
+  def value0844 : Int = idPoly value0843;
+  def value0845 : Int = useInt (λ(x : Int) value0844);
+  def value0846 : Int = case Succ Zero of {
+    Zero -> value0845;
+    Succ _ -> value0845
+  };
+  def value0847 : Int = case Box value0846 of {
+    Box x -> x
+  };
+  def value0848 : Int = value0847;
+  def value0849 : Int = let id = λx x in id value0848;
+  def value0850 : Int = idPoly value0849;
+  def value0851 : Int = useInt (λ(x : Int) value0850);
+  def value0852 : Int = case Succ Zero of {
+    Zero -> value0851;
+    Succ _ -> value0851
+  };
+  def value0853 : Int = case Box value0852 of {
+    Box x -> x
+  };
+  def value0854 : Int = value0853;
+  def value0855 : Int = let id = λx x in id value0854;
+  def value0856 : Int = idPoly value0855;
+  def value0857 : Int = useInt (λ(x : Int) value0856);
+  def value0858 : Int = case Succ Zero of {
+    Zero -> value0857;
+    Succ _ -> value0857
+  };
+  def value0859 : Int = case Box value0858 of {
+    Box x -> x
+  };
+  def value0860 : Int = value0859;
+  def value0861 : Int = let id = λx x in id value0860;
+  def value0862 : Int = idPoly value0861;
+  def value0863 : Int = useInt (λ(x : Int) value0862);
+  def value0864 : Int = case Succ Zero of {
+    Zero -> value0863;
+    Succ _ -> value0863
+  };
+  def value0865 : Int = case Box value0864 of {
+    Box x -> x
+  };
+  def value0866 : Int = value0865;
+  def value0867 : Int = let id = λx x in id value0866;
+  def value0868 : Int = idPoly value0867;
+  def value0869 : Int = useInt (λ(x : Int) value0868);
+  def value0870 : Int = case Succ Zero of {
+    Zero -> value0869;
+    Succ _ -> value0869
+  };
+  def value0871 : Int = case Box value0870 of {
+    Box x -> x
+  };
+  def value0872 : Int = value0871;
+  def value0873 : Int = let id = λx x in id value0872;
+  def value0874 : Int = idPoly value0873;
+  def value0875 : Int = useInt (λ(x : Int) value0874);
+  def value0876 : Int = case Succ Zero of {
+    Zero -> value0875;
+    Succ _ -> value0875
+  };
+  def value0877 : Int = case Box value0876 of {
+    Box x -> x
+  };
+  def value0878 : Int = value0877;
+  def value0879 : Int = let id = λx x in id value0878;
+  def value0880 : Int = idPoly value0879;
+  def value0881 : Int = useInt (λ(x : Int) value0880);
+  def value0882 : Int = case Succ Zero of {
+    Zero -> value0881;
+    Succ _ -> value0881
+  };
+  def value0883 : Int = case Box value0882 of {
+    Box x -> x
+  };
+  def value0884 : Int = value0883;
+  def value0885 : Int = let id = λx x in id value0884;
+  def value0886 : Int = idPoly value0885;
+  def value0887 : Int = useInt (λ(x : Int) value0886);
+  def value0888 : Int = case Succ Zero of {
+    Zero -> value0887;
+    Succ _ -> value0887
+  };
+  def value0889 : Int = case Box value0888 of {
+    Box x -> x
+  };
+  def value0890 : Int = value0889;
+  def value0891 : Int = let id = λx x in id value0890;
+  def value0892 : Int = idPoly value0891;
+  def value0893 : Int = useInt (λ(x : Int) value0892);
+  def value0894 : Int = case Succ Zero of {
+    Zero -> value0893;
+    Succ _ -> value0893
+  };
+  def value0895 : Int = case Box value0894 of {
+    Box x -> x
+  };
+  def value0896 : Int = value0895;
+  def value0897 : Int = let id = λx x in id value0896;
+  def value0898 : Int = idPoly value0897;
+  def value0899 : Int = useInt (λ(x : Int) value0898);
+  def value0900 : Int = case Succ Zero of {
+    Zero -> value0899;
+    Succ _ -> value0899
+  };
+  def value0901 : Int = case Box value0900 of {
+    Box x -> x
+  };
+  def value0902 : Int = value0901;
+  def value0903 : Int = let id = λx x in id value0902;
+  def value0904 : Int = idPoly value0903;
+  def value0905 : Int = useInt (λ(x : Int) value0904);
+  def value0906 : Int = case Succ Zero of {
+    Zero -> value0905;
+    Succ _ -> value0905
+  };
+  def value0907 : Int = case Box value0906 of {
+    Box x -> x
+  };
+  def value0908 : Int = value0907;
+  def value0909 : Int = let id = λx x in id value0908;
+  def value0910 : Int = idPoly value0909;
+  def value0911 : Int = useInt (λ(x : Int) value0910);
+  def value0912 : Int = case Succ Zero of {
+    Zero -> value0911;
+    Succ _ -> value0911
+  };
+  def value0913 : Int = case Box value0912 of {
+    Box x -> x
+  };
+  def value0914 : Int = value0913;
+  def value0915 : Int = let id = λx x in id value0914;
+  def value0916 : Int = idPoly value0915;
+  def value0917 : Int = useInt (λ(x : Int) value0916);
+  def value0918 : Int = case Succ Zero of {
+    Zero -> value0917;
+    Succ _ -> value0917
+  };
+  def value0919 : Int = case Box value0918 of {
+    Box x -> x
+  };
+  def value0920 : Int = value0919;
+  def value0921 : Int = let id = λx x in id value0920;
+  def value0922 : Int = idPoly value0921;
+  def value0923 : Int = useInt (λ(x : Int) value0922);
+  def value0924 : Int = case Succ Zero of {
+    Zero -> value0923;
+    Succ _ -> value0923
+  };
+  def value0925 : Int = case Box value0924 of {
+    Box x -> x
+  };
+  def value0926 : Int = value0925;
+  def value0927 : Int = let id = λx x in id value0926;
+  def value0928 : Int = idPoly value0927;
+  def value0929 : Int = useInt (λ(x : Int) value0928);
+  def value0930 : Int = case Succ Zero of {
+    Zero -> value0929;
+    Succ _ -> value0929
+  };
+  def value0931 : Int = case Box value0930 of {
+    Box x -> x
+  };
+  def value0932 : Int = value0931;
+  def value0933 : Int = let id = λx x in id value0932;
+  def value0934 : Int = idPoly value0933;
+  def value0935 : Int = useInt (λ(x : Int) value0934);
+  def value0936 : Int = case Succ Zero of {
+    Zero -> value0935;
+    Succ _ -> value0935
+  };
+  def value0937 : Int = case Box value0936 of {
+    Box x -> x
+  };
+  def value0938 : Int = value0937;
+  def value0939 : Int = let id = λx x in id value0938;
+  def value0940 : Int = idPoly value0939;
+  def value0941 : Int = useInt (λ(x : Int) value0940);
+  def value0942 : Int = case Succ Zero of {
+    Zero -> value0941;
+    Succ _ -> value0941
+  };
+  def value0943 : Int = case Box value0942 of {
+    Box x -> x
+  };
+  def value0944 : Int = value0943;
+  def value0945 : Int = let id = λx x in id value0944;
+  def value0946 : Int = idPoly value0945;
+  def value0947 : Int = useInt (λ(x : Int) value0946);
+  def value0948 : Int = case Succ Zero of {
+    Zero -> value0947;
+    Succ _ -> value0947
+  };
+  def value0949 : Int = case Box value0948 of {
+    Box x -> x
+  };
+  def value0950 : Int = value0949;
+  def value0951 : Int = let id = λx x in id value0950;
+  def value0952 : Int = idPoly value0951;
+  def value0953 : Int = useInt (λ(x : Int) value0952);
+  def value0954 : Int = case Succ Zero of {
+    Zero -> value0953;
+    Succ _ -> value0953
+  };
+  def value0955 : Int = case Box value0954 of {
+    Box x -> x
+  };
+  def value0956 : Int = value0955;
+  def value0957 : Int = let id = λx x in id value0956;
+  def value0958 : Int = idPoly value0957;
+  def value0959 : Int = useInt (λ(x : Int) value0958);
+  def value0960 : Int = case Succ Zero of {
+    Zero -> value0959;
+    Succ _ -> value0959
+  };
+  def value0961 : Int = case Box value0960 of {
+    Box x -> x
+  };
+  def value0962 : Int = value0961;
+  def value0963 : Int = let id = λx x in id value0962;
+  def value0964 : Int = idPoly value0963;
+  def value0965 : Int = useInt (λ(x : Int) value0964);
+  def value0966 : Int = case Succ Zero of {
+    Zero -> value0965;
+    Succ _ -> value0965
+  };
+  def value0967 : Int = case Box value0966 of {
+    Box x -> x
+  };
+  def value0968 : Int = value0967;
+  def value0969 : Int = let id = λx x in id value0968;
+  def value0970 : Int = idPoly value0969;
+  def value0971 : Int = useInt (λ(x : Int) value0970);
+  def value0972 : Int = case Succ Zero of {
+    Zero -> value0971;
+    Succ _ -> value0971
+  };
+  def value0973 : Int = case Box value0972 of {
+    Box x -> x
+  };
+  def value0974 : Int = value0973;
+  def value0975 : Int = let id = λx x in id value0974;
+  def value0976 : Int = idPoly value0975;
+  def value0977 : Int = useInt (λ(x : Int) value0976);
+  def value0978 : Int = case Succ Zero of {
+    Zero -> value0977;
+    Succ _ -> value0977
+  };
+  def value0979 : Int = case Box value0978 of {
+    Box x -> x
+  };
+  def value0980 : Int = value0979;
+  def value0981 : Int = let id = λx x in id value0980;
+  def value0982 : Int = idPoly value0981;
+  def value0983 : Int = useInt (λ(x : Int) value0982);
+  def value0984 : Int = case Succ Zero of {
+    Zero -> value0983;
+    Succ _ -> value0983
+  };
+  def value0985 : Int = case Box value0984 of {
+    Box x -> x
+  };
+  def value0986 : Int = value0985;
+  def value0987 : Int = let id = λx x in id value0986;
+  def value0988 : Int = idPoly value0987;
+  def value0989 : Int = useInt (λ(x : Int) value0988);
+  def value0990 : Int = case Succ Zero of {
+    Zero -> value0989;
+    Succ _ -> value0989
+  };
+  def value0991 : Int = case Box value0990 of {
+    Box x -> x
+  };
+  def value0992 : Int = value0991;
+  def value0993 : Int = let id = λx x in id value0992;
+  def value0994 : Int = idPoly value0993;
+  def value0995 : Int = useInt (λ(x : Int) value0994);
+  def value0996 : Int = case Succ Zero of {
+    Zero -> value0995;
+    Succ _ -> value0995
+  };
+  def value0997 : Int = case Box value0996 of {
+    Box x -> x
+  };
+  def value0998 : Int = value0997;
+  def value0999 : Int = let id = λx x in id value0998;
+  def value1000 : Int = idPoly value0999;
+
+  def main : Int = value1000;
+}
