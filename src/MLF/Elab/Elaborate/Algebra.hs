@@ -709,6 +709,8 @@ elabAlg algebraContext layer =
                 typeCheckLocal = TypeCheck.typeCheckWithEnv tcEnv
                 fTyChecked = typeCheckLocal f'
                 argTyChecked = typeCheckLocal a'
+                fSourceName = sourceVarName fAnn
+                aSourceName = sourceVarName aAnn
                 appTargetTy =
                   let directTy = either (const Nothing) Just (reifyNodeTypeDirect scopeContext appNodeId)
                       boundTy = either (const Nothing) Just (reifyNodeTypePreferringBound scopeContext appNodeId)
@@ -787,13 +789,13 @@ elabAlg algebraContext layer =
                     Right argTy
                       | hasContractiveRecursiveWitness argTy -> Just a'
                     _ ->
-                      case sourceVarName aAnn >>= (`lookupSchemeType` env) of
+                      case aSourceName >>= (`lookupSchemeType` env) of
                         Just argSchemeTy
                           | hasContractiveRecursiveWitness argSchemeTy ->
                               Just a'
                         _ -> Nothing
                 transparentOrIdentityBypassTerm =
-                  case sourceVarName fAnn of
+                  case fSourceName of
                     Just fName
                       | isTransparentMediatorVar fName env ->
                           let aStripped = stripUnusedTopTyAbs a'
@@ -934,8 +936,8 @@ elabAlg algebraContext layer =
                         InstId -> fHead
                         _ -> ETyInst fHead funInstNorm
                    in case ( typeCheckLocal (EApp fApp0 a'),
-                             sourceVarName fAnn,
-                             sourceVarName aAnn,
+                             fSourceName,
+                             aSourceName,
                              argTyChecked
                            ) of
                         (Right (TArrow _ TBottom), Just fName, mArgName, Right argTy) ->
@@ -959,7 +961,7 @@ elabAlg algebraContext layer =
                             Nothing -> funInstNorm
                         (Left _, _, _, _) ->
                           fromMaybe funInstNorm $
-                            case (sourceVarName fAnn, argTyChecked) of
+                            case (fSourceName, argTyChecked) of
                               (Just fName, Right argTy)
                                 | hasContractiveRecursiveWitness argTy ->
                                     case lookupSchemeInfo fName env of
@@ -988,7 +990,7 @@ elabAlg algebraContext layer =
                           fCandidate = ETyInst fHead instCandidate
                           fCandidateTy = typeCheckLocal fCandidate
                           keepCandidate =
-                            case (isAppLikeInst instCandidate, fHeadTy, sourceVarName fAnn) of
+                            case (isAppLikeInst instCandidate, fHeadTy, fSourceName) of
                               (True, Just TForall {}, _) ->
                                 case fCandidateTy of
                                   Right _ -> True
@@ -1025,16 +1027,16 @@ elabAlg algebraContext layer =
                     _ -> Nothing
                 argInstFromFun =
                   let shouldInlineParamTy =
-                        case (sourceVarName fAnn, sourceVarName aAnn) of
+                        case (fSourceName, aSourceName) of
                           (Just fName, Just argName) -> fName /= argName
                           _ -> False
                       shouldInferArgInst =
-                        case (sourceVarName fAnn, sourceVarName aAnn) of
+                        case (fSourceName, aSourceName) of
                           (Just fName, Just argName) -> fName /= argName
                           _ -> True
                    in if not shouldInferArgInst
                         then Nothing
-                        else case (sourceVarName aAnn, f') of
+                        else case (aSourceName, f') of
                           (Just vName, ELam _ paramTy _) -> do
                             schemeInfo <- lookupSchemeInfo vName env
                             let paramTy' =
@@ -1056,7 +1058,7 @@ elabAlg algebraContext layer =
                               _ -> Nothing
                           _ -> Nothing
                 argInstFallback =
-                  case (sourceVarName fAnn, sourceVarName aAnn, fAppForArgInferenceTy, argInst) of
+                  case (fSourceName, aSourceName, fAppForArgInferenceTy, argInst) of
                     (Just fName, Just argName, Right (TArrow paramTy _), InstApp argTy)
                       | fName == argName,
                         Just schemeInfo <- lookupSchemeInfo fName env,
@@ -1174,13 +1176,15 @@ elabAlg algebraContext layer =
                         case body of
                           EVar bodyName -> bodyName == paramName
                           _ -> False
-                   in case (typeCheckLocal (EApp fApp0 aApp), fApp0, sourceVarName aAnn, aAppTyChecked) of
-                        (Left _, ELam paramName paramTy body, Just argName, Right argTy)
+                   in case (fApp0, aSourceName, aAppTyChecked) of
+                        (ELam paramName paramTy body, Just argName, Right argTy)
                           | containsInternalTyVar paramTy
                               && isIdentityLambdaBody paramName body
                               && hasContractiveRecursiveWitness argTy
                               && maybe False hasContractiveRecursiveWitness (lookupSchemeType argName env) ->
-                              ELam paramName argTy body
+                              case typeCheckLocal (EApp fApp0 aApp) of
+                                Left _ -> ELam paramName argTy body
+                                Right _ -> fApp0
                         _ -> fApp0
                 bypassApp = transparentOrIdentityBypassTerm
             let fAppTyChecked = typeCheckLocal fApp
@@ -1191,7 +1195,7 @@ elabAlg algebraContext layer =
                   insertMuUseSiteCoercions
                     tcEnv
                     (argIsExplicitRecursiveParam aAnn)
-                    (isJust (sourceVarName aAnn))
+                    (isJust aSourceName)
                     argSourceSchemeTy
                     (either (const Nothing) Just fAppTyChecked)
                     (either (const Nothing) Just aAppTyChecked)
@@ -1238,8 +1242,8 @@ elabAlg algebraContext layer =
                     Left
                       ( PhiTranslatabilityError
                           [ "AAppF: unresolved non-self polymorphic alias instantiation",
-                            "function=" ++ show (sourceVarName fAnn),
-                            "argument=" ++ show (sourceVarName aAnn),
+                            "function=" ++ show fSourceName,
+                            "argument=" ++ show aSourceName,
                             "typeCheck=" ++ show tcErr
                           ]
                       )
