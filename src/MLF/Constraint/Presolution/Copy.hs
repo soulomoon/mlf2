@@ -326,17 +326,17 @@ instantiateSchemeWithModeSnapshot replaceFrontier snapshot bodyId substList = do
             rootBinder = genRef gid
         -- Flag reset: the copy root and frontier copies are flexibly bound.
         setBindParentM (typeRef copyRootC) (rootBinder, BindFlex)
+        cUpper <- getConstraint
         forM_ (IntSet.toList frontierSet) $ \nidInt -> do
             let nid = NodeId nidInt
                 nidC = canonical nid
             case IntMap.lookup (getNodeId nidC) cmap of
                 Nothing -> pure ()
                 Just copy -> do
-                    c1 <- getConstraint
                     let childRef = typeRef copy
                         parentCandidate = typeRef copyRootC
                         parentFinal =
-                            if Binding.isUpper c1 parentCandidate childRef
+                            if Binding.isUpper cUpper parentCandidate childRef
                                 then parentCandidate
                                 else rootBinder
                     setBindParentM childRef (parentFinal, BindFlex)
@@ -370,16 +370,15 @@ instantiateSchemeWithModeSnapshot replaceFrontier snapshot bodyId substList = do
                                                 case IntMap.lookup (getNodeId (canonical pid)) cmap of
                                                     Just parentCopy -> pure (typeRef parentCopy)
                                                     Nothing -> pure (typeRef copyRootC)
-                                        c1 <- getConstraint
                                         let childRef = typeRef copy
                                             parentFinal1 =
                                                 if parentFinal0 == childRef
                                                     then typeRef copyRootC
                                                     else parentFinal0
                                             parentFinal =
-                                                if Binding.isUpper c1 parentFinal1 childRef
+                                                if Binding.isUpper cUpper parentFinal1 childRef
                                                     then parentFinal1
-                                                    else if Binding.isUpper c1 (typeRef copyRootC) childRef
+                                                    else if Binding.isUpper cUpper (typeRef copyRootC) childRef
                                                         then typeRef copyRootC
                                                         else rootBinder
                                         setBindParentM childRef (parentFinal, flag)
