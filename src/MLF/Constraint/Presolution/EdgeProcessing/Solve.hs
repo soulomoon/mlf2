@@ -71,11 +71,15 @@ canonicalizeEdgeTraceInteriorsWith :: (NodeId -> NodeId) -> EdgeId -> Presolutio
 canonicalizeEdgeTraceInteriorsWith canonical (EdgeId eid) = do
     let canonInterior tr =
             let InteriorNodes s = etInterior tr
-                interior' =
-                    InteriorNodes
-                        (IntSet.fromList
-                            (Prelude.map (\i -> getNodeId (canonical (NodeId i)))
-                                (IntSet.toList s)))
+                interior'
+                    | IntSet.null s = InteriorNodes s
+                    | [x] <- IntSet.toList s =
+                        InteriorNodes (IntSet.singleton (getNodeId (canonical (NodeId x))))
+                    | otherwise =
+                        InteriorNodes
+                            (IntSet.fromList
+                                (Prelude.map (\i -> getNodeId (canonical (NodeId i)))
+                                    (IntSet.toList s)))
             in tr { etInterior = interior' }
     modify' $ \st -> st { psEdgeTraces = IntMap.adjust canonInterior eid (psEdgeTraces st) }
 

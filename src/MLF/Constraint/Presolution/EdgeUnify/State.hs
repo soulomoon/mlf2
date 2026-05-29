@@ -137,6 +137,8 @@ data EdgeUnifyState = EdgeUnifyState
     , eusStructurePairs :: IntMap IntSet.IntSet
     , eusCollectStats :: !Bool
     , eusStats :: !EdgeUnifyStats
+    , eusRootCacheVersion :: !Int
+    , eusRootCacheGen :: !Int
     }
 
 type EdgeUnifyM p = StateT EdgeUnifyState (PresolutionM p)
@@ -162,11 +164,23 @@ recordEdgeUnifyStatN count update =
 
 clearEdgeUnifyRootCache :: EdgeUnifyM p ()
 clearEdgeUnifyRootCache =
-    modify' $ \st -> st { eusRootCache = IntMap.empty, eusStructurePairs = IntMap.empty }
+    modify' $ \st -> st { eusRootCacheVersion = eusRootCacheVersion st + 1 }
 
 clearEdgeUnifyStructureCache :: EdgeUnifyM p ()
 clearEdgeUnifyStructureCache =
-    modify' $ \st -> st { eusStructurePairs = IntMap.empty }
+    modify' $ \st -> st { eusRootCacheVersion = eusRootCacheVersion st + 1 }
+
+-- | Lazily clear root/structure caches if the version counter has advanced.
+-- Returns the (possibly updated) state.
+syncRootCacheVersion :: EdgeUnifyState -> EdgeUnifyM p EdgeUnifyState
+syncRootCacheVersion st =
+    let ver = eusRootCacheVersion st
+    in if eusRootCacheGen st /= ver
+        then do
+            let st' = st { eusRootCache = IntMap.empty, eusStructurePairs = IntMap.empty, eusRootCacheGen = ver }
+            put $! st'
+            pure st'
+        else pure st
 
 structurePairSeenOrInsert :: NodeId -> NodeId -> EdgeUnifyM p Bool
 structurePairSeenOrInsert left right = do
@@ -176,7 +190,8 @@ structurePairSeenOrInsert left right = do
             if leftKey <= rightKey
                 then (leftKey, rightKey)
                 else (rightKey, leftKey)
-    st <- get
+    st0 <- get
+    st <- syncRootCacheVersion st0
     let peers = IntMap.findWithDefault IntSet.empty lo (eusStructurePairs st)
     if IntSet.member hi peers
         then pure True
@@ -224,7 +239,8 @@ instance MonadEdgeUnify (EdgeUnifyM p) where
     recordInstanceOp op = modify' $ \st -> st { eusOps = op : eusOps st }
     liftPresolution = lift
     findRootM nid = do
-        st <- get
+        st0 <- get
+        st <- syncRootCacheVersion st0
         let key = getNodeId nid
             collectStats = eusCollectStats st
             stats' =
@@ -501,6 +517,8 @@ initEdgeUnifyStateWithStats collectStats binderArgs interior edgeRoot pendingOwn
         , eusStructurePairs = IntMap.empty
         , eusCollectStats = collectStats
         , eusStats = emptyEdgeUnifyStats
+        , eusRootCacheVersion = 0
+        , eusRootCacheGen = 0
         }
 
 flushInheritedPendingWeakensOnce :: EdgeUnifyM p Bool
