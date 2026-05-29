@@ -22,7 +22,8 @@ import MLF.Constraint.Types.Graph
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Elab.Inst (applyInstantiation, schemeToType)
-import MLF.Elab.Phi (phiFromEdgeWitnessWithTrace)
+import MLF.Elab.Phi (phiFromEdgeWitnessWithTraceReadModel)
+import MLF.Elab.ReadModel (ermNamedNodes)
 import MLF.Elab.Types
 import MLF.Reify.TypeOps
     ( inlineAliasBoundsWithBy
@@ -112,8 +113,9 @@ computeResultTypeFromAnnWithView ctx view inner innerPre annNodeId eid = do
         generalizeTargetCached scopeRoot' target'
             | scopeRoot' == scopeRoot && target' == targetC = Right (sch0, subst0)
             | otherwise = View.rtvGeneralizeTarget view scopeRoot' target'
-    phi0 <- phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith presolutionViewForGen (Just bindParentsGa) (Just schemeInfo) mTrace ew
-    namedSetSolved <- View.rtvNamedNodes view
+    readModel <- View.rtvReadModel view
+    phi0 <- phiFromEdgeWitnessWithTraceReadModel traceCfg generalizeAtWith readModel (Just bindParentsGa) (Just schemeInfo) mTrace ew
+    let namedSetSolved = ermNamedNodes readModel
     let annBound = View.rtvLookupVarBound view annNodeId
         annTargetNode0 =
             case annBound of

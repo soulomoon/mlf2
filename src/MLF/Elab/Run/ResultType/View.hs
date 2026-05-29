@@ -12,6 +12,7 @@ module MLF.Elab.Run.ResultType.View (
     rtvLookupVarBound,
     rtvPresolutionViewOverlay,
     rtvNamedNodes,
+    rtvReadModel,
     rtvBaseVarOnlyNodes,
     rtvReifyWithNamedSetNoFallback,
     rtvReifyWithNamesNoFallback,

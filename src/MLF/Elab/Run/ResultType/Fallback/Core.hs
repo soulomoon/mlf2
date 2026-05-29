@@ -28,7 +28,7 @@ import MLF.Constraint.Types.Graph
     toListNode,
   )
 import MLF.Constraint.Types.Witness (ewRight)
-import MLF.Elab.Phi (phiFromEdgeWitnessWithTrace)
+import MLF.Elab.Phi (phiFromEdgeWitnessWithTraceReadModel)
 import MLF.Elab.Run.Annotation (annNode)
 import MLF.Elab.Run.Debug (debugGaScope, debugGaScopeEnabled, debugWhenCondM, debugWhenM)
 import MLF.Elab.Run.Generalize (generalizeAtWithBuilder)
@@ -165,6 +165,7 @@ computeResultTypeFallbackCoreWithRoots ctx viewBase (rootForTypeAnn, rootForType
     _ -> do
       let rootC = canonical rootForType
           nodes = cNodes (pvConstraint presolutionView)
+          phiReadModel = View.rtvReadModel viewBase
           resolveBaseBoundCanonical start =
             let go visited nid0 =
                   let nid = canonical nid0
@@ -204,9 +205,9 @@ computeResultTypeFallbackCoreWithRoots ctx viewBase (rootForTypeAnn, rootForType
                 Map.lookup base baseNodeByTy
               _ -> Nothing
           instAppBasesFromWitness funEid =
-            case IntMap.lookup (getEdgeId funEid) edgeWitnesses of
-              Just ew ->
-                case phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith presolutionView (Just bindParentsGa) Nothing (IntMap.lookup (getEdgeId funEid) edgeTraces) ew of
+            case (phiReadModel, IntMap.lookup (getEdgeId funEid) edgeWitnesses) of
+              (Right readModel, Just ew) ->
+                case phiFromEdgeWitnessWithTraceReadModel traceCfg generalizeAtWith readModel (Just bindParentsGa) Nothing (IntMap.lookup (getEdgeId funEid) edgeTraces) ew of
                   Right inst ->
                     IntSet.fromList
                       [ getNodeId nid
@@ -214,7 +215,7 @@ computeResultTypeFallbackCoreWithRoots ctx viewBase (rootForTypeAnn, rootForType
                           Just nid <- [baseNodeForTy ty]
                       ]
                   Left _ -> IntSet.empty
-              Nothing -> IntSet.empty
+              _ -> IntSet.empty
           rootArgBaseBounds =
             let argEdgeBases eid =
                   IntMap.findWithDefault IntSet.empty (getEdgeId eid) traceBinderArgBaseBounds
