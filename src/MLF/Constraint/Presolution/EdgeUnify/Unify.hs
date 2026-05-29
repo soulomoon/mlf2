@@ -16,6 +16,7 @@ import qualified Data.IntSet as IntSet
 
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution.Base (
+    psConstraint,
     memberInterior,
     PresolutionError(..)
     )
@@ -143,91 +144,100 @@ unifyAcyclicEdge n1 n2 = do
     root1 <- findRootM n1
     root2 <- findRootM n2
     when (root1 /= root2) $ do
-        st0 <- getEdgeUnifyState
-        let r1 = getNodeId root1
-            r2 = getNodeId root2
-            inInt1 = memberInterior root1 (eusInteriorRoots st0)
-            inInt2 = memberInterior root2 (eusInteriorRoots st0)
-            bs1 = IntMap.findWithDefault IntSet.empty r1 (eusBindersByRoot st0)
-            bs2 = IntMap.findWithDefault IntSet.empty r2 (eusBindersByRoot st0)
-            bs = IntSet.union bs1 bs2
+        node1 <- liftPresolution $ Ops.getNode root1
+        node2 <- liftPresolution $ Ops.getNode root2
+        unifyAcyclicEdgeCore node1 node2 root1 root2
 
-        prefer <- preferBinderMetaRoot root1 root2
-        raiseTrace <- unifyWithLockedFallback prefer root1 root2
-        rep <- findRootM root2
-        let repId = getNodeId rep
-            int1 = IntMap.findWithDefault mempty r1 (eusInteriorByRoot st0)
-            int2 = IntMap.findWithDefault mempty r2 (eusInteriorByRoot st0)
-            intAll = int1 <> int2
+-- | Internal body of 'unifyAcyclicEdge', accepting pre-fetched 'TyNode' values
+-- to avoid redundant 'Ops.getNode' lookups when the caller (e.g.
+-- 'unifyStructureRoots') has already fetched them.
+unifyAcyclicEdgeCore :: TyNode -> TyNode -> NodeId -> NodeId -> EdgeUnifyM p ()
+unifyAcyclicEdgeCore node1 node2 root1 root2 = do
+    st0 <- getEdgeUnifyState
+    let r1 = getNodeId root1
+        r2 = getNodeId root2
+        inInt1 = memberInterior root1 (eusInteriorRoots st0)
+        inInt2 = memberInterior root2 (eusInteriorRoots st0)
+        bs1 = IntMap.findWithDefault IntSet.empty r1 (eusBindersByRoot st0)
+        bs2 = IntMap.findWithDefault IntSet.empty r2 (eusBindersByRoot st0)
+        bs = IntSet.union bs1 bs2
 
-        recordRaisesFromTrace intAll raiseTrace
+    prefer <- preferBinderMetaRoot root1 root2
+    raiseTrace <- unifyWithLockedFallback prefer root1 root2
+    rep <- findRootM root2
+    let repId = getNodeId rep
+        int1 = IntMap.findWithDefault mempty r1 (eusInteriorByRoot st0)
+        int2 = IntMap.findWithDefault mempty r2 (eusInteriorByRoot st0)
+        intAll = int1 <> int2
 
-        modifyEdgeUnifyState $ \st ->
-            let roots' =
-                    if inInt1 || inInt2
+    recordRaisesFromTrace intAll raiseTrace
+
+    modifyEdgeUnifyState $ \st ->
+        let roots' =
+                if inInt1 || inInt2
+                    then
+                        insertInteriorKey
+                            repId
+                            (deleteInteriorKey r2 (deleteInteriorKey r1 (eusInteriorRoots st)))
+                    else eusInteriorRoots st
+            binders' =
+                let m0 = eusBindersByRoot st
+                    m1 =
+                        if IntSet.null bs
+                            then IntMap.delete r2 (IntMap.delete r1 m0)
+                            else IntMap.insert repId bs (IntMap.delete r2 (IntMap.delete r1 m0))
+                in m1
+            interior' =
+                let m0 = eusInteriorByRoot st
+                    m1 =
+                        if nullInteriorNodes intAll
+                            then IntMap.delete r2 (IntMap.delete r1 m0)
+                            else IntMap.insert repId intAll (IntMap.delete r2 (IntMap.delete r1 m0))
+                in m1
+            metaRoots' = mergeBinderMetaRoots r1 r2 repId (eusBinderMetaRoots st)
+        in st
+            { eusInteriorRoots = roots'
+            , eusBindersByRoot = binders'
+            , eusInteriorByRoot = interior'
+            , eusBinderMetaRoots = metaRoots'
+            }
+
+    recordMergesIntoRep bs
+
+    when (IntSet.size bs >= 1) $ do
+        eliminated <- gets eusEliminatedBinders
+        let live = IntSet.filter (\bid -> not (IntSet.member bid eliminated)) bs
+        when (not (IntSet.null live)) $ do
+            repBinderId <- pickRepBinderId live
+            let repBinder = NodeId repBinderId
+                recordRaiseMergeUnlessSelf extCandidate = do
+                    repRoot <- findRootM repBinder
+                    extRoot <- findRootM extCandidate
+                    if repRoot == extRoot
                         then
-                            insertInteriorKey
-                                repId
-                                (deleteInteriorKey r2 (deleteInteriorKey r1 (eusInteriorRoots st)))
-                        else eusInteriorRoots st
-                binders' =
-                    let m0 = eusBindersByRoot st
-                        m1 =
-                            if IntSet.null bs
-                                then IntMap.delete r2 (IntMap.delete r1 m0)
-                                else IntMap.insert repId bs (IntMap.delete r2 (IntMap.delete r1 m0))
-                    in m1
-                interior' =
-                    let m0 = eusInteriorByRoot st
-                        m1 =
-                            if nullInteriorNodes intAll
-                                then IntMap.delete r2 (IntMap.delete r1 m0)
-                                else IntMap.insert repId intAll (IntMap.delete r2 (IntMap.delete r1 m0))
-                    in m1
-                metaRoots' = mergeBinderMetaRoots r1 r2 repId (eusBinderMetaRoots st)
-            in st
-                { eusInteriorRoots = roots'
-                , eusBindersByRoot = binders'
-                , eusInteriorByRoot = interior'
-                , eusBinderMetaRoots = metaRoots'
-                }
-
-        recordMergesIntoRep bs
-
-        when (IntSet.size bs >= 1) $ do
-            eliminated <- gets eusEliminatedBinders
-            let live = IntSet.filter (\bid -> not (IntSet.member bid eliminated)) bs
-            when (not (IntSet.null live)) $ do
-                repBinderId <- pickRepBinderId live
-                let repBinder = NodeId repBinderId
-                    recordRaiseMergeUnlessSelf extCandidate = do
-                        repRoot <- findRootM repBinder
-                        extRoot <- findRootM extCandidate
-                        if repRoot == extRoot
-                            then
-                                debugEdgeUnify
-                                    ( "raise-merge skipped: self-class merge binder="
-                                        ++ show repBinder
-                                        ++ " ext="
-                                        ++ show extCandidate
-                                        ++ " root="
-                                        ++ show repRoot
-                                    )
-                            else do
-                                recordOp (OpRaise repBinder)
-                                recordOp (OpMerge repBinder extCandidate)
-                                setVarBoundM repBinder (Just extCandidate)
-                                recordEliminate repBinder
-                case (IntSet.null bs1, IntSet.null bs2) of
-                    (False, True) | inInt1 && not inInt2 -> do
-                        should <- shouldRecordRaiseMerge repBinder root2
-                        when should $
-                            recordRaiseMergeUnlessSelf root2
-                    (True, False) | inInt2 && not inInt1 -> do
-                        should <- shouldRecordRaiseMerge repBinder root1
-                        when should $
-                            recordRaiseMergeUnlessSelf root1
-                    _ -> pure ()
+                            debugEdgeUnify
+                                ( "raise-merge skipped: self-class merge binder="
+                                    ++ show repBinder
+                                    ++ " ext="
+                                    ++ show extCandidate
+                                    ++ " root="
+                                    ++ show repRoot
+                                )
+                        else do
+                            recordOp (OpRaise repBinder)
+                            recordOp (OpMerge repBinder extCandidate)
+                            setVarBoundM repBinder (Just extCandidate)
+                            recordEliminate repBinder
+            case (IntSet.null bs1, IntSet.null bs2) of
+                (False, True) | inInt1 && not inInt2 -> do
+                    should <- shouldRecordRaiseMerge node2 repBinder
+                    when should $
+                        recordRaiseMergeUnlessSelf root2
+                (True, False) | inInt2 && not inInt1 -> do
+                    should <- shouldRecordRaiseMerge node1 repBinder
+                    when should $
+                        recordRaiseMergeUnlessSelf root1
+                _ -> pure ()
 
 -- | Decide whether to record a RaiseMerge(binder, ext) operation.
 --
@@ -246,18 +256,26 @@ unifyAcyclicEdge n1 n2 = do
 --
 -- All queries use the current canonical graph state (UF roots, binding tree,
 -- interior set) — no precomputed snapshots.
-shouldRecordRaiseMerge :: NodeId -> NodeId -> EdgeUnifyM p Bool
-shouldRecordRaiseMerge binder ext = do
+--
+-- The @extNode@ parameter is the pre-fetched 'TyNode' for @ext@, threaded
+-- from the caller to avoid a redundant 'Ops.getNode' lookup.
+shouldRecordRaiseMerge :: TyNode -> NodeId -> EdgeUnifyM p Bool
+shouldRecordRaiseMerge extNode binder = do
     already <- isEliminated binder
     if already
         then pure False
         else do
             edgeRoot <- gets eusEdgeRoot
-            extNode <- liftPresolution $ Ops.getNode ext
             case extNode of
                 TyVar{} -> do
-                    mbBnd <- lookupVarBoundM binder
-                    case mbBnd of
+                    -- Thread the pre-computed binder root to avoid the
+                    -- redundant findRootM inside lookupVarBoundM.
+                    binderRoot <- findRootM binder
+                    recordEdgeUnifyStat $ \stats ->
+                        stats { eusLookupVarBoundCalls = eusLookupVarBoundCalls stats + 1 }
+                    c <- liftPresolution (gets psConstraint)
+                    let ext = tnId extNode
+                    case NodeAccess.lookupVarBound c binderRoot of
                         Nothing -> do
                             debugEdgeUnify
                                 ( "shouldRecordRaiseMerge: binder="
@@ -414,7 +432,9 @@ unifyStructureRoots root1 root2 = do
                 then do
                     recordEdgeUnifyStat $ \stats ->
                         stats { eusUnifyStructureVarVar = eusUnifyStructureVarVar stats + 1 }
-                    unifyAcyclicEdge root1 root2
+                    recordEdgeUnifyStat $ \stats ->
+                        stats { eusUnifyAcyclicCalls = eusUnifyAcyclicCalls stats + 1 }
+                    unifyAcyclicEdgeCore node1 node2 root1 root2
                     unifyVarBounds node1 node2
                 else do
                     let (metaRoot, otherNode) =
@@ -433,7 +453,9 @@ unifyStructureRoots root1 root2 = do
                             _ <- trySetBound metaRoot (tnId otherNode)
                             pure ()
         else do
-            unifyAcyclicEdge root1 root2
+            recordEdgeUnifyStat $ \stats ->
+                stats { eusUnifyAcyclicCalls = eusUnifyAcyclicCalls stats + 1 }
+            unifyAcyclicEdgeCore node1 node2 root1 root2
             case (node1, node2) of
                 (TyVar { tnBound = mb1 }, TyVar { tnBound = mb2 }) ->
                     case (mb1, mb2) of
