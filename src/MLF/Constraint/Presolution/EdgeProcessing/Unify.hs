@@ -22,7 +22,9 @@ module MLF.Constraint.Presolution.EdgeProcessing.Unify
     unifyEdgeExpansionInstantiateArgs,
     freshEdgeExpansionBinderMetas,
     instantiateEdgeExpansionScheme,
+    instantiateEdgeExpansionSchemeWithSnapshot,
     copyEdgeExpansionBinderBounds,
+    copyEdgeExpansionBinderBoundsWithSnapshot,
     finishEdgeExpansionInstantiateApply,
     bindEdgeExpansionRoot,
     prepareEdgeExpansionOmega,
@@ -88,14 +90,20 @@ import MLF.Constraint.Presolution.Expansion
   ( applyExpansionEdgeTracedWithBinders,
     bindExpansionRootLikeTarget,
     copyBinderBounds,
+    copyBinderBoundsWithSnapshot,
     instantiateSchemeWithTrace,
   )
+import MLF.Constraint.Presolution.Copy (instantiateSchemeWithTraceSnapshot)
 import MLF.Constraint.Presolution.Ops
   ( createFreshVar,
     findRoot,
     setBindParentM,
   )
-import MLF.Constraint.Presolution.StateAccess (getCanonical)
+import MLF.Constraint.Presolution.StateAccess
+  ( PresolutionBindingSnapshot,
+    getBindingSnapshot,
+    getCanonical,
+  )
 import MLF.Constraint.Presolution.Unify (unifyAcyclic)
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness
@@ -299,8 +307,8 @@ applyEdgeExpansion input baseOps = do
     EdgeExpansionApplyInstantiate instantiatePlan -> do
       unifyEdgeExpansionInstantiateArgs instantiatePlan
       binderMetas <- freshEdgeExpansionBinderMetas instantiatePlan
-      schemeTrace <- instantiateEdgeExpansionScheme instantiatePlan binderMetas
-      boundsTrace <- copyEdgeExpansionBinderBounds instantiatePlan binderMetas
+      (snapshot, schemeTrace) <- instantiateEdgeExpansionSchemeWithSnapshot instantiatePlan binderMetas
+      boundsTrace <- copyEdgeExpansionBinderBoundsWithSnapshot snapshot instantiatePlan binderMetas
       finishEdgeExpansionInstantiateApply instantiatePlan schemeTrace boundsTrace
 
 prepareEdgeExpansionApply ::
@@ -397,12 +405,32 @@ instantiateEdgeExpansionScheme ::
 instantiateEdgeExpansionScheme plan binderMetas =
   instantiateSchemeWithTrace (eeiBodyRoot (eeipInput plan)) binderMetas
 
+instantiateEdgeExpansionSchemeWithSnapshot ::
+  EdgeExpansionInstantiatePlan ->
+  [(NodeId, NodeId)] ->
+  PresolutionM p (PresolutionBindingSnapshot p, (NodeId, CopyMap, InteriorSet, FrontierSet))
+instantiateEdgeExpansionSchemeWithSnapshot plan binderMetas = do
+  snapshot <- getBindingSnapshot
+  schemeTrace <- instantiateSchemeWithTraceSnapshot snapshot (eeiBodyRoot (eeipInput plan)) binderMetas
+  pure (snapshot, schemeTrace)
+
 copyEdgeExpansionBinderBounds ::
   EdgeExpansionInstantiatePlan ->
   [(NodeId, NodeId)] ->
   PresolutionM p (CopyMap, InteriorSet, FrontierSet)
 copyEdgeExpansionBinderBounds plan binderMetas =
   copyBinderBounds binderMetas binderArgs
+  where
+    boundVars = eeiBoundVars (eeipInput plan)
+    binderArgs = zip boundVars (eeipArgs plan)
+
+copyEdgeExpansionBinderBoundsWithSnapshot ::
+  PresolutionBindingSnapshot p ->
+  EdgeExpansionInstantiatePlan ->
+  [(NodeId, NodeId)] ->
+  PresolutionM p (CopyMap, InteriorSet, FrontierSet)
+copyEdgeExpansionBinderBoundsWithSnapshot snapshot plan binderMetas =
+  copyBinderBoundsWithSnapshot snapshot binderMetas binderArgs
   where
     boundVars = eeiBoundVars (eeipInput plan)
     binderArgs = zip boundVars (eeipArgs plan)
