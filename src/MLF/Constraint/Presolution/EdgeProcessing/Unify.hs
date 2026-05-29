@@ -209,11 +209,14 @@ executeEdgeExpansionPipeline input baseOps = do
 
   canonical <- getCanonical
   let copyMapCanon =
-        IntMap.foldlWithKey'
-          (\acc orig copy ->
-            IntMap.insert (getNodeId (canonical (NodeId orig))) copy acc)
-          IntMap.empty
-          (getCopyMapping copyMap0)
+        if IntSet.null frontier0
+          then IntMap.empty
+          else
+            IntMap.foldlWithKey'
+              (\acc orig copy ->
+                IntMap.insert (getNodeId (canonical (NodeId orig))) copy acc)
+              IntMap.empty
+              (getCopyMapping copyMap0)
   forM_ (IntSet.toList frontier0) $ \nidInt ->
     case IntMap.lookup nidInt copyMapCanon of
       Nothing -> pure ()
@@ -459,13 +462,17 @@ bindEdgeExpansionRoot applied = do
     )
   targetBinder <- bindExpansionRootLikeTarget resNodeId targetNodeId
 
-  canonical <- getCanonical
-  let copyMapCanon =
-        IntMap.foldlWithKey'
-          (\acc orig copy ->
-            IntMap.insert (getNodeId (canonical (NodeId orig))) copy acc)
-          IntMap.empty
-          (getCopyMapping copyMap0)
+  copyMapCanon <-
+    if IntSet.null frontier0
+      then pure IntMap.empty
+      else do
+        canonical <- getCanonical
+        pure $
+          IntMap.foldlWithKey'
+            (\acc orig copy ->
+              IntMap.insert (getNodeId (canonical (NodeId orig))) copy acc)
+            IntMap.empty
+            (getCopyMapping copyMap0)
   forM_ (IntSet.toList frontier0) $ \nidInt ->
     case IntMap.lookup nidInt copyMapCanon of
       Nothing -> pure ()
