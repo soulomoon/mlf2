@@ -226,10 +226,11 @@ executeEdgeExpansionPipeline input baseOps = do
       Nothing ->
         throwError (InternalError ("runExpansionUnify: missing binder-meta copy for " ++ show bv))
 
-  canonInterior <- getCanonical
+  -- Reuse `canonical` from above: no UF mutation has occurred since line 210
+  -- (setBindParentIfUpper only modifies constraint, not UF).
   let canonInteriorSet =
         IntSet.fromList
-          [ getNodeId (canonInterior (NodeId i))
+          [ getNodeId (canonical (NodeId i))
           | i <- IntSet.toList interior0
           ]
   interiorExact <- edgeInteriorExact resNodeId
@@ -267,9 +268,12 @@ executeEdgeExpansionPipeline input baseOps = do
         ++ show targetBinder
     )
 
-  c1 <- getConstraint
-  case Binding.lookupBindParent c1 (typeRef resRoot) of
-    Nothing -> setBindParentIfUpper resRoot targetBinder
+  -- Reuse `cAfterBind`: debugBindParents does not modify state.
+  -- Inline setBindParentIfUpper to avoid re-reading getConstraint.
+  case Binding.lookupBindParent cAfterBind (typeRef resRoot) of
+    Nothing ->
+      when (Binding.isUpper cAfterBind targetBinder (TypeRef resRoot)) $
+        setBindParentM (TypeRef resRoot) (targetBinder, BindFlex)
     Just _ -> pure ()
 
   pure
@@ -566,9 +570,12 @@ finishEdgeExpansionUnify executed = do
         ++ show targetBinder
     )
 
-  c1 <- getConstraint
-  case Binding.lookupBindParent c1 (typeRef resRoot) of
-    Nothing -> setBindParentIfUpper resRoot targetBinder
+  -- Reuse `cAfterBind`: debugBindParents does not modify state.
+  -- Inline setBindParentIfUpper to avoid re-reading getConstraint.
+  case Binding.lookupBindParent cAfterBind (typeRef resRoot) of
+    Nothing ->
+      when (Binding.isUpper cAfterBind targetBinder (TypeRef resRoot)) $
+        setBindParentM (TypeRef resRoot) (targetBinder, BindFlex)
     Just _ -> pure ()
 
   pure
