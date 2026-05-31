@@ -11,11 +11,13 @@ import BackendStructuralRecursiveDataSpec qualified
 import BindingSharedAbstractionSpec qualified
 import BindingSpec qualified
 import CanonicalizerSpec qualified
+import Constraint.NodeAccessSpec qualified
 import Constraint.SolvedSpec qualified
 import ConstraintGenSpec qualified
 import Control.Exception (finally)
 import Control.Monad (unless)
 import Data.IORef (newIORef, readIORef, writeIORef)
+import Elab.ResultTypeUtilSpec qualified
 import ElaborationSpec qualified
 import ExpansionMinimalitySpec qualified
 import FrontendDesugarSpec qualified
@@ -92,6 +94,7 @@ main = do
   presolutionMarker <- newIORef False
   hspec $ do
     timedSpec "PhaseSingletonsSpec" PhaseSingletonsSpec.spec
+    timedSpec "Constraint.NodeAccessSpec" Constraint.NodeAccessSpec.spec
     timedSpec "ConstraintGenSpec" ConstraintGenSpec.spec
     timedSpec "NormalizeSpec" NormalizeSpec.spec
     timedSpec "AcyclicitySpec" AcyclicitySpec.spec
@@ -141,6 +144,7 @@ main = do
     timedSpec "TypeCheckSpec" TypeCheckSpec.spec
     timedSpec "TypeSoundnessSpec" TypeSoundnessSpec.spec
     timedSpec "ReduceSpec" ReduceSpec.spec
+    timedSpec "Elab.ResultTypeUtilSpec" Elab.ResultTypeUtilSpec.spec
     timedSpec "ElaborationSpec" ElaborationSpec.spec
     timedSpec "GeneralizeSpec" GeneralizeSpec.spec
     timedSpec "BindingSpec" BindingSpec.spec

@@ -5,9 +5,11 @@ module MLF.Util.Timing
     , timeProgramIO
     , timeProgramDetailIO
     , timeProgramOperationIO
+    , timeProgramOperationWithSuffixIO
     , measureProgramOperationIO
     , emitProgramOperationDurationIO
     , emitProgramOperationMetricIO
+    , whenProgramOperationsIO
     ) where
 
 import Control.Exception (onException)
@@ -71,6 +73,16 @@ timeProgramOperationIO :: TimingConfig -> String -> IO a -> IO a
 timeProgramOperationIO config label action
     | not (timingProgramOperations config) = action
     | otherwise = timeProgramIO config label action
+
+timeProgramOperationWithSuffixIO :: TimingConfig -> String -> String -> IO a -> IO a
+timeProgramOperationWithSuffixIO config label suffix action
+    | not (timingProgramOperations config) = action
+    | otherwise = timeProgramIO config (label ++ suffix) action
+
+whenProgramOperationsIO :: TimingConfig -> IO () -> IO ()
+whenProgramOperationsIO config action
+    | not (timingProgramOperations config) = pure ()
+    | otherwise = action
 
 measureProgramOperationIO :: TimingConfig -> IO a -> IO (a, Word64)
 measureProgramOperationIO config action

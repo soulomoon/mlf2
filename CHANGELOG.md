@@ -3,6 +3,14 @@
 ## Unreleased
 
 ### Changed
+- Canonicalized structure-unification cache keys before recording seen pairs,
+  so same-root structure edges skip cleanly without poisoning later structural
+  work.
+- Made result-type reconstruction an opt-in pipeline diagnostic
+  (`pcResultTypeDiagnostics`) after the authoritative final typecheck. The
+  default `.mlfp` checking hot path now skips that duplicate reconstruction
+  work while preserving an explicit diagnostic mode and its representative
+  pipeline coverage.
 - Consolidated the carried bounded canonical parser parity fixtures onto one
   shared parser-owned `.mlfp` library under
   `test/programs/compiler-parser-parity/parser-library/`. The Hspec harness

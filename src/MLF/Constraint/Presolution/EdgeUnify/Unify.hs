@@ -333,20 +333,18 @@ debugEdgeUnify msg = do
 unifyStructureEdge :: NodeId -> NodeId -> EdgeUnifyM p ()
 unifyStructureEdge n1 n2 = do
     when (n1 /= n2) $ do
-        seen <- structurePairSeenOrInsert n1 n2
-        when (not seen) $ do
-            root1 <- findRootM n1
-            root2 <- findRootM n2
-            if root1 == root2
-                then
+        root1 <- findRootM n1
+        root2 <- findRootM n2
+        if root1 == root2
+            then
+                recordEdgeUnifyStat $ \stats ->
+                    stats { eusUnifyStructureSameRoot = eusUnifyStructureSameRoot stats + 1 }
+            else do
+                seenRoots <- structurePairSeenOrInsert root1 root2
+                when (not seenRoots) $ do
                     recordEdgeUnifyStat $ \stats ->
-                        stats { eusUnifyStructureSameRoot = eusUnifyStructureSameRoot stats + 1 }
-                else do
-                    seenRoots <- structurePairSeenOrInsert root1 root2
-                    when (not seenRoots) $ do
-                        recordEdgeUnifyStat $ \stats ->
-                            stats { eusUnifyStructureCalls = eusUnifyStructureCalls stats + 1 }
-                        unifyStructureRoots root1 root2
+                        stats { eusUnifyStructureCalls = eusUnifyStructureCalls stats + 1 }
+                    unifyStructureRoots root1 root2
 
 unifyStructureRoots :: NodeId -> NodeId -> EdgeUnifyM p ()
 unifyStructureRoots root1 root2 = do

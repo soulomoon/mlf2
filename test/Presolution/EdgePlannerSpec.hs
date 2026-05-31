@@ -20,6 +20,7 @@ import MLF.Constraint.Presolution.EdgeProcessing.Worklist
     , invalidateExpansions
     , invalidateOwners
     , invalidateRoots
+    , invalidateRootsOwnersExpansionsWithinRootOwnersExcept
     , noteInertEdge
     , notePlannedEdge
     , noteProcessedEdge
@@ -142,6 +143,53 @@ spec = describe "Edge plan types" $ do
                 queuedEdgeCount worklist3 `shouldBe` 1
                 case popEdgeWorkItem worklist3 of
                     Nothing -> expectationFailure "expected requeued stale edge"
+                    Just (staleItem, worklist4) -> do
+                        ewiStale staleItem `shouldBe` True
+                        ewiFingerprint staleItem `shouldBe` Just fingerprint
+                        popEdgeWorkItem (noteInertEdge staleItem worklist4) `shouldBe` Nothing
+
+    it "deduplicates root, owner, and expansion invalidation into one stale requeue" $ do
+        let leftTyExp = ResolvedTyExp
+                { rteNodeId = NodeId 10
+                , rteExpVar = ExpVarId 3
+                , rteBodyId = NodeId 0
+                }
+            edge = InstEdge (EdgeId 42) (NodeId 10) (NodeId 1)
+            seed = EdgePlanSeed
+                { epsLeftTyExp = leftTyExp
+                , epsLeftRoot = NodeId 10
+                , epsRightRoot = NodeId 1
+                , epsBodyRoot = NodeId 0
+                , epsSchemeOwnerGen = GenNodeId 7
+                , epsExpansionVar = ExpVarId 3
+                }
+            fingerprint = EdgeFingerprint
+                { efLeftRoot = NodeId 10
+                , efRightRoot = NodeId 1
+                , efBodyRoot = NodeId 0
+                , efSchemeOwnerGen = GenNodeId 7
+                , efExpansionVar = ExpVarId 3
+                , efCurrentExpansion = ExpIdentity
+                }
+            worklist0 = buildEdgeWorklist [edge]
+        case popEdgeWorkItem worklist0 of
+            Nothing -> expectationFailure "expected one queued edge"
+            Just (_popped, worklist1) -> do
+                let worklist2 = noteProcessedEdge edge (Just (seed, fingerprint)) worklist1
+                    (rootInvalidation, ownerInvalidation, expInvalidation, worklist3) =
+                        invalidateRootsOwnersExpansionsWithinRootOwnersExcept
+                            IntSet.empty
+                            (IntSet.singleton 10)
+                            (IntSet.singleton 7)
+                            (IntSet.singleton 3)
+                            IntSet.empty
+                            worklist2
+                wiEdges rootInvalidation `shouldBe` IntSet.singleton 42
+                wiEdges ownerInvalidation `shouldBe` IntSet.singleton 42
+                wiEdges expInvalidation `shouldBe` IntSet.singleton 42
+                queuedEdgeCount worklist3 `shouldBe` 1
+                case popEdgeWorkItem worklist3 of
+                    Nothing -> expectationFailure "expected one combined stale requeue"
                     Just (staleItem, worklist4) -> do
                         ewiStale staleItem `shouldBe` True
                         ewiFingerprint staleItem `shouldBe` Just fingerprint
