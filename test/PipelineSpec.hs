@@ -601,6 +601,9 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       it "production entrypoint remains checked-authoritative on representative corpus" $ do
         forM_ representativeMigrationCorpus assertCanonicalPipelineTypeChecks
 
+      it "opt-in result-type diagnostics still clear the representative corpus" $ do
+        forM_ representativeMigrationCorpus assertDiagnosticPipelineTypeChecks
+
     it "shared solved-to-presolution adapter matches selected solved queries on representative corpus" $ do
       let corpus =
             [ ELam "x" (EVar "x"),
@@ -5935,6 +5938,14 @@ assertCanonicalPipelineTypeChecks expr =
     Left err -> expectationFailure (renderPipelineError err)
     Right (term, ty) ->
       typeCheck term `shouldBe` Right ty
+
+assertDiagnosticPipelineTypeChecks :: SurfaceExpr -> Expectation
+assertDiagnosticPipelineTypeChecks expr =
+  let config = Elab.defaultPipelineConfig {Elab.pcResultTypeDiagnostics = True}
+   in case Elab.runPipelineElabWithConfig config Set.empty (unsafeNormalizeExpr expr) of
+        Left err -> expectationFailure (Elab.renderPipelineError err)
+        Right (term, ty) ->
+          Elab.typeCheck term `shouldBe` Right ty
 
 assertViewParity :: PresolutionViewBoundary.PresolutionView p -> Solved -> Expectation
 assertViewParity view legacy = do

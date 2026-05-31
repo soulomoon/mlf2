@@ -32,6 +32,7 @@ module MLF.Util.IndexedWorklist
     , indexWorkItemKeys
     , invalidateIndexedKeysExcept
     , invalidateIndexedKeysExceptWithin
+    , invalidateIndexedKeyTripleExceptWithin
     , invalidateQueuedIndexedKeysExcept
     , queuedIndexedItemCount
     ) where
@@ -218,6 +219,48 @@ invalidateIndexedKeysExceptWithin excluded indexName keys withinIndex withinKeys
        , markStaleAndRequeue affected worklist
        )
 
+invalidateIndexedKeyTripleExceptWithin
+    :: IntSet
+    -> WorklistIndexEntry
+    -> WorklistIndexEntry
+    -> WorklistIndexEntry
+    -> Maybe WorklistIndexEntry
+    -> IndexedWorklist a
+    -> ( IndexedWorklistInvalidation
+       , IndexedWorklistInvalidation
+       , IndexedWorklistInvalidation
+       , IndexedWorklist a
+       )
+invalidateIndexedKeyTripleExceptWithin excluded entryA entryB entryC mbWithin worklist =
+    let mbWithinItems =
+            case mbWithin of
+                Nothing -> Nothing
+                Just withinEntry ->
+                    Just (itemsFor (wieIndex withinEntry) (wieKeys withinEntry) worklist)
+        invalidationA = invalidationFor mbWithinItems entryA
+        invalidationB = invalidationFor mbWithinItems entryB
+        invalidationC = invalidationFor mbWithinItems entryC
+        core' =
+            markStaleAndRequeueGroups
+                [ iwiInvalidatedItemKeys invalidationA
+                , iwiInvalidatedItemKeys invalidationB
+                , iwiInvalidatedItemKeys invalidationC
+                ]
+                worklist
+    in (invalidationA, invalidationB, invalidationC, core')
+  where
+    invalidationFor mbWithinItems entry =
+        let indexedItems = itemsFor (wieIndex entry) (wieKeys entry) worklist
+            scopedItems =
+                case mbWithinItems of
+                    Nothing -> indexedItems
+                    Just withinItems -> IntSet.intersection indexedItems withinItems
+            affected = IntSet.difference scopedItems excluded
+        in IndexedWorklistInvalidation
+            { iwiInvalidatedIndexKeys = wieKeys entry
+            , iwiInvalidatedItemKeys = affected
+            }
+
 invalidateQueuedIndexedKeysExcept
     :: IntSet
     -> WorklistIndex
@@ -260,19 +303,31 @@ markStale affected worklist
 markStaleAndRequeue :: IntSet -> IndexedWorklist a -> IndexedWorklist a
 markStaleAndRequeue affected worklist
     | IntSet.null affected = worklist
+    | otherwise = markStaleAndRequeueGroups [affected] worklist
+
+{-# INLINABLE markStaleAndRequeueGroups #-}
+markStaleAndRequeueGroups :: [IntSet] -> IndexedWorklist a -> IndexedWorklist a
+markStaleAndRequeueGroups affectedGroups worklist
+    | IntSet.null affected = worklist
     | otherwise =
-        let toQueue = IntSet.difference affected (iwQueuedKeys worklist)
-            queue' =
-                IntSet.foldl'
-                    enqueueStoredItem
-                    (iwQueue worklist)
-                    toQueue
+        let (queuedKeys', queue') =
+                foldl'
+                    enqueueAffectedGroup
+                    (iwQueuedKeys worklist, iwQueue worklist)
+                    affectedGroups
         in worklist
             { iwQueue = queue'
-            , iwQueuedKeys = IntSet.union (iwQueuedKeys worklist) toQueue
+            , iwQueuedKeys = queuedKeys'
             , iwStaleKeys = IntSet.union affected (iwStaleKeys worklist)
             }
   where
+    affected = IntSet.unions affectedGroups
+
+    enqueueAffectedGroup (queuedKeys, queue) affectedGroup =
+        let toQueue = IntSet.difference affectedGroup queuedKeys
+            queue' = IntSet.foldl' enqueueStoredItem queue toQueue
+        in (IntSet.union queuedKeys toQueue, queue')
+
     enqueueStoredItem queue key =
         case IntMap.lookup key (iwItemsByKey worklist) of
             Nothing -> queue

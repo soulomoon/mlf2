@@ -57,6 +57,7 @@ import MLF.Binding.Path (
     bindingPathToRootLocal,
     bindingPathToRootWithLookup,
     firstGenAncestorFromPath,
+    validateBindingPathsAcyclic,
     )
 import MLF.Binding.ScopeGraph (
     buildTypeEdgesFrom,
@@ -93,7 +94,7 @@ checkBindingTree c = do
                         "Binding parent " ++ show parentRef ++ " of node " ++ show childKey ++ " not in live constraint"
 
     -- Check 2: No cycles in binding paths.
-    mapM_ (bindingPathToRoot c) allRefs
+    validateBindingPathsAcyclic bindParents allRefs
 
     -- Check 3: Gen nodes only bind under gen nodes; type nodes must be "upper".
     let checkUpperInvariant (childKey, (parentRef, _flag))
@@ -627,7 +628,7 @@ checkBindingTreeUnder canonical c0 = do
                         ++ " of node " ++ show childKey ++ " not in constraint"
 
     -- Cycle check on the canonical binding-parent relation.
-    mapM_ (bindingPathToRootWithLookup (\key -> IntMap.lookup key bindParents) . nodeRefFromKey) (IntMap.keys bindParents)
+    validateBindingPathsAcyclic bindParents (map nodeRefFromKey (IntMap.keys bindParents))
 
     -- Upper-than check on the quotient structure graph (gen nodes must bind under gen nodes).
     forM_ (IntMap.toList bindParents) $ \(childKey, (parentRef, _flag)) -> do

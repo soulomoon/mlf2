@@ -130,12 +130,10 @@ import MLF.Constraint.Presolution.EdgeProcessing.Worklist
     , EdgeWorklist
     , WorklistInvalidation(..)
     , buildIndexedEdgeWorklistWithRootOwnership
-    , invalidateExpansionsWithinRootOwnersExcept
-    , invalidateOwnersWithinRootOwnersExcept
-    , invalidateRootsWithinRootOwnersExcept
     , noteInertEdge
     , noteProcessedEdge
     , popEdgeWorkItem
+    , invalidateRootsOwnersExpansionsWithinRootOwnersExcept
     , rootOwnershipOfWorklist
     , rootOwnersForPlan
     )
@@ -1162,12 +1160,14 @@ invalidateWorklistAfterMutation edge plan mutation worklist0
     | otherwise =
         let excluded = IntSet.singleton (getEdgeId (instEdgeId edge))
             rootScope = mutationRootOwners worklist0 mutation `IntSet.union` rootOwnersForPlan (rootOwnershipOfWorklist worklist0) plan
-            (rootInvalidation, worklist1) =
-                invalidateRootsWithinRootOwnersExcept excluded (emRoots mutation) rootScope worklist0
-            (ownerInvalidation, worklist2) =
-                invalidateOwnersWithinRootOwnersExcept excluded (emOwners mutation) rootScope worklist1
-            (expInvalidation, worklist3) =
-                invalidateExpansionsWithinRootOwnersExcept excluded (emExpansions mutation) rootScope worklist2
+            (rootInvalidation, ownerInvalidation, expInvalidation, worklist1) =
+                invalidateRootsOwnersExpansionsWithinRootOwnersExcept
+                    excluded
+                    (emRoots mutation)
+                    (emOwners mutation)
+                    (emExpansions mutation)
+                    rootScope
+                    worklist0
             invalidation =
                 EdgeInvalidation
                     { eiRootEdges = wiEdges rootInvalidation
@@ -1178,7 +1178,7 @@ invalidateWorklistAfterMutation edge plan mutation worklist0
                             `IntSet.union` wiEdges ownerInvalidation
                             `IntSet.union` wiEdges expInvalidation
                     }
-        in (invalidation, worklist3)
+        in (invalidation, worklist1)
 
 mutationRootOwners :: EdgeWorklist -> EdgeMutation -> IntSet.IntSet
 mutationRootOwners worklist mutation =

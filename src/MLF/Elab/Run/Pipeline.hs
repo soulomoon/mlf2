@@ -28,6 +28,8 @@ where
 
 import Control.Concurrent (forkIO, newEmptyMVar, putMVar, rtsSupportsBoundThreads, takeMVar)
 import Control.Exception (SomeException, evaluate, throwIO, try)
+import Control.Monad.Except (ExceptT (..), runExceptT)
+import Control.Monad.IO.Class (liftIO)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
@@ -122,7 +124,14 @@ import MLF.Frontend.ConstraintGen
 import MLF.Frontend.Syntax (NormSrcType, NormSurfaceExpr, StructBound, VarName)
 import qualified MLF.Frontend.Syntax as Surface
 import MLF.Reify.TypeOps (freeTypeVarsType, freshNameLike, substTypeCapture)
-import MLF.Util.Timing (TimingConfig, emitProgramOperationMetricIO, timeProgramOperationIO, timingProgramOperations)
+import MLF.Util.Timing
+  ( TimingConfig,
+    emitProgramOperationMetricIO,
+    timeProgramOperationIO,
+    timeProgramOperationWithSuffixIO,
+    timingProgramOperations,
+    whenProgramOperationsIO,
+  )
 import MLF.Util.Trace (TraceConfig, traceGeneralize)
 
 data PipelineElabDetailedResult = PipelineElabDetailedResult
@@ -193,6 +202,56 @@ data RootFinalizationContext p = RootFinalizationContext
     rfcSharedContext :: !(Maybe ModuleBatchSharedContext),
     rfcTemplateInstantiation :: !(Maybe RootTemplateInstantiation)
   }
+
+type PipelineStage a = ExceptT PipelineError IO a
+
+timePipelineValueSuffix ::
+  TimingConfig ->
+  String ->
+  String ->
+  IO a ->
+  PipelineStage a
+timePipelineValueSuffix timing label suffix action =
+  liftIO (timeProgramOperationWithSuffixIO timing label suffix action)
+
+timePipelineEither ::
+  TimingConfig ->
+  String ->
+  IO (Either PipelineError a) ->
+  PipelineStage a
+timePipelineEither timing stageLabel action =
+  ExceptT (timeProgramOperationIO timing stageLabel action)
+
+timePipelineEitherSuffix ::
+  TimingConfig ->
+  String ->
+  String ->
+  IO (Either PipelineError a) ->
+  PipelineStage a
+timePipelineEitherSuffix timing label suffix action =
+  ExceptT (timeProgramOperationWithSuffixIO timing label suffix action)
+
+evaluatePipelineEitherSuffix ::
+  TimingConfig ->
+  String ->
+  String ->
+  Either PipelineError a ->
+  PipelineStage a
+evaluatePipelineEitherSuffix timing label suffix result =
+  timePipelineEitherSuffix timing label suffix (evaluate result)
+
+evaluatePipelineAttemptSuffix ::
+  TimingConfig ->
+  String ->
+  String ->
+  Either PipelineError a ->
+  PipelineStage (Either PipelineError a)
+evaluatePipelineAttemptSuffix timing label suffix result =
+  timePipelineValueSuffix timing label suffix (evaluate result)
+
+fromPipelineEither :: Either PipelineError a -> PipelineStage a
+fromPipelineEither result =
+  ExceptT (pure result)
 
 validateDirectRecursiveAnnotations :: NormSurfaceExpr -> Either ConstraintError ()
 validateDirectRecursiveAnnotations = goExpr
@@ -267,7 +326,7 @@ runPipelineElab = runPipelineElabWithConfig defaultPipelineConfig
 
 runPipelineElabWithConfig :: PipelineConfig -> PolySyms -> NormSurfaceExpr -> Either PipelineError (ElabTerm, ElabType)
 runPipelineElabWithConfig config polySyms expr =
-  detailedPair <$> runPipelineElabWith FinalCheckInPipeline (pcTraceConfig config) polySyms Map.empty expr
+  detailedPair <$> runPipelineElabWith FinalCheckInPipeline (resultTypeDiagnosticsFromConfig config) (pcTraceConfig config) polySyms Map.empty expr
 
 -- | Run the pipeline with an external environment of type assumptions
 -- for free variables, avoiding the ELamAnn wrapping approach.
@@ -291,27 +350,27 @@ runPipelineElabDetailedWithExternalBindings =
 
 runPipelineElabDetailedWithConfigAndExternalBindings :: PipelineConfig -> PolySyms -> ExternalBindings -> NormSurfaceExpr -> Either PipelineError PipelineElabDetailedResult
 runPipelineElabDetailedWithConfigAndExternalBindings config polySyms extBindings =
-  runPipelineElabWith FinalCheckInPipeline (pcTraceConfig config) polySyms extBindings
+  runPipelineElabWith FinalCheckInPipeline (resultTypeDiagnosticsFromConfig config) (pcTraceConfig config) polySyms extBindings
 
 runPipelineElabDetailedUncheckedWithExternalBindings :: PolySyms -> ExternalBindings -> NormSurfaceExpr -> Either PipelineError PipelineElabDetailedResult
 runPipelineElabDetailedUncheckedWithExternalBindings polySyms extBindings =
-  runPipelineElabWith FinalCheckAfterDeferredRewrite (pcTraceConfig defaultPipelineConfig) polySyms extBindings
+  runPipelineElabWith FinalCheckAfterDeferredRewrite ResultTypeDiagnosticsDisabled (pcTraceConfig defaultPipelineConfig) polySyms extBindings
 
 runPipelineElabDetailedWithPreparedExternalBindings :: PolySyms -> PreparedExternalBindings -> NormSurfaceExpr -> Either PipelineError PipelineElabDetailedResult
 runPipelineElabDetailedWithPreparedExternalBindings =
-  runPipelineElabWithPrepared FinalCheckInPipeline (pcTraceConfig defaultPipelineConfig)
+  runPipelineElabWithPrepared FinalCheckInPipeline (resultTypeDiagnosticsFromConfig defaultPipelineConfig) (pcTraceConfig defaultPipelineConfig)
 
 runPipelineElabDetailedWithPreparedExternalBindingsWithTiming :: TimingConfig -> String -> PolySyms -> PreparedExternalBindings -> NormSurfaceExpr -> IO (Either PipelineError PipelineElabDetailedResult)
 runPipelineElabDetailedWithPreparedExternalBindingsWithTiming timing label =
-  runPipelineElabWithPreparedWithTiming timing label FinalCheckInPipeline (pcTraceConfig defaultPipelineConfig)
+  runPipelineElabWithPreparedWithTiming timing label FinalCheckInPipeline (resultTypeDiagnosticsFromConfig defaultPipelineConfig) (pcTraceConfig defaultPipelineConfig)
 
 runPipelineElabDetailedUncheckedWithPreparedExternalBindings :: PolySyms -> PreparedExternalBindings -> NormSurfaceExpr -> Either PipelineError PipelineElabDetailedResult
 runPipelineElabDetailedUncheckedWithPreparedExternalBindings =
-  runPipelineElabWithPrepared FinalCheckAfterDeferredRewrite (pcTraceConfig defaultPipelineConfig)
+  runPipelineElabWithPrepared FinalCheckAfterDeferredRewrite ResultTypeDiagnosticsDisabled (pcTraceConfig defaultPipelineConfig)
 
 runPipelineElabDetailedUncheckedWithPreparedExternalBindingsWithTiming :: TimingConfig -> String -> PolySyms -> PreparedExternalBindings -> NormSurfaceExpr -> IO (Either PipelineError PipelineElabDetailedResult)
 runPipelineElabDetailedUncheckedWithPreparedExternalBindingsWithTiming timing label =
-  runPipelineElabWithPreparedWithTiming timing label FinalCheckAfterDeferredRewrite (pcTraceConfig defaultPipelineConfig)
+  runPipelineElabWithPreparedWithTiming timing label FinalCheckAfterDeferredRewrite ResultTypeDiagnosticsDisabled (pcTraceConfig defaultPipelineConfig)
 
 schemeExternalBindings :: ExternalEnv -> ExternalBindings
 schemeExternalBindings =
@@ -373,39 +432,58 @@ data PipelineFinalCheckMode
   | FinalCheckAfterDeferredRewrite
   deriving (Eq, Show)
 
+data ResultTypeDiagnosticsMode
+  = ResultTypeDiagnosticsEnabled
+  | ResultTypeDiagnosticsDisabled
+  deriving (Eq, Show)
+
+resultTypeDiagnosticsFromConfig :: PipelineConfig -> ResultTypeDiagnosticsMode
+resultTypeDiagnosticsFromConfig config =
+  if pcResultTypeDiagnostics config
+    then ResultTypeDiagnosticsEnabled
+    else ResultTypeDiagnosticsDisabled
+
+shouldRunResultTypeDiagnostics :: PipelineFinalCheckMode -> ResultTypeDiagnosticsMode -> Bool
+shouldRunResultTypeDiagnostics finalCheckMode diagnosticsMode =
+  finalCheckMode == FinalCheckInPipeline && diagnosticsMode == ResultTypeDiagnosticsEnabled
+
 runPipelineElabWith ::
   PipelineFinalCheckMode ->
+  ResultTypeDiagnosticsMode ->
   TraceConfig ->
   PolySyms ->
   ExternalBindings ->
   NormSurfaceExpr ->
   Either PipelineError PipelineElabDetailedResult
-runPipelineElabWith finalCheckMode traceCfg polySyms extBindings expr = do
+runPipelineElabWith finalCheckMode diagnosticsMode traceCfg polySyms extBindings expr = do
   extPrepared <- fromConstraintError (prepareExternalBindings extBindings)
-  runPipelineElabWithPrepared finalCheckMode traceCfg polySyms extPrepared expr
+  runPipelineElabWithPrepared finalCheckMode diagnosticsMode traceCfg polySyms extPrepared expr
 
 runPipelineElabWithPrepared ::
   PipelineFinalCheckMode ->
+  ResultTypeDiagnosticsMode ->
   TraceConfig ->
   PolySyms ->
   PreparedExternalBindings ->
   NormSurfaceExpr ->
   Either PipelineError PipelineElabDetailedResult
-runPipelineElabWithPrepared finalCheckMode traceCfg polySyms extPrepared =
+runPipelineElabWithPrepared finalCheckMode diagnosticsMode traceCfg polySyms extPrepared =
   runPipelineElabWithPreparedGenerated
     finalCheckMode
+    diagnosticsMode
     traceCfg
     extPrepared
     (generateConstraintsWithExternalBindings polySyms (pebBindings extPrepared))
 
 runPipelineElabWithPreparedGenerated ::
   PipelineFinalCheckMode ->
+  ResultTypeDiagnosticsMode ->
   TraceConfig ->
   PreparedExternalBindings ->
   (NormSurfaceExpr -> Either ConstraintError (ConstraintResult 'Raw)) ->
   NormSurfaceExpr ->
   Either PipelineError PipelineElabDetailedResult
-runPipelineElabWithPreparedGenerated finalCheckMode traceCfg extPrepared generateConstraints expr = do
+runPipelineElabWithPreparedGenerated finalCheckMode diagnosticsMode traceCfg extPrepared generateConstraints expr = do
   () <- fromConstraintError (validateDirectRecursiveAnnotations expr)
   let initialSchemeInfos = pebSchemeInfos extPrepared
   ConstraintResult {crConstraint = c0, crAnnotated = ann, crAnnSourceTypes = annSourceTypes, crInitialEnv = _initialBindings} <-
@@ -439,31 +517,7 @@ runPipelineElabWithPreparedGenerated finalCheckMode traceCfg extPrepared generat
       rootSubst = prgSubst rootGeneralization
   let termSubst = substInTerm rootSubst term
 
-  let retainedChildAuthoritativeCandidate =
-        case preserveRetainedChildAuthoritativeResult termSubst of
-          Just _ -> True
-          Nothing -> False
-      termClosed0 =
-        if retainedChildAuthoritativeCandidate
-          then closeTermWithSchemeSubstIfNeeded rootSubst rootScheme term
-          else case typeCheckWithEnv initialTcEnv termSubst of
-            Right ty | null (freeTypeVarsType ty) -> termSubst
-            Right ty ->
-              case rootScheme of
-                Forall binds _
-                  | null binds ->
-                      let freeBinds =
-                            [ (name, Nothing)
-                              | name <- Set.toList (freeTypeVarsType ty)
-                            ]
-                          freeScheme = Forall freeBinds ty
-                       in closeTermWithSchemeSubstIfNeeded IntMap.empty freeScheme termSubst
-                _ -> closeTermWithSchemeSubstIfNeeded rootSubst rootScheme term
-            Left _ -> closeTermWithSchemeSubstIfNeeded rootSubst rootScheme term
-      termClosed =
-        case preserveRetainedChildAuthoritativeResult termClosed0 of
-          Just termAdjusted -> closeTermWithSchemeSubstIfNeeded rootSubst rootScheme termAdjusted
-          Nothing -> termClosed0
+  let termClosed = closePipelineTerm initialTcEnv rootSubst rootScheme term termSubst
   let termClosedFresh = freshenTypeAbsAgainstEnv initialTcEnv termClosed
       uncheckedAuthoritative =
         pure
@@ -490,11 +544,10 @@ runPipelineElabWithPreparedGenerated finalCheckMode traceCfg extPrepared generat
           FinalCheckInPipeline -> checkedAuthoritative
           FinalCheckAfterDeferredRewrite -> uncheckedAuthoritative
 
-  -- Keep result-type reconstruction for diagnostics, but report the
-  -- type-checker result as authoritative.
-  case finalCheckMode of
-    FinalCheckAfterDeferredRewrite -> authoritativeResult
-    FinalCheckInPipeline -> do
+  -- Result-type reconstruction is an opt-in diagnostic cross-check; the final
+  -- typechecker result stays authoritative on the default hot path.
+  if shouldRunResultTypeDiagnostics finalCheckMode diagnosticsMode
+    then do
       _ <-
         fromElabError
           ( computePreparedResultTypeWithRootGeneralization
@@ -504,21 +557,24 @@ runPipelineElabWithPreparedGenerated finalCheckMode traceCfg extPrepared generat
               authoritativeAnnPreFinal
           )
       authoritativeResult
+    else authoritativeResult
 
 runPipelineElabWithPreparedWithTiming ::
   TimingConfig ->
   String ->
   PipelineFinalCheckMode ->
+  ResultTypeDiagnosticsMode ->
   TraceConfig ->
   PolySyms ->
   PreparedExternalBindings ->
   NormSurfaceExpr ->
   IO (Either PipelineError PipelineElabDetailedResult)
-runPipelineElabWithPreparedWithTiming timing label finalCheckMode traceCfg polySyms extPrepared =
+runPipelineElabWithPreparedWithTiming timing label finalCheckMode diagnosticsMode traceCfg polySyms extPrepared =
   runPipelineElabWithPreparedGeneratedWithTiming
     timing
     label
     finalCheckMode
+    diagnosticsMode
     traceCfg
     extPrepared
     (generateConstraintsWithExternalBindings polySyms (pebBindings extPrepared))
@@ -527,242 +583,101 @@ runPipelineElabWithPreparedGeneratedWithTiming ::
   TimingConfig ->
   String ->
   PipelineFinalCheckMode ->
+  ResultTypeDiagnosticsMode ->
   TraceConfig ->
   PreparedExternalBindings ->
   (NormSurfaceExpr -> Either ConstraintError (ConstraintResult 'Raw)) ->
   NormSurfaceExpr ->
   IO (Either PipelineError PipelineElabDetailedResult)
-runPipelineElabWithPreparedGeneratedWithTiming timing label finalCheckMode traceCfg extPrepared generateConstraints expr = do
-  validationResult <-
-    timeProgramOperationIO timing (label ++ ".validate_annotations") $
-      evaluate (fromConstraintError (validateDirectRecursiveAnnotations expr))
-  case validationResult of
-    Left err -> pure (Left err)
-    Right () -> do
-      let initialSchemeInfos = pebSchemeInfos extPrepared
-      constraintResult <-
-        timeProgramOperationIO timing (label ++ ".generate_constraints") $
-          evaluate (fromConstraintError (generateConstraints expr))
-      case constraintResult of
-        Left err -> pure (Left err)
-        Right ConstraintResult {crConstraint = c0, crAnnotated = ann, crAnnSourceTypes = annSourceTypes, crInitialEnv = _initialBindings} -> do
-          normalizeResult <-
-            timeProgramOperationIO timing (label ++ ".constraint_normalize") $
-              evaluate (normalize c0)
-          acycResult <-
-            timeProgramOperationIO timing (label ++ ".acyclicity") $
-              evaluate (fromCycleError (breakCyclesAndCheckAcyclicity normalizeResult))
-          case acycResult of
-            Left err -> pure (Left err)
-            Right (cAcyclic, acyc) -> do
-              presResult <-
-                timeProgramOperationIO timing (label ++ ".presolution") $
-                  fromPresolutionError <$> computePresolutionWithTiming timing (label ++ ".presolution") traceCfg acyc cAcyclic
-              case presResult of
-                Left err -> pure (Left err)
-                Right pres -> do
-                  preparedResult <-
-                    timeProgramOperationIO timing (label ++ ".prepare_generalization") $
-                      evaluate (fromSolveError (prepareGeneralizationArtifact traceCfg cAcyclic pres ann))
-                  case preparedResult of
-                    Left err -> pure (Left err)
-                    Right prepared -> do
-                      let initialTcEnv = pebTypeCheckEnv extPrepared
-                          annCanon = preparedAnnotated prepared
-                          elabConfig = preparedElaborationConfig traceCfg prepared
-                          elabEnv = preparedElaborationEnv annSourceTypes initialSchemeInfos prepared
-                      termResult <-
-                        timeProgramOperationIO timing (label ++ ".elaborate") $
-                          evaluate (fromElabError (elaborateWithEnv elabConfig elabEnv annCanon))
-                      case termResult of
-                        Left err -> pure (Left err)
-                        Right term -> do
-                          case traceGeneralize traceCfg ("pipeline elaborated term=" ++ show term) () of
-                            () -> pure ()
-                          let authoritativeAnnCanon = authoritativeRootAnn term annCanon
-                              authoritativeAnnPre = authoritativeRootAnn term ann
-                              (authoritativeAnnCanonFinal, authoritativeAnnPreFinal) =
-                                stripPreparedWitnesslessAuthoritativeAnn prepared authoritativeAnnCanon authoritativeAnnPre
-                          rootResult <-
-                            timeProgramOperationIO timing (label ++ ".generalize_root") $
-                              evaluate (fromElabError (generalizePreparedRootDetailed prepared authoritativeAnnCanonFinal authoritativeAnnPreFinal))
-                          case rootResult of
-                            Left err -> pure (Left err)
-                            Right rootGeneralization -> do
-                              let rootScheme = prgScheme rootGeneralization
-                                  rootSubst = prgSubst rootGeneralization
-                              termSubst <-
-                                timeProgramOperationIO timing (label ++ ".subst_root") $
-                                  evaluate (substInTerm rootSubst term)
-                              termClosed <-
-                                timeProgramOperationIO timing (label ++ ".close_term") $
-                                  evaluate (closePipelineTerm initialTcEnv rootSubst rootScheme term termSubst)
-                              termClosedFresh <-
-                                timeProgramOperationIO timing (label ++ ".freshen_type_abs") $
-                                  evaluate (freshenTypeAbsAgainstEnv initialTcEnv termClosed)
-                              let uncheckedAuthoritative =
-                                    Right
-                                      PipelineElabDetailedResult
-                                        { pedTerm = termClosedFresh,
-                                          pedType = schemeToType rootScheme,
-                                          pedRootAnn = authoritativeAnnCanonFinal,
-                                          pedTypeCheckEnv = initialTcEnv
-                                        }
-                              authoritativeResult <-
-                                case finalCheckMode of
-                                  FinalCheckInPipeline ->
-                                    timeProgramOperationIO timing (label ++ ".final_typecheck") $
-                                      evaluate $ do
-                                        tyChecked <-
-                                          case typeCheckWithEnv initialTcEnv termClosedFresh of
-                                            Right ty -> pure ty
-                                            Left err -> fromTypeCheckError (Left err)
-                                        pure
-                                          PipelineElabDetailedResult
-                                            { pedTerm = termClosedFresh,
-                                              pedType = tyChecked,
-                                              pedRootAnn = authoritativeAnnCanonFinal,
-                                              pedTypeCheckEnv = initialTcEnv
-                                            }
-                                  FinalCheckAfterDeferredRewrite ->
-                                    pure uncheckedAuthoritative
-                              case finalCheckMode of
-                                FinalCheckAfterDeferredRewrite -> pure authoritativeResult
-                                FinalCheckInPipeline -> do
-                                  resultTypeResult <-
-                                    timeProgramOperationIO timing (label ++ ".result_type_reconstruction") $
-                                      evaluate
-                                        ( fromElabError
-                                            ( computePreparedResultTypeWithRootGeneralization
-                                                prepared
-                                                rootGeneralization
-                                                authoritativeAnnCanonFinal
-                                                authoritativeAnnPreFinal
-                                            )
-                                        )
-                                  pure $ do
-                                    _ <- resultTypeResult
-                                    authoritativeResult
+runPipelineElabWithPreparedGeneratedWithTiming timing label finalCheckMode diagnosticsMode traceCfg extPrepared generateConstraints expr =
+  runExceptT $ do
+    evaluatePipelineEitherSuffix timing label ".validate_annotations" $
+      fromConstraintError (validateDirectRecursiveAnnotations expr)
+    let initialSchemeInfos = pebSchemeInfos extPrepared
+    ConstraintResult {crConstraint = c0, crAnnotated = ann, crAnnSourceTypes = annSourceTypes, crInitialEnv = _initialBindings} <-
+      evaluatePipelineEitherSuffix timing label ".generate_constraints" $
+        fromConstraintError (generateConstraints expr)
+    normalizeResult <-
+      timePipelineValueSuffix timing label ".constraint_normalize" $
+        evaluate (normalize c0)
+    (cAcyclic, acyc) <-
+      evaluatePipelineEitherSuffix timing label ".acyclicity" $
+        fromCycleError (breakCyclesAndCheckAcyclicity normalizeResult)
+    pres <-
+      let presolutionLabel = label ++ ".presolution"
+       in timePipelineEither timing presolutionLabel $
+            fromPresolutionError <$> computePresolutionWithTiming timing presolutionLabel traceCfg acyc cAcyclic
+    prepared <-
+      evaluatePipelineEitherSuffix timing label ".prepare_generalization" $
+        fromSolveError (prepareGeneralizationArtifact traceCfg cAcyclic pres ann)
+    let annCanon = preparedAnnotated prepared
+        elabConfig = preparedElaborationConfig traceCfg prepared
+        elabEnv = preparedElaborationEnv annSourceTypes initialSchemeInfos prepared
+    finishPreparedPipelineRootStage
+      timing
+      label
+      finalCheckMode
+      diagnosticsMode
+      traceCfg
+      extPrepared
+      prepared
+      elabConfig
+      elabEnv
+      annCanon
+      ann
 
 runPipelineElabWithPreparedConstraintWithTiming ::
   TimingConfig ->
   String ->
   PipelineFinalCheckMode ->
+  ResultTypeDiagnosticsMode ->
   TraceConfig ->
   PreparedExternalBindings ->
   Constraint 'Raw ->
   AnnExpr ->
   IntMap.IntMap NormSrcType ->
   IO (Either PipelineError PipelineElabDetailedResult)
-runPipelineElabWithPreparedConstraintWithTiming timing label finalCheckMode traceCfg extPrepared c0 ann annSourceTypes = do
-  let initialSchemeInfos = pebSchemeInfos extPrepared
-  normalizeResult <-
-    timeProgramOperationIO timing (label ++ ".constraint_normalize") $
-      evaluate (normalize c0)
-  acycResult <-
-    timeProgramOperationIO timing (label ++ ".acyclicity") $
-      evaluate (fromCycleError (breakCyclesAndCheckAcyclicity normalizeResult))
-  case acycResult of
-    Left err -> pure (Left err)
-    Right (cAcyclic, acyc) -> do
-      presResult <-
-        timeProgramOperationIO timing (label ++ ".presolution") $
-          fromPresolutionError <$> computePresolutionWithTiming timing (label ++ ".presolution") traceCfg acyc cAcyclic
-      case presResult of
-        Left err -> pure (Left err)
-        Right pres -> do
-          preparedResult <-
-            timeProgramOperationIO timing (label ++ ".prepare_generalization") $
-              evaluate (fromSolveError (prepareGeneralizationArtifact traceCfg cAcyclic pres ann))
-          case preparedResult of
-            Left err -> pure (Left err)
-            Right prepared -> do
-              readContextResult <-
-                timeProgramOperationIO timing (label ++ ".root_finalization.prepare_read_context") $
-                  evaluate (fromElabError (preparedReadContextReady prepared))
-              resultTypeReadContextResult <-
-                timeProgramOperationIO timing (label ++ ".root_finalization.result_type_read_context") $
-                  evaluate (fromElabError (preparedResultTypeViewReady prepared))
-              case (readContextResult, resultTypeReadContextResult) of
-                (Left err, _) -> pure (Left err)
-                (_, Left err) -> pure (Left err)
-                (Right (), Right ()) -> do
-                  let initialTcEnv = pebTypeCheckEnv extPrepared
-                      annCanon = preparedAnnotated prepared
-                      elabConfig = preparedElaborationConfig traceCfg prepared
-                      elabEnv = preparedElaborationEnv annSourceTypes initialSchemeInfos prepared
-                  termResult <-
-                    timeProgramOperationIO timing (label ++ ".elaborate") $
-                      evaluate (fromElabError (elaborateWithEnv elabConfig elabEnv annCanon))
-                  case termResult of
-                    Left err -> pure (Left err)
-                    Right term -> do
-                      case traceGeneralize traceCfg ("pipeline elaborated term=" ++ show term) () of
-                        () -> pure ()
-                      let authoritativeAnnCanon = authoritativeRootAnn term annCanon
-                          authoritativeAnnPre = authoritativeRootAnn term ann
-                          (authoritativeAnnCanonFinal, authoritativeAnnPreFinal) =
-                            stripPreparedWitnesslessAuthoritativeAnn prepared authoritativeAnnCanon authoritativeAnnPre
-                      rootResult <-
-                        timeProgramOperationIO timing (label ++ ".generalize_root") $
-                          evaluate (fromElabError (generalizePreparedRootDetailed prepared authoritativeAnnCanonFinal authoritativeAnnPreFinal))
-                      case rootResult of
-                        Left err -> pure (Left err)
-                        Right rootGeneralization -> do
-                          let rootScheme = prgScheme rootGeneralization
-                              rootSubst = prgSubst rootGeneralization
-                          termSubst <-
-                            timeProgramOperationIO timing (label ++ ".subst_root") $
-                              evaluate (substInTerm rootSubst term)
-                          termClosed <-
-                            timeProgramOperationIO timing (label ++ ".close_term") $
-                              evaluate (closePipelineTerm initialTcEnv rootSubst rootScheme term termSubst)
-                          termClosedFresh <-
-                            timeProgramOperationIO timing (label ++ ".freshen_type_abs") $
-                              evaluate (freshenTypeAbsAgainstEnv initialTcEnv termClosed)
-                          let uncheckedAuthoritative =
-                                Right
-                                  PipelineElabDetailedResult
-                                    { pedTerm = termClosedFresh,
-                                      pedType = schemeToType rootScheme,
-                                      pedRootAnn = authoritativeAnnCanonFinal,
-                                      pedTypeCheckEnv = initialTcEnv
-                                    }
-                          authoritativeResult <-
-                            case finalCheckMode of
-                              FinalCheckInPipeline ->
-                                timeProgramOperationIO timing (label ++ ".final_typecheck") $
-                                  evaluate $ do
-                                    tyChecked <-
-                                      case typeCheckWithEnv initialTcEnv termClosedFresh of
-                                        Right ty -> pure ty
-                                        Left err -> fromTypeCheckError (Left err)
-                                    pure
-                                      PipelineElabDetailedResult
-                                        { pedTerm = termClosedFresh,
-                                          pedType = tyChecked,
-                                          pedRootAnn = authoritativeAnnCanonFinal,
-                                          pedTypeCheckEnv = initialTcEnv
-                                        }
-                              FinalCheckAfterDeferredRewrite ->
-                                pure uncheckedAuthoritative
-                          case finalCheckMode of
-                            FinalCheckAfterDeferredRewrite -> pure authoritativeResult
-                            FinalCheckInPipeline -> do
-                              resultTypeResult <-
-                                timeProgramOperationIO timing (label ++ ".result_type_reconstruction") $
-                                  evaluate
-                                    ( fromElabError
-                                        ( computePreparedResultTypeWithRootGeneralization
-                                            prepared
-                                            rootGeneralization
-                                            authoritativeAnnCanonFinal
-                                            authoritativeAnnPreFinal
-                                        )
-                                    )
-                              pure $ do
-                                _ <- resultTypeResult
-                                authoritativeResult
+runPipelineElabWithPreparedConstraintWithTiming timing label finalCheckMode diagnosticsMode traceCfg extPrepared c0 ann annSourceTypes =
+  runExceptT $ do
+    let initialSchemeInfos = pebSchemeInfos extPrepared
+    normalizeResult <-
+      timePipelineValueSuffix timing label ".constraint_normalize" $
+        evaluate (normalize c0)
+    (cAcyclic, acyc) <-
+      evaluatePipelineEitherSuffix timing label ".acyclicity" $
+        fromCycleError (breakCyclesAndCheckAcyclicity normalizeResult)
+    pres <-
+      let presolutionLabel = label ++ ".presolution"
+       in timePipelineEither timing presolutionLabel $
+            fromPresolutionError <$> computePresolutionWithTiming timing presolutionLabel traceCfg acyc cAcyclic
+    prepared <-
+      evaluatePipelineEitherSuffix timing label ".prepare_generalization" $
+        fromSolveError (prepareGeneralizationArtifact traceCfg cAcyclic pres ann)
+    readContextResult <-
+      evaluatePipelineAttemptSuffix timing label ".root_finalization.prepare_read_context" $
+        fromElabError (preparedReadContextReady prepared)
+    resultTypeReadContextResult <-
+      evaluatePipelineAttemptSuffix timing label ".root_finalization.result_type_read_context" $
+        fromElabError (preparedResultTypeViewReady prepared)
+    case (readContextResult, resultTypeReadContextResult) of
+      (Left err, _) -> fromPipelineEither (Left err)
+      (_, Left err) -> fromPipelineEither (Left err)
+      (Right (), Right ()) -> pure ()
+    let annCanon = preparedAnnotated prepared
+        elabConfig = preparedElaborationConfig traceCfg prepared
+        elabEnv = preparedElaborationEnv annSourceTypes initialSchemeInfos prepared
+    finishPreparedPipelineRootStage
+      timing
+      label
+      finalCheckMode
+      diagnosticsMode
+      traceCfg
+      extPrepared
+      prepared
+      elabConfig
+      elabEnv
+      annCanon
+      ann
 
 runPipelineElabDetailedModuleWithPreparedExternalBindingsWithTiming ::
   TimingConfig ->
@@ -773,7 +688,7 @@ runPipelineElabDetailedModuleWithPreparedExternalBindingsWithTiming ::
   [(VarName, NormSurfaceExpr)] ->
   IO (Either PipelineError (Map.Map VarName PipelineElabDetailedResult))
 runPipelineElabDetailedModuleWithPreparedExternalBindingsWithTiming =
-  runPipelineElabDetailedModuleWithPreparedExternalBindingsModeWithTiming FinalCheckInPipeline
+  runPipelineElabDetailedModuleWithPreparedExternalBindingsModeWithTiming FinalCheckInPipeline (resultTypeDiagnosticsFromConfig defaultPipelineConfig)
 
 runPipelineElabDetailedModuleDeferFinalCheckWithPreparedExternalBindingsWithTiming ::
   TimingConfig ->
@@ -784,10 +699,11 @@ runPipelineElabDetailedModuleDeferFinalCheckWithPreparedExternalBindingsWithTimi
   [(VarName, NormSurfaceExpr)] ->
   IO (Either PipelineError (Map.Map VarName PipelineElabDetailedResult))
 runPipelineElabDetailedModuleDeferFinalCheckWithPreparedExternalBindingsWithTiming =
-  runPipelineElabDetailedModuleWithPreparedExternalBindingsModeWithTiming FinalCheckAfterDeferredRewrite
+  runPipelineElabDetailedModuleWithPreparedExternalBindingsModeWithTiming FinalCheckAfterDeferredRewrite ResultTypeDiagnosticsDisabled
 
 runPipelineElabDetailedModuleWithPreparedExternalBindingsModeWithTiming ::
   PipelineFinalCheckMode ->
+  ResultTypeDiagnosticsMode ->
   TimingConfig ->
   String ->
   PolySyms ->
@@ -795,44 +711,48 @@ runPipelineElabDetailedModuleWithPreparedExternalBindingsModeWithTiming ::
   Map.Map VarName PreparedExternalBindings ->
   [(VarName, NormSurfaceExpr)] ->
   IO (Either PipelineError (Map.Map VarName PipelineElabDetailedResult))
-runPipelineElabDetailedModuleWithPreparedExternalBindingsModeWithTiming finalCheckMode timing label polySyms extPrepared rootPrepared namedExprs = do
-  let traceCfg = pcTraceConfig defaultPipelineConfig
-  validationResult <-
-    timeProgramOperationIO timing (label ++ ".validate_annotations") $
-      evaluate (mapM_ (fromConstraintError . validateDirectRecursiveAnnotations . snd) namedExprs)
-  case validationResult of
-    Left err -> pure (Left err)
-    Right () -> do
-      constraintResult <-
-        timeProgramOperationIO timing (label ++ ".generate_constraints") $
-          evaluate (fromConstraintError (generateModuleConstraintsWithExternalBindings polySyms (pebBindings extPrepared) namedExprs))
-      case constraintResult of
-        Left err -> pure (Left err)
-        Right ModuleConstraintResult {mcrConstraint = c0, mcrRoots = roots, mcrAnnSourceTypes = annSourceTypes, mcrRootOwnership = rootOwnership} -> do
-          emitModuleBatchGraphMetrics timing (label ++ ".graph") c0 rootOwnership roots annSourceTypes extPrepared rootPrepared
-          let batchPlan = buildModuleBatchPlan c0 rootOwnership roots annSourceTypes extPrepared rootPrepared
-          mbSharedContext <-
-            if timingProgramOperations timing
-              then do
-                let sharedContext = buildModuleBatchSharedContext extPrepared (mbpPartitions batchPlan)
-                _ <-
-                  timeProgramOperationIO timing (label ++ ".batch_context.prepare_templates") $
-                    evaluate (moduleBatchSharedTemplatePayloadMeasure sharedContext)
-                _ <-
-                  timeProgramOperationIO timing (label ++ ".batch_context.instantiate_templates") $
-                    evaluate (moduleBatchSharedInstantiationPayloadMeasure sharedContext)
-                emitModuleBatchSharedContextMetrics timing (label ++ ".batch_context") sharedContext
-                pure (Just sharedContext)
-              else pure Nothing
-          emitModuleBatchPlanMetrics timing (label ++ ".partition") batchPlan
-          if moduleBatchPlanRootLocalEligible batchPlan
-            then runModuleBatchPlanRootLocalWithTiming timing (label ++ ".partitioned_roots") finalCheckMode traceCfg mbSharedContext batchPlan
-            else runModuleBatchPlanGlobalWithTiming timing label finalCheckMode traceCfg extPrepared rootPrepared c0 rootOwnership roots annSourceTypes
+runPipelineElabDetailedModuleWithPreparedExternalBindingsModeWithTiming finalCheckMode diagnosticsMode timing label polySyms extPrepared rootPrepared namedExprs =
+  runExceptT $ do
+    let traceCfg = pcTraceConfig defaultPipelineConfig
+    evaluatePipelineEitherSuffix timing label ".validate_annotations" $
+      mapM_ (fromConstraintError . validateDirectRecursiveAnnotations . snd) namedExprs
+    ModuleConstraintResult {mcrConstraint = c0, mcrRoots = roots, mcrAnnSourceTypes = annSourceTypes, mcrRootOwnership = rootOwnership} <-
+      evaluatePipelineEitherSuffix timing label ".generate_constraints" $
+        fromConstraintError (generateModuleConstraintsWithExternalBindings polySyms (pebBindings extPrepared) namedExprs)
+    liftIO $
+      whenProgramOperationsIO timing $
+        emitModuleBatchGraphMetrics timing (label ++ ".graph") c0 rootOwnership roots annSourceTypes extPrepared rootPrepared
+    let batchPlan = buildModuleBatchPlan c0 rootOwnership roots annSourceTypes extPrepared rootPrepared
+    mbSharedContext <-
+      if timingProgramOperations timing
+        then do
+          let sharedContext = buildModuleBatchSharedContext extPrepared (mbpPartitions batchPlan)
+          _ <-
+            timePipelineValueSuffix timing label ".batch_context.prepare_templates" $
+              evaluate (moduleBatchSharedTemplatePayloadMeasure sharedContext)
+          _ <-
+            timePipelineValueSuffix timing label ".batch_context.instantiate_templates" $
+              evaluate (moduleBatchSharedInstantiationPayloadMeasure sharedContext)
+          liftIO $
+            emitModuleBatchSharedContextMetrics timing (label ++ ".batch_context") sharedContext
+          pure (Just sharedContext)
+        else pure Nothing
+    liftIO $
+      whenProgramOperationsIO timing $
+        emitModuleBatchPlanMetrics timing (label ++ ".partition") batchPlan
+    if moduleBatchPlanRootLocalEligible batchPlan
+      then
+        ExceptT $
+          runModuleBatchPlanRootLocalWithTiming timing (label ++ ".partitioned_roots") finalCheckMode diagnosticsMode traceCfg mbSharedContext batchPlan
+      else
+        ExceptT $
+          runModuleBatchPlanGlobalWithTiming timing label finalCheckMode diagnosticsMode traceCfg extPrepared rootPrepared c0 rootOwnership roots annSourceTypes
 
 runModuleBatchPlanGlobalWithTiming ::
   TimingConfig ->
   String ->
   PipelineFinalCheckMode ->
+  ResultTypeDiagnosticsMode ->
   TraceConfig ->
   PreparedExternalBindings ->
   Map.Map VarName PreparedExternalBindings ->
@@ -841,77 +761,71 @@ runModuleBatchPlanGlobalWithTiming ::
   Map.Map VarName ModuleConstraintRoot ->
   IntMap.IntMap NormSrcType ->
   IO (Either PipelineError (Map.Map VarName PipelineElabDetailedResult))
-runModuleBatchPlanGlobalWithTiming timing label finalCheckMode traceCfg extPrepared rootPrepared c0 rootOwnership roots annSourceTypes = do
-  normalizeResult <-
-    timeProgramOperationIO timing (label ++ ".constraint_normalize") $
-      evaluate (normalize c0)
-  acycResult <-
-    timeProgramOperationIO timing (label ++ ".acyclicity") $
-      evaluate (fromCycleError (breakCyclesAndCheckAcyclicity normalizeResult))
-  case acycResult of
-    Left err -> pure (Left err)
-    Right (cAcyclic, acyc) -> do
-      presResult <-
-        timeProgramOperationIO timing (label ++ ".presolution") $
-          fromPresolutionError <$> computePresolutionWithTimingAndRootOwnership timing (label ++ ".presolution") traceCfg rootOwnership acyc cAcyclic
-      case presResult of
-        Left err -> pure (Left err)
-        Right pres -> do
-          preparedResult <-
-            timeProgramOperationIO timing (label ++ ".prepare_generalization") $
-              evaluate $
-                fromSolveError $
-                  prepareGeneralizationArtifactForRoots
-                    traceCfg
-                    cAcyclic
-                    pres
-                    [mcrAnnotated root | root <- Map.elems roots]
-          case preparedResult of
-            Left err -> pure (Left err)
-            Right prepared ->
-              let elabConfig = preparedElaborationConfig traceCfg prepared
-               in
-              timeProgramOperationIO timing (label ++ ".roots") $
-                finishPreparedPipelineRootsWithTiming
-                  timing
-                  (label ++ ".roots")
-                  finalCheckMode
-                  traceCfg
-                  extPrepared
-                  rootPrepared
-                  prepared
-                  elabConfig
-                  annSourceTypes
-                  (Map.toList roots)
+runModuleBatchPlanGlobalWithTiming timing label finalCheckMode diagnosticsMode traceCfg extPrepared rootPrepared c0 rootOwnership roots annSourceTypes =
+  runExceptT $ do
+    normalizeResult <-
+      timePipelineValueSuffix timing label ".constraint_normalize" $
+        evaluate (normalize c0)
+    (cAcyclic, acyc) <-
+      evaluatePipelineEitherSuffix timing label ".acyclicity" $
+        fromCycleError (breakCyclesAndCheckAcyclicity normalizeResult)
+    pres <-
+      let presolutionLabel = label ++ ".presolution"
+       in timePipelineEither timing presolutionLabel $
+            fromPresolutionError <$> computePresolutionWithTimingAndRootOwnership timing presolutionLabel traceCfg rootOwnership acyc cAcyclic
+    prepared <-
+      evaluatePipelineEitherSuffix timing label ".prepare_generalization" $
+        fromSolveError $
+          prepareGeneralizationArtifactForRoots
+            traceCfg
+            cAcyclic
+            pres
+            [mcrAnnotated root | root <- Map.elems roots]
+    let elabConfig = preparedElaborationConfig traceCfg prepared
+        rootsLabel = label ++ ".roots"
+    timePipelineEither timing rootsLabel $
+      finishPreparedPipelineRootsWithTiming
+        timing
+        rootsLabel
+        finalCheckMode
+        diagnosticsMode
+        traceCfg
+        extPrepared
+        rootPrepared
+        prepared
+        elabConfig
+        annSourceTypes
+        (Map.toList roots)
 
 runModuleBatchPlanRootLocalWithTiming ::
   TimingConfig ->
   String ->
   PipelineFinalCheckMode ->
+  ResultTypeDiagnosticsMode ->
   TraceConfig ->
   Maybe ModuleBatchSharedContext ->
   ModuleBatchPlan 'Raw ->
   IO (Either PipelineError (Map.Map VarName PipelineElabDetailedResult))
-runModuleBatchPlanRootLocalWithTiming timing label finalCheckMode traceCfg mbSharedContext plan =
+runModuleBatchPlanRootLocalWithTiming timing label finalCheckMode diagnosticsMode traceCfg mbSharedContext plan =
   timeProgramOperationIO timing label $
     case mbpPartitions plan of
       [] -> pure (Right Map.empty)
-      [_] -> goSequential (1 :: Int) Map.empty (mbpPartitions plan)
+      [_] -> runExceptT (goSequential (1 :: Int) Map.empty (mbpPartitions plan))
       partitions -> goConcurrent partitions
   where
     goSequential _ acc [] =
-      pure (Right acc)
+      pure acc
     goSequential index acc ((name, partition) : rest) = do
-      result <-
-        runRootFinalizationContextWithTiming
-          timing
-          (label ++ ".root_" ++ show index)
-          finalCheckMode
-          traceCfg
-          (mkRootFinalizationContext name partition)
-      case result of
-        Left err -> pure (Left err)
-        Right out -> goSequential (index + 1) (Map.insert name out acc) rest
+      out <-
+        ExceptT $
+          runRootFinalizationContextWithTiming
+            timing
+            (rootTimingLabel label index)
+            finalCheckMode
+            diagnosticsMode
+            traceCfg
+            (mkRootFinalizationContext name partition)
+      goSequential (index + 1) (Map.insert name out acc) rest
 
     goConcurrent partitions = do
       ensureConcurrentCapabilities (length partitions)
@@ -924,8 +838,9 @@ runModuleBatchPlanRootLocalWithTiming timing label finalCheckMode traceCfg mbSha
                   try
                     ( runRootFinalizationContextWithTiming
                         timing
-                        (label ++ ".root_" ++ show index)
+                        (rootTimingLabel label index)
                         finalCheckMode
+                        diagnosticsMode
                         traceCfg
                         (mkRootFinalizationContext name partition)
                     )
@@ -967,10 +882,15 @@ runModuleBatchPlanRootLocalWithTiming timing label finalCheckMode traceCfg mbSha
             else pure ()
         else pure ()
 
+rootTimingLabel :: String -> Int -> String
+rootTimingLabel label index =
+  label ++ ".root_" ++ show index
+
 runRootFinalizationContextWithTiming ::
   TimingConfig ->
   String ->
   PipelineFinalCheckMode ->
+  ResultTypeDiagnosticsMode ->
   TraceConfig ->
   RootFinalizationContext 'Raw ->
   IO (Either PipelineError PipelineElabDetailedResult)
@@ -978,6 +898,7 @@ runRootFinalizationContextWithTiming
   timing
   label
   finalCheckMode
+  diagnosticsMode
   traceCfg
   RootFinalizationContext
     { rfcPartition = partition,
@@ -985,16 +906,18 @@ runRootFinalizationContextWithTiming
       rfcSharedContext = mbSharedContext,
       rfcTemplateInstantiation = mbInstantiation
     } = do
-    case (mbSharedContext, mbInstantiation) of
-      (Just sharedContext, Just instantiation) -> do
-        emitProgramOperationMetricIO timing (label ++ ".batch_context.frozen_templates") (fromIntegral (moduleBatchSharedTemplateCount sharedContext))
-        emitProgramOperationMetricIO timing (label ++ ".batch_context.template_uses") (fromIntegral (rtiTemplateCount instantiation))
-        emitProgramOperationMetricIO timing (label ++ ".batch_context.missing_templates") (fromIntegral (rtiMissingTemplateCount instantiation))
-      _ -> pure ()
+    whenProgramOperationsIO timing $
+      case (mbSharedContext, mbInstantiation) of
+        (Just sharedContext, Just instantiation) -> do
+          emitProgramOperationMetricIO timing (label ++ ".batch_context.frozen_templates") (fromIntegral (moduleBatchSharedTemplateCount sharedContext))
+          emitProgramOperationMetricIO timing (label ++ ".batch_context.template_uses") (fromIntegral (rtiTemplateCount instantiation))
+          emitProgramOperationMetricIO timing (label ++ ".batch_context.missing_templates") (fromIntegral (rtiMissingTemplateCount instantiation))
+        _ -> pure ()
     runPipelineElabWithPreparedConstraintWithTiming
       timing
       label
       finalCheckMode
+      diagnosticsMode
       traceCfg
       extPrepared
       (rpConstraint partition)
@@ -1262,17 +1185,19 @@ moduleBatchSharedInstantiationPayloadMeasure sharedContext =
         + rtiMissingTemplateCount instantiation
 
 emitModuleBatchSharedContextMetrics :: TimingConfig -> String -> ModuleBatchSharedContext -> IO ()
-emitModuleBatchSharedContextMetrics timing label sharedContext = do
-  emitProgramOperationMetricIO timing (label ++ ".template_count") (fromIntegral (moduleBatchSharedTemplateCount sharedContext))
-  emitProgramOperationMetricIO timing (label ++ ".template_instantiations") (fromIntegral (moduleBatchSharedInstantiationCount sharedContext))
-  emitProgramOperationMetricIO timing (label ++ ".missing_templates") (fromIntegral (moduleBatchSharedMissingTemplateCount sharedContext))
-  emitProgramOperationMetricIO timing (label ++ ".prepared_external_bindings") (fromIntegral (Map.size (pebBindings (mbscPreparedExternalBindings sharedContext))))
-  mapM_
-    ( \(index, instantiation) -> do
-        emitProgramOperationMetricIO timing (label ++ ".root_" ++ show index ++ ".template_uses") (fromIntegral (rtiTemplateCount instantiation))
-        emitProgramOperationMetricIO timing (label ++ ".root_" ++ show index ++ ".missing_templates") (fromIntegral (rtiMissingTemplateCount instantiation))
-    )
-    (zip [(1 :: Int) ..] (Map.elems (mbscRootTemplateInstantiations sharedContext)))
+emitModuleBatchSharedContextMetrics timing label sharedContext =
+  whenProgramOperationsIO timing $ do
+    emitProgramOperationMetricIO timing (label ++ ".template_count") (fromIntegral (moduleBatchSharedTemplateCount sharedContext))
+    emitProgramOperationMetricIO timing (label ++ ".template_instantiations") (fromIntegral (moduleBatchSharedInstantiationCount sharedContext))
+    emitProgramOperationMetricIO timing (label ++ ".missing_templates") (fromIntegral (moduleBatchSharedMissingTemplateCount sharedContext))
+    emitProgramOperationMetricIO timing (label ++ ".prepared_external_bindings") (fromIntegral (Map.size (pebBindings (mbscPreparedExternalBindings sharedContext))))
+    mapM_
+      ( \(index, instantiation) -> do
+          let rootLabel = rootTimingLabel label index
+          emitProgramOperationMetricIO timing (rootLabel ++ ".template_uses") (fromIntegral (rtiTemplateCount instantiation))
+          emitProgramOperationMetricIO timing (rootLabel ++ ".missing_templates") (fromIntegral (rtiMissingTemplateCount instantiation))
+      )
+      (zip [(1 :: Int) ..] (Map.elems (mbscRootTemplateInstantiations sharedContext)))
 
 buildRootPartitionFromBucket ::
   Constraint 'Raw ->
@@ -1313,17 +1238,19 @@ buildRootPartitionFromBucket constraint annSourceTypes extPrepared rootPrepared 
         }
 
 emitModuleBatchPlanMetrics :: TimingConfig -> String -> ModuleBatchPlan p -> IO ()
-emitModuleBatchPlanMetrics timing label plan = do
-  emitProgramOperationMetricIO timing (label ++ ".roots") (fromIntegral (length (mbpRoots plan)))
-  emitProgramOperationMetricIO timing (label ++ ".shared_edges") (fromIntegral (mbpSharedEdgeCount plan))
-  emitProgramOperationMetricIO timing (label ++ ".unknown_edges") (fromIntegral (mbpUnknownEdgeCount plan))
-  emitProgramOperationMetricIO timing (label ++ ".root_local_enabled") (if moduleBatchPlanRootLocalEligible plan then 1 else 0)
-  mapM_
-    ( \(index, (_name, partition)) -> do
-        emitProgramOperationMetricIO timing (label ++ ".root_" ++ show index ++ ".owned_edges") (fromIntegral (rpOwnedEdgeCount partition))
-        emitProgramOperationMetricIO timing (label ++ ".root_" ++ show index ++ ".external_scheme_uses") (fromIntegral (rpExternalSchemeUseCount partition))
-    )
-    (zip [(1 :: Int) ..] (mbpPartitions plan))
+emitModuleBatchPlanMetrics timing label plan =
+  whenProgramOperationsIO timing $ do
+    emitProgramOperationMetricIO timing (label ++ ".roots") (fromIntegral (length (mbpRoots plan)))
+    emitProgramOperationMetricIO timing (label ++ ".shared_edges") (fromIntegral (mbpSharedEdgeCount plan))
+    emitProgramOperationMetricIO timing (label ++ ".unknown_edges") (fromIntegral (mbpUnknownEdgeCount plan))
+    emitProgramOperationMetricIO timing (label ++ ".root_local_enabled") (if moduleBatchPlanRootLocalEligible plan then 1 else 0)
+    mapM_
+      ( \(index, (_name, partition)) -> do
+          let rootLabel = rootTimingLabel label index
+          emitProgramOperationMetricIO timing (rootLabel ++ ".owned_edges") (fromIntegral (rpOwnedEdgeCount partition))
+          emitProgramOperationMetricIO timing (rootLabel ++ ".external_scheme_uses") (fromIntegral (rpExternalSchemeUseCount partition))
+      )
+      (zip [(1 :: Int) ..] (mbpPartitions plan))
 
 emitModuleBatchGraphMetrics ::
   TimingConfig ->
@@ -1335,31 +1262,33 @@ emitModuleBatchGraphMetrics ::
   PreparedExternalBindings ->
   Map.Map VarName PreparedExternalBindings ->
   IO ()
-emitModuleBatchGraphMetrics timing label constraint rootOwnership roots annSourceTypes extPrepared rootPrepared = do
-  emitProgramOperationMetricIO timing (label ++ ".roots") (fromIntegral (Map.size roots))
-  emitProgramOperationMetricIO timing (label ++ ".nodes") (fromIntegral (IntMap.size (getNodeMap (cNodes constraint))))
-  emitProgramOperationMetricIO timing (label ++ ".inst_edges") (fromIntegral (length (cInstEdges constraint)))
-  emitProgramOperationMetricIO timing (label ++ ".unify_edges") (fromIntegral (length (cUnifyEdges constraint)))
-  emitProgramOperationMetricIO timing (label ++ ".bind_parents") (fromIntegral (IntMap.size (cBindParents constraint)))
-  emitProgramOperationMetricIO timing (label ++ ".annotation_roots") (fromIntegral (IntMap.size annSourceTypes))
-  emitProgramOperationMetricIO timing (label ++ ".external_scheme_unique") (fromIntegral (Map.size (pebSchemeInfos extPrepared)))
-  emitProgramOperationMetricIO timing (label ++ ".external_scheme_uses") (fromIntegral (sum (map (Map.size . pebSchemeInfos) (Map.elems rootPrepared))))
-  emitProgramOperationMetricIO timing (label ++ ".owned_roots") (fromIntegral (rootOwnershipRootCount rootOwnership))
-  emitProgramOperationMetricIO timing (label ++ ".owned_nodes") (fromIntegral (rootOwnershipOwnedNodeCount rootOwnership))
-  emitProgramOperationMetricIO timing (label ++ ".owned_gens") (fromIntegral (rootOwnershipOwnedGenCount rootOwnership))
-  emitProgramOperationMetricIO timing (label ++ ".owned_exp_vars") (fromIntegral (rootOwnershipOwnedExpVarCount rootOwnership))
-  emitProgramOperationMetricIO timing (label ++ ".owned_edges") (fromIntegral (rootOwnershipOwnedEdgeCount rootOwnership))
-  emitProgramOperationMetricIO timing (label ++ ".shared_edges") (fromIntegral (rootOwnershipSharedEdgeCount rootOwnership))
-  mapM_
-    ( \(rootId, edgeCount) ->
-        emitProgramOperationMetricIO timing (label ++ ".root_" ++ show rootId ++ ".owned_edges") (fromIntegral edgeCount)
-    )
-    (IntMap.toAscList (rootOwnershipOwnedEdgeCounts rootOwnership))
+emitModuleBatchGraphMetrics timing label constraint rootOwnership roots annSourceTypes extPrepared rootPrepared =
+  whenProgramOperationsIO timing $ do
+    emitProgramOperationMetricIO timing (label ++ ".roots") (fromIntegral (Map.size roots))
+    emitProgramOperationMetricIO timing (label ++ ".nodes") (fromIntegral (IntMap.size (getNodeMap (cNodes constraint))))
+    emitProgramOperationMetricIO timing (label ++ ".inst_edges") (fromIntegral (length (cInstEdges constraint)))
+    emitProgramOperationMetricIO timing (label ++ ".unify_edges") (fromIntegral (length (cUnifyEdges constraint)))
+    emitProgramOperationMetricIO timing (label ++ ".bind_parents") (fromIntegral (IntMap.size (cBindParents constraint)))
+    emitProgramOperationMetricIO timing (label ++ ".annotation_roots") (fromIntegral (IntMap.size annSourceTypes))
+    emitProgramOperationMetricIO timing (label ++ ".external_scheme_unique") (fromIntegral (Map.size (pebSchemeInfos extPrepared)))
+    emitProgramOperationMetricIO timing (label ++ ".external_scheme_uses") (fromIntegral (sum (map (Map.size . pebSchemeInfos) (Map.elems rootPrepared))))
+    emitProgramOperationMetricIO timing (label ++ ".owned_roots") (fromIntegral (rootOwnershipRootCount rootOwnership))
+    emitProgramOperationMetricIO timing (label ++ ".owned_nodes") (fromIntegral (rootOwnershipOwnedNodeCount rootOwnership))
+    emitProgramOperationMetricIO timing (label ++ ".owned_gens") (fromIntegral (rootOwnershipOwnedGenCount rootOwnership))
+    emitProgramOperationMetricIO timing (label ++ ".owned_exp_vars") (fromIntegral (rootOwnershipOwnedExpVarCount rootOwnership))
+    emitProgramOperationMetricIO timing (label ++ ".owned_edges") (fromIntegral (rootOwnershipOwnedEdgeCount rootOwnership))
+    emitProgramOperationMetricIO timing (label ++ ".shared_edges") (fromIntegral (rootOwnershipSharedEdgeCount rootOwnership))
+    mapM_
+      ( \(rootId, edgeCount) ->
+          emitProgramOperationMetricIO timing (label ++ ".root_" ++ show rootId ++ ".owned_edges") (fromIntegral edgeCount)
+      )
+      (IntMap.toAscList (rootOwnershipOwnedEdgeCounts rootOwnership))
 
 finishPreparedPipelineRootsWithTiming ::
   TimingConfig ->
   String ->
   PipelineFinalCheckMode ->
+  ResultTypeDiagnosticsMode ->
   TraceConfig ->
   PreparedExternalBindings ->
   Map.Map VarName PreparedExternalBindings ->
@@ -1368,11 +1297,11 @@ finishPreparedPipelineRootsWithTiming ::
   IntMap.IntMap NormSrcType ->
   [(VarName, ModuleConstraintRoot)] ->
   IO (Either PipelineError (Map.Map VarName PipelineElabDetailedResult))
-finishPreparedPipelineRootsWithTiming timing label finalCheckMode traceCfg extPrepared rootPrepared prepared elabConfig annSourceTypes roots =
-  go (1 :: Int) Map.empty roots
+finishPreparedPipelineRootsWithTiming timing label finalCheckMode diagnosticsMode traceCfg extPrepared rootPrepared prepared elabConfig annSourceTypes roots =
+  runExceptT (go (1 :: Int) Map.empty roots)
   where
     go _ acc [] =
-      pure (Right acc)
+      pure acc
     go index acc ((name, root) : rest) = do
       let rootExtPrepared =
             Map.findWithDefault extPrepared name rootPrepared
@@ -1381,26 +1310,27 @@ finishPreparedPipelineRootsWithTiming timing label finalCheckMode traceCfg extPr
               annSourceTypes
               (pebSchemeInfos rootExtPrepared)
               prepared
-          rootLabel = label ++ ".root_" ++ show index
-      result <-
-        finishPreparedPipelineRootWithTiming
-          timing
-          rootLabel
-          finalCheckMode
-          traceCfg
-          rootExtPrepared
-          prepared
-          elabConfig
-          elabEnv
-          (mcrAnnotated root)
-      case result of
-        Left err -> pure (Left err)
-        Right out -> go (index + 1) (Map.insert name out acc) rest
+          rootLabel = rootTimingLabel label index
+      out <-
+        ExceptT $
+          finishPreparedPipelineRootWithTiming
+            timing
+            rootLabel
+            finalCheckMode
+            diagnosticsMode
+            traceCfg
+            rootExtPrepared
+            prepared
+            elabConfig
+            elabEnv
+            (mcrAnnotated root)
+      go (index + 1) (Map.insert name out acc) rest
 
 finishPreparedPipelineRootWithTiming ::
   TimingConfig ->
   String ->
   PipelineFinalCheckMode ->
+  ResultTypeDiagnosticsMode ->
   TraceConfig ->
   PreparedExternalBindings ->
   PreparedGeneralizationArtifact ->
@@ -1408,73 +1338,91 @@ finishPreparedPipelineRootWithTiming ::
   ElabEnv 'Presolved ->
   AnnExpr ->
   IO (Either PipelineError PipelineElabDetailedResult)
-finishPreparedPipelineRootWithTiming timing label finalCheckMode traceCfg extPrepared prepared elabConfig elabEnv annPre = do
+finishPreparedPipelineRootWithTiming timing label finalCheckMode diagnosticsMode traceCfg extPrepared prepared elabConfig elabEnv annPre =
+  runExceptT $
+    finishPreparedPipelineRootStage
+      timing
+      label
+      finalCheckMode
+      diagnosticsMode
+      traceCfg
+      extPrepared
+      prepared
+      elabConfig
+      elabEnv
+      (canonicalizePreparedAnn prepared annPre)
+      annPre
+
+finishPreparedPipelineRootStage ::
+  TimingConfig ->
+  String ->
+  PipelineFinalCheckMode ->
+  ResultTypeDiagnosticsMode ->
+  TraceConfig ->
+  PreparedExternalBindings ->
+  PreparedGeneralizationArtifact ->
+  ElabConfig 'Presolved ->
+  ElabEnv 'Presolved ->
+  AnnExpr ->
+  AnnExpr ->
+  PipelineStage PipelineElabDetailedResult
+finishPreparedPipelineRootStage timing label finalCheckMode diagnosticsMode traceCfg extPrepared prepared elabConfig elabEnv annCanon annPre = do
   let initialTcEnv = pebTypeCheckEnv extPrepared
-      annCanon = canonicalizePreparedAnn prepared annPre
-  termResult <-
-    timeProgramOperationIO timing (label ++ ".elaborate") $
-      evaluate (fromElabError (elaborateWithEnv elabConfig elabEnv annCanon))
-  case termResult of
-    Left err -> pure (Left err)
-    Right term -> do
-      case traceGeneralize traceCfg ("pipeline elaborated term=" ++ show term) () of
-        () -> pure ()
-      let authoritativeAnnCanon = authoritativeRootAnn term annCanon
-          authoritativeAnnPre = authoritativeRootAnn term annPre
-          (authoritativeAnnCanonFinal, authoritativeAnnPreFinal) =
-            stripPreparedWitnesslessAuthoritativeAnn prepared authoritativeAnnCanon authoritativeAnnPre
-      rootResult <-
-        timeProgramOperationIO timing (label ++ ".generalize_root") $
-          evaluate (fromElabError (generalizePreparedRootDetailed prepared authoritativeAnnCanonFinal authoritativeAnnPreFinal))
-      case rootResult of
-        Left err -> pure (Left err)
-        Right rootGeneralization -> do
-          let rootScheme = prgScheme rootGeneralization
-              rootSubst = prgSubst rootGeneralization
-          termSubst <-
-            timeProgramOperationIO timing (label ++ ".subst_root") $
-              evaluate (substInTerm rootSubst term)
-          termClosed <-
-            timeProgramOperationIO timing (label ++ ".close_term") $
-              evaluate (closePipelineTerm initialTcEnv rootSubst rootScheme term termSubst)
-          termClosedFresh <-
-            timeProgramOperationIO timing (label ++ ".freshen_type_abs") $
-              evaluate (freshenTypeAbsAgainstEnv initialTcEnv termClosed)
-          let uncheckedAuthoritative =
-                Right
-                  PipelineElabDetailedResult
-                    { pedTerm = termClosedFresh,
-                      pedType = schemeToType rootScheme,
-                      pedRootAnn = authoritativeAnnCanonFinal,
-                      pedTypeCheckEnv = initialTcEnv
-                    }
-          authoritativeResult <-
-            case finalCheckMode of
-              FinalCheckInPipeline ->
-                timeProgramOperationIO timing (label ++ ".final_typecheck") $
-                  evaluate $ do
-                    tyChecked <-
-                      case typeCheckWithEnv initialTcEnv termClosedFresh of
-                        Right ty -> pure ty
-                        Left err -> fromTypeCheckError (Left err)
-                    pure
-                      PipelineElabDetailedResult
-                        { pedTerm = termClosedFresh,
-                          pedType = tyChecked,
-                          pedRootAnn = authoritativeAnnCanonFinal,
-                          pedTypeCheckEnv = initialTcEnv
-                        }
-              FinalCheckAfterDeferredRewrite ->
-                pure uncheckedAuthoritative
-          case finalCheckMode of
-            FinalCheckAfterDeferredRewrite -> pure authoritativeResult
-            FinalCheckInPipeline -> do
-              resultTypeResult <-
-                timeProgramOperationIO timing (label ++ ".result_type_reconstruction") $
-                  evaluate (fromElabError (computePreparedResultTypeWithRootGeneralization prepared rootGeneralization authoritativeAnnCanonFinal authoritativeAnnPreFinal))
-              pure $ do
-                _ <- resultTypeResult
-                authoritativeResult
+  term <-
+    evaluatePipelineEitherSuffix timing label ".elaborate" $
+      fromElabError (elaborateWithEnv elabConfig elabEnv annCanon)
+  case traceGeneralize traceCfg ("pipeline elaborated term=" ++ show term) () of
+    () -> pure ()
+  let authoritativeAnnCanon = authoritativeRootAnn term annCanon
+      authoritativeAnnPre = authoritativeRootAnn term annPre
+      (authoritativeAnnCanonFinal, authoritativeAnnPreFinal) =
+        stripPreparedWitnesslessAuthoritativeAnn prepared authoritativeAnnCanon authoritativeAnnPre
+  rootGeneralization <-
+    evaluatePipelineEitherSuffix timing label ".generalize_root" $
+      fromElabError (generalizePreparedRootDetailed prepared authoritativeAnnCanonFinal authoritativeAnnPreFinal)
+  let rootScheme = prgScheme rootGeneralization
+      rootSubst = prgSubst rootGeneralization
+  termSubst <-
+    timePipelineValueSuffix timing label ".subst_root" $
+      evaluate (substInTerm rootSubst term)
+  termClosed <-
+    timePipelineValueSuffix timing label ".close_term" $
+      evaluate (closePipelineTerm initialTcEnv rootSubst rootScheme term termSubst)
+  termClosedFresh <-
+    timePipelineValueSuffix timing label ".freshen_type_abs" $
+      evaluate (freshenTypeAbsAgainstEnv initialTcEnv termClosed)
+  let uncheckedAuthoritative =
+        PipelineElabDetailedResult
+          { pedTerm = termClosedFresh,
+            pedType = schemeToType rootScheme,
+            pedRootAnn = authoritativeAnnCanonFinal,
+            pedTypeCheckEnv = initialTcEnv
+          }
+  authoritativeResult <-
+    case finalCheckMode of
+      FinalCheckInPipeline ->
+        timePipelineValueSuffix timing label ".final_typecheck" $
+          evaluate $ do
+            tyChecked <-
+              case typeCheckWithEnv initialTcEnv termClosedFresh of
+                Right ty -> pure ty
+                Left err -> fromTypeCheckError (Left err)
+            pure
+              PipelineElabDetailedResult
+                { pedTerm = termClosedFresh,
+                  pedType = tyChecked,
+                  pedRootAnn = authoritativeAnnCanonFinal,
+                  pedTypeCheckEnv = initialTcEnv
+                }
+      FinalCheckAfterDeferredRewrite ->
+        pure (Right uncheckedAuthoritative)
+  if shouldRunResultTypeDiagnostics finalCheckMode diagnosticsMode
+    then do
+      _ <-
+        evaluatePipelineEitherSuffix timing label ".result_type_reconstruction" $
+          fromElabError (computePreparedResultTypeWithRootGeneralization prepared rootGeneralization authoritativeAnnCanonFinal authoritativeAnnPreFinal)
+      fromPipelineEither authoritativeResult
+    else fromPipelineEither authoritativeResult
 
 closePipelineTerm :: TypeCheck.Env -> IntMap.IntMap String -> ElabScheme -> ElabTerm -> ElabTerm -> ElabTerm
 closePipelineTerm initialTcEnv rootSubst rootScheme term termSubst =
@@ -1486,32 +1434,31 @@ closePipelineTerm initialTcEnv rootSubst rootScheme term termSubst =
         if retainedChildAuthoritativeCandidate
           then closeTermWithSchemeSubstIfNeeded rootSubst rootScheme term
           else case typeCheckWithEnv initialTcEnv termSubst of
-            Right ty | null (freeTypeVarsType ty) -> termSubst
             Right ty ->
-              case rootScheme of
-                Forall binds _
-                  | null binds ->
-                      let freeBinds =
-                            [ (name, Nothing)
-                              | name <- Set.toList (freeTypeVarsType ty)
-                            ]
-                          freeScheme = Forall freeBinds ty
-                       in closeTermWithSchemeSubstIfNeeded IntMap.empty freeScheme termSubst
-                _ -> closeTermWithSchemeSubstIfNeeded rootSubst rootScheme term
+              let freeTyVars = freeTypeVarsType ty
+               in if Set.null freeTyVars
+                    then termSubst
+                    else
+                      case rootScheme of
+                        Forall binds _
+                          | null binds ->
+                              let freeBinds =
+                                    [ (name, Nothing)
+                                      | name <- Set.toList freeTyVars
+                                    ]
+                                  freeScheme = Forall freeBinds ty
+                               in closeTermWithSchemeSubstIfNeeded IntMap.empty freeScheme termSubst
+                        _ -> closeTermWithSchemeSubstIfNeeded rootSubst rootScheme term
             Left _ -> closeTermWithSchemeSubstIfNeeded rootSubst rootScheme term
    in case preserveRetainedChildAuthoritativeResult termClosed0 of
         Just termAdjusted -> closeTermWithSchemeSubstIfNeeded rootSubst rootScheme termAdjusted
         Nothing -> termClosed0
 
 freshenTypeAbsAgainstEnv :: TypeCheck.Env -> ElabTerm -> ElabTerm
-freshenTypeAbsAgainstEnv env term0 = pruneVacuousLeadingTyAbsAgainstEnv env (go reserved term0)
+freshenTypeAbsAgainstEnv env term0 =
+  let summary = summarizePipelineTypeCheckEnv env
+   in pruneVacuousLeadingTyAbsAgainstEnv summary env (go (pipelineFreshenReservedTypeVars summary) term0)
   where
-    reserved =
-      Set.unions
-        ( map freeTypeVarsType (Map.elems (TypeCheck.termEnv env))
-            ++ [Set.fromList (Map.keys (TypeCheck.typeEnv env))]
-        )
-
     go used term = case term of
       ETyAbs name mb body ->
         let usedForBinder = Set.union used (maybe Set.empty freeTypeVarsType mb)
@@ -1536,41 +1483,104 @@ freshenTypeAbsAgainstEnv env term0 = pruneVacuousLeadingTyAbsAgainstEnv env (go 
       EUnroll body -> EUnroll (go used body)
       _ -> term
 
-pruneVacuousLeadingTyAbsAgainstEnv :: TypeCheck.Env -> ElabTerm -> ElabTerm
-pruneVacuousLeadingTyAbsAgainstEnv env term = case term of
+data PipelineTypeCheckEnvSummary = PipelineTypeCheckEnvSummary
+  { ptcesTermFreeVars :: FreeVarCounts,
+    ptcesTypeFreeVars :: FreeVarCounts,
+    ptcesTypeNames :: Set.Set String
+  }
+
+newtype FreeVarCounts = FreeVarCounts (Map.Map String Int)
+
+summarizePipelineTypeCheckEnv :: TypeCheck.Env -> PipelineTypeCheckEnvSummary
+summarizePipelineTypeCheckEnv env =
+  PipelineTypeCheckEnvSummary
+    { ptcesTermFreeVars = freeVarCountsFromTypes (Map.elems (TypeCheck.termEnv env)),
+      ptcesTypeFreeVars = freeVarCountsFromTypes (Map.elems (TypeCheck.typeEnv env)),
+      ptcesTypeNames = Map.keysSet (TypeCheck.typeEnv env)
+    }
+
+insertPipelineTypeSummary :: String -> ElabType -> TypeCheck.Env -> PipelineTypeCheckEnvSummary -> PipelineTypeCheckEnvSummary
+insertPipelineTypeSummary name ty env summary =
+  summary
+    { ptcesTypeFreeVars =
+        replaceTypeFreeVars (Map.lookup name (TypeCheck.typeEnv env)) ty (ptcesTypeFreeVars summary),
+      ptcesTypeNames = Set.insert name (ptcesTypeNames summary)
+    }
+
+pipelineFreshenReservedTypeVars :: PipelineTypeCheckEnvSummary -> Set.Set String
+pipelineFreshenReservedTypeVars summary =
+  freeVarCountsSet (ptcesTermFreeVars summary)
+    `Set.union` ptcesTypeNames summary
+
+pipelineVisibleTypeVars :: PipelineTypeCheckEnvSummary -> Set.Set String
+pipelineVisibleTypeVars summary =
+  Set.unions
+    [ freeVarCountsSet (ptcesTermFreeVars summary),
+      freeVarCountsSet (ptcesTypeFreeVars summary),
+      ptcesTypeNames summary
+    ]
+
+freeVarCountsFromTypes :: [ElabType] -> FreeVarCounts
+freeVarCountsFromTypes =
+  foldl' (\counts ty -> insertFreeVarSet (freeTypeVarsType ty) counts) emptyFreeVarCounts
+
+emptyFreeVarCounts :: FreeVarCounts
+emptyFreeVarCounts = FreeVarCounts Map.empty
+
+freeVarCountsSet :: FreeVarCounts -> Set.Set String
+freeVarCountsSet (FreeVarCounts counts) = Map.keysSet counts
+
+replaceTypeFreeVars :: Maybe ElabType -> ElabType -> FreeVarCounts -> FreeVarCounts
+replaceTypeFreeVars oldTy newTy =
+  insertFreeVarSet (freeTypeVarsType newTy)
+    . maybe id (deleteFreeVarSet . freeTypeVarsType) oldTy
+
+insertFreeVarSet :: Set.Set String -> FreeVarCounts -> FreeVarCounts
+insertFreeVarSet vars (FreeVarCounts counts) =
+  FreeVarCounts (Set.foldl' (\acc name -> Map.insertWith (+) name 1 acc) counts vars)
+
+deleteFreeVarSet :: Set.Set String -> FreeVarCounts -> FreeVarCounts
+deleteFreeVarSet vars (FreeVarCounts counts) =
+  FreeVarCounts (Set.foldl' deleteOne counts vars)
+  where
+    deleteOne acc name =
+      Map.update
+        ( \count ->
+            let count' = count - 1
+             in if count' <= 0 then Nothing else Just count'
+        )
+        name
+        acc
+
+pruneVacuousLeadingTyAbsAgainstEnv :: PipelineTypeCheckEnvSummary -> TypeCheck.Env -> ElabTerm -> ElabTerm
+pruneVacuousLeadingTyAbsAgainstEnv summary env term = case term of
   ETyAbs name mb body ->
-    let env' =
+    let boundTy = maybe TBottom tyToElab mb
+        summary' = insertPipelineTypeSummary name boundTy env summary
+        env' =
           env
             { TypeCheck.typeEnv =
-                Map.insert name (maybe TBottom tyToElab mb) (TypeCheck.typeEnv env)
+                Map.insert name boundTy (TypeCheck.typeEnv env)
             }
-        body' = pruneVacuousLeadingTyAbsAgainstEnv env' body
+        body' = pruneVacuousLeadingTyAbsAgainstEnv summary' env' body
      in case typeCheckWithEnv env' body' of
           Right bodyTy
             | name `Set.notMember` freeTypeVarsType bodyTy,
               not (containsRecursiveType bodyTy) ->
                 case mb of
-                  Nothing -> pruneVacuousLeadingTyAbsAgainstEnv env body'
+                  Nothing -> pruneVacuousLeadingTyAbsAgainstEnv summary env body'
                   Just _ ->
-                    case Set.toList (freeTypeVarsType bodyTy `Set.difference` freeTypeVarsTypeCheckEnv env) of
+                    case Set.toList (freeTypeVarsType bodyTy `Set.difference` pipelineVisibleTypeVars summary) of
                       [freeName] ->
                         let bodyRenamed = renameTypeVarInTerm freeName name body'
                          in case typeCheckWithEnv env' bodyRenamed of
                               Right renamedTy
                                 | name `Set.member` freeTypeVarsType renamedTy ->
                                     ETyAbs name mb bodyRenamed
-                              _ -> pruneVacuousLeadingTyAbsAgainstEnv env body'
-                      _ -> pruneVacuousLeadingTyAbsAgainstEnv env body'
+                              _ -> pruneVacuousLeadingTyAbsAgainstEnv summary env body'
+                      _ -> pruneVacuousLeadingTyAbsAgainstEnv summary env body'
           _ -> ETyAbs name mb body'
   _ -> term
-
-freeTypeVarsTypeCheckEnv :: TypeCheck.Env -> Set.Set String
-freeTypeVarsTypeCheckEnv env =
-  Set.unions
-    ( map freeTypeVarsType (Map.elems (TypeCheck.termEnv env))
-        ++ map freeTypeVarsType (Map.elems (TypeCheck.typeEnv env))
-        ++ [Set.fromList (Map.keys (TypeCheck.typeEnv env))]
-    )
 
 containsRecursiveType :: ElabType -> Bool
 containsRecursiveType ty = case ty of

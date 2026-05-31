@@ -26,6 +26,8 @@ where
 import Control.Applicative ((<|>))
 import Control.Exception (evaluate)
 import Control.Monad (foldM, zipWithM)
+import Control.Monad.Except (ExceptT (..), runExceptT)
+import Control.Monad.IO.Class (liftIO)
 import Data.List (isPrefixOf, sort)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
@@ -139,6 +141,28 @@ data BindingCheckReadContext = BindingCheckReadContext
     bindingCheckExpectedTypeForCompare :: Either ProgramError ElabType,
     bindingCheckRecoveredExpectedSourceType :: SrcType
   }
+
+type ProgramStage a = ExceptT ProgramError IO a
+
+timeFinalizeEither ::
+  TimingConfig ->
+  String ->
+  IO (Either ProgramError a) ->
+  ProgramStage a
+timeFinalizeEither timing stageLabel action =
+  ExceptT (timeProgramOperationIO timing stageLabel action)
+
+evaluateFinalizeEither ::
+  TimingConfig ->
+  String ->
+  Either ProgramError a ->
+  ProgramStage a
+evaluateFinalizeEither timing stageLabel result =
+  timeFinalizeEither timing stageLabel (evaluate result)
+
+fromProgramEither :: Either ProgramError a -> ProgramStage a
+fromProgramEither result =
+  ExceptT (pure result)
 
 mkFinalizeContext :: ElaborateScope -> Either ProgramError FinalizeContext
 mkFinalizeContext scope = do
@@ -530,20 +554,12 @@ finalizeBindingLayerAllowOpaqueWithModuleContext moduleContext lowereds
       case traverse (lookupModuleBindingReadContext moduleContext) lowereds of
         Left _ ->
           finalizeLayerIndividually defaultTimingConfig "module_layer" moduleContext lowereds
-        Right readContexts -> do
-          let resolvedResult = do
-                mapM_ moduleBindingReadResolvedFreeVars readContexts
-                extEnvs <- traverse moduleBindingReadExternalBindings readContexts
-                extEnv <- combinePreparedExternalBindings extEnvs
-                normExprs <- traverse moduleBindingReadNormalizedExpr readContexts
-                let rootPrepared =
-                      Map.fromList (zip (map loweredBindingName lowereds) extEnvs)
-                Right (extEnv, rootPrepared, normExprs)
-          case resolvedResult of
-            Left err -> pure (Left err)
-            Right (extEnv, rootPrepared, normExprs) -> do
-              let namedExprs = zip (map loweredBindingName lowereds) normExprs
-              pipelineResult <-
+        Right readContexts ->
+          runExceptT $ do
+            (extEnv, rootPrepared, namedExprs) <-
+              fromProgramEither (prepareModuleLayerPipelineInputs lowereds readContexts)
+            pipelineResult <-
+              liftIO $
                 runPipelineElabDetailedModuleWithPreparedExternalBindingsWithTiming
                   defaultTimingConfig
                   "module_layer.elab_pipeline"
@@ -551,10 +567,12 @@ finalizeBindingLayerAllowOpaqueWithModuleContext moduleContext lowereds
                   extEnv
                   rootPrepared
                   namedExprs
-              case pipelineResult of
-                Left _ ->
+            case pipelineResult of
+              Left _ ->
+                ExceptT $
                   finalizeLayerIndividually defaultTimingConfig "module_layer.fallback_pipeline" moduleContext lowereds
-                Right results ->
+              Right results ->
+                ExceptT $
                   finalizeLayerPipelineResults
                     defaultTimingConfig
                     "module_layer"
@@ -578,44 +596,32 @@ finalizeBindingLayerAllowOpaqueWithModuleContextWithTiming timing label moduleCo
       case traverse (lookupModuleBindingReadContext moduleContext) lowereds of
         Left _ ->
           finalizeLayerIndividually timing (label ++ ".fallback_missing_context") moduleContext lowereds
-        Right readContexts -> do
-          resolvedResult <-
-            timeProgramOperationIO timing (label ++ ".prepare_external_bindings") $
-              evaluate $ do
-                mapM_ moduleBindingReadResolvedFreeVars readContexts
-                extEnvs <- traverse moduleBindingReadExternalBindings readContexts
-                extEnv <- combinePreparedExternalBindings extEnvs
-                let rootPrepared =
-                      Map.fromList (zip (map loweredBindingName lowereds) extEnvs)
-                Right (extEnv, rootPrepared)
-          case resolvedResult of
-            Left err -> pure (Left err)
-            Right (extEnv, rootPrepared) -> do
-              normResult <-
-                timeProgramOperationIO timing (label ++ ".normalize_surface") $
-                  evaluate (traverse moduleBindingReadNormalizedExpr readContexts)
-              case normResult of
-                Left err -> pure (Left err)
-                Right normExprs -> do
-                  let namedExprs = zip (map loweredBindingName lowereds) normExprs
-                      innerTiming =
-                        if timingProgramDefDetails timing
-                          then timing
-                          else defaultTimingConfig
-                  pipelineResult <-
-                    timeProgramOperationIO timing (label ++ ".pipeline") $
-                      runPipelineElabDetailedModuleWithPreparedExternalBindingsWithTiming
-                        innerTiming
-                        (label ++ ".pipeline.elab_pipeline")
-                        Set.empty
-                        extEnv
-                        rootPrepared
-                        namedExprs
-                  case pipelineResult of
-                    Left _ ->
-                      finalizeLayerIndividually timing (label ++ ".fallback_pipeline") moduleContext lowereds
-                    Right results ->
-                      finalizeLayerPipelineResults timing label context lowereds readContexts results
+        Right readContexts ->
+          runExceptT $ do
+            (extEnv, rootPrepared, namedExprs) <-
+              ExceptT $
+                prepareModuleLayerPipelineInputsWithTiming timing label lowereds readContexts
+            let innerTiming =
+                  if timingProgramDefDetails timing
+                    then timing
+                    else defaultTimingConfig
+            pipelineResult <-
+              liftIO $
+                timeProgramOperationIO timing (label ++ ".pipeline") $
+                  runPipelineElabDetailedModuleWithPreparedExternalBindingsWithTiming
+                    innerTiming
+                    (label ++ ".pipeline.elab_pipeline")
+                    Set.empty
+                    extEnv
+                    rootPrepared
+                    namedExprs
+            case pipelineResult of
+              Left _ ->
+                ExceptT $
+                  finalizeLayerIndividually timing (label ++ ".fallback_pipeline") moduleContext lowereds
+              Right results ->
+                ExceptT $
+                  finalizeLayerPipelineResults timing label context lowereds readContexts results
   where
     context = moduleFinalizeContextBase moduleContext
 
@@ -634,44 +640,32 @@ finalizeDeferredBindingLayerAllowOpaqueWithModuleContextWithTiming timing label 
       case traverse (lookupModuleBindingReadContext moduleContext) lowereds of
         Left _ ->
           finalizeLayerIndividually timing (label ++ ".fallback_missing_context") moduleContext lowereds
-        Right readContexts -> do
-          resolvedResult <-
-            timeProgramOperationIO timing (label ++ ".prepare_external_bindings") $
-              evaluate $ do
-                mapM_ moduleBindingReadResolvedFreeVars readContexts
-                extEnvs <- traverse moduleBindingReadExternalBindings readContexts
-                extEnv <- combinePreparedExternalBindings extEnvs
-                let rootPrepared =
-                      Map.fromList (zip (map loweredBindingName lowereds) extEnvs)
-                Right (extEnv, rootPrepared)
-          case resolvedResult of
-            Left err -> pure (Left err)
-            Right (extEnv, rootPrepared) -> do
-              normResult <-
-                timeProgramOperationIO timing (label ++ ".normalize_surface") $
-                  evaluate (traverse moduleBindingReadNormalizedExpr readContexts)
-              case normResult of
-                Left err -> pure (Left err)
-                Right normExprs -> do
-                  let namedExprs = zip (map loweredBindingName lowereds) normExprs
-                      innerTiming =
-                        if timingProgramDefDetails timing
-                          then timing
-                          else defaultTimingConfig
-                  pipelineResult <-
-                    timeProgramOperationIO timing (label ++ ".pipeline") $
-                      runPipelineElabDetailedModuleDeferFinalCheckWithPreparedExternalBindingsWithTiming
-                        innerTiming
-                        (label ++ ".pipeline.elab_pipeline")
-                        Set.empty
-                        extEnv
-                        rootPrepared
-                        namedExprs
-                  case pipelineResult of
-                    Left _ ->
-                      finalizeLayerIndividually timing (label ++ ".fallback_pipeline") moduleContext lowereds
-                    Right results ->
-                      finalizeLayerPipelineResults timing label context lowereds readContexts results
+        Right readContexts ->
+          runExceptT $ do
+            (extEnv, rootPrepared, namedExprs) <-
+              ExceptT $
+                prepareModuleLayerPipelineInputsWithTiming timing label lowereds readContexts
+            let innerTiming =
+                  if timingProgramDefDetails timing
+                    then timing
+                    else defaultTimingConfig
+            pipelineResult <-
+              liftIO $
+                timeProgramOperationIO timing (label ++ ".pipeline") $
+                  runPipelineElabDetailedModuleDeferFinalCheckWithPreparedExternalBindingsWithTiming
+                    innerTiming
+                    (label ++ ".pipeline.elab_pipeline")
+                    Set.empty
+                    extEnv
+                    rootPrepared
+                    namedExprs
+            case pipelineResult of
+              Left _ ->
+                ExceptT $
+                  finalizeLayerIndividually timing (label ++ ".fallback_pipeline") moduleContext lowereds
+              Right results ->
+                ExceptT $
+                  finalizeLayerPipelineResults timing label context lowereds readContexts results
   where
     context = moduleFinalizeContextBase moduleContext
 
@@ -692,29 +686,65 @@ combinePreparedExternalBindings bindings =
     firstBinding : rest ->
       Right (foldl' unionPreparedExternalBindings firstBinding rest)
 
+prepareModuleLayerPipelineInputs ::
+  [LoweredBinding] ->
+  [ModuleBindingReadContext] ->
+  Either ProgramError (PreparedExternalBindings, Map String PreparedExternalBindings, [(String, NormSurfaceExpr)])
+prepareModuleLayerPipelineInputs lowereds readContexts = do
+  mapM_ moduleBindingReadResolvedFreeVars readContexts
+  extEnvs <- traverse moduleBindingReadExternalBindings readContexts
+  extEnv <- combinePreparedExternalBindings extEnvs
+  normExprs <- traverse moduleBindingReadNormalizedExpr readContexts
+  let rootPrepared =
+        Map.fromList (zip (map loweredBindingName lowereds) extEnvs)
+      namedExprs =
+        zip (map loweredBindingName lowereds) normExprs
+  pure (extEnv, rootPrepared, namedExprs)
+
+prepareModuleLayerPipelineInputsWithTiming ::
+  TimingConfig ->
+  String ->
+  [LoweredBinding] ->
+  [ModuleBindingReadContext] ->
+  IO (Either ProgramError (PreparedExternalBindings, Map String PreparedExternalBindings, [(String, NormSurfaceExpr)]))
+prepareModuleLayerPipelineInputsWithTiming timing label lowereds readContexts =
+  runExceptT $ do
+    (extEnv, rootPrepared) <-
+      evaluateFinalizeEither timing (label ++ ".prepare_external_bindings") $ do
+        mapM_ moduleBindingReadResolvedFreeVars readContexts
+        extEnvs <- traverse moduleBindingReadExternalBindings readContexts
+        extEnv <- combinePreparedExternalBindings extEnvs
+        let rootPrepared =
+              Map.fromList (zip (map loweredBindingName lowereds) extEnvs)
+        pure (extEnv, rootPrepared)
+    normExprs <-
+      evaluateFinalizeEither timing (label ++ ".normalize_surface") $
+        traverse moduleBindingReadNormalizedExpr readContexts
+    let namedExprs =
+          zip (map loweredBindingName lowereds) normExprs
+    pure (extEnv, rootPrepared, namedExprs)
+
 finalizeLayerIndividually ::
   TimingConfig ->
   String ->
   ModuleFinalizeContext ->
   [LoweredBinding] ->
   IO (Either ProgramError [CheckedBinding])
-finalizeLayerIndividually timing label moduleContext =
-  go (1 :: Int)
+finalizeLayerIndividually timing label moduleContext lowereds =
+  runExceptT (go (1 :: Int) lowereds)
   where
-    go _ [] = pure (Right [])
+    go _ [] = pure []
     go index (lowered : rest) = do
-      checkedResult <-
-        finalizeBindingAllowOpaqueWithModuleContextWithTiming
-          timing
-          (label ++ ".def_" ++ show index)
-          moduleContext
-          False
-          lowered
-      case checkedResult of
-        Left err -> pure (Left err)
-        Right checked -> do
-          restResult <- go (index + 1) rest
-          pure ((checked :) <$> restResult)
+      checked <-
+        ExceptT $
+          finalizeBindingAllowOpaqueWithModuleContextWithTiming
+            timing
+            (label ++ ".def_" ++ show index)
+            moduleContext
+            False
+            lowered
+      restResult <- go (index + 1) rest
+      pure (checked : restResult)
 
 finalizeLayerPipelineResults ::
   TimingConfig ->
@@ -725,28 +755,26 @@ finalizeLayerPipelineResults ::
   Map String PipelineElabDetailedResult ->
   IO (Either ProgramError [CheckedBinding])
 finalizeLayerPipelineResults timing label context lowereds readContexts results =
-  go [] (1 :: Int) lowereds readContexts
+  runExceptT (go [] (1 :: Int) lowereds readContexts)
   where
-    go acc _ [] [] = pure (Right (reverse acc))
+    go acc _ [] [] = pure (reverse acc)
     go acc index (lowered : rest) (readContext : readRest) =
       case Map.lookup (loweredBindingName lowered) results of
         Nothing ->
-          pure (Left (ProgramPipelineError ("module layer missing result for binding `" ++ loweredBindingName lowered ++ "`")))
+          fromProgramEither (Left (ProgramPipelineError ("module layer missing result for binding `" ++ loweredBindingName lowered ++ "`")))
         Just pipelineResult -> do
-          checkedResult <-
-            finalizePipelineBindingResultWithReadContext
-              timing
-              (label ++ ".binding_" ++ show index)
-              context
-              (Just (moduleBindingReadCheckContext readContext))
-              lowered
-              (Right pipelineResult)
-          case checkedResult of
-            Left err -> pure (Left err)
-            Right checked ->
-              checked `seq` go (checked : acc) (index + 1) rest readRest
+          checked <-
+            ExceptT $
+              finalizePipelineBindingResultWithReadContext
+                timing
+                (label ++ ".binding_" ++ show index)
+                context
+                (Just (moduleBindingReadCheckContext readContext))
+                lowered
+                (Right pipelineResult)
+          checked `seq` go (checked : acc) (index + 1) rest readRest
     go _ _ _ _ =
-      pure (Left (ProgramPipelineError "module layer result/read-context length mismatch"))
+      fromProgramEither (Left (ProgramPipelineError "module layer result/read-context length mismatch"))
 
 finalizePipelineBindingResult ::
   TimingConfig ->
@@ -767,24 +795,20 @@ finalizePipelineBindingResultWithReadContext ::
   Either ProgramError PipelineElabDetailedResult ->
   IO (Either ProgramError CheckedBinding)
 finalizePipelineBindingResultWithReadContext timing label context mbCheckContext lowered pipelineResult =
-  case pipelineResult of
-    Left err -> pure (Left err)
-    Right PipelineElabDetailedResult {pedTerm = term0, pedType = actualTy0, pedTypeCheckEnv = tcEnv} -> do
-      deferredResult <-
-        timeProgramOperationIO timing (label ++ ".deferred_obligations") $
-          evaluate $
-            finalizeDeferredObligations
-              context
-              (loweredBindingDeferredObligations lowered)
-              tcEnv
-              term0
-              actualTy0
-              (loweredBindingExpectedType lowered)
-      case deferredResult of
-        Left err -> pure (Left err)
-        Right (term, actualTy) ->
-          timeProgramOperationIO timing (label ++ ".binding_check") $
-            evaluate (finalizeCheckedBindingFromTermWithReadContext context mbCheckContext lowered term actualTy)
+  runExceptT $ do
+    PipelineElabDetailedResult {pedTerm = term0, pedType = actualTy0, pedTypeCheckEnv = tcEnv} <-
+      fromProgramEither pipelineResult
+    (term, actualTy) <-
+      evaluateFinalizeEither timing (label ++ ".deferred_obligations") $
+        finalizeDeferredObligations
+          context
+          (loweredBindingDeferredObligations lowered)
+          tcEnv
+          term0
+          actualTy0
+          (loweredBindingExpectedType lowered)
+    evaluateFinalizeEither timing (label ++ ".binding_check") $
+      finalizeCheckedBindingFromTermWithReadContext context mbCheckContext lowered term actualTy
 finalizeBindingsAllowOpaqueWithContext :: FinalizeContext -> [LoweredBinding] -> Either ProgramError [CheckedBinding]
 finalizeBindingsAllowOpaqueWithContext context =
   go
@@ -809,28 +833,22 @@ finalizeBindingsAllowOpaqueWithContextWithTiming ::
   [LoweredBinding] ->
   IO (Either ProgramError [CheckedBinding])
 finalizeBindingsAllowOpaqueWithContextWithTiming timing label context lowereds =
-  timeProgramOperationIO timing label (go (1 :: Int) lowereds)
+  timeProgramOperationIO timing label (runExceptT (go (1 :: Int) lowereds))
   where
-    go _ [] = pure (Right [])
+    go _ [] = pure []
     go groupIndex bindings@(lowered : rest)
       | batchableLoweredBinding lowered = do
           let (batch, rest') = span batchableLoweredBinding bindings
           batchResult <-
             if length batch <= 1
-              then evaluate ((: []) <$> finalizeBindingAllowOpaqueWithContext context lowered)
-              else finalizeBindingGroupWithContextWithTiming timing (label ++ ".group_" ++ show groupIndex) context batch
-          case batchResult of
-            Left err -> pure (Left err)
-            Right checkedBatch -> do
-              restResult <- go (groupIndex + 1) rest'
-              pure ((checkedBatch ++) <$> restResult)
+              then ExceptT $ evaluate ((: []) <$> finalizeBindingAllowOpaqueWithContext context lowered)
+              else ExceptT $ finalizeBindingGroupWithContextWithTiming timing (label ++ ".group_" ++ show groupIndex) context batch
+          restResult <- go (groupIndex + 1) rest'
+          pure (batchResult ++ restResult)
       | otherwise = do
-          checkedResult <- evaluate (finalizeBindingAllowOpaqueWithContext context lowered)
-          case checkedResult of
-            Left err -> pure (Left err)
-            Right checked -> do
-              restResult <- go groupIndex rest
-              pure ((checked :) <$> restResult)
+          checked <- ExceptT $ evaluate (finalizeBindingAllowOpaqueWithContext context lowered)
+          restResult <- go groupIndex rest
+          pure (checked : restResult)
 
     batchableLoweredBinding lowered =
       not (Builtins.srcTypeMentionsOpaqueBuiltin (loweredBindingSourceType lowered))
@@ -866,50 +884,47 @@ finalizeBindingGroupWithContextWithTiming ::
   [LoweredBinding] ->
   IO (Either ProgramError [CheckedBinding])
 finalizeBindingGroupWithContextWithTiming _ _ _ [] = pure (Right [])
-finalizeBindingGroupWithContextWithTiming timing label context lowereds0 = do
-  let lowereds = zipWith renameDeferredPlaceholdersForGroup [(1 :: Int) ..] lowereds0
-      deferredObligations = Map.unions (map loweredBindingDeferredObligations lowereds)
-      externalTypes = Map.unions (map loweredBindingExternalTypes lowereds)
-      expectedNames = map loweredBindingName lowereds
-      groupExpr = groupedBindingExpr lowereds
-  pipelineResult <-
-    timeProgramOperationIO timing (label ++ ".pipeline") $
-      runSurfacePipelineWithContextWithTiming timing (label ++ ".pipeline") context False deferredObligations externalTypes groupExpr
-  case pipelineResult of
-    Left err -> pure (Left err)
-    Right PipelineElabDetailedResult {pedTerm = term0, pedType = actualTy0, pedTypeCheckEnv = tcEnv} -> do
-      deferredResult <-
-        timeProgramOperationIO timing (label ++ ".deferred_obligations") $
-          evaluate (finalizeDeferredObligations context deferredObligations tcEnv term0 actualTy0 STBottom)
-      case deferredResult of
-        Left err -> pure (Left err)
-        Right (term, _actualTy) -> do
-          extractedResult <-
-            timeProgramOperationIO timing (label ++ ".extract_bindings") $
-              evaluate (extractGroupedBindings expectedNames term)
-          case extractedResult of
-            Left _ ->
-              timeProgramOperationIO timing (label ++ ".fallback_individual") $
-                evaluate (traverse (finalizeBindingAllowOpaqueWithContext context) lowereds0)
-            Right extracted -> finalizeExtractedBindingsWithTiming (1 :: Int) extracted
+finalizeBindingGroupWithContextWithTiming timing label context lowereds0 =
+  runExceptT $ do
+    let lowereds = zipWith renameDeferredPlaceholdersForGroup [(1 :: Int) ..] lowereds0
+        deferredObligations = Map.unions (map loweredBindingDeferredObligations lowereds)
+        externalTypes = Map.unions (map loweredBindingExternalTypes lowereds)
+        expectedNames = map loweredBindingName lowereds
+        groupExpr = groupedBindingExpr lowereds
+    PipelineElabDetailedResult {pedTerm = term0, pedType = actualTy0, pedTypeCheckEnv = tcEnv} <-
+      timeFinalizeEither timing (label ++ ".pipeline") $
+        runSurfacePipelineWithContextWithTiming timing (label ++ ".pipeline") context False deferredObligations externalTypes groupExpr
+    (term, _actualTy) <-
+      evaluateFinalizeEither timing (label ++ ".deferred_obligations") $
+        finalizeDeferredObligations context deferredObligations tcEnv term0 actualTy0 STBottom
+    extractedResult <-
+      liftIO $
+        timeProgramOperationIO timing (label ++ ".extract_bindings") $
+          evaluate (extractGroupedBindings expectedNames term)
+    case extractedResult of
+      Left _ ->
+        timeFinalizeEither timing (label ++ ".fallback_individual") $
+          evaluate (traverse (finalizeBindingAllowOpaqueWithContext context) lowereds0)
+      Right extracted ->
+        ExceptT (finalizeExtractedBindingsWithTiming (1 :: Int) extracted)
   where
-    finalizeExtractedBindingsWithTiming _ [] = pure (Right [])
-    finalizeExtractedBindingsWithTiming index ((name, scheme, rhs) : rest) =
-      case drop (index - 1) lowereds0 of
-        [] ->
-          pure (Left (ProgramPipelineError ("group finalizer returned extra binding `" ++ name ++ "`")))
-        original : _ -> do
-          checkedResult <-
-            timeProgramOperationIO timing (label ++ ".binding_" ++ show index ++ "_check") $
-              evaluate $
-                if name == loweredBindingName original
-                  then finalizeCheckedBindingFromTerm context original rhs (schemeToType scheme)
-                  else Left (ProgramPipelineError ("group finalizer returned binding `" ++ name ++ "` while expecting `" ++ loweredBindingName original ++ "`"))
-          case checkedResult of
-            Left err -> pure (Left err)
-            Right checked -> do
-              restResult <- finalizeExtractedBindingsWithTiming (index + 1) rest
-              pure ((checked :) <$> restResult)
+    finalizeExtractedBindingsWithTiming index extracted =
+      runExceptT (go index extracted)
+
+    go _ [] = pure []
+    go index ((name, scheme, rhs) : rest) = do
+      original <-
+        case drop (index - 1) lowereds0 of
+          [] ->
+            fromProgramEither (Left (ProgramPipelineError ("group finalizer returned extra binding `" ++ name ++ "`")))
+          original : _ -> pure original
+      checked <-
+        evaluateFinalizeEither timing (label ++ ".binding_" ++ show index ++ "_check") $
+          if name == loweredBindingName original
+            then finalizeCheckedBindingFromTerm context original rhs (schemeToType scheme)
+            else Left (ProgramPipelineError ("group finalizer returned binding `" ++ name ++ "` while expecting `" ++ loweredBindingName original ++ "`"))
+      restResult <- go (index + 1) rest
+      pure (checked : restResult)
 
 groupedBindingExpr :: [LoweredBinding] -> SurfaceExpr
 groupedBindingExpr =
@@ -1180,38 +1195,33 @@ runSurfacePipelineWithContextWithTiming ::
   Map String SrcType ->
   SurfaceExpr ->
   IO (Either ProgramError PipelineElabDetailedResult)
-runSurfacePipelineWithContextWithTiming timing label context forceUnchecked deferredObligations externalTypes surfaceExpr = do
-  let freeVars = sort (Set.toList (surfaceFreeVars surfaceExpr))
-      externalTypeNames = Map.keysSet externalTypes
-      externalFreeVars = Set.fromList [name | name <- freeVars, name `Set.member` externalTypeNames]
-      runtimeFreeVars = Set.fromList [name | name <- freeVars, name `Set.notMember` externalTypeNames]
-      runtimeBindings = restrictPreparedExternalBindings runtimeFreeVars (finalizeContextRuntimeBindings context)
-  case mapM_ resolveRuntimeType freeVars of
-    Left err -> pure (Left err)
-    Right () -> do
-      deferredBindingsResult <-
-        timeProgramOperationIO timing (label ++ ".prepare_external_bindings") $
-          evaluate $
-            prepareSurfaceExternalBindings
-              externalBindingModeFor
-              (Map.restrictKeys externalTypes externalFreeVars)
-      case deferredBindingsResult of
-        Left err -> pure (Left err)
-        Right deferredBindings -> do
-          normExprResult <-
-            timeProgramOperationIO timing (label ++ ".normalize_surface") $
-              evaluate (either (Left . ProgramPipelineError . show) Right (normalizeExpr surfaceExpr))
-          case normExprResult of
-            Left err -> pure (Left err)
-            Right normExpr -> do
-              let extEnv = deferredBindings `unionPreparedExternalBindings` runtimeBindings
-                  runPipeline =
-                    if not forceUnchecked && Map.null deferredObligations
-                      then runPipelineElabDetailedWithPreparedExternalBindingsWithTiming
-                      else runPipelineElabDetailedUncheckedWithPreparedExternalBindingsWithTiming
-              pipelineResult <-
-                runPipeline timing (label ++ ".elab_pipeline") Set.empty extEnv normExpr
-              pure (either (Left . ProgramPipelineError . renderPipelineError) Right pipelineResult)
+runSurfacePipelineWithContextWithTiming timing label context forceUnchecked deferredObligations externalTypes surfaceExpr =
+  runExceptT $ do
+    let freeVars = sort (Set.toList (surfaceFreeVars surfaceExpr))
+        externalTypeNames = Map.keysSet externalTypes
+        externalFreeVars = Set.fromList [name | name <- freeVars, name `Set.member` externalTypeNames]
+        runtimeFreeVars = Set.fromList [name | name <- freeVars, name `Set.notMember` externalTypeNames]
+        runtimeBindings = restrictPreparedExternalBindings runtimeFreeVars (finalizeContextRuntimeBindings context)
+    fromProgramEither (mapM_ resolveRuntimeType freeVars)
+    deferredBindings <-
+      timeFinalizeEither timing (label ++ ".prepare_external_bindings") $
+        evaluate $
+          prepareSurfaceExternalBindings
+            externalBindingModeFor
+            (Map.restrictKeys externalTypes externalFreeVars)
+    normExpr <-
+      evaluateFinalizeEither timing (label ++ ".normalize_surface") $
+        either (Left . ProgramPipelineError . show) Right (normalizeExpr surfaceExpr)
+    let extEnv = deferredBindings `unionPreparedExternalBindings` runtimeBindings
+        runPipeline =
+          if not forceUnchecked && Map.null deferredObligations
+            then runPipelineElabDetailedWithPreparedExternalBindingsWithTiming
+            else runPipelineElabDetailedUncheckedWithPreparedExternalBindingsWithTiming
+    pipelineResult <-
+      liftIO $
+        runPipeline timing (label ++ ".elab_pipeline") Set.empty extEnv normExpr
+    fromProgramEither $
+      either (Left . ProgramPipelineError . renderPipelineError) Right pipelineResult
   where
     scope = finalizeContextScope context
     runtimeTypes = externalTypes `Map.union` elaborateScopeRuntimeTypes scope
@@ -1249,33 +1259,24 @@ runLoweredSurfacePipelineWithModuleContextWithTiming ::
   LoweredBinding ->
   IO (Either ProgramError PipelineElabDetailedResult)
 runLoweredSurfacePipelineWithModuleContextWithTiming timing label moduleContext forceUnchecked lowered =
-  case lookupModuleBindingReadContext moduleContext lowered of
-    Left err -> pure (Left err)
-    Right readContext -> do
-      case moduleBindingReadResolvedFreeVars readContext of
-        Left err -> pure (Left err)
-        Right () -> do
-          extEnvResult <-
-            timeProgramOperationIO timing (label ++ ".prepare_external_bindings") $
-              evaluate $ do
-                extEnv <- moduleBindingReadExternalBindings readContext
-                Right extEnv
-          case extEnvResult of
-            Left err -> pure (Left err)
-            Right extEnv -> do
-              normExprResult <-
-                timeProgramOperationIO timing (label ++ ".normalize_surface") $
-                  evaluate (moduleBindingReadNormalizedExpr readContext)
-              case normExprResult of
-                Left err -> pure (Left err)
-                Right normExpr -> do
-                  let runPipeline =
-                        if not forceUnchecked && Map.null (loweredBindingDeferredObligations lowered)
-                          then runPipelineElabDetailedWithPreparedExternalBindingsWithTiming
-                          else runPipelineElabDetailedUncheckedWithPreparedExternalBindingsWithTiming
-                  pipelineResult <-
-                    runPipeline timing (label ++ ".elab_pipeline") Set.empty extEnv normExpr
-                  pure (either (Left . ProgramPipelineError . renderPipelineError) Right pipelineResult)
+  runExceptT $ do
+    readContext <- fromProgramEither (lookupModuleBindingReadContext moduleContext lowered)
+    fromProgramEither (moduleBindingReadResolvedFreeVars readContext)
+    extEnv <-
+      evaluateFinalizeEither timing (label ++ ".prepare_external_bindings") $
+        moduleBindingReadExternalBindings readContext
+    normExpr <-
+      evaluateFinalizeEither timing (label ++ ".normalize_surface") $
+        moduleBindingReadNormalizedExpr readContext
+    let runPipeline =
+          if not forceUnchecked && Map.null (loweredBindingDeferredObligations lowered)
+            then runPipelineElabDetailedWithPreparedExternalBindingsWithTiming
+            else runPipelineElabDetailedUncheckedWithPreparedExternalBindingsWithTiming
+    pipelineResult <-
+      liftIO $
+        runPipeline timing (label ++ ".elab_pipeline") Set.empty extEnv normExpr
+    fromProgramEither $
+      either (Left . ProgramPipelineError . renderPipelineError) Right pipelineResult
 
 lookupModuleBindingReadContext :: ModuleFinalizeContext -> LoweredBinding -> Either ProgramError ModuleBindingReadContext
 lookupModuleBindingReadContext moduleContext lowered =

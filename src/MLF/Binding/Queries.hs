@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {- |
 Module      : MLF.Binding.Queries
 Description : Binding tree query operations
@@ -29,7 +30,7 @@ module MLF.Binding.Queries (
     lookupBindParent,
 ) where
 
-import Control.Monad (forM, unless)
+import Control.Monad (unless)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.IntSet (IntSet)
@@ -44,6 +45,7 @@ import MLF.Binding.Path (
     bindingPathToRoot,
     bindingPathToRootLocal,
     bindingPathToRootWithLookup,
+    validateBindingPathsAcyclic,
     )
 -- Import canonicalization functions
 import MLF.Binding.Canonicalization (
@@ -99,8 +101,8 @@ nodeKind :: Constraint p -> NodeRef -> Either BindingError NodeKind
 nodeKind c nid = case lookupBindParent c nid of
     Nothing                     -> Right NodeRoot
     Just (_, BindRigid)         -> Right NodeRestricted
-    Just (_, BindFlex)          -> do
-        underRigid <- isUnderRigidBinder c nid
+    Just (parentRef, BindFlex)  -> do
+        underRigid <- isUnderRigidBinderFromParent c nid parentRef
         pure $ if underRigid then NodeLocked else NodeInstantiable
 
 -- | True iff @nid@ is strictly under some rigid binding edge.
@@ -112,8 +114,35 @@ nodeKind c nid = case lookupBindParent c nid of
 -- normalized witnesses do not perform operations under rigidly bound nodes.
 isUnderRigidBinder :: Constraint p -> NodeRef -> Either BindingError Bool
 isUnderRigidBinder c nid =
-    any (\ref -> case lookupBindParent c ref of Just (_, BindRigid) -> True; _ -> False)
-    . drop 1 <$> bindingPathToRoot c nid
+    case lookupBindParent c nid of
+        Nothing -> Right False
+        Just (parentRef, _ownFlag) ->
+            isUnderRigidBinderFromParent c nid parentRef
+
+isUnderRigidBinderFromParent :: Constraint p -> NodeRef -> NodeRef -> Either BindingError Bool
+isUnderRigidBinderFromParent c nid parent0 =
+    go (IntSet.singleton startKey) False (nodeRefKey parent0)
+  where
+    bindParents = cBindParents c
+    startKey = nodeRefKey nid
+    lookupParent key = IntMap.lookup key bindParents
+
+    go !seen !hasRigid !key
+        | IntSet.member key seen =
+            case bindingPathToRootWithLookup lookupParent nid of
+                Left err -> Left err
+                Right path -> Left (BindingCycleDetected path)
+        | otherwise =
+            case lookupParent key of
+                Nothing -> Right hasRigid
+                Just (parentRef, flag) ->
+                    let !seen' = IntSet.insert key seen
+                        !hasRigid' = hasRigid || flag == BindRigid
+                        !parentKey = nodeRefKey parentRef
+                    in go
+                        seen'
+                        hasRigid'
+                        parentKey
 
 -- | Compute the interior I(r): all nodes transitively bound to r.
 --
@@ -122,10 +151,20 @@ interiorOf :: Constraint p -> NodeRef -> Either BindingError IntSet
 interiorOf c root = do
     unless (nodeRefExists c root) $
         Left $ InvalidBindingTree $ "interiorOf: root " ++ show root ++ " not in constraint"
-    paths <- forM (allNodeRefs c) $ \ref -> do
-        path <- bindingPathToRoot c ref
-        pure (ref, path)
-    pure $ IntSet.fromList [ nodeRefKey ref | (ref, path) <- paths, root `elem` path ]
+    let refs = allNodeRefs c
+    validateBindingPathsAcyclic (cBindParents c) refs
+    let liveKeys = IntSet.fromList (map nodeRefKey refs)
+        childrenByParent =
+            IntMap.foldlWithKey'
+                (\m childKey (parent, _flag) ->
+                    insertChild (nodeRefKey parent) childKey m
+                )
+                IntMap.empty
+                (cBindParents c)
+    pure $
+        IntSet.intersection
+            liveKeys
+            (descendantsFromChildren childrenByParent (nodeRefKey root))
 
 -- | Compute the interior I(r) on the quotient graph induced by a canonicalization
 -- function.
@@ -144,19 +183,30 @@ interiorOfUnder canonical c0 root0 =
     withQuotientBindParents "interiorOfUnder" canonical c0 root0 $ \rootC bindParents ->
         let childrenByParent :: IntMap.IntMap IntSet
             childrenByParent =
-                foldl'
-                    (\m (childRootKey, (parentRoot, _flag)) ->
-                        let parentRootKey = nodeRefKey parentRoot
-                        in IntMap.insertWith IntSet.union parentRootKey (IntSet.singleton childRootKey) m
+                IntMap.foldlWithKey'
+                    (\m childRootKey (parentRoot, _flag) ->
+                        insertChild (nodeRefKey parentRoot) childRootKey m
                     )
                     IntMap.empty
-                    (IntMap.toList bindParents)
+                    bindParents
 
-            go :: IntSet -> [Int] -> IntSet
-            go visited [] = visited
-            go visited (nid : rest) =
-                let kids = IntMap.findWithDefault IntSet.empty nid childrenByParent
-                    newKids = IntSet.difference kids visited
-                in go (IntSet.union visited newKids) (IntSet.toList newKids ++ rest)
+        in pure (descendantsFromChildren childrenByParent (nodeRefKey rootC))
 
-        in pure (go (IntSet.singleton (nodeRefKey rootC)) [nodeRefKey rootC])
+insertChild :: Int -> Int -> IntMap.IntMap IntSet -> IntMap.IntMap IntSet
+insertChild !parentKey !childKey =
+    IntMap.alter insertOrAppend parentKey
+  where
+    insertOrAppend Nothing = Just (IntSet.singleton childKey)
+    insertOrAppend (Just children) = Just (IntSet.insert childKey children)
+
+descendantsFromChildren :: IntMap.IntMap IntSet -> Int -> IntSet
+descendantsFromChildren childrenByParent rootKey =
+    go (IntSet.singleton rootKey) [rootKey]
+  where
+    go !visited [] = visited
+    go !visited (key : rest) =
+        let kids = IntMap.findWithDefault IntSet.empty key childrenByParent
+            !newKids = IntSet.difference kids visited
+            !visited' = IntSet.union visited newKids
+            !rest' = IntSet.foldl' (flip (:)) rest newKids
+        in go visited' rest'

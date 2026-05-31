@@ -32,6 +32,13 @@ data Env = Env
   }
   deriving (Eq, Show)
 
+newtype FreeVarCounts = FreeVarCounts (Map.Map String Int)
+
+data TypeCheckEnvSummary = TypeCheckEnvSummary
+  { tcesTermFreeVars :: FreeVarCounts,
+    tcesTypeFreeVars :: FreeVarCounts
+  }
+
 emptyEnv :: Env
 emptyEnv = Env Map.empty Map.empty
 
@@ -39,7 +46,11 @@ typeCheck :: ElabTerm -> Either TypeCheckError ElabType
 typeCheck = typeCheckWithEnv emptyEnv
 
 typeCheckWithEnv :: Env -> ElabTerm -> Either TypeCheckError ElabType
-typeCheckWithEnv env term = case term of
+typeCheckWithEnv env =
+  typeCheckWithEnvSummary (summarizeTypeCheckEnv env) env
+
+typeCheckWithEnvSummary :: TypeCheckEnvSummary -> Env -> ElabTerm -> Either TypeCheckError ElabType
+typeCheckWithEnvSummary envSummary env term = case term of
   EVar v ->
     case Map.lookup v (termEnv env) of
       Just ty -> Right ty
@@ -47,12 +58,13 @@ typeCheckWithEnv env term = case term of
   ELit lit -> Right (litType lit)
   ELam v ty body -> do
     ensureContractiveType ty
-    let env' = env {termEnv = Map.insert v ty (termEnv env)}
-    bodyTy <- typeCheckWithEnv env' body
+    let envSummary' = insertTermSummary v ty env envSummary
+        env' = env {termEnv = Map.insert v ty (termEnv env)}
+    bodyTy <- typeCheckWithEnvSummary envSummary' env' body
     Right (TArrow ty bodyTy)
   EApp f a -> do
-    fTy <- typeCheckWithEnv env f
-    aTy <- typeCheckWithEnv env a
+    fTy <- typeCheckWithEnvSummary envSummary env f
+    aTy <- typeCheckWithEnvSummary envSummary env a
     case fTy of
       TArrow argTy resTy ->
         let argTy' = stripVacuousForallsDeep (inlineTypeEnvBounds env argTy)
@@ -114,11 +126,12 @@ typeCheckWithEnv env term = case term of
   ELet v sch rhs body -> do
     ensureContractiveType (schemeToType sch)
     let schTy = schemeToType sch
+        envSummary' = insertTermSummary v schTy env envSummary
         env' = env {termEnv = Map.insert v schTy (termEnv env)}
-    rhsTy <- typeCheckWithEnv env' rhs
+    rhsTy <- typeCheckWithEnvSummary envSummary' env' rhs
     if v == "_" || letSchemeAccepts rhsTy schTy
       then do
-        typeCheckWithEnv env' body
+        typeCheckWithEnvSummary envSummary' env' body
       else Left (TCLetTypeMismatch rhsTy schTy)
   ETyAbs v mbBound body -> do
     maybe (Right ()) (ensureContractiveType . tyToElab) mbBound
@@ -126,21 +139,22 @@ typeCheckWithEnv env term = case term of
     if v `Set.member` freeTypeVarsType boundTy
       then Left (TCTypeAbsBoundMentionsVar v)
       else
-        if v `Set.member` freeTypeVarsEnv env
+        if v `Set.member` summaryFreeTypeVars envSummary
           then Left (TCTypeAbsVarInScope v)
           else do
-            let env' = env {typeEnv = Map.insert v boundTy (typeEnv env)}
-            bodyTy <- typeCheckWithEnv env' body
+            let envSummary' = insertTypeSummary v boundTy env envSummary
+                env' = env {typeEnv = Map.insert v boundTy (typeEnv env)}
+            bodyTy <- typeCheckWithEnvSummary envSummary' env' body
             Right (TForall v mbBound bodyTy)
   ETyInst e inst -> do
     ensureContractiveInstantiation inst
-    ty <- typeCheckWithEnv env e
+    ty <- typeCheckWithEnvSummary envSummary env e
     checkInstantiation env ty inst
   ERoll recursiveTy body -> do
     ensureContractiveType recursiveTy
     case recursiveTy of
       TMu name unfoldedBody -> do
-        bodyTy <- typeCheckWithEnv env body
+        bodyTy <- typeCheckWithEnvSummary envSummary env body
         let expectedBodyTy = substTypeCapture name recursiveTy unfoldedBody
             expectedBodyTyAlias = collapseRecursiveAlias name recursiveTy expectedBodyTy
             expectedBodyTy' = stripVacuousForallsDeep expectedBodyTy
@@ -157,7 +171,7 @@ typeCheckWithEnv env term = case term of
           else Left (TCRollBodyMismatch expectedBodyTy bodyTy)
       _ -> Left (TCExpectedRecursive recursiveTy)
   EUnroll e -> do
-    ty <- typeCheckWithEnv env e
+    ty <- typeCheckWithEnvSummary envSummary env e
     case ty of
       TMu name body -> Right (substTypeCapture name ty body)
       _ -> Left (TCExpectedRecursive ty)
@@ -232,11 +246,63 @@ litType lit = case lit of
 boundType :: Maybe BoundType -> ElabType
 boundType = maybe TBottom tyToElab
 
-freeTypeVarsEnv :: Env -> Set.Set String
-freeTypeVarsEnv env =
-  Set.union
-    (Set.unions (map freeTypeVarsType (Map.elems (termEnv env))))
-    (Set.unions (map freeTypeVarsType (Map.elems (typeEnv env))))
+summarizeTypeCheckEnv :: Env -> TypeCheckEnvSummary
+summarizeTypeCheckEnv env =
+  TypeCheckEnvSummary
+    { tcesTermFreeVars = freeVarCountsFromTypes (Map.elems (termEnv env)),
+      tcesTypeFreeVars = freeVarCountsFromTypes (Map.elems (typeEnv env))
+    }
+
+insertTermSummary :: String -> ElabType -> Env -> TypeCheckEnvSummary -> TypeCheckEnvSummary
+insertTermSummary name ty env summary =
+  summary
+    { tcesTermFreeVars =
+        replaceTypeFreeVars (Map.lookup name (termEnv env)) ty (tcesTermFreeVars summary)
+    }
+
+insertTypeSummary :: String -> ElabType -> Env -> TypeCheckEnvSummary -> TypeCheckEnvSummary
+insertTypeSummary name ty env summary =
+  summary
+    { tcesTypeFreeVars =
+        replaceTypeFreeVars (Map.lookup name (typeEnv env)) ty (tcesTypeFreeVars summary)
+    }
+
+summaryFreeTypeVars :: TypeCheckEnvSummary -> Set.Set String
+summaryFreeTypeVars summary =
+  freeVarCountsSet (tcesTermFreeVars summary)
+    `Set.union` freeVarCountsSet (tcesTypeFreeVars summary)
+
+freeVarCountsFromTypes :: [ElabType] -> FreeVarCounts
+freeVarCountsFromTypes =
+  foldl' (\counts ty -> insertFreeVarSet (freeTypeVarsType ty) counts) emptyFreeVarCounts
+
+emptyFreeVarCounts :: FreeVarCounts
+emptyFreeVarCounts = FreeVarCounts Map.empty
+
+freeVarCountsSet :: FreeVarCounts -> Set.Set String
+freeVarCountsSet (FreeVarCounts counts) = Map.keysSet counts
+
+replaceTypeFreeVars :: Maybe ElabType -> ElabType -> FreeVarCounts -> FreeVarCounts
+replaceTypeFreeVars oldTy newTy =
+  insertFreeVarSet (freeTypeVarsType newTy)
+    . maybe id (deleteFreeVarSet . freeTypeVarsType) oldTy
+
+insertFreeVarSet :: Set.Set String -> FreeVarCounts -> FreeVarCounts
+insertFreeVarSet vars (FreeVarCounts counts) =
+  FreeVarCounts (Set.foldl' (\acc name -> Map.insertWith (+) name 1 acc) counts vars)
+
+deleteFreeVarSet :: Set.Set String -> FreeVarCounts -> FreeVarCounts
+deleteFreeVarSet vars (FreeVarCounts counts) =
+  FreeVarCounts (Set.foldl' deleteOne counts vars)
+  where
+    deleteOne acc name =
+      Map.update
+        ( \count ->
+            let count' = count - 1
+             in if count' <= 0 then Nothing else Just count'
+        )
+        name
+        acc
 
 inlineTypeEnvBounds :: Env -> ElabType -> ElabType
 inlineTypeEnvBounds env = go Set.empty

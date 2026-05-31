@@ -35,6 +35,7 @@ module MLF.Constraint.Presolution.EdgeProcessing.Worklist
     , invalidateExpansionsExcept
     , invalidateExpansionsWithinRootOwnersExcept
     , invalidateQueuedExpansionsExcept
+    , invalidateRootsOwnersExpansionsWithinRootOwnersExcept
     , queuedEdgeCount
     , indexedEdgeCount
     , rootOwnershipOfWorklist
@@ -404,6 +405,76 @@ invalidateQueuedExpansionsExcept excluded expansions worklist =
        , worklist { ewCore = core' }
        )
 
+invalidateRootsOwnersExpansionsWithinRootOwnersExcept
+    :: IntSet
+    -> IntSet
+    -> IntSet
+    -> IntSet
+    -> IntSet
+    -> EdgeWorklist
+    -> (WorklistInvalidation, WorklistInvalidation, WorklistInvalidation, EdgeWorklist)
+invalidateRootsOwnersExpansionsWithinRootOwnersExcept excluded roots owners expansions rootOwners worklist =
+    let withinEntry
+            | IntSet.null rootOwners = Nothing
+            | otherwise =
+                Just
+                    Indexed.WorklistIndexEntry
+                        { Indexed.wieIndex = rootOwnerIndex
+                        , Indexed.wieKeys = rootOwners
+                        }
+        rootEntry =
+            Indexed.WorklistIndexEntry
+                { Indexed.wieIndex = rootIndex
+                , Indexed.wieKeys = roots
+                }
+        ownerEntry =
+            Indexed.WorklistIndexEntry
+                { Indexed.wieIndex = ownerIndex
+                , Indexed.wieKeys = owners
+                }
+        expansionEntry =
+            Indexed.WorklistIndexEntry
+                { Indexed.wieIndex = expansionIndex
+                , Indexed.wieKeys = expansions
+                }
+        (rootInvalidation, ownerInvalidation, expInvalidation, core') =
+            Indexed.invalidateIndexedKeyTripleExceptWithin
+                excluded
+                rootEntry
+                ownerEntry
+                expansionEntry
+                withinEntry
+                (ewCore worklist)
+    in ( rootsInvalidation rootInvalidation
+       , ownersInvalidation ownerInvalidation
+       , expansionsInvalidation expInvalidation
+       , worklist { ewCore = core' }
+       )
+  where
+    rootsInvalidation invalidation =
+        WorklistInvalidation
+            { wiRoots = roots
+            , wiOwners = IntSet.empty
+            , wiExpansions = IntSet.empty
+            , wiEdges = Indexed.iwiInvalidatedItemKeys invalidation
+            }
+
+    ownersInvalidation invalidation =
+        WorklistInvalidation
+            { wiRoots = IntSet.empty
+            , wiOwners = owners
+            , wiExpansions = IntSet.empty
+            , wiEdges = Indexed.iwiInvalidatedItemKeys invalidation
+            }
+
+    expansionsInvalidation invalidation =
+        WorklistInvalidation
+            { wiRoots = IntSet.empty
+            , wiOwners = IntSet.empty
+            , wiExpansions = expansions
+            , wiEdges = Indexed.iwiInvalidatedItemKeys invalidation
+            }
+
 queuedEdgeCount :: EdgeWorklist -> Int
 queuedEdgeCount = Indexed.queuedIndexedItemCount . ewCore
 
@@ -445,10 +516,10 @@ indexEdge edgeKey roots mbOwner mbExpVar rootOwners worklist =
             indexRootOwners $
                 indexExpansion $
                     indexOwner $
-                        Indexed.indexWorkItemKeyList
+                        Indexed.indexWorkItemKeys
                             edgeKey
                             rootIndex
-                            (map getNodeId roots)
+                            (IntSet.fromList (map getNodeId roots))
                             (ewCore worklist)
         }
   where
