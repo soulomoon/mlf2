@@ -3,6 +3,9 @@
 ## Unreleased
 
 ### Changed
+- Reused finalized canonical bind-parent maps when building elaboration read
+  models, avoiding a repeated structural canonicalization pass in the
+  parser-library hot path.
 - Canonicalized structure-unification cache keys before recording seen pairs,
   so same-root structure edges skip cleanly without poisoning later structural
   work.

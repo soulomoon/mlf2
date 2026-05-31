@@ -31,7 +31,7 @@ import MLF.Constraint.Types.Graph
     , nodeRefKey
     , toListNode
     )
-import MLF.Reify.Named (softenedBindParentsUnder)
+import MLF.Reify.Named (softenCanonicalBindParentsUnder)
 import MLF.Util.ElabError (ElabError, bindingToElab)
 
 data ElabReadModel p = ElabReadModel
@@ -48,7 +48,11 @@ data ElabReadModel p = ElabReadModel
 
 buildElabReadModel :: PresolutionView p -> Either ElabError (ElabReadModel p)
 buildElabReadModel presolutionView = do
-    softBindParents <- softenedBindParentsUnder canonical canonicalConstraint
+    let softBindParents =
+            softenCanonicalBindParentsUnder
+                canonical
+                canonicalConstraint
+                (cBindParents canonicalConstraint)
     let softChildren = bindParentChildren softBindParents
         namedSet = namedNodesFromSoftParents canonical originalConstraint softBindParents
     pure
