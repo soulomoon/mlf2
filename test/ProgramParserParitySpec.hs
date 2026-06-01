@@ -44,6 +44,15 @@ spec =
             canonicalProjection `shouldBe` expected
             sharedParserProjection `shouldBe` Right expected
 
+        it "shared parser-owned .mlfp parser parses first-class polymorphic source types" $ do
+            source <- readFile firstClassPolymorphismSourceTypesCanonicalSourcePath
+            expected <- readFile firstClassPolymorphismSourceTypesExpectedProjectionPath
+            canonicalProjection <- renderCanonicalProjection firstClassPolymorphismSourceTypesCanonicalSourcePath source
+            sharedParserProjection <- runSharedParserBatch firstClassPolymorphismSourceTypesParserProgramRoot
+
+            canonicalProjection `shouldBe` expected
+            sharedParserProjection `shouldBe` Right expected
+
         beforeAll loadParserParityBatchFixture $ do
             it "runs all .mlfp parser parity fixtures through one generated public CLI driver" $ \fixture ->
                 batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
@@ -83,6 +92,12 @@ spec =
                 batchExpectedOutput fixture
                     `shouldSatisfy` isInfixOf
                         (batchSection "negative:text-literal-malformed" textLiteralMalformedNegativeEvidenceProjection)
+
+            it "parser-owned .mlfp parser reports malformed first-class polymorphic source-type diagnostics through public run-program" $ \fixture -> do
+                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
+                batchExpectedOutput fixture
+                    `shouldSatisfy` isInfixOf
+                        (batchSection "negative:first-class-polymorphism-source-type" firstClassPolymorphismSourceTypeNegativeEvidenceProjection)
 
             it "shared parser-owned .mlfp parser library routes the generated batch through one entrypoint" $ \fixture -> do
                 sharedParserExists <- doesFileExist (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
@@ -218,6 +233,10 @@ textLiteralCharStringCanonicalSourcePath :: FilePath
 textLiteralCharStringCanonicalSourcePath =
     "test/conformance/mlfp/parser-parity/text-literal-char-string/src/Main.mlfp"
 
+firstClassPolymorphismSourceTypesCanonicalSourcePath :: FilePath
+firstClassPolymorphismSourceTypesCanonicalSourcePath =
+    "test/conformance/mlfp/parser-parity/first-class-polymorphism-source-types/src/Main.mlfp"
+
 expectedProjectionPath :: FilePath
 expectedProjectionPath =
     "test/conformance/mlfp/parser-parity/basic-module-def-bool/expected/parser-program.txt"
@@ -302,6 +321,10 @@ textLiteralCharStringExpectedProjectionPath :: FilePath
 textLiteralCharStringExpectedProjectionPath =
     "test/conformance/mlfp/parser-parity/text-literal-char-string/expected/parser-program.txt"
 
+firstClassPolymorphismSourceTypesExpectedProjectionPath :: FilePath
+firstClassPolymorphismSourceTypesExpectedProjectionPath =
+    "test/conformance/mlfp/parser-parity/first-class-polymorphism-source-types/expected/parser-program.txt"
+
 sharedParserLibraryRoot :: FilePath
 sharedParserLibraryRoot =
     "test/programs/compiler-parser-parity/parser-library"
@@ -309,6 +332,10 @@ sharedParserLibraryRoot =
 textLiteralCharStringParserProgramRoot :: FilePath
 textLiteralCharStringParserProgramRoot =
     "test/programs/compiler-parser-parity/text-literal-char-string"
+
+firstClassPolymorphismSourceTypesParserProgramRoot :: FilePath
+firstClassPolymorphismSourceTypesParserProgramRoot =
+    "test/programs/compiler-parser-parity/first-class-polymorphism-source-types"
 
 sharedParserAuditFiles :: [FilePath]
 sharedParserAuditFiles =
@@ -356,6 +383,8 @@ sharedParserBannedPhrases =
     , concat ["LexerOk ", "multi", "Module", "Tokens"]
     , concat ["LexerOk ", "abstract", "Export", "Tokens"]
     , concat ["LexerOk ", "recursive", "Adt", "Tokens"]
+    , concat ["First", "Class", "Polymorphism", "Tokens"]
+    , concat ["LexerOk ", "first", "Class", "Polymorphism", "Tokens"]
     , concat ["case", " tokens"]
     , concat ["class", " tokens"]
     , concat ["instance", " tokens"]
@@ -369,6 +398,7 @@ sharedParserBannedPhrases =
     , concat ["multi-module", " tokens"]
     , concat ["abstract-export", " tokens"]
     , concat ["recursive-adt", " tokens"]
+    , concat ["first-class-polymorphism-source-types", " tokens"]
     ]
 
 sharedParserFixedOffsetPhrases :: [String]
@@ -425,6 +455,7 @@ sharedParserShortcutPhrases =
         , sharedParserRound317ShortcutPhrases
         , sharedParserRound318ShortcutPhrases
         , sharedParserRound319ShortcutPhrases
+        , sharedParserRound320ShortcutPhrases
         ]
 
 sharedParserRound314ShortcutPhrases :: [String]
@@ -618,6 +649,23 @@ sharedParserRound319ShortcutPhrases =
     , "text-literal parser negative unexpected-source@"
     ]
 
+sharedParserRound320ShortcutPhrases :: [String]
+sharedParserRound320ShortcutPhrases =
+    [ concat ["parse", "First", "Class", "Polymorphism"]
+    , concat ["completeModuleKey \"", "first-class-polymorphism-source-types", "\""]
+    , concat ["moduleKey \"", "first-class-polymorphism-source-types", "\""]
+    , concat ["programKey \"", "first-class-polymorphism-source-types", "\""]
+    , concat ["First", "Class", "Polymorphism", "Tokens"]
+    , concat ["LexerOk ", "first", "Class", "Polymorphism", "Tokens"]
+    , concat ["first-class-polymorphism-source-types", " tokens"]
+    , concat ["defRows sourceFile \"", "usePoly", "\""]
+    , concat ["defRows sourceFile \"", "id", "\""]
+    , concat ["def usePoly type=", "(∀a. a -> a) -> Bool"]
+    , concat ["def id type=", "∀a. a -> a"]
+    , concat ["def main type=Bool expr=", "usePoly id"]
+    , concat ["first-class-polymorphism parser negative ", "expected-constructor-forall-dot@"]
+    ]
+
 sharedParserCompleteParseRequiredPhrases :: [String]
 sharedParserCompleteParseRequiredPhrases =
     [ "parserStateAtEnd state"
@@ -721,6 +769,7 @@ parserParityPositiveCases =
     , ParserParityPositiveCase "positive:multi-module-abstract-export-import" "positiveMultiModuleAbstractExportImport" multiModuleAbstractExportImportCanonicalSourcePath multiModuleAbstractExportImportExpectedProjectionPath
     , ParserParityPositiveCase "positive:multi-module-recursive-adt-export-import" "positiveMultiModuleRecursiveAdtExportImport" multiModuleRecursiveAdtExportImportCanonicalSourcePath multiModuleRecursiveAdtExportImportExpectedProjectionPath
     , ParserParityPositiveCase "positive:text-literal-char-string" "positiveTextLiteralCharString" textLiteralCharStringCanonicalSourcePath textLiteralCharStringExpectedProjectionPath
+    , ParserParityPositiveCase "positive:first-class-polymorphism-source-types" "positiveFirstClassPolymorphismSourceTypes" firstClassPolymorphismSourceTypesCanonicalSourcePath firstClassPolymorphismSourceTypesExpectedProjectionPath
     ]
 
 parserParityNegativeCases :: [ParserParityNegativeCase]
@@ -738,6 +787,7 @@ parserParityNegativeCases =
     , ParserParityNegativeCase "negative:qualified-import-alias-references" "negativeQualifiedImportAliasReferences" "qualified-import-alias parser negative " qualifiedImportAliasReferencesCanonicalSourcePath qualifiedImportAliasNegativeSourceText qualifiedImportAliasNegativeEvidenceProjection
     , ParserParityNegativeCase "negative:multi-module-import-exposing-separator" "negativeMultiModuleImportExposingSeparator" "multi-module import-exposing parser negative " multiModuleAbstractExportImportCanonicalSourcePath importExposingSeparatorNegativeSourceText importExposingSeparatorNegativeEvidenceProjection
     , ParserParityNegativeCase "negative:text-literal-malformed" "negativeTextLiteralMalformed" "text-literal parser negative " textLiteralCharStringCanonicalSourcePath textLiteralMalformedNegativeSourceText textLiteralMalformedNegativeEvidenceProjection
+    , ParserParityNegativeCase "negative:first-class-polymorphism-source-type" "negativeFirstClassPolymorphismSourceType" "first-class-polymorphism parser negative " firstClassPolymorphismSourceTypesCanonicalSourcePath firstClassPolymorphismSourceTypeNegativeSourceText firstClassPolymorphismSourceTypeNegativeEvidenceProjection
     ]
 
 assertCanonicalParserParityProjection :: ParserParityPositiveCase -> IO ()
@@ -1083,6 +1133,19 @@ textLiteralMalformedNegativeSourceText =
         , "}"
         ]
 
+firstClassPolymorphismSourceTypeNegativeSourceText :: String
+firstClassPolymorphismSourceTypeNegativeSourceText =
+    unlines
+        [ "module FirstClassPolymorphism export (usePoly, id, main) {"
+        , "  def usePoly : (∀ a. a -> a) -> Bool ="
+        , "    λ(poly : ∀ a. a -> a) let x = poly 1 in poly true;"
+        , ""
+        , "  def id : ∀ a a -> a = λx x;"
+        , ""
+        , "  def main : Bool = usePoly id;"
+        , "}"
+        ]
+
 retryEvidenceProjection :: String
 retryEvidenceProjection =
     unlines
@@ -1167,6 +1230,16 @@ textLiteralMalformedNegativeEvidenceProjection :: String
 textLiteralMalformedNegativeEvidenceProjection =
     unlines
         [ "text-literal parser negative unexpected-source@test/conformance/mlfp/parser-parity/text-literal-char-string/src/Main.mlfp:3:47"
+        ]
+
+firstClassPolymorphismSourceTypeNegativeEvidenceProjection :: String
+firstClassPolymorphismSourceTypeNegativeEvidenceProjection =
+    unlines
+        [ concat
+            [ "first-class-polymorphism parser negative "
+            , "expected-constructor-forall-dot@"
+            , "test/conformance/mlfp/parser-parity/first-class-polymorphism-source-types/src/Main.mlfp:5:16-5:17"
+            ]
         ]
 
 renderCanonicalProjection :: FilePath -> String -> IO String

@@ -3,7 +3,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
   import ParserParityAst exposing (ParsedModule(..), renderParsedModule);
   import ParserParityDiagnostic exposing (ParserDiagnostic(..));
   import ParserParityLexer exposing (LexerResult(..), nextLineNumber, tokenizeCompleteModule);
-  import ParserParityParserCombinator exposing (Parser, ParserEnd(..), ParserState(..), ParserStep(..), ParserValue(..), captureSpan, diagnosticLabel, expectIdentifierToken, expectToken, expectTokenPrefix, labelCaseBranchArrow, labelConstructorColon, labelConstructorForallDot, labelDefSemicolon, labelEquals, labelFunctionalDependencyArrow, labelImportAlias, labelImportSemicolon, labelInstanceMethodEquals, labelLetAnnotationType, labelLetIn, labelTypeFamilyEquationEquals, labelUnexpectedSource, parserBind, parserChoice, parserCurrentTokenStartOr, parserFail, parserFailExpectedImportExposingSeparatorAtCurrent, parserFailExpectedImportSemicolonAtCurrent, parserPure, parserReturnAtEndOr, parserStateAtEnd, runParser);
+  import ParserParityParserCombinator exposing (Parser, ParserEnd(..), ParserState(..), ParserStep(..), ParserValue(..), captureSpan, diagnosticLabel, expectIdentifierToken, expectToken, expectTokenPrefix, labelCaseBranchArrow, labelConstructorColon, labelConstructorForallDot, labelDefSemicolon, labelEquals, labelFunctionalDependencyArrow, labelImportAlias, labelImportSemicolon, labelInstanceMethodEquals, labelLetAnnotationType, labelLetIn, labelTypeFamilyEquationEquals, labelUnexpectedSource, parserBind, parserChoice, parserCurrentTokenStartOr, parserFail, parserFailExpectedConstructorForallDotAtCurrent, parserFailExpectedImportExposingSeparatorAtCurrent, parserFailExpectedImportSemicolonAtCurrent, parserPure, parserReturnAtEndOr, parserStateAtEnd, runParser);
   import ParserParitySource exposing (basicBoolLiteralSpan, basicUnexpectedSpan, caseBranchArrowSpan, constructorForallDotSpan, dataZeroColonSpan, existentialForallExprDataSpan, existentialForallMainDefSpan, existentialForallModuleSpan, existentialForallNatDataSpan, existentialForallSomeExprDataSpan, existentialForallUnwrapSomeDefSpan, importBoolSemicolonSpan, letInSpan, lexerUnknownSpan, multiparamFundepArrowSpan, qualifiedImportAliasDiagnosticSpan, recursiveGadtDoneNowDefSpan, recursiveGadtExprDataSpan, recursiveGadtMainDefSpan, recursiveGadtModuleSpan, recursiveGadtNatDataSpan, renderSpan, typedLetForallSpan, typeFamilyEquationEqualsSpan, typeclassInstanceMethodEqualsSpan, valueFirstDefSemicolonSpan);
   import ParserParityToken exposing (ParserInput(..), TokenKind(..), renderTokenPrefixEvidence, tokenEnd, tokenSpan, tokenStart, tokenText);
 
@@ -108,6 +108,10 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
     λ(_start : ParserValue)
       labelConstructorForallDot
         (parserChoice (expectText ".") (parserFail (ExpectedConstructorForallDot constructorForallDotSpan)));
+
+  def expectForallDotParser : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserChoice (expectText ".") parserFailExpectedConstructorForallDotAtCurrent;
 
   def expectText : String -> Parser ParserValue =
     λ(text : String) expectComplete (TokenKind text);
@@ -231,6 +235,25 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
       ValueModuleKey coordinate -> coordinate;
       ValueProjectionRows _ -> basicUnexpectedSpan;
       ValueUnit -> basicUnexpectedSpan
+    };
+
+  def parserTextFromValue : ParserValue -> String =
+    λ(value : ParserValue) case value of {
+      ValueProjectionRows text -> text;
+      ValueToken token -> tokenText token;
+      ValueModuleKey _ -> "unknown";
+      ValueUnit -> "unknown"
+    };
+
+  def parserTextValue : String -> Parser ParserValue =
+    λ(text : String) parserPure (ValueProjectionRows text);
+
+  def intLiteralTextFromValue : ParserValue -> String =
+    λ(value : ParserValue) case value of {
+      ValueToken token -> stringDrop (tokenText token) 4;
+      ValueModuleKey _ -> "unknown";
+      ValueProjectionRows _ -> "unknown";
+      ValueUnit -> "unknown"
     };
 
   def spanFromStartToCoordinate : String -> ParserValue -> String =
@@ -479,7 +502,342 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
   def parseProgramModuleBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_openModule : ParserValue)
       parserChoice (parseDeclarationLedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)
-        (parseImportLedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit);
+        (parserChoice
+          (parseImportLedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)
+          (parseDefinitionLedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit));
+
+  def parseDefinitionLedBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
+      parserBind (parseSourceDefinitionRows sourceFile ValueUnit)
+        (parseSecondSourceDefinitionRows sourceFile moduleStart moduleName exportRows);
+
+  def parseSecondSourceDefinitionRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(firstRows : ParserValue)
+      parserBind (parseSourceDefinitionRows sourceFile ValueUnit)
+        (appendFirstSecondSourceDefinitionRows sourceFile moduleStart moduleName exportRows firstRows);
+
+  def appendFirstSecondSourceDefinitionRows : String -> String -> String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(firstRows : ParserValue) λ(secondRows : ParserValue)
+      parserBind (appendProjectionValues firstRows secondRows)
+        (parseThirdSourceDefinitionRows sourceFile moduleStart moduleName exportRows);
+
+  def parseThirdSourceDefinitionRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(firstTwoRows : ParserValue)
+      parserBind (parseSourceDefinitionRows sourceFile ValueUnit)
+        (finishExactModuleBodyRows sourceFile moduleStart moduleName exportRows firstTwoRows);
+
+  def parseSourceDefinitionRows : String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(_start : ParserValue)
+      parserBind (expectText "def")
+        (parseSourceDefinitionName sourceFile);
+
+  def parseSourceDefinitionName : String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(defToken : ParserValue)
+      parserBind expectAnyIdentifier
+        (parseSourceDefinitionColon sourceFile (tokenStartCoordinate defToken));
+
+  def parseSourceDefinitionColon : String -> String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(defStart : String) λ(nameToken : ParserValue)
+      parserBind (expectText ":")
+        (parseSourceDefinitionType sourceFile defStart nameToken);
+
+  def parseSourceDefinitionType : String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(defStart : String) λ(nameToken : ParserValue) λ(_colon : ParserValue)
+      parserBind (parseSourceType ValueUnit)
+        (parseSourceDefinitionEquals sourceFile defStart nameToken);
+
+  def parseSourceDefinitionEquals : String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(defStart : String) λ(nameToken : ParserValue) λ(typeValue : ParserValue)
+      parserBind (expectEqualsParser ValueUnit)
+        (parseSourceDefinitionExpression sourceFile defStart nameToken typeValue);
+
+  def parseSourceDefinitionExpression : String -> String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(defStart : String) λ(nameToken : ParserValue) λ(typeValue : ParserValue) λ(_equals : ParserValue)
+      parserBind (parseSourceExpression ValueUnit)
+        (parseSourceDefinitionSemicolon sourceFile defStart nameToken typeValue);
+
+  def parseSourceDefinitionSemicolon : String -> String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(defStart : String) λ(nameToken : ParserValue) λ(typeValue : ParserValue) λ(exprValue : ParserValue)
+      parserBind (expectText ";")
+        (finishSourceDefinitionRows sourceFile defStart nameToken typeValue exprValue);
+
+  def finishSourceDefinitionRows : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(defStart : String) λ(nameToken : ParserValue) λ(typeValue : ParserValue) λ(exprValue : ParserValue) λ(semicolon : ParserValue)
+      parserBind (parserCurrentTokenStartOr (tokenEndCoordinate semicolon))
+        (λ(defEnd : ParserValue)
+          projectionText
+            (defRows sourceFile
+              (identifierNameFromValue nameToken)
+              (parserTextFromValue typeValue)
+              (parserTextFromValue exprValue)
+              (spanFromStartToCoordinate defStart defEnd)));
+
+  def parseSourceType : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserChoice (parseForallSourceType ValueUnit) (parseSourceArrowType ValueUnit);
+
+  def parseSourceArrowType : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (parseSourceTypeAtom ValueUnit)
+        parseSourceTypeArrowTail;
+
+  def parseSourceTypeArrowTail : ParserValue -> Parser ParserValue =
+    λ(leftType : ParserValue)
+      parserChoice
+        (parserBind (expectText "->") (parseSourceTypeCodomain leftType))
+        (parserPure leftType);
+
+  def parseSourceTypeCodomain : ParserValue -> ParserValue -> Parser ParserValue =
+    λ(leftType : ParserValue) λ(_arrow : ParserValue)
+      parserBind (parseSourceTypeAtom ValueUnit)
+        (finishSourceArrowType leftType);
+
+  def finishSourceArrowType : ParserValue -> ParserValue -> Parser ParserValue =
+    λ(leftType : ParserValue) λ(rightType : ParserValue)
+      parserTextValue
+        (stringAppend
+          (parserTextFromValue leftType)
+          (stringAppend " -> " (parserTextFromValue rightType)));
+
+  def parseSourceTypeAtom : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserChoice (parseParenthesizedSourceType ValueUnit) (parseNamedSourceType ValueUnit);
+
+  def parseParenthesizedSourceType : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "(")
+        parseParenthesizedSourceTypeBody;
+
+  def parseParenthesizedSourceTypeBody : ParserValue -> Parser ParserValue =
+    λ(_openType : ParserValue)
+      parserBind
+        (parserChoice (parseForallSourceType ValueUnit) (parseSimpleArrowSourceType ValueUnit))
+        parseParenthesizedSourceTypeClose;
+
+  def parseParenthesizedSourceTypeClose : ParserValue -> Parser ParserValue =
+    λ(typeValue : ParserValue)
+      parserBind (expectText ")")
+        (finishParenthesizedSourceType typeValue);
+
+  def finishParenthesizedSourceType : ParserValue -> ParserValue -> Parser ParserValue =
+    λ(typeValue : ParserValue) λ(_closeType : ParserValue)
+      parserTextValue
+        (stringAppend "(" (stringAppend (parserTextFromValue typeValue) ")"));
+
+  def parseNamedSourceType : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind expectAnyIdentifier
+        finishNamedSourceType;
+
+  def finishNamedSourceType : ParserValue -> Parser ParserValue =
+    λ(nameToken : ParserValue)
+      parserTextValue (identifierNameFromValue nameToken);
+
+  def parseForallSourceType : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "forall")
+        parseForallSourceTypeBinder;
+
+  def parseForallSourceTypeBinder : ParserValue -> Parser ParserValue =
+    λ(_forallToken : ParserValue)
+      parserBind expectAnyIdentifier
+        parseForallSourceTypeDot;
+
+  def parseForallSourceTypeDot : ParserValue -> Parser ParserValue =
+    λ(binderToken : ParserValue)
+      parserBind (expectForallDotParser ValueUnit)
+        (parseForallSourceTypeBody binderToken);
+
+  def parseForallSourceTypeBody : ParserValue -> ParserValue -> Parser ParserValue =
+    λ(binderToken : ParserValue) λ(_dot : ParserValue)
+      parserBind (parseSimpleArrowSourceType ValueUnit)
+        (finishForallSourceType binderToken);
+
+  def finishForallSourceType : ParserValue -> ParserValue -> Parser ParserValue =
+    λ(binderToken : ParserValue) λ(bodyType : ParserValue)
+      parserTextValue
+        (stringAppend
+          (stringAppend "∀" (identifierNameFromValue binderToken))
+          (stringAppend ". " (parserTextFromValue bodyType)));
+
+  def parseSimpleArrowSourceType : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (parseNamedSourceType ValueUnit)
+        parseSimpleArrowSourceTypeTail;
+
+  def parseSimpleArrowSourceTypeTail : ParserValue -> Parser ParserValue =
+    λ(leftType : ParserValue)
+      parserChoice
+        (parserBind (expectText "->") (parseSimpleArrowSourceTypeCodomain leftType))
+        (parserPure leftType);
+
+  def parseSimpleArrowSourceTypeCodomain : ParserValue -> ParserValue -> Parser ParserValue =
+    λ(leftType : ParserValue) λ(_arrow : ParserValue)
+      parserBind (parseNamedSourceType ValueUnit)
+        (finishSourceArrowType leftType);
+
+  def parseSourceExpression : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserChoice (parseAnnotatedLambdaExpression ValueUnit)
+        (parserChoice (parsePlainLambdaExpression ValueUnit)
+          (parserChoice (parseLetExpression ValueUnit) (parseApplicationOrAtomExpression ValueUnit)));
+
+  def parseAnnotatedLambdaExpression : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "lambda")
+        parseAnnotatedLambdaOpen;
+
+  def parseAnnotatedLambdaOpen : ParserValue -> Parser ParserValue =
+    λ(_lambda : ParserValue)
+      parserBind (expectText "(")
+        parseAnnotatedLambdaParam;
+
+  def parseAnnotatedLambdaParam : ParserValue -> Parser ParserValue =
+    λ(_openParam : ParserValue)
+      parserBind expectAnyIdentifier
+        parseAnnotatedLambdaParamColon;
+
+  def parseAnnotatedLambdaParamColon : ParserValue -> Parser ParserValue =
+    λ(paramToken : ParserValue)
+      parserBind (expectText ":")
+        (parseAnnotatedLambdaParamType paramToken);
+
+  def parseAnnotatedLambdaParamType : ParserValue -> ParserValue -> Parser ParserValue =
+    λ(paramToken : ParserValue) λ(_colon : ParserValue)
+      parserBind (parseSourceType ValueUnit)
+        (parseAnnotatedLambdaParamClose paramToken);
+
+  def parseAnnotatedLambdaParamClose : ParserValue -> ParserValue -> Parser ParserValue =
+    λ(paramToken : ParserValue) λ(typeValue : ParserValue)
+      parserBind (expectText ")")
+        (parseAnnotatedLambdaBody paramToken typeValue);
+
+  def parseAnnotatedLambdaBody : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(paramToken : ParserValue) λ(typeValue : ParserValue) λ(_closeParam : ParserValue)
+      parserBind
+        (parserChoice (parseLetExpression ValueUnit) (parseApplicationOrAtomExpression ValueUnit))
+        (finishAnnotatedLambdaExpression paramToken typeValue);
+
+  def finishAnnotatedLambdaExpression : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(paramToken : ParserValue) λ(typeValue : ParserValue) λ(bodyValue : ParserValue)
+      parserTextValue
+        (stringAppend "λ"
+          (stringAppend
+            (stringAppend
+              (stringAppend "(" (identifierNameFromValue paramToken))
+              (stringAppend " : " (parserTextFromValue typeValue)))
+            (stringAppend ") " (parserTextFromValue bodyValue))));
+
+  def parsePlainLambdaExpression : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "lambda")
+        parsePlainLambdaParam;
+
+  def parsePlainLambdaParam : ParserValue -> Parser ParserValue =
+    λ(_lambda : ParserValue)
+      parserBind expectAnyIdentifier
+        parsePlainLambdaBody;
+
+  def parsePlainLambdaBody : ParserValue -> Parser ParserValue =
+    λ(paramToken : ParserValue)
+      parserBind (parseApplicationOrAtomExpression ValueUnit)
+        (finishPlainLambdaExpression paramToken);
+
+  def finishPlainLambdaExpression : ParserValue -> ParserValue -> Parser ParserValue =
+    λ(paramToken : ParserValue) λ(bodyValue : ParserValue)
+      parserTextValue
+        (stringAppend "λ"
+          (stringAppend (identifierNameFromValue paramToken)
+            (stringAppend " " (parserTextFromValue bodyValue))));
+
+  def parseLetExpression : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "let")
+        parseLetExpressionName;
+
+  def parseLetExpressionName : ParserValue -> Parser ParserValue =
+    λ(_letToken : ParserValue)
+      parserBind expectAnyIdentifier
+        parseLetExpressionEquals;
+
+  def parseLetExpressionEquals : ParserValue -> Parser ParserValue =
+    λ(nameToken : ParserValue)
+      parserBind (expectText "=")
+        (parseLetExpressionRhs nameToken);
+
+  def parseLetExpressionRhs : ParserValue -> ParserValue -> Parser ParserValue =
+    λ(nameToken : ParserValue) λ(_equals : ParserValue)
+      parserBind (parseApplicationOrAtomExpression ValueUnit)
+        (parseSourceLetExpressionIn nameToken);
+
+  def parseSourceLetExpressionIn : ParserValue -> ParserValue -> Parser ParserValue =
+    λ(nameToken : ParserValue) λ(rhsValue : ParserValue)
+      parserBind (expectLetInParser ValueUnit)
+        (parseSourceLetExpressionBody nameToken rhsValue);
+
+  def parseSourceLetExpressionBody : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(nameToken : ParserValue) λ(rhsValue : ParserValue) λ(_inToken : ParserValue)
+      parserBind (parseApplicationOrAtomExpression ValueUnit)
+        (finishLetExpression nameToken rhsValue);
+
+  def finishLetExpression : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(nameToken : ParserValue) λ(rhsValue : ParserValue) λ(bodyValue : ParserValue)
+      parserTextValue
+        (stringAppend "let "
+          (stringAppend (identifierNameFromValue nameToken)
+            (stringAppend " = "
+              (stringAppend (parserTextFromValue rhsValue)
+                (stringAppend " in " (parserTextFromValue bodyValue))))));
+
+  def parseApplicationOrAtomExpression : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (parseExpressionAtom ValueUnit)
+        parseApplicationArgumentOrDone;
+
+  def parseApplicationArgumentOrDone : ParserValue -> Parser ParserValue =
+    λ(functionValue : ParserValue)
+      parserChoice
+        (parserBind (parseExpressionAtom ValueUnit) (finishApplicationExpression functionValue))
+        (parserPure functionValue);
+
+  def finishApplicationExpression : ParserValue -> ParserValue -> Parser ParserValue =
+    λ(functionValue : ParserValue) λ(argumentValue : ParserValue)
+      parserTextValue
+        (stringAppend (parserTextFromValue functionValue)
+          (stringAppend " " (parserTextFromValue argumentValue)));
+
+  def parseExpressionAtom : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserChoice (parseIdentifierExpressionAtom ValueUnit)
+        (parserChoice (parseIntExpressionAtom ValueUnit) (parseBoolExpressionAtom ValueUnit));
+
+  def parseIdentifierExpressionAtom : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind expectAnyIdentifier
+        finishIdentifierExpressionAtom;
+
+  def finishIdentifierExpressionAtom : ParserValue -> Parser ParserValue =
+    λ(nameToken : ParserValue)
+      parserTextValue (identifierNameFromValue nameToken);
+
+  def parseIntExpressionAtom : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectTokenPrefix "int:" basicUnexpectedSpan)
+        finishIntExpressionAtom;
+
+  def finishIntExpressionAtom : ParserValue -> Parser ParserValue =
+    λ(intToken : ParserValue)
+      parserTextValue (intLiteralTextFromValue intToken);
+
+  def parseBoolExpressionAtom : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserChoice
+        (parserBind (expectText "bool:true") (finishLiteralExpressionAtom "true"))
+        (parserBind (expectText "bool:false") (finishLiteralExpressionAtom "false"));
+
+  def finishLiteralExpressionAtom : String -> ParserValue -> Parser ParserValue =
+    λ(text : String) λ(_token : ParserValue)
+      parserTextValue text;
 
   def parseProjectionExportList : String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(_start : ParserValue)

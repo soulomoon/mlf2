@@ -1,0 +1,24 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-320",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-004",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-004",
+  "milestone_id": "milestone-4",
+  "direction_id": "direction-4a-canonical-parser-parity",
+  "extracted_item_id": "item-320-parser-library-first-class-polymorphism-source-type-extension",
+  "decision": "approved",
+  "evidence_summary": "Approved: branch fresh at origin/master 48a26d928062a9a8429f1e74dc9975c3b3e284af; focused first-class and malformed source-type matchers passed; shortcut audits found no matches; parser-parity group passed 13 examples; 22 direct parser-parity fixture smokes diffed cleanly; cabal build all, cabal test with 2660 examples, and thesis gate passed.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-4-completion",
+        "text": "round-320 completed item-320-parser-library-first-class-polymorphism-source-type-extension: shared parser-owned source-text parser library parses first-class polymorphic source types and public malformed source-type diagnostics; evidence: focused parser matchers, shortcut audits, 22 direct fixture smokes, parser-parity group, cabal build all, cabal test, and thesis gate passed."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}

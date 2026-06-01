@@ -74,4 +74,8 @@ value/type/constructor/class/method references, and one malformed import-alias
 diagnostic path, plus two complete multi-module export/import fixtures
 covering abstract exports/imports, recursive ADT constructor exports/imports,
 cross-module references, and one malformed import-exposing separator
-diagnostic path.
+diagnostic path, plus one text-literal fixture covering character/string
+literals with Unicode contents and malformed string diagnostics, plus one
+first-class polymorphic source-type fixture covering definition types, lambda
+parameter annotations, let/application use of the polymorphic value, and a
+malformed forall-dot source-type diagnostic path.

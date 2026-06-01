@@ -1,0 +1,8 @@
+module FirstClassPolymorphism export (usePoly, id, main) {
+  def usePoly : (∀ a. a -> a) -> Bool =
+    λ(poly : ∀ a. a -> a) let x = poly 1 in poly true;
+
+  def id : ∀ a. a -> a = λx x;
+
+  def main : Bool = usePoly id;
+}

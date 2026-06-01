@@ -1,4 +1,4 @@
-module ParserParityParserCombinator export (ParserState(..), ParserValue(..), ParserStep(..), Parser(..), ParserEnd(..), runParser, parserPure, parserFail, parserFailExpectedImportSemicolonAtCurrent, parserFailExpectedImportExposingSeparatorAtCurrent, parserBind, parserMap, parserChoice, parserReturnAtEndOr, parserCurrentTokenStartOr, captureSpan, diagnosticLabel, labelUnexpectedSource, labelEquals, labelImportSemicolon, labelImportAlias, labelDefSemicolon, labelLetIn, labelLetAnnotationType, labelConstructorColon, labelCaseBranchArrow, labelInstanceMethodEquals, labelFunctionalDependencyArrow, labelTypeFamilyEquationEquals, labelConstructorForallDot, expectToken, expectIdentifierToken, expectTokenPrefix, parserStateAtEnd) {
+module ParserParityParserCombinator export (ParserState(..), ParserValue(..), ParserStep(..), Parser(..), ParserEnd(..), runParser, parserPure, parserFail, parserFailExpectedImportSemicolonAtCurrent, parserFailExpectedImportExposingSeparatorAtCurrent, parserFailExpectedConstructorForallDotAtCurrent, parserBind, parserMap, parserChoice, parserReturnAtEndOr, parserCurrentTokenStartOr, captureSpan, diagnosticLabel, labelUnexpectedSource, labelEquals, labelImportSemicolon, labelImportAlias, labelDefSemicolon, labelLetIn, labelLetAnnotationType, labelConstructorColon, labelCaseBranchArrow, labelInstanceMethodEquals, labelFunctionalDependencyArrow, labelTypeFamilyEquationEquals, labelConstructorForallDot, expectToken, expectIdentifierToken, expectTokenPrefix, parserStateAtEnd) {
   import Prelude exposing (Option(..), stringIndexOf);
   import ParserParityDiagnostic exposing (ParserDiagnostic(..));
   import ParserParitySource exposing (ParserSourceInput(..), ParserSourceSymbol(..), basicUnexpectedSpan);
@@ -59,6 +59,11 @@ module ParserParityParserCombinator export (ParserState(..), ParserValue(..), Pa
     (Parser
       (λ(state : ParserState)
         ParserStepError (ExpectedImportExposingSeparator (currentTokenSpanOr basicUnexpectedSpan state))) : Parser ParserValue);
+
+  def parserFailExpectedConstructorForallDotAtCurrent : Parser ParserValue =
+    (Parser
+      (λ(state : ParserState)
+        ParserStepError (ExpectedConstructorForallDot (currentTokenSpanOr basicUnexpectedSpan state))) : Parser ParserValue);
 
   def parserBind : Parser ParserValue -> (ParserValue -> Parser ParserValue) -> Parser ParserValue =
     λ(parser : Parser ParserValue) λ(next : ParserValue -> Parser ParserValue)

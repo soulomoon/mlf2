@@ -1,0 +1,7 @@
+module ParserParityFixture export (sourceFile, sourceText) {
+  def sourceFile : String =
+    "test/conformance/mlfp/parser-parity/first-class-polymorphism-source-types/src/Main.mlfp";
+
+  def sourceText : String =
+    "module FirstClassPolymorphism export (usePoly, id, main) {\n  def usePoly : (∀ a. a -> a) -> Bool =\n    λ(poly : ∀ a. a -> a) let x = poly 1 in poly true;\n\n  def id : ∀ a. a -> a = λx x;\n\n  def main : Bool = usePoly id;\n}\n";
+}

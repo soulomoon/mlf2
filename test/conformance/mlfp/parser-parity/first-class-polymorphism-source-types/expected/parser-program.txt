@@ -1,0 +1,7 @@
+module FirstClassPolymorphism span=test/conformance/mlfp/parser-parity/first-class-polymorphism-source-types/src/Main.mlfp:1:1-9:1
+export value usePoly span=test/conformance/mlfp/parser-parity/first-class-polymorphism-source-types/src/Main.mlfp:1:39-1:46
+export value id span=test/conformance/mlfp/parser-parity/first-class-polymorphism-source-types/src/Main.mlfp:1:48-1:50
+export value main span=test/conformance/mlfp/parser-parity/first-class-polymorphism-source-types/src/Main.mlfp:1:52-1:56
+def usePoly type=(∀a. a -> a) -> Bool expr=λ(poly : ∀a. a -> a) let x = poly 1 in poly true span=test/conformance/mlfp/parser-parity/first-class-polymorphism-source-types/src/Main.mlfp:2:3-5:3
+def id type=∀a. a -> a expr=λx x span=test/conformance/mlfp/parser-parity/first-class-polymorphism-source-types/src/Main.mlfp:5:3-7:3
+def main type=Bool expr=usePoly id span=test/conformance/mlfp/parser-parity/first-class-polymorphism-source-types/src/Main.mlfp:7:3-8:1
