@@ -1,3 +1,23 @@
+## 2026-06-02 - Round 321 parser parity higher-order partial-application extension
+
+- Extended the shared parser-owned parser-parity source-text lexer/parser
+  library with a bounded higher-order partial-application slice covering
+  nested plain lambda bodies, parenthesized expression atoms, function-valued
+  source types, and identifier-boundary token recognition.
+- Added the committed parser-program projection fixture for
+  `higher-order-partial-application`, plus a thin `.mlfp` fixture root that
+  exposes only `sourceFile` and `sourceText` before calling
+  `renderParserParityProjectionFromSourceText`.
+- Added public parser-parity coverage for malformed parenthesized partial
+  application through `renderParserNegativeEvidenceFromSourceText`, with the
+  parser-owned `expected-expression-close-paren@...` diagnostic evidence.
+- Extended shortcut/static guards for round-specific parser/token/projection
+  shortcuts, including fixture-specific token streams, success keys, and
+  pre-rendered `keepLeft`/`apply`/`main` rows.
+- Scope remains bounded parser parity only. This is not full parser parity,
+  resolver, checker, backend, compiler-package, driver, platform, proof, or
+  self-boot progress.
+
 ## 2026-06-01 - Round 318 parser parity rejected-shape retry
 
 - Repaired the shared parser-library complete-program path after review

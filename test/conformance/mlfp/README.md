@@ -78,4 +78,7 @@ diagnostic path, plus one text-literal fixture covering character/string
 literals with Unicode contents and malformed string diagnostics, plus one
 first-class polymorphic source-type fixture covering definition types, lambda
 parameter annotations, let/application use of the polymorphic value, and a
-malformed forall-dot source-type diagnostic path.
+malformed forall-dot source-type diagnostic path, plus one higher-order
+partial-application fixture covering nested plain lambda bodies,
+parenthesized expression atoms, function-valued partial application, and a
+malformed missing-close-paren diagnostic path.

@@ -53,6 +53,15 @@ spec =
             canonicalProjection `shouldBe` expected
             sharedParserProjection `shouldBe` Right expected
 
+        it "shared parser-owned .mlfp parser parses higher-order partial applications" $ do
+            source <- readFile higherOrderPartialApplicationCanonicalSourcePath
+            expected <- readFile higherOrderPartialApplicationExpectedProjectionPath
+            canonicalProjection <- renderCanonicalProjection higherOrderPartialApplicationCanonicalSourcePath source
+            sharedParserProjection <- runSharedParserBatch higherOrderPartialApplicationParserProgramRoot
+
+            canonicalProjection `shouldBe` expected
+            sharedParserProjection `shouldBe` Right expected
+
         beforeAll loadParserParityBatchFixture $ do
             it "runs all .mlfp parser parity fixtures through one generated public CLI driver" $ \fixture ->
                 batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
@@ -98,6 +107,12 @@ spec =
                 batchExpectedOutput fixture
                     `shouldSatisfy` isInfixOf
                         (batchSection "negative:first-class-polymorphism-source-type" firstClassPolymorphismSourceTypeNegativeEvidenceProjection)
+
+            it "parser-owned .mlfp parser reports malformed higher-order partial-application diagnostics through public run-program" $ \fixture -> do
+                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
+                batchExpectedOutput fixture
+                    `shouldSatisfy` isInfixOf
+                        (batchSection "negative:higher-order-partial-application" higherOrderPartialApplicationNegativeEvidenceProjection)
 
             it "shared parser-owned .mlfp parser library routes the generated batch through one entrypoint" $ \fixture -> do
                 sharedParserExists <- doesFileExist (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
@@ -237,6 +252,10 @@ firstClassPolymorphismSourceTypesCanonicalSourcePath :: FilePath
 firstClassPolymorphismSourceTypesCanonicalSourcePath =
     "test/conformance/mlfp/parser-parity/first-class-polymorphism-source-types/src/Main.mlfp"
 
+higherOrderPartialApplicationCanonicalSourcePath :: FilePath
+higherOrderPartialApplicationCanonicalSourcePath =
+    "test/conformance/mlfp/parser-parity/higher-order-partial-application/src/Main.mlfp"
+
 expectedProjectionPath :: FilePath
 expectedProjectionPath =
     "test/conformance/mlfp/parser-parity/basic-module-def-bool/expected/parser-program.txt"
@@ -325,6 +344,10 @@ firstClassPolymorphismSourceTypesExpectedProjectionPath :: FilePath
 firstClassPolymorphismSourceTypesExpectedProjectionPath =
     "test/conformance/mlfp/parser-parity/first-class-polymorphism-source-types/expected/parser-program.txt"
 
+higherOrderPartialApplicationExpectedProjectionPath :: FilePath
+higherOrderPartialApplicationExpectedProjectionPath =
+    "test/conformance/mlfp/parser-parity/higher-order-partial-application/expected/parser-program.txt"
+
 sharedParserLibraryRoot :: FilePath
 sharedParserLibraryRoot =
     "test/programs/compiler-parser-parity/parser-library"
@@ -336,6 +359,10 @@ textLiteralCharStringParserProgramRoot =
 firstClassPolymorphismSourceTypesParserProgramRoot :: FilePath
 firstClassPolymorphismSourceTypesParserProgramRoot =
     "test/programs/compiler-parser-parity/first-class-polymorphism-source-types"
+
+higherOrderPartialApplicationParserProgramRoot :: FilePath
+higherOrderPartialApplicationParserProgramRoot =
+    "test/programs/compiler-parser-parity/higher-order-partial-application"
 
 sharedParserAuditFiles :: [FilePath]
 sharedParserAuditFiles =
@@ -456,6 +483,7 @@ sharedParserShortcutPhrases =
         , sharedParserRound318ShortcutPhrases
         , sharedParserRound319ShortcutPhrases
         , sharedParserRound320ShortcutPhrases
+        , sharedParserRound321ShortcutPhrases
         ]
 
 sharedParserRound314ShortcutPhrases :: [String]
@@ -666,6 +694,22 @@ sharedParserRound320ShortcutPhrases =
     , concat ["first-class-polymorphism parser negative ", "expected-constructor-forall-dot@"]
     ]
 
+sharedParserRound321ShortcutPhrases :: [String]
+sharedParserRound321ShortcutPhrases =
+    [ concat ["parse", "Higher", "Order", "Partial", "Application"]
+    , concat ["completeModuleKey \"", "higher-order-partial-application", "\""]
+    , concat ["moduleKey \"", "higher-order-partial-application", "\""]
+    , concat ["programKey \"", "higher-order-partial-application", "\""]
+    , concat ["Higher", "Order", "Partial", "Application", "Tokens"]
+    , concat ["LexerOk ", "higher", "Order", "Partial", "Application", "Tokens"]
+    , concat ["higher-order-partial-application", " tokens"]
+    , concat ["defRows sourceFile \"", "keepLeft", "\""]
+    , concat ["defRows sourceFile \"", "apply", "\""]
+    , concat ["def keepLeft type=", "Int -> Int -> Int expr=", "λx λy x"]
+    , concat ["def main type=Int expr=", "apply (keepLeft 1)"]
+    , concat ["higher-order-partial-application parser negative ", "expected-expression-close-paren@"]
+    ]
+
 sharedParserCompleteParseRequiredPhrases :: [String]
 sharedParserCompleteParseRequiredPhrases =
     [ "parserStateAtEnd state"
@@ -691,6 +735,7 @@ sharedParserStaticNegativeEvidencePhrases =
     , "stringAppend \"data-declaration parser negative expected-constructor-colon@\""
     , "stringAppend \"multi-module import-exposing parser negative expected-import-exposing-separator@\""
     , "stringAppend \"text-literal parser negative unexpected-source@\""
+    , concat ["stringAppend \"higher-order-partial-application parser negative ", "expected-expression-close-paren@\""]
     ]
 
 sharedParserDynamicEvidenceRequiredPhrases :: [String]
@@ -770,6 +815,7 @@ parserParityPositiveCases =
     , ParserParityPositiveCase "positive:multi-module-recursive-adt-export-import" "positiveMultiModuleRecursiveAdtExportImport" multiModuleRecursiveAdtExportImportCanonicalSourcePath multiModuleRecursiveAdtExportImportExpectedProjectionPath
     , ParserParityPositiveCase "positive:text-literal-char-string" "positiveTextLiteralCharString" textLiteralCharStringCanonicalSourcePath textLiteralCharStringExpectedProjectionPath
     , ParserParityPositiveCase "positive:first-class-polymorphism-source-types" "positiveFirstClassPolymorphismSourceTypes" firstClassPolymorphismSourceTypesCanonicalSourcePath firstClassPolymorphismSourceTypesExpectedProjectionPath
+    , ParserParityPositiveCase "positive:higher-order-partial-application" "positiveHigherOrderPartialApplication" higherOrderPartialApplicationCanonicalSourcePath higherOrderPartialApplicationExpectedProjectionPath
     ]
 
 parserParityNegativeCases :: [ParserParityNegativeCase]
@@ -788,6 +834,7 @@ parserParityNegativeCases =
     , ParserParityNegativeCase "negative:multi-module-import-exposing-separator" "negativeMultiModuleImportExposingSeparator" "multi-module import-exposing parser negative " multiModuleAbstractExportImportCanonicalSourcePath importExposingSeparatorNegativeSourceText importExposingSeparatorNegativeEvidenceProjection
     , ParserParityNegativeCase "negative:text-literal-malformed" "negativeTextLiteralMalformed" "text-literal parser negative " textLiteralCharStringCanonicalSourcePath textLiteralMalformedNegativeSourceText textLiteralMalformedNegativeEvidenceProjection
     , ParserParityNegativeCase "negative:first-class-polymorphism-source-type" "negativeFirstClassPolymorphismSourceType" "first-class-polymorphism parser negative " firstClassPolymorphismSourceTypesCanonicalSourcePath firstClassPolymorphismSourceTypeNegativeSourceText firstClassPolymorphismSourceTypeNegativeEvidenceProjection
+    , ParserParityNegativeCase "negative:higher-order-partial-application" "negativeHigherOrderPartialApplication" "higher-order-partial-application parser negative " higherOrderPartialApplicationCanonicalSourcePath higherOrderPartialApplicationNegativeSourceText higherOrderPartialApplicationNegativeEvidenceProjection
     ]
 
 assertCanonicalParserParityProjection :: ParserParityPositiveCase -> IO ()
@@ -1146,6 +1193,17 @@ firstClassPolymorphismSourceTypeNegativeSourceText =
         , "}"
         ]
 
+higherOrderPartialApplicationNegativeSourceText :: String
+higherOrderPartialApplicationNegativeSourceText =
+    unlines
+        [ "module Main export (main) {"
+        , "  def keepLeft : Int -> Int -> Int = λx λy x;"
+        , "  def apply : (Int -> Int) -> Int = λf f 2;"
+        , ""
+        , "  def main : Int = apply (keepLeft 1;"
+        , "}"
+        ]
+
 retryEvidenceProjection :: String
 retryEvidenceProjection =
     unlines
@@ -1239,6 +1297,16 @@ firstClassPolymorphismSourceTypeNegativeEvidenceProjection =
             [ "first-class-polymorphism parser negative "
             , "expected-constructor-forall-dot@"
             , "test/conformance/mlfp/parser-parity/first-class-polymorphism-source-types/src/Main.mlfp:5:16-5:17"
+            ]
+        ]
+
+higherOrderPartialApplicationNegativeEvidenceProjection :: String
+higherOrderPartialApplicationNegativeEvidenceProjection =
+    unlines
+        [ concat
+            [ "higher-order-partial-application parser negative "
+            , "expected-expression-close-paren@"
+            , "test/conformance/mlfp/parser-parity/higher-order-partial-application/src/Main.mlfp:5:37-5:38"
             ]
         ]
 

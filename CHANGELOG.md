@@ -37,6 +37,14 @@
 
 ### Added
 - Extended the shared parser-owned parser-parity library with a bounded
+  higher-order partial-application grammar slice for nested plain lambda
+  bodies, parenthesized expression atoms, and a function-valued partial
+  application argument. A new committed parser-program projection and thin
+  fixture root cover `higher-order-partial-application`, with malformed
+  missing-close-paren evidence through the same source-text lexer/parser path.
+  This is not full parser parity, resolver/checker/backend, compiler-package,
+  driver, platform, proof, or self-boot work.
+- Extended the shared parser-owned parser-parity library with a bounded
   multi-module export/import grammar slice for complete programs containing a
   `Core` module and a `User` module, abstract exports/imports, recursive ADT
   constructor exports/imports, and cross-module references inside the selected

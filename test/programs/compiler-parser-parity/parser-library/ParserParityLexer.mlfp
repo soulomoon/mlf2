@@ -916,11 +916,25 @@ module ParserParityLexer export (LexerResult(..), tokenizeCompleteModule, nextLi
       case cursor of {
         SourceCursor sourceText lineNumber linePrefix -> case sourceStartsWith sourceLexeme sourceText of {
           StringMatched ->
-            LexStepOk
-              (SourceSymbol (cursorStart lineNumber linePrefix) (cursorEnd lineNumber linePrefix sourceLexeme) tokenText)
-              (SourceCursor (stringDrop sourceText width) lineNumber (stringAppend linePrefix sourceLexeme));
+            case sourceTokenBoundary sourceLexeme sourceText width of {
+              StringMatched ->
+                LexStepOk
+                  (SourceSymbol (cursorStart lineNumber linePrefix) (cursorEnd lineNumber linePrefix sourceLexeme) tokenText)
+                  (SourceCursor (stringDrop sourceText width) lineNumber (stringAppend linePrefix sourceLexeme));
+              StringMismatch -> LexStepError (UnexpectedSourceText lexerUnknownSpan)
+            };
           StringMismatch -> LexStepError (UnexpectedSourceText lexerUnknownSpan)
         }
+      };
+
+  def sourceTokenBoundary : String -> String -> Int -> StringMatch =
+    λ(sourceLexeme : String) λ(sourceText : String) λ(width : Int)
+      case sourceCharIn identifierContinueCharacters sourceLexeme of {
+        StringMatched -> case sourceCharIn identifierContinueCharacters (stringDrop sourceText width) of {
+          StringMatched -> StringMismatch;
+          StringMismatch -> StringMatched
+        };
+        StringMismatch -> StringMatched
       };
 
   def cursorStart : String -> String -> String =

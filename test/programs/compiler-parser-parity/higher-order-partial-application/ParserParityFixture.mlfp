@@ -1,0 +1,7 @@
+module ParserParityFixture export (sourceFile, sourceText) {
+  def sourceFile : String =
+    "test/conformance/mlfp/parser-parity/higher-order-partial-application/src/Main.mlfp";
+
+  def sourceText : String =
+    "module Main export (main) {\n  def keepLeft : Int -> Int -> Int = λx λy x;\n  def apply : (Int -> Int) -> Int = λf f 2;\n\n  def main : Int = apply (keepLeft 1);\n}\n";
+}

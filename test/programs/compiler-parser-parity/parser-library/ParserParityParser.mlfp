@@ -3,7 +3,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
   import ParserParityAst exposing (ParsedModule(..), renderParsedModule);
   import ParserParityDiagnostic exposing (ParserDiagnostic(..));
   import ParserParityLexer exposing (LexerResult(..), nextLineNumber, tokenizeCompleteModule);
-  import ParserParityParserCombinator exposing (Parser, ParserEnd(..), ParserState(..), ParserStep(..), ParserValue(..), captureSpan, diagnosticLabel, expectIdentifierToken, expectToken, expectTokenPrefix, labelCaseBranchArrow, labelConstructorColon, labelConstructorForallDot, labelDefSemicolon, labelEquals, labelFunctionalDependencyArrow, labelImportAlias, labelImportSemicolon, labelInstanceMethodEquals, labelLetAnnotationType, labelLetIn, labelTypeFamilyEquationEquals, labelUnexpectedSource, parserBind, parserChoice, parserCurrentTokenStartOr, parserFail, parserFailExpectedConstructorForallDotAtCurrent, parserFailExpectedImportExposingSeparatorAtCurrent, parserFailExpectedImportSemicolonAtCurrent, parserPure, parserReturnAtEndOr, parserStateAtEnd, runParser);
+  import ParserParityParserCombinator exposing (Parser, ParserEnd(..), ParserState(..), ParserStep(..), ParserValue(..), captureSpan, diagnosticLabel, expectIdentifierToken, expectToken, expectTokenPrefix, labelCaseBranchArrow, labelConstructorColon, labelConstructorForallDot, labelDefSemicolon, labelEquals, labelFunctionalDependencyArrow, labelImportAlias, labelImportSemicolon, labelInstanceMethodEquals, labelLetAnnotationType, labelLetIn, labelTypeFamilyEquationEquals, labelUnexpectedSource, parserBind, parserChoice, parserCurrentTokenStartOr, parserFail, parserFailExpectedConstructorForallDotAtCurrent, parserFailExpectedExpressionCloseParenAtCurrent, parserFailExpectedImportExposingSeparatorAtCurrent, parserFailExpectedImportSemicolonAtCurrent, parserPure, parserReturnAtEndOr, parserStateAtEnd, runParser);
   import ParserParitySource exposing (basicBoolLiteralSpan, basicUnexpectedSpan, caseBranchArrowSpan, constructorForallDotSpan, dataZeroColonSpan, existentialForallExprDataSpan, existentialForallMainDefSpan, existentialForallModuleSpan, existentialForallNatDataSpan, existentialForallSomeExprDataSpan, existentialForallUnwrapSomeDefSpan, importBoolSemicolonSpan, letInSpan, lexerUnknownSpan, multiparamFundepArrowSpan, qualifiedImportAliasDiagnosticSpan, recursiveGadtDoneNowDefSpan, recursiveGadtExprDataSpan, recursiveGadtMainDefSpan, recursiveGadtModuleSpan, recursiveGadtNatDataSpan, renderSpan, typedLetForallSpan, typeFamilyEquationEqualsSpan, typeclassInstanceMethodEqualsSpan, valueFirstDefSemicolonSpan);
   import ParserParityToken exposing (ParserInput(..), TokenKind(..), renderTokenPrefixEvidence, tokenEnd, tokenSpan, tokenStart, tokenText);
 
@@ -590,7 +590,28 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
   def parseSourceTypeCodomain : ParserValue -> ParserValue -> Parser ParserValue =
     λ(leftType : ParserValue) λ(_arrow : ParserValue)
       parserBind (parseSourceTypeAtom ValueUnit)
-        (finishSourceArrowType leftType);
+        (parseSourceTypeSecondArrowTail leftType);
+
+  def parseSourceTypeSecondArrowTail : ParserValue -> ParserValue -> Parser ParserValue =
+    λ(leftType : ParserValue) λ(middleType : ParserValue)
+      parserChoice
+        (parserBind (expectText "->") (parseSourceTypeThirdCodomain leftType middleType))
+        (finishSourceArrowType leftType middleType);
+
+  def parseSourceTypeThirdCodomain : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(leftType : ParserValue) λ(middleType : ParserValue) λ(_arrow : ParserValue)
+      parserBind (parseSourceTypeAtom ValueUnit)
+        (finishNestedSourceArrowType leftType middleType);
+
+  def finishNestedSourceArrowType : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(leftType : ParserValue) λ(middleType : ParserValue) λ(rightType : ParserValue)
+      parserTextValue
+        (stringAppend
+          (parserTextFromValue leftType)
+          (stringAppend " -> "
+            (stringAppend
+              (parserTextFromValue middleType)
+              (stringAppend " -> " (parserTextFromValue rightType)))));
 
   def finishSourceArrowType : ParserValue -> ParserValue -> Parser ParserValue =
     λ(leftType : ParserValue) λ(rightType : ParserValue)
@@ -740,6 +761,22 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
 
   def parsePlainLambdaBody : ParserValue -> Parser ParserValue =
     λ(paramToken : ParserValue)
+      parserBind
+        (parserChoice (parseNestedPlainLambdaExpression ValueUnit) (parseApplicationOrAtomExpression ValueUnit))
+        (finishPlainLambdaExpression paramToken);
+
+  def parseNestedPlainLambdaExpression : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "lambda")
+        parseNestedPlainLambdaParam;
+
+  def parseNestedPlainLambdaParam : ParserValue -> Parser ParserValue =
+    λ(_lambda : ParserValue)
+      parserBind expectAnyIdentifier
+        parseNestedPlainLambdaBody;
+
+  def parseNestedPlainLambdaBody : ParserValue -> Parser ParserValue =
+    λ(paramToken : ParserValue)
       parserBind (parseApplicationOrAtomExpression ValueUnit)
         (finishPlainLambdaExpression paramToken);
 
@@ -800,6 +837,17 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
         (parserBind (parseExpressionAtom ValueUnit) (finishApplicationExpression functionValue))
         (parserPure functionValue);
 
+  def parseApplicationOrSimpleAtomExpression : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (parseSimpleExpressionAtom ValueUnit)
+        parseSimpleApplicationArgumentOrDone;
+
+  def parseSimpleApplicationArgumentOrDone : ParserValue -> Parser ParserValue =
+    λ(functionValue : ParserValue)
+      parserChoice
+        (parserBind (parseSimpleExpressionAtom ValueUnit) (finishApplicationExpression functionValue))
+        (parserPure functionValue);
+
   def finishApplicationExpression : ParserValue -> ParserValue -> Parser ParserValue =
     λ(functionValue : ParserValue) λ(argumentValue : ParserValue)
       parserTextValue
@@ -808,8 +856,34 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
 
   def parseExpressionAtom : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
+      parserChoice (parseParenthesizedExpressionAtom ValueUnit)
+        (parseSimpleExpressionAtom ValueUnit);
+
+  def parseSimpleExpressionAtom : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
       parserChoice (parseIdentifierExpressionAtom ValueUnit)
         (parserChoice (parseIntExpressionAtom ValueUnit) (parseBoolExpressionAtom ValueUnit));
+
+  def parseParenthesizedExpressionAtom : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "(")
+        parseParenthesizedExpressionBody;
+
+  def parseParenthesizedExpressionBody : ParserValue -> Parser ParserValue =
+    λ(_openExpression : ParserValue)
+      parserBind (parseApplicationOrSimpleAtomExpression ValueUnit)
+        parseParenthesizedExpressionClose;
+
+  def parseParenthesizedExpressionClose : ParserValue -> Parser ParserValue =
+    λ(exprValue : ParserValue)
+      parserBind
+        (parserChoice (expectText ")") parserFailExpectedExpressionCloseParenAtCurrent)
+        (finishParenthesizedExpression exprValue);
+
+  def finishParenthesizedExpression : ParserValue -> ParserValue -> Parser ParserValue =
+    λ(exprValue : ParserValue) λ(_closeExpression : ParserValue)
+      parserTextValue
+        (stringAppend "(" (stringAppend (parserTextFromValue exprValue) ")"));
 
   def parseIdentifierExpressionAtom : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
@@ -6284,6 +6358,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
       ExpectedInstanceMethodEquals span -> stringAppend "expected-instance-method-equals@" (renderSpan sourceFile span);
       ExpectedFunctionalDependencyArrow span -> stringAppend "expected-functional-dependency-arrow@" (renderSpan sourceFile span);
       ExpectedTypeFamilyEquationEquals span -> stringAppend "expected-type-family-equation-equals@" (renderSpan sourceFile span);
-      ExpectedConstructorForallDot span -> stringAppend "expected-constructor-forall-dot@" (renderSpan sourceFile span)
+      ExpectedConstructorForallDot span -> stringAppend "expected-constructor-forall-dot@" (renderSpan sourceFile span);
+      ExpectedExpressionCloseParen span -> stringAppend "expected-expression-close-paren@" (renderSpan sourceFile span)
     };
 }

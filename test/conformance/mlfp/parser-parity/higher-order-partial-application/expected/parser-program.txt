@@ -1,0 +1,5 @@
+module Main span=test/conformance/mlfp/parser-parity/higher-order-partial-application/src/Main.mlfp:1:1-7:1
+export value main span=test/conformance/mlfp/parser-parity/higher-order-partial-application/src/Main.mlfp:1:21-1:25
+def keepLeft type=Int -> Int -> Int expr=λx λy x span=test/conformance/mlfp/parser-parity/higher-order-partial-application/src/Main.mlfp:2:3-3:3
+def apply type=(Int -> Int) -> Int expr=λf f 2 span=test/conformance/mlfp/parser-parity/higher-order-partial-application/src/Main.mlfp:3:3-5:3
+def main type=Int expr=apply (keepLeft 1) span=test/conformance/mlfp/parser-parity/higher-order-partial-application/src/Main.mlfp:5:3-6:1

@@ -1,0 +1,24 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-321",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-004",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-004",
+  "milestone_id": "milestone-4",
+  "direction_id": "direction-4a-canonical-parser-parity",
+  "extracted_item_id": "item-321-parser-library-higher-order-partial-application-extension",
+  "decision": "approved",
+  "evidence_summary": "Lineage is fresh; focused positive, malformed diagnostic, shortcut guard, full parser-parity group, direct fixture diffs, git diff checks, cabal build all, cabal test, and thesis conformance gate passed. Diff stays bounded to the shared parser-owned parser library, one thin higher-order partial-application fixture, oracle, tests, and scoped docs.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-4-completion",
+        "text": "round-321 completed item-321-parser-library-higher-order-partial-application-extension: the shared parser-owned library now covers the bounded higher-order partial-application fixture and malformed close-paren diagnostic; reviewer evidence passed focused parser checks, direct fixture diffs, cabal build all, cabal test, and thesis gate."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}

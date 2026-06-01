@@ -14,5 +14,6 @@ module ParserParityDiagnostic export (ParserDiagnostic(..)) {
     | ExpectedInstanceMethodEquals : String -> ParserDiagnostic
     | ExpectedFunctionalDependencyArrow : String -> ParserDiagnostic
     | ExpectedTypeFamilyEquationEquals : String -> ParserDiagnostic
-    | ExpectedConstructorForallDot : String -> ParserDiagnostic;
+    | ExpectedConstructorForallDot : String -> ParserDiagnostic
+    | ExpectedExpressionCloseParen : String -> ParserDiagnostic;
 }
