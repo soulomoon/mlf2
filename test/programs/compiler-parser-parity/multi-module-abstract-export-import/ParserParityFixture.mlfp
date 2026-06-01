@@ -1,0 +1,7 @@
+module ParserParityFixture export (sourceFile, sourceText) {
+  def sourceFile : String =
+    "test/conformance/mlfp/parser-parity/multi-module-abstract-export-import/src/Main.mlfp";
+
+  def sourceText : String =
+    "module Core export (Nat, zero, succ) {\n  data Nat =\n      Zero : Nat\n    | Succ : Nat -> Nat;\n\n  def zero : Nat = Zero;\n\n  def succ : Nat -> Nat = λ(n : Nat) Succ n;\n}\n\nmodule User export (main) {\n  import Core exposing (Nat, zero, succ);\n\n  def main : Nat = succ zero;\n}\n";
+}

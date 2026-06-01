@@ -2,7 +2,7 @@ module ParserParitySource export (ParserSourceSymbol(..), ParserSourceInput(..),
   import Prelude exposing (stringAppend);
 
   data ParserSourceSymbol =
-      SourceSymbol : String -> String -> ParserSourceSymbol
+      SourceSymbol : String -> String -> String -> ParserSourceSymbol
     | SourceUnknown : String -> ParserSourceSymbol;
 
   data ParserSourceInput =

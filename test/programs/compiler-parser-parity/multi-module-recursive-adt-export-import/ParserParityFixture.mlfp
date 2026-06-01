@@ -1,0 +1,7 @@
+module ParserParityFixture export (sourceFile, sourceText) {
+  def sourceFile : String =
+    "test/conformance/mlfp/parser-parity/multi-module-recursive-adt-export-import/src/Main.mlfp";
+
+  def sourceText : String =
+    "module Core export (Eq, Nat(..), Expr(..), zero) {\n  class Eq a {\n    eq : a -> a -> Bool;\n  }\n\n  data Nat =\n      Zero : Nat\n    | Succ : Nat -> Nat;\n\n  data Expr a =\n      DoneNat : Nat -> Expr Nat\n    | Step : Expr a -> Expr a;\n\n  def zero : Nat = Zero;\n}\n\nmodule User export (main) {\n  import Core exposing (Eq, Nat(..), Expr(..), zero);\n\n  def main : Bool = case DoneNat zero of {\n    DoneNat n -> true;\n    _ -> false\n  };\n}\n";
+}

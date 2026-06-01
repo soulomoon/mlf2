@@ -407,4 +407,12 @@ module ParserParityAst export (ParsedModule(..), renderParsedModule, renderBasic
             (stringAppend
               (stringAppend "import alias C span=" (stringAppend (renderSpan sourceFile qualifiedImportOnlyAliasSpan) "\n"))
               (stringAppend "def main type=C.Token expr=C.Token span=" (renderSpan sourceFile qualifiedImportOnlyMainDefSpan)))));
+
+  def appendLine : String -> String -> String =
+    λ(line : String) λ(rest : String)
+      stringAppend line (stringAppend "\n" rest);
+
+  def spanText : String -> String -> String =
+    λ(sourceFile : String) λ(coordinates : String)
+      renderSpan sourceFile coordinates;
 }

@@ -1,0 +1,16 @@
+module Core span=test/conformance/mlfp/parser-parity/multi-module-abstract-export-import/src/Main.mlfp:1:1-11:1
+export type Nat span=test/conformance/mlfp/parser-parity/multi-module-abstract-export-import/src/Main.mlfp:1:21-1:24
+export value zero span=test/conformance/mlfp/parser-parity/multi-module-abstract-export-import/src/Main.mlfp:1:26-1:30
+export value succ span=test/conformance/mlfp/parser-parity/multi-module-abstract-export-import/src/Main.mlfp:1:32-1:36
+data Nat span=test/conformance/mlfp/parser-parity/multi-module-abstract-export-import/src/Main.mlfp:2:3-6:3
+constructor Zero type=Nat span=test/conformance/mlfp/parser-parity/multi-module-abstract-export-import/src/Main.mlfp:3:7-4:5
+constructor Succ type=Nat -> Nat span=test/conformance/mlfp/parser-parity/multi-module-abstract-export-import/src/Main.mlfp:4:7-4:24
+def zero type=Nat expr=Zero span=test/conformance/mlfp/parser-parity/multi-module-abstract-export-import/src/Main.mlfp:6:3-8:3
+def succ type=Nat -> Nat expr=λ(n : Nat) Succ n span=test/conformance/mlfp/parser-parity/multi-module-abstract-export-import/src/Main.mlfp:8:3-9:1
+module User span=test/conformance/mlfp/parser-parity/multi-module-abstract-export-import/src/Main.mlfp:11:1-16:1
+export value main span=test/conformance/mlfp/parser-parity/multi-module-abstract-export-import/src/Main.mlfp:11:21-11:25
+import Core span=test/conformance/mlfp/parser-parity/multi-module-abstract-export-import/src/Main.mlfp:12:10-12:15
+import exposing type Nat span=test/conformance/mlfp/parser-parity/multi-module-abstract-export-import/src/Main.mlfp:12:25-12:28
+import exposing value zero span=test/conformance/mlfp/parser-parity/multi-module-abstract-export-import/src/Main.mlfp:12:30-12:34
+import exposing value succ span=test/conformance/mlfp/parser-parity/multi-module-abstract-export-import/src/Main.mlfp:12:36-12:40
+def main type=Nat expr=succ zero span=test/conformance/mlfp/parser-parity/multi-module-abstract-export-import/src/Main.mlfp:14:3-15:1

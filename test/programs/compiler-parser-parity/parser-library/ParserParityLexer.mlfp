@@ -1,7 +1,7 @@
-module ParserParityLexer export (LexerResult(..), tokenizeCompleteModule) {
-  import Prelude exposing (Option(..), stringCharAtOption, stringDrop, stringIndexOf, stringLength, stringTake);
+module ParserParityLexer export (LexerResult(..), tokenizeCompleteModule, nextLineNumber) {
+  import Prelude exposing (Option(..), stringAppend, stringCharAtOption, stringDrop, stringFromInt, stringIndexOf, stringLength, stringTake);
   import ParserParityDiagnostic exposing (ParserDiagnostic(..));
-  import ParserParitySource exposing (ParserSourceInput(..), ParserSourceSymbol(..), basicExportKeywordSpan, basicModuleKeywordSpan, basicModuleNameSpan, basicUnexpectedSpan, lexerUnknownSpan, sourceInputCons, sourceInputNil);
+  import ParserParitySource exposing (ParserSourceInput(..), ParserSourceSymbol(..), lexerUnknownSpan, sourceInputCons, sourceInputNil);
   import ParserParityToken exposing (ParserInput(..));
 
   data LexerResult =
@@ -9,7 +9,7 @@ module ParserParityLexer export (LexerResult(..), tokenizeCompleteModule) {
     | LexerError : ParserDiagnostic -> LexerResult;
 
   data SourceCursor =
-      SourceCursor : String -> SourceCursor;
+      SourceCursor : String -> String -> String -> SourceCursor;
 
   data LexStep =
       LexStepOk : ParserSourceSymbol -> SourceCursor -> LexStep
@@ -32,7 +32,7 @@ module ParserParityLexer export (LexerResult(..), tokenizeCompleteModule) {
       finishScannedInput (scanMany256 (initialScanState sourceText));
 
   def initialSourceCursor : String -> SourceCursor =
-    λ(sourceText : String) SourceCursor sourceText;
+    λ(sourceText : String) SourceCursor sourceText "1" "";
 
   def initialScanState : String -> LexerScanState =
     λ(sourceText : String)
@@ -123,7 +123,7 @@ module ParserParityLexer export (LexerResult(..), tokenizeCompleteModule) {
   def scanActiveSource : ParserSourceInput -> SourceCursor -> LexerScanState =
     λ(reverseInput : ParserSourceInput) λ(cursor : SourceCursor)
       case cursor of {
-        SourceCursor sourceText -> case stringCharAtOption sourceText 0 of {
+        SourceCursor sourceText _ _ -> case stringCharAtOption sourceText 0 of {
           None -> LexerScanDone reverseInput;
           Some _ -> case scanKnownToken cursor of {
             LexStepOk token nextCursor -> LexerScanState (sourceInputCons token reverseInput) nextCursor;
@@ -136,553 +136,571 @@ module ParserParityLexer export (LexerResult(..), tokenizeCompleteModule) {
     λ(cursor : SourceCursor) scanKnownModule cursor;
 
   def scanKnownModule : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "module" "module" 6 basicModuleKeywordSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "module" "module" 6 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownExport cursor
     };
 
   def scanKnownExport : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "export" "export" 6 basicExportKeywordSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "export" "export" 6 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownDef cursor
     };
 
   def scanKnownDef : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "def" "def" 3 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "def" "def" 3 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownType cursor
     };
 
   def scanKnownType : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "type" "type" 4 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "type" "type" 4 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownFamily cursor
     };
 
   def scanKnownFamily : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "family" "family" 6 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "family" "family" 6 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownData cursor
     };
 
   def scanKnownData : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "data" "data" 4 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "data" "data" 4 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownClass cursor
     };
 
   def scanKnownClass : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "class" "class" 5 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "class" "class" 5 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownDeriving cursor
     };
 
   def scanKnownDeriving : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "deriving" "deriving" 8 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "deriving" "deriving" 8 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownImport cursor
     };
 
   def scanKnownImport : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "import" "import" 6 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "import" "import" 6 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownExposing cursor
     };
 
   def scanKnownExposing : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "exposing" "exposing" 8 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "exposing" "exposing" 8 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownLet cursor
     };
 
   def scanKnownLet : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "let" "let" 3 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "let" "let" 3 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownInstance cursor
     };
 
   def scanKnownInstance : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "instance" "instance" 8 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "instance" "instance" 8 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownIn cursor
     };
 
   def scanKnownIn : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "in" "in" 2 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "in" "in" 2 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownCase cursor
     };
 
   def scanKnownCase : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "case" "case" 4 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "case" "case" 4 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownOf cursor
     };
 
   def scanKnownOf : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "of" "of" 2 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "of" "of" 2 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownWhere cursor
     };
 
   def scanKnownWhere : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "where" "where" 5 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "where" "where" 5 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownTrue cursor
     };
 
   def scanKnownTrue : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "true" "bool:true" 4 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "true" "bool:true" 4 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownFalse cursor
     };
 
   def scanKnownFalse : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "false" "bool:false" 5 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "false" "bool:false" 5 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownArrow cursor
     };
 
   def scanKnownArrow : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "->" "->" 2 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "->" "->" 2 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownConstraintArrow cursor
     };
 
   def scanKnownConstraintArrow : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "=>" "=>" 2 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "=>" "=>" 2 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownFundepArrow cursor
     };
 
   def scanKnownFundepArrow : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "→" "→" 1 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "→" "→" 1 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownMainModule cursor
     };
 
   def scanKnownMainModule : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "Main" "identifier:Main" 4 basicModuleNameSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "Main" "identifier:Main" 4 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownPrelude cursor
     };
 
   def scanKnownPrelude : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "Prelude" "identifier:Prelude" 7 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "Prelude" "identifier:Prelude" 7 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownCore cursor
     };
 
   def scanKnownCore : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "Core" "identifier:Core" 4 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "Core" "identifier:Core" 4 cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownUserModule cursor
+    };
+
+  def scanKnownUserModule : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "User" "identifier:User" 4 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownModuleAliasC cursor
     };
 
   def scanKnownModuleAliasC : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "C" "identifier:C" 1 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "C" "identifier:C" 1 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownTokenType cursor
     };
 
   def scanKnownTokenType : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "Token" "identifier:Token" 5 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "Token" "identifier:Token" 5 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownBool cursor
     };
 
   def scanKnownBool : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "Bool" "identifier:Bool" 4 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "Bool" "identifier:Bool" 4 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownBox cursor
     };
 
   def scanKnownBox : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "Box" "identifier:Box" 3 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "Box" "identifier:Box" 3 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownEqType cursor
     };
 
   def scanKnownEqType : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "Eq" "identifier:Eq" 2 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "Eq" "identifier:Eq" 2 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownMonoid cursor
     };
 
   def scanKnownMonoid : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "Monoid" "identifier:Monoid" 6 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "Monoid" "identifier:Monoid" 6 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownFunctor cursor
     };
 
   def scanKnownFunctor : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "Functor" "identifier:Functor" 7 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "Functor" "identifier:Functor" 7 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownHigher cursor
     };
 
   def scanKnownHigher : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "Higher" "identifier:Higher" 6 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "Higher" "identifier:Higher" 6 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownMonad cursor
     };
 
   def scanKnownMonad : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "Monad" "identifier:Monad" 5 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "Monad" "identifier:Monad" 5 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownIO cursor
     };
 
   def scanKnownIO : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "IO" "identifier:IO" 2 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "IO" "identifier:IO" 2 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownNormalize cursor
     };
 
   def scanKnownNormalize : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "Normalize" "identifier:Normalize" 9 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "Normalize" "identifier:Normalize" 9 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownApplyType cursor
     };
 
   def scanKnownApplyType : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "Apply" "identifier:Apply" 5 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "Apply" "identifier:Apply" 5 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownInt cursor
     };
 
   def scanKnownInt : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "Int" "identifier:Int" 3 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "Int" "identifier:Int" 3 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownNat cursor
     };
 
   def scanKnownNat : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "Nat" "identifier:Nat" 3 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "Nat" "identifier:Nat" 3 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownZero cursor
     };
 
   def scanKnownZero : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "Zero" "identifier:Zero" 4 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "Zero" "identifier:Zero" 4 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownSucc cursor
     };
 
   def scanKnownSucc : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "Succ" "identifier:Succ" 4 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "Succ" "identifier:Succ" 4 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownExpr cursor
     };
 
   def scanKnownExpr : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "Expr" "identifier:Expr" 4 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "Expr" "identifier:Expr" 4 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownSomeExpr cursor
     };
 
   def scanKnownSomeExpr : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "SomeExpr" "identifier:SomeExpr" 8 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "SomeExpr" "identifier:SomeExpr" 8 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownDoneNat cursor
     };
 
   def scanKnownDoneNat : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "DoneNat" "identifier:DoneNat" 7 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "DoneNat" "identifier:DoneNat" 7 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownStep cursor
     };
 
   def scanKnownStep : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "Step" "identifier:Step" 4 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "Step" "identifier:Step" 4 cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownZeroValue cursor
+    };
+
+  def scanKnownZeroValue : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "zero" "identifier:zero" 4 cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownSuccValue cursor
+    };
+
+  def scanKnownSuccValue : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "succ" "identifier:succ" 4 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownMainValue cursor
     };
 
   def scanKnownMainValue : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "main" "identifier:main" 4 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "main" "identifier:main" 4 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownDoneNow cursor
     };
 
   def scanKnownDoneNow : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "doneNow" "identifier:doneNow" 7 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "doneNow" "identifier:doneNow" 7 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownUnwrapSome cursor
     };
 
   def scanKnownUnwrapSome : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "unwrapSome" "identifier:unwrapSome" 10 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "unwrapSome" "identifier:unwrapSome" 10 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownExprValue cursor
     };
 
   def scanKnownExprValue : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "expr" "identifier:expr" 4 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "expr" "identifier:expr" 4 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownId cursor
     };
 
   def scanKnownId : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "id" "identifier:id" 2 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "id" "identifier:id" 2 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownTwoName cursor
     };
 
   def scanKnownTwoName : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "two" "identifier:two" 3 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "two" "identifier:two" 3 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownAnswer cursor
     };
 
   def scanKnownAnswer : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "answer" "identifier:answer" 6 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "answer" "identifier:answer" 6 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownEqMethod cursor
     };
 
   def scanKnownEqMethod : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "eq" "identifier:eq" 2 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "eq" "identifier:eq" 2 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownMempty cursor
     };
 
   def scanKnownMempty : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "mempty" "identifier:mempty" 6 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "mempty" "identifier:mempty" 6 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownAppend cursor
     };
 
   def scanKnownAppend : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "append" "identifier:append" 6 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "append" "identifier:append" 6 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownMap cursor
     };
 
   def scanKnownMap : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "map" "identifier:map" 3 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "map" "identifier:map" 3 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownBind cursor
     };
 
   def scanKnownBind : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "bind" "identifier:bind" 4 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "bind" "identifier:bind" 4 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownWrap cursor
     };
 
   def scanKnownWrap : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "Wrap" "identifier:Wrap" 4 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "Wrap" "identifier:Wrap" 4 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownLeft cursor
     };
 
   def scanKnownLeft : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "left" "identifier:left" 4 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "left" "identifier:left" 4 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownRight cursor
     };
 
   def scanKnownRight : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "right" "identifier:right" 5 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "right" "identifier:right" 5 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownSameCtor cursor
     };
 
   def scanKnownSameCtor : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "sameCtor" "identifier:sameCtor" 8 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "sameCtor" "identifier:sameCtor" 8 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownUsesQualifiedClass cursor
     };
 
   def scanKnownUsesQualifiedClass : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "usesQualifiedClass" "identifier:usesQualifiedClass" 18 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "usesQualifiedClass" "identifier:usesQualifiedClass" 18 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownUsesClass cursor
     };
 
   def scanKnownUsesClass : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "usesClass" "identifier:usesClass" 9 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "usesClass" "identifier:usesClass" 9 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownAlso cursor
     };
 
   def scanKnownAlso : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "also" "identifier:also" 4 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "also" "identifier:also" 4 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownAsKeyword cursor
     };
 
   def scanKnownAsKeyword : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "as" "as" 2 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "as" "as" 2 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownX cursor
     };
 
   def scanKnownX : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "x" "identifier:x" 1 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "x" "identifier:x" 1 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownA cursor
     };
 
   def scanKnownA : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "a" "identifier:a" 1 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "a" "identifier:a" 1 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownBoxed cursor
     };
 
   def scanKnownBoxed : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "boxed" "identifier:boxed" 5 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "boxed" "identifier:boxed" 5 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownB cursor
     };
 
   def scanKnownB : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "b" "identifier:b" 1 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "b" "identifier:b" 1 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownF cursor
     };
 
   def scanKnownF : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "f" "identifier:f" 1 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "f" "identifier:f" 1 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownK cursor
     };
 
   def scanKnownK : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "k" "identifier:k" 1 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "k" "identifier:k" 1 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownM cursor
     };
 
   def scanKnownM : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "m" "identifier:m" 1 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "m" "identifier:m" 1 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownNext cursor
     };
 
   def scanKnownNext : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "next" "identifier:next" 4 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "next" "identifier:next" 4 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownN cursor
     };
 
   def scanKnownN : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "n" "identifier:n" 1 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "n" "identifier:n" 1 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownZeroInt cursor
     };
 
   def scanKnownZeroInt : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "0" "int:0" 1 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "0" "int:0" 1 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownOne cursor
     };
 
   def scanKnownOne : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "1" "int:1" 1 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "1" "int:1" 1 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownTwo cursor
     };
 
   def scanKnownTwo : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "2" "int:2" 1 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "2" "int:2" 1 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownForall cursor
     };
 
   def scanKnownForall : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "∀" "forall" 1 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "∀" "forall" 1 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownTypeLambda cursor
     };
 
   def scanKnownTypeLambda : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "Λ" "type-lambda" 1 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "Λ" "type-lambda" 1 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownLambda cursor
     };
 
   def scanKnownLambda : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "λ" "lambda" 1 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "λ" "lambda" 1 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownLeftParen cursor
     };
 
   def scanKnownLeftParen : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "(" "(" 1 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "(" "(" 1 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownRightParen cursor
     };
 
   def scanKnownRightParen : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken ")" ")" 1 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken ")" ")" 1 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownLeftBrace cursor
     };
 
   def scanKnownLeftBrace : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "{" "{" 1 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "{" "{" 1 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownRightBrace cursor
     };
 
   def scanKnownRightBrace : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "}" "}" 1 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "}" "}" 1 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownDoubleColon cursor
     };
 
   def scanKnownDoubleColon : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "::" "::" 2 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "::" "::" 2 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownColon cursor
     };
 
   def scanKnownColon : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken ":" ":" 1 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken ":" ":" 1 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownStar cursor
     };
 
   def scanKnownStar : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "*" "*" 1 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "*" "*" 1 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownEquals cursor
     };
 
   def scanKnownEquals : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "=" "=" 1 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "=" "=" 1 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownSemicolon cursor
     };
 
   def scanKnownSemicolon : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken ";" ";" 1 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken ";" ";" 1 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownComma cursor
     };
 
   def scanKnownComma : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "," "," 1 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "," "," 1 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownDot cursor
     };
 
   def scanKnownDot : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "." "." 1 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "." "." 1 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownBar cursor
     };
 
   def scanKnownBar : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "|" "|" 1 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "|" "|" 1 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownWildcard cursor
     };
 
   def scanKnownWildcard : SourceCursor -> LexStep =
-    λ(cursor : SourceCursor) case scanSourceToken "_" "_" 1 basicUnexpectedSpan cursor of {
+    λ(cursor : SourceCursor) case scanSourceToken "_" "_" 1 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownUnknown cursor
     };
@@ -690,14 +708,27 @@ module ParserParityLexer export (LexerResult(..), tokenizeCompleteModule) {
   def scanKnownUnknown : SourceCursor -> LexStep =
     λ(_cursor : SourceCursor) LexStepError (UnexpectedSourceText lexerUnknownSpan);
 
-  def scanSourceToken : String -> String -> Int -> String -> SourceCursor -> LexStep =
-    λ(sourceLexeme : String) λ(tokenText : String) λ(width : Int) λ(span : String) λ(cursor : SourceCursor)
+  def scanSourceToken : String -> String -> Int -> SourceCursor -> LexStep =
+    λ(sourceLexeme : String) λ(tokenText : String) λ(width : Int) λ(cursor : SourceCursor)
       case cursor of {
-        SourceCursor sourceText -> case sourceStartsWith sourceLexeme sourceText of {
-          StringMatched -> LexStepOk (SourceSymbol span tokenText) (SourceCursor (stringDrop sourceText width));
+        SourceCursor sourceText lineNumber linePrefix -> case sourceStartsWith sourceLexeme sourceText of {
+          StringMatched ->
+            LexStepOk
+              (SourceSymbol (cursorStart lineNumber linePrefix) (cursorEnd lineNumber linePrefix sourceLexeme) tokenText)
+              (SourceCursor (stringDrop sourceText width) lineNumber (stringAppend linePrefix sourceLexeme));
           StringMismatch -> LexStepError (UnexpectedSourceText lexerUnknownSpan)
         }
       };
+
+  def cursorStart : String -> String -> String =
+    λ(lineNumber : String) λ(linePrefix : String)
+      stringAppend lineNumber (stringAppend ":" (stringFromInt (stringLength (stringAppend " " linePrefix))));
+
+  def cursorEnd : String -> String -> String -> String =
+    λ(lineNumber : String) λ(linePrefix : String) λ(sourceLexeme : String)
+      stringAppend lineNumber
+        (stringAppend ":"
+          (stringFromInt (stringLength (stringAppend (stringAppend " " linePrefix) sourceLexeme))));
 
   def advanceTrivia : SourceCursor -> SourceCursor =
     λ(cursor : SourceCursor) skipTrivia64 cursor;
@@ -722,13 +753,109 @@ module ParserParityLexer export (LexerResult(..), tokenizeCompleteModule) {
 
   def skipTriviaStep : SourceCursor -> SourceCursor =
     λ(cursor : SourceCursor) case cursor of {
-      SourceCursor sourceText -> case sourceStartsWith " " sourceText of {
-        StringMatched -> SourceCursor (stringDrop sourceText 1);
+      SourceCursor sourceText lineNumber linePrefix -> case sourceStartsWith " " sourceText of {
+        StringMatched -> SourceCursor (stringDrop sourceText 1) lineNumber (stringAppend linePrefix " ");
         StringMismatch -> case sourceStartsWith "\n" sourceText of {
-          StringMatched -> SourceCursor (stringDrop sourceText 1);
+          StringMatched -> SourceCursor (stringDrop sourceText 1) (nextLineNumber lineNumber) "";
           StringMismatch -> case sourceStartsWith "\t" sourceText of {
-            StringMatched -> SourceCursor (stringDrop sourceText 1);
+            StringMatched -> SourceCursor (stringDrop sourceText 1) lineNumber (stringAppend linePrefix "\t");
             StringMismatch -> cursor
+          }
+        }
+      }
+    };
+
+  def nextLineNumber : String -> String =
+    λ(lineNumber : String) case stringExactMatch "1" lineNumber of {
+      StringMatched -> "2";
+      StringMismatch -> case stringExactMatch "2" lineNumber of {
+        StringMatched -> "3";
+        StringMismatch -> case stringExactMatch "3" lineNumber of {
+          StringMatched -> "4";
+          StringMismatch -> case stringExactMatch "4" lineNumber of {
+            StringMatched -> "5";
+            StringMismatch -> case stringExactMatch "5" lineNumber of {
+              StringMatched -> "6";
+              StringMismatch -> case stringExactMatch "6" lineNumber of {
+                StringMatched -> "7";
+                StringMismatch -> case stringExactMatch "7" lineNumber of {
+                  StringMatched -> "8";
+                  StringMismatch -> case stringExactMatch "8" lineNumber of {
+                    StringMatched -> "9";
+                    StringMismatch -> case stringExactMatch "9" lineNumber of {
+                      StringMatched -> "10";
+                      StringMismatch -> case stringExactMatch "10" lineNumber of {
+                        StringMatched -> "11";
+                        StringMismatch -> case stringExactMatch "11" lineNumber of {
+                          StringMatched -> "12";
+                          StringMismatch -> case stringExactMatch "12" lineNumber of {
+                            StringMatched -> "13";
+                            StringMismatch -> case stringExactMatch "13" lineNumber of {
+                              StringMatched -> "14";
+                              StringMismatch -> case stringExactMatch "14" lineNumber of {
+                                StringMatched -> "15";
+                                StringMismatch -> case stringExactMatch "15" lineNumber of {
+                                  StringMatched -> "16";
+                                  StringMismatch -> case stringExactMatch "16" lineNumber of {
+                                    StringMatched -> "17";
+                                    StringMismatch -> case stringExactMatch "17" lineNumber of {
+                                      StringMatched -> "18";
+                                      StringMismatch -> case stringExactMatch "18" lineNumber of {
+                                        StringMatched -> "19";
+                                        StringMismatch -> case stringExactMatch "19" lineNumber of {
+                                          StringMatched -> "20";
+                                          StringMismatch -> case stringExactMatch "20" lineNumber of {
+                                            StringMatched -> "21";
+                                            StringMismatch -> case stringExactMatch "21" lineNumber of {
+                                              StringMatched -> "22";
+                                              StringMismatch -> case stringExactMatch "22" lineNumber of {
+                                                StringMatched -> "23";
+                                                StringMismatch -> case stringExactMatch "23" lineNumber of {
+                                                  StringMatched -> "24";
+                                                  StringMismatch -> case stringExactMatch "24" lineNumber of {
+                                                    StringMatched -> "25";
+                                                    StringMismatch -> case stringExactMatch "25" lineNumber of {
+                                                      StringMatched -> "26";
+                                                      StringMismatch -> case stringExactMatch "26" lineNumber of {
+                                                        StringMatched -> "27";
+                                                        StringMismatch -> case stringExactMatch "27" lineNumber of {
+                                                          StringMatched -> "28";
+                                                          StringMismatch -> case stringExactMatch "28" lineNumber of {
+                                                            StringMatched -> "29";
+                                                            StringMismatch -> case stringExactMatch "29" lineNumber of {
+                                                              StringMatched -> "30";
+                                                              StringMismatch -> case stringExactMatch "30" lineNumber of {
+                                                                StringMatched -> "31";
+                                                                StringMismatch -> case stringExactMatch "31" lineNumber of {
+                                                                  StringMatched -> "32";
+                                                                  StringMismatch -> lineNumber
+                                                                }
+                                                              }
+                                                            }
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }

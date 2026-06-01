@@ -5,6 +5,7 @@ module ParserParityDiagnostic export (ParserDiagnostic(..)) {
     | ExpectedEquals : String -> ParserDiagnostic
     | ExpectedImportSemicolon : String -> ParserDiagnostic
     | ExpectedImportAlias : String -> ParserDiagnostic
+    | ExpectedImportExposingSeparator : String -> ParserDiagnostic
     | ExpectedDefSemicolon : String -> ParserDiagnostic
     | ExpectedLetIn : String -> ParserDiagnostic
     | ExpectedLetAnnotationType : String -> ParserDiagnostic

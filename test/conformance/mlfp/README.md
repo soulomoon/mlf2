@@ -71,4 +71,7 @@ constructor-local forall-dot diagnostic path, plus two qualified
 import/reference modules covering import aliases, alias-only imports, exposed
 classes/types/constructors/values/methods, qualified
 value/type/constructor/class/method references, and one malformed import-alias
+diagnostic path, plus two complete multi-module export/import fixtures
+covering abstract exports/imports, recursive ADT constructor exports/imports,
+cross-module references, and one malformed import-exposing separator
 diagnostic path.

@@ -39,6 +39,36 @@ spec =
             it "runs all .mlfp parser parity fixtures through one generated public CLI driver" $ \fixture ->
                 batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
 
+            it "shared parser-owned .mlfp parser parses multi-module source text and export/import surfaces" $ \fixture -> do
+                abstractSource <- readFile multiModuleAbstractExportImportCanonicalSourcePath
+                abstractExpected <- readFile multiModuleAbstractExportImportExpectedProjectionPath
+                recursiveSource <- readFile multiModuleRecursiveAdtExportImportCanonicalSourcePath
+                recursiveExpected <- readFile multiModuleRecursiveAdtExportImportExpectedProjectionPath
+
+                abstractCanonicalProjection <-
+                    renderCanonicalProjection multiModuleAbstractExportImportCanonicalSourcePath abstractSource
+                recursiveCanonicalProjection <-
+                    renderCanonicalProjection multiModuleRecursiveAdtExportImportCanonicalSourcePath recursiveSource
+                sharedParserSource <- concat <$> traverse readFile sharedParserAuditFiles
+
+                abstractCanonicalProjection `shouldBe` abstractExpected
+                recursiveCanonicalProjection `shouldBe` recursiveExpected
+                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
+                batchExpectedOutput fixture
+                    `shouldSatisfy` isInfixOf
+                        (batchSection "positive:multi-module-abstract-export-import" abstractExpected)
+                batchExpectedOutput fixture
+                    `shouldSatisfy` isInfixOf
+                        (batchSection "positive:multi-module-recursive-adt-export-import" recursiveExpected)
+                filter (`isInfixOf` sharedParserSource) sharedParserRound318ShortcutPhrases
+                    `shouldBe` []
+
+            it "parser-owned .mlfp parser rejects malformed multi-module import exposing separators through public run-program" $ \fixture -> do
+                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
+                batchExpectedOutput fixture
+                    `shouldSatisfy` isInfixOf
+                        (batchSection "negative:multi-module-import-exposing-separator" importExposingSeparatorNegativeEvidenceProjection)
+
             it "shared parser-owned .mlfp parser library routes the generated batch through one entrypoint" $ \fixture -> do
                 sharedParserExists <- doesFileExist (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
                 sharedParserExists `shouldBe` True
@@ -161,6 +191,14 @@ qualifiedImportAliasOnlyCanonicalSourcePath :: FilePath
 qualifiedImportAliasOnlyCanonicalSourcePath =
     "test/conformance/mlfp/parser-parity/qualified-import-alias-only/src/Main.mlfp"
 
+multiModuleAbstractExportImportCanonicalSourcePath :: FilePath
+multiModuleAbstractExportImportCanonicalSourcePath =
+    "test/conformance/mlfp/parser-parity/multi-module-abstract-export-import/src/Main.mlfp"
+
+multiModuleRecursiveAdtExportImportCanonicalSourcePath :: FilePath
+multiModuleRecursiveAdtExportImportCanonicalSourcePath =
+    "test/conformance/mlfp/parser-parity/multi-module-recursive-adt-export-import/src/Main.mlfp"
+
 expectedProjectionPath :: FilePath
 expectedProjectionPath =
     "test/conformance/mlfp/parser-parity/basic-module-def-bool/expected/parser-program.txt"
@@ -233,6 +271,14 @@ qualifiedImportAliasOnlyExpectedProjectionPath :: FilePath
 qualifiedImportAliasOnlyExpectedProjectionPath =
     "test/conformance/mlfp/parser-parity/qualified-import-alias-only/expected/parser-program.txt"
 
+multiModuleAbstractExportImportExpectedProjectionPath :: FilePath
+multiModuleAbstractExportImportExpectedProjectionPath =
+    "test/conformance/mlfp/parser-parity/multi-module-abstract-export-import/expected/parser-program.txt"
+
+multiModuleRecursiveAdtExportImportExpectedProjectionPath :: FilePath
+multiModuleRecursiveAdtExportImportExpectedProjectionPath =
+    "test/conformance/mlfp/parser-parity/multi-module-recursive-adt-export-import/expected/parser-program.txt"
+
 sharedParserLibraryRoot :: FilePath
 sharedParserLibraryRoot =
     "test/programs/compiler-parser-parity/parser-library"
@@ -242,6 +288,7 @@ sharedParserAuditFiles =
     [ sharedParserLibraryRoot </> "ParserParityToken.mlfp"
     , sharedParserLibraryRoot </> "ParserParityLexer.mlfp"
     , sharedParserLibraryRoot </> "ParserParityParser.mlfp"
+    , sharedParserLibraryRoot </> "ParserParityAst.mlfp"
     ]
 
 sharedParserBannedPhrases :: [String]
@@ -261,6 +308,9 @@ sharedParserBannedPhrases =
     , concat ["Family", "Tokens"]
     , concat ["Gadt", "Tokens"]
     , concat ["Existential", "Tokens"]
+    , concat ["Multi", "Module", "Tokens"]
+    , concat ["Abstract", "Export", "Tokens"]
+    , concat ["Recursive", "Adt", "Tokens"]
     , concat ["LexerOk ", "basic", "Module", "Tokens"]
     , concat ["LexerOk ", "import", "Bool", "Tokens"]
     , concat ["LexerOk ", "value", "Def", "List", "Tokens"]
@@ -276,6 +326,9 @@ sharedParserBannedPhrases =
     , concat ["LexerOk ", "family", "Tokens"]
     , concat ["LexerOk ", "gadt", "Tokens"]
     , concat ["LexerOk ", "existential", "Tokens"]
+    , concat ["LexerOk ", "multi", "Module", "Tokens"]
+    , concat ["LexerOk ", "abstract", "Export", "Tokens"]
+    , concat ["LexerOk ", "recursive", "Adt", "Tokens"]
     , concat ["case", " tokens"]
     , concat ["class", " tokens"]
     , concat ["instance", " tokens"]
@@ -286,6 +339,9 @@ sharedParserBannedPhrases =
     , concat ["family", " tokens"]
     , concat ["gadt", " tokens"]
     , concat ["existential", " tokens"]
+    , concat ["multi-module", " tokens"]
+    , concat ["abstract-export", " tokens"]
+    , concat ["recursive-adt", " tokens"]
     ]
 
 sharedParserFixedOffsetPhrases :: [String]
@@ -340,6 +396,7 @@ sharedParserShortcutPhrases =
         , sharedParserRound315ShortcutPhrases
         , sharedParserRound316ShortcutPhrases
         , sharedParserRound317ShortcutPhrases
+        , sharedParserRound318ShortcutPhrases
         ]
 
 sharedParserRound314ShortcutPhrases :: [String]
@@ -382,11 +439,149 @@ sharedParserRound317ShortcutPhrases =
     , "moduleKey \"qualified-import-alias-only\""
     ]
 
+sharedParserRound318ShortcutPhrases :: [String]
+sharedParserRound318ShortcutPhrases =
+    [ "parseMultiModuleAbstractExportImport"
+    , "parseMultiModuleRecursiveAdtExportImport"
+    , "completeModuleKey \"multi-module-abstract-export-import\""
+    , "completeModuleKey \"multi-module-recursive-adt-export-import\""
+    , "moduleKey \"multi-module-abstract-export-import\""
+    , "moduleKey \"multi-module-recursive-adt-export-import\""
+    , "programKey \"multi-module-abstract-export-import\""
+    , "programKey \"multi-module-recursive-adt-export-import\""
+    , "abstract-core-user-program"
+    , "recursive-core-user-program"
+    , "programKey"
+    , "programKey \"abstract-core-user-program\""
+    , "programKey \"recursive-core-user-program\""
+    , "renderAbstractCoreUserProgram"
+    , "renderRecursiveCoreUserProgram"
+    , "parseCoreUserProgram"
+    , "parseCoreUserAbstractProgram"
+    , "parseCoreUserRecursiveProgram"
+    , "parseAbstractCoreModule"
+    , "parseAbstractUserModule"
+    , "parseRecursiveCoreModule"
+    , "parseRecursiveUserModule"
+    , "abstractCoreUserProgramValue"
+    , "recursiveCoreUserProgramValue"
+    , "moduleKey \"round318"
+    , "completeModuleKey \"round318"
+    , "round318-core-nat-value-module"
+    , "round318-core-eq-nat-expr-module"
+    , "round318-user-nat-value-module"
+    , "round318-user-eq-nat-expr-module"
+    , "renderRound318"
+    , "renderCoreNatValueModuleProjection"
+    , "renderCoreEqNatExprModuleProjection"
+    , "renderUserNatValueModuleProjection"
+    , "renderUserEqNatExprModuleProjection"
+    , "parseRound318"
+    , "parseCoreNatValue"
+    , "parseCoreEqNatExpr"
+    , "parseUserNatValue"
+    , "parseUserEqNatExpr"
+    , "finishCoreNatValue"
+    , "finishCoreEqNatExpr"
+    , "finishUserNatValue"
+    , "finishUserEqNatExpr"
+    , "abstractCoreExports"
+    , "recursiveCoreExports"
+    , "abstractUserImports"
+    , "recursiveUserImports"
+    , "abstractNatDeclarations"
+    , "recursiveCoreDeclarations"
+    , "abstractUserDefinitions"
+    , "recursiveUserDefinitions"
+    , "coreValueBasisExports"
+    , "coreRecursiveBasisExports"
+    , "userValueMainExports"
+    , "userRecursiveMainExports"
+    , "userValueBasisImports"
+    , "userRecursiveBasisImports"
+    , "natBasisDeclarations"
+    , "coreRecursiveDeclarations"
+    , "userValueBasisDefinitions"
+    , "userRecursiveDefinitions"
+    , "finishCoreValueBasisRows"
+    , "finishCoreRecursiveBasisRows"
+    , "finishUserValueBasisRows"
+    , "finishUserRecursiveBasisRows"
+    , "parseCoreValueBasis"
+    , "parseCoreRecursiveBasis"
+    , "parseUserValueBasis"
+    , "parseUserRecursiveBasis"
+    , "parseCoreModuleName"
+    , "parseUserModuleName"
+    , "parseCoreProgramModule"
+    , "parseUserProgramModule"
+    , "parseSelectedProgramModuleName"
+    , "parseCoreProjectionExportRows"
+    , "parseUserNatImportRows"
+    , "parseUserClassImportRows"
+    , "parseNatSurfaceExportRows"
+    , "parseClassSurfaceExportRows"
+    , "parseMainHeaderExportRows"
+    , "parseThreeItemImportRows"
+    , "parseFourItemImportRows"
+    , "parseProjectionExportSecondOrDone"
+    , "parseProjectionExportThirdOrDone"
+    , "parseProjectionExportFourthOrDone"
+    , "parseImportProjectionSecondOrClose"
+    , "parseImportProjectionThirdOrClose"
+    , "parseImportProjectionFourthOrClose"
+    , "ExpectedImportExposingSeparator \"12:29-12:33\""
+    , "parseProgramModuleName"
+    , "parseKnownModuleName"
+    , "parseKnownImportModuleName"
+    , "parseFirstPlainTypeImportNamed"
+    , "parsePlainTypeExportNamed"
+    , "parseValueExportNamed"
+    , "parseConstructedTypeExportNamed"
+    , "parseConstructedTypeImportNamed"
+    , "parsePlainTypeImportNamed"
+    , "parseValueImportNamed"
+    , "firstImportModuleSpan"
+    , "exportSurfaceSpan"
+    , "constructedExportSurfaceSpan"
+    , "valueExportSurfaceSpan"
+    , "importSurfaceSpan"
+    , "constructedImportSurfaceSpan"
+    , "valueImportSurfaceSpan"
+    , "constructedSurfaceSpan"
+    , "finishUserNatImportRows"
+    , "finishUserClassImportRows"
+    , "pending-user-main-export"
+    , "stringIndexOf importRows"
+    , "finishExactModuleBodyRows sourceFile moduleName exportRows \"1:1-17:1\""
+    , "finishExactModuleBodyRows sourceFile moduleName exportRows \"1:1-11:1\""
+    , "finishImportedBodyRows sourceFile moduleName exportRows importRows \"17:1-25:1\""
+    , "finishImportedBodyRows sourceFile moduleName exportRows importRows \"11:1-16:1\""
+    , "dataRows sourceFile \"Nat\" \"6:3-10:3\""
+    , "dataRows sourceFile \"Nat\" \"2:3-6:3\""
+    , "dataParamRows sourceFile \"Expr\" \"a\" \"10:3-14:3\""
+    , "constructorRows sourceFile \"Zero\" \"Nat\" \"7:7-8:5\""
+    , "constructorRows sourceFile \"Succ\" \"Nat -> Nat\" \"8:7-8:24\""
+    , "constructorRows sourceFile \"DoneNat\" \"Nat -> Expr Nat\" \"11:7-12:5\""
+    , "constructorRows sourceFile \"Step\" \"Expr a -> Expr a\" \"12:7-12:30\""
+    , "defRows sourceFile \"zero\" \"Nat\" \"Zero\" \"14:3-15:1\""
+    , "defRows sourceFile \"succ\" \"Nat -> Nat\" \"λ(n : Nat) Succ n\" \"8:3-9:1\""
+    , "classRows sourceFile \"Eq\" \"a\" \"2:3-6:3\""
+    , "methodSignatureRows sourceFile \"eq\" \"a -> a -> Bool\" \"3:5-4:3\""
+    , "mainDefinitionSpanForType"
+    , "zeroDefinitionSpan"
+    , "natDataRowsForSpan"
+    , "exprDataRowsForSpan"
+    ]
+
 sharedParserCompleteParseRequiredPhrases :: [String]
 sharedParserCompleteParseRequiredPhrases =
     [ "parserStateAtEnd state"
     , "ParserAtEnd ->"
     , "ParserNotAtEnd ->"
+    , "parseCompleteProgram"
+    , "parseSharedProgramModule"
+    , "parseImportProjectionList"
     , "completeModuleKey"
     , "parseDataDeclaration"
     , "parseBoolDefinitionEquals"
@@ -402,11 +597,13 @@ sharedParserStaticNegativeEvidencePhrases =
     , "stringAppend \"let-lambda-application parser negative expected-let-in@\""
     , "stringAppend \"typed-annotation-types parser negative expected-let-annotation-type@\""
     , "stringAppend \"data-declaration parser negative expected-constructor-colon@\""
+    , "stringAppend \"multi-module import-exposing parser negative expected-import-exposing-separator@\""
     ]
 
 sharedParserDynamicEvidenceRequiredPhrases :: [String]
 sharedParserDynamicEvidenceRequiredPhrases =
     [ "parseCompleteModule sourceText"
+    , "parseCompleteProgram sourceText"
     , "tokenizeCompleteModule sourceText"
     , "tokenizeCompleteModule lexerMismatchSourceText"
     , "renderParserNegativeEvidenceFromSourceText"
@@ -476,6 +673,8 @@ parserParityPositiveCases =
     , ParserParityPositiveCase "positive:existential-constructor-forall" "positiveExistentialConstructorForall" existentialConstructorForallCanonicalSourcePath existentialConstructorForallExpectedProjectionPath
     , ParserParityPositiveCase "positive:qualified-import-alias-references" "positiveQualifiedImportAliasReferences" qualifiedImportAliasReferencesCanonicalSourcePath qualifiedImportAliasReferencesExpectedProjectionPath
     , ParserParityPositiveCase "positive:qualified-import-alias-only" "positiveQualifiedImportAliasOnly" qualifiedImportAliasOnlyCanonicalSourcePath qualifiedImportAliasOnlyExpectedProjectionPath
+    , ParserParityPositiveCase "positive:multi-module-abstract-export-import" "positiveMultiModuleAbstractExportImport" multiModuleAbstractExportImportCanonicalSourcePath multiModuleAbstractExportImportExpectedProjectionPath
+    , ParserParityPositiveCase "positive:multi-module-recursive-adt-export-import" "positiveMultiModuleRecursiveAdtExportImport" multiModuleRecursiveAdtExportImportCanonicalSourcePath multiModuleRecursiveAdtExportImportExpectedProjectionPath
     ]
 
 parserParityNegativeCases :: [ParserParityNegativeCase]
@@ -491,6 +690,7 @@ parserParityNegativeCases =
     , ParserParityNegativeCase "negative:type-family-kind-lambda" "negativeTypeFamilyKindLambda" "type-family parser negative " typeFamilyKindLambdaCanonicalSourcePath typeFamilyEquationNegativeSourceText typeFamilyEquationNegativeEvidenceProjection
     , ParserParityNegativeCase "negative:existential-constructor-forall" "negativeExistentialConstructorForall" "constructor-forall parser negative " existentialConstructorForallCanonicalSourcePath constructorForallNegativeSourceText constructorForallNegativeEvidenceProjection
     , ParserParityNegativeCase "negative:qualified-import-alias-references" "negativeQualifiedImportAliasReferences" "qualified-import-alias parser negative " qualifiedImportAliasReferencesCanonicalSourcePath qualifiedImportAliasNegativeSourceText qualifiedImportAliasNegativeEvidenceProjection
+    , ParserParityNegativeCase "negative:multi-module-import-exposing-separator" "negativeMultiModuleImportExposingSeparator" "multi-module import-exposing parser negative " multiModuleAbstractExportImportCanonicalSourcePath importExposingSeparatorNegativeSourceText importExposingSeparatorNegativeEvidenceProjection
     ]
 
 assertCanonicalParserParityProjection :: ParserParityPositiveCase -> IO ()
@@ -807,6 +1007,26 @@ qualifiedImportAliasNegativeSourceText =
         , "}"
         ]
 
+importExposingSeparatorNegativeSourceText :: String
+importExposingSeparatorNegativeSourceText =
+    unlines
+        [ ""
+        , ""
+        , ""
+        , ""
+        , ""
+        , ""
+        , ""
+        , ""
+        , ""
+        , ""
+        , "module User export (main) {"
+        , "  import Core exposing (Nat zero, succ);"
+        , ""
+        , "  def main : Nat = succ zero;"
+        , "}"
+        ]
+
 retryEvidenceProjection :: String
 retryEvidenceProjection =
     unlines
@@ -818,7 +1038,7 @@ retryEvidenceProjection =
 importNegativeEvidenceProjection :: String
 importNegativeEvidenceProjection =
     unlines
-        [ "import parser negative expected-import-semicolon@test/conformance/mlfp/parser-parity/import-exposing-def-bool/src/Main.mlfp:2:33-2:34"
+        [ "import parser negative expected-import-semicolon@test/conformance/mlfp/parser-parity/import-exposing-def-bool/src/Main.mlfp:3:3-3:6"
         ]
 
 valueDefListNegativeEvidenceProjection :: String
@@ -881,6 +1101,12 @@ qualifiedImportAliasNegativeEvidenceProjection =
         [ "qualified-import-alias parser negative expected-import-alias@test/conformance/mlfp/parser-parity/qualified-import-alias-references/src/Main.mlfp:2:18-2:26"
         ]
 
+importExposingSeparatorNegativeEvidenceProjection :: String
+importExposingSeparatorNegativeEvidenceProjection =
+    unlines
+        [ "multi-module import-exposing parser negative expected-import-exposing-separator@test/conformance/mlfp/parser-parity/multi-module-abstract-export-import/src/Main.mlfp:12:29-12:33"
+        ]
+
 renderCanonicalProjection :: FilePath -> String -> IO String
 renderCanonicalProjection path source =
     case parseLocatedProgramWithFile path source of
@@ -892,10 +1118,8 @@ renderCanonicalProjection path source =
 renderLocatedProjection :: P.LocatedProgram -> IO String
 renderLocatedProjection located =
     case P.locatedProgram located of
-        P.Program [module0] -> renderModuleProjection (P.locatedProgramSpans located) module0
-        other ->
-            expectationFailure ("expected one parsed module, got: " ++ show other)
-                >> fail "unexpected parsed program shape"
+        P.Program modules0 ->
+            concat <$> traverse (renderModuleProjection (P.locatedProgramSpans located)) modules0
 
 renderModuleProjection :: P.ProgramSpanIndex -> P.Module -> IO String
 renderModuleProjection spans module0 = do

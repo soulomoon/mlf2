@@ -1,0 +1,15 @@
+module Core export (Nat, zero, succ) {
+  data Nat =
+      Zero : Nat
+    | Succ : Nat -> Nat;
+
+  def zero : Nat = Zero;
+
+  def succ : Nat -> Nat = λ(n : Nat) Succ n;
+}
+
+module User export (main) {
+  import Core exposing (Nat, zero, succ);
+
+  def main : Nat = succ zero;
+}

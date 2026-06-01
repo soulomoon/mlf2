@@ -1,4 +1,4 @@
-module ParserParityToken export (TokenKind(..), TokenMatch(..), ParserInput(..), tokenSpan, tokenMatches, renderTokenPrefixEvidence) {
+module ParserParityToken export (TokenKind(..), TokenMatch(..), ParserInput(..), tokenSpan, tokenStart, tokenEnd, tokenText, tokenMatches, renderTokenPrefixEvidence) {
   import Prelude exposing (Option(..), stringAppend, stringIndexOf);
   import ParserParitySource exposing (ParserSourceInput(..), ParserSourceSymbol(..), renderSpan, basicUnexpectedSpan);
 
@@ -14,7 +14,19 @@ module ParserParityToken export (TokenKind(..), TokenMatch(..), ParserInput(..),
 
   def tokenSpan : ParserSourceSymbol -> String =
     λ(token : ParserSourceSymbol) case token of {
-      SourceSymbol span _ -> span;
+      SourceSymbol start finish _ -> stringAppend start (stringAppend "-" finish);
+      SourceUnknown span -> span
+    };
+
+  def tokenStart : ParserSourceSymbol -> String =
+    λ(token : ParserSourceSymbol) case token of {
+      SourceSymbol start _ _ -> start;
+      SourceUnknown span -> span
+    };
+
+  def tokenEnd : ParserSourceSymbol -> String =
+    λ(token : ParserSourceSymbol) case token of {
+      SourceSymbol _ finish _ -> finish;
       SourceUnknown span -> span
     };
 
@@ -34,7 +46,7 @@ module ParserParityToken export (TokenKind(..), TokenMatch(..), ParserInput(..),
 
   def tokenText : ParserSourceSymbol -> String =
     λ(token : ParserSourceSymbol) case token of {
-      SourceSymbol _ text -> text;
+      SourceSymbol _ _ text -> text;
       SourceUnknown _ -> "unknown"
     };
 

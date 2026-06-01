@@ -1,7 +1,8 @@
-module ParserParityParserCombinator export (ParserState(..), ParserValue(..), ParserStep(..), Parser(..), ParserEnd(..), runParser, parserPure, parserFail, parserBind, parserMap, parserChoice, captureSpan, diagnosticLabel, labelUnexpectedSource, labelEquals, labelImportSemicolon, labelImportAlias, labelDefSemicolon, labelLetIn, labelLetAnnotationType, labelConstructorColon, labelCaseBranchArrow, labelInstanceMethodEquals, labelFunctionalDependencyArrow, labelTypeFamilyEquationEquals, labelConstructorForallDot, expectToken, parserStateAtEnd) {
+module ParserParityParserCombinator export (ParserState(..), ParserValue(..), ParserStep(..), Parser(..), ParserEnd(..), runParser, parserPure, parserFail, parserFailExpectedImportSemicolonAtCurrent, parserFailExpectedImportExposingSeparatorAtCurrent, parserBind, parserMap, parserChoice, parserReturnAtEndOr, parserCurrentTokenStartOr, captureSpan, diagnosticLabel, labelUnexpectedSource, labelEquals, labelImportSemicolon, labelImportAlias, labelDefSemicolon, labelLetIn, labelLetAnnotationType, labelConstructorColon, labelCaseBranchArrow, labelInstanceMethodEquals, labelFunctionalDependencyArrow, labelTypeFamilyEquationEquals, labelConstructorForallDot, expectToken, expectIdentifierToken, parserStateAtEnd) {
+  import Prelude exposing (Option(..), stringIndexOf);
   import ParserParityDiagnostic exposing (ParserDiagnostic(..));
   import ParserParitySource exposing (ParserSourceInput(..), ParserSourceSymbol(..), basicUnexpectedSpan);
-  import ParserParityToken exposing (TokenKind(..), TokenMatch(..), tokenMatches);
+  import ParserParityToken exposing (TokenKind(..), TokenMatch(..), tokenMatches, tokenSpan, tokenStart, tokenText);
 
   def parserFunctorAudit : String = "class Functor";
   def parserApplicativeAudit : String = "class Applicative";
@@ -13,6 +14,7 @@ module ParserParityParserCombinator export (ParserState(..), ParserValue(..), Pa
   data ParserValue =
       ValueUnit : ParserValue
     | ValueToken : ParserSourceSymbol -> ParserValue
+    | ValueProjectionRows : String -> ParserValue
     | ValueModuleKey : String -> ParserValue;
 
   data ParserStep =
@@ -40,6 +42,24 @@ module ParserParityParserCombinator export (ParserState(..), ParserValue(..), Pa
     λ(diagnostic : ParserDiagnostic)
       (Parser (λ(state : ParserState) ParserStepError diagnostic) : Parser ParserValue);
 
+  def currentTokenSpanOr : String -> ParserState -> String =
+    λ(fallbackSpan : String) λ(state : ParserState) case state of {
+      ParserState stream -> case stream of {
+        SourceInputNil -> fallbackSpan;
+        SourceInputCons token _ -> tokenSpan token
+      }
+    };
+
+  def parserFailExpectedImportSemicolonAtCurrent : Parser ParserValue =
+    (Parser
+      (λ(state : ParserState)
+        ParserStepError (ExpectedImportSemicolon (currentTokenSpanOr basicUnexpectedSpan state))) : Parser ParserValue);
+
+  def parserFailExpectedImportExposingSeparatorAtCurrent : Parser ParserValue =
+    (Parser
+      (λ(state : ParserState)
+        ParserStepError (ExpectedImportExposingSeparator (currentTokenSpanOr basicUnexpectedSpan state))) : Parser ParserValue);
+
   def parserBind : Parser ParserValue -> (ParserValue -> Parser ParserValue) -> Parser ParserValue =
     λ(parser : Parser ParserValue) λ(next : ParserValue -> Parser ParserValue)
       (Parser
@@ -63,6 +83,7 @@ module ParserParityParserCombinator export (ParserState(..), ParserValue(..), Pa
             ExpectedEquals span -> ParserStepError (ExpectedEquals span);
             ExpectedImportSemicolon span -> ParserStepError (ExpectedImportSemicolon span);
             ExpectedImportAlias span -> ParserStepError (ExpectedImportAlias span);
+            ExpectedImportExposingSeparator span -> ParserStepError (ExpectedImportExposingSeparator span);
             ExpectedDefSemicolon span -> ParserStepError (ExpectedDefSemicolon span);
             ExpectedLetIn span -> ParserStepError (ExpectedLetIn span);
             ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
@@ -72,6 +93,25 @@ module ParserParityParserCombinator export (ParserState(..), ParserValue(..), Pa
             ExpectedFunctionalDependencyArrow span -> ParserStepError (ExpectedFunctionalDependencyArrow span);
             ExpectedTypeFamilyEquationEquals span -> ParserStepError (ExpectedTypeFamilyEquationEquals span);
             ExpectedConstructorForallDot span -> ParserStepError (ExpectedConstructorForallDot span)
+          }
+        }) : Parser ParserValue);
+
+  def parserReturnAtEndOr : ParserValue -> Parser ParserValue -> Parser ParserValue =
+    λ(doneValue : ParserValue) λ(nextParser : Parser ParserValue)
+      (Parser
+        (λ(state : ParserState) case parserStateAtEnd state of {
+          ParserAtEnd -> ParserStepOk state doneValue;
+          ParserNotAtEnd -> runParser nextParser state;
+          ParserEndUnknown -> ParserStepError (ExpectedCompleteModule basicUnexpectedSpan)
+        }) : Parser ParserValue);
+
+  def parserCurrentTokenStartOr : String -> Parser ParserValue =
+    λ(fallbackStart : String)
+      (Parser
+        (λ(state : ParserState) case state of {
+          ParserState stream -> case stream of {
+            SourceInputNil -> ParserStepOk state (ValueModuleKey fallbackStart);
+            SourceInputCons token _ -> ParserStepOk state (ValueModuleKey (tokenStart token))
           }
         }) : Parser ParserValue);
 
@@ -92,6 +132,7 @@ module ParserParityParserCombinator export (ParserState(..), ParserValue(..), Pa
             ExpectedEquals expectedSpan -> ParserStepError (ExpectedEquals expectedSpan);
             ExpectedImportSemicolon expectedSpan -> ParserStepError (ExpectedImportSemicolon expectedSpan);
             ExpectedImportAlias expectedSpan -> ParserStepError (ExpectedImportAlias expectedSpan);
+            ExpectedImportExposingSeparator expectedSpan -> ParserStepError (ExpectedImportExposingSeparator expectedSpan);
             ExpectedDefSemicolon expectedSpan -> ParserStepError (ExpectedDefSemicolon expectedSpan);
             ExpectedLetIn expectedSpan -> ParserStepError (ExpectedLetIn expectedSpan);
             ExpectedLetAnnotationType expectedSpan -> ParserStepError (ExpectedLetAnnotationType expectedSpan);
@@ -115,6 +156,7 @@ module ParserParityParserCombinator export (ParserState(..), ParserValue(..), Pa
             ExpectedEquals span -> ParserStepError (ExpectedEquals span);
             ExpectedImportSemicolon span -> ParserStepError (ExpectedImportSemicolon span);
             ExpectedImportAlias span -> ParserStepError (ExpectedImportAlias span);
+            ExpectedImportExposingSeparator span -> ParserStepError (ExpectedImportExposingSeparator span);
             ExpectedDefSemicolon span -> ParserStepError (ExpectedDefSemicolon span);
             ExpectedLetIn span -> ParserStepError (ExpectedLetIn span);
             ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
@@ -138,6 +180,7 @@ module ParserParityParserCombinator export (ParserState(..), ParserValue(..), Pa
             ExpectedEquals span -> ParserStepError (ExpectedEquals span);
             ExpectedImportSemicolon span -> ParserStepError (ExpectedImportSemicolon span);
             ExpectedImportAlias span -> ParserStepError (ExpectedImportAlias span);
+            ExpectedImportExposingSeparator span -> ParserStepError (ExpectedImportExposingSeparator span);
             ExpectedDefSemicolon span -> ParserStepError (ExpectedDefSemicolon span);
             ExpectedLetIn span -> ParserStepError (ExpectedLetIn span);
             ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
@@ -161,6 +204,7 @@ module ParserParityParserCombinator export (ParserState(..), ParserValue(..), Pa
             ExpectedEquals span -> ParserStepError (ExpectedEquals span);
             ExpectedImportSemicolon span -> ParserStepError (ExpectedImportSemicolon span);
             ExpectedImportAlias span -> ParserStepError (ExpectedImportAlias span);
+            ExpectedImportExposingSeparator span -> ParserStepError (ExpectedImportExposingSeparator span);
             ExpectedDefSemicolon span -> ParserStepError (ExpectedDefSemicolon span);
             ExpectedLetIn span -> ParserStepError (ExpectedLetIn span);
             ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
@@ -184,6 +228,7 @@ module ParserParityParserCombinator export (ParserState(..), ParserValue(..), Pa
             ExpectedEquals span -> ParserStepError (ExpectedEquals span);
             ExpectedImportSemicolon span -> ParserStepError (ExpectedImportSemicolon span);
             ExpectedImportAlias span -> ParserStepError (ExpectedImportAlias span);
+            ExpectedImportExposingSeparator span -> ParserStepError (ExpectedImportExposingSeparator span);
             ExpectedDefSemicolon span -> ParserStepError (ExpectedDefSemicolon span);
             ExpectedLetIn span -> ParserStepError (ExpectedLetIn span);
             ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
@@ -207,6 +252,7 @@ module ParserParityParserCombinator export (ParserState(..), ParserValue(..), Pa
             ExpectedEquals span -> ParserStepError (ExpectedEquals span);
             ExpectedImportSemicolon span -> ParserStepError (ExpectedImportSemicolon span);
             ExpectedImportAlias span -> ParserStepError (ExpectedImportAlias span);
+            ExpectedImportExposingSeparator span -> ParserStepError (ExpectedImportExposingSeparator span);
             ExpectedDefSemicolon span -> ParserStepError (ExpectedDefSemicolon span);
             ExpectedLetIn span -> ParserStepError (ExpectedLetIn span);
             ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
@@ -230,6 +276,7 @@ module ParserParityParserCombinator export (ParserState(..), ParserValue(..), Pa
             ExpectedEquals span -> ParserStepError (ExpectedEquals span);
             ExpectedImportSemicolon span -> ParserStepError (ExpectedImportSemicolon span);
             ExpectedImportAlias span -> ParserStepError (ExpectedImportAlias span);
+            ExpectedImportExposingSeparator span -> ParserStepError (ExpectedImportExposingSeparator span);
             ExpectedDefSemicolon span -> ParserStepError (ExpectedDefSemicolon span);
             ExpectedLetIn span -> ParserStepError (ExpectedLetIn span);
             ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
@@ -253,6 +300,7 @@ module ParserParityParserCombinator export (ParserState(..), ParserValue(..), Pa
             ExpectedEquals span -> ParserStepError (ExpectedEquals span);
             ExpectedImportSemicolon span -> ParserStepError (ExpectedImportSemicolon span);
             ExpectedImportAlias span -> ParserStepError (ExpectedImportAlias span);
+            ExpectedImportExposingSeparator span -> ParserStepError (ExpectedImportExposingSeparator span);
             ExpectedDefSemicolon span -> ParserStepError (ExpectedDefSemicolon span);
             ExpectedLetIn span -> ParserStepError (ExpectedLetIn span);
             ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
@@ -276,6 +324,7 @@ module ParserParityParserCombinator export (ParserState(..), ParserValue(..), Pa
             ExpectedEquals span -> ParserStepError (ExpectedEquals span);
             ExpectedImportSemicolon span -> ParserStepError (ExpectedImportSemicolon span);
             ExpectedImportAlias span -> ParserStepError (ExpectedImportAlias span);
+            ExpectedImportExposingSeparator span -> ParserStepError (ExpectedImportExposingSeparator span);
             ExpectedDefSemicolon span -> ParserStepError (ExpectedDefSemicolon span);
             ExpectedLetIn span -> ParserStepError (ExpectedLetIn span);
             ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
@@ -299,6 +348,7 @@ module ParserParityParserCombinator export (ParserState(..), ParserValue(..), Pa
             ExpectedEquals span -> ParserStepError (ExpectedEquals span);
             ExpectedImportSemicolon span -> ParserStepError (ExpectedImportSemicolon span);
             ExpectedImportAlias span -> ParserStepError (ExpectedImportAlias span);
+            ExpectedImportExposingSeparator span -> ParserStepError (ExpectedImportExposingSeparator span);
             ExpectedDefSemicolon span -> ParserStepError (ExpectedDefSemicolon span);
             ExpectedLetIn span -> ParserStepError (ExpectedLetIn span);
             ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
@@ -322,6 +372,7 @@ module ParserParityParserCombinator export (ParserState(..), ParserValue(..), Pa
             ExpectedEquals span -> ParserStepError (ExpectedEquals span);
             ExpectedImportSemicolon span -> ParserStepError (ExpectedImportSemicolon span);
             ExpectedImportAlias span -> ParserStepError (ExpectedImportAlias span);
+            ExpectedImportExposingSeparator span -> ParserStepError (ExpectedImportExposingSeparator span);
             ExpectedDefSemicolon span -> ParserStepError (ExpectedDefSemicolon span);
             ExpectedLetIn span -> ParserStepError (ExpectedLetIn span);
             ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
@@ -345,6 +396,7 @@ module ParserParityParserCombinator export (ParserState(..), ParserValue(..), Pa
             ExpectedEquals span -> ParserStepError (ExpectedEquals span);
             ExpectedImportSemicolon span -> ParserStepError (ExpectedImportSemicolon span);
             ExpectedImportAlias span -> ParserStepError (ExpectedImportAlias span);
+            ExpectedImportExposingSeparator span -> ParserStepError (ExpectedImportExposingSeparator span);
             ExpectedDefSemicolon span -> ParserStepError (ExpectedDefSemicolon span);
             ExpectedLetIn span -> ParserStepError (ExpectedLetIn span);
             ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
@@ -368,6 +420,7 @@ module ParserParityParserCombinator export (ParserState(..), ParserValue(..), Pa
             ExpectedEquals span -> ParserStepError (ExpectedEquals span);
             ExpectedImportSemicolon span -> ParserStepError (ExpectedImportSemicolon span);
             ExpectedImportAlias span -> ParserStepError (ExpectedImportAlias span);
+            ExpectedImportExposingSeparator span -> ParserStepError (ExpectedImportExposingSeparator span);
             ExpectedDefSemicolon span -> ParserStepError (ExpectedDefSemicolon span);
             ExpectedLetIn span -> ParserStepError (ExpectedLetIn span);
             ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
@@ -389,6 +442,19 @@ module ParserParityParserCombinator export (ParserState(..), ParserValue(..), Pa
             SourceInputCons token rest -> case tokenMatches kind token of {
               TokenMatched -> ParserStepOk (ParserState rest) (ValueToken token);
               TokenMismatch -> ParserStepError (UnexpectedSourceText fallbackSpan)
+            }
+          }
+        }) : Parser ParserValue);
+
+  def expectIdentifierToken : String -> Parser ParserValue =
+    λ(fallbackSpan : String)
+      (Parser
+        (λ(state : ParserState) case state of {
+          ParserState stream -> case stream of {
+            SourceInputNil -> ParserStepError (UnexpectedSourceText fallbackSpan);
+            SourceInputCons token rest -> case stringIndexOf (tokenText token) "identifier:" of {
+              None -> ParserStepError (UnexpectedSourceText fallbackSpan);
+              Some _ -> ParserStepOk (ParserState rest) (ValueToken token)
             }
           }
         }) : Parser ParserValue);

@@ -1,0 +1,24 @@
+module Core export (Eq, Nat(..), Expr(..), zero) {
+  class Eq a {
+    eq : a -> a -> Bool;
+  }
+
+  data Nat =
+      Zero : Nat
+    | Succ : Nat -> Nat;
+
+  data Expr a =
+      DoneNat : Nat -> Expr Nat
+    | Step : Expr a -> Expr a;
+
+  def zero : Nat = Zero;
+}
+
+module User export (main) {
+  import Core exposing (Eq, Nat(..), Expr(..), zero);
+
+  def main : Bool = case DoneNat zero of {
+    DoneNat n -> true;
+    _ -> false
+  };
+}

@@ -1,3 +1,75 @@
+## 2026-06-01 - Round 318 parser parity rejected-shape retry
+
+- Repaired the shared parser-library complete-program path after review
+  rejection. Module parsing now accepts a shared parsed identifier token and
+  renders the module row from that parsed module name instead of branching on
+  `Core`/`User`.
+- Export/import projection lists now use shared parsed item accumulation in the
+  active path. The rejected fixed families
+  `parseNatSurfaceExportRows`, `parseClassSurfaceExportRows`,
+  `parseThreeItemImportRows`, and `parseFourItemImportRows` are gone from the
+  parser-library path.
+- Lexer-owned tokens now carry parsed start/end positions and token text.
+  Export/import row names, ordering, `(..)` spans, plain type/value
+  classification, and import-module spans are derived from parsed tokens rather
+  than fixed Core/User fixture-family strings. The import-module row span is
+  derived from the module-name token start through the following parsed
+  `exposing` token start.
+- Complete-program parsing remains bounded to four modules because this
+  `.mlfp` parser-library slice still has bounded non-recursive list handling,
+  but each slot calls the same shared module parser and the bound is not tied
+  to Core/User fixtures.
+- Export/import projection accumulation uses generic bounded list-budget steps
+  rather than self-recursive parser combinators after a recursive attempt hit
+  the current presolution `OperationOnLockedNode` limitation. The bound is not
+  tied to Nat/Eq/main or Core/User fixture families, and row names/order/spans
+  still come from parsed tokens.
+- Extended `ProgramParserParitySpec` rejected-shape guards for the fixed
+  known-module, fixed export/import item, fixed span, and fixed row-family
+  helper names.
+- Base refresh on 2026-06-01: preserved the dirty retry state in
+  `/tmp/mlf4-round318-refresh-20260601165747`, stashed the implementation
+  edits, fast-forwarded `orchestrator/round-318-next-parser-parity-slice` from
+  `3b38af28` to current `origin/master` at `1279adcd`, and replayed the round
+  changes. The only content conflict was `test/ProgramParserParitySpec.hs`;
+  the resolution keeps the refreshed single batch-driver setup and adds the
+  round-318 multi-module and malformed-separator assertions to that batch
+  fixture. `orchestrator/state.json` was already modified and controller-owned;
+  it was excluded from the implementation patch replay and not content-edited.
+- Evidence after refresh: focused multi-module parser parity matcher passed
+  (`221.5416s`, 1 example), malformed import-exposing matcher passed
+  (`221.8468s`, 1 example), static shortcut Hspec guard passed (`0.2928s`, 1
+  example), the broader `MLF.Program parser parity` Hspec group passed
+  (`214.7520s`, 9 examples), direct batch and direct `run-program` smokes
+  passed for both new multi-module fixtures plus the carried import fixture,
+  rejected-shape audits produced no matches,
+  `git rev-list --left-right --count HEAD...origin/master` returned `0 0`, and
+  `git diff --check` passed. Full `cabal test` was not rerun after these
+  parser-only gates.
+- Scope remains bounded parser parity only. This is not full parser parity,
+  resolver, checker, backend, compiler-package, driver, platform, proof, or
+  self-boot progress.
+
+## 2026-05-25 - Round 318 parser parity multi-module export/import extension
+
+- Extended the shared parser-owned parser-parity source-text lexer/parser
+  library with the bounded complete-program slice for a `Core` module followed
+  by a `User` module, covering selected abstract export/import items,
+  recursive ADT constructor export/import items, and cross-module references in
+  the carried surfaces.
+- Added committed parser-program projection fixtures for
+  `multi-module-abstract-export-import` and
+  `multi-module-recursive-adt-export-import`, plus thin `.mlfp` fixture roots
+  that expose only `sourceFile` and `sourceText` before calling
+  `renderParserParityProjectionFromSourceText`.
+- Extended `ProgramParserParitySpec` canonical projection rendering so every
+  parsed module in a program is rendered in source order, and added public
+  negative evidence for malformed import-exposing separators through
+  `renderParserNegativeEvidenceFromSourceText`.
+- Scope remains bounded parser parity only. This is not full parser parity,
+  resolver, checker, backend, compiler-package, driver, platform, proof, or
+  self-boot progress.
+
 ## 2026-05-25 - Parser parity batch driver
 
 - Replaced the repeated public `.mlfp` parser-parity fixture executions with
