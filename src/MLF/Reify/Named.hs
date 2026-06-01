@@ -1,6 +1,7 @@
 {-# LANGUAGE GADTs #-}
 module MLF.Reify.Named (
     namedNodes,
+    softenCanonicalBindParentsUnder,
     softenedBindParentsUnder
 ) where
 
@@ -15,7 +16,11 @@ import MLF.Util.ElabError (ElabError, bindingToElab)
 softenedBindParentsUnder :: (NodeId -> NodeId) -> Constraint p -> Either ElabError BindParents
 softenedBindParentsUnder canonical constraint = do
     bindParents0 <- bindingToElab (canonicalizeBindParentsUnder canonical constraint)
-    pure (softenBindParents canonical (cWeakenedVars constraint) bindParents0)
+    pure (softenCanonicalBindParentsUnder canonical constraint bindParents0)
+
+softenCanonicalBindParentsUnder :: (NodeId -> NodeId) -> Constraint p -> BindParents -> BindParents
+softenCanonicalBindParentsUnder canonical constraint =
+    softenBindParents canonical (cWeakenedVars constraint)
 
 softenBindParents :: (NodeId -> NodeId) -> IntSet.IntSet -> BindParents -> BindParents
 softenBindParents canonical weakened =

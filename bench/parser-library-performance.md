@@ -13,10 +13,10 @@ module-level definition checking. Parser-library benchmark artifacts are now
 captured as a single run because the end-to-end package path is still expensive
 enough that repeat runs should be reserved for final confirmation after a
 substantial change. The current column is generated from the accepted
-worklist/timing/binding-strict artifact:
+read-model direct canonical bind-parent artifact:
 
 ```text
-bench/results/parser-library-worklist-timing-binding-strict-2026-05-30.tsv
+bench/results/parser-library-readmodel-direct-bindparents-2026-05-31.tsv
 ```
 
 Captured with:
@@ -26,9 +26,21 @@ Captured with:
   --runs 1 \
   --allow-status 1 \
   --no-build \
+  --bin "$(cabal list-bin exe:mlf2)" \
   --benchmark parser-library test/programs/compiler-parser-parity/parser-library \
-  --output bench/results/parser-library-worklist-timing-binding-strict-2026-05-30.tsv
+  --output bench/results/parser-library-readmodel-direct-bindparents-2026-05-31.tsv
 ```
+
+The 2026-05-31 read-model change was compared against a same-session baseline
+rerun because the machine was running slower than the accepted 2026-05-30
+artifact. Directly reusing the already-finalized canonical constraint bind
+parents moved same-session `program.check.modules` from `29616.916ms` to
+`27983.792ms` (`-1633.124ms`, `5.51%`) and
+`ParserParityParser.def-bindings` from `17195.729ms` to `16334.989ms`
+(`-860.740ms`, `5.01%`). Broader attempts to cache whole elaboration read
+models or result-type overlay read models were rejected: they measured
+`31139.574ms`, `30531.152ms`, and `29783.779ms` for
+`program.check.modules` against the same-session `29616.916ms` baseline.
 
 After the upstream master merge, module-context batching is the default for
 multi-definition modules. `MLF_MODULE_DEF_BATCH_SIZE=1` no longer forces
@@ -47,7 +59,7 @@ The parser target still pays tens of times too much per generated definition.
 
 | System / metric | Workload | Total checked defs | Current total | Current per def | Ratio vs GHC reference |
 | --- | --- | ---: | ---: | ---: | ---: |
-| `mlf2` exact pipeline, `ParserParityParser.def-bindings` | generated `.mlfp` parser definitions | 914 | 15191.834ms | 16.621ms | 29.8x |
+| `mlf2` exact pipeline, `ParserParityParser.def-bindings` | generated `.mlfp` parser definitions | 914 | 16334.989ms | 17.872ms | 32.0x |
 | GHC 9.12.2 local reference, `-fforce-recomp -fno-code -O0` | persisted synthetic module with 914 parser-shaped top-level defs | 914 | 510.000ms | 0.558ms | 1.0x |
 
 The comparable real GHC artifact is not a testsuite module. It is
@@ -108,28 +120,28 @@ caches are useful only if they reduce these totals.
 
 | Metric | Before module def checker (ms) | Current default batch-16 exact path (ms) | Saved vs baseline (ms) | Reduction | Speedup | Rejected direct-bypass reference (ms) | Reading |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| `program.check.modules` | 161077.348 | 26391.237 | 134686.111 | 83.62% | 6.10x | 67796.970 | Direct bypass is removed; the current win comes from keeping the full pipeline while using module-context batching, root-local partitions, concurrent independent root finalization, cheaper binding structural queries, local typecheck env/free-var summaries, deduplicated presolution invalidation, and lower timing-label overhead. |
-| `program.check.module.ParserParityParser` | 112892.114 | 15351.168 | 97540.946 | 86.40% | 7.35x | 23814.194 | Main target module remains the largest single module, but the default exact path is now faster than the rejected direct-bypass reference. |
-| `program.check.module.ParserParityParser.def-bindings` | 112683.979 | 15191.834 | 97492.145 | 86.52% | 7.42x | 23622.957 | 914 generated defs still run the full checker path; the current default is about 16.621ms per generated parser definition. |
-| `program.check.module.ParserParityParserCombinator` | 17656.853 | 2886.507 | 14770.346 | 83.65% | 6.12x | 15440.448 | The post-merge default also helps smaller multi-def modules because module-context batching no longer has the old high-def-count gate. |
-| `program.check.module.ParserParityLexer` | 16997.185 | 2272.544 | 14724.641 | 86.63% | 7.48x | 15507.747 | Still exact checking, now using the default module-context batch path. |
-| `program.check.module.ParserParityAst` | 10838.915 | 4041.654 | 6797.261 | 62.71% | 2.68x | 9469.193 | Mostly constructor-heavy; improved, but less dramatically than parser and lexer definition-heavy modules. |
+| `program.check.modules` | 161077.348 | 27983.792 | 133093.556 | 82.63% | 5.76x | 67796.970 | Direct bypass is removed; the current win comes from keeping the full pipeline while using module-context batching, root-local partitions, concurrent independent root finalization, cheaper binding structural queries, local typecheck env/free-var summaries, deduplicated presolution invalidation, lower timing-label overhead, and avoiding a repeated canonical bind-parent derivation in the elaboration read model. |
+| `program.check.module.ParserParityParser` | 112892.114 | 16494.624 | 96397.490 | 85.39% | 6.84x | 23814.194 | Main target module remains the largest single module, but the default exact path is now faster than the rejected direct-bypass reference. |
+| `program.check.module.ParserParityParser.def-bindings` | 112683.979 | 16334.989 | 96348.990 | 85.50% | 6.90x | 23622.957 | 914 generated defs still run the full checker path; the current default is about 17.872ms per generated parser definition in this run. |
+| `program.check.module.ParserParityParserCombinator` | 17656.853 | 3104.895 | 14551.958 | 82.42% | 5.69x | 15440.448 | The post-merge default also helps smaller multi-def modules because module-context batching no longer has the old high-def-count gate. |
+| `program.check.module.ParserParityLexer` | 16997.185 | 2358.495 | 14638.690 | 86.12% | 7.21x | 15507.747 | Still exact checking, now using the default module-context batch path. |
+| `program.check.module.ParserParityAst` | 10838.915 | 4140.545 | 6698.370 | 61.80% | 2.62x | 9469.193 | Mostly constructor-heavy; improved, but less dramatically than parser and lexer definition-heavy modules. |
 
 ## Current exact-pipeline snapshot
 
 Source:
 
 ```text
-bench/results/parser-library-worklist-timing-binding-strict-2026-05-30.tsv
+bench/results/parser-library-readmodel-direct-bindparents-2026-05-31.tsv
 ```
 
 | Module | Def count | Uses module read context | Module time (ms) | Def-bindings time (ms) |
 | --- | ---: | --- | ---: | ---: |
-| `ParserParityParser` | 914 | yes | 15351.168 | 15191.834 |
-| `ParserParitySource` | 160 | yes | 118.828 | 52.057 |
-| `ParserParityLexer` | 130 | yes | 2278.505 | 1907.081 |
-| `ParserParityParserCombinator` | 26 | yes | 2893.544 | 2637.675 |
-| `ParserParityAst` | 21 | yes | 3985.171 | 3958.351 |
+| `ParserParityParser` | 914 | yes | 16494.624 | 16334.989 |
+| `ParserParitySource` | 160 | yes | 133.701 | 67.064 |
+| `ParserParityLexer` | 130 | yes | 2358.495 | 1993.538 |
+| `ParserParityParserCombinator` | 26 | yes | 3104.895 | 2850.417 |
+| `ParserParityAst` | 21 | yes | 4140.545 | 4110.570 |
 
 The old `moduleDefContextMinDefs = 150` gate is gone. Multi-definition modules
 use module-context batching by default, and the effective default batch size is
@@ -238,10 +250,14 @@ selection. The refreshed one-run artifact is noisy rather than a headline win:
 as retained exact read-context cleanup, not proof that result-type-side caching
 can solve the native multi-root regression by itself. A follow-up attempt to
 reuse overlay read-model indexes instead of rebuilding them was measured and
-rejected: it moved the then-one-root default to `130712.985ms` in that run and batch2
-to `202139.784ms`, then was reverted. Root generalization now reuses the same
-cached scheme-body target in `ResultTypeView`; the refreshed batch2 artifact
+rejected: it moved the then-one-root default to `130712.985ms` in that run and
+batch2 to `202139.784ms`, then was reverted. Root generalization now reuses the
+same cached scheme-body target in `ResultTypeView`; the refreshed batch2 artifact
 is `200081.198ms`, still far slower than the then-one-root default.
+The accepted 2026-05-31 read-model cleanup is narrower: it reuses the canonical
+constraint's already-finalized bind-parent map and only applies the softening
+pass, avoiding a repeated structural canonicalization inside
+`buildElabReadModel`.
 
 After the master merge, multi-root batching is no longer just a diagnostic
 path. The default exact path uses module-context batching with effective batch
@@ -253,13 +269,14 @@ partitions through the sequential path to measure the concurrency contribution.
 | --- | --- | ---: | ---: | ---: | ---: | --- |
 | Historical one-root exact path | `bench/results/parser-library-latest.tsv` | 139511.385ms | 97575.976ms | 140930ms | 106.757ms | Pre-default-batch reference from the accepted exact-pipeline work. |
 | Historical batch 16 | `bench/results/parser-library-batch16.tsv` | 92018.259ms | 43844.366ms | 92130ms | 47.970ms | Older same-branch batch-16 run before the master default-batching refresh. |
-| Current default batch 16, forked root partitions | `bench/results/parser-library-worklist-timing-binding-strict-2026-05-30.tsv` | 26391.237ms | 15191.834ms | 26480ms | 16.621ms | Current production shape after the master merge plus accepted binding structural-query, typecheck env/free-var, presolution invalidation, timing-label, and binding traversal cleanup; `MLF_MODULE_DEF_BATCH_SIZE=1` falls back to default 16. |
+| Accepted 2026-05-30 batch 16, forked root partitions | `bench/results/parser-library-worklist-timing-binding-strict-2026-05-30.tsv` | 26391.237ms | 15191.834ms | 26480ms | 16.621ms | Production shape at the no-fork comparison checkpoint after the master merge plus accepted binding structural-query, typecheck env/free-var, presolution invalidation, timing-label, and binding traversal cleanup; `MLF_MODULE_DEF_BATCH_SIZE=1` falls back to default 16. |
 | Batch 16, no fork | `bench/results/parser-library-batch16-no-fork.tsv` | 106012.112ms | 70580.820ms | 107390ms | 77.222ms | Temporary local patch that ran the same root partitions sequentially. |
 
-The no-fork run is `3.54x` slower on `program.check.modules`, `4.09x` slower
-on `ParserParityParser.def-bindings`, and `3.41x` slower by wall time. That
-confirms the current speed is not just batching or smaller contexts; it also
-depends on forking independent root-local partitions inside each batch.
+At that checkpoint, the no-fork run was `3.54x` slower on
+`program.check.modules`, `4.09x` slower on `ParserParityParser.def-bindings`,
+and `3.41x` slower by wall time. That confirms the default speed is not just
+batching or smaller contexts; it also depends on forking independent root-local
+partitions inside each batch.
 
 A 2026-05-30 ten-worktree sweep measured each candidate sequentially to avoid
 CPU contention and integrated only the repeatable winners. The same-checkpoint
