@@ -1,0 +1,7 @@
+module ParserParityFixture export (sourceFile, sourceText) {
+  def sourceFile : String =
+    "test/conformance/mlfp/parser-parity/text-literal-char-string/src/Main.mlfp";
+
+  def sourceText : String =
+    "module Main export (sampleChar, sampleString) {\n  import Prelude exposing (Char, String);\n  def sampleChar : Char = 'λ';\n  def sampleString : String = \"hello λ\";\n}\n";
+}

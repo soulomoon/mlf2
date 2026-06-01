@@ -1,0 +1,5 @@
+module Main export (sampleChar, sampleString) {
+  import Prelude exposing (Char, String);
+  def sampleChar : Char = 'λ';
+  def sampleString : String = "hello λ";
+}

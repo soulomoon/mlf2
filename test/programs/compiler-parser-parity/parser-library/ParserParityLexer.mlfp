@@ -20,6 +20,15 @@ module ParserParityLexer export (LexerResult(..), tokenizeCompleteModule, nextLi
     | LexerScanDone : ParserSourceInput -> LexerScanState
     | LexerScanError : ParserDiagnostic -> LexerScanState;
 
+  data IdentifierScanState =
+      IdentifierScanState : String -> String -> String -> SourceCursor -> IdentifierScanState
+    | IdentifierScanDone : ParserSourceSymbol -> SourceCursor -> IdentifierScanState;
+
+  data StringLiteralScanState =
+      StringLiteralScanState : String -> String -> String -> SourceCursor -> StringLiteralScanState
+    | StringLiteralScanDone : ParserSourceSymbol -> SourceCursor -> StringLiteralScanState
+    | StringLiteralScanError : ParserDiagnostic -> StringLiteralScanState;
+
   data ReverseState =
       ReverseState : ParserSourceInput -> ParserSourceInput -> ReverseState;
 
@@ -281,6 +290,18 @@ module ParserParityLexer export (LexerResult(..), tokenizeCompleteModule, nextLi
 
   def scanKnownUserModule : SourceCursor -> LexStep =
     λ(cursor : SourceCursor) case scanSourceToken "User" "identifier:User" 4 cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownCharType cursor
+    };
+
+  def scanKnownCharType : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "Char" "identifier:Char" 4 cursor of {
+      LexStepOk token nextCursor -> LexStepOk token nextCursor;
+      LexStepError _ -> scanKnownStringType cursor
+    };
+
+  def scanKnownStringType : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case scanSourceToken "String" "identifier:String" 6 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
       LexStepError _ -> scanKnownModuleAliasC cursor
     };
@@ -706,7 +727,189 @@ module ParserParityLexer export (LexerResult(..), tokenizeCompleteModule, nextLi
     };
 
   def scanKnownUnknown : SourceCursor -> LexStep =
-    λ(_cursor : SourceCursor) LexStepError (UnexpectedSourceText lexerUnknownSpan);
+    λ(cursor : SourceCursor) scanIdentifierToken cursor;
+
+  def scanIdentifierToken : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case cursor of {
+      SourceCursor sourceText lineNumber linePrefix -> case stringCharAtOption sourceText 0 of {
+        None -> LexStepError (UnexpectedSourceText lexerUnknownSpan);
+        Some _ -> case sourceCharIn identifierStartCharacters sourceText of {
+          StringMatched ->
+            finishIdentifierScan
+              (scanIdentifierMany64
+                (IdentifierScanState lineNumber linePrefix "" cursor));
+          StringMismatch -> scanCharLiteralToken cursor
+        }
+      }
+    };
+
+  def scanIdentifierMany64 : IdentifierScanState -> IdentifierScanState =
+    λ(state : IdentifierScanState) scanIdentifierMany32 (scanIdentifierMany32 state);
+
+  def scanIdentifierMany32 : IdentifierScanState -> IdentifierScanState =
+    λ(state : IdentifierScanState) scanIdentifierMany16 (scanIdentifierMany16 state);
+
+  def scanIdentifierMany16 : IdentifierScanState -> IdentifierScanState =
+    λ(state : IdentifierScanState) scanIdentifierMany8 (scanIdentifierMany8 state);
+
+  def scanIdentifierMany8 : IdentifierScanState -> IdentifierScanState =
+    λ(state : IdentifierScanState) scanIdentifierMany4 (scanIdentifierMany4 state);
+
+  def scanIdentifierMany4 : IdentifierScanState -> IdentifierScanState =
+    λ(state : IdentifierScanState) scanIdentifierMany2 (scanIdentifierMany2 state);
+
+  def scanIdentifierMany2 : IdentifierScanState -> IdentifierScanState =
+    λ(state : IdentifierScanState) scanIdentifierStep (scanIdentifierStep state);
+
+  def scanIdentifierStep : IdentifierScanState -> IdentifierScanState =
+    λ(state : IdentifierScanState) case state of {
+      IdentifierScanDone token cursor -> IdentifierScanDone token cursor;
+      IdentifierScanState startLine startPrefix lexeme cursor -> case cursor of {
+        SourceCursor sourceText lineNumber linePrefix -> case sourceCharIn identifierContinueCharacters sourceText of {
+          StringMatched ->
+            IdentifierScanState startLine startPrefix
+              (stringAppend lexeme (stringTake sourceText 1))
+              (SourceCursor (stringDrop sourceText 1) lineNumber (stringAppend linePrefix (stringTake sourceText 1)));
+          StringMismatch ->
+            IdentifierScanDone
+              (SourceSymbol
+                (cursorStart startLine startPrefix)
+                (cursorEnd startLine startPrefix lexeme)
+                (stringAppend "identifier:" lexeme))
+              cursor
+        }
+      }
+    };
+
+  def finishIdentifierScan : IdentifierScanState -> LexStep =
+    λ(state : IdentifierScanState) case state of {
+      IdentifierScanDone token cursor -> LexStepOk token cursor;
+      IdentifierScanState startLine startPrefix lexeme cursor ->
+        LexStepOk
+          (SourceSymbol
+            (cursorStart startLine startPrefix)
+            (cursorEnd startLine startPrefix lexeme)
+            (stringAppend "identifier:" lexeme))
+          cursor
+    };
+
+  def scanCharLiteralToken : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case cursor of {
+      SourceCursor sourceText lineNumber linePrefix -> case sourceStartsWith "'" sourceText of {
+        StringMatched -> scanCharLiteralBody lineNumber linePrefix (SourceCursor (stringDrop sourceText 1) lineNumber (stringAppend linePrefix "'"));
+        StringMismatch -> scanStringLiteralToken cursor
+      }
+    };
+
+  def scanCharLiteralBody : String -> String -> SourceCursor -> LexStep =
+    λ(startLine : String) λ(startPrefix : String) λ(cursor : SourceCursor) case cursor of {
+      SourceCursor sourceText lineNumber linePrefix -> case stringCharAtOption sourceText 0 of {
+        None -> LexStepError (UnexpectedSourceText (cursorStart lineNumber linePrefix));
+        Some _ -> case sourceStartsWith "'" sourceText of {
+          StringMatched -> LexStepError (UnexpectedSourceText (cursorStart lineNumber linePrefix));
+          StringMismatch -> case sourceStartsWith "\n" sourceText of {
+            StringMatched -> LexStepError (UnexpectedSourceText (cursorStart lineNumber linePrefix));
+            StringMismatch ->
+              scanCharLiteralClose startLine startPrefix (stringTake sourceText 1)
+                (SourceCursor (stringDrop sourceText 1) lineNumber (stringAppend linePrefix (stringTake sourceText 1)))
+          }
+        }
+      }
+    };
+
+  def scanCharLiteralClose : String -> String -> String -> SourceCursor -> LexStep =
+    λ(startLine : String) λ(startPrefix : String) λ(charText : String) λ(cursor : SourceCursor) case cursor of {
+      SourceCursor sourceText lineNumber linePrefix -> case sourceStartsWith "'" sourceText of {
+        StringMatched ->
+          LexStepOk
+            (SourceSymbol
+              (cursorStart startLine startPrefix)
+              (cursorEnd lineNumber linePrefix "'")
+              (stringAppend "char-literal:" (stringAppend (stringAppend "'" charText) "'")))
+            (SourceCursor (stringDrop sourceText 1) lineNumber (stringAppend linePrefix "'"));
+        StringMismatch -> LexStepError (UnexpectedSourceText (cursorStart lineNumber linePrefix))
+      }
+    };
+
+  def scanStringLiteralToken : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case cursor of {
+      SourceCursor sourceText lineNumber linePrefix -> case sourceStartsWith "\"" sourceText of {
+        StringMatched ->
+          finishStringLiteralScan
+            (scanStringLiteralMany64
+              (StringLiteralScanState lineNumber linePrefix "\"" (SourceCursor (stringDrop sourceText 1) lineNumber (stringAppend linePrefix "\""))));
+        StringMismatch -> LexStepError (UnexpectedSourceText lexerUnknownSpan)
+      }
+    };
+
+  def scanStringLiteralMany64 : StringLiteralScanState -> StringLiteralScanState =
+    λ(state : StringLiteralScanState) scanStringLiteralMany32 (scanStringLiteralMany32 state);
+
+  def scanStringLiteralMany32 : StringLiteralScanState -> StringLiteralScanState =
+    λ(state : StringLiteralScanState) scanStringLiteralMany16 (scanStringLiteralMany16 state);
+
+  def scanStringLiteralMany16 : StringLiteralScanState -> StringLiteralScanState =
+    λ(state : StringLiteralScanState) scanStringLiteralMany8 (scanStringLiteralMany8 state);
+
+  def scanStringLiteralMany8 : StringLiteralScanState -> StringLiteralScanState =
+    λ(state : StringLiteralScanState) scanStringLiteralMany4 (scanStringLiteralMany4 state);
+
+  def scanStringLiteralMany4 : StringLiteralScanState -> StringLiteralScanState =
+    λ(state : StringLiteralScanState) scanStringLiteralMany2 (scanStringLiteralMany2 state);
+
+  def scanStringLiteralMany2 : StringLiteralScanState -> StringLiteralScanState =
+    λ(state : StringLiteralScanState) scanStringLiteralStep (scanStringLiteralStep state);
+
+  def scanStringLiteralStep : StringLiteralScanState -> StringLiteralScanState =
+    λ(state : StringLiteralScanState) case state of {
+      StringLiteralScanDone token cursor -> StringLiteralScanDone token cursor;
+      StringLiteralScanError diagnostic -> StringLiteralScanError diagnostic;
+      StringLiteralScanState startLine startPrefix lexeme cursor -> case cursor of {
+        SourceCursor sourceText lineNumber linePrefix -> case stringCharAtOption sourceText 0 of {
+          None -> StringLiteralScanError (UnexpectedSourceText (cursorStart lineNumber linePrefix));
+          Some _ -> case sourceStartsWith "\"" sourceText of {
+            StringMatched ->
+              StringLiteralScanDone
+                (SourceSymbol
+                  (cursorStart startLine startPrefix)
+                  (cursorEnd lineNumber linePrefix "\"")
+                  (stringAppend "string-literal:" (stringAppend lexeme "\"")))
+                (SourceCursor (stringDrop sourceText 1) lineNumber (stringAppend linePrefix "\""));
+            StringMismatch -> case sourceStartsWith "\n" sourceText of {
+              StringMatched -> StringLiteralScanError (UnexpectedSourceText (cursorStart lineNumber linePrefix));
+              StringMismatch ->
+                StringLiteralScanState startLine startPrefix
+                  (stringAppend lexeme (stringTake sourceText 1))
+                  (SourceCursor (stringDrop sourceText 1) lineNumber (stringAppend linePrefix (stringTake sourceText 1)))
+            }
+          }
+        }
+      }
+    };
+
+  def finishStringLiteralScan : StringLiteralScanState -> LexStep =
+    λ(state : StringLiteralScanState) case state of {
+      StringLiteralScanDone token cursor -> LexStepOk token cursor;
+      StringLiteralScanError diagnostic -> LexStepError diagnostic;
+      StringLiteralScanState _ _ _ cursor -> case cursor of {
+        SourceCursor _ lineNumber linePrefix -> LexStepError (UnexpectedSourceText (cursorStart lineNumber linePrefix))
+      }
+    };
+
+  def identifierStartCharacters : String =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_";
+
+  def identifierContinueCharacters : String =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_0123456789";
+
+  def sourceCharIn : String -> String -> StringMatch =
+    λ(characters : String) λ(sourceText : String) case stringCharAtOption sourceText 0 of {
+      None -> StringMismatch;
+      Some _ -> case stringIndexOf characters (stringTake sourceText 1) of {
+        None -> StringMismatch;
+        Some _ -> StringMatched
+      }
+    };
 
   def scanSourceToken : String -> String -> Int -> SourceCursor -> LexStep =
     λ(sourceLexeme : String) λ(tokenText : String) λ(width : Int) λ(cursor : SourceCursor)

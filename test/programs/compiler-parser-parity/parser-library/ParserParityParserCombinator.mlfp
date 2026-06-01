@@ -1,4 +1,4 @@
-module ParserParityParserCombinator export (ParserState(..), ParserValue(..), ParserStep(..), Parser(..), ParserEnd(..), runParser, parserPure, parserFail, parserFailExpectedImportSemicolonAtCurrent, parserFailExpectedImportExposingSeparatorAtCurrent, parserBind, parserMap, parserChoice, parserReturnAtEndOr, parserCurrentTokenStartOr, captureSpan, diagnosticLabel, labelUnexpectedSource, labelEquals, labelImportSemicolon, labelImportAlias, labelDefSemicolon, labelLetIn, labelLetAnnotationType, labelConstructorColon, labelCaseBranchArrow, labelInstanceMethodEquals, labelFunctionalDependencyArrow, labelTypeFamilyEquationEquals, labelConstructorForallDot, expectToken, expectIdentifierToken, parserStateAtEnd) {
+module ParserParityParserCombinator export (ParserState(..), ParserValue(..), ParserStep(..), Parser(..), ParserEnd(..), runParser, parserPure, parserFail, parserFailExpectedImportSemicolonAtCurrent, parserFailExpectedImportExposingSeparatorAtCurrent, parserBind, parserMap, parserChoice, parserReturnAtEndOr, parserCurrentTokenStartOr, captureSpan, diagnosticLabel, labelUnexpectedSource, labelEquals, labelImportSemicolon, labelImportAlias, labelDefSemicolon, labelLetIn, labelLetAnnotationType, labelConstructorColon, labelCaseBranchArrow, labelInstanceMethodEquals, labelFunctionalDependencyArrow, labelTypeFamilyEquationEquals, labelConstructorForallDot, expectToken, expectIdentifierToken, expectTokenPrefix, parserStateAtEnd) {
   import Prelude exposing (Option(..), stringIndexOf);
   import ParserParityDiagnostic exposing (ParserDiagnostic(..));
   import ParserParitySource exposing (ParserSourceInput(..), ParserSourceSymbol(..), basicUnexpectedSpan);
@@ -453,6 +453,19 @@ module ParserParityParserCombinator export (ParserState(..), ParserValue(..), Pa
           ParserState stream -> case stream of {
             SourceInputNil -> ParserStepError (UnexpectedSourceText fallbackSpan);
             SourceInputCons token rest -> case stringIndexOf (tokenText token) "identifier:" of {
+              None -> ParserStepError (UnexpectedSourceText fallbackSpan);
+              Some _ -> ParserStepOk (ParserState rest) (ValueToken token)
+            }
+          }
+        }) : Parser ParserValue);
+
+  def expectTokenPrefix : String -> String -> Parser ParserValue =
+    λ(prefix : String) λ(fallbackSpan : String)
+      (Parser
+        (λ(state : ParserState) case state of {
+          ParserState stream -> case stream of {
+            SourceInputNil -> ParserStepError (UnexpectedSourceText fallbackSpan);
+            SourceInputCons token rest -> case stringIndexOf (tokenText token) prefix of {
               None -> ParserStepError (UnexpectedSourceText fallbackSpan);
               Some _ -> ParserStepOk (ParserState rest) (ValueToken token)
             }

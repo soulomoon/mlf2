@@ -1,0 +1,24 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-319",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-004",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-004",
+  "milestone_id": "milestone-4",
+  "direction_id": "direction-4a-canonical-parser-parity",
+  "extracted_item_id": "item-319-parser-library-text-literal-extension",
+  "decision": "approved",
+  "evidence_summary": "Focused Char/String and malformed-literal matchers, shortcut guard, full parser-parity group, all 21 direct parser-parity fixture smokes, git diff --check, cabal build all, cabal test, and thesis gate passed; diff stays inside parser-parity test harness and shared parser-library surfaces.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-4-completion",
+        "text": "round-319 completed item-319-parser-library-text-literal-extension: the shared parser-owned source-text parser library now scans and consumes Char/String literal tokens for the text-literal-char-string parser-parity fixture and reports malformed literal syntax through the public batch; reviewer evidence: focused Char/String and malformed-literal matchers, static shortcut guard, parser-parity group, 21 direct fixture smokes, cabal build all, cabal test, and thesis gate passed."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}

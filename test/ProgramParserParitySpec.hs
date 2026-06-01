@@ -35,6 +35,15 @@ spec =
         it "matches canonical parser projections for every batched positive fixture" $
             traverse_ assertCanonicalParserParityProjection parserParityPositiveCases
 
+        it "shared parser-owned .mlfp parser parses Char and String literals" $ do
+            source <- readFile textLiteralCharStringCanonicalSourcePath
+            expected <- readFile textLiteralCharStringExpectedProjectionPath
+            canonicalProjection <- renderCanonicalProjection textLiteralCharStringCanonicalSourcePath source
+            sharedParserProjection <- runSharedParserBatch textLiteralCharStringParserProgramRoot
+
+            canonicalProjection `shouldBe` expected
+            sharedParserProjection `shouldBe` Right expected
+
         beforeAll loadParserParityBatchFixture $ do
             it "runs all .mlfp parser parity fixtures through one generated public CLI driver" $ \fixture ->
                 batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
@@ -68,6 +77,12 @@ spec =
                 batchExpectedOutput fixture
                     `shouldSatisfy` isInfixOf
                         (batchSection "negative:multi-module-import-exposing-separator" importExposingSeparatorNegativeEvidenceProjection)
+
+            it "parser-owned .mlfp parser reports malformed text literal diagnostics through public run-program" $ \fixture -> do
+                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
+                batchExpectedOutput fixture
+                    `shouldSatisfy` isInfixOf
+                        (batchSection "negative:text-literal-malformed" textLiteralMalformedNegativeEvidenceProjection)
 
             it "shared parser-owned .mlfp parser library routes the generated batch through one entrypoint" $ \fixture -> do
                 sharedParserExists <- doesFileExist (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
@@ -199,6 +214,10 @@ multiModuleRecursiveAdtExportImportCanonicalSourcePath :: FilePath
 multiModuleRecursiveAdtExportImportCanonicalSourcePath =
     "test/conformance/mlfp/parser-parity/multi-module-recursive-adt-export-import/src/Main.mlfp"
 
+textLiteralCharStringCanonicalSourcePath :: FilePath
+textLiteralCharStringCanonicalSourcePath =
+    "test/conformance/mlfp/parser-parity/text-literal-char-string/src/Main.mlfp"
+
 expectedProjectionPath :: FilePath
 expectedProjectionPath =
     "test/conformance/mlfp/parser-parity/basic-module-def-bool/expected/parser-program.txt"
@@ -279,9 +298,17 @@ multiModuleRecursiveAdtExportImportExpectedProjectionPath :: FilePath
 multiModuleRecursiveAdtExportImportExpectedProjectionPath =
     "test/conformance/mlfp/parser-parity/multi-module-recursive-adt-export-import/expected/parser-program.txt"
 
+textLiteralCharStringExpectedProjectionPath :: FilePath
+textLiteralCharStringExpectedProjectionPath =
+    "test/conformance/mlfp/parser-parity/text-literal-char-string/expected/parser-program.txt"
+
 sharedParserLibraryRoot :: FilePath
 sharedParserLibraryRoot =
     "test/programs/compiler-parser-parity/parser-library"
+
+textLiteralCharStringParserProgramRoot :: FilePath
+textLiteralCharStringParserProgramRoot =
+    "test/programs/compiler-parser-parity/text-literal-char-string"
 
 sharedParserAuditFiles :: [FilePath]
 sharedParserAuditFiles =
@@ -397,6 +424,7 @@ sharedParserShortcutPhrases =
         , sharedParserRound316ShortcutPhrases
         , sharedParserRound317ShortcutPhrases
         , sharedParserRound318ShortcutPhrases
+        , sharedParserRound319ShortcutPhrases
         ]
 
 sharedParserRound314ShortcutPhrases :: [String]
@@ -574,6 +602,22 @@ sharedParserRound318ShortcutPhrases =
     , "exprDataRowsForSpan"
     ]
 
+sharedParserRound319ShortcutPhrases :: [String]
+sharedParserRound319ShortcutPhrases =
+    [ "parseTextLiteralCharString"
+    , "completeModuleKey \"text-literal-char-string\""
+    , "moduleKey \"text-literal-char-string\""
+    , "programKey \"text-literal-char-string\""
+    , concat ["Text", "Literal", "Char", "String", "Tokens"]
+    , concat ["LexerOk ", "text", "Literal", "Char", "String", "Tokens"]
+    , concat ["text-literal-char-string", " tokens"]
+    , "defRows sourceFile \"sampleChar\""
+    , "defRows sourceFile \"sampleString\""
+    , "def sampleChar type=Char expr='λ'"
+    , "def sampleString type=String expr=\"hello λ\""
+    , "text-literal parser negative unexpected-source@"
+    ]
+
 sharedParserCompleteParseRequiredPhrases :: [String]
 sharedParserCompleteParseRequiredPhrases =
     [ "parserStateAtEnd state"
@@ -598,6 +642,7 @@ sharedParserStaticNegativeEvidencePhrases =
     , "stringAppend \"typed-annotation-types parser negative expected-let-annotation-type@\""
     , "stringAppend \"data-declaration parser negative expected-constructor-colon@\""
     , "stringAppend \"multi-module import-exposing parser negative expected-import-exposing-separator@\""
+    , "stringAppend \"text-literal parser negative unexpected-source@\""
     ]
 
 sharedParserDynamicEvidenceRequiredPhrases :: [String]
@@ -675,6 +720,7 @@ parserParityPositiveCases =
     , ParserParityPositiveCase "positive:qualified-import-alias-only" "positiveQualifiedImportAliasOnly" qualifiedImportAliasOnlyCanonicalSourcePath qualifiedImportAliasOnlyExpectedProjectionPath
     , ParserParityPositiveCase "positive:multi-module-abstract-export-import" "positiveMultiModuleAbstractExportImport" multiModuleAbstractExportImportCanonicalSourcePath multiModuleAbstractExportImportExpectedProjectionPath
     , ParserParityPositiveCase "positive:multi-module-recursive-adt-export-import" "positiveMultiModuleRecursiveAdtExportImport" multiModuleRecursiveAdtExportImportCanonicalSourcePath multiModuleRecursiveAdtExportImportExpectedProjectionPath
+    , ParserParityPositiveCase "positive:text-literal-char-string" "positiveTextLiteralCharString" textLiteralCharStringCanonicalSourcePath textLiteralCharStringExpectedProjectionPath
     ]
 
 parserParityNegativeCases :: [ParserParityNegativeCase]
@@ -691,6 +737,7 @@ parserParityNegativeCases =
     , ParserParityNegativeCase "negative:existential-constructor-forall" "negativeExistentialConstructorForall" "constructor-forall parser negative " existentialConstructorForallCanonicalSourcePath constructorForallNegativeSourceText constructorForallNegativeEvidenceProjection
     , ParserParityNegativeCase "negative:qualified-import-alias-references" "negativeQualifiedImportAliasReferences" "qualified-import-alias parser negative " qualifiedImportAliasReferencesCanonicalSourcePath qualifiedImportAliasNegativeSourceText qualifiedImportAliasNegativeEvidenceProjection
     , ParserParityNegativeCase "negative:multi-module-import-exposing-separator" "negativeMultiModuleImportExposingSeparator" "multi-module import-exposing parser negative " multiModuleAbstractExportImportCanonicalSourcePath importExposingSeparatorNegativeSourceText importExposingSeparatorNegativeEvidenceProjection
+    , ParserParityNegativeCase "negative:text-literal-malformed" "negativeTextLiteralMalformed" "text-literal parser negative " textLiteralCharStringCanonicalSourcePath textLiteralMalformedNegativeSourceText textLiteralMalformedNegativeEvidenceProjection
     ]
 
 assertCanonicalParserParityProjection :: ParserParityPositiveCase -> IO ()
@@ -1027,6 +1074,15 @@ importExposingSeparatorNegativeSourceText =
         , "}"
         ]
 
+textLiteralMalformedNegativeSourceText :: String
+textLiteralMalformedNegativeSourceText =
+    unlines
+        [ "module Main export (sampleString) {"
+        , "  import Prelude exposing (String);"
+        , "  def sampleString : String = \"unterminated λ;"
+        , "}"
+        ]
+
 retryEvidenceProjection :: String
 retryEvidenceProjection =
     unlines
@@ -1105,6 +1161,12 @@ importExposingSeparatorNegativeEvidenceProjection :: String
 importExposingSeparatorNegativeEvidenceProjection =
     unlines
         [ "multi-module import-exposing parser negative expected-import-exposing-separator@test/conformance/mlfp/parser-parity/multi-module-abstract-export-import/src/Main.mlfp:12:29-12:33"
+        ]
+
+textLiteralMalformedNegativeEvidenceProjection :: String
+textLiteralMalformedNegativeEvidenceProjection =
+    unlines
+        [ "text-literal parser negative unexpected-source@test/conformance/mlfp/parser-parity/text-literal-char-string/src/Main.mlfp:3:47"
         ]
 
 renderCanonicalProjection :: FilePath -> String -> IO String
@@ -1609,6 +1671,8 @@ renderExprPrec precedence expr =
         P.ELit (LInt value) -> show value
         P.ELit (LBool True) -> "true"
         P.ELit (LBool False) -> "false"
+        P.ELit (LChar value) -> renderCharLiteral value
+        P.ELit (LString value) -> renderStringLiteral value
         P.ELam param body ->
             parenthesizeIf (precedence > 0) $
                 "λ" ++ renderParam param ++ " " ++ renderExprPrec 0 body
@@ -1633,7 +1697,24 @@ renderExprPrec precedence expr =
                     ++ " of { "
                     ++ intercalate "; " (map renderAlt alts)
                     ++ " }"
-        other -> show other
+
+renderCharLiteral :: Char -> String
+renderCharLiteral value =
+    "'" ++ renderLiteralChar value ++ "'"
+
+renderStringLiteral :: String -> String
+renderStringLiteral value =
+    "\"" ++ concatMap renderLiteralChar value ++ "\""
+
+renderLiteralChar :: Char -> String
+renderLiteralChar value =
+    case value of
+        '\'' -> "\\'"
+        '"' -> "\\\""
+        '\\' -> "\\\\"
+        '\n' -> "\\n"
+        '\t' -> "\\t"
+        _ -> [value]
 
 renderParam :: P.Param -> String
 renderParam param =
