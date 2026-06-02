@@ -81,7 +81,10 @@ parameter annotations, let/application use of the polymorphic value, and a
 malformed forall-dot source-type diagnostic path, plus one higher-order
 partial-application fixture covering nested plain lambda bodies,
 parenthesized expression atoms, function-valued partial application, and a
-    malformed missing-close-paren diagnostic path, plus one higher-order local
-    function-flow fixture covering typed local let chains, annotated-lambda RHS
-    expressions, a multi-digit integer literal in a local binding, and a
-    malformed missing-`in` diagnostic path.
+malformed missing-close-paren diagnostic path, plus one higher-order local
+function-flow fixture covering typed local let chains, annotated-lambda RHS
+expressions, a multi-digit integer literal in a local binding, and a malformed
+missing-`in` diagnostic path, plus one higher-order returned-function fixture
+covering annotated-lambda bodies and typed local-let bodies returning another
+annotated lambda, parenthesized function-valued callee application, and
+malformed missing-close-paren diagnostics.

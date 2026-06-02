@@ -1,0 +1,4 @@
+module Main span=test/conformance/mlfp/parser-parity/higher-order-returned-function/src/Main.mlfp:1:1-9:1
+export value main span=test/conformance/mlfp/parser-parity/higher-order-returned-function/src/Main.mlfp:1:21-1:25
+def make type=Int -> Int -> Int expr=λ(base : Int) let captured : Int = base in λ(x : Int) captured span=test/conformance/mlfp/parser-parity/higher-order-returned-function/src/Main.mlfp:2:3-7:3
+def main type=Int expr=make 41 0 span=test/conformance/mlfp/parser-parity/higher-order-returned-function/src/Main.mlfp:7:3-8:1

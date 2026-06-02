@@ -1,3 +1,25 @@
+## 2026-06-02 - Round 323 parser parity higher-order returned-function extension
+
+- Extended the shared parser-owned parser-parity source-text parser library
+  with a bounded higher-order returned-function slice covering annotated-lambda
+  bodies and typed local-let bodies that return another annotated lambda,
+  parenthesized function-valued callee application, and canonical projection
+  rendering for the selected returned-function fixture.
+- Added the committed parser-program projection fixture for
+  `higher-order-returned-function`, plus a thin `.mlfp` fixture root that
+  exposes only `sourceFile` and `sourceText` before calling
+  `renderParserParityProjectionFromSourceText`.
+- Added public parser-parity coverage for malformed returned-function syntax
+  through `renderParserNegativeEvidenceFromSourceText`, with parser-owned
+  `expected-expression-close-paren@...` diagnostic evidence.
+- Extended shortcut/static guards for round-specific parser/token/projection
+  shortcuts, including fixture-specific token streams, success keys, the
+  `make` row shortcut, pre-rendered returned-function rows, and static
+  returned-function negative evidence.
+- Scope remains bounded parser parity only. This is not full parser parity,
+  resolver, checker, backend, compiler-package, driver, platform, proof, or
+  self-boot progress.
+
 ## 2026-06-02 - Round 322 parser parity higher-order local-function-flow extension
 
 - Extended the shared parser-owned parser-parity source-text lexer/parser

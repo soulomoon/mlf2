@@ -71,6 +71,15 @@ spec =
             canonicalProjection `shouldBe` expected
             sharedParserProjection `shouldBe` Right expected
 
+        it "shared parser-owned .mlfp parser parses higher-order returned functions" $ do
+            source <- readFile higherOrderReturnedFunctionCanonicalSourcePath
+            expected <- readFile higherOrderReturnedFunctionExpectedProjectionPath
+            canonicalProjection <- renderCanonicalProjection higherOrderReturnedFunctionCanonicalSourcePath source
+            sharedParserProjection <- runSharedParserBatch higherOrderReturnedFunctionParserProgramRoot
+
+            canonicalProjection `shouldBe` expected
+            sharedParserProjection `shouldBe` Right expected
+
         beforeAll loadParserParityBatchFixture $ do
             it "runs all .mlfp parser parity fixtures through one generated public CLI driver" $ \fixture ->
                 batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
@@ -128,6 +137,12 @@ spec =
                 batchExpectedOutput fixture
                     `shouldSatisfy` isInfixOf
                         (batchSection "negative:higher-order-local-function-flow" higherOrderLocalFunctionFlowNegativeEvidenceProjection)
+
+            it "parser-owned .mlfp parser reports malformed higher-order returned-function diagnostics through public run-program" $ \fixture -> do
+                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
+                batchExpectedOutput fixture
+                    `shouldSatisfy` isInfixOf
+                        (batchSection "negative:higher-order-returned-function" higherOrderReturnedFunctionNegativeEvidenceProjection)
 
             it "shared parser-owned .mlfp parser library routes the generated batch through one entrypoint" $ \fixture -> do
                 sharedParserExists <- doesFileExist (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
@@ -275,6 +290,10 @@ higherOrderLocalFunctionFlowCanonicalSourcePath :: FilePath
 higherOrderLocalFunctionFlowCanonicalSourcePath =
     "test/conformance/mlfp/parser-parity/higher-order-local-function-flow/src/Main.mlfp"
 
+higherOrderReturnedFunctionCanonicalSourcePath :: FilePath
+higherOrderReturnedFunctionCanonicalSourcePath =
+    "test/conformance/mlfp/parser-parity/higher-order-returned-function/src/Main.mlfp"
+
 expectedProjectionPath :: FilePath
 expectedProjectionPath =
     "test/conformance/mlfp/parser-parity/basic-module-def-bool/expected/parser-program.txt"
@@ -371,6 +390,10 @@ higherOrderLocalFunctionFlowExpectedProjectionPath :: FilePath
 higherOrderLocalFunctionFlowExpectedProjectionPath =
     "test/conformance/mlfp/parser-parity/higher-order-local-function-flow/expected/parser-program.txt"
 
+higherOrderReturnedFunctionExpectedProjectionPath :: FilePath
+higherOrderReturnedFunctionExpectedProjectionPath =
+    "test/conformance/mlfp/parser-parity/higher-order-returned-function/expected/parser-program.txt"
+
 sharedParserLibraryRoot :: FilePath
 sharedParserLibraryRoot =
     "test/programs/compiler-parser-parity/parser-library"
@@ -390,6 +413,10 @@ higherOrderPartialApplicationParserProgramRoot =
 higherOrderLocalFunctionFlowParserProgramRoot :: FilePath
 higherOrderLocalFunctionFlowParserProgramRoot =
     "test/programs/compiler-parser-parity/higher-order-local-function-flow"
+
+higherOrderReturnedFunctionParserProgramRoot :: FilePath
+higherOrderReturnedFunctionParserProgramRoot =
+    "test/programs/compiler-parser-parity/higher-order-returned-function"
 
 sharedParserAuditFiles :: [FilePath]
 sharedParserAuditFiles =
@@ -512,6 +539,7 @@ sharedParserShortcutPhrases =
         , sharedParserRound320ShortcutPhrases
         , sharedParserRound321ShortcutPhrases
         , sharedParserRound322ShortcutPhrases
+        , sharedParserRound323ShortcutPhrases
         ]
 
 sharedParserRound314ShortcutPhrases :: [String]
@@ -752,6 +780,23 @@ sharedParserRound322ShortcutPhrases =
     , concat ["higher-order-local-function-flow parser negative ", "expected-let-in@"]
     ]
 
+sharedParserRound323ShortcutPhrases :: [String]
+sharedParserRound323ShortcutPhrases =
+    [ concat ["parse", "Higher", "Order", "Returned", "Function"]
+    , concat ["completeModuleKey \"", "higher-order-returned-function", "\""]
+    , concat ["moduleKey \"", "higher-order-returned-function", "\""]
+    , concat ["programKey \"", "higher-order-returned-function", "\""]
+    , concat ["Higher", "Order", "Returned", "Function", "Tokens"]
+    , concat ["LexerOk ", "higher", "Order", "Returned", "Function", "Tokens"]
+    , concat ["higher-order-returned-function", " tokens"]
+    , concat ["defRows sourceFile \"", "make", "\""]
+    , concat ["def make type=", "Int -> (Int -> Int) expr=", "λ(base : Int) let captured : Int = base in λ(x : Int) captured"]
+    , concat ["def make type=", "Int -> Int -> Int expr=", "λ(base : Int) let captured : Int = base in λ(x : Int) captured"]
+    , concat ["def main type=Int expr=", "(make 41) 0"]
+    , concat ["def main type=Int expr=", "make 41 0"]
+    , concat ["higher-order-returned-function parser negative ", "expected-expression-close-paren@"]
+    ]
+
 sharedParserCompleteParseRequiredPhrases :: [String]
 sharedParserCompleteParseRequiredPhrases =
     [ "parserStateAtEnd state"
@@ -779,6 +824,7 @@ sharedParserStaticNegativeEvidencePhrases =
     , "stringAppend \"text-literal parser negative unexpected-source@\""
     , concat ["stringAppend \"higher-order-partial-application parser negative ", "expected-expression-close-paren@\""]
     , concat ["stringAppend \"higher-order-local-function-flow parser negative ", "expected-let-in@\""]
+    , concat ["stringAppend \"higher-order-returned-function parser negative ", "expected-expression-close-paren@\""]
     ]
 
 sharedParserDynamicEvidenceRequiredPhrases :: [String]
@@ -860,6 +906,7 @@ parserParityPositiveCases =
     , ParserParityPositiveCase "positive:first-class-polymorphism-source-types" "positiveFirstClassPolymorphismSourceTypes" firstClassPolymorphismSourceTypesCanonicalSourcePath firstClassPolymorphismSourceTypesExpectedProjectionPath
     , ParserParityPositiveCase "positive:higher-order-partial-application" "positiveHigherOrderPartialApplication" higherOrderPartialApplicationCanonicalSourcePath higherOrderPartialApplicationExpectedProjectionPath
     , ParserParityPositiveCase "positive:higher-order-local-function-flow" "positiveHigherOrderLocalFunctionFlow" higherOrderLocalFunctionFlowCanonicalSourcePath higherOrderLocalFunctionFlowExpectedProjectionPath
+    , ParserParityPositiveCase "positive:higher-order-returned-function" "positiveHigherOrderReturnedFunction" higherOrderReturnedFunctionCanonicalSourcePath higherOrderReturnedFunctionExpectedProjectionPath
     ]
 
 parserParityNegativeCases :: [ParserParityNegativeCase]
@@ -880,6 +927,7 @@ parserParityNegativeCases =
     , ParserParityNegativeCase "negative:first-class-polymorphism-source-type" "negativeFirstClassPolymorphismSourceType" "first-class-polymorphism parser negative " firstClassPolymorphismSourceTypesCanonicalSourcePath firstClassPolymorphismSourceTypeNegativeSourceText firstClassPolymorphismSourceTypeNegativeEvidenceProjection
     , ParserParityNegativeCase "negative:higher-order-partial-application" "negativeHigherOrderPartialApplication" "higher-order-partial-application parser negative " higherOrderPartialApplicationCanonicalSourcePath higherOrderPartialApplicationNegativeSourceText higherOrderPartialApplicationNegativeEvidenceProjection
     , ParserParityNegativeCase "negative:higher-order-local-function-flow" "negativeHigherOrderLocalFunctionFlow" "higher-order-local-function-flow parser negative " higherOrderLocalFunctionFlowCanonicalSourcePath higherOrderLocalFunctionFlowNegativeSourceText higherOrderLocalFunctionFlowNegativeEvidenceProjection
+    , ParserParityNegativeCase "negative:higher-order-returned-function" "negativeHigherOrderReturnedFunction" "higher-order-returned-function parser negative " higherOrderReturnedFunctionCanonicalSourcePath higherOrderReturnedFunctionNegativeSourceText higherOrderReturnedFunctionNegativeEvidenceProjection
     ]
 
 assertCanonicalParserParityProjection :: ParserParityPositiveCase -> IO ()
@@ -1261,6 +1309,19 @@ higherOrderLocalFunctionFlowNegativeSourceText =
         , "}"
         ]
 
+higherOrderReturnedFunctionNegativeSourceText :: String
+higherOrderReturnedFunctionNegativeSourceText =
+    unlines
+        [ "module Main export (main) {"
+        , "  def make : Int -> (Int -> Int) ="
+        , "    λ(base : Int)"
+        , "      let captured : Int = base in"
+        , "      λ(x : Int) captured;"
+        , ""
+        , "  def main : Int = (make 41 0;"
+        , "}"
+        ]
+
 retryEvidenceProjection :: String
 retryEvidenceProjection =
     unlines
@@ -1374,6 +1435,16 @@ higherOrderLocalFunctionFlowNegativeEvidenceProjection =
             [ "higher-order-local-function-flow parser negative "
             , "expected-let-in@"
             , "test/conformance/mlfp/parser-parity/higher-order-local-function-flow/src/Main.mlfp:3:34-3:36"
+            ]
+        ]
+
+higherOrderReturnedFunctionNegativeEvidenceProjection :: String
+higherOrderReturnedFunctionNegativeEvidenceProjection =
+    unlines
+        [ concat
+            [ "higher-order-returned-function parser negative "
+            , "expected-expression-close-paren@"
+            , "test/conformance/mlfp/parser-parity/higher-order-returned-function/src/Main.mlfp:7:29-7:30"
             ]
         ]
 

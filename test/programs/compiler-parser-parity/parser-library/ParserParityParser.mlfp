@@ -605,8 +605,12 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
 
   def parseSourceTypeCodomain : ParserValue -> ParserValue -> Parser ParserValue =
     λ(leftType : ParserValue) λ(_arrow : ParserValue)
-      parserBind (parseSourceTypeAtom ValueUnit)
+      parserBind (parseSourceTypeCodomainAtom ValueUnit)
         (parseSourceTypeSecondArrowTail leftType);
+
+  def parseSourceTypeCodomainAtom : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserChoice (parseParenthesizedSourceTypeCodomain ValueUnit) (parseNamedSourceType ValueUnit);
 
   def parseSourceTypeSecondArrowTail : ParserValue -> ParserValue -> Parser ParserValue =
     λ(leftType : ParserValue) λ(middleType : ParserValue)
@@ -616,7 +620,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
 
   def parseSourceTypeThirdCodomain : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
     λ(leftType : ParserValue) λ(middleType : ParserValue) λ(_arrow : ParserValue)
-      parserBind (parseSourceTypeAtom ValueUnit)
+      parserBind (parseSourceTypeCodomainAtom ValueUnit)
         (finishNestedSourceArrowType leftType middleType);
 
   def finishNestedSourceArrowType : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
@@ -660,6 +664,26 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
     λ(typeValue : ParserValue) λ(_closeType : ParserValue)
       parserTextValue
         (stringAppend "(" (stringAppend (parserTextFromValue typeValue) ")"));
+
+  def parseParenthesizedSourceTypeCodomain : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "(")
+        parseParenthesizedSourceTypeCodomainBody;
+
+  def parseParenthesizedSourceTypeCodomainBody : ParserValue -> Parser ParserValue =
+    λ(_openType : ParserValue)
+      parserBind
+        (parserChoice (parseForallSourceType ValueUnit) (parseSimpleArrowSourceType ValueUnit))
+        parseParenthesizedSourceTypeCodomainClose;
+
+  def parseParenthesizedSourceTypeCodomainClose : ParserValue -> Parser ParserValue =
+    λ(typeValue : ParserValue)
+      parserBind (expectText ")")
+        (finishParenthesizedSourceTypeCodomain typeValue);
+
+  def finishParenthesizedSourceTypeCodomain : ParserValue -> ParserValue -> Parser ParserValue =
+    λ(typeValue : ParserValue) λ(_closeType : ParserValue)
+      parserTextValue (parserTextFromValue typeValue);
 
   def parseNamedSourceType : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
@@ -752,7 +776,8 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
   def parseAnnotatedLambdaBody : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
     λ(paramToken : ParserValue) λ(typeValue : ParserValue) λ(_closeParam : ParserValue)
       parserBind
-        (parserChoice (parseLetExpression ValueUnit) (parseApplicationOrAtomExpression ValueUnit))
+        (parserChoice (parseAnnotatedLambdaRhsExpression ValueUnit)
+          (parserChoice (parseLetExpression ValueUnit) (parseApplicationOrAtomExpression ValueUnit)))
         (finishAnnotatedLambdaExpression paramToken typeValue);
 
   def finishAnnotatedLambdaExpression : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
@@ -886,7 +911,8 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
 
   def parseLetBodyExpression : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
-      parserChoice (parseNestedLetExpression ValueUnit) (parseApplicationOrAtomExpression ValueUnit);
+      parserChoice (parseNestedLetExpression ValueUnit)
+        (parserChoice (parseAnnotatedLambdaRhsExpression ValueUnit) (parseApplicationOrAtomExpression ValueUnit));
 
   def parseNestedLetExpression : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
@@ -926,7 +952,8 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
 
   def parseNestedSourceLetExpressionBody : ParserValue -> String -> ParserValue -> ParserValue -> Parser ParserValue =
     λ(nameToken : ParserValue) λ(annotationText : String) λ(rhsValue : ParserValue) λ(_inToken : ParserValue)
-      parserBind (parseApplicationOrAtomExpression ValueUnit)
+      parserBind
+        (parserChoice (parseAnnotatedLambdaRhsExpression ValueUnit) (parseApplicationOrAtomExpression ValueUnit))
         (finishLetExpression nameToken annotationText rhsValue);
 
   def finishLetExpression : ParserValue -> String -> ParserValue -> ParserValue -> Parser ParserValue =
@@ -941,8 +968,33 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
 
   def parseApplicationOrAtomExpression : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
-      parserBind (parseExpressionAtom ValueUnit)
+      parserBind (parseApplicationFunctionAtom ValueUnit)
         parseApplicationArgumentOrDone;
+
+  def parseApplicationFunctionAtom : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserChoice (parseParenthesizedApplicationFunctionAtom ValueUnit)
+        (parseSimpleExpressionAtom ValueUnit);
+
+  def parseParenthesizedApplicationFunctionAtom : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "(")
+        parseParenthesizedApplicationFunctionBody;
+
+  def parseParenthesizedApplicationFunctionBody : ParserValue -> Parser ParserValue =
+    λ(_openExpression : ParserValue)
+      parserBind (parseApplicationOrSimpleAtomExpression ValueUnit)
+        parseParenthesizedApplicationFunctionClose;
+
+  def parseParenthesizedApplicationFunctionClose : ParserValue -> Parser ParserValue =
+    λ(exprValue : ParserValue)
+      parserBind
+        (parserChoice (expectText ")") parserFailExpectedExpressionCloseParenAtCurrent)
+        (finishParenthesizedApplicationFunction exprValue);
+
+  def finishParenthesizedApplicationFunction : ParserValue -> ParserValue -> Parser ParserValue =
+    λ(exprValue : ParserValue) λ(_closeExpression : ParserValue)
+      parserTextValue (parserTextFromValue exprValue);
 
   def parseApplicationArgumentOrDone : ParserValue -> Parser ParserValue =
     λ(functionValue : ParserValue)

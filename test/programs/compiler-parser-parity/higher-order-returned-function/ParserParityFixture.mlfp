@@ -1,0 +1,7 @@
+module ParserParityFixture export (sourceFile, sourceText) {
+  def sourceFile : String =
+    "test/conformance/mlfp/parser-parity/higher-order-returned-function/src/Main.mlfp";
+
+  def sourceText : String =
+    "module Main export (main) {\n  def make : Int -> (Int -> Int) =\n    λ(base : Int)\n      let captured : Int = base in\n      λ(x : Int) captured;\n\n  def main : Int = (make 41) 0;\n}\n";
+}
