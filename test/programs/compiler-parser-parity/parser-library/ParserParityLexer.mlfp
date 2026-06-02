@@ -24,6 +24,10 @@ module ParserParityLexer export (LexerResult(..), tokenizeCompleteModule, nextLi
       IdentifierScanState : String -> String -> String -> SourceCursor -> IdentifierScanState
     | IdentifierScanDone : ParserSourceSymbol -> SourceCursor -> IdentifierScanState;
 
+  data IntegerScanState =
+      IntegerScanState : String -> String -> String -> SourceCursor -> IntegerScanState
+    | IntegerScanDone : ParserSourceSymbol -> SourceCursor -> IntegerScanState;
+
   data StringLiteralScanState =
       StringLiteralScanState : String -> String -> String -> SourceCursor -> StringLiteralScanState
     | StringLiteralScanDone : ParserSourceSymbol -> SourceCursor -> StringLiteralScanState
@@ -627,7 +631,71 @@ module ParserParityLexer export (LexerResult(..), tokenizeCompleteModule, nextLi
   def scanKnownTwo : SourceCursor -> LexStep =
     λ(cursor : SourceCursor) case scanSourceToken "2" "int:2" 1 cursor of {
       LexStepOk token nextCursor -> LexStepOk token nextCursor;
-      LexStepError _ -> scanKnownForall cursor
+      LexStepError _ -> scanIntegerLiteralToken cursor
+    };
+
+  def scanIntegerLiteralToken : SourceCursor -> LexStep =
+    λ(cursor : SourceCursor) case cursor of {
+      SourceCursor sourceText lineNumber linePrefix -> case stringCharAtOption sourceText 0 of {
+        None -> scanKnownForall cursor;
+        Some _ -> case sourceCharIn digitCharacters sourceText of {
+          StringMatched ->
+            finishIntegerScan
+              (scanIntegerMany64
+                (IntegerScanState lineNumber linePrefix "" cursor));
+          StringMismatch -> scanKnownForall cursor
+        }
+      }
+    };
+
+  def scanIntegerMany64 : IntegerScanState -> IntegerScanState =
+    λ(state : IntegerScanState) scanIntegerMany32 (scanIntegerMany32 state);
+
+  def scanIntegerMany32 : IntegerScanState -> IntegerScanState =
+    λ(state : IntegerScanState) scanIntegerMany16 (scanIntegerMany16 state);
+
+  def scanIntegerMany16 : IntegerScanState -> IntegerScanState =
+    λ(state : IntegerScanState) scanIntegerMany8 (scanIntegerMany8 state);
+
+  def scanIntegerMany8 : IntegerScanState -> IntegerScanState =
+    λ(state : IntegerScanState) scanIntegerMany4 (scanIntegerMany4 state);
+
+  def scanIntegerMany4 : IntegerScanState -> IntegerScanState =
+    λ(state : IntegerScanState) scanIntegerMany2 (scanIntegerMany2 state);
+
+  def scanIntegerMany2 : IntegerScanState -> IntegerScanState =
+    λ(state : IntegerScanState) scanIntegerStep (scanIntegerStep state);
+
+  def scanIntegerStep : IntegerScanState -> IntegerScanState =
+    λ(state : IntegerScanState) case state of {
+      IntegerScanDone token cursor -> IntegerScanDone token cursor;
+      IntegerScanState startLine startPrefix lexeme cursor -> case cursor of {
+        SourceCursor sourceText lineNumber linePrefix -> case sourceCharIn digitCharacters sourceText of {
+          StringMatched ->
+            IntegerScanState startLine startPrefix
+              (stringAppend lexeme (stringTake sourceText 1))
+              (SourceCursor (stringDrop sourceText 1) lineNumber (stringAppend linePrefix (stringTake sourceText 1)));
+          StringMismatch ->
+            IntegerScanDone
+              (SourceSymbol
+                (cursorStart startLine startPrefix)
+                (cursorEnd startLine startPrefix lexeme)
+                (stringAppend "int:" lexeme))
+              cursor
+        }
+      }
+    };
+
+  def finishIntegerScan : IntegerScanState -> LexStep =
+    λ(state : IntegerScanState) case state of {
+      IntegerScanDone token cursor -> LexStepOk token cursor;
+      IntegerScanState startLine startPrefix lexeme cursor ->
+        LexStepOk
+          (SourceSymbol
+            (cursorStart startLine startPrefix)
+            (cursorEnd startLine startPrefix lexeme)
+            (stringAppend "int:" lexeme))
+          cursor
     };
 
   def scanKnownForall : SourceCursor -> LexStep =
@@ -901,6 +969,9 @@ module ParserParityLexer export (LexerResult(..), tokenizeCompleteModule, nextLi
 
   def identifierContinueCharacters : String =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_0123456789";
+
+  def digitCharacters : String =
+    "0123456789";
 
   def sourceCharIn : String -> String -> StringMatch =
     λ(characters : String) λ(sourceText : String) case stringCharAtOption sourceText 0 of {

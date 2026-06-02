@@ -1,0 +1,7 @@
+module ParserParityFixture export (sourceFile, sourceText) {
+  def sourceFile : String =
+    "test/conformance/mlfp/parser-parity/higher-order-local-function-flow/src/Main.mlfp";
+
+  def sourceText : String =
+    "module Main export (main) {\n  def use : (Int -> Int) -> Int = λ(f : Int -> Int) f 1;\n\n  def main : Int =\n    let captured : Int = 41 in\n    let f : Int -> Int = λ(x : Int) captured in\n    use f;\n}\n";
+}

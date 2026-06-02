@@ -1,0 +1,4 @@
+module Main span=test/conformance/mlfp/parser-parity/higher-order-local-function-flow/src/Main.mlfp:1:1-9:1
+export value main span=test/conformance/mlfp/parser-parity/higher-order-local-function-flow/src/Main.mlfp:1:21-1:25
+def use type=(Int -> Int) -> Int expr=λ(f : Int -> Int) f 1 span=test/conformance/mlfp/parser-parity/higher-order-local-function-flow/src/Main.mlfp:2:3-4:3
+def main type=Int expr=let captured : Int = 41 in let f : Int -> Int = λ(x : Int) captured in use f span=test/conformance/mlfp/parser-parity/higher-order-local-function-flow/src/Main.mlfp:4:3-8:1

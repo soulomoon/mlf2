@@ -1,3 +1,24 @@
+## 2026-06-02 - Round 322 parser parity higher-order local-function-flow extension
+
+- Extended the shared parser-owned parser-parity source-text lexer/parser
+  library with a bounded higher-order local-function-flow slice covering
+  two-definition source modules, typed local let chains, annotated-lambda RHS
+  expressions, nested let bodies without recursive parser binding cycles, and
+  generic multi-digit integer tokens.
+- Added the committed parser-program projection fixture for
+  `higher-order-local-function-flow`, plus a thin `.mlfp` fixture root that
+  exposes only `sourceFile` and `sourceText` before calling
+  `renderParserParityProjectionFromSourceText`.
+- Added public parser-parity coverage for malformed typed local let chains
+  through `renderParserNegativeEvidenceFromSourceText`, with parser-owned
+  `expected-let-in@...` diagnostic evidence.
+- Extended shortcut/static guards for round-specific parser/token/projection
+  shortcuts, including fixture-specific token streams, success keys, the `use`
+  row shortcut, and pre-rendered local-flow rows.
+- Scope remains bounded parser parity only. This is not full parser parity,
+  resolver, checker, backend, compiler-package, driver, platform, proof, or
+  self-boot progress.
+
 ## 2026-06-02 - Round 321 parser parity higher-order partial-application extension
 
 - Extended the shared parser-owned parser-parity source-text lexer/parser
