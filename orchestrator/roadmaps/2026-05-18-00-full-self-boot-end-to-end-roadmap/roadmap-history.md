@@ -2,6 +2,20 @@
 
 Roadmap family: `2026-05-18-00-full-self-boot-end-to-end-roadmap`
 
+## rev-005
+
+- Semantic update from round-324: future checker, checker-parity,
+  compiler-source-package, driver, and conformance-validation rounds should
+  prefer one aggregate public program run with labelled per-case evidence when
+  cases can share checker/program setup context.
+- Multiple checker-facing invocations remain lawful when semantic isolation,
+  diagnostic boundaries, failure independence, stage-owned output isolation, or
+  the public interface under test requires separate runs.
+- The update preserves milestone ordering, proof oracle meaning,
+  trusted-substrate boundaries, public-interface tests, committed expected
+  outputs, and self-boot completion criteria. It adds planning/review
+  coordination only, not checker implementation or optimization scope.
+
 ## rev-004
 
 - Activated the integrated Broad String Library completion contract and marked

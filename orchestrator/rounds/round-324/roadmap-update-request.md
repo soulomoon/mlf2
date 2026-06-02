@@ -1,0 +1,23 @@
+### Roadmap Update Required
+- Round id: `round-324`
+- Roadmap id: `2026-05-18-00-full-self-boot-end-to-end-roadmap`
+- Roadmap revision: `rev-004`
+- Roadmap dir: `orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-004`
+- Reason: Future checker, checker-parity, and compiler-source-package validation rounds need a semantic planning constraint before implementation continues: when multiple public cases can share checker/program context, planners should prefer one batched/shared-context public program run instead of invoking `check-program`, `run-program`, or equivalent checker-facing program commands separately for each case. Separate invocations should remain valid only when semantics, diagnostic isolation, failure independence, or public-interface evidence requires isolation.
+
+### Current Evidence
+- Docs/ADRs/context/code inspected: `AGENTS.md`; `orchestrator/role-contract.md`; `orchestrator/roles/planner.md`; `orchestrator/artifact-manifest.md`; `orchestrator/active-roadmap-bundle.md`; `orchestrator/roadmap-update-schema.md`; `orchestrator/project-contract.md`; `orchestrator/state.json`; active rev-004 `roadmap.md`, `roadmap-view.json`, and `verification.md`; `implementation_notes.md`; `bench/parser-library-performance.md`; `src/MLF/Program/CLI.hs`; `test/ProgramParserParitySpec.hs`.
+- Codebase or test boundaries inspected: `MLF.Program.CLI.checkProgramArgs` and `runProgramArgs` both enter the located package command path and full frontend checker path for a package run; `ProgramParserParitySpec` now uses a generated `dist-newstyle/parser-parity-batch` public CLI driver for parser-parity evidence; `implementation_notes.md` records that the parser-parity batch driver replaced repeated public `.mlfp` fixture executions with one generated aggregate driver while preserving per-case labelled evidence; `bench/parser-library-performance.md` records that `program.check.modules` and generated parser-library definition checking dominate parser/checker-adjacent validation time, and that module-context batching produced the accepted exact-pipeline speedup while keeping the full checker path.
+- Why current milestone/direction is too coarse: Rev-004 contains parser batching and parser-owned shared-library constraints for milestone 4, and later milestones require checker, compiler-package, driver, and proof validation, but the active roadmap does not encode a general checker-related planning rule that distinguishes cases safe to batch from cases requiring isolated program invocations. Without a semantic update, future checker/checker-parity planners can lawfully choose multiple separate public program runs for cases that share context, reintroducing repeated setup/checker overhead and obscuring the intended shared-context validation shape.
+
+### Requested Split
+Author a new roadmap revision that adds a cross-cutting coordination and verification constraint for future eligible checker-related work. The update should preserve the current milestone order, but add explicit planning language to the active roadmap and verification contract requiring future checker, checker-parity, compiler-source-package, driver, and conformance-validation rounds to prefer batched/shared-context public program runs when cases can share setup/checker context.
+
+The rule should say that planners and reviewers should expect a single aggregate public run with labelled per-case output/evidence when cases share context, such as parser/checker parity fixture groups or compiler-source-package validation groups. It should also say that multiple invocations remain lawful when isolation is required by language semantics, diagnostic boundaries, failure independence, stage-owned output isolation, or the public interface being tested. The update should make this a planning and review constraint only; it should not prescribe a specific implementation mechanism or alter already-approved round artifacts.
+
+### Non-Goals
+Do not weaken public-interface tests, committed expected outputs, or conformance evidence.
+Do not hide per-case diagnostics, spans, labels, or failure evidence inside an opaque aggregate result.
+Do not require batching when semantic isolation, independent failure evidence, stage isolation, or public command behavior requires separate invocations.
+Do not introduce checker implementation, checker optimization, parser implementation, compiler-package implementation, driver implementation, platform, proof, or benchmark-refactor scope in this request.
+Do not change milestone ordering, proof oracle meaning, trusted-substrate boundaries, or self-boot completion criteria except for the requested future-planning constraint.
