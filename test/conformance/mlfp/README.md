@@ -93,4 +93,8 @@ bounded constructor-pattern case branch that applies the extracted function,
 with malformed missing case-branch-arrow diagnostics, plus one authoritative
 recursive-let fixture covering a `Nat` data declaration, typed local recursive
 let, annotated-lambda RHS case expression, outer case over constructor
-application, and malformed missing case-branch-arrow diagnostics.
+application, and malformed missing case-branch-arrow diagnostics, plus one
+authoritative cross-module let-polymorphism fixture covering `Core.applyId`,
+a one-definition `Core` module with `let id = λx x in id 1`, a `User` import
+and reference to `applyId`, and malformed missing definition-semicolon
+diagnostics.

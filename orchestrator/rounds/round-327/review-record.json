@@ -1,0 +1,24 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-327",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-005",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-005",
+  "milestone_id": "milestone-4",
+  "direction_id": "direction-4a-canonical-parser-parity",
+  "extracted_item_id": "item-327-parser-library-cross-module-let-polymorphism-extension",
+  "decision": "approved",
+  "evidence_summary": "Lineage, static shortcut audits, focused positive and malformed diagnostic parser checks, rev-005 aggregate public parser-parity batch, full parser-parity group, standalone fixture smoke/diff, git diff checks, cabal build all, cabal test, and thesis conformance gate all passed. The diff stays bounded to the shared parser-owned parser library, one thin authoritative cross-module let-polymorphism fixture/oracle, tests, and scoped docs; no generated runtime path churn remains.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-4-completion",
+        "text": "round-327 completed item-327-parser-library-cross-module-let-polymorphism-extension: the shared parser-owned library now covers the bounded authoritative cross-module let-polymorphism fixture and malformed def-semicolon diagnostic; reviewer evidence passed focused parser checks, the rev-005 aggregate public batch, standalone fixture diff, cabal build all, cabal test, and thesis gate."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}

@@ -3,7 +3,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
   import ParserParityAst exposing (ParsedModule(..), renderParsedModule);
   import ParserParityDiagnostic exposing (ParserDiagnostic(..));
   import ParserParityLexer exposing (LexerResult(..), nextLineNumber, tokenizeCompleteModule);
-  import ParserParityParserCombinator exposing (Parser, ParserEnd(..), ParserState(..), ParserStep(..), ParserValue(..), captureSpan, diagnosticLabel, expectIdentifierToken, expectToken, expectTokenPrefix, labelCaseBranchArrow, labelConstructorColon, labelConstructorForallDot, labelDefSemicolon, labelEquals, labelFunctionalDependencyArrow, labelImportAlias, labelImportSemicolon, labelInstanceMethodEquals, labelLetAnnotationType, labelLetIn, labelTypeFamilyEquationEquals, labelUnexpectedSource, parserBind, parserChoice, parserCurrentTokenStartOr, parserFail, parserFailExpectedCaseBranchArrowAtCurrent, parserFailExpectedConstructorForallDotAtCurrent, parserFailExpectedExpressionCloseParenAtCurrent, parserFailExpectedImportExposingSeparatorAtCurrent, parserFailExpectedImportSemicolonAtCurrent, parserPure, parserReturnAtEndOr, parserStateAtEnd, runParser);
+  import ParserParityParserCombinator exposing (Parser, ParserEnd(..), ParserState(..), ParserStep(..), ParserValue(..), captureSpan, diagnosticLabel, expectIdentifierToken, expectToken, expectTokenPrefix, labelCaseBranchArrow, labelConstructorColon, labelConstructorForallDot, labelDefSemicolon, labelEquals, labelFunctionalDependencyArrow, labelImportAlias, labelImportSemicolon, labelInstanceMethodEquals, labelLetAnnotationType, labelLetIn, labelTypeFamilyEquationEquals, labelUnexpectedSource, parserBind, parserChoice, parserCurrentTokenStartOr, parserFail, parserFailExpectedCaseBranchArrowAtCurrent, parserFailExpectedConstructorForallDotAtCurrent, parserFailExpectedDefSemicolonAtCurrent, parserFailExpectedExpressionCloseParenAtCurrent, parserFailExpectedImportExposingSeparatorAtCurrent, parserFailExpectedImportSemicolonAtCurrent, parserPure, parserReturnAtEndOr, parserStateAtEnd, runParser);
   import ParserParitySource exposing (basicBoolLiteralSpan, basicUnexpectedSpan, caseBranchArrowSpan, constructorForallDotSpan, dataZeroColonSpan, existentialForallExprDataSpan, existentialForallMainDefSpan, existentialForallModuleSpan, existentialForallNatDataSpan, existentialForallSomeExprDataSpan, existentialForallUnwrapSomeDefSpan, importBoolSemicolonSpan, letInSpan, lexerUnknownSpan, multiparamFundepArrowSpan, qualifiedImportAliasDiagnosticSpan, recursiveGadtDoneNowDefSpan, recursiveGadtExprDataSpan, recursiveGadtMainDefSpan, recursiveGadtModuleSpan, recursiveGadtNatDataSpan, renderSpan, typedLetForallSpan, typeFamilyEquationEqualsSpan, typeclassInstanceMethodEqualsSpan, valueFirstDefSemicolonSpan);
   import ParserParityToken exposing (ParserInput(..), TokenKind(..), renderTokenPrefixEvidence, tokenEnd, tokenSpan, tokenStart, tokenText);
 
@@ -513,8 +513,15 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
   def parseDefinitionLedBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
       parserChoice
-        (parseTwoDefinitionBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)
-        (parseThreeDefinitionBodyRows sourceFile moduleStart moduleName exportRows ValueUnit);
+        (parseOneDefinitionBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)
+        (parserChoice
+          (parseTwoDefinitionBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)
+          (parseThreeDefinitionBodyRows sourceFile moduleStart moduleName exportRows ValueUnit));
+
+  def parseOneDefinitionBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
+      parserBind (parseSourceDefinitionRowsWithCurrentDefSemicolon sourceFile ValueUnit)
+        (finishModuleBodyRows sourceFile moduleStart moduleName exportRows);
 
   def parseTwoDefinitionBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
@@ -579,6 +586,41 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
   def parseSourceDefinitionSemicolon : String -> String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(defStart : String) λ(nameToken : ParserValue) λ(typeValue : ParserValue) λ(exprValue : ParserValue)
       parserBind (expectText ";")
+        (finishSourceDefinitionRows sourceFile defStart nameToken typeValue exprValue);
+
+  def parseSourceDefinitionRowsWithCurrentDefSemicolon : String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(_start : ParserValue)
+      parserBind (expectText "def")
+        (parseSourceDefinitionNameWithCurrentDefSemicolon sourceFile);
+
+  def parseSourceDefinitionNameWithCurrentDefSemicolon : String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(defToken : ParserValue)
+      parserBind expectAnyIdentifier
+        (parseSourceDefinitionColonWithCurrentDefSemicolon sourceFile (tokenStartCoordinate defToken));
+
+  def parseSourceDefinitionColonWithCurrentDefSemicolon : String -> String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(defStart : String) λ(nameToken : ParserValue)
+      parserBind (expectText ":")
+        (parseSourceDefinitionTypeWithCurrentDefSemicolon sourceFile defStart nameToken);
+
+  def parseSourceDefinitionTypeWithCurrentDefSemicolon : String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(defStart : String) λ(nameToken : ParserValue) λ(_colon : ParserValue)
+      parserBind (parseSourceType ValueUnit)
+        (parseSourceDefinitionEqualsWithCurrentDefSemicolon sourceFile defStart nameToken);
+
+  def parseSourceDefinitionEqualsWithCurrentDefSemicolon : String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(defStart : String) λ(nameToken : ParserValue) λ(typeValue : ParserValue)
+      parserBind (expectEqualsParser ValueUnit)
+        (parseSourceDefinitionExpressionWithCurrentDefSemicolon sourceFile defStart nameToken typeValue);
+
+  def parseSourceDefinitionExpressionWithCurrentDefSemicolon : String -> String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(defStart : String) λ(nameToken : ParserValue) λ(typeValue : ParserValue) λ(_equals : ParserValue)
+      parserBind (parseSourceExpression ValueUnit)
+        (parseSourceDefinitionSemicolonAtCurrent sourceFile defStart nameToken typeValue);
+
+  def parseSourceDefinitionSemicolonAtCurrent : String -> String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(defStart : String) λ(nameToken : ParserValue) λ(typeValue : ParserValue) λ(exprValue : ParserValue)
+      parserBind (parserChoice (expectText ";") parserFailExpectedDefSemicolonAtCurrent)
         (finishSourceDefinitionRows sourceFile defStart nameToken typeValue exprValue);
 
   def finishSourceDefinitionRows : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
@@ -1630,12 +1672,61 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
           (parserChoice
             (parserBind (parseImportedNatMainRows sourceFile ValueUnit)
               (finishImportedBodyRows sourceFile moduleStart moduleName exportRows importRows))
-            (parserBind (parseTextLiteralDefinitionRows sourceFile ValueUnit)
-              (finishImportedBodyRows sourceFile moduleStart moduleName exportRows importRows)));
+            (parserChoice
+              (parserBind (parseTextLiteralDefinitionRows sourceFile ValueUnit)
+                (finishImportedBodyRows sourceFile moduleStart moduleName exportRows importRows))
+              (parserBind (parseImportedIntReferenceMainRows sourceFile ValueUnit)
+                (finishImportedBodyRows sourceFile moduleStart moduleName exportRows importRows))));
       ValueModuleKey _ -> parserFail (ExpectedCompleteModule basicUnexpectedSpan);
       ValueToken _ -> parserFail (ExpectedCompleteModule basicUnexpectedSpan);
       ValueUnit -> parserFail (ExpectedCompleteModule basicUnexpectedSpan)
     };
+
+  def parseImportedIntReferenceMainRows : String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(_start : ParserValue)
+      parserBind (expectText "def")
+        (parseImportedIntReferenceMainName sourceFile);
+
+  def parseImportedIntReferenceMainName : String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(defToken : ParserValue)
+      parserBind (expectIdentifier "main")
+        (parseImportedIntReferenceMainColon sourceFile (tokenStartCoordinate defToken));
+
+  def parseImportedIntReferenceMainColon : String -> String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(defStart : String) λ(nameToken : ParserValue)
+      parserBind (expectText ":")
+        (parseImportedIntReferenceMainType sourceFile defStart nameToken);
+
+  def parseImportedIntReferenceMainType : String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(defStart : String) λ(nameToken : ParserValue) λ(_colon : ParserValue)
+      parserBind (expectIdentifier "Int")
+        (parseImportedIntReferenceMainEquals sourceFile defStart nameToken);
+
+  def parseImportedIntReferenceMainEquals : String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(defStart : String) λ(nameToken : ParserValue) λ(_typeToken : ParserValue)
+      parserBind (expectEqualsParser ValueUnit)
+        (parseImportedIntReferenceMainExpression sourceFile defStart nameToken);
+
+  def parseImportedIntReferenceMainExpression : String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(defStart : String) λ(nameToken : ParserValue) λ(_equals : ParserValue)
+      parserBind expectAnyIdentifier
+        (parseImportedIntReferenceMainSemicolon sourceFile defStart nameToken);
+
+  def parseImportedIntReferenceMainSemicolon : String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(defStart : String) λ(nameToken : ParserValue) λ(exprToken : ParserValue)
+      parserBind (expectText ";")
+        (finishImportedIntReferenceMainRows sourceFile defStart nameToken exprToken);
+
+  def finishImportedIntReferenceMainRows : String -> String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(defStart : String) λ(nameToken : ParserValue) λ(exprToken : ParserValue) λ(semicolon : ParserValue)
+      parserBind (parserCurrentTokenStartOr (tokenEndCoordinate semicolon))
+        (λ(defEnd : ParserValue)
+          projectionText
+            (defRows sourceFile
+              (identifierNameFromValue nameToken)
+              "Int"
+              (identifierNameFromValue exprToken)
+              (spanFromStartToCoordinate defStart defEnd)));
 
   def finishImportedBodyRows : String -> String -> String -> String -> String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(importRows : String) λ(definitionRows : ParserValue) case definitionRows of {

@@ -1,0 +1,8 @@
+module Core span=test/conformance/mlfp/parser-parity/authoritative-cross-module-let-polymorphism/src/Main.mlfp:1:1-5:1
+export value applyId span=test/conformance/mlfp/parser-parity/authoritative-cross-module-let-polymorphism/src/Main.mlfp:1:21-1:28
+def applyId type=Int expr=let id = λx x in id 1 span=test/conformance/mlfp/parser-parity/authoritative-cross-module-let-polymorphism/src/Main.mlfp:2:3-3:1
+module User span=test/conformance/mlfp/parser-parity/authoritative-cross-module-let-polymorphism/src/Main.mlfp:5:1-9:1
+export value main span=test/conformance/mlfp/parser-parity/authoritative-cross-module-let-polymorphism/src/Main.mlfp:5:21-5:25
+import Core span=test/conformance/mlfp/parser-parity/authoritative-cross-module-let-polymorphism/src/Main.mlfp:6:10-6:15
+import exposing value applyId span=test/conformance/mlfp/parser-parity/authoritative-cross-module-let-polymorphism/src/Main.mlfp:6:25-6:32
+def main type=Int expr=applyId span=test/conformance/mlfp/parser-parity/authoritative-cross-module-let-polymorphism/src/Main.mlfp:7:3-8:1

@@ -1,0 +1,7 @@
+module ParserParityFixture export (sourceFile, sourceText) {
+  def sourceFile : String =
+    "test/conformance/mlfp/parser-parity/authoritative-cross-module-let-polymorphism/src/Main.mlfp";
+
+  def sourceText : String =
+    "module Core export (applyId) {\n  def applyId : Int = let id = λx x in id 1;\n}\n\nmodule User export (main) {\n  import Core exposing (applyId);\n  def main : Int = applyId;\n}\n";
+}

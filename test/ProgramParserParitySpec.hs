@@ -98,6 +98,15 @@ spec =
             canonicalProjection `shouldBe` expected
             sharedParserProjection `shouldBe` Right expected
 
+        it "shared parser-owned .mlfp parser parses authoritative cross-module let polymorphism" $ do
+            source <- readFile authoritativeCrossModuleLetPolymorphismCanonicalSourcePath
+            expected <- readFile authoritativeCrossModuleLetPolymorphismExpectedProjectionPath
+            canonicalProjection <- renderCanonicalProjection authoritativeCrossModuleLetPolymorphismCanonicalSourcePath source
+            sharedParserProjection <- runSharedParserBatch authoritativeCrossModuleLetPolymorphismParserProgramRoot
+
+            canonicalProjection `shouldBe` expected
+            sharedParserProjection `shouldBe` Right expected
+
         beforeAll loadParserParityBatchFixture $ do
             it "runs all .mlfp parser parity fixtures through one generated public CLI driver" $ \fixture ->
                 batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
@@ -173,6 +182,12 @@ spec =
                 batchExpectedOutput fixture
                     `shouldSatisfy` isInfixOf
                         (batchSection "negative:authoritative-recursive-let" authoritativeRecursiveLetNegativeEvidenceProjection)
+
+            it "parser-owned .mlfp parser reports malformed authoritative cross-module let-polymorphism diagnostics through public run-program" $ \fixture -> do
+                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
+                batchExpectedOutput fixture
+                    `shouldSatisfy` isInfixOf
+                        (batchSection "negative:authoritative-cross-module-let-polymorphism" authoritativeCrossModuleLetPolymorphismNegativeEvidenceProjection)
 
             it "shared parser-owned .mlfp parser library routes the generated batch through one entrypoint" $ \fixture -> do
                 sharedParserExists <- doesFileExist (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
@@ -332,6 +347,10 @@ authoritativeRecursiveLetCanonicalSourcePath :: FilePath
 authoritativeRecursiveLetCanonicalSourcePath =
     "test/conformance/mlfp/parser-parity/authoritative-recursive-let/src/Main.mlfp"
 
+authoritativeCrossModuleLetPolymorphismCanonicalSourcePath :: FilePath
+authoritativeCrossModuleLetPolymorphismCanonicalSourcePath =
+    "test/conformance/mlfp/parser-parity/authoritative-cross-module-let-polymorphism/src/Main.mlfp"
+
 expectedProjectionPath :: FilePath
 expectedProjectionPath =
     "test/conformance/mlfp/parser-parity/basic-module-def-bool/expected/parser-program.txt"
@@ -440,6 +459,10 @@ authoritativeRecursiveLetExpectedProjectionPath :: FilePath
 authoritativeRecursiveLetExpectedProjectionPath =
     "test/conformance/mlfp/parser-parity/authoritative-recursive-let/expected/parser-program.txt"
 
+authoritativeCrossModuleLetPolymorphismExpectedProjectionPath :: FilePath
+authoritativeCrossModuleLetPolymorphismExpectedProjectionPath =
+    "test/conformance/mlfp/parser-parity/authoritative-cross-module-let-polymorphism/expected/parser-program.txt"
+
 sharedParserLibraryRoot :: FilePath
 sharedParserLibraryRoot =
     "test/programs/compiler-parser-parity/parser-library"
@@ -471,6 +494,10 @@ higherOrderFunctionFieldParserProgramRoot =
 authoritativeRecursiveLetParserProgramRoot :: FilePath
 authoritativeRecursiveLetParserProgramRoot =
     "test/programs/compiler-parser-parity/authoritative-recursive-let"
+
+authoritativeCrossModuleLetPolymorphismParserProgramRoot :: FilePath
+authoritativeCrossModuleLetPolymorphismParserProgramRoot =
+    "test/programs/compiler-parser-parity/authoritative-cross-module-let-polymorphism"
 
 sharedParserAuditFiles :: [FilePath]
 sharedParserAuditFiles =
@@ -596,6 +623,7 @@ sharedParserShortcutPhrases =
         , sharedParserRound323ShortcutPhrases
         , sharedParserRound325ShortcutPhrases
         , sharedParserRound326ShortcutPhrases
+        , sharedParserRound327ShortcutPhrases
         ]
 
 sharedParserRound314ShortcutPhrases :: [String]
@@ -885,6 +913,23 @@ sharedParserRound326ShortcutPhrases =
     , concat ["authoritative-recursive-let parser negative ", "expected-case-branch-arrow@"]
     ]
 
+sharedParserRound327ShortcutPhrases :: [String]
+sharedParserRound327ShortcutPhrases =
+    [ concat ["parse", "Authoritative", "Cross", "Module", "Let", "Polymorphism"]
+    , concat ["completeModuleKey \"", "authoritative-cross-module-let-polymorphism", "\""]
+    , concat ["moduleKey \"", "authoritative-cross-module-let-polymorphism", "\""]
+    , concat ["programKey \"", "authoritative-cross-module-let-polymorphism", "\""]
+    , concat ["Authoritative", "Cross", "Module", "Let", "Polymorphism", "Tokens"]
+    , concat ["LexerOk ", "authoritative", "Cross", "Module", "Let", "Polymorphism", "Tokens"]
+    , concat ["authoritative-cross-module-let-polymorphism", " tokens"]
+    , concat ["stringIndexOf sourceText \"", "module Core export (applyId)", "\""]
+    , concat ["stringIndexOf \"", "module Core export (applyId)", "\" sourceText"]
+    , concat ["defRows sourceFile \"", "applyId", "\""]
+    , concat ["defRows sourceFile \"", "main", "\""]
+    , concat ["def applyId type=Int expr=", "let id = λx x in id 1"]
+    , concat ["authoritative-cross-module-let-polymorphism parser negative ", "expected-def-semicolon@"]
+    ]
+
 sharedParserCompleteParseRequiredPhrases :: [String]
 sharedParserCompleteParseRequiredPhrases =
     [ "parserStateAtEnd state"
@@ -915,6 +960,7 @@ sharedParserStaticNegativeEvidencePhrases =
     , concat ["stringAppend \"higher-order-returned-function parser negative ", "expected-expression-close-paren@\""]
     , concat ["stringAppend \"higher-order-function-field parser negative ", "expected-case-branch-arrow@\""]
     , concat ["stringAppend \"authoritative-recursive-let parser negative ", "expected-case-branch-arrow@\""]
+    , concat ["stringAppend \"authoritative-cross-module-let-polymorphism parser negative ", "expected-def-semicolon@\""]
     ]
 
 sharedParserDynamicEvidenceRequiredPhrases :: [String]
@@ -999,6 +1045,7 @@ parserParityPositiveCases =
     , ParserParityPositiveCase "positive:higher-order-returned-function" "positiveHigherOrderReturnedFunction" higherOrderReturnedFunctionCanonicalSourcePath higherOrderReturnedFunctionExpectedProjectionPath
     , ParserParityPositiveCase "positive:higher-order-function-field" "positiveHigherOrderFunctionField" higherOrderFunctionFieldCanonicalSourcePath higherOrderFunctionFieldExpectedProjectionPath
     , ParserParityPositiveCase "positive:authoritative-recursive-let" "positiveAuthoritativeRecursiveLet" authoritativeRecursiveLetCanonicalSourcePath authoritativeRecursiveLetExpectedProjectionPath
+    , ParserParityPositiveCase "positive:authoritative-cross-module-let-polymorphism" "positiveAuthoritativeCrossModuleLetPolymorphism" authoritativeCrossModuleLetPolymorphismCanonicalSourcePath authoritativeCrossModuleLetPolymorphismExpectedProjectionPath
     ]
 
 parserParityNegativeCases :: [ParserParityNegativeCase]
@@ -1022,6 +1069,7 @@ parserParityNegativeCases =
     , ParserParityNegativeCase "negative:higher-order-returned-function" "negativeHigherOrderReturnedFunction" "higher-order-returned-function parser negative " higherOrderReturnedFunctionCanonicalSourcePath higherOrderReturnedFunctionNegativeSourceText higherOrderReturnedFunctionNegativeEvidenceProjection
     , ParserParityNegativeCase "negative:higher-order-function-field" "negativeHigherOrderFunctionField" "higher-order-function-field parser negative " higherOrderFunctionFieldCanonicalSourcePath higherOrderFunctionFieldNegativeSourceText higherOrderFunctionFieldNegativeEvidenceProjection
     , ParserParityNegativeCase "negative:authoritative-recursive-let" "negativeAuthoritativeRecursiveLet" "authoritative-recursive-let parser negative " authoritativeRecursiveLetCanonicalSourcePath authoritativeRecursiveLetNegativeSourceText authoritativeRecursiveLetNegativeEvidenceProjection
+    , ParserParityNegativeCase "negative:authoritative-cross-module-let-polymorphism" "negativeAuthoritativeCrossModuleLetPolymorphism" "authoritative-cross-module-let-polymorphism parser negative " authoritativeCrossModuleLetPolymorphismCanonicalSourcePath authoritativeCrossModuleLetPolymorphismNegativeSourceText authoritativeCrossModuleLetPolymorphismNegativeEvidenceProjection
     ]
 
 assertCanonicalParserParityProjection :: ParserParityPositiveCase -> IO ()
@@ -1450,6 +1498,19 @@ authoritativeRecursiveLetNegativeSourceText =
         , "}"
         ]
 
+authoritativeCrossModuleLetPolymorphismNegativeSourceText :: String
+authoritativeCrossModuleLetPolymorphismNegativeSourceText =
+    unlines
+        [ "module Core export (applyId) {"
+        , "  def applyId : Int = let id = λx x in id 1"
+        , "}"
+        , ""
+        , "module User export (main) {"
+        , "  import Core exposing (applyId);"
+        , "  def main : Int = applyId;"
+        , "}"
+        ]
+
 retryEvidenceProjection :: String
 retryEvidenceProjection =
     unlines
@@ -1593,6 +1654,16 @@ authoritativeRecursiveLetNegativeEvidenceProjection =
             [ "authoritative-recursive-let parser negative "
             , "expected-case-branch-arrow@"
             , "test/conformance/mlfp/parser-parity/authoritative-recursive-let/src/Main.mlfp:8:16-8:17"
+            ]
+        ]
+
+authoritativeCrossModuleLetPolymorphismNegativeEvidenceProjection :: String
+authoritativeCrossModuleLetPolymorphismNegativeEvidenceProjection =
+    unlines
+        [ concat
+            [ "authoritative-cross-module-let-polymorphism parser negative "
+            , "expected-def-semicolon@"
+            , "test/conformance/mlfp/parser-parity/authoritative-cross-module-let-polymorphism/src/Main.mlfp:3:1-3:2"
             ]
         ]
 

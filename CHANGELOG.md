@@ -37,6 +37,15 @@
 
 ### Added
 - Extended the shared parser-owned parser-parity library with a bounded
+  authoritative cross-module let-polymorphism grammar slice for a `Core` module
+  exporting `applyId`, a one-definition `Core` body with
+  `let id = λx x in id 1`, and a `User` module importing and referencing that
+  value. A new committed parser-program projection and thin fixture root cover
+  `authoritative-cross-module-let-polymorphism`, with malformed missing
+  definition-semicolon evidence through the same source-text lexer/parser path.
+  This is not full parser parity, resolver/checker/backend, compiler-package,
+  driver, platform, proof, or self-boot work.
+- Extended the shared parser-owned parser-parity library with a bounded
   authoritative recursive-let grammar slice for `Nat` data declarations, typed
   local recursive lets, annotated-lambda RHS bodies that parse through case
   expressions, and outer case expressions over constructor applications. A new

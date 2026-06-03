@@ -1,3 +1,24 @@
+## 2026-06-03 - Round 327 parser parity authoritative cross-module let-polymorphism extension
+
+- Extended the shared parser-owned parser-parity source-text parser library
+  with a bounded cross-module let-polymorphism slice covering a one-definition
+  `Core` module exporting `applyId`, `let id = λx x in id 1`, and a `User`
+  module importing and referencing that value.
+- Added the committed parser-program projection fixture for
+  `authoritative-cross-module-let-polymorphism`, plus a thin `.mlfp` fixture
+  root that exposes only `sourceFile` and `sourceText` before calling
+  `renderParserParityProjectionFromSourceText`.
+- Added public parser-parity coverage for malformed cross-module-let syntax
+  through `renderParserNegativeEvidenceFromSourceText`, with parser-owned
+  `expected-def-semicolon@...` diagnostic evidence.
+- Extended shortcut/static guards for round-specific parser/token/projection
+  shortcuts, including fixture-specific token streams, success keys,
+  pre-rendered `applyId`/`main` rows, whole-fixture recognition, and static
+  cross-module-let negative evidence.
+- Scope remains bounded parser parity only. This is not full parser parity,
+  resolver, checker, backend, compiler-package, driver, platform, proof, or
+  self-boot progress.
+
 ## 2026-06-03 - Round 326 parser parity authoritative recursive-let extension
 
 - Extended the shared parser-owned parser-parity source-text parser library
