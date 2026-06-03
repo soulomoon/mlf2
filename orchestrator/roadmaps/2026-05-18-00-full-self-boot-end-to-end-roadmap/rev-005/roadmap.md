@@ -819,6 +819,7 @@ Milestone-3 closeout criteria after the whole-library round:
 - round-321 completed item-321-parser-library-higher-order-partial-application-extension: the shared parser-owned library now covers the bounded higher-order partial-application fixture and malformed close-paren diagnostic; reviewer evidence passed focused parser checks, direct fixture diffs, cabal build all, cabal test, and thesis gate.
 - round-322 completed item-322-parser-library-higher-order-local-function-flow-extension: the shared parser-owned library now covers the bounded higher-order local-function-flow fixture and malformed typed-let diagnostic; reviewer evidence passed focused parser checks, direct fixture diffs, cabal build all, cabal test, and thesis gate.
 - round-323 completed item-323-parser-library-higher-order-returned-function-extension: the shared parser-owned library now covers the bounded higher-order returned-function fixture and malformed returned-function diagnostic; reviewer evidence passed focused parser checks, direct fixture diffs, cabal build all, cabal test, and thesis gate.
+- round-325 completed item-325-parser-library-higher-order-function-field-extension: the shared parser-owned library now covers the bounded higher-order function-field fixture and malformed case-branch-arrow diagnostic; reviewer evidence passed focused parser checks, the rev-005 aggregate public batch, standalone fixture diff, cabal build all, cabal test, and thesis gate.
 
 #### Rev-004 Parser Library Consolidation Contract
 

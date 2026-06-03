@@ -1,0 +1,6 @@
+module Main span=test/conformance/mlfp/parser-parity/higher-order-function-field/src/Main.mlfp:1:1-10:1
+export type-with-constructors FnBox span=test/conformance/mlfp/parser-parity/higher-order-function-field/src/Main.mlfp:1:21-1:30
+export value main span=test/conformance/mlfp/parser-parity/higher-order-function-field/src/Main.mlfp:1:32-1:36
+data FnBox span=test/conformance/mlfp/parser-parity/higher-order-function-field/src/Main.mlfp:2:3-5:3
+constructor FnBox type=(Int -> Int) -> FnBox span=test/conformance/mlfp/parser-parity/higher-order-function-field/src/Main.mlfp:3:7-3:36
+def main type=Int expr=let captured : Int = 41 in let f : Int -> Int = λ(x : Int) captured in case FnBox f of { FnBox g -> g 0 } span=test/conformance/mlfp/parser-parity/higher-order-function-field/src/Main.mlfp:5:3-9:1

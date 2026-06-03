@@ -37,6 +37,14 @@
 
 ### Added
 - Extended the shared parser-owned parser-parity library with a bounded
+  higher-order function-field grammar slice for a function-valued constructor
+  field and a bounded constructor-pattern case branch that applies the
+  extracted function. A new committed parser-program projection and thin
+  fixture root cover `higher-order-function-field`, with malformed missing
+  case-branch-arrow evidence through the same source-text lexer/parser path.
+  This is not full parser parity, resolver/checker/backend, compiler-package,
+  driver, platform, proof, or self-boot work.
+- Extended the shared parser-owned parser-parity library with a bounded
   higher-order returned-function grammar slice for annotated-lambda bodies and
   typed local-let bodies that return another annotated lambda, plus
   parenthesized function-valued callee application. A new committed

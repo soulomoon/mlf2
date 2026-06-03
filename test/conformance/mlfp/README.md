@@ -87,4 +87,7 @@ expressions, a multi-digit integer literal in a local binding, and a malformed
 missing-`in` diagnostic path, plus one higher-order returned-function fixture
 covering annotated-lambda bodies and typed local-let bodies returning another
 annotated lambda, parenthesized function-valued callee application, and
-malformed missing-close-paren diagnostics.
+malformed missing-close-paren diagnostics, plus one higher-order
+function-field fixture covering a function-valued constructor field and a
+bounded constructor-pattern case branch that applies the extracted function,
+with malformed missing case-branch-arrow diagnostics.

@@ -1,0 +1,7 @@
+module ParserParityFixture export (sourceFile, sourceText) {
+  def sourceFile : String =
+    "test/conformance/mlfp/parser-parity/higher-order-function-field/src/Main.mlfp";
+
+  def sourceText : String =
+    "module Main export (FnBox(..), main) {\n  data FnBox =\n      FnBox : (Int -> Int) -> FnBox;\n\n  def main : Int =\n    let captured : Int = 41 in\n    let f : Int -> Int = λ(x : Int) captured in\n    case FnBox f of { FnBox g -> g 0 };\n}\n";
+}
