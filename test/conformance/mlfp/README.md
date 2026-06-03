@@ -97,4 +97,7 @@ application, and malformed missing case-branch-arrow diagnostics, plus one
 authoritative cross-module let-polymorphism fixture covering `Core.applyId`,
 a one-definition `Core` module with `let id = λx x in id 1`, a `User` import
 and reference to `applyId`, and malformed missing definition-semicolon
-diagnostics.
+diagnostics, plus one recursive-ADT plain Nat fixture covering `NatPlain`,
+top-level `isZero` and `peel` annotated-lambda case definitions, nested
+constructor/application expressions in `main`, and malformed missing
+case-branch-arrow diagnostics.

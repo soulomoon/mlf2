@@ -37,6 +37,16 @@
 
 ### Added
 - Extended the shared parser-owned parser-parity library with a bounded
+  recursive-ADT plain Nat grammar slice for `module NatPlain export (Nat(..),
+  isZero, peel, main)`, a two-constructor recursive `Nat` declaration, top-level
+  `isZero` and `peel` annotated-lambda case expressions, and nested
+  constructor/application expressions in `main`. A new committed parser-program
+  projection and thin fixture root cover `recursive-adt-plain-nat`, with
+  malformed missing case-branch-arrow evidence through the same source-text
+  lexer/parser path. This is not full parser parity,
+  resolver/checker/backend, compiler-package, driver, platform, proof, or
+  self-boot work.
+- Extended the shared parser-owned parser-parity library with a bounded
   authoritative cross-module let-polymorphism grammar slice for a `Core` module
   exporting `applyId`, a one-definition `Core` body with
   `let id = λx x in id 1`, and a `User` module importing and referencing that

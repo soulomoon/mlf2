@@ -107,6 +107,15 @@ spec =
             canonicalProjection `shouldBe` expected
             sharedParserProjection `shouldBe` Right expected
 
+        it "shared parser-owned .mlfp parser parses recursive ADT plain Nat" $ do
+            source <- readFile recursiveAdtPlainNatCanonicalSourcePath
+            expected <- readFile recursiveAdtPlainNatExpectedProjectionPath
+            canonicalProjection <- renderCanonicalProjection recursiveAdtPlainNatCanonicalSourcePath source
+            sharedParserProjection <- runSharedParserBatch recursiveAdtPlainNatParserProgramRoot
+
+            canonicalProjection `shouldBe` expected
+            sharedParserProjection `shouldBe` Right expected
+
         beforeAll loadParserParityBatchFixture $ do
             it "runs all .mlfp parser parity fixtures through one generated public CLI driver" $ \fixture ->
                 batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
@@ -188,6 +197,12 @@ spec =
                 batchExpectedOutput fixture
                     `shouldSatisfy` isInfixOf
                         (batchSection "negative:authoritative-cross-module-let-polymorphism" authoritativeCrossModuleLetPolymorphismNegativeEvidenceProjection)
+
+            it "parser-owned .mlfp parser reports malformed recursive ADT plain Nat diagnostics through public run-program" $ \fixture -> do
+                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
+                batchExpectedOutput fixture
+                    `shouldSatisfy` isInfixOf
+                        (batchSection "negative:recursive-adt-plain-nat" recursiveAdtPlainNatNegativeEvidenceProjection)
 
             it "shared parser-owned .mlfp parser library routes the generated batch through one entrypoint" $ \fixture -> do
                 sharedParserExists <- doesFileExist (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
@@ -351,6 +366,10 @@ authoritativeCrossModuleLetPolymorphismCanonicalSourcePath :: FilePath
 authoritativeCrossModuleLetPolymorphismCanonicalSourcePath =
     "test/conformance/mlfp/parser-parity/authoritative-cross-module-let-polymorphism/src/Main.mlfp"
 
+recursiveAdtPlainNatCanonicalSourcePath :: FilePath
+recursiveAdtPlainNatCanonicalSourcePath =
+    "test/conformance/mlfp/parser-parity/recursive-adt-plain-nat/src/Main.mlfp"
+
 expectedProjectionPath :: FilePath
 expectedProjectionPath =
     "test/conformance/mlfp/parser-parity/basic-module-def-bool/expected/parser-program.txt"
@@ -463,6 +482,10 @@ authoritativeCrossModuleLetPolymorphismExpectedProjectionPath :: FilePath
 authoritativeCrossModuleLetPolymorphismExpectedProjectionPath =
     "test/conformance/mlfp/parser-parity/authoritative-cross-module-let-polymorphism/expected/parser-program.txt"
 
+recursiveAdtPlainNatExpectedProjectionPath :: FilePath
+recursiveAdtPlainNatExpectedProjectionPath =
+    "test/conformance/mlfp/parser-parity/recursive-adt-plain-nat/expected/parser-program.txt"
+
 sharedParserLibraryRoot :: FilePath
 sharedParserLibraryRoot =
     "test/programs/compiler-parser-parity/parser-library"
@@ -499,6 +522,10 @@ authoritativeCrossModuleLetPolymorphismParserProgramRoot :: FilePath
 authoritativeCrossModuleLetPolymorphismParserProgramRoot =
     "test/programs/compiler-parser-parity/authoritative-cross-module-let-polymorphism"
 
+recursiveAdtPlainNatParserProgramRoot :: FilePath
+recursiveAdtPlainNatParserProgramRoot =
+    "test/programs/compiler-parser-parity/recursive-adt-plain-nat"
+
 sharedParserAuditFiles :: [FilePath]
 sharedParserAuditFiles =
     [ sharedParserLibraryRoot </> "ParserParityToken.mlfp"
@@ -527,6 +554,8 @@ sharedParserBannedPhrases =
     , concat ["Multi", "Module", "Tokens"]
     , concat ["Abstract", "Export", "Tokens"]
     , concat ["Recursive", "Adt", "Tokens"]
+    , concat ["Recursive", "Adt", "Plain", "Nat", "Tokens"]
+    , concat ["Plain", "Recursive", "Nat", "Tokens"]
     , concat ["LexerOk ", "basic", "Module", "Tokens"]
     , concat ["LexerOk ", "import", "Bool", "Tokens"]
     , concat ["LexerOk ", "value", "Def", "List", "Tokens"]
@@ -545,6 +574,8 @@ sharedParserBannedPhrases =
     , concat ["LexerOk ", "multi", "Module", "Tokens"]
     , concat ["LexerOk ", "abstract", "Export", "Tokens"]
     , concat ["LexerOk ", "recursive", "Adt", "Tokens"]
+    , concat ["LexerOk ", "recursive", "Adt", "Plain", "Nat", "Tokens"]
+    , concat ["LexerOk ", "plain", "Recursive", "Nat", "Tokens"]
     , concat ["First", "Class", "Polymorphism", "Tokens"]
     , concat ["LexerOk ", "first", "Class", "Polymorphism", "Tokens"]
     , concat ["case", " tokens"]
@@ -560,6 +591,8 @@ sharedParserBannedPhrases =
     , concat ["multi-module", " tokens"]
     , concat ["abstract-export", " tokens"]
     , concat ["recursive-adt", " tokens"]
+    , concat ["recursive-adt-plain-nat", " tokens"]
+    , concat ["plain-recursive-nat", " tokens"]
     , concat ["first-class-polymorphism-source-types", " tokens"]
     ]
 
@@ -624,6 +657,7 @@ sharedParserShortcutPhrases =
         , sharedParserRound325ShortcutPhrases
         , sharedParserRound326ShortcutPhrases
         , sharedParserRound327ShortcutPhrases
+        , sharedParserRound328ShortcutPhrases
         ]
 
 sharedParserRound314ShortcutPhrases :: [String]
@@ -930,6 +964,30 @@ sharedParserRound327ShortcutPhrases =
     , concat ["authoritative-cross-module-let-polymorphism parser negative ", "expected-def-semicolon@"]
     ]
 
+sharedParserRound328ShortcutPhrases :: [String]
+sharedParserRound328ShortcutPhrases =
+    [ concat ["parse", "Recursive", "Adt", "Plain", "Nat"]
+    , concat ["parse", "Plain", "Recursive", "Nat"]
+    , concat ["completeModuleKey \"", "recursive-adt-plain-nat", "\""]
+    , concat ["moduleKey \"", "recursive-adt-plain-nat", "\""]
+    , concat ["programKey \"", "recursive-adt-plain-nat", "\""]
+    , concat ["Recursive", "Adt", "Plain", "Nat", "Tokens"]
+    , concat ["Plain", "Recursive", "Nat", "Tokens"]
+    , concat ["LexerOk ", "recursive", "Adt", "Plain", "Nat", "Tokens"]
+    , concat ["LexerOk ", "plain", "Recursive", "Nat", "Tokens"]
+    , concat ["recursive-adt-plain-nat", " tokens"]
+    , concat ["plain-recursive-nat", " tokens"]
+    , concat ["stringIndexOf sourceText \"", "module NatPlain export", "\""]
+    , concat ["stringIndexOf \"", "module NatPlain export", "\" sourceText"]
+    , concat ["defRows sourceFile \"", "isZero", "\""]
+    , concat ["defRows sourceFile \"", "peel", "\""]
+    , concat ["defRows sourceFile \"", "main", "\""]
+    , concat ["def isZero type=Nat -> Bool expr=", "λ(n : Nat) case n of"]
+    , concat ["def peel type=Nat -> Nat expr=", "λ(n : Nat) case n of"]
+    , concat ["def main type=Bool expr=", "isZero (peel (Succ Zero))"]
+    , concat ["recursive-adt-plain-nat parser negative ", "expected-case-branch-arrow@"]
+    ]
+
 sharedParserCompleteParseRequiredPhrases :: [String]
 sharedParserCompleteParseRequiredPhrases =
     [ "parserStateAtEnd state"
@@ -961,6 +1019,7 @@ sharedParserStaticNegativeEvidencePhrases =
     , concat ["stringAppend \"higher-order-function-field parser negative ", "expected-case-branch-arrow@\""]
     , concat ["stringAppend \"authoritative-recursive-let parser negative ", "expected-case-branch-arrow@\""]
     , concat ["stringAppend \"authoritative-cross-module-let-polymorphism parser negative ", "expected-def-semicolon@\""]
+    , concat ["stringAppend \"recursive-adt-plain-nat parser negative ", "expected-case-branch-arrow@\""]
     ]
 
 sharedParserDynamicEvidenceRequiredPhrases :: [String]
@@ -1046,6 +1105,7 @@ parserParityPositiveCases =
     , ParserParityPositiveCase "positive:higher-order-function-field" "positiveHigherOrderFunctionField" higherOrderFunctionFieldCanonicalSourcePath higherOrderFunctionFieldExpectedProjectionPath
     , ParserParityPositiveCase "positive:authoritative-recursive-let" "positiveAuthoritativeRecursiveLet" authoritativeRecursiveLetCanonicalSourcePath authoritativeRecursiveLetExpectedProjectionPath
     , ParserParityPositiveCase "positive:authoritative-cross-module-let-polymorphism" "positiveAuthoritativeCrossModuleLetPolymorphism" authoritativeCrossModuleLetPolymorphismCanonicalSourcePath authoritativeCrossModuleLetPolymorphismExpectedProjectionPath
+    , ParserParityPositiveCase "positive:recursive-adt-plain-nat" "positiveRecursiveAdtPlainNat" recursiveAdtPlainNatCanonicalSourcePath recursiveAdtPlainNatExpectedProjectionPath
     ]
 
 parserParityNegativeCases :: [ParserParityNegativeCase]
@@ -1070,6 +1130,7 @@ parserParityNegativeCases =
     , ParserParityNegativeCase "negative:higher-order-function-field" "negativeHigherOrderFunctionField" "higher-order-function-field parser negative " higherOrderFunctionFieldCanonicalSourcePath higherOrderFunctionFieldNegativeSourceText higherOrderFunctionFieldNegativeEvidenceProjection
     , ParserParityNegativeCase "negative:authoritative-recursive-let" "negativeAuthoritativeRecursiveLet" "authoritative-recursive-let parser negative " authoritativeRecursiveLetCanonicalSourcePath authoritativeRecursiveLetNegativeSourceText authoritativeRecursiveLetNegativeEvidenceProjection
     , ParserParityNegativeCase "negative:authoritative-cross-module-let-polymorphism" "negativeAuthoritativeCrossModuleLetPolymorphism" "authoritative-cross-module-let-polymorphism parser negative " authoritativeCrossModuleLetPolymorphismCanonicalSourcePath authoritativeCrossModuleLetPolymorphismNegativeSourceText authoritativeCrossModuleLetPolymorphismNegativeEvidenceProjection
+    , ParserParityNegativeCase "negative:recursive-adt-plain-nat" "negativeRecursiveAdtPlainNat" "recursive-adt-plain-nat parser negative " recursiveAdtPlainNatCanonicalSourcePath recursiveAdtPlainNatNegativeSourceText recursiveAdtPlainNatNegativeEvidenceProjection
     ]
 
 assertCanonicalParserParityProjection :: ParserParityPositiveCase -> IO ()
@@ -1511,6 +1572,28 @@ authoritativeCrossModuleLetPolymorphismNegativeSourceText =
         , "}"
         ]
 
+recursiveAdtPlainNatNegativeSourceText :: String
+recursiveAdtPlainNatNegativeSourceText =
+    unlines
+        [ "module NatPlain export (Nat(..), isZero, peel, main) {"
+        , "  data Nat ="
+        , "      Zero : Nat"
+        , "    | Succ : Nat -> Nat;"
+        , ""
+        , "  def isZero : Nat -> Bool = λ(n : Nat) case n of {"
+        , "    Zero -> true;"
+        , "    Succ _ -> false"
+        , "  };"
+        , ""
+        , "  def peel : Nat -> Nat = λ(n : Nat) case n of {"
+        , "    Zero -> Zero;"
+        , "    Succ inner inner"
+        , "  };"
+        , ""
+        , "  def main : Bool = isZero (peel (Succ Zero));"
+        , "}"
+        ]
+
 retryEvidenceProjection :: String
 retryEvidenceProjection =
     unlines
@@ -1664,6 +1747,16 @@ authoritativeCrossModuleLetPolymorphismNegativeEvidenceProjection =
             [ "authoritative-cross-module-let-polymorphism parser negative "
             , "expected-def-semicolon@"
             , "test/conformance/mlfp/parser-parity/authoritative-cross-module-let-polymorphism/src/Main.mlfp:3:1-3:2"
+            ]
+        ]
+
+recursiveAdtPlainNatNegativeEvidenceProjection :: String
+recursiveAdtPlainNatNegativeEvidenceProjection =
+    unlines
+        [ concat
+            [ "recursive-adt-plain-nat parser negative "
+            , "expected-case-branch-arrow@"
+            , "test/conformance/mlfp/parser-parity/recursive-adt-plain-nat/src/Main.mlfp:13:16-13:21"
             ]
         ]
 

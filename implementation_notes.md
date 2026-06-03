@@ -1,3 +1,25 @@
+## 2026-06-04 - Round 328 parser parity recursive-ADT plain Nat extension
+
+- Extended the shared parser-owned parser-parity source-text parser library
+  with a bounded recursive-ADT plain Nat slice covering `module NatPlain export
+  (Nat(..), isZero, peel, main)`, a recursive `Nat` data declaration,
+  top-level `isZero` and `peel` annotated-lambda case expressions, and nested
+  constructor/application expressions in `main`.
+- Added the committed parser-program projection fixture for
+  `recursive-adt-plain-nat`, plus a thin `.mlfp` fixture root that exposes only
+  `sourceFile` and `sourceText` before calling
+  `renderParserParityProjectionFromSourceText`.
+- Added public parser-parity coverage for malformed recursive-ADT plain Nat
+  case syntax through `renderParserNegativeEvidenceFromSourceText`, with
+  parser-owned `expected-case-branch-arrow@...` diagnostic evidence.
+- Extended shortcut/static guards for round-specific parser/token/projection
+  shortcuts, including fixture-specific token streams, success keys,
+  pre-rendered `isZero`/`peel`/`main` rows, whole-fixture recognition, and
+  static recursive-ADT plain Nat negative evidence.
+- Scope remains bounded parser parity only. This is not full parser parity,
+  resolver, checker, backend, compiler-package, driver, platform, proof, or
+  self-boot progress.
+
 ## 2026-06-03 - Round 327 parser parity authoritative cross-module let-polymorphism extension
 
 - Extended the shared parser-owned parser-parity source-text parser library
