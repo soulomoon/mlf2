@@ -89,6 +89,15 @@ spec =
             canonicalProjection `shouldBe` expected
             sharedParserProjection `shouldBe` Right expected
 
+        it "shared parser-owned .mlfp parser parses authoritative recursive let flows" $ do
+            source <- readFile authoritativeRecursiveLetCanonicalSourcePath
+            expected <- readFile authoritativeRecursiveLetExpectedProjectionPath
+            canonicalProjection <- renderCanonicalProjection authoritativeRecursiveLetCanonicalSourcePath source
+            sharedParserProjection <- runSharedParserBatch authoritativeRecursiveLetParserProgramRoot
+
+            canonicalProjection `shouldBe` expected
+            sharedParserProjection `shouldBe` Right expected
+
         beforeAll loadParserParityBatchFixture $ do
             it "runs all .mlfp parser parity fixtures through one generated public CLI driver" $ \fixture ->
                 batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
@@ -158,6 +167,12 @@ spec =
                 batchExpectedOutput fixture
                     `shouldSatisfy` isInfixOf
                         (batchSection "negative:higher-order-function-field" higherOrderFunctionFieldNegativeEvidenceProjection)
+
+            it "parser-owned .mlfp parser reports malformed authoritative recursive-let diagnostics through public run-program" $ \fixture -> do
+                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
+                batchExpectedOutput fixture
+                    `shouldSatisfy` isInfixOf
+                        (batchSection "negative:authoritative-recursive-let" authoritativeRecursiveLetNegativeEvidenceProjection)
 
             it "shared parser-owned .mlfp parser library routes the generated batch through one entrypoint" $ \fixture -> do
                 sharedParserExists <- doesFileExist (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
@@ -313,6 +328,10 @@ higherOrderFunctionFieldCanonicalSourcePath :: FilePath
 higherOrderFunctionFieldCanonicalSourcePath =
     "test/conformance/mlfp/parser-parity/higher-order-function-field/src/Main.mlfp"
 
+authoritativeRecursiveLetCanonicalSourcePath :: FilePath
+authoritativeRecursiveLetCanonicalSourcePath =
+    "test/conformance/mlfp/parser-parity/authoritative-recursive-let/src/Main.mlfp"
+
 expectedProjectionPath :: FilePath
 expectedProjectionPath =
     "test/conformance/mlfp/parser-parity/basic-module-def-bool/expected/parser-program.txt"
@@ -417,6 +436,10 @@ higherOrderFunctionFieldExpectedProjectionPath :: FilePath
 higherOrderFunctionFieldExpectedProjectionPath =
     "test/conformance/mlfp/parser-parity/higher-order-function-field/expected/parser-program.txt"
 
+authoritativeRecursiveLetExpectedProjectionPath :: FilePath
+authoritativeRecursiveLetExpectedProjectionPath =
+    "test/conformance/mlfp/parser-parity/authoritative-recursive-let/expected/parser-program.txt"
+
 sharedParserLibraryRoot :: FilePath
 sharedParserLibraryRoot =
     "test/programs/compiler-parser-parity/parser-library"
@@ -444,6 +467,10 @@ higherOrderReturnedFunctionParserProgramRoot =
 higherOrderFunctionFieldParserProgramRoot :: FilePath
 higherOrderFunctionFieldParserProgramRoot =
     "test/programs/compiler-parser-parity/higher-order-function-field"
+
+authoritativeRecursiveLetParserProgramRoot :: FilePath
+authoritativeRecursiveLetParserProgramRoot =
+    "test/programs/compiler-parser-parity/authoritative-recursive-let"
 
 sharedParserAuditFiles :: [FilePath]
 sharedParserAuditFiles =
@@ -568,6 +595,7 @@ sharedParserShortcutPhrases =
         , sharedParserRound322ShortcutPhrases
         , sharedParserRound323ShortcutPhrases
         , sharedParserRound325ShortcutPhrases
+        , sharedParserRound326ShortcutPhrases
         ]
 
 sharedParserRound314ShortcutPhrases :: [String]
@@ -840,6 +868,23 @@ sharedParserRound325ShortcutPhrases =
     , concat ["higher-order-function-field parser negative ", "expected-case-branch-arrow@"]
     ]
 
+sharedParserRound326ShortcutPhrases :: [String]
+sharedParserRound326ShortcutPhrases =
+    [ concat ["parse", "Authoritative", "Recursive", "Let"]
+    , concat ["completeModuleKey \"", "authoritative-recursive-let", "\""]
+    , concat ["moduleKey \"", "authoritative-recursive-let", "\""]
+    , concat ["programKey \"", "authoritative-recursive-let", "\""]
+    , concat ["Authoritative", "Recursive", "Let", "Tokens"]
+    , concat ["LexerOk ", "authoritative", "Recursive", "Let", "Tokens"]
+    , concat ["authoritative-recursive-let", " tokens"]
+    , concat ["stringIndexOf sourceText \"", "module Main export (Nat(..), main)", "\""]
+    , concat ["stringIndexOf \"", "module Main export (Nat(..), main)", "\" sourceText"]
+    , concat ["defRows sourceFile \"", "peel", "\""]
+    , concat ["defRows sourceFile \"", "main", "\""]
+    , concat ["def main type=Bool expr=", "let peel : Nat -> Nat ="]
+    , concat ["authoritative-recursive-let parser negative ", "expected-case-branch-arrow@"]
+    ]
+
 sharedParserCompleteParseRequiredPhrases :: [String]
 sharedParserCompleteParseRequiredPhrases =
     [ "parserStateAtEnd state"
@@ -869,6 +914,7 @@ sharedParserStaticNegativeEvidencePhrases =
     , concat ["stringAppend \"higher-order-local-function-flow parser negative ", "expected-let-in@\""]
     , concat ["stringAppend \"higher-order-returned-function parser negative ", "expected-expression-close-paren@\""]
     , concat ["stringAppend \"higher-order-function-field parser negative ", "expected-case-branch-arrow@\""]
+    , concat ["stringAppend \"authoritative-recursive-let parser negative ", "expected-case-branch-arrow@\""]
     ]
 
 sharedParserDynamicEvidenceRequiredPhrases :: [String]
@@ -952,6 +998,7 @@ parserParityPositiveCases =
     , ParserParityPositiveCase "positive:higher-order-local-function-flow" "positiveHigherOrderLocalFunctionFlow" higherOrderLocalFunctionFlowCanonicalSourcePath higherOrderLocalFunctionFlowExpectedProjectionPath
     , ParserParityPositiveCase "positive:higher-order-returned-function" "positiveHigherOrderReturnedFunction" higherOrderReturnedFunctionCanonicalSourcePath higherOrderReturnedFunctionExpectedProjectionPath
     , ParserParityPositiveCase "positive:higher-order-function-field" "positiveHigherOrderFunctionField" higherOrderFunctionFieldCanonicalSourcePath higherOrderFunctionFieldExpectedProjectionPath
+    , ParserParityPositiveCase "positive:authoritative-recursive-let" "positiveAuthoritativeRecursiveLet" authoritativeRecursiveLetCanonicalSourcePath authoritativeRecursiveLetExpectedProjectionPath
     ]
 
 parserParityNegativeCases :: [ParserParityNegativeCase]
@@ -974,6 +1021,7 @@ parserParityNegativeCases =
     , ParserParityNegativeCase "negative:higher-order-local-function-flow" "negativeHigherOrderLocalFunctionFlow" "higher-order-local-function-flow parser negative " higherOrderLocalFunctionFlowCanonicalSourcePath higherOrderLocalFunctionFlowNegativeSourceText higherOrderLocalFunctionFlowNegativeEvidenceProjection
     , ParserParityNegativeCase "negative:higher-order-returned-function" "negativeHigherOrderReturnedFunction" "higher-order-returned-function parser negative " higherOrderReturnedFunctionCanonicalSourcePath higherOrderReturnedFunctionNegativeSourceText higherOrderReturnedFunctionNegativeEvidenceProjection
     , ParserParityNegativeCase "negative:higher-order-function-field" "negativeHigherOrderFunctionField" "higher-order-function-field parser negative " higherOrderFunctionFieldCanonicalSourcePath higherOrderFunctionFieldNegativeSourceText higherOrderFunctionFieldNegativeEvidenceProjection
+    , ParserParityNegativeCase "negative:authoritative-recursive-let" "negativeAuthoritativeRecursiveLet" "authoritative-recursive-let parser negative " authoritativeRecursiveLetCanonicalSourcePath authoritativeRecursiveLetNegativeSourceText authoritativeRecursiveLetNegativeEvidenceProjection
     ]
 
 assertCanonicalParserParityProjection :: ParserParityPositiveCase -> IO ()
@@ -1382,6 +1430,26 @@ higherOrderFunctionFieldNegativeSourceText =
         , "}"
         ]
 
+authoritativeRecursiveLetNegativeSourceText :: String
+authoritativeRecursiveLetNegativeSourceText =
+    unlines
+        [ "module Main export (Nat(..), main) {"
+        , "  data Nat ="
+        , "      Zero : Nat"
+        , "    | Succ : Nat -> Nat;"
+        , ""
+        , "  def main : Bool ="
+        , "    let peel : Nat -> Nat = λ(n : Nat) case n of {"
+        , "      Zero Zero;"
+        , "      Succ inner -> peel inner"
+        , "    } in"
+        , "    case peel (Succ Zero) of {"
+        , "      Zero -> true;"
+        , "      Succ _ -> false"
+        , "    };"
+        , "}"
+        ]
+
 retryEvidenceProjection :: String
 retryEvidenceProjection =
     unlines
@@ -1515,6 +1583,16 @@ higherOrderFunctionFieldNegativeEvidenceProjection =
             [ "higher-order-function-field parser negative "
             , "expected-case-branch-arrow@"
             , "test/conformance/mlfp/parser-parity/higher-order-function-field/src/Main.mlfp:8:31-8:32"
+            ]
+        ]
+
+authoritativeRecursiveLetNegativeEvidenceProjection :: String
+authoritativeRecursiveLetNegativeEvidenceProjection =
+    unlines
+        [ concat
+            [ "authoritative-recursive-let parser negative "
+            , "expected-case-branch-arrow@"
+            , "test/conformance/mlfp/parser-parity/authoritative-recursive-let/src/Main.mlfp:8:16-8:17"
             ]
         ]
 

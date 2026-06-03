@@ -902,7 +902,8 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
 
   def parseAnnotatedLambdaRhsBody : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
     λ(paramToken : ParserValue) λ(typeValue : ParserValue) λ(_closeParam : ParserValue)
-      parserBind (parseApplicationOrAtomExpression ValueUnit)
+      parserBind
+        (parserChoice (parseSourceCaseExpression ValueUnit) (parseApplicationOrAtomExpression ValueUnit))
         (finishAnnotatedLambdaExpression paramToken typeValue);
 
   def parseSourceLetExpressionIn : ParserValue -> String -> ParserValue -> Parser ParserValue =
@@ -992,44 +993,165 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
   def parseSourceCaseOpen : ParserValue -> ParserValue -> Parser ParserValue =
     λ(scrutineeValue : ParserValue) λ(_ofToken : ParserValue)
       parserBind (expectText "{")
-        (parseSourceCasePattern scrutineeValue);
+        (parseSourceCaseFirstBranch scrutineeValue);
 
-  def parseSourceCasePattern : ParserValue -> ParserValue -> Parser ParserValue =
+  def parseSourceCaseFirstBranch : ParserValue -> ParserValue -> Parser ParserValue =
     λ(scrutineeValue : ParserValue) λ(_openToken : ParserValue)
-      parserBind expectAnyIdentifier
-        (parseSourceCasePatternArgument scrutineeValue);
+      parserBind (parseSourceCaseBranch ValueUnit)
+        (parseSourceCaseMoreOrClose2 scrutineeValue);
 
-  def parseSourceCasePatternArgument : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(constructorToken : ParserValue)
-      parserBind expectAnyIdentifier
-        (finishSourceCasePattern scrutineeValue constructorToken);
+  def parseSourceCaseBranch : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (parseSourceCasePattern ValueUnit)
+        parseSourceCaseBranchArrow;
 
-  def finishSourceCasePattern : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(constructorToken : ParserValue) λ(argumentToken : ParserValue)
+  def parseSourceCasePattern : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserChoice (parseSourceCaseWildcardPattern ValueUnit)
+        (parserBind expectAnyIdentifier parseSourceCaseConstructorPatternTail);
+
+  def parseSourceCaseWildcardPattern : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "_")
+        finishSourceCaseWildcardPattern;
+
+  def finishSourceCaseWildcardPattern : ParserValue -> Parser ParserValue =
+    λ(_wildcardToken : ParserValue)
+      parserTextValue "_";
+
+  def parseSourceCaseConstructorPatternTail : ParserValue -> Parser ParserValue =
+    λ(constructorToken : ParserValue)
+      parserChoice
+        (parserBind (parseSourceCasePatternArgument ValueUnit)
+          (finishSourceCaseConstructorArgumentPattern constructorToken))
+        (parserTextValue (identifierNameFromValue constructorToken));
+
+  def parseSourceCasePatternArgument : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserChoice (parseSourceCaseWildcardPattern ValueUnit)
+        (parserChoice (parseParenthesizedSourceCasePattern ValueUnit) (parseSourceCaseNamedPatternArgument ValueUnit));
+
+  def parseSourceCaseNamedPatternArgument : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind expectAnyIdentifier
+        finishSourceCaseNamedPatternArgument;
+
+  def finishSourceCaseNamedPatternArgument : ParserValue -> Parser ParserValue =
+    λ(argumentToken : ParserValue)
+      parserTextValue (identifierNameFromValue argumentToken);
+
+  def parseParenthesizedSourceCasePattern : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserBind (expectText "(")
+        parseParenthesizedSourceCasePatternBody;
+
+  def parseParenthesizedSourceCasePatternBody : ParserValue -> Parser ParserValue =
+    λ(_openPattern : ParserValue)
+      parserBind expectAnyIdentifier
+        parseParenthesizedSourceCaseConstructorPatternTail;
+
+  def parseParenthesizedSourceCaseConstructorPatternTail : ParserValue -> Parser ParserValue =
+    λ(constructorToken : ParserValue)
+      parserChoice
+        (parserBind (parseSourceCaseSimplePatternArgument ValueUnit)
+          (parseParenthesizedSourceCasePatternCloseForConstructor constructorToken))
+        (parserBind (expectText ")")
+          (finishParenthesizedSourceCaseNullaryPattern constructorToken));
+
+  def parseSourceCaseSimplePatternArgument : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserChoice (parseSourceCaseWildcardPattern ValueUnit) (parseSourceCaseNamedPatternArgument ValueUnit);
+
+  def parseParenthesizedSourceCasePatternCloseForConstructor : ParserValue -> ParserValue -> Parser ParserValue =
+    λ(constructorToken : ParserValue) λ(argumentValue : ParserValue)
+      parserBind (expectText ")")
+        (finishParenthesizedSourceCaseConstructorPattern constructorToken argumentValue);
+
+  def finishParenthesizedSourceCaseConstructorPattern : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(constructorToken : ParserValue) λ(argumentValue : ParserValue) λ(_closePattern : ParserValue)
+      parserTextValue
+        (stringAppend "("
+          (stringAppend
+            (stringAppend (identifierNameFromValue constructorToken)
+              (stringAppend " " (parserTextFromValue argumentValue)))
+            ")"));
+
+  def finishParenthesizedSourceCaseNullaryPattern : ParserValue -> ParserValue -> Parser ParserValue =
+    λ(constructorToken : ParserValue) λ(_closePattern : ParserValue)
+      parserTextValue (stringAppend "(" (stringAppend (identifierNameFromValue constructorToken) ")"));
+
+  def finishSourceCaseConstructorArgumentPattern : ParserValue -> ParserValue -> Parser ParserValue =
+    λ(constructorToken : ParserValue) λ(argumentValue : ParserValue)
+      parserTextValue
+        (stringAppend (identifierNameFromValue constructorToken)
+          (stringAppend " " (parserTextFromValue argumentValue)));
+
+  def parseSourceCaseBranchArrow : ParserValue -> Parser ParserValue =
+    λ(patternValue : ParserValue)
       parserBind (expectCaseBranchArrowAtCurrentParser ValueUnit)
-        (parseSourceCaseBranchBody scrutineeValue
-          (stringAppend (identifierNameFromValue constructorToken)
-            (stringAppend " " (identifierNameFromValue argumentToken))));
+        (parseSourceCaseBranchBody patternValue);
 
-  def parseSourceCaseBranchBody : ParserValue -> String -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(patternText : String) λ(_arrowToken : ParserValue)
+  def parseSourceCaseBranchBody : ParserValue -> ParserValue -> Parser ParserValue =
+    λ(patternValue : ParserValue) λ(_arrowToken : ParserValue)
       parserBind (parseApplicationOrAtomExpression ValueUnit)
-        (parseSourceCaseClose scrutineeValue patternText);
+        (finishSourceCaseBranch patternValue);
 
-  def parseSourceCaseClose : ParserValue -> String -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(patternText : String) λ(bodyValue : ParserValue)
+  def finishSourceCaseBranch : ParserValue -> ParserValue -> Parser ParserValue =
+    λ(patternValue : ParserValue) λ(bodyValue : ParserValue)
+      parserTextValue
+        (stringAppend (parserTextFromValue patternValue)
+          (stringAppend " -> " (parserTextFromValue bodyValue)));
+
+  def parseSourceCaseMoreOrClose2 : ParserValue -> ParserValue -> Parser ParserValue =
+    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
+      parserChoice
+        (parserBind (expectText ";") (parseSourceCaseNextBranch1 scrutineeValue branchRows))
+        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
+
+  def parseSourceCaseNextBranch1 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
+      parserBind (parseSourceCaseBranch ValueUnit)
+        (appendSourceCaseBranchAndContinue1 scrutineeValue branchRows);
+
+  def appendSourceCaseBranchAndContinue1 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
+      parserBind (appendSourceCaseBranchText branchRows nextBranch)
+        (parseSourceCaseMoreOrClose1 scrutineeValue);
+
+  def parseSourceCaseMoreOrClose1 : ParserValue -> ParserValue -> Parser ParserValue =
+    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
+      parserChoice
+        (parserBind (expectText ";") (parseSourceCaseNextBranch0 scrutineeValue branchRows))
+        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
+
+  def parseSourceCaseNextBranch0 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
+      parserBind (parseSourceCaseBranch ValueUnit)
+        (appendSourceCaseBranchAndClose scrutineeValue branchRows);
+
+  def appendSourceCaseBranchAndClose : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
+      parserBind (appendSourceCaseBranchText branchRows nextBranch)
+        (parseSourceCaseClose scrutineeValue);
+
+  def parseSourceCaseClose : ParserValue -> ParserValue -> Parser ParserValue =
+    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
       parserBind (expectText "}")
-        (finishSourceCaseExpression scrutineeValue patternText bodyValue);
+        (finishSourceCaseExpression scrutineeValue branchRows);
 
-  def finishSourceCaseExpression : ParserValue -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(patternText : String) λ(bodyValue : ParserValue) λ(_closeToken : ParserValue)
+  def appendSourceCaseBranchText : ParserValue -> ParserValue -> Parser ParserValue =
+    λ(firstBranch : ParserValue) λ(secondBranch : ParserValue)
+      parserTextValue
+        (stringAppend (parserTextFromValue firstBranch)
+          (stringAppend "; " (parserTextFromValue secondBranch)));
+
+  def finishSourceCaseExpression : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_closeToken : ParserValue)
       parserTextValue
         (stringAppend "case "
           (stringAppend (parserTextFromValue scrutineeValue)
             (stringAppend " of { "
-              (stringAppend patternText
-                (stringAppend " -> "
-                  (stringAppend (parserTextFromValue bodyValue) " }"))))));
+              (stringAppend (parserTextFromValue branchRows) " }"))));
 
   def parseApplicationOrAtomExpression : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
@@ -1240,7 +1362,9 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
     λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
       parserChoice (parseClassStartedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)
         (parserChoice (parseSingleConstructorDataStartedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)
-          (parseDataStartedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit));
+          (parserChoice
+            (parseNatDataSingleDefinitionStartedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)
+            (parseDataStartedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)));
 
   def parseClassStartedBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
@@ -1286,6 +1410,16 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
     λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
       parserBind (parseNatRecursiveDataRows sourceFile ValueUnit)
         (parseDataStartedBodyTail sourceFile moduleStart moduleName exportRows);
+
+  def parseNatDataSingleDefinitionStartedBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
+      parserBind (parseNatRecursiveDataRows sourceFile ValueUnit)
+        (parseNatDataSingleDefinitionRows sourceFile moduleStart moduleName exportRows);
+
+  def parseNatDataSingleDefinitionRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(firstRows : ParserValue)
+      parserBind (parseSourceDefinitionRows sourceFile ValueUnit)
+        (finishExactModuleBodyRows sourceFile moduleStart moduleName exportRows firstRows);
 
   def parseSingleConstructorDataStartedBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)

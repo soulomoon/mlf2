@@ -1,0 +1,7 @@
+module ParserParityFixture export (sourceFile, sourceText) {
+  def sourceFile : String =
+    "test/conformance/mlfp/parser-parity/authoritative-recursive-let/src/Main.mlfp";
+
+  def sourceText : String =
+    "module Main export (Nat(..), main) {\n  data Nat =\n      Zero : Nat\n    | Succ : Nat -> Nat;\n\n  def main : Bool =\n    let peel : Nat -> Nat = λ(n : Nat) case n of {\n      Zero -> Zero;\n      Succ inner -> peel inner\n    } in\n    case peel (Succ Zero) of {\n      Zero -> true;\n      Succ _ -> false\n    };\n}\n";
+}

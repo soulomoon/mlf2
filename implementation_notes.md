@@ -1,3 +1,25 @@
+## 2026-06-03 - Round 326 parser parity authoritative recursive-let extension
+
+- Extended the shared parser-owned parser-parity source-text parser library
+  with a bounded authoritative recursive-let slice covering `Nat` data
+  declarations, typed local recursive lets, annotated-lambda RHS bodies that
+  parse through case expressions, and outer case expressions over constructor
+  applications.
+- Added the committed parser-program projection fixture for
+  `authoritative-recursive-let`, plus a thin `.mlfp` fixture root that exposes
+  only `sourceFile` and `sourceText` before calling
+  `renderParserParityProjectionFromSourceText`.
+- Added public parser-parity coverage for malformed recursive-let case syntax
+  through `renderParserNegativeEvidenceFromSourceText`, with parser-owned
+  `expected-case-branch-arrow@...` diagnostic evidence.
+- Extended shortcut/static guards for round-specific parser/token/projection
+  shortcuts, including fixture-specific token streams, success keys,
+  pre-rendered `peel`/`main` rows, whole-fixture recognition, and static
+  recursive-let negative evidence.
+- Scope remains bounded parser parity only. This is not full parser parity,
+  resolver, checker, backend, compiler-package, driver, platform, proof, or
+  self-boot progress.
+
 ## 2026-06-02 - Round 323 parser parity higher-order returned-function extension
 
 - Extended the shared parser-owned parser-parity source-text parser library

@@ -1,0 +1,26 @@
+### Changes Made
+- `test/ProgramParserParitySpec.hs`: added the public parser-parity matcher for `authoritative-recursive-let`, registered the positive fixture in the generated aggregate batch, added the malformed recursive-let negative case, and extended shortcut/static guards for round-326 banned parser shortcuts.
+- `test/conformance/mlfp/parser-parity/authoritative-recursive-let/src/Main.mlfp`: added the canonical source fixture covering `data Nat = Zero : Nat | Succ : Nat -> Nat;`, typed local recursive `peel : Nat -> Nat`, annotated-lambda RHS case expression, and outer case over `peel (Succ Zero)`.
+- `test/conformance/mlfp/parser-parity/authoritative-recursive-let/expected/parser-program.txt`: added the committed canonical parser projection expected from the shared `.mlfp` parser-library path.
+- `test/programs/compiler-parser-parity/authoritative-recursive-let/ParserParityFixture.mlfp`: added the thin source/evidence harness exposing only `sourceFile` and `sourceText`.
+- `test/programs/compiler-parser-parity/authoritative-recursive-let/Main.mlfp`: added the thin public package root that calls `renderParserParityProjectionFromSourceText` from the shared parser library.
+- `test/programs/compiler-parser-parity/parser-library/ParserParityParser.mlfp`: extended the shared parser-owned combinator/monadic parser path so typed-let RHS parsing accepts annotated lambdas whose body is a case expression, case branches consume multiple `Zero`/`Succ`/wildcard patterns from tokens, and `Nat` data declarations can be followed by one definition without fixture-specific token streams or pre-rendered rows.
+- `CHANGELOG.md`, `implementation_notes.md`, `docs/mlfp-self-boot-readiness.md`, `test/conformance/mlfp/README.md`: documented the bounded parser-parity progress without claiming checker, resolver, backend, platform, driver, proof, full parser parity, or self-boot completion.
+- `runtime/mlfp_io/target/release/libmlfp_io.d`: restored unrelated generated absolute-path churn out of the round diff after validation regenerated it.
+
+### Tests
+- `timeout 3600 cabal test mlf2-test --test-options='--match "/MLF.Program parser parity/shared parser-owned .mlfp parser parses authoritative recursive let flows/"'` in temporary clean worktree `/tmp/mlf4-round326-red` with only the new public test/fixture and without the parser-library implementation: failed as expected; old shared parser returned `Right "parser-error\n"` instead of the expected projection.
+- `timeout 3600 cabal test mlf2-test --test-options='--match "/MLF.Program parser parity/shared parser-owned .mlfp parser parses authoritative recursive let flows/"'`: passed, 1 example, 0 failures, 179.2345 seconds.
+- `timeout 3600 cabal test mlf2-test --test-options='--match "/MLF.Program parser parity/parser-owned .mlfp parser reports malformed authoritative recursive-let diagnostics through public run-program/"'`: passed, 1 example, 0 failures, 305.4122 seconds.
+- `timeout 300 cabal test mlf2-test --test-options='--match "/MLF.Program parser parity/shared parser-owned .mlfp parser keeps expanded grammar paths instead of shortcut entrypoints/"'`: passed, 1 example, 0 failures, 0.5995 seconds.
+- `rg -n 'parseAuthoritativeRecursiveLet|completeModuleKey "authoritative-recursive-let"|moduleKey "authoritative-recursive-let"|programKey "authoritative-recursive-let"|AuthoritativeRecursiveLetTokens|LexerOk authoritativeRecursiveLetTokens|authoritative-recursive-let tokens|defRows sourceFile "peel"|defRows sourceFile "main"|def main type=Bool expr=let peel : Nat -> Nat =|authoritative-recursive-let parser negative expected-case-branch-arrow@' test/programs/compiler-parser-parity/parser-library test/ProgramParserParitySpec.hs`: no matches; `rg` exited 1 as expected.
+- `timeout 3600 cabal test mlf2-test --test-options='--match "/MLF.Program parser parity/runs all .mlfp parser parity fixtures through one generated public CLI driver/"'`: passed, 1 example, 0 failures, 307.3661 seconds.
+- `timeout 3600 cabal test mlf2-test --test-options='--match "/MLF.Program parser parity/"'`: passed, 23 examples, 0 failures, 1555.4308 seconds.
+- `actual=$(mktemp); timeout 900 cabal run mlf2 -- run-program test/programs/compiler-parser-parity/authoritative-recursive-let --search-path test/programs/compiler-parser-parity/parser-library > "$actual"; diff -u test/conformance/mlfp/parser-parity/authoritative-recursive-let/expected/parser-program.txt "$actual"; rm -f "$actual"`: passed, exit 0 with no diff output.
+- `git diff --check`: passed with no output.
+- `cabal build all`: passed.
+- `cabal test`: passed, 2670 examples, 0 failures, 1897.4922 seconds.
+- `./scripts/thesis-conformance-gate.sh`: passed; final line `PASS: thesis conformance anchors are green`.
+
+### Notes
+The canonical round worktree already contained a salvageable draft implementation when this pass began, so the focused RED evidence was reproduced in an isolated temporary clean worktree from round-325 `HEAD` with only the new public test and fixture applied. The broad parser-parity evidence used the generated aggregate public CLI driver with labelled sections, preserving rev-005 shared-context run discipline. Scope remains parser-parity/library only; no checker, resolver, backend, platform, driver, proof, package-manager, full-parser-parity, or self-boot behavior was added.

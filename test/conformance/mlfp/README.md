@@ -90,4 +90,7 @@ annotated lambda, parenthesized function-valued callee application, and
 malformed missing-close-paren diagnostics, plus one higher-order
 function-field fixture covering a function-valued constructor field and a
 bounded constructor-pattern case branch that applies the extracted function,
-with malformed missing case-branch-arrow diagnostics.
+with malformed missing case-branch-arrow diagnostics, plus one authoritative
+recursive-let fixture covering a `Nat` data declaration, typed local recursive
+let, annotated-lambda RHS case expression, outer case over constructor
+application, and malformed missing case-branch-arrow diagnostics.

@@ -37,6 +37,15 @@
 
 ### Added
 - Extended the shared parser-owned parser-parity library with a bounded
+  authoritative recursive-let grammar slice for `Nat` data declarations, typed
+  local recursive lets, annotated-lambda RHS bodies that parse through case
+  expressions, and outer case expressions over constructor applications. A new
+  committed parser-program projection and thin fixture root cover
+  `authoritative-recursive-let`, with malformed missing case-branch-arrow
+  evidence through the same source-text lexer/parser path. This is not full
+  parser parity, resolver/checker/backend, compiler-package, driver, platform,
+  proof, or self-boot work.
+- Extended the shared parser-owned parser-parity library with a bounded
   higher-order function-field grammar slice for a function-valued constructor
   field and a bounded constructor-pattern case branch that applies the
   extracted function. A new committed parser-program projection and thin
