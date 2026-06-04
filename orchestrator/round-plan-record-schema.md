@@ -29,6 +29,9 @@ While the round is live, resolve this path inside the round's recorded
   "direction_id": "direction-001-example",
   "extracted_item_id": "item-001-example",
   "plan_path": "orchestrator/rounds/round-001-example/plan.md",
+  "execution_mode": "delegated",
+  "complexity": "standard",
+  "verification_profile": "standard",
   "worker_mode": "none",
   "workers": [],
   "integration": null
@@ -46,9 +49,52 @@ Required fields:
 - `direction_id`
 - `extracted_item_id`
 - `plan_path`
+- `execution_mode`: `delegated` or `simple-direct`
 - `worker_mode`: `none` or `fanout`
 - `workers`
 - `integration`
+
+For records authored before `rev-006`, absence of `execution_mode`,
+`complexity`, and `verification_profile` means historical delegated behavior:
+runtime should treat the round as `execution_mode: delegated` with the checks
+required by the active roadmap revision that owned that round. New records
+authored under `rev-006` or later must include the execution/profile fields.
+
+Optional fields:
+
+- `complexity`: `simple`, `standard`, or `closeout`
+- `verification_profile`: `focused`, `standard`, or `closeout`
+- `profile_reason`: short planner rationale for why the selected process and
+  verification profile are sufficient
+- `direct_write_scope`: required when `execution_mode` is `simple-direct`;
+  repo-relative paths the planner may modify while implementing directly
+- `direct_verification_commands`: required when `execution_mode` is
+  `simple-direct`; exact focused commands the planner must run and record
+
+The planner owns these fields. The controller must not infer them from the diff
+or task name. When present, runtime passes them to implementer and reviewer
+assignments. The reviewer may escalate to a heavier profile when evidence or
+repo-local verification rules require it, but should not run closeout-heavy
+checks for a planner-classified simple round without a concrete reason.
+
+## Simple Direct Mode
+
+Use `execution_mode: "simple-direct"` only when all are true:
+
+- `complexity` is `simple`
+- `verification_profile` is `focused`
+- `worker_mode` is `none`
+- the task has one clear owner surface and bounded `direct_write_scope`
+- the task does not change public contracts, schemas, role prompts, roadmap
+  semantics, milestone status, verification meaning, or cross-owner behavior
+- the task does not require semantic roadmap update or milestone closeout
+
+In simple-direct mode, the planner may implement the change in the canonical
+round worktree during the planning assignment, then write human evidence in
+`implementation-notes.md` and machine evidence in `simple-direct-record.json`
+under `orchestrator/round-finalization-schema.md`. The controller skips
+implementer and reviewer dispatch only after those artifacts exist and pass the
+direct finalization predicates.
 
 ## Worker Fan-Out
 

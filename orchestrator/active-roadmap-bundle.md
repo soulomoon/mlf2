@@ -22,6 +22,46 @@ dependency-ready round, the planner may write `roadmap-update-request.md`.
 Runtime must treat that as a request to enter delegated `update-roadmap`, not
 as permission to edit the active revision directly.
 
+Read-only status, progress, blockage, and roadmap-inspection requests are not
+runtime execution. Runtime may answer them from `state.json`, this contract,
+the active roadmap bundle, and relevant round artifacts without creating
+branches, worktrees, round artifacts, subagents, or state edits.
+
+## Round Execution Profiles
+
+The planner owns process classification for each selected round. The controller
+must not decide whether a task is simple by inspecting the diff, task title, or
+roadmap wording. Planner-authored `round-plan-record.json` records:
+
+- `execution_mode`: `delegated` or `simple-direct`
+- `complexity`: `simple`, `standard`, or `closeout`
+- `verification_profile`: `focused`, `standard`, or `closeout`
+
+For `execution_mode: delegated`, runtime passes the planner-authored profile to
+the implementer and reviewer. The reviewer applies the active
+`verification.md` checks for the selected profile and may escalate only with a
+concrete repo-risk or contract reason.
+
+For `execution_mode: simple-direct`, the planner may implement the selected
+simple task during planning and write both `implementation-notes.md` and
+`simple-direct-record.json`. The controller may skip implementer and reviewer
+dispatch only after all direct predicates pass:
+
+- `round-plan-record.json.execution_mode == "simple-direct"`
+- `complexity == "simple"`
+- `verification_profile == "focused"`
+- `worker_mode == "none"`
+- changed paths stay inside `direct_write_scope`
+- every command in `simple-direct-record.json.verification_commands` passed,
+  including `git diff --check`
+- `simple-direct-record.json.roadmap_closeout.mode == "none"`
+
+`simple-direct` is forbidden for milestone closeout, completion pointers,
+history entries, semantic roadmap updates, role prompt changes, schema changes,
+public contracts, cross-owner integration, verification meaning changes, or
+anything needing reviewer judgment. If any predicate fails, runtime must step
+back to the normal delegated path or recovery instead of merging directly.
+
 ## Required State Metadata
 
 `orchestrator/state.json` must name the active bundle with all of:
@@ -200,12 +240,16 @@ Roadmap-specific retry policy belongs in `## Roadmap Overrides` only when the
 active revision needs behavior beyond the shared runtime retry mechanics. If no
 roadmap-specific retry policy exists, record `none`.
 
-## Status-Only Round Closeout
+## Status-Only Delegated Round Closeout
 
-After a round is approved and before it is squash-merged, the controller may
-apply status-only round closeout directly to the active revision copy in the
-canonical round worktree only when `review-record.json` explicitly approves it
-under `orchestrator/round-finalization-schema.md`.
+After a delegated round is approved and before it is squash-merged, the
+controller may apply status-only round closeout directly to the active revision
+copy in the canonical round worktree only when `review-record.json` explicitly
+approves it under `orchestrator/round-finalization-schema.md`.
+
+`simple-direct` rounds are not status-only closeout rounds. They must use
+`simple-direct-record.json` with `roadmap_closeout.mode == "none"` and may not
+write `closeout-record.json`.
 
 Status-only round closeout may do only these edits:
 

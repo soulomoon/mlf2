@@ -2,6 +2,21 @@
 
 Roadmap family: `2026-05-18-00-full-self-boot-end-to-end-roadmap`
 
+## rev-006
+
+- Semantic update: planner owns runtime process classification through
+  `execution_mode`, `complexity`, and `verification_profile`, instead of the
+  controller inferring simplicity from a task name or diff.
+- Simple, bounded, same-owner work may use `execution_mode: simple-direct`
+  with focused verification, planner-authored implementation notes, and a
+  `simple-direct-record.json`, allowing the controller to skip implementer and
+  reviewer dispatch only after mechanical predicates pass.
+- The update preserves milestone ordering, milestone completion criteria,
+  parser-parity semantics, status-only closeout boundaries, and the semantic
+  roadmap-update path. `simple-direct` may not change milestone status,
+  completion pointers, schemas, role prompts, public contracts, verification
+  meaning, roadmap semantics, or cross-owner behavior.
+
 ## rev-005
 
 - Semantic update from round-324: future checker, checker-parity,

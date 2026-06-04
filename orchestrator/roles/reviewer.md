@@ -20,11 +20,22 @@ output, boundary, and self-check rules.
 - Active roadmap bundle `verification.md` resolved from `orchestrator/state.json`
 - `orchestrator/project-contract.md`
 - `implementation-notes.md`
+- `simple-direct-record.json` only when controller or recovery escalates a
+  planner-authored `simple-direct` round into review
 - `selection-record.json`
 
 ## Duties
 - Own verification and approval for the current round in the repo-local orchestrator loop.
-- Run every baseline check plus any round-specific checks.
+- Do not expect dispatch for a planner-authorized `simple-direct` round unless
+  the controller or recovery path escalates it after a direct predicate fails.
+- Read the planner-authored `execution_mode`, `complexity`, and
+  `verification_profile` from `round-plan-record.json` or the plan's
+  `Execution Profile`.
+- Run every check required by the selected verification profile plus any
+  round-specific checks that apply to the touched scope.
+- Escalate from `focused` to `standard` or `closeout` only when concrete
+  evidence or a repo-local contract requires heavier validation, and record
+  the reason in `review.md`.
 - Check repo-wide invariants from `orchestrator/project-contract.md` when the
   round touches a listed stable surface.
 - Compare the diff against the round plan.
@@ -46,7 +57,10 @@ output, boundary, and self-check rules.
 
 ## Boundaries
 - Do not fix implementation directly.
-- Do not skip checks because the round looks small.
+- Do not skip checks required by the selected verification profile or active
+  roadmap contract.
+- Do not run closeout-heavy checks for a planner-classified simple round
+  without a concrete escalation reason.
 - Do not merge changes.
 - Do not approve a worker-fan-out round until integration and round-level verification are complete.
 
@@ -83,6 +97,8 @@ For `update-roadmap`, write the review artifact required by
 ## Self-Check
 - Did I run every baseline check from `verification.md`?
 - Did I run every task-specific check?
+- Did I respect the planner-authored verification profile, or record a concrete
+  reason for escalating it?
 - Is my decision explicitly APPROVED or REJECTED (not hedged)?
 - Does my evidence actually support my decision?
 - Am I reviewing the integrated round result, not isolated worker slices?

@@ -40,6 +40,15 @@ explicit parallel execution.
 | `worktree_path` | string | Canonical round worktree |
 | `resume_error` | string or null | Per-round recoverable error |
 
+Delegated rounds follow the normal stage path:
+`plan -> implement -> review -> finalize-round`. `simple-direct` rounds may
+skip `implement` and `review`: after the planner writes `selection-record.json`,
+`round-plan-record.json`, `plan.md`, `implementation-notes.md`, and
+`simple-direct-record.json`, the controller may move from `plan` to
+`finalize-round` only if the direct predicates in
+`orchestrator/active-roadmap-bundle.md` and
+`orchestrator/round-finalization-schema.md` pass.
+
 ## Invariants
 
 When no semantic roadmap update is in progress, `roadmap_update` should be
@@ -58,7 +67,11 @@ Round lineage and merge-order scheduling come from planner-authored
 `selection-record.json` following `orchestrator/selection-record-schema.md`.
 These fields are not duplicated in `state.json`.
 
-Merge readiness is not persisted. The controller derives merge admissibility
-from reviewer approval, closeout validity, scheduler fields in
+Merge readiness is not persisted. For delegated rounds, the controller derives
+merge admissibility from reviewer approval, closeout validity, scheduler fields
+in `selection-record.json`, dependency state, base freshness, and active
+semantic roadmap-update state. For `simple-direct` rounds, the controller
+derives merge admissibility from the planner-authored direct record, direct
+write-scope and verification predicates, scheduler fields in
 `selection-record.json`, dependency state, base freshness, and active semantic
 roadmap-update state.

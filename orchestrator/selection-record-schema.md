@@ -59,6 +59,10 @@ Scheduler fields:
   may merge
 - `parallel_group`: co-scheduling group, or `null`
 
-Merge readiness is not persisted. The controller derives merge admissibility
-from reviewer approval, closeout validity, scheduler fields, dependency state,
-base freshness, and active semantic roadmap-update state.
+Merge readiness is not persisted. For delegated rounds, the controller derives
+merge admissibility from reviewer approval, closeout validity, scheduler
+fields, dependency state, base freshness, and active semantic roadmap-update
+state. For `simple-direct` rounds, the controller derives merge admissibility
+from the planner-authored direct record, direct write-scope and verification
+predicates, scheduler fields, dependency state, base freshness, and active
+semantic roadmap-update state.

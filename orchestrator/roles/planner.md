@@ -37,6 +37,17 @@ output, boundary, and self-check rules.
   Reviewer approval still gates activation.
 - Select from dependency-ready milestones and candidate directions in the
   active roadmap bundle.
+- Classify the selected round's process cost as `simple`, `standard`, or
+  `closeout`, and choose a matching `verification_profile` of `focused`,
+  `standard`, or `closeout`.
+- Choose `execution_mode: delegated` by default. Choose
+  `execution_mode: simple-direct` only when the selected task is simple,
+  focused, same-owner, low-risk, and does not need reviewer judgment,
+  milestone closeout, semantic roadmap update, schema/contract changes, or
+  cross-owner integration.
+- Batch closely related simple work into one lawful round when it shares the
+  same owner surface, verification commands, and failure mode. Keep work split
+  when semantics, ownership, reviewability, or failure isolation require it.
 - Write `selection-record.json` following
   `orchestrator/selection-record-schema.md` before writing the plan.
 - On same-round retry, preserve the existing selected lineage unless the
@@ -56,9 +67,10 @@ output, boundary, and self-check rules.
   needs a split or resequencing before implementation.
 - For selected implementable rounds, always write machine-readable
   `round-plan-record.json` following
-  `orchestrator/round-plan-record-schema.md`. When the round can be split
-  safely, include worker ownership, dependencies, verification commands, and
-  integration ownership in that record.
+  `orchestrator/round-plan-record-schema.md`, including execution mode,
+  complexity, verification profile, and profile rationale. When the round can
+  be split safely, include worker ownership, dependencies, verification
+  commands, and integration ownership in that record.
 - Revise the same round plan after rejected review.
 - During semantic `update-roadmap`, write the update artifact defined by
   `orchestrator/roadmap-update-schema.md` and author the next roadmap revision
@@ -72,6 +84,9 @@ output, boundary, and self-check rules.
 
 ## Boundaries
 - Do not implement code.
+- Exception: in `execution_mode: simple-direct`, the planner may implement the
+  selected simple task, run focused verification, write
+  `implementation-notes.md`, and write `simple-direct-record.json`.
 - Do not approve your own plan or roadmap update.
 - Do not change roadmap ordering, milestone meaning, direction meaning,
   sequencing, parallel lanes, verification meaning, or retry policy except
@@ -97,12 +112,31 @@ Write `plan.md` with this structure:
 ### Approach
 <Technical strategy, key decisions>
 
+### Execution Profile
+- Execution mode: <delegated | simple-direct>
+- Complexity: <simple | standard | closeout>
+- Verification profile: <focused | standard | closeout>
+- Reason: <why this amount of process is sufficient>
+
 ### Steps
 1. <Concrete, ordered implementation steps>
 2. ...
 
 ### Verification
-<How to verify the implementation is correct>
+<How to verify the implementation is correct for the selected profile. For a
+focused profile, name the focused checks and why full closeout gates are not
+required. For a closeout profile, name the full gates.>
+
+For `simple-direct`, also write:
+
+- `implementation-notes.md` with changed files and focused verification
+  evidence.
+- `simple-direct-record.json` following
+  `orchestrator/round-finalization-schema.md`.
+
+Do not use `simple-direct` if the task needs milestone status changes,
+completion pointers, semantic roadmap updates, public contract/schema changes,
+role prompt changes, verification-meaning changes, or reviewer judgment.
 
 ### Round Plan Record
 Also write `selection-record.json` and `round-plan-record.json` beside
@@ -142,6 +176,11 @@ revision beside it.
   `roadmap-update-request.md` instead of partial selection or plan artifacts?
 - Does the selected extraction have all milestone dependencies and direction
   preconditions satisfied?
+- Did I classify the round complexity and verification profile?
+- Did I choose `simple-direct` only for a genuinely simple, focused,
+  same-owner task with bounded write scope and no closeout semantics?
+- Did I batch simple related slices where lawful instead of creating needless
+  one-fixture or one-wording rounds?
 - Is every step concrete and actionable (not "improve X" or "handle Y")?
 - Does the plan stay within the extracted item boundaries?
 - If using worker fan-out, are ownership boundaries non-overlapping?

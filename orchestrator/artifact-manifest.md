@@ -56,14 +56,17 @@ Round artifact paths are derived from `round_id`, not persisted in
 | `plan` | `orchestrator/rounds/<round-id>/plan.md` |
 | `round_plan_record` | `orchestrator/rounds/<round-id>/round-plan-record.json` |
 | `implementation_notes` | `orchestrator/rounds/<round-id>/implementation-notes.md` |
+| `simple_direct_record` | `orchestrator/rounds/<round-id>/simple-direct-record.json` |
 | `review` | `orchestrator/rounds/<round-id>/review.md` |
 | `review_record` | `orchestrator/rounds/<round-id>/review-record.json` |
 | `closeout_record` | `orchestrator/rounds/<round-id>/closeout-record.json` |
 
 `roadmap_update_request` is written only by a plan-stage planner when no
 bounded round can be selected before a semantic roadmap split. It is evidence
-for `update-roadmap`, not a mergeable round output. `closeout_record` is
-required only for status-only closeout rounds.
+for `update-roadmap`, not a mergeable round output. `simple_direct_record` is
+written only by a planner-authorized `simple-direct` round and never approves
+roadmap closeout. `closeout_record` is required only for status-only closeout
+rounds.
 
 ## Worker Artifact Paths
 

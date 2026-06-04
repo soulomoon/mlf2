@@ -1,17 +1,21 @@
 # Round Finalization Schema
 
-This file is the machine contract for the two artifacts that finalize a round:
+This file is the machine contract for the artifacts that finalize a round:
 
 - reviewer-authored `review-record.json`
+- planner-authored `simple-direct-record.json`
 - controller-authored `closeout-record.json`
 
 The artifacts remain separate because ownership differs. `review-record.json`
-owns lineage and closeout selectors; `closeout-record.json` is a compact
-controller proof that those approved selectors were applied and revalidated.
+owns lineage and closeout selectors for delegated rounds.
+`simple-direct-record.json` owns planner-authored direct-mode evidence for
+simple rounds that skip implementer and reviewer dispatch. `closeout-record.json`
+is a compact controller proof that reviewer-approved selectors were applied and
+revalidated.
 
 ## `review-record.json`
 
-Each round stores the reviewer record at:
+Each delegated round stores the reviewer record at:
 
 ```text
 orchestrator/rounds/<round-id>/review-record.json
@@ -76,12 +80,74 @@ Required top-level fields:
 Rejected reviews may omit `roadmap_closeout`, because no merge may follow a
 rejected review.
 
+## `simple-direct-record.json`
+
+Each simple-direct round stores the planner record at:
+
+```text
+orchestrator/rounds/<round-id>/simple-direct-record.json
+```
+
+While the round is live, resolve this path inside the round's recorded
+`worktree_path`.
+
+```json
+{
+  "schema_version": "simple-direct-record-v1",
+  "round_id": "round-001-example",
+  "roadmap_id": "YYYY-MM-DD-00-example",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/YYYY-MM-DD-00-example/rev-001",
+  "milestone_id": "milestone-001-example",
+  "direction_id": "direction-001-example",
+  "extracted_item_id": "item-001-example",
+  "decision": "direct-complete",
+  "evidence_summary": "Focused check passed and diff stayed inside direct_write_scope.",
+  "direct_write_scope": ["docs/example.md"],
+  "verification_commands": [
+    {
+      "command": "git diff --check",
+      "result": "pass",
+      "summary": "No whitespace errors."
+    }
+  ],
+  "roadmap_closeout": {
+    "mode": "none"
+  }
+}
+```
+
+Required top-level fields:
+
+- `schema_version`: must be `simple-direct-record-v1`
+- `round_id`
+- `roadmap_id`
+- `roadmap_revision`
+- `roadmap_dir`
+- `milestone_id`
+- `direction_id`
+- `extracted_item_id`
+- `decision`: must be `direct-complete`
+- `evidence_summary`: non-empty focused evidence summary
+- `direct_write_scope`: copied from `round-plan-record.json`
+- `verification_commands`: exact commands run with pass/fail summaries
+- `roadmap_closeout.mode`: must be `none`
+
+Simple-direct records may not approve milestone status changes, completion
+pointers, history entries, or semantic roadmap updates. If the simple task
+turns out to require any roadmap closeout beyond merge bookkeeping, the
+planner must stop direct mode and let the controller dispatch the normal
+delegated reviewer path.
+
 ## Closeout Modes
 
-`roadmap_closeout.mode` is one of:
+For reviewer-authored `review-record.json`, `roadmap_closeout.mode` is one of:
 
 - `status-only`
 - `semantic-update-required`
+
+For planner-authored `simple-direct-record.json`, `roadmap_closeout.mode` must
+be `none`.
 
 For `status-only`, the reviewer must provide controller-applicable selectors
 that resolve through the active `roadmap-view.json`. Free-form closeout
@@ -135,7 +201,7 @@ Rules:
 
 ## `closeout-record.json`
 
-Each status-only round stores the controller record at:
+Each status-only delegated round stores the controller record at:
 
 ```text
 orchestrator/rounds/<round-id>/closeout-record.json

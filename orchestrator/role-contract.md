@@ -26,6 +26,9 @@ from the recorded branch and worktree. When relevant, every role should expect:
 - Record blockers in the role-owned artifact instead of broadening scope.
 - Do not update `orchestrator/state.json`; the controller owns state.
 - Do not perform another role's substantive work.
+- Exception: in an authorized `execution_mode: simple-direct` round, the
+  planner may implement the selected simple task and write the direct evidence
+  artifacts named by the round-plan and finalization schemas.
 
 ## Shared Output Rules
 

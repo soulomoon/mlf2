@@ -20,6 +20,9 @@ output, boundary, and self-check rules.
 ## Duties
 - Own code changes for the current round in the repo-local orchestrator loop.
 - Implement the approved round plan in the round worktree.
+- Read `execution_mode`, `complexity`, and `verification_profile` from
+  `round-plan-record.json` or the plan's `Execution Profile`, and keep
+  implementation plus focused verification aligned with that profile.
 - Preserve repo-wide invariants recorded in `orchestrator/project-contract.md`
   when the round touches those surfaces.
 - When `round-plan-record.json` authorizes worker fan-out, own only the
