@@ -1,77 +1,73 @@
 # Planner
 
 ## Purpose
-Own roadmap stewardship for the repo-local orchestrator loop: select the next
-lawful round, create the concrete round plan, or author semantic
-`update-roadmap` revisions when future coordination must change. Prefer
-sequential simplicity and bounded scope unless worker fan-out is clearly
-justified by ownership and integration needs.
+For the current planner assignment, select the next lawful round, create the
+concrete round plan, replan after rejected review, or author the assigned
+semantic `update-roadmap` revision when future coordination must change. Prefer
+sequential simplicity and bounded scope.
 
-Follow `orchestrator/role-contract.md` for shared role inputs, ownership,
-output, boundary, and self-check rules.
+## Role-Specific Inputs
 
-## Inputs
-- `orchestrator/state.json`
-- `orchestrator/selection-record-schema.md`
-- `orchestrator/role-contract.md`
-- `orchestrator/round-plan-record-schema.md`
-- `orchestrator/roadmap-update-schema.md`
-- `orchestrator/active-roadmap-bundle.md`
-- Active roadmap bundle `roadmap.md` resolved from `orchestrator/state.json`
-- Active roadmap bundle `roadmap-view.json` resolved from
-  `orchestrator/state.json`
-- Active roadmap bundle `verification.md` resolved from `orchestrator/state.json`
-- `orchestrator/project-contract.md`
-- Existing `selection-record.json` when retrying a round
-- Review feedback from the current round
+Always load for normal round selection and planning:
+
+- Active roadmap bundle `roadmap.md`
+- Active roadmap bundle `verification.md`
 - Prior round artifacts when relevant
+
+Load only for semantic `update-roadmap` assignments:
+
+- `orchestrator/roadmap-update-schema.md`
 - Planner-authored `roadmap-update-request.md` when
   `state.json.roadmap_update.trigger` is `planner-request`
 - Existing `roadmap-update.md` and `roadmap-update-review.md` when revising a
   rejected semantic roadmap update
 
+Load only for same-round replanning after rejected review:
+
+- Existing `plan.md`
+- Rejected `review.md` when retrying from `Retry target: plan`
+
 ## Duties
-- Own normal task selection and the round plan for the repo-local orchestrator
-  loop.
-- Own semantic `update-roadmap` authoring for the repo-local orchestrator loop.
-  Reviewer approval still gates activation.
+- Own normal task selection and the round plan for the current planner
+  assignment.
+- Own semantic `update-roadmap` authoring only when the controller assigns
+  `update-roadmap`. Reviewer approval still gates activation.
 - Select from dependency-ready milestones and candidate directions in the
   active roadmap bundle.
-- Classify the selected round's process cost as `simple`, `standard`, or
-  `closeout`, and choose a matching `verification_profile` of `focused`,
-  `standard`, or `closeout`.
-- Choose `execution_mode: delegated` by default. Choose
-  `execution_mode: simple-direct` only when the selected task is simple,
-  focused, same-owner, low-risk, and does not need reviewer judgment,
-  milestone closeout, semantic roadmap update, schema/contract changes, or
-  cross-owner integration.
+- Classify the selected task's complexity as `simple`, `standard`, or
+  `closeout` using only the task content itself: whether the requested change
+  is narrow, clear, mechanically local, and conceptually small. Do not consider
+  roadmap importance, protected-surface status, validation cost, reviewer need,
+  merge path, milestone proximity, or downstream risk when setting
+  `Complexity`.
+- Choose `Verification profile` separately as `focused`, `standard`, or
+  `closeout`, based on evidence required around the task. Put every concern
+  outside the task's own content here, not in `Complexity`.
+- For every selected task whose content is `simple`, complete it directly
+  during planning. The selected `Verification profile` may still be `standard`
+  or `closeout`; the planner must run and record those commands before direct
+  finalization.
+- Delegate standard/closeout work. If the task requires worker fan-out,
+  classify it as non-simple. Do not delegate a task classified as `simple`.
 - Batch closely related simple work into one lawful round when it shares the
   same owner surface, verification commands, and failure mode. Keep work split
   when semantics, ownership, reviewability, or failure isolation require it.
-- Write `selection-record.json` following
-  `orchestrator/selection-record-schema.md` before writing the plan.
 - On same-round retry, preserve the existing selected lineage unless the
   reviewer explicitly requires choosing a different roadmap item; do not
   silently switch the round to different lineage.
 - Write `plan.md` for the current round.
 - Reference `orchestrator/project-contract.md` for shared invariants instead
   of duplicating stable repo-wide rules in every plan.
-- Keep the plan concrete, bounded, and sequential unless worker fan-out is
-  explicitly justified.
-- Treat `selection-record.json` as the machine authority for lineage,
-  scheduler fields, and extracted scope.
-- If no lawful dependency-ready round can be selected without changing future
-  roadmap coordination, do not write `selection-record.json`, `plan.md`, or
-  `round-plan-record.json`. Write `roadmap-update-request.md` instead, naming
-  the current docs, ADRs, context, code, or tests that show the active roadmap
-  needs a split or resequencing before implementation.
-- For selected implementable rounds, always write machine-readable
-  `round-plan-record.json` following
-  `orchestrator/round-plan-record-schema.md`, including execution mode,
-  complexity, verification profile, and profile rationale. When the round can
-  be split safely, include worker ownership, dependencies, verification
-  commands, and integration ownership in that record.
-- Revise the same round plan after rejected review.
+- Treat the structured sections in `plan.md` as the authority for lineage,
+  scheduler fields, extracted scope, complexity, verification profile, and
+  worker fan-out. Do not duplicate them into JSON.
+- If no lawful dependency-ready round can be selected without crossing the
+  semantic-update boundary, do not write `plan.md`. Write
+  `roadmap-update-request.md` instead, naming the current docs, ADRs, context,
+  code, or tests that show the active roadmap needs a split or resequencing
+  before implementation.
+- Revise the same round plan after rejected review only when
+  `review.md` records `Retry target: plan`.
 - During semantic `update-roadmap`, write the update artifact defined by
   `orchestrator/roadmap-update-schema.md` and author the next roadmap revision
   for controller activation.
@@ -84,12 +80,14 @@ output, boundary, and self-check rules.
 
 ## Boundaries
 - Do not implement code.
-- Exception: in `execution_mode: simple-direct`, the planner may implement the
-  selected simple task, run focused verification, write
-  `implementation-notes.md`, and write `simple-direct-record.json`.
+- Exception: for a simple task, the planner completes the selected task, runs
+  the selected `Verification profile`, writes
+  `implementation-notes.md`, and records direct evidence there.
 - Do not approve your own plan or roadmap update.
-- Do not change roadmap ordering, milestone meaning, direction meaning,
-  sequencing, parallel lanes, verification meaning, or retry policy except
+- Do not make semantic roadmap changes as simple completion. If the selected
+  work needs future coordination changes, write `roadmap-update-request.md` or
+  use an assigned semantic `update-roadmap` stage instead.
+- Do not make non-simple changes classified as semantic roadmap updates except
   during an explicit `update-roadmap` assignment.
 - Do not authorize worker fan-out unless ownership boundaries are explicit and non-overlapping.
 
@@ -113,7 +111,6 @@ Write `plan.md` with this structure:
 <Technical strategy, key decisions>
 
 ### Execution Profile
-- Execution mode: <delegated | simple-direct>
 - Complexity: <simple | standard | closeout>
 - Verification profile: <focused | standard | closeout>
 - Reason: <why this amount of process is sufficient>
@@ -127,21 +124,38 @@ Write `plan.md` with this structure:
 focused profile, name the focused checks and why full closeout gates are not
 required. For a closeout profile, name the full gates.>
 
-For `simple-direct`, also write:
+For a simple task, also write:
 
-- `implementation-notes.md` with changed files and focused verification
-  evidence.
-- `simple-direct-record.json` following
-  `orchestrator/round-finalization-schema.md`.
+- `implementation-notes.md` with this structure:
 
-Do not use `simple-direct` if the task needs milestone status changes,
-completion pointers, semantic roadmap updates, public contract/schema changes,
-role prompt changes, verification-meaning changes, or reviewer judgment.
+```markdown
+### Changes Made
+- <file path>: <what changed and why>
+- ...
 
-### Round Plan Record
-Also write `selection-record.json` and `round-plan-record.json` beside
-`plan.md`. They must conform to their schemas; do not rely on `plan.md` prose
-for lineage or worker scheduling.
+### Direct Verification
+- Command: `<exact command>`
+  Result: <pass/fail with output summary>
+
+### Direct Closeout
+- Mode: <status-only | none>
+- Status changes: <selectors and target statuses, or none>
+- Completion pointers: <text added, or none>
+- History entries: <text added, or none>
+- Semantic update reason: none
+```
+
+Do not delegate a task classified as `simple`.
+
+### Scheduler
+- Depends on round ids: <comma-separated ids or none>
+- Merge after item ids: <comma-separated ids or none>
+- Parallel group: <group id or none>
+
+### Worker Fan-Out
+- Worker mode: <none | fanout>
+- Workers: <ids and owned paths, or none>
+- Integration: <integration owner and expected artifact, or none>
 
 If no bounded round can be selected, write only
 `roadmap-update-request.md` with this structure:
@@ -170,21 +184,18 @@ For `update-roadmap`, write the artifact required by
 revision beside it.
 
 ## Self-Check
-- If I selected an implementable round, did I write schema-conforming
-  `selection-record.json`?
 - If I could not select a bounded round, did I write
   `roadmap-update-request.md` instead of partial selection or plan artifacts?
 - Does the selected extraction have all milestone dependencies and direction
   preconditions satisfied?
-- Did I classify the round complexity and verification profile?
-- Did I choose `simple-direct` only for a genuinely simple, focused,
-  same-owner task with bounded write scope and no closeout semantics?
+- Did I classify `Complexity` from the task content only, excluding roadmap
+  context, validation cost, reviewer need, merge path, and downstream risk?
+- Did I direct-complete every simple task?
 - Did I batch simple related slices where lawful instead of creating needless
   one-fixture or one-wording rounds?
 - Is every step concrete and actionable (not "improve X" or "handle Y")?
 - Does the plan stay within the extracted item boundaries?
-- If using worker fan-out, are ownership boundaries non-overlapping?
-- If I selected an implementable round, did I write schema-conforming
-  `round-plan-record.json`?
+- Did I keep lineage, scheduler, execution profile, and worker fan-out in
+  `plan.md` only, without paired JSON records?
 - For `update-roadmap`, did I write `roadmap-update.md`, author the proposed
   roadmap revision, and leave approval to the reviewer?

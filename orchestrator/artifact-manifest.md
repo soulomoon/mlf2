@@ -1,8 +1,6 @@
 # Artifact Manifest
 
-This file is the canonical repo-local Interface for orchestrator file layout,
-artifact keys, and path resolution. Other control-plane documents may point
-here, but should not duplicate the complete file list or artifact map.
+This file owns orchestrator file layout, artifact keys, and path resolution.
 
 ## Shared Control-Plane Files
 
@@ -14,9 +12,6 @@ The scaffolded `orchestrator/` directory must contain:
 - `project-contract.md`
 - `active-roadmap-bundle.md`
 - `role-contract.md`
-- `selection-record-schema.md`
-- `round-plan-record-schema.md`
-- `round-finalization-schema.md`
 - `roadmap-update-schema.md`
 - `roles/planner.md`
 - `roles/implementer.md`
@@ -33,66 +28,51 @@ The active roadmap revision directory named by `state.json.roadmap_dir` must
 contain:
 
 - `roadmap.md`
-- `roadmap-view.json`
 - `verification.md`
 
 The roadmap family directory must contain:
 
 - `roadmap-history.md`
 
-Roadmap-specific retry policy, when any exists, lives in `verification.md`
-under `## Roadmap Overrides`. Shared retry mechanics live in runtime
-references, not in the active bundle.
-
 ## Round Artifact Keys
 
 Round artifact paths are derived from `round_id`, not persisted in
-`state.json`. Use these keys:
+`state.json`. Do not create paired JSON records for round artifacts. Each
+Markdown artifact owns both its human-readable content and its structured
+fields. This manifest owns live-vs-archived path resolution. Use these keys:
 
 | Key | Path |
 |-----|------|
-| `selection_record` | `orchestrator/rounds/<round-id>/selection-record.json` |
 | `roadmap_update_request` | `orchestrator/rounds/<round-id>/roadmap-update-request.md` |
 | `plan` | `orchestrator/rounds/<round-id>/plan.md` |
-| `round_plan_record` | `orchestrator/rounds/<round-id>/round-plan-record.json` |
 | `implementation_notes` | `orchestrator/rounds/<round-id>/implementation-notes.md` |
-| `simple_direct_record` | `orchestrator/rounds/<round-id>/simple-direct-record.json` |
 | `review` | `orchestrator/rounds/<round-id>/review.md` |
-| `review_record` | `orchestrator/rounds/<round-id>/review-record.json` |
-| `closeout_record` | `orchestrator/rounds/<round-id>/closeout-record.json` |
+| `merge` | `orchestrator/rounds/<round-id>/merge.md` |
 
 `roadmap_update_request` is written only by a plan-stage planner when no
 bounded round can be selected before a semantic roadmap split. It is evidence
-for `update-roadmap`, not a mergeable round output. `simple_direct_record` is
-written only by a planner-authorized `simple-direct` round and never approves
-roadmap closeout. `closeout_record` is required only for status-only closeout
-rounds.
+for `update-roadmap`, not a mergeable round output. For `Complexity: simple`
+rounds, planner-authored direct evidence lives in `implementation-notes.md`.
+For non-simple rounds, reviewer approval, retry target, and closeout
+classification live in `review.md`. `merge.md` is optional controller merge
+bookkeeping; it must not duplicate plan or review content.
 
 ## Worker Artifact Paths
 
-When `round-plan-record.json` authorizes worker fan-out, worker artifacts use:
+When `plan.md` authorizes worker fan-out, worker artifacts use:
 
 - `orchestrator/rounds/<round-id>/workers/<worker-id>/assignment.md`
 - `orchestrator/rounds/<round-id>/workers/<worker-id>/implementation-notes.md`
 - `orchestrator/rounds/<round-id>/workers/<worker-id>/handoff.md`
 
-Worker branch and worktree names are deterministic from the round and worker
-ids:
-
-- branch `orchestrator/<round-id>-<worker-id>`
-- worktree `orchestrator/worktrees/<round-id>-<worker-id>`
+Worker branch and worktree fields belong to the `Worker Fan-Out` section in
+`plan.md`; this manifest owns artifact paths only.
 
 ## Roadmap Update Artifacts
 
-Semantic roadmap updates use the paths defined by
-`orchestrator/roadmap-update-schema.md`:
-
-- branch `orchestrator/roadmap-update-<round-id>-<slug>`
-- worktree `orchestrator/worktrees/roadmap-update-<round-id>`
-- update artifact
-  `orchestrator/roadmap-updates/<round-id>-roadmap-update.md`
-- review artifact
-  `orchestrator/roadmap-updates/<round-id>-roadmap-update-review.md`
+Semantic roadmap-update branch, worktree, update artifact, and review artifact
+paths are defined by `orchestrator/roadmap-update-schema.md`. Load that schema
+instead of copying those conventions into callers.
 
 ## Path Resolution
 

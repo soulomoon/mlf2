@@ -6,15 +6,14 @@ review artifact contract, rejection loop, and activation metadata.
 
 Semantic roadmap updates are entered through one of two triggers:
 
-- `merged-round`: a merged round changes future coordination, milestone or
-  direction meaning, sequencing, parallel lanes, extraction scope, verification
-  meaning, or retry policy.
+- `merged-round`: reviewer-approved `review.md` classifies the round as
+  `semantic-update-required` under `orchestrator/active-roadmap-bundle.md`.
 - `planner-request`: a plan-stage `roadmap-update-request.md` shows that no
   bounded dependency-ready round can be selected without first splitting or
   resequencing the active roadmap.
 
-Status-only round closeout stays in the round worktree under
-`round-finalization-schema.md`.
+Status-only round closeout stays in the round worktree as approved Markdown
+closeout evidence; do not create duplicate JSON closeout records.
 
 ## `state.json.roadmap_update`
 

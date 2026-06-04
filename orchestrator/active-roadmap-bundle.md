@@ -11,10 +11,10 @@ record a migration-needed controller error in
 back to scattered roadmap rules.
 
 This file is not a shortcut to the active roadmap files. It defines how callers
-read the active bundle, which files are required, how the machine-readable
-roadmap view drives terminal detection and anchors, when status-only round
-closeout is controller-owned, and when a semantic roadmap update must create a
-new revision.
+read the active bundle, which files are required, how structured `roadmap.md`
+fields drive terminal detection and closeout selectors, when status-only round
+closeout is controller-owned or planner-authored for simple rounds, and when
+semantic roadmap updates must create a new revision.
 
 If a plan-stage planner discovers from current docs, ADRs, context, code, or
 tests that the active milestone is too broad to select a bounded
@@ -22,45 +22,37 @@ dependency-ready round, the planner may write `roadmap-update-request.md`.
 Runtime must treat that as a request to enter delegated `update-roadmap`, not
 as permission to edit the active revision directly.
 
-Read-only status, progress, blockage, and roadmap-inspection requests are not
-runtime execution. Runtime may answer them from `state.json`, this contract,
-the active roadmap bundle, and relevant round artifacts without creating
-branches, worktrees, round artifacts, subagents, or state edits.
-
 ## Round Execution Profiles
 
 The planner owns process classification for each selected round. The controller
 must not decide whether a task is simple by inspecting the diff, task title, or
-roadmap wording. Planner-authored `round-plan-record.json` records:
+roadmap wording. Planner-authored `plan.md` records these fields in its
+`Execution Profile` section:
 
-- `execution_mode`: `delegated` or `simple-direct`
-- `complexity`: `simple`, `standard`, or `closeout`
-- `verification_profile`: `focused`, `standard`, or `closeout`
+- `Complexity`: `simple`, `standard`, or `closeout`
+- `Verification profile`: `focused`, `standard`, or `closeout`
 
-For `execution_mode: delegated`, runtime passes the planner-authored profile to
-the implementer and reviewer. The reviewer applies the active
-`verification.md` checks for the selected profile and may escalate only with a
-concrete repo-risk or contract reason.
+`Complexity` describes only the selected task's own content: whether the
+requested change is narrow, clear, mechanically local, and conceptually small.
+Do not use surrounding roadmap importance, protected-surface status,
+validation cost, reviewer need, merge path, milestone proximity, or downstream
+risk to upgrade `Complexity`.
 
-For `execution_mode: simple-direct`, the planner may implement the selected
-simple task during planning and write both `implementation-notes.md` and
-`simple-direct-record.json`. The controller may skip implementer and reviewer
-dispatch only after all direct predicates pass:
+`Verification profile` describes the evidence required around the task. Put
+everything outside the task's own content here: protected-surface validation,
+aggregate regressions, full gates, milestone/proof/readiness claims, and
+downstream risk.
 
-- `round-plan-record.json.execution_mode == "simple-direct"`
-- `complexity == "simple"`
-- `verification_profile == "focused"`
-- `worker_mode == "none"`
-- changed paths stay inside `direct_write_scope`
-- every command in `simple-direct-record.json.verification_commands` passed,
-  including `git diff --check`
-- `simple-direct-record.json.roadmap_closeout.mode == "none"`
+For any task with `Complexity: simple`, the planner completes the task directly
+during planning, runs the commands required by the selected `Verification
+profile`, and writes direct evidence in
+`implementation-notes.md`. The controller skips implementer and reviewer
+dispatch after that evidence is present and verification commands passed.
 
-`simple-direct` is forbidden for milestone closeout, completion pointers,
-history entries, semantic roadmap updates, role prompt changes, schema changes,
-public contracts, cross-owner integration, verification meaning changes, or
-anything needing reviewer judgment. If any predicate fails, runtime must step
-back to the normal delegated path or recovery instead of merging directly.
+Runtime delegates to implementer/reviewer only for planner-classified
+non-simple work. Work that requires worker fan-out is non-simple by definition.
+The reviewer applies the active `verification.md` checks for the selected
+profile and may escalate only with a concrete repo-risk or contract reason.
 
 ## Required State Metadata
 
@@ -84,7 +76,6 @@ orchestrator/roadmaps/<roadmap_id>/<roadmap_revision>/
 The active revision directory must contain:
 
 - `roadmap.md`
-- `roadmap-view.json`
 - `verification.md`
 
 The roadmap family directory must contain:
@@ -101,13 +92,13 @@ The complete scaffold file list and path-resolution rules live in
 ## `roadmap.md`
 
 `roadmap.md` is the human-readable coordination source for live and future work
-in the family. It must be strategic: milestones are larger than rounds, and
-candidate directions are extraction hints rather than implementation plans.
+in the family and the single structured roadmap source for controller decisions.
+It must be strategic: milestones are larger than rounds, and candidate
+directions are extraction hints rather than implementation plans.
 
-Runtime must not parse `roadmap.md` as the machine source for terminal
-detection, lineage validation, or closeout anchors. Use `roadmap-view.json` for
-those machine decisions, and use `selection-record.json` for selected round
-lineage.
+Runtime reads the exact structured labels below for terminal detection,
+dependency lookup, direction lookup, and status-only closeout selectors. Use
+`plan.md` for selected round lineage.
 
 Required top-level sections:
 
@@ -131,6 +122,7 @@ Each milestone must include:
 - `Depends on:`
 - `Intent:`
 - `Completion signal:`
+- `Completion pointers:`
 - `Parallel lane:`
 - `Coordination notes:`
 
@@ -147,24 +139,23 @@ Each candidate direction must include:
 ## Terminal Detection
 
 To decide whether the active roadmap bundle has unfinished work, inspect
-`roadmap-view.json`.
+milestone headings under `roadmap.md` `## Milestones`.
 
-- Any milestone with `"status": "pending"` is unfinished.
-- Any milestone with `"status": "in-progress"` is unfinished.
-- A roadmap is terminal only when every milestone in
-  `roadmap-view.json.milestones[]` has `"status": "done"`.
+- Any milestone heading with `[pending]` is unfinished.
+- Any milestone heading with `[in-progress]` is unfinished.
+- A roadmap is terminal only when every milestone heading under `## Milestones`
+  uses `[done]`.
 
 The following are validation errors, not terminal roadmaps:
 
-- missing `roadmap-view.json`
-- missing or unknown `schema_version`
+- missing `roadmap.md`
+- missing required top-level sections or milestone fields
 - duplicate milestone ids or direction ids
 - unknown milestone status values
-- direction entries that point at missing milestone ids
-- milestone `status_anchor` or `completion_anchor` values that are absent from
-  `roadmap-view.json.anchors`
-- anchors referenced by status-only closeout selectors that are absent from
-  `roadmap-view.json.anchors`
+- candidate direction blocks outside a valid milestone
+- milestone dependencies that point at missing milestone ids
+- status-only closeout selectors that name missing milestone ids
+- history entries requested without `roadmap-history.md` `## Completed Rounds`
 
 On validation error, runtime must record the exact controller error in
 `orchestrator/state.json.resume_errors.controller` instead of treating the
@@ -175,49 +166,24 @@ terminal completion only when the active bundle is terminal and
 `state.json.active_rounds` is empty, no active `roadmap_update` remains, and no
 unresolved resume errors remain.
 
-## `roadmap-view.json`
+## Structured Roadmap Fields
 
-`roadmap-view.json` is the machine-readable view of the active roadmap
-revision. It keeps terminal detection, dependency lookup, direction lookup, and
-status-only closeout anchors behind one small Interface.
+`roadmap.md` is the structured roadmap source. Runtime derives:
 
-Required top-level fields:
+- milestone status from `### [pending]`, `### [in-progress]`, or `### [done]`
+  headings under `## Milestones`;
+- milestone identity from each `Milestone id:` field;
+- milestone dependencies from `Depends on:` comma-separated milestone ids, with
+  an empty value meaning no dependency;
+- milestone lane from `Parallel lane:`;
+- candidate direction identity from each `Direction id:` field inside a
+  milestone's `Candidate directions:` block;
+- direction readiness hints from `Preconditions:` and `Parallel hints:`.
 
-- `schema_version`: `roadmap-view-v1`
-- `roadmap_id`
-- `roadmap_revision`
-- `roadmap_dir`
-- `roadmap_file`
-- `milestones`
-- `directions`
-- `anchors`
-
-Milestone entries must include:
-
-- `milestone_id`
-- `title`
-- `status`: `pending`, `in-progress`, or `done`
-- `depends_on`
-- `parallel_lane`
-- `status_anchor`
-- `completion_anchor`
-- `direction_ids`
-
-Direction entries must include:
-
-- `direction_id`
-- `milestone_id`
-- `summary`
-- `preconditions`
-- `parallel_hints`
-
-Anchor entries map an `anchor_id` to a repo-relative `target_file` and a stable
-selector inside that file. Status-only round closeout resolves selectors through
-these anchors instead of relying on reviewers to copy exact Markdown headings.
-
-`roadmap.md` and `roadmap-view.json` should describe the same roadmap. If they
-conflict, runtime must record a controller error instead of guessing which
-surface is current.
+Callers resolve a status-only closeout selector by matching exactly one
+`Milestone id:` field in the active `roadmap.md`, then editing only that
+milestone block and the allowed `roadmap-history.md` section. Ambiguous or
+missing structured fields are controller errors.
 
 ## `verification.md`
 
@@ -240,28 +206,28 @@ Roadmap-specific retry policy belongs in `## Roadmap Overrides` only when the
 active revision needs behavior beyond the shared runtime retry mechanics. If no
 roadmap-specific retry policy exists, record `none`.
 
-## Status-Only Delegated Round Closeout
+## Status-Only Round Closeout
 
-After a delegated round is approved and before it is squash-merged, the
+This section owns the decision boundary between `status-only` closeout and
+semantic roadmap update. Reviewers classify non-simple rounds in `review.md`
+using this section. Planners record direct simple-round closeout in
+`implementation-notes.md`; runtime validates those fields instead of applying
+controller-inferred edits.
+
+After a non-simple round is approved and before it is squash-merged, the
 controller may apply status-only round closeout directly to the active revision
-copy in the canonical round worktree only when `review-record.json` explicitly
-approves it under `orchestrator/round-finalization-schema.md`.
-
-`simple-direct` rounds are not status-only closeout rounds. They must use
-`simple-direct-record.json` with `roadmap_closeout.mode == "none"` and may not
-write `closeout-record.json`.
+copy in the canonical round worktree only when `review.md` explicitly approves
+it.
 
 Status-only round closeout may do only these edits:
 
-- change the selected milestone status in `roadmap-view.json` between
-  `pending`, `in-progress`, and `done`, and update the corresponding
-  human-readable `roadmap.md` projection through the milestone anchor recorded
-  in `review-record.json`;
-- add or update compact completion pointers that name the round id and reviewer
-  evidence through `roadmap-view.json` anchors; and
+- change the selected milestone status marker in `roadmap.md` between
+  `[pending]`, `[in-progress]`, and `[done]`;
+- add or update compact completion pointers that name the round id and the
+  finalization evidence under the selected milestone's `Completion pointers:`
+  field; and
 - add compact history entries under `roadmap-history.md` that only summarize
-  completed work already approved by the round reviewer and use
-  `roadmap-view.json` anchors.
+  completed work already supported by the finalization evidence.
 
 Status-only round closeout must not change:
 
@@ -273,33 +239,34 @@ Status-only round closeout must not change:
 - verification meaning; or
 - retry policy.
 
-If the approved reviewer record is missing, ambiguous, or asks for any semantic
-change, runtime must return to review or recovery before merge instead of
-guessing controller-owned edits. After merge, semantic changes use the
-delegated `update-roadmap` path.
+If the approved reviewer artifact for a non-simple round is missing, ambiguous,
+or asks for any semantic change, runtime must return to review or recovery
+before merge instead of guessing controller-owned edits. If a simple round's
+`implementation-notes.md` is missing, ambiguous, or records any semantic
+change, runtime must return to plan or recovery. After merge, semantic changes
+use the delegated `update-roadmap` path.
 
-The controller must record applied status-only closeout in
-`orchestrator/rounds/<round-id>/closeout-record.json` following
-`orchestrator/round-finalization-schema.md`.
+Planner-completed simple rounds record their direct evidence and any simple
+status-only closeout they completed in `implementation-notes.md`. They do not
+need reviewer-authored closeout, and the controller must not author missing
+simple closeout by inference.
+
+For non-simple rounds, the controller may record concise merge bookkeeping in
+`orchestrator/rounds/<round-id>/merge.md`; it must not create a duplicate JSON
+closeout record.
 
 ## Revision And History Rules
 
 Used roadmap revisions are durable history. The current active revision may be
 modified in place on the round branch only through status-only round closeout,
-such as marking completed work in `roadmap-view.json` and `roadmap.md` or
-adding compact completion pointers, when the reviewer approves that no future
-coordination meaning changed.
+such as marking completed work in `roadmap.md` or adding compact completion
+pointers, when `review.md` approves that no future coordination meaning changed
+for a non-simple round or `implementation-notes.md` records valid direct
+status-only closeout for a simple round.
 
 Publish a new `rev-00N+1` directory under the same `roadmap_id` when a merged
-round or planner-requested roadmap update changes any of:
-
-- future coordination
-- milestone or direction meaning
-- sequencing
-- parallel lanes
-- extraction scope
-- verification meaning
-- retry policy
+round or planner-requested roadmap update crosses the semantic roadmap update
+boundary above.
 
 Move completed detail to
 `orchestrator/roadmaps/<roadmap_id>/roadmap-history.md`, or keep only compact

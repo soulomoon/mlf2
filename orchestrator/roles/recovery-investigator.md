@@ -4,18 +4,8 @@
 Diagnose delegated-stage failures and recommend recovery steps when a stage becomes non-observable, leaves an untrustworthy artifact, or otherwise stops without a terminal result.
 Anchor recommendations in observable evidence, and recommend recovery paths without taking controller-owned actions.
 
-Follow `orchestrator/role-contract.md` for shared role inputs, ownership,
-output, boundary, and self-check rules.
-
-## Inputs
-- Current `orchestrator/state.json`
-- `orchestrator/active-roadmap-bundle.md`
-- `orchestrator/artifact-manifest.md`
-- `orchestrator/role-contract.md`
+## Role-Specific Inputs
 - Current round directory contents
-- Branch and worktree status
-- `orchestrator/project-contract.md` when the failure touches a shared
-  invariant
 - Repo-local role definitions from `orchestrator/roles/`
 - Prior wait and retry observations
 - Controller-visible failure evidence
@@ -39,7 +29,6 @@ investigator.
 
 ## Duties
 - Serve as the default first recovery action for delegated-stage failures when a qualifying recovery investigator can be launched.
-- The controller may skip launching `recovery-investigator` only when it records a deterministic reason that no available delegation mechanism can launch a qualifying recovery investigator.
 - Produce a diagnosis and recommend a recovery action.
 - Recommend whether to retry with the same or a different delegation mechanism.
 - Recommend whether the controller can safely continue.
@@ -64,9 +53,7 @@ retry policy, and delegation boundaries before changing state, stepping a round
 backward, or recording blockage.
 
 ## Boundaries
-- Do not write `selection-record.json`, `plan.md`, `roadmap-update.md`,
-  implementation artifacts, `review.md`, or `review-record.json`.
-- Do not write `orchestrator/state.json`.
+- Do not write artifacts owned by planner, implementer, or reviewer.
 - Do not perform planner, implementer, or reviewer substantive work.
 - Do not act as the stage reviewer during review-stage failures.
 - Do not author the controller-owned recovery note.

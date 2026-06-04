@@ -1,8 +1,6 @@
 # State Schema
 
-This document is the canonical field reference for `orchestrator/state.json`.
-Other control-plane documents may point here, but should not duplicate the full
-schema table.
+This document owns the `orchestrator/state.json` field contract.
 
 Use a small machine-oriented state file that supports safe serial defaults plus
 explicit parallel execution.
@@ -40,15 +38,6 @@ explicit parallel execution.
 | `worktree_path` | string | Canonical round worktree |
 | `resume_error` | string or null | Per-round recoverable error |
 
-Delegated rounds follow the normal stage path:
-`plan -> implement -> review -> finalize-round`. `simple-direct` rounds may
-skip `implement` and `review`: after the planner writes `selection-record.json`,
-`round-plan-record.json`, `plan.md`, `implementation-notes.md`, and
-`simple-direct-record.json`, the controller may move from `plan` to
-`finalize-round` only if the direct predicates in
-`orchestrator/active-roadmap-bundle.md` and
-`orchestrator/round-finalization-schema.md` pass.
-
 ## Invariants
 
 When no semantic roadmap update is in progress, `roadmap_update` should be
@@ -58,20 +47,12 @@ Only one semantic roadmap update may be active. If `roadmap_update` is not
 `finalize-round`.
 The record shape, branch/worktree convention, artifact paths, rejection loop,
 and activation rules are defined by `orchestrator/roadmap-update-schema.md`.
-Round artifact paths are derived from `round_id`, `worktree_path`, and
-`orchestrator/artifact-manifest.md`; they are not duplicated in `state.json`.
-Worker fan-out mode and worker artifact paths are derived from
-`round-plan-record.json`; they are not duplicated in `state.json`.
+Round artifact paths and worker artifact paths are not duplicated in
+`state.json`; use `orchestrator/artifact-manifest.md` and the structured
+sections in `plan.md`.
 
-Round lineage and merge-order scheduling come from planner-authored
-`selection-record.json` following `orchestrator/selection-record-schema.md`.
+Round lineage and merge-order scheduling come from planner-authored `plan.md`.
 These fields are not duplicated in `state.json`.
 
-Merge readiness is not persisted. For delegated rounds, the controller derives
-merge admissibility from reviewer approval, closeout validity, scheduler fields
-in `selection-record.json`, dependency state, base freshness, and active
-semantic roadmap-update state. For `simple-direct` rounds, the controller
-derives merge admissibility from the planner-authored direct record, direct
-write-scope and verification predicates, scheduler fields in
-`selection-record.json`, dependency state, base freshness, and active semantic
-roadmap-update state.
+Merge readiness is not persisted. The controller derives it during
+`finalize-round`.
