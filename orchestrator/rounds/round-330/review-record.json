@@ -1,0 +1,24 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-330",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-006",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-006",
+  "milestone_id": "milestone-4",
+  "direction_id": "direction-4a-canonical-parser-parity",
+  "extracted_item_id": "item-330-parser-library-recursive-tree-extension",
+  "decision": "approved",
+  "evidence_summary": "Retry cleanup resolved the previous integration blockers: the index is empty, no tracked out-of-scope orchestrator/control-plane or generated runtime churn remains, and selection-record.json plus round-plan-record.json match the active rev-006 parser-library recursive-tree slice. Current review passed scope, lineage, shortcut, diff hygiene, and closeout-anchor checks; existing standard parser, Cabal, and thesis-gate evidence remains valid because cleanup did not alter parser/test/fixture behavior.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-4-completion",
+        "text": "round-330 completed item-330-parser-library-recursive-tree-extension: the shared parser-owned library covers bounded recursive-tree first-order and deriving parser-parity fixtures plus malformed case-branch-arrow evidence; reviewer evidence passed cleanup scope checks, shortcut audit, focused and aggregate parser-parity evidence, cabal build all, cabal test, and thesis gate."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}

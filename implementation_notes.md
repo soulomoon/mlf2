@@ -1,3 +1,30 @@
+## 2026-06-04 - Round 330 parser parity recursive-tree extension
+
+- Extended the shared parser-owned parser-parity source-text parser library
+  with bounded recursive tree slices covering `recursive-tree-first-order` and
+  `recursive-tree-deriving`, including a `Tree` declaration with two-field
+  `Branch : Tree -> Tree -> Tree`, two-argument constructor patterns,
+  wildcard patterns, recursive `mirror`, nested constructor/application
+  expressions, and `data Tree ... deriving Eq`.
+- Added committed parser-program projection fixtures for both recursive-tree
+  cases, plus thin `.mlfp` fixture roots that expose only `sourceFile` and
+  `sourceText` before calling `renderParserParityProjectionFromSourceText`.
+- Registered both positive fixtures in the generated aggregate parser-parity
+  public CLI driver and added public malformed recursive-tree case syntax
+  coverage through `renderParserNegativeEvidenceFromSourceText`, with
+  parser-owned `expected-case-branch-arrow@...` diagnostic evidence.
+- The generalized two-argument constructor-pattern grammar now carries two
+  older malformed case-pattern fixtures to the later token-derived branch-arrow
+  location; their expected dynamic evidence spans were updated to match the
+  shared parser's honest grammar path.
+- Extended shortcut/static guards for round-specific parser/token/projection
+  shortcuts, including recursive-tree fixture-specific token streams, success
+  keys, pre-rendered `Tree`/`Branch`/`mirror`/`isBranch`/`main` rows,
+  whole-fixture recognition, and static recursive-tree negative evidence.
+- Scope remains bounded parser parity only. This is not full parser parity,
+  resolver, checker, backend, compiler-package, driver, platform, proof, or
+  self-boot progress.
+
 ## 2026-06-04 - Round 329 parser parity recursive-list-tail extension
 
 - Extended the shared parser-owned parser-parity source-text parser library

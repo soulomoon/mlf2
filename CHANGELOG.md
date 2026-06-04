@@ -36,6 +36,17 @@
   deferred placeholders remain per binding.
 
 ### Added
+- Extended the shared parser-owned parser-parity library with bounded
+  recursive tree grammar slices for `recursive-tree-first-order` and
+  `recursive-tree-deriving`. The new committed projections and thin fixture
+  roots cover `Tree` declarations with two-field `Branch` constructors,
+  two-argument constructor patterns, wildcard patterns, recursive `mirror`,
+  nested constructor/application expressions, and `data Tree ... deriving Eq`
+  through the shared source-text lexer/parser path. A malformed recursive-tree
+  missing case-branch-arrow path is also covered by the generated aggregate
+  public CLI driver. This is not full parser parity,
+  resolver/checker/backend, compiler-package, driver, platform, proof, or
+  self-boot work.
 - Extended the shared parser-owned parser-parity library with a bounded
   recursive list-tail grammar slice for `module RecursiveList export (Nat(..),
   List(..), tailOrNil, isNil, main)`, paired `Nat` and `List` data

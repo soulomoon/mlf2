@@ -1,0 +1,7 @@
+module ParserParityFixture export (sourceFile, sourceText) {
+  def sourceFile : String =
+    "test/conformance/mlfp/parser-parity/recursive-tree-first-order/src/Main.mlfp";
+
+  def sourceText : String =
+    "module RecursiveTreeFirstOrder export (Tree(..), mirror, isBranch, main) {\n  data Tree =\n      Leaf : Tree\n    | Branch : Tree -> Tree -> Tree;\n\n  def mirror : Tree -> Tree = λ(tree : Tree) case tree of {\n    Leaf -> Leaf;\n    Branch left right -> Branch (mirror right) (mirror left)\n  };\n\n  def isBranch : Tree -> Bool = λ(tree : Tree) case tree of {\n    Leaf -> false;\n    Branch _ _ -> true\n  };\n\n  def main : Bool = isBranch (mirror (Branch Leaf Leaf));\n}\n";
+}

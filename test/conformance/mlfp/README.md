@@ -103,4 +103,8 @@ constructor/application expressions in `main`, and malformed missing
 case-branch-arrow diagnostics, plus one recursive-list tail fixture covering
 paired `Nat`/`List` data declarations, two-field `Cons` constructor syntax,
 two-argument list case patterns, nested `isNil (tailOrNil (Cons Zero Nil))`
-application, and malformed missing case-branch-arrow diagnostics.
+application, and malformed missing case-branch-arrow diagnostics, plus two
+recursive-tree fixtures covering two-field `Branch` constructor syntax,
+two-argument tree case patterns, wildcard patterns, recursive `mirror`,
+nested constructor/application expressions, `data Tree ... deriving Eq`, and
+malformed missing case-branch-arrow diagnostics.

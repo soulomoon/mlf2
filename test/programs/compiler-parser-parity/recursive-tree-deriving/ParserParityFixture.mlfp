@@ -1,0 +1,7 @@
+module ParserParityFixture export (sourceFile, sourceText) {
+  def sourceFile : String =
+    "test/conformance/mlfp/parser-parity/recursive-tree-deriving/src/Main.mlfp";
+
+  def sourceText : String =
+    "module RecursiveTreeDeriving export (Eq, Tree(..), eq, main) {\n  class Eq a {\n    eq : a -> a -> Bool;\n  }\n\n  data Tree =\n      Leaf : Tree\n    | Branch : Tree -> Tree -> Tree\n    deriving Eq;\n\n  def main : Bool = eq (Branch Leaf Leaf) (Branch Leaf Leaf);\n}\n";
+}

@@ -1,0 +1,11 @@
+module RecursiveTreeFirstOrder span=test/conformance/mlfp/parser-parity/recursive-tree-first-order/src/Main.mlfp:1:1-18:1
+export type-with-constructors Tree span=test/conformance/mlfp/parser-parity/recursive-tree-first-order/src/Main.mlfp:1:40-1:48
+export value mirror span=test/conformance/mlfp/parser-parity/recursive-tree-first-order/src/Main.mlfp:1:50-1:56
+export value isBranch span=test/conformance/mlfp/parser-parity/recursive-tree-first-order/src/Main.mlfp:1:58-1:66
+export value main span=test/conformance/mlfp/parser-parity/recursive-tree-first-order/src/Main.mlfp:1:68-1:72
+data Tree span=test/conformance/mlfp/parser-parity/recursive-tree-first-order/src/Main.mlfp:2:3-6:3
+constructor Leaf type=Tree span=test/conformance/mlfp/parser-parity/recursive-tree-first-order/src/Main.mlfp:3:7-4:5
+constructor Branch type=Tree -> Tree -> Tree span=test/conformance/mlfp/parser-parity/recursive-tree-first-order/src/Main.mlfp:4:7-4:36
+def mirror type=Tree -> Tree expr=λ(tree : Tree) case tree of { Leaf -> Leaf; Branch left right -> Branch (mirror right) (mirror left) } span=test/conformance/mlfp/parser-parity/recursive-tree-first-order/src/Main.mlfp:6:3-11:3
+def isBranch type=Tree -> Bool expr=λ(tree : Tree) case tree of { Leaf -> false; Branch _ _ -> true } span=test/conformance/mlfp/parser-parity/recursive-tree-first-order/src/Main.mlfp:11:3-16:3
+def main type=Bool expr=isBranch (mirror (Branch Leaf Leaf)) span=test/conformance/mlfp/parser-parity/recursive-tree-first-order/src/Main.mlfp:16:3-17:1

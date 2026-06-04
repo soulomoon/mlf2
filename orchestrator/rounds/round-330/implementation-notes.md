@@ -1,0 +1,43 @@
+### Changes Made
+- `test/ProgramParserParitySpec.hs`: added focused public-interface matchers for `recursive-tree-first-order` and `recursive-tree-deriving`, registered both positive fixtures in `parserParityPositiveCases`, added the generated-batch recursive-tree negative case, extended round-330 shortcut/static guards, and updated two older dynamic negative-evidence spans to the later token-derived branch-arrow locations produced by the generalized two-argument constructor-pattern grammar.
+- `test/conformance/mlfp/parser-parity/recursive-tree-first-order/src/Main.mlfp`: added the canonical first-order recursive tree source fixture with `Tree`, `Leaf`, `Branch`, recursive `mirror`, `isBranch`, wildcard patterns, and nested constructor/application expressions.
+- `test/conformance/mlfp/parser-parity/recursive-tree-first-order/expected/parser-program.txt`: added the canonical parser-program projection oracle for the first-order recursive tree fixture.
+- `test/programs/compiler-parser-parity/recursive-tree-first-order/ParserParityFixture.mlfp` and `Main.mlfp`: added the thin public harness that exposes only `sourceFile`/`sourceText` and calls `renderParserParityProjectionFromSourceText`.
+- `test/conformance/mlfp/parser-parity/recursive-tree-deriving/src/Main.mlfp`: added the canonical recursive tree deriving source fixture with `class Eq`, `data Tree ... deriving Eq`, and `eq (Branch Leaf Leaf) (Branch Leaf Leaf)`.
+- `test/conformance/mlfp/parser-parity/recursive-tree-deriving/expected/parser-program.txt`: added the canonical parser-program projection oracle for the deriving fixture.
+- `test/programs/compiler-parser-parity/recursive-tree-deriving/ParserParityFixture.mlfp` and `Main.mlfp`: added the thin public harness that routes through the shared parser library.
+- `test/programs/compiler-parser-parity/parser-library/ParserParityParser.mlfp`: generalized shared grammar paths for two-field constructor types, two-argument constructor patterns, nested parenthesized constructor/application expressions, one-data/three-definition module bodies, and class-plus-derived-data module bodies. Added deriving projection rendering through token-derived rows.
+- `CHANGELOG.md`, `implementation_notes.md`, `docs/mlfp-self-boot-readiness.md`, and `test/conformance/mlfp/README.md`: recorded bounded parser-parity fixture progress without claiming checker/backend, full parser parity, milestone-4 closeout, or self-boot completion.
+
+### Tests
+- `test/ProgramParserParitySpec.hs`: verifies the two new recursive-tree fixtures against the Haskell canonical parser projection and the shared `.mlfp` parser-library projection, includes them in the generated aggregate public CLI driver, checks the malformed recursive-tree negative diagnostic path, and rejects fixture-specific parser/token/projection shortcuts.
+- RED evidence:
+  - `timeout 3600 cabal test mlf2-test --test-options='--match "/MLF.Program parser parity/shared parser-owned .mlfp parser parses recursive tree first-order programs/"'` failed with shared parser output `parser-error` before grammar support was added.
+  - `timeout 3600 cabal test mlf2-test --test-options='--match "/MLF.Program parser parity/shared parser-owned .mlfp parser parses recursive tree deriving programs/"'` failed with shared parser output `parser-error` before deriving/tree grammar support was added.
+- GREEN evidence:
+  - `timeout 3600 cabal test mlf2-test --test-options='--match "/MLF.Program parser parity/shared parser-owned .mlfp parser parses recursive tree first-order programs/"'` passed: 1 example, 0 failures, 199.7301s.
+  - `timeout 3600 cabal test mlf2-test --test-options='--match "/MLF.Program parser parity/shared parser-owned .mlfp parser parses recursive tree deriving programs/"'` passed: 1 example, 0 failures, 196.3471s.
+  - `timeout 3600 cabal test mlf2-test --test-options='--match "/MLF.Program parser parity/parser-owned .mlfp parser reports malformed recursive tree diagnostics through public run-program/"'` passed: 1 example, 0 failures, 375.6616s. The first final-registration run failed because the expanded two-argument pattern grammar moved two older malformed-case diagnostics to later token-derived spans; those expected evidence rows were updated and the matcher passed on rerun.
+  - `timeout 300 cabal test mlf2-test --test-options='--match "/MLF.Program parser parity/shared parser-owned .mlfp parser keeps expanded grammar paths instead of shortcut entrypoints/"'` passed: 1 example, 0 failures, 0.8503s.
+  - `timeout 300 cabal test mlf2-test --test-options='--match "/MLF.Program parser parity/shared parser-owned .mlfp parser reaches success only after complete syntax and dynamic diagnostics/"'` passed: 1 example, 0 failures, 0.0824s.
+  - `rg -n 'parseRecursiveTree|completeModuleKey "recursive-tree-first-order"|completeModuleKey "recursive-tree-deriving"|moduleKey "recursive-tree-first-order"|moduleKey "recursive-tree-deriving"|programKey "recursive-tree-first-order"|programKey "recursive-tree-deriving"|RecursiveTreeFirstOrderTokens|RecursiveTreeDerivingTokens|LexerOk recursiveTreeFirstOrderTokens|LexerOk recursiveTreeDerivingTokens|recursive-tree-first-order tokens|recursive-tree-deriving tokens|stringIndexOf sourceText "module RecursiveTree"|stringIndexOf "module RecursiveTree" sourceText|defRows sourceFile "mirror"|defRows sourceFile "isBranch"|defRows sourceFile "main"|dataRows sourceFile "Tree"|constructorRows sourceFile "Branch"|recursive-tree parser negative expected-case-branch-arrow@' test/programs/compiler-parser-parity/parser-library test/ProgramParserParitySpec.hs` returned no matches.
+  - `timeout 3600 cabal test mlf2-test --test-options='--match "/MLF.Program parser parity/runs all .mlfp parser parity fixtures through one generated public CLI driver/"'` passed: 1 example, 0 failures, 377.7352s.
+  - First-order standalone smoke/diff passed with no diff: `timeout 900 cabal -v0 run mlf2 -- run-program test/programs/compiler-parser-parity/recursive-tree-first-order --search-path test/programs/compiler-parser-parity/parser-library`.
+  - Deriving standalone smoke/diff passed with no diff: `timeout 900 cabal -v0 run mlf2 -- run-program test/programs/compiler-parser-parity/recursive-tree-deriving --search-path test/programs/compiler-parser-parity/parser-library`.
+  - `timeout 3600 cabal test mlf2-test --test-options='--match "/MLF.Program parser parity/"'` passed: 33 examples, 0 failures, 2868.4385s.
+  - `git diff --check` passed.
+  - `cabal build all` passed.
+  - `cabal test` passed: 2680 examples, 0 failures, 3256.1538s.
+  - `./scripts/thesis-conformance-gate.sh` passed with `[thesis-gate] PASS: thesis conformance anchors are green`.
+
+### Notes
+The implementation stayed in the round worktree and did not update controller state or merge. The parser extension is shared grammar support, not a fixture-owned parser: both new harnesses remain source/evidence wrappers around `renderParserParityProjectionFromSourceText`, and the shortcut audit found no round-330 fixture keys, token streams, whole-source recognition, or pre-rendered recursive-tree rows.
+
+The generalized two-argument constructor-pattern path means malformed cases like `Succ inner inner` can now parse as a syntactically valid two-argument pattern and report the missing branch arrow at the following token. That changed dynamic evidence spans for `higher-order-function-field` and `recursive-adt-plain-nat`; the diagnostic category remains `expected-case-branch-arrow@...`.
+
+#### Retry Cleanup - 2026-06-05
+- Confirmed the retry started with an empty git index: `git diff --cached --name-status` produced no output.
+- Dropped out-of-scope tracked orchestrator/control-plane churn and generated local build noise with `git restore -- orchestrator runtime/mlfp_io/target/release/libmlfp_io.d`; the remaining round output no longer modifies roles, schemas, roadmap revision files, roadmap views, historical round records, or `runtime/mlfp_io/target/release/libmlfp_io.d`.
+- Restored the missing structured round artifacts as `orchestrator/rounds/round-330/selection-record.json` and `orchestrator/rounds/round-330/round-plan-record.json`, matching `item-330-parser-library-recursive-tree-extension`, `execution_mode: delegated`, `complexity: standard`, `verification_profile: standard`, and `worker_mode: none`.
+- Did not touch parser, test, fixture, or bounded docs content during retry cleanup, so the accepted parser verification was not invalidated and focused parser checks were not rerun.
+- Retry cleanup verification commands run: `git status --short --branch`, `git diff --cached --name-status`, `git diff --name-status`, and `git diff --check`.
