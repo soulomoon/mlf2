@@ -1,0 +1,15 @@
+module RecursiveList span=test/conformance/mlfp/parser-parity/recursive-list-tail/src/Main.mlfp:1:1-22:1
+export type-with-constructors Nat span=test/conformance/mlfp/parser-parity/recursive-list-tail/src/Main.mlfp:1:30-1:37
+export type-with-constructors List span=test/conformance/mlfp/parser-parity/recursive-list-tail/src/Main.mlfp:1:39-1:47
+export value tailOrNil span=test/conformance/mlfp/parser-parity/recursive-list-tail/src/Main.mlfp:1:49-1:58
+export value isNil span=test/conformance/mlfp/parser-parity/recursive-list-tail/src/Main.mlfp:1:60-1:65
+export value main span=test/conformance/mlfp/parser-parity/recursive-list-tail/src/Main.mlfp:1:67-1:71
+data Nat span=test/conformance/mlfp/parser-parity/recursive-list-tail/src/Main.mlfp:2:3-6:3
+constructor Zero type=Nat span=test/conformance/mlfp/parser-parity/recursive-list-tail/src/Main.mlfp:3:7-4:5
+constructor Succ type=Nat -> Nat span=test/conformance/mlfp/parser-parity/recursive-list-tail/src/Main.mlfp:4:7-4:24
+data List span=test/conformance/mlfp/parser-parity/recursive-list-tail/src/Main.mlfp:6:3-10:3
+constructor Nil type=List span=test/conformance/mlfp/parser-parity/recursive-list-tail/src/Main.mlfp:7:7-8:5
+constructor Cons type=Nat -> List -> List span=test/conformance/mlfp/parser-parity/recursive-list-tail/src/Main.mlfp:8:7-8:33
+def tailOrNil type=List -> List expr=λ(xs : List) case xs of { Nil -> Nil; Cons _ rest -> rest } span=test/conformance/mlfp/parser-parity/recursive-list-tail/src/Main.mlfp:10:3-15:3
+def isNil type=List -> Bool expr=λ(xs : List) case xs of { Nil -> true; Cons _ _ -> false } span=test/conformance/mlfp/parser-parity/recursive-list-tail/src/Main.mlfp:15:3-20:3
+def main type=Bool expr=isNil (tailOrNil (Cons Zero Nil)) span=test/conformance/mlfp/parser-parity/recursive-list-tail/src/Main.mlfp:20:3-21:1

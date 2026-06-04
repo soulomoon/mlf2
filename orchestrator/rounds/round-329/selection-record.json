@@ -1,0 +1,16 @@
+{
+  "schema_version": "selection-record-v1",
+  "round_id": "round-329",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-005",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-005",
+  "milestone_id": "milestone-4",
+  "direction_id": "direction-4a-canonical-parser-parity",
+  "extracted_item_id": "item-329-parser-library-recursive-list-tail-extension",
+  "summary": "Extend the shared parser-owned source-text parser library to parse the bounded frozen recursive-list-tail fixture, including Nat and List data declarations, a two-field Cons constructor, List case expressions with multi-argument constructor patterns, and nested constructor/application expressions, through one thin parser-parity fixture without fixture-owned parsers, exact-source token streams, or checker/backend scope.",
+  "scheduler": {
+    "depends_on_round_ids": [],
+    "merge_after_item_ids": [],
+    "parallel_group": null
+  }
+}

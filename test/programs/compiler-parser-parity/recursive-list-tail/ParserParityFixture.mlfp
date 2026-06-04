@@ -1,0 +1,7 @@
+module ParserParityFixture export (sourceFile, sourceText) {
+  def sourceFile : String =
+    "test/conformance/mlfp/parser-parity/recursive-list-tail/src/Main.mlfp";
+
+  def sourceText : String =
+    "module RecursiveList export (Nat(..), List(..), tailOrNil, isNil, main) {\n  data Nat =\n      Zero : Nat\n    | Succ : Nat -> Nat;\n\n  data List =\n      Nil : List\n    | Cons : Nat -> List -> List;\n\n  def tailOrNil : List -> List = λ(xs : List) case xs of {\n    Nil -> Nil;\n    Cons _ rest -> rest\n  };\n\n  def isNil : List -> Bool = λ(xs : List) case xs of {\n    Nil -> true;\n    Cons _ _ -> false\n  };\n\n  def main : Bool = isNil (tailOrNil (Cons Zero Nil));\n}\n";
+}

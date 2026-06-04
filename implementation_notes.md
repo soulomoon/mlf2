@@ -1,3 +1,26 @@
+## 2026-06-04 - Round 329 parser parity recursive-list-tail extension
+
+- Extended the shared parser-owned parser-parity source-text parser library
+  with a bounded recursive list-tail slice covering `module RecursiveList
+  export (Nat(..), List(..), tailOrNil, isNil, main)`, paired `Nat` and `List`
+  data declarations, a two-field `Cons : Nat -> List -> List` constructor,
+  two-argument list case patterns, and nested `isNil (tailOrNil (Cons Zero
+  Nil))` application.
+- Added the committed parser-program projection fixture for
+  `recursive-list-tail`, plus a thin `.mlfp` fixture root that exposes only
+  `sourceFile` and `sourceText` before calling
+  `renderParserParityProjectionFromSourceText`.
+- Added public parser-parity coverage for malformed recursive-list case syntax
+  through `renderParserNegativeEvidenceFromSourceText`, with parser-owned
+  `expected-case-branch-arrow@...` diagnostic evidence.
+- Extended shortcut/static guards for round-specific parser/token/projection
+  shortcuts, including fixture-specific token streams, success keys,
+  pre-rendered `tailOrNil`/`isNil`/`main` rows, whole-fixture recognition, and
+  static recursive-list negative evidence.
+- Scope remains bounded parser parity only. This is not full parser parity,
+  resolver, checker, backend, compiler-package, driver, platform, proof, or
+  self-boot progress.
+
 ## 2026-06-04 - Round 328 parser parity recursive-ADT plain Nat extension
 
 - Extended the shared parser-owned parser-parity source-text parser library

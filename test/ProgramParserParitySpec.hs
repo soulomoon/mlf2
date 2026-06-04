@@ -116,6 +116,15 @@ spec =
             canonicalProjection `shouldBe` expected
             sharedParserProjection `shouldBe` Right expected
 
+        it "shared parser-owned .mlfp parser parses recursive list tail" $ do
+            source <- readFile recursiveListTailCanonicalSourcePath
+            expected <- readFile recursiveListTailExpectedProjectionPath
+            canonicalProjection <- renderCanonicalProjection recursiveListTailCanonicalSourcePath source
+            sharedParserProjection <- runSharedParserBatch recursiveListTailParserProgramRoot
+
+            canonicalProjection `shouldBe` expected
+            sharedParserProjection `shouldBe` Right expected
+
         beforeAll loadParserParityBatchFixture $ do
             it "runs all .mlfp parser parity fixtures through one generated public CLI driver" $ \fixture ->
                 batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
@@ -203,6 +212,12 @@ spec =
                 batchExpectedOutput fixture
                     `shouldSatisfy` isInfixOf
                         (batchSection "negative:recursive-adt-plain-nat" recursiveAdtPlainNatNegativeEvidenceProjection)
+
+            it "parser-owned .mlfp parser reports malformed recursive list tail diagnostics through public run-program" $ \fixture -> do
+                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
+                batchExpectedOutput fixture
+                    `shouldSatisfy` isInfixOf
+                        (batchSection "negative:recursive-list-tail" recursiveListTailNegativeEvidenceProjection)
 
             it "shared parser-owned .mlfp parser library routes the generated batch through one entrypoint" $ \fixture -> do
                 sharedParserExists <- doesFileExist (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
@@ -370,6 +385,10 @@ recursiveAdtPlainNatCanonicalSourcePath :: FilePath
 recursiveAdtPlainNatCanonicalSourcePath =
     "test/conformance/mlfp/parser-parity/recursive-adt-plain-nat/src/Main.mlfp"
 
+recursiveListTailCanonicalSourcePath :: FilePath
+recursiveListTailCanonicalSourcePath =
+    "test/conformance/mlfp/parser-parity/recursive-list-tail/src/Main.mlfp"
+
 expectedProjectionPath :: FilePath
 expectedProjectionPath =
     "test/conformance/mlfp/parser-parity/basic-module-def-bool/expected/parser-program.txt"
@@ -486,6 +505,10 @@ recursiveAdtPlainNatExpectedProjectionPath :: FilePath
 recursiveAdtPlainNatExpectedProjectionPath =
     "test/conformance/mlfp/parser-parity/recursive-adt-plain-nat/expected/parser-program.txt"
 
+recursiveListTailExpectedProjectionPath :: FilePath
+recursiveListTailExpectedProjectionPath =
+    "test/conformance/mlfp/parser-parity/recursive-list-tail/expected/parser-program.txt"
+
 sharedParserLibraryRoot :: FilePath
 sharedParserLibraryRoot =
     "test/programs/compiler-parser-parity/parser-library"
@@ -526,6 +549,10 @@ recursiveAdtPlainNatParserProgramRoot :: FilePath
 recursiveAdtPlainNatParserProgramRoot =
     "test/programs/compiler-parser-parity/recursive-adt-plain-nat"
 
+recursiveListTailParserProgramRoot :: FilePath
+recursiveListTailParserProgramRoot =
+    "test/programs/compiler-parser-parity/recursive-list-tail"
+
 sharedParserAuditFiles :: [FilePath]
 sharedParserAuditFiles =
     [ sharedParserLibraryRoot </> "ParserParityToken.mlfp"
@@ -556,6 +583,7 @@ sharedParserBannedPhrases =
     , concat ["Recursive", "Adt", "Tokens"]
     , concat ["Recursive", "Adt", "Plain", "Nat", "Tokens"]
     , concat ["Plain", "Recursive", "Nat", "Tokens"]
+    , concat ["Recursive", "List", "Tail", "Tokens"]
     , concat ["LexerOk ", "basic", "Module", "Tokens"]
     , concat ["LexerOk ", "import", "Bool", "Tokens"]
     , concat ["LexerOk ", "value", "Def", "List", "Tokens"]
@@ -576,6 +604,7 @@ sharedParserBannedPhrases =
     , concat ["LexerOk ", "recursive", "Adt", "Tokens"]
     , concat ["LexerOk ", "recursive", "Adt", "Plain", "Nat", "Tokens"]
     , concat ["LexerOk ", "plain", "Recursive", "Nat", "Tokens"]
+    , concat ["LexerOk ", "recursive", "List", "Tail", "Tokens"]
     , concat ["First", "Class", "Polymorphism", "Tokens"]
     , concat ["LexerOk ", "first", "Class", "Polymorphism", "Tokens"]
     , concat ["case", " tokens"]
@@ -593,6 +622,7 @@ sharedParserBannedPhrases =
     , concat ["recursive-adt", " tokens"]
     , concat ["recursive-adt-plain-nat", " tokens"]
     , concat ["plain-recursive-nat", " tokens"]
+    , concat ["recursive-list-tail", " tokens"]
     , concat ["first-class-polymorphism-source-types", " tokens"]
     ]
 
@@ -658,6 +688,7 @@ sharedParserShortcutPhrases =
         , sharedParserRound326ShortcutPhrases
         , sharedParserRound327ShortcutPhrases
         , sharedParserRound328ShortcutPhrases
+        , sharedParserRound329ShortcutPhrases
         ]
 
 sharedParserRound314ShortcutPhrases :: [String]
@@ -988,6 +1019,28 @@ sharedParserRound328ShortcutPhrases =
     , concat ["recursive-adt-plain-nat parser negative ", "expected-case-branch-arrow@"]
     ]
 
+sharedParserRound329ShortcutPhrases :: [String]
+sharedParserRound329ShortcutPhrases =
+    [ concat ["parse", "Recursive", "List", "Tail"]
+    , concat ["completeModuleKey \"", "recursive-list-tail", "\""]
+    , concat ["moduleKey \"", "recursive-list-tail", "\""]
+    , concat ["programKey \"", "recursive-list-tail", "\""]
+    , concat ["Recursive", "List", "Tail", "Tokens"]
+    , concat ["LexerOk ", "recursive", "List", "Tail", "Tokens"]
+    , concat ["recursive-list-tail", " tokens"]
+    , concat ["stringIndexOf sourceText \"", "module RecursiveList export", "\""]
+    , concat ["stringIndexOf \"", "module RecursiveList export", "\" sourceText"]
+    , concat ["defRows sourceFile \"", "tailOrNil", "\""]
+    , concat ["defRows sourceFile \"", "isNil", "\""]
+    , concat ["defRows sourceFile \"", "main", "\""]
+    , concat ["dataRows sourceFile \"", "List", "\""]
+    , concat ["constructorRows sourceFile \"", "Cons", "\""]
+    , concat ["def tailOrNil type=List -> List expr=", "λ(xs : List) case xs of"]
+    , concat ["def isNil type=List -> Bool expr=", "λ(xs : List) case xs of"]
+    , concat ["def main type=Bool expr=", "isNil (tailOrNil (Cons Zero Nil))"]
+    , concat ["recursive-list-tail parser negative ", "expected-case-branch-arrow@"]
+    ]
+
 sharedParserCompleteParseRequiredPhrases :: [String]
 sharedParserCompleteParseRequiredPhrases =
     [ "parserStateAtEnd state"
@@ -1020,6 +1073,7 @@ sharedParserStaticNegativeEvidencePhrases =
     , concat ["stringAppend \"authoritative-recursive-let parser negative ", "expected-case-branch-arrow@\""]
     , concat ["stringAppend \"authoritative-cross-module-let-polymorphism parser negative ", "expected-def-semicolon@\""]
     , concat ["stringAppend \"recursive-adt-plain-nat parser negative ", "expected-case-branch-arrow@\""]
+    , concat ["stringAppend \"recursive-list-tail parser negative ", "expected-case-branch-arrow@\""]
     ]
 
 sharedParserDynamicEvidenceRequiredPhrases :: [String]
@@ -1106,6 +1160,7 @@ parserParityPositiveCases =
     , ParserParityPositiveCase "positive:authoritative-recursive-let" "positiveAuthoritativeRecursiveLet" authoritativeRecursiveLetCanonicalSourcePath authoritativeRecursiveLetExpectedProjectionPath
     , ParserParityPositiveCase "positive:authoritative-cross-module-let-polymorphism" "positiveAuthoritativeCrossModuleLetPolymorphism" authoritativeCrossModuleLetPolymorphismCanonicalSourcePath authoritativeCrossModuleLetPolymorphismExpectedProjectionPath
     , ParserParityPositiveCase "positive:recursive-adt-plain-nat" "positiveRecursiveAdtPlainNat" recursiveAdtPlainNatCanonicalSourcePath recursiveAdtPlainNatExpectedProjectionPath
+    , ParserParityPositiveCase "positive:recursive-list-tail" "positiveRecursiveListTail" recursiveListTailCanonicalSourcePath recursiveListTailExpectedProjectionPath
     ]
 
 parserParityNegativeCases :: [ParserParityNegativeCase]
@@ -1131,6 +1186,7 @@ parserParityNegativeCases =
     , ParserParityNegativeCase "negative:authoritative-recursive-let" "negativeAuthoritativeRecursiveLet" "authoritative-recursive-let parser negative " authoritativeRecursiveLetCanonicalSourcePath authoritativeRecursiveLetNegativeSourceText authoritativeRecursiveLetNegativeEvidenceProjection
     , ParserParityNegativeCase "negative:authoritative-cross-module-let-polymorphism" "negativeAuthoritativeCrossModuleLetPolymorphism" "authoritative-cross-module-let-polymorphism parser negative " authoritativeCrossModuleLetPolymorphismCanonicalSourcePath authoritativeCrossModuleLetPolymorphismNegativeSourceText authoritativeCrossModuleLetPolymorphismNegativeEvidenceProjection
     , ParserParityNegativeCase "negative:recursive-adt-plain-nat" "negativeRecursiveAdtPlainNat" "recursive-adt-plain-nat parser negative " recursiveAdtPlainNatCanonicalSourcePath recursiveAdtPlainNatNegativeSourceText recursiveAdtPlainNatNegativeEvidenceProjection
+    , ParserParityNegativeCase "negative:recursive-list-tail" "negativeRecursiveListTail" "recursive-list-tail parser negative " recursiveListTailCanonicalSourcePath recursiveListTailNegativeSourceText recursiveListTailNegativeEvidenceProjection
     ]
 
 assertCanonicalParserParityProjection :: ParserParityPositiveCase -> IO ()
@@ -1594,6 +1650,32 @@ recursiveAdtPlainNatNegativeSourceText =
         , "}"
         ]
 
+recursiveListTailNegativeSourceText :: String
+recursiveListTailNegativeSourceText =
+    unlines
+        [ "module RecursiveList export (Nat(..), List(..), tailOrNil, isNil, main) {"
+        , "  data Nat ="
+        , "      Zero : Nat"
+        , "    | Succ : Nat -> Nat;"
+        , ""
+        , "  data List ="
+        , "      Nil : List"
+        , "    | Cons : Nat -> List -> List;"
+        , ""
+        , "  def tailOrNil : List -> List = λ(xs : List) case xs of {"
+        , "    Nil -> Nil;"
+        , "    Cons _ rest rest"
+        , "  };"
+        , ""
+        , "  def isNil : List -> Bool = λ(xs : List) case xs of {"
+        , "    Nil -> true;"
+        , "    Cons _ _ -> false"
+        , "  };"
+        , ""
+        , "  def main : Bool = isNil (tailOrNil (Cons Zero Nil));"
+        , "}"
+        ]
+
 retryEvidenceProjection :: String
 retryEvidenceProjection =
     unlines
@@ -1757,6 +1839,16 @@ recursiveAdtPlainNatNegativeEvidenceProjection =
             [ "recursive-adt-plain-nat parser negative "
             , "expected-case-branch-arrow@"
             , "test/conformance/mlfp/parser-parity/recursive-adt-plain-nat/src/Main.mlfp:13:16-13:21"
+            ]
+        ]
+
+recursiveListTailNegativeEvidenceProjection :: String
+recursiveListTailNegativeEvidenceProjection =
+    unlines
+        [ concat
+            [ "recursive-list-tail parser negative "
+            , "expected-case-branch-arrow@"
+            , "test/conformance/mlfp/parser-parity/recursive-list-tail/src/Main.mlfp:12:17-12:21"
             ]
         ]
 

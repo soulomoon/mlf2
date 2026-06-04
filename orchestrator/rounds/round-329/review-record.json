@@ -1,0 +1,24 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-329",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-005",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-005",
+  "milestone_id": "milestone-4",
+  "direction_id": "direction-4a-canonical-parser-parity",
+  "extracted_item_id": "item-329-parser-library-recursive-list-tail-extension",
+  "decision": "approved",
+  "evidence_summary": "Current restored-tree diff hygiene and generated-runtime checks are clean; the standalone recursive-list-tail public run-program diff passed. Same-session reviewer-run focused positive and negative parser checks, shortcut guards, the rev-005 aggregate public parser-parity batch, the full parser-parity group, cabal build all, cabal test, and the thesis conformance gate passed. The diff remains bounded to the shared parser-owned parser library, a thin recursive-list-tail fixture/oracle, parser-parity tests, and scoped progress docs.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-4-completion",
+        "text": "round-329 completed item-329-parser-library-recursive-list-tail-extension: the shared parser-owned library now covers the bounded recursive-list tail fixture and malformed case-branch-arrow diagnostic; reviewer evidence passed current diff hygiene, shortcut audit, standalone fixture diff, focused parser checks, the rev-005 aggregate public batch, full parser-parity group, cabal build all, cabal test, and thesis gate."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}

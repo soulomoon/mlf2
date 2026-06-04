@@ -100,4 +100,7 @@ and reference to `applyId`, and malformed missing definition-semicolon
 diagnostics, plus one recursive-ADT plain Nat fixture covering `NatPlain`,
 top-level `isZero` and `peel` annotated-lambda case definitions, nested
 constructor/application expressions in `main`, and malformed missing
-case-branch-arrow diagnostics.
+case-branch-arrow diagnostics, plus one recursive-list tail fixture covering
+paired `Nat`/`List` data declarations, two-field `Cons` constructor syntax,
+two-argument list case patterns, nested `isNil (tailOrNil (Cons Zero Nil))`
+application, and malformed missing case-branch-arrow diagnostics.

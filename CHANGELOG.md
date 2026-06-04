@@ -37,6 +37,17 @@
 
 ### Added
 - Extended the shared parser-owned parser-parity library with a bounded
+  recursive list-tail grammar slice for `module RecursiveList export (Nat(..),
+  List(..), tailOrNil, isNil, main)`, paired `Nat` and `List` data
+  declarations, a two-field `Cons : Nat -> List -> List` constructor, list
+  case expressions with two-argument constructor patterns, and nested
+  `isNil (tailOrNil (Cons Zero Nil))` application. A new committed
+  parser-program projection and thin fixture root cover `recursive-list-tail`,
+  with malformed missing case-branch-arrow evidence through the same
+  source-text lexer/parser path. This is not full parser parity,
+  resolver/checker/backend, compiler-package, driver, platform, proof, or
+  self-boot work.
+- Extended the shared parser-owned parser-parity library with a bounded
   recursive-ADT plain Nat grammar slice for `module NatPlain export (Nat(..),
   isZero, peel, main)`, a two-constructor recursive `Nat` declaration, top-level
   `isZero` and `peel` annotated-lambda case expressions, and nested
