@@ -1,3 +1,25 @@
+## 2026-06-05 - Round 331 parser parity recursive ADT/typeclass integration extension
+
+- Extended the shared parser-owned parser-parity source-text parser library
+  with a bounded recursive ADT/typeclass integration slice covering
+  `typeclass-integration`: an `Eq` class, recursive `Nat` declaration,
+  explicit `Eq Nat` instance, nested `case left` / `case right` method body,
+  `same` wrapper definition, and nested constructor applications in `main`.
+- Added the committed parser-program projection fixture for
+  `typeclass-integration`, plus a thin `.mlfp` fixture root that exposes only
+  `sourceFile` and `sourceText` before calling
+  `renderParserParityProjectionFromSourceText`.
+- Added public parser-parity coverage for malformed nested case syntax through
+  `renderParserNegativeEvidenceFromSourceText`, with parser-owned
+  `expected-case-branch-arrow@...` diagnostic evidence.
+- Extended shortcut/static guards for round-specific parser/token/projection
+  shortcuts, including fixture-specific token streams, success keys,
+  pre-rendered instance/method/definition rows, whole-fixture recognition, and
+  static typeclass-integration negative evidence.
+- Scope remains bounded parser parity only. This is not full parser parity,
+  resolver, checker, backend, compiler-package, driver, platform, proof, or
+  self-boot progress.
+
 ## 2026-06-04 - Round 330 parser parity recursive-tree extension
 
 - Extended the shared parser-owned parser-parity source-text parser library

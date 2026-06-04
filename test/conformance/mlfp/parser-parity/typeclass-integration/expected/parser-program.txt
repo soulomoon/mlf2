@@ -1,0 +1,15 @@
+module TypeclassIntegration span=test/conformance/mlfp/parser-parity/typeclass-integration/src/Main.mlfp:1:1-27:1
+export type Eq span=test/conformance/mlfp/parser-parity/typeclass-integration/src/Main.mlfp:1:37-1:39
+export type-with-constructors Nat span=test/conformance/mlfp/parser-parity/typeclass-integration/src/Main.mlfp:1:41-1:48
+export value eq span=test/conformance/mlfp/parser-parity/typeclass-integration/src/Main.mlfp:1:50-1:52
+export value same span=test/conformance/mlfp/parser-parity/typeclass-integration/src/Main.mlfp:1:54-1:58
+export value main span=test/conformance/mlfp/parser-parity/typeclass-integration/src/Main.mlfp:1:60-1:64
+class Eq params=a span=test/conformance/mlfp/parser-parity/typeclass-integration/src/Main.mlfp:2:3-6:3
+method-signature eq type=a -> a -> Bool span=test/conformance/mlfp/parser-parity/typeclass-integration/src/Main.mlfp:3:5-4:3
+data Nat span=test/conformance/mlfp/parser-parity/typeclass-integration/src/Main.mlfp:6:3-10:3
+constructor Zero type=Nat span=test/conformance/mlfp/parser-parity/typeclass-integration/src/Main.mlfp:7:7-8:5
+constructor Succ type=Nat -> Nat span=test/conformance/mlfp/parser-parity/typeclass-integration/src/Main.mlfp:8:7-8:24
+instance Eq types=Nat span=test/conformance/mlfp/parser-parity/typeclass-integration/src/Main.mlfp:10:12-10:15
+method-definition eq expr=λ(left : Nat) λ(right : Nat) case left of { Zero -> case right of { Zero -> true; Succ _ -> false }; Succ leftRest -> case right of { Zero -> false; Succ rightRest -> eq leftRest rightRest } } span=test/conformance/mlfp/parser-parity/typeclass-integration/src/Main.mlfp:11:5-21:3
+def same type=Nat -> Nat -> Bool expr=λ(left : Nat) λ(right : Nat) eq left right span=test/conformance/mlfp/parser-parity/typeclass-integration/src/Main.mlfp:23:3-25:3
+def main type=Bool expr=same (Succ (Succ Zero)) (Succ (Succ Zero)) span=test/conformance/mlfp/parser-parity/typeclass-integration/src/Main.mlfp:25:3-26:1

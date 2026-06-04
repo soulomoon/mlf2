@@ -143,6 +143,15 @@ spec =
             canonicalProjection `shouldBe` expected
             sharedParserProjection `shouldBe` Right expected
 
+        it "shared parser-owned .mlfp parser parses recursive ADT typeclass integration" $ do
+            source <- readFile typeclassIntegrationCanonicalSourcePath
+            expected <- readFile typeclassIntegrationExpectedProjectionPath
+            canonicalProjection <- renderCanonicalProjection typeclassIntegrationCanonicalSourcePath source
+            sharedParserProjection <- runSharedParserBatch typeclassIntegrationParserProgramRoot
+
+            canonicalProjection `shouldBe` expected
+            sharedParserProjection `shouldBe` Right expected
+
         beforeAll loadParserParityBatchFixture $ do
             it "runs all .mlfp parser parity fixtures through one generated public CLI driver" $ \fixture ->
                 batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
@@ -254,6 +263,20 @@ spec =
                 batchExpectedOutput fixture
                     `shouldSatisfy` isInfixOf
                         (batchSection "negative:recursive-tree-branch-arrow" recursiveTreeNegativeEvidenceProjection)
+
+            it "shared parser-owned .mlfp parser routes recursive ADT typeclass integration through the generated public CLI driver" $ \fixture -> do
+                expected <- readFile typeclassIntegrationExpectedProjectionPath
+
+                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
+                batchExpectedOutput fixture
+                    `shouldSatisfy` isInfixOf
+                        (batchSection "positive:typeclass-integration" expected)
+
+            it "parser-owned .mlfp parser reports malformed recursive ADT typeclass integration diagnostics through public run-program" $ \fixture -> do
+                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
+                batchExpectedOutput fixture
+                    `shouldSatisfy` isInfixOf
+                        (batchSection "negative:typeclass-integration-nested-case" typeclassIntegrationNegativeEvidenceProjection)
 
             it "shared parser-owned .mlfp parser library routes the generated batch through one entrypoint" $ \fixture -> do
                 sharedParserExists <- doesFileExist (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
@@ -433,6 +456,10 @@ recursiveTreeDerivingCanonicalSourcePath :: FilePath
 recursiveTreeDerivingCanonicalSourcePath =
     "test/conformance/mlfp/parser-parity/recursive-tree-deriving/src/Main.mlfp"
 
+typeclassIntegrationCanonicalSourcePath :: FilePath
+typeclassIntegrationCanonicalSourcePath =
+    "test/conformance/mlfp/parser-parity/typeclass-integration/src/Main.mlfp"
+
 expectedProjectionPath :: FilePath
 expectedProjectionPath =
     "test/conformance/mlfp/parser-parity/basic-module-def-bool/expected/parser-program.txt"
@@ -561,6 +588,10 @@ recursiveTreeDerivingExpectedProjectionPath :: FilePath
 recursiveTreeDerivingExpectedProjectionPath =
     "test/conformance/mlfp/parser-parity/recursive-tree-deriving/expected/parser-program.txt"
 
+typeclassIntegrationExpectedProjectionPath :: FilePath
+typeclassIntegrationExpectedProjectionPath =
+    "test/conformance/mlfp/parser-parity/typeclass-integration/expected/parser-program.txt"
+
 sharedParserLibraryRoot :: FilePath
 sharedParserLibraryRoot =
     "test/programs/compiler-parser-parity/parser-library"
@@ -613,6 +644,10 @@ recursiveTreeDerivingParserProgramRoot :: FilePath
 recursiveTreeDerivingParserProgramRoot =
     "test/programs/compiler-parser-parity/recursive-tree-deriving"
 
+typeclassIntegrationParserProgramRoot :: FilePath
+typeclassIntegrationParserProgramRoot =
+    "test/programs/compiler-parser-parity/typeclass-integration"
+
 sharedParserAuditFiles :: [FilePath]
 sharedParserAuditFiles =
     [ sharedParserLibraryRoot </> "ParserParityToken.mlfp"
@@ -646,6 +681,7 @@ sharedParserBannedPhrases =
     , concat ["Recursive", "List", "Tail", "Tokens"]
     , concat ["Recursive", "Tree", "First", "Order", "Tokens"]
     , concat ["Recursive", "Tree", "Deriving", "Tokens"]
+    , concat ["Typeclass", "Integration", "Tokens"]
     , concat ["LexerOk ", "basic", "Module", "Tokens"]
     , concat ["LexerOk ", "import", "Bool", "Tokens"]
     , concat ["LexerOk ", "value", "Def", "List", "Tokens"]
@@ -669,6 +705,7 @@ sharedParserBannedPhrases =
     , concat ["LexerOk ", "recursive", "List", "Tail", "Tokens"]
     , concat ["LexerOk ", "recursive", "Tree", "First", "Order", "Tokens"]
     , concat ["LexerOk ", "recursive", "Tree", "Deriving", "Tokens"]
+    , concat ["LexerOk ", "typeclass", "Integration", "Tokens"]
     , concat ["First", "Class", "Polymorphism", "Tokens"]
     , concat ["LexerOk ", "first", "Class", "Polymorphism", "Tokens"]
     , concat ["case", " tokens"]
@@ -689,6 +726,7 @@ sharedParserBannedPhrases =
     , concat ["recursive-list-tail", " tokens"]
     , concat ["recursive-tree-first-order", " tokens"]
     , concat ["recursive-tree-deriving", " tokens"]
+    , concat ["typeclass-integration", " tokens"]
     , concat ["first-class-polymorphism-source-types", " tokens"]
     ]
 
@@ -756,6 +794,7 @@ sharedParserShortcutPhrases =
         , sharedParserRound328ShortcutPhrases
         , sharedParserRound329ShortcutPhrases
         , sharedParserRound330ShortcutPhrases
+        , sharedParserRound331ShortcutPhrases
         ]
 
 sharedParserRound314ShortcutPhrases :: [String]
@@ -1134,6 +1173,28 @@ sharedParserRound330ShortcutPhrases =
     , concat ["recursive-tree parser negative ", "expected-case-branch-arrow@"]
     ]
 
+sharedParserRound331ShortcutPhrases :: [String]
+sharedParserRound331ShortcutPhrases =
+    [ concat ["parse", "Typeclass", "Integration"]
+    , concat ["parse", "Recursive", "Adt", "Typeclass", "Integration"]
+    , concat ["completeModuleKey \"", "typeclass-integration", "\""]
+    , concat ["moduleKey \"", "typeclass-integration", "\""]
+    , concat ["programKey \"", "typeclass-integration", "\""]
+    , concat ["Typeclass", "Integration", "Tokens"]
+    , concat ["LexerOk ", "typeclass", "Integration", "Tokens"]
+    , concat ["typeclass-integration", " tokens"]
+    , concat ["stringIndexOf sourceText \"", "module TypeclassIntegration export", "\""]
+    , concat ["stringIndexOf \"", "module TypeclassIntegration export", "\" sourceText"]
+    , concat ["instanceRows sourceFile \"", "Eq", "\" \"", "Nat", "\""]
+    , concat ["methodDefinitionRows sourceFile \"", "eq", "\""]
+    , concat ["defRows sourceFile \"", "same", "\""]
+    , concat ["defRows sourceFile \"", "main", "\" \"", "Bool", "\" \"", "same (Succ (Succ Zero))", "\""]
+    , concat ["method-definition eq expr=", "λ(left : Nat) λ(right : Nat) case left"]
+    , concat ["def same type=", "Nat -> Nat -> Bool expr=", "λ(left : Nat) λ(right : Nat) eq left right"]
+    , concat ["def main type=Bool expr=", "same (Succ (Succ Zero)) (Succ (Succ Zero))"]
+    , concat ["typeclass-integration parser negative ", "expected-case-branch-arrow@"]
+    ]
+
 sharedParserCompleteParseRequiredPhrases :: [String]
 sharedParserCompleteParseRequiredPhrases =
     [ "parserStateAtEnd state"
@@ -1168,6 +1229,7 @@ sharedParserStaticNegativeEvidencePhrases =
     , concat ["stringAppend \"recursive-adt-plain-nat parser negative ", "expected-case-branch-arrow@\""]
     , concat ["stringAppend \"recursive-list-tail parser negative ", "expected-case-branch-arrow@\""]
     , concat ["stringAppend \"recursive-tree parser negative ", "expected-case-branch-arrow@\""]
+    , concat ["stringAppend \"typeclass-integration parser negative ", "expected-case-branch-arrow@\""]
     ]
 
 sharedParserDynamicEvidenceRequiredPhrases :: [String]
@@ -1257,6 +1319,7 @@ parserParityPositiveCases =
     , ParserParityPositiveCase "positive:recursive-list-tail" "positiveRecursiveListTail" recursiveListTailCanonicalSourcePath recursiveListTailExpectedProjectionPath
     , ParserParityPositiveCase "positive:recursive-tree-first-order" "positiveRecursiveTreeFirstOrder" recursiveTreeFirstOrderCanonicalSourcePath recursiveTreeFirstOrderExpectedProjectionPath
     , ParserParityPositiveCase "positive:recursive-tree-deriving" "positiveRecursiveTreeDeriving" recursiveTreeDerivingCanonicalSourcePath recursiveTreeDerivingExpectedProjectionPath
+    , ParserParityPositiveCase "positive:typeclass-integration" "positiveTypeclassIntegration" typeclassIntegrationCanonicalSourcePath typeclassIntegrationExpectedProjectionPath
     ]
 
 parserParityNegativeCases :: [ParserParityNegativeCase]
@@ -1284,6 +1347,7 @@ parserParityNegativeCases =
     , ParserParityNegativeCase "negative:recursive-adt-plain-nat" "negativeRecursiveAdtPlainNat" "recursive-adt-plain-nat parser negative " recursiveAdtPlainNatCanonicalSourcePath recursiveAdtPlainNatNegativeSourceText recursiveAdtPlainNatNegativeEvidenceProjection
     , ParserParityNegativeCase "negative:recursive-list-tail" "negativeRecursiveListTail" "recursive-list-tail parser negative " recursiveListTailCanonicalSourcePath recursiveListTailNegativeSourceText recursiveListTailNegativeEvidenceProjection
     , ParserParityNegativeCase "negative:recursive-tree-branch-arrow" "negativeRecursiveTreeBranchArrow" "recursive-tree parser negative " recursiveTreeFirstOrderCanonicalSourcePath recursiveTreeNegativeSourceText recursiveTreeNegativeEvidenceProjection
+    , ParserParityNegativeCase "negative:typeclass-integration-nested-case" "negativeTypeclassIntegrationNestedCase" "typeclass-integration parser negative " typeclassIntegrationCanonicalSourcePath typeclassIntegrationNegativeSourceText typeclassIntegrationNegativeEvidenceProjection
     ]
 
 assertCanonicalParserParityProjection :: ParserParityPositiveCase -> IO ()
@@ -1795,6 +1859,37 @@ recursiveTreeNegativeSourceText =
         , "}"
         ]
 
+typeclassIntegrationNegativeSourceText :: String
+typeclassIntegrationNegativeSourceText =
+    unlines
+        [ "module TypeclassIntegration export (Eq, Nat(..), eq, same, main) {"
+        , "  class Eq a {"
+        , "    eq : a -> a -> Bool;"
+        , "  }"
+        , ""
+        , "  data Nat ="
+        , "      Zero : Nat"
+        , "    | Succ : Nat -> Nat;"
+        , ""
+        , "  instance Eq Nat {"
+        , "    eq = λ(left : Nat) λ(right : Nat) case left of {"
+        , "      Zero -> case right of {"
+        , "        Zero true;"
+        , "        Succ _ -> false"
+        , "      };"
+        , "      Succ leftRest -> case right of {"
+        , "        Zero -> false;"
+        , "        Succ rightRest -> eq leftRest rightRest"
+        , "      }"
+        , "    };"
+        , "  }"
+        , ""
+        , "  def same : Nat -> Nat -> Bool = λ(left : Nat) λ(right : Nat) eq left right;"
+        , ""
+        , "  def main : Bool = same (Succ (Succ Zero)) (Succ (Succ Zero));"
+        , "}"
+        ]
+
 retryEvidenceProjection :: String
 retryEvidenceProjection =
     unlines
@@ -1978,6 +2073,16 @@ recursiveTreeNegativeEvidenceProjection =
             [ "recursive-tree parser negative "
             , "expected-case-branch-arrow@"
             , "test/conformance/mlfp/parser-parity/recursive-tree-first-order/src/Main.mlfp:8:23-8:29"
+            ]
+        ]
+
+typeclassIntegrationNegativeEvidenceProjection :: String
+typeclassIntegrationNegativeEvidenceProjection =
+    unlines
+        [ concat
+            [ "typeclass-integration parser negative "
+            , "expected-case-branch-arrow@"
+            , "test/conformance/mlfp/parser-parity/typeclass-integration/src/Main.mlfp:13:14-13:18"
             ]
         ]
 

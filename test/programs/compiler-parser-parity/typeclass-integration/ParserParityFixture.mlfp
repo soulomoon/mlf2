@@ -1,0 +1,7 @@
+module ParserParityFixture export (sourceFile, sourceText) {
+  def sourceFile : String =
+    "test/conformance/mlfp/parser-parity/typeclass-integration/src/Main.mlfp";
+
+  def sourceText : String =
+    "module TypeclassIntegration export (Eq, Nat(..), eq, same, main) {\n  class Eq a {\n    eq : a -> a -> Bool;\n  }\n\n  data Nat =\n      Zero : Nat\n    | Succ : Nat -> Nat;\n\n  instance Eq Nat {\n    eq = λ(left : Nat) λ(right : Nat) case left of {\n      Zero -> case right of {\n        Zero -> true;\n        Succ _ -> false\n      };\n      Succ leftRest -> case right of {\n        Zero -> false;\n        Succ rightRest -> eq leftRest rightRest\n      }\n    };\n  }\n\n  def same : Nat -> Nat -> Bool = λ(left : Nat) λ(right : Nat) eq left right;\n\n  def main : Bool = same (Succ (Succ Zero)) (Succ (Succ Zero));\n}\n";
+}

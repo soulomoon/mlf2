@@ -36,6 +36,16 @@
   deferred placeholders remain per binding.
 
 ### Added
+- Extended the shared parser-owned parser-parity library with a bounded
+  recursive ADT/typeclass integration grammar slice for `typeclass-integration`.
+  The new committed projection and thin fixture root cover an `Eq` class,
+  recursive `Nat` declaration, explicit `Eq Nat` instance method with nested
+  case expressions, a `same` wrapper, and nested constructor applications in
+  `main` through the shared source-text lexer/parser path. A malformed nested
+  case missing branch-arrow path is also covered by the generated aggregate
+  public CLI driver. This is not full parser parity,
+  resolver/checker/backend, compiler-package, driver, platform, proof, or
+  self-boot work.
 - Extended the shared parser-owned parser-parity library with bounded
   recursive tree grammar slices for `recursive-tree-first-order` and
   `recursive-tree-deriving`. The new committed projections and thin fixture
