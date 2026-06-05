@@ -1116,7 +1116,10 @@ module ParserParityLexer export (LexerResult(..), tokenizeCompleteModule, nextLi
                                                                 StringMatched -> "31";
                                                                 StringMismatch -> case stringExactMatch "31" lineNumber of {
                                                                   StringMatched -> "32";
-                                                                  StringMismatch -> lineNumber
+                                                                  StringMismatch -> case stringExactMatch "32" lineNumber of {
+                                                                    StringMatched -> "33";
+                                                                    StringMismatch -> lineNumber
+                                                                  }
                                                                 }
                                                               }
                                                             }

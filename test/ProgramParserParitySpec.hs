@@ -161,6 +161,15 @@ spec =
             canonicalProjection `shouldBe` expected
             sharedParserProjection `shouldBe` Right expected
 
+        it "shared parser-owned .mlfp parser parses module-integrated recursive existential programs" $ do
+            source <- readFile moduleIntegratedRecursiveExistentialCanonicalSourcePath
+            expected <- readFile moduleIntegratedRecursiveExistentialExpectedProjectionPath
+            canonicalProjection <- renderCanonicalProjection moduleIntegratedRecursiveExistentialCanonicalSourcePath source
+            sharedParserProjection <- runSharedParserBatch moduleIntegratedRecursiveExistentialParserProgramRoot
+
+            canonicalProjection `shouldBe` expected
+            sharedParserProjection `shouldBe` Right expected
+
         beforeAll loadParserParityBatchFixture $ do
             it "runs all .mlfp parser parity fixtures through one generated public CLI driver" $ \fixture ->
                 batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
@@ -300,6 +309,20 @@ spec =
                 batchExpectedOutput fixture
                     `shouldSatisfy` isInfixOf
                         (batchSection "negative:abstract-recursive-adt-module-use" abstractRecursiveAdtModuleUseNegativeEvidenceProjection)
+
+            it "shared parser-owned .mlfp parser routes module-integrated recursive existential source through the generated public CLI driver" $ \fixture -> do
+                expected <- readFile moduleIntegratedRecursiveExistentialExpectedProjectionPath
+
+                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
+                batchExpectedOutput fixture
+                    `shouldSatisfy` isInfixOf
+                        (batchSection "positive:module-integrated-recursive-existential" expected)
+
+            it "parser-owned .mlfp parser reports malformed module-integrated recursive existential diagnostics through public run-program" $ \fixture -> do
+                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
+                batchExpectedOutput fixture
+                    `shouldSatisfy` isInfixOf
+                        (batchSection "negative:module-integrated-recursive-existential" moduleIntegratedRecursiveExistentialNegativeEvidenceProjection)
 
             it "shared parser-owned .mlfp parser library routes the generated batch through one entrypoint" $ \fixture -> do
                 sharedParserExists <- doesFileExist (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
@@ -487,6 +510,10 @@ abstractRecursiveAdtModuleUseCanonicalSourcePath :: FilePath
 abstractRecursiveAdtModuleUseCanonicalSourcePath =
     "test/conformance/mlfp/parser-parity/abstract-recursive-adt-module-use/src/Main.mlfp"
 
+moduleIntegratedRecursiveExistentialCanonicalSourcePath :: FilePath
+moduleIntegratedRecursiveExistentialCanonicalSourcePath =
+    "test/conformance/mlfp/parser-parity/module-integrated-recursive-existential/src/Main.mlfp"
+
 expectedProjectionPath :: FilePath
 expectedProjectionPath =
     "test/conformance/mlfp/parser-parity/basic-module-def-bool/expected/parser-program.txt"
@@ -623,6 +650,10 @@ abstractRecursiveAdtModuleUseExpectedProjectionPath :: FilePath
 abstractRecursiveAdtModuleUseExpectedProjectionPath =
     "test/conformance/mlfp/parser-parity/abstract-recursive-adt-module-use/expected/parser-program.txt"
 
+moduleIntegratedRecursiveExistentialExpectedProjectionPath :: FilePath
+moduleIntegratedRecursiveExistentialExpectedProjectionPath =
+    "test/conformance/mlfp/parser-parity/module-integrated-recursive-existential/expected/parser-program.txt"
+
 sharedParserLibraryRoot :: FilePath
 sharedParserLibraryRoot =
     "test/programs/compiler-parser-parity/parser-library"
@@ -683,6 +714,10 @@ abstractRecursiveAdtModuleUseParserProgramRoot :: FilePath
 abstractRecursiveAdtModuleUseParserProgramRoot =
     "test/programs/compiler-parser-parity/abstract-recursive-adt-module-use"
 
+moduleIntegratedRecursiveExistentialParserProgramRoot :: FilePath
+moduleIntegratedRecursiveExistentialParserProgramRoot =
+    "test/programs/compiler-parser-parity/module-integrated-recursive-existential"
+
 sharedParserAuditFiles :: [FilePath]
 sharedParserAuditFiles =
     [ sharedParserLibraryRoot </> "ParserParityToken.mlfp"
@@ -718,6 +753,7 @@ sharedParserBannedPhrases =
     , concat ["Recursive", "Tree", "Deriving", "Tokens"]
     , concat ["Typeclass", "Integration", "Tokens"]
     , concat ["Abstract", "Recursive", "Adt", "Module", "Use", "Tokens"]
+    , concat ["Module", "Integrated", "Recursive", "Existential", "Tokens"]
     , concat ["LexerOk ", "basic", "Module", "Tokens"]
     , concat ["LexerOk ", "import", "Bool", "Tokens"]
     , concat ["LexerOk ", "value", "Def", "List", "Tokens"]
@@ -743,6 +779,7 @@ sharedParserBannedPhrases =
     , concat ["LexerOk ", "recursive", "Tree", "Deriving", "Tokens"]
     , concat ["LexerOk ", "typeclass", "Integration", "Tokens"]
     , concat ["LexerOk ", "abstract", "Recursive", "Adt", "Module", "Use", "Tokens"]
+    , concat ["LexerOk ", "module", "Integrated", "Recursive", "Existential", "Tokens"]
     , concat ["First", "Class", "Polymorphism", "Tokens"]
     , concat ["LexerOk ", "first", "Class", "Polymorphism", "Tokens"]
     , concat ["case", " tokens"]
@@ -765,6 +802,7 @@ sharedParserBannedPhrases =
     , concat ["recursive-tree-deriving", " tokens"]
     , concat ["typeclass-integration", " tokens"]
     , concat ["abstract-recursive-adt-module-use", " tokens"]
+    , concat ["module-integrated-recursive-existential", " tokens"]
     , concat ["first-class-polymorphism-source-types", " tokens"]
     ]
 
@@ -834,6 +872,7 @@ sharedParserShortcutPhrases =
         , sharedParserRound330ShortcutPhrases
         , sharedParserRound331ShortcutPhrases
         , sharedParserRound332ShortcutPhrases
+        , sharedParserRound333ShortcutPhrases
         ]
 
 sharedParserRound314ShortcutPhrases :: [String]
@@ -1254,6 +1293,25 @@ sharedParserRound332ShortcutPhrases =
     , concat ["abstract-recursive-adt-module-use parser negative ", "expected-case-branch-arrow@"]
     ]
 
+sharedParserRound333ShortcutPhrases :: [String]
+sharedParserRound333ShortcutPhrases =
+    [ concat ["parse", "Module", "Integrated", "Recursive", "Existential"]
+    , concat ["completeModuleKey \"", "module-integrated-recursive-existential", "\""]
+    , concat ["moduleKey \"", "module-integrated-recursive-existential", "\""]
+    , concat ["programKey \"", "module-integrated-recursive-existential", "\""]
+    , concat ["Module", "Integrated", "Recursive", "Existential", "Tokens"]
+    , concat ["LexerOk ", "module", "Integrated", "Recursive", "Existential", "Tokens"]
+    , concat ["module-integrated-recursive-existential", " tokens"]
+    , concat ["stringIndexOf sourceText \"", "module Core export (Eq, Nat(..), Expr(..), SomeExpr(..), eq)", "\""]
+    , concat ["stringIndexOf \"", "module Core export (Eq, Nat(..), Expr(..), SomeExpr(..), eq)", "\" sourceText"]
+    , concat ["defRows sourceFile \"", "peel", "\""]
+    , concat ["defRows sourceFile \"", "peelSome", "\""]
+    , concat ["defRows sourceFile \"", "main", "\" \"", "Bool", "\" \"", "eq (peelSome"]
+    , concat ["def peelSome type=", "SomeExpr -> Nat expr=", "λboxed case boxed of"]
+    , concat ["def main type=Bool expr=", "eq (peelSome (SomeExpr (Step (DoneNat (Succ Zero))))) (Succ Zero)"]
+    , concat ["module-integrated-recursive-existential parser negative ", "expected-case-branch-arrow@"]
+    ]
+
 sharedParserCompleteParseRequiredPhrases :: [String]
 sharedParserCompleteParseRequiredPhrases =
     [ "parserStateAtEnd state"
@@ -1381,6 +1439,7 @@ parserParityPositiveCases =
     , ParserParityPositiveCase "positive:recursive-tree-deriving" "positiveRecursiveTreeDeriving" recursiveTreeDerivingCanonicalSourcePath recursiveTreeDerivingExpectedProjectionPath
     , ParserParityPositiveCase "positive:typeclass-integration" "positiveTypeclassIntegration" typeclassIntegrationCanonicalSourcePath typeclassIntegrationExpectedProjectionPath
     , ParserParityPositiveCase "positive:abstract-recursive-adt-module-use" "positiveAbstractRecursiveAdtModuleUse" abstractRecursiveAdtModuleUseCanonicalSourcePath abstractRecursiveAdtModuleUseExpectedProjectionPath
+    , ParserParityPositiveCase "positive:module-integrated-recursive-existential" "positiveModuleIntegratedRecursiveExistential" moduleIntegratedRecursiveExistentialCanonicalSourcePath moduleIntegratedRecursiveExistentialExpectedProjectionPath
     ]
 
 parserParityNegativeCases :: [ParserParityNegativeCase]
@@ -1410,6 +1469,7 @@ parserParityNegativeCases =
     , ParserParityNegativeCase "negative:recursive-tree-branch-arrow" "negativeRecursiveTreeBranchArrow" "recursive-tree parser negative " recursiveTreeFirstOrderCanonicalSourcePath recursiveTreeNegativeSourceText recursiveTreeNegativeEvidenceProjection
     , ParserParityNegativeCase "negative:typeclass-integration-nested-case" "negativeTypeclassIntegrationNestedCase" "typeclass-integration parser negative " typeclassIntegrationCanonicalSourcePath typeclassIntegrationNegativeSourceText typeclassIntegrationNegativeEvidenceProjection
     , ParserParityNegativeCase "negative:abstract-recursive-adt-module-use" "negativeAbstractRecursiveAdtModuleUse" "abstract-recursive-adt-module-use parser negative " abstractRecursiveAdtModuleUseCanonicalSourcePath abstractRecursiveAdtModuleUseNegativeSourceText abstractRecursiveAdtModuleUseNegativeEvidenceProjection
+    , ParserParityNegativeCase "negative:module-integrated-recursive-existential" "negativeModuleIntegratedRecursiveExistential" "module-integrated-recursive-existential parser negative " moduleIntegratedRecursiveExistentialCanonicalSourcePath moduleIntegratedRecursiveExistentialNegativeSourceText moduleIntegratedRecursiveExistentialNegativeEvidenceProjection
     ]
 
 assertCanonicalParserParityProjection :: ParserParityPositiveCase -> IO ()
@@ -1982,6 +2042,43 @@ abstractRecursiveAdtModuleUseNegativeSourceText =
         , "}"
         ]
 
+moduleIntegratedRecursiveExistentialNegativeSourceText :: String
+moduleIntegratedRecursiveExistentialNegativeSourceText =
+    unlines
+        [ "module Core export (Eq, Nat(..), Expr(..), SomeExpr(..), eq) {"
+        , "  class Eq a {"
+        , "    eq : a -> a -> Bool;"
+        , "  }"
+        , ""
+        , "  data Nat ="
+        , "      Zero : Nat"
+        , "    | Succ : Nat -> Nat"
+        , "    deriving Eq;"
+        , ""
+        , "  data Expr a ="
+        , "      DoneNat : Nat -> Expr Nat"
+        , "    | Step : Expr a -> Expr a;"
+        , ""
+        , "  data SomeExpr ="
+        , "      SomeExpr : ∀ a. Expr a -> SomeExpr;"
+        , "}"
+        , ""
+        , "module User export (peelSome, main) {"
+        , "  import Core exposing (Nat(..), Expr(..), SomeExpr(..), eq);"
+        , ""
+        , "  def peel : Expr a -> Nat = λ(expr) case expr of {"
+        , "    DoneNat n -> n;"
+        , "    Step next -> peel next"
+        , "  };"
+        , ""
+        , "  def peelSome : SomeExpr -> Nat = λ(boxed) case boxed of {"
+        , "    SomeExpr expr peel expr"
+        , "  };"
+        , ""
+        , "  def main : Bool = eq (peelSome (SomeExpr (Step (DoneNat (Succ Zero))))) (Succ Zero);"
+        , "}"
+        ]
+
 retryEvidenceProjection :: String
 retryEvidenceProjection =
     unlines
@@ -2185,6 +2282,16 @@ abstractRecursiveAdtModuleUseNegativeEvidenceProjection =
             [ "abstract-recursive-adt-module-use parser negative "
             , "expected-case-branch-arrow@"
             , "test/conformance/mlfp/parser-parity/abstract-recursive-adt-module-use/src/Main.mlfp:13:3-13:4"
+            ]
+        ]
+
+moduleIntegratedRecursiveExistentialNegativeEvidenceProjection :: String
+moduleIntegratedRecursiveExistentialNegativeEvidenceProjection =
+    unlines
+        [ concat
+            [ "module-integrated-recursive-existential parser negative "
+            , "expected-case-branch-arrow@"
+            , "test/conformance/mlfp/parser-parity/module-integrated-recursive-existential/src/Main.mlfp:28:24-28:28"
             ]
         ]
 

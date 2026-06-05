@@ -37,6 +37,17 @@
 
 ### Added
 - Extended the shared parser-owned parser-parity library with a bounded
+  module-integrated recursive existential grammar slice for
+  `module-integrated-recursive-existential`. The new committed projection and
+  thin fixture root cover `Core` exporting `Eq`, `Nat(..)`, `Expr(..)`,
+  `SomeExpr(..)`, and `eq`, plus `User` importing that surface, defining
+  `peel` and `peelSome`, and computing
+  `eq (peelSome (SomeExpr (Step (DoneNat (Succ Zero))))) (Succ Zero)` through
+  the shared source-text lexer/parser path. A malformed `SomeExpr` case branch
+  missing `->` is also covered by the generated aggregate public CLI driver.
+  This is not full parser parity, resolver/checker/backend, compiler-package,
+  driver, platform, proof, or self-boot work.
+- Extended the shared parser-owned parser-parity library with a bounded
   abstract recursive ADT module-use grammar slice for
   `abstract-recursive-adt-module-use`. The new committed projection and thin
   fixture root cover `Core` exporting `Nat` abstractly with `zero`, `succ`,

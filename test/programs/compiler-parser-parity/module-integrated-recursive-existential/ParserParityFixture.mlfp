@@ -1,0 +1,7 @@
+module ParserParityFixture export (sourceFile, sourceText) {
+  def sourceFile : String =
+    "test/conformance/mlfp/parser-parity/module-integrated-recursive-existential/src/Main.mlfp";
+
+  def sourceText : String =
+    "module Core export (Eq, Nat(..), Expr(..), SomeExpr(..), eq) {\n  class Eq a {\n    eq : a -> a -> Bool;\n  }\n\n  data Nat =\n      Zero : Nat\n    | Succ : Nat -> Nat\n    deriving Eq;\n\n  data Expr a =\n      DoneNat : Nat -> Expr Nat\n    | Step : Expr a -> Expr a;\n\n  data SomeExpr =\n      SomeExpr : ∀ a. Expr a -> SomeExpr;\n}\n\nmodule User export (peelSome, main) {\n  import Core exposing (Nat(..), Expr(..), SomeExpr(..), eq);\n\n  def peel : Expr a -> Nat = λ(expr) case expr of {\n    DoneNat n -> n;\n    Step next -> peel next\n  };\n\n  def peelSome : SomeExpr -> Nat = λ(boxed) case boxed of {\n    SomeExpr expr -> peel expr\n  };\n\n  def main : Bool = eq (peelSome (SomeExpr (Step (DoneNat (Succ Zero))))) (Succ Zero);\n}\n";
+}

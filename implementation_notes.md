@@ -1,3 +1,33 @@
+## 2026-06-05 - Round 333 parser parity module-integrated recursive existential extension
+
+- Extended the shared parser-owned parser-parity source-text parser library
+  with a bounded module-integrated recursive existential slice covering
+  `Core` exporting `Eq`, `Nat(..)`, `Expr(..)`, `SomeExpr(..)`, and `eq`,
+  plus `User` importing that surface, defining `peel` and `peelSome`, and
+  computing `eq (peelSome (SomeExpr (Step (DoneNat (Succ Zero)))))
+  (Succ Zero)`.
+- Added the committed parser-program projection fixture for
+  `module-integrated-recursive-existential`, plus a thin `.mlfp` fixture root
+  that exposes only `sourceFile` and `sourceText` before calling
+  `renderParserParityProjectionFromSourceText`.
+- Added public parser-parity coverage for malformed `SomeExpr` case-branch
+  syntax through `renderParserNegativeEvidenceFromSourceText`, with
+  parser-owned `expected-case-branch-arrow@...` diagnostic evidence.
+- Extended the shared source parser for the selected syntax family with
+  simple source-type applications such as `Expr a`, parenthesized plain lambda
+  parameters, bounded nested parenthesized constructor/function applications,
+  the `Eq`/derived-`Nat`/`Expr`/`SomeExpr` declaration sequence, and generic
+  imported-definition rows for `peel`, `peelSome`, and `main`. Also extended
+  the parser-library line-number helper only as far as the fixture's canonical
+  final span requires.
+- Extended shortcut/static guards for round-specific parser/token/projection
+  shortcuts, including fixture-specific token streams, success keys,
+  whole-fixture recognition, pre-rendered `peel`/`peelSome`/`main` rows, exact
+  `peelSome`/`main` expression shortcuts, and static negative evidence.
+- Scope remains bounded parser parity only. This is not full parser parity,
+  resolver, checker, backend, compiler-package, driver, platform, proof, or
+  self-boot progress.
+
 ## 2026-06-05 - Round 332 parser parity abstract recursive ADT module-use extension
 
 - Extended the shared parser-owned parser-parity source-text parser library
