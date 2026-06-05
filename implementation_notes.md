@@ -1,3 +1,26 @@
+## 2026-06-05 - Round 332 parser parity abstract recursive ADT module-use extension
+
+- Extended the shared parser-owned parser-parity source-text parser library
+  with a bounded abstract recursive ADT module-use slice covering `Core`
+  exporting `Nat` abstractly with `zero`, `succ`, `peel`, and `isZero`, plus
+  `User` importing that five-item surface and computing
+  `isZero (peel (succ zero))`.
+- Added the committed parser-program projection fixture for
+  `abstract-recursive-adt-module-use`, plus a thin `.mlfp` fixture root that
+  exposes only `sourceFile` and `sourceText` before calling
+  `renderParserParityProjectionFromSourceText`.
+- Added public parser-parity coverage for malformed destructor-case syntax
+  through `renderParserNegativeEvidenceFromSourceText`, with parser-owned
+  `expected-case-branch-arrow@...` diagnostic evidence.
+- Extended shortcut/static guards for round-specific parser/token/projection
+  shortcuts, including fixture-specific token streams, success keys,
+  pre-rendered `zero`/`succ`/`peel`/`isZero`/`main` rows, whole-fixture
+  recognition, imported-main expression shortcuts, and static
+  abstract-recursive-ADT module-use negative evidence.
+- Scope remains bounded parser parity only. This is not full parser parity,
+  resolver, checker, backend, compiler-package, driver, platform, proof, or
+  self-boot progress.
+
 ## 2026-06-05 - Round 331 parser parity recursive ADT/typeclass integration extension
 
 - Extended the shared parser-owned parser-parity source-text parser library

@@ -1,0 +1,22 @@
+module Core span=test/conformance/mlfp/parser-parity/abstract-recursive-adt-module-use/src/Main.mlfp:1:1-21:1
+export type Nat span=test/conformance/mlfp/parser-parity/abstract-recursive-adt-module-use/src/Main.mlfp:1:21-1:24
+export value zero span=test/conformance/mlfp/parser-parity/abstract-recursive-adt-module-use/src/Main.mlfp:1:26-1:30
+export value succ span=test/conformance/mlfp/parser-parity/abstract-recursive-adt-module-use/src/Main.mlfp:1:32-1:36
+export value peel span=test/conformance/mlfp/parser-parity/abstract-recursive-adt-module-use/src/Main.mlfp:1:38-1:42
+export value isZero span=test/conformance/mlfp/parser-parity/abstract-recursive-adt-module-use/src/Main.mlfp:1:44-1:50
+data Nat span=test/conformance/mlfp/parser-parity/abstract-recursive-adt-module-use/src/Main.mlfp:2:3-6:3
+constructor Zero type=Nat span=test/conformance/mlfp/parser-parity/abstract-recursive-adt-module-use/src/Main.mlfp:3:7-4:5
+constructor Succ type=Nat -> Nat span=test/conformance/mlfp/parser-parity/abstract-recursive-adt-module-use/src/Main.mlfp:4:7-4:24
+def zero type=Nat expr=Zero span=test/conformance/mlfp/parser-parity/abstract-recursive-adt-module-use/src/Main.mlfp:6:3-8:3
+def succ type=Nat -> Nat expr=λ(n : Nat) Succ n span=test/conformance/mlfp/parser-parity/abstract-recursive-adt-module-use/src/Main.mlfp:8:3-10:3
+def peel type=Nat -> Nat expr=λ(n : Nat) case n of { Zero -> Zero; Succ inner -> inner } span=test/conformance/mlfp/parser-parity/abstract-recursive-adt-module-use/src/Main.mlfp:10:3-15:3
+def isZero type=Nat -> Bool expr=λ(n : Nat) case n of { Zero -> true; Succ _ -> false } span=test/conformance/mlfp/parser-parity/abstract-recursive-adt-module-use/src/Main.mlfp:15:3-19:1
+module User span=test/conformance/mlfp/parser-parity/abstract-recursive-adt-module-use/src/Main.mlfp:21:1-26:1
+export value main span=test/conformance/mlfp/parser-parity/abstract-recursive-adt-module-use/src/Main.mlfp:21:21-21:25
+import Core span=test/conformance/mlfp/parser-parity/abstract-recursive-adt-module-use/src/Main.mlfp:22:10-22:15
+import exposing type Nat span=test/conformance/mlfp/parser-parity/abstract-recursive-adt-module-use/src/Main.mlfp:22:25-22:28
+import exposing value zero span=test/conformance/mlfp/parser-parity/abstract-recursive-adt-module-use/src/Main.mlfp:22:30-22:34
+import exposing value succ span=test/conformance/mlfp/parser-parity/abstract-recursive-adt-module-use/src/Main.mlfp:22:36-22:40
+import exposing value peel span=test/conformance/mlfp/parser-parity/abstract-recursive-adt-module-use/src/Main.mlfp:22:42-22:46
+import exposing value isZero span=test/conformance/mlfp/parser-parity/abstract-recursive-adt-module-use/src/Main.mlfp:22:48-22:54
+def main type=Bool expr=isZero (peel (succ zero)) span=test/conformance/mlfp/parser-parity/abstract-recursive-adt-module-use/src/Main.mlfp:24:3-25:1

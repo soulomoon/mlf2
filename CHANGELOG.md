@@ -37,6 +37,16 @@
 
 ### Added
 - Extended the shared parser-owned parser-parity library with a bounded
+  abstract recursive ADT module-use grammar slice for
+  `abstract-recursive-adt-module-use`. The new committed projection and thin
+  fixture root cover `Core` exporting `Nat` abstractly with `zero`, `succ`,
+  `peel`, and `isZero`, plus `User` importing that abstract surface and
+  computing `isZero (peel (succ zero))` through the shared source-text
+  lexer/parser path. A malformed destructor-case missing branch-arrow path is
+  also covered by the generated aggregate public CLI driver. This is not full
+  parser parity, resolver/checker/backend, compiler-package, driver, platform,
+  proof, or self-boot work.
+- Extended the shared parser-owned parser-parity library with a bounded
   recursive ADT/typeclass integration grammar slice for `typeclass-integration`.
   The new committed projection and thin fixture root cover an `Eq` class,
   recursive `Nat` declaration, explicit `Eq Nat` instance method with nested
