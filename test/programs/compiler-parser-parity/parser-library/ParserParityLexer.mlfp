@@ -1118,7 +1118,103 @@ module ParserParityLexer export (LexerResult(..), tokenizeCompleteModule, nextLi
                                                                   StringMatched -> "32";
                                                                   StringMismatch -> case stringExactMatch "32" lineNumber of {
                                                                     StringMatched -> "33";
-                                                                    StringMismatch -> lineNumber
+                                                                  StringMismatch -> case stringExactMatch "33" lineNumber of {
+                                                                    StringMatched -> "34";
+                                                                    StringMismatch -> case stringExactMatch "34" lineNumber of {
+                                                                      StringMatched -> "35";
+                                                                      StringMismatch -> case stringExactMatch "35" lineNumber of {
+                                                                        StringMatched -> "36";
+                                                                        StringMismatch -> case stringExactMatch "36" lineNumber of {
+                                                                          StringMatched -> "37";
+                                                                          StringMismatch -> case stringExactMatch "37" lineNumber of {
+                                                                            StringMatched -> "38";
+                                                                            StringMismatch -> case stringExactMatch "38" lineNumber of {
+                                                                              StringMatched -> "39";
+                                                                              StringMismatch -> case stringExactMatch "39" lineNumber of {
+                                                                                StringMatched -> "40";
+                                                                                StringMismatch -> case stringExactMatch "40" lineNumber of {
+                                                                                  StringMatched -> "41";
+                                                                                  StringMismatch -> case stringExactMatch "41" lineNumber of {
+                                                                                    StringMatched -> "42";
+                                                                                    StringMismatch -> case stringExactMatch "42" lineNumber of {
+                                                                                      StringMatched -> "43";
+                                                                                      StringMismatch -> case stringExactMatch "43" lineNumber of {
+                                                                                        StringMatched -> "44";
+                                                                                        StringMismatch -> case stringExactMatch "44" lineNumber of {
+                                                                                          StringMatched -> "45";
+                                                                                          StringMismatch -> case stringExactMatch "45" lineNumber of {
+                                                                                            StringMatched -> "46";
+                                                                                            StringMismatch -> case stringExactMatch "46" lineNumber of {
+                                                                                              StringMatched -> "47";
+                                                                                              StringMismatch -> case stringExactMatch "47" lineNumber of {
+                                                                                                StringMatched -> "48";
+                                                                                                StringMismatch -> case stringExactMatch "48" lineNumber of {
+                                                                                                  StringMatched -> "49";
+                                                                                                  StringMismatch -> case stringExactMatch "49" lineNumber of {
+                                                                                                    StringMatched -> "50";
+                                                                                                    StringMismatch -> case stringExactMatch "50" lineNumber of {
+                                                                                                      StringMatched -> "51";
+                                                                                                      StringMismatch -> case stringExactMatch "51" lineNumber of {
+                                                                                                        StringMatched -> "52";
+                                                                                                        StringMismatch -> case stringExactMatch "52" lineNumber of {
+                                                                                                          StringMatched -> "53";
+                                                                                                          StringMismatch -> case stringExactMatch "53" lineNumber of {
+                                                                                                            StringMatched -> "54";
+                                                                                                            StringMismatch -> case stringExactMatch "54" lineNumber of {
+                                                                                                              StringMatched -> "55";
+                                                                                                              StringMismatch -> case stringExactMatch "55" lineNumber of {
+                                                                                                                StringMatched -> "56";
+                                                                                                                StringMismatch -> case stringExactMatch "56" lineNumber of {
+                                                                                                                  StringMatched -> "57";
+                                                                                                                  StringMismatch -> case stringExactMatch "57" lineNumber of {
+                                                                                                                    StringMatched -> "58";
+                                                                                                                    StringMismatch -> case stringExactMatch "58" lineNumber of {
+                                                                                                                      StringMatched -> "59";
+                                                                                                                      StringMismatch -> case stringExactMatch "59" lineNumber of {
+                                                                                                                        StringMatched -> "60";
+                                                                                                                        StringMismatch -> case stringExactMatch "60" lineNumber of {
+                                                                                                                          StringMatched -> "61";
+                                                                                                                          StringMismatch -> case stringExactMatch "61" lineNumber of {
+                                                                                                                            StringMatched -> "62";
+                                                                                                                            StringMismatch -> case stringExactMatch "62" lineNumber of {
+                                                                                                                              StringMatched -> "63";
+                                                                                                                              StringMismatch -> case stringExactMatch "63" lineNumber of {
+                                                                                                                                StringMatched -> "64";
+                                                                                                                                StringMismatch -> case stringExactMatch "64" lineNumber of {
+                                                                                                                                  StringMatched -> "65";
+                                                                                                                                  StringMismatch -> lineNumber
+                                                                                                                                }
+                                                                                                                              }
+                                                                                                                            }
+                                                                                                                          }
+                                                                                                                        }
+                                                                                                                      }
+                                                                                                                    }
+                                                                                                                  }
+                                                                                                                }
+                                                                                                              }
+                                                                                                            }
+                                                                                                          }
+                                                                                                        }
+                                                                                                      }
+                                                                                                    }
+                                                                                                  }
+                                                                                                }
+                                                                                              }
+                                                                                            }
+                                                                                          }
+                                                                                        }
+                                                                                      }
+                                                                                    }
+                                                                                  }
+                                                                                }
+                                                                              }
+                                                                            }
+                                                                          }
+                                                                        }
+                                                                      }
+                                                                    }
+                                                                  }
                                                                   }
                                                                 }
                                                               }

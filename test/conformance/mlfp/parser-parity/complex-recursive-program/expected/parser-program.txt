@@ -1,0 +1,22 @@
+module ComplexRecursiveProgram span=test/conformance/mlfp/parser-parity/complex-recursive-program/src/Main.mlfp:1:1-46:1
+export type Eq span=test/conformance/mlfp/parser-parity/complex-recursive-program/src/Main.mlfp:1:40-1:42
+export type-with-constructors Nat span=test/conformance/mlfp/parser-parity/complex-recursive-program/src/Main.mlfp:1:44-1:51
+export type-with-constructors Tree span=test/conformance/mlfp/parser-parity/complex-recursive-program/src/Main.mlfp:1:53-1:61
+export value eq span=test/conformance/mlfp/parser-parity/complex-recursive-program/src/Main.mlfp:1:63-1:65
+export value mirror span=test/conformance/mlfp/parser-parity/complex-recursive-program/src/Main.mlfp:1:67-1:73
+export value leftDepth span=test/conformance/mlfp/parser-parity/complex-recursive-program/src/Main.mlfp:1:75-1:84
+export value rightDepth span=test/conformance/mlfp/parser-parity/complex-recursive-program/src/Main.mlfp:1:86-1:96
+export value main span=test/conformance/mlfp/parser-parity/complex-recursive-program/src/Main.mlfp:1:98-1:102
+class Eq params=a span=test/conformance/mlfp/parser-parity/complex-recursive-program/src/Main.mlfp:2:3-6:3
+method-signature eq type=a -> a -> Bool span=test/conformance/mlfp/parser-parity/complex-recursive-program/src/Main.mlfp:3:5-4:3
+data Nat span=test/conformance/mlfp/parser-parity/complex-recursive-program/src/Main.mlfp:6:3-11:3
+constructor Zero type=Nat span=test/conformance/mlfp/parser-parity/complex-recursive-program/src/Main.mlfp:7:7-8:5
+constructor Succ type=Nat -> Nat span=test/conformance/mlfp/parser-parity/complex-recursive-program/src/Main.mlfp:8:7-9:5
+deriving Eq span=test/conformance/mlfp/parser-parity/complex-recursive-program/src/Main.mlfp:9:14-9:16
+data Tree span=test/conformance/mlfp/parser-parity/complex-recursive-program/src/Main.mlfp:11:3-15:3
+constructor Leaf type=Tree span=test/conformance/mlfp/parser-parity/complex-recursive-program/src/Main.mlfp:12:7-13:5
+constructor Branch type=Tree -> Tree -> Tree span=test/conformance/mlfp/parser-parity/complex-recursive-program/src/Main.mlfp:13:7-13:36
+def mirror type=Tree -> Tree expr=λ(tree : Tree) case tree of { Leaf -> Leaf; Branch left right -> Branch (mirror right) (mirror left) } span=test/conformance/mlfp/parser-parity/complex-recursive-program/src/Main.mlfp:15:3-20:3
+def leftDepth type=Tree -> Nat expr=λ(tree : Tree) case tree of { Leaf -> Zero; Branch left _ -> Succ (leftDepth left) } span=test/conformance/mlfp/parser-parity/complex-recursive-program/src/Main.mlfp:20:3-25:3
+def rightDepth type=Tree -> Nat expr=λ(tree : Tree) case tree of { Leaf -> Zero; Branch _ right -> Succ (rightDepth right) } span=test/conformance/mlfp/parser-parity/complex-recursive-program/src/Main.mlfp:25:3-30:3
+def main type=Bool expr=eq (leftDepth (mirror (Branch (Branch Leaf Leaf) (Branch Leaf (Branch Leaf Leaf))))) (rightDepth (Branch (Branch Leaf Leaf) (Branch Leaf (Branch Leaf Leaf)))) span=test/conformance/mlfp/parser-parity/complex-recursive-program/src/Main.mlfp:30:3-45:1

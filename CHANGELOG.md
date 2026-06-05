@@ -36,6 +36,17 @@
   deferred placeholders remain per binding.
 
 ### Added
+- Extended the shared parser-owned parser-parity library with a bounded complex
+  recursive program grammar slice for `complex-recursive-program`. The new
+  committed projection and thin fixture root cover `ComplexRecursiveProgram`
+  exporting `Eq`, `Nat(..)`, `Tree(..)`, `eq`, `mirror`, `leftDepth`,
+  `rightDepth`, and `main`; recursive `Nat deriving Eq`; recursive binary
+  `Tree`; three recursive Tree traversal definitions; and nested
+  `leftDepth`/`rightDepth`/`mirror`/`Branch` applications in `main` through
+  the shared source-text lexer/parser path. A malformed Tree traversal branch
+  missing `->` is also covered by the generated aggregate public CLI driver.
+  This is not full parser parity, resolver/checker/backend, compiler-package,
+  driver, platform, proof, or self-boot work.
 - Extended the shared parser-owned parser-parity library with a bounded
   module-integrated recursive existential grammar slice for
   `module-integrated-recursive-existential`. The new committed projection and

@@ -1,0 +1,7 @@
+module ParserParityFixture export (sourceFile, sourceText) {
+  def sourceFile : String =
+    "test/conformance/mlfp/parser-parity/complex-recursive-program/src/Main.mlfp";
+
+  def sourceText : String =
+    "module ComplexRecursiveProgram export (Eq, Nat(..), Tree(..), eq, mirror, leftDepth, rightDepth, main) {\n  class Eq a {\n    eq : a -> a -> Bool;\n  }\n\n  data Nat =\n      Zero : Nat\n    | Succ : Nat -> Nat\n    deriving Eq;\n\n  data Tree =\n      Leaf : Tree\n    | Branch : Tree -> Tree -> Tree;\n\n  def mirror : Tree -> Tree = λ(tree : Tree) case tree of {\n    Leaf -> Leaf;\n    Branch left right -> Branch (mirror right) (mirror left)\n  };\n\n  def leftDepth : Tree -> Nat = λ(tree : Tree) case tree of {\n    Leaf -> Zero;\n    Branch left _ -> Succ (leftDepth left)\n  };\n\n  def rightDepth : Tree -> Nat = λ(tree : Tree) case tree of {\n    Leaf -> Zero;\n    Branch _ right -> Succ (rightDepth right)\n  };\n\n  def main : Bool =\n    eq\n      (leftDepth\n        (mirror\n          (Branch\n            (Branch Leaf Leaf)\n            (Branch\n              Leaf\n              (Branch Leaf Leaf)))))\n      (rightDepth\n        (Branch\n          (Branch Leaf Leaf)\n          (Branch\n            Leaf\n            (Branch Leaf Leaf))));\n}\n";
+}

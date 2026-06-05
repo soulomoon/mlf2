@@ -1,3 +1,31 @@
+## 2026-06-05 - Round 334 parser parity complex recursive program extension
+
+- Extended the shared parser-owned parser-parity source-text parser library
+  with a bounded complex recursive program slice based on
+  `test/programs/recursive-adt/complex-recursive-program.mlfp`, covering
+  `ComplexRecursiveProgram` exports for `Eq`, `Nat(..)`, `Tree(..)`, `eq`,
+  `mirror`, `leftDepth`, `rightDepth`, and `main`.
+- Added the committed parser-program projection fixture for
+  `complex-recursive-program`, plus a thin `.mlfp` fixture root that exposes
+  only `sourceFile` and `sourceText` before calling
+  `renderParserParityProjectionFromSourceText`.
+- Added public parser-parity coverage for a malformed Tree traversal branch
+  through `renderParserNegativeEvidenceFromSourceText`, with parser-owned
+  `expected-case-branch-arrow@...` diagnostic evidence.
+- Extended the shared source parser for the selected syntax family with the
+  composed `Eq`/recursive `Nat deriving Eq`/recursive `Tree` declaration
+  sequence, eight-item export lists, bounded nested parenthesized
+  constructor/function applications, and line-number evidence through the
+  fixture's canonical final span.
+- Extended shortcut/static guards for round-specific parser/token/projection
+  shortcuts, including fixture-specific token streams, success keys,
+  whole-fixture recognition, pre-rendered `mirror`/`leftDepth`/`rightDepth`/
+  `main` rows, exact helper/main expression shortcuts, and static negative
+  evidence.
+- Scope remains bounded parser parity only. This is not full parser parity,
+  resolver, checker, backend, compiler-package, driver, platform, proof, or
+  self-boot progress.
+
 ## 2026-06-05 - Round 333 parser parity module-integrated recursive existential extension
 
 - Extended the shared parser-owned parser-parity source-text parser library
