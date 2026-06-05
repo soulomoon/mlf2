@@ -1,3 +1,30 @@
+## 2026-06-06 - Round 335 parser parity named recursive ADT source-module extension
+
+- Extended the shared parser-owned parser-parity source-text parser library
+  with a bounded named recursive-ADT corpus slice copied from
+  `test/programs/recursive-adt/deriving-eq.mlfp`,
+  `test/programs/recursive-adt/recursive-gadt.mlfp`, and
+  `test/programs/recursive-adt/recursive-existential.mlfp`.
+- Added committed parser-program projection fixtures for `deriving-eq`,
+  `recursive-gadt`, and `recursive-existential`, preserving source module
+  names `DerivingEq`, `RecursiveGadt`, and `RecursiveExistential` in rendered
+  module rows.
+- Added thin `.mlfp` fixture roots that expose only `sourceFile` and
+  `sourceText` before calling `renderParserParityProjectionFromSourceText`.
+- Extended the shared source parser for the selected deriving, GADT, and
+  existential recursive-ADT syntax families so they render projection rows
+  from parsed source structure and dynamic module headers instead of
+  `Main`-only static projection keys.
+- Added public parser-parity coverage for a malformed named recursive-ADT case
+  branch through `renderParserNegativeEvidenceFromSourceText`, with
+  parser-owned `expected-case-branch-arrow@...` diagnostic evidence.
+- Removed the retired static recursive-ADT fallback recognizer from the shared
+  parser library so the selected named corpus modules and carried recursive
+  ADT cases use the dynamic program parser path.
+- Scope remains bounded parser parity only. This is not full parser parity,
+  resolver, checker, backend, compiler-package, driver, platform, proof, or
+  self-boot progress.
+
 ## 2026-06-05 - Round 334 parser parity complex recursive program extension
 
 - Extended the shared parser-owned parser-parity source-text parser library

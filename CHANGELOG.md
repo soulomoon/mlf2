@@ -36,6 +36,16 @@
   deferred placeholders remain per binding.
 
 ### Added
+- Extended the shared parser-owned parser-parity library with a bounded named
+  recursive-ADT corpus grammar slice for `deriving-eq`, `recursive-gadt`, and
+  `recursive-existential`. The new committed projections and thin fixture
+  roots copy the exact recursive-ADT corpus sources, preserve source module
+  names `DerivingEq`, `RecursiveGadt`, and `RecursiveExistential`, route the
+  selected deriving/GADT/existential syntax families through the shared
+  source-text lexer/parser path, and cover a malformed named recursive-ADT
+  case branch missing `->` through the generated aggregate public CLI driver.
+  This is not full parser parity, resolver/checker/backend, compiler-package,
+  driver, platform, proof, or self-boot work.
 - Extended the shared parser-owned parser-parity library with a bounded complex
   recursive program grammar slice for `complex-recursive-program`. The new
   committed projection and thin fixture root cover `ComplexRecursiveProgram`

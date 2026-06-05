@@ -4,7 +4,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
   import ParserParityDiagnostic exposing (ParserDiagnostic(..));
   import ParserParityLexer exposing (LexerResult(..), nextLineNumber, tokenizeCompleteModule);
   import ParserParityParserCombinator exposing (Parser, ParserEnd(..), ParserState(..), ParserStep(..), ParserValue(..), captureSpan, diagnosticLabel, expectIdentifierToken, expectToken, expectTokenPrefix, labelCaseBranchArrow, labelConstructorColon, labelConstructorForallDot, labelDefSemicolon, labelEquals, labelFunctionalDependencyArrow, labelImportAlias, labelImportSemicolon, labelInstanceMethodEquals, labelLetAnnotationType, labelLetIn, labelTypeFamilyEquationEquals, labelUnexpectedSource, parserBind, parserChoice, parserCurrentTokenStartOr, parserFail, parserFailExpectedCaseBranchArrowAtCurrent, parserFailExpectedConstructorForallDotAtCurrent, parserFailExpectedDefSemicolonAtCurrent, parserFailExpectedExpressionCloseParenAtCurrent, parserFailExpectedImportExposingSeparatorAtCurrent, parserFailExpectedImportSemicolonAtCurrent, parserPure, parserReturnAtEndOr, parserStateAtEnd, runParser);
-  import ParserParitySource exposing (basicBoolLiteralSpan, basicUnexpectedSpan, caseBranchArrowSpan, constructorForallDotSpan, dataZeroColonSpan, existentialForallExprDataSpan, existentialForallMainDefSpan, existentialForallModuleSpan, existentialForallNatDataSpan, existentialForallSomeExprDataSpan, existentialForallUnwrapSomeDefSpan, importBoolSemicolonSpan, letInSpan, lexerUnknownSpan, multiparamFundepArrowSpan, qualifiedImportAliasDiagnosticSpan, recursiveGadtDoneNowDefSpan, recursiveGadtExprDataSpan, recursiveGadtMainDefSpan, recursiveGadtModuleSpan, recursiveGadtNatDataSpan, renderSpan, typedLetForallSpan, typeFamilyEquationEqualsSpan, typeclassInstanceMethodEqualsSpan, valueFirstDefSemicolonSpan);
+  import ParserParitySource exposing (basicBoolLiteralSpan, basicUnexpectedSpan, caseBranchArrowSpan, constructorForallDotSpan, dataZeroColonSpan, importBoolSemicolonSpan, letInSpan, lexerUnknownSpan, multiparamFundepArrowSpan, qualifiedImportAliasDiagnosticSpan, renderSpan, typedLetForallSpan, typeFamilyEquationEqualsSpan, typeclassInstanceMethodEqualsSpan, valueFirstDefSemicolonSpan);
   import ParserParityToken exposing (ParserInput(..), TokenKind(..), renderTokenPrefixEvidence, tokenEnd, tokenSpan, tokenStart, tokenText);
 
   data ParserResult =
@@ -479,7 +479,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
                   (parserChoice (parseCaseModule ValueUnit)
                     (parserChoice (parseTypeclassModule ValueUnit)
                       (parserChoice (parseKindedConstraintModule ValueUnit)
-                      (parserChoice (parseClosedTypeFamilySyntax ValueUnit) (parseRecursiveAdtSyntax ValueUnit)))))))))));
+                        (parseClosedTypeFamilySyntax ValueUnit))))))))));
 
   def parseSharedProgramModule : String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(_start : ParserValue)
@@ -1879,6 +1879,8 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
     λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
       parserChoice (parseEqDerivedNatTreeFourDefinitionStartedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)
         (parserChoice (parseEqDerivedExprSomeStartedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)
+        (parserChoice (parseNatExprSomeTwoDefinitionStartedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)
+        (parserChoice (parseNatExprTwoDefinitionStartedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)
         (parserChoice (parseEqNatInstanceStartedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)
         (parserChoice (parseClassDerivedStartedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)
         (parserChoice (parseClassStartedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)
@@ -1891,7 +1893,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
                   (parseNatDataThreeDefinitionStartedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)
                   (parserChoice
                     (parseNatDataSingleDefinitionStartedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)
-                    (parseDataStartedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)))))))))));
+                    (parseDataStartedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)))))))))))));
 
   def parseEqDerivedNatTreeFourDefinitionStartedBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
@@ -1947,6 +1949,46 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
     λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(rowsValue : ParserValue)
       parserBind (parseSingleConstructorDataRows sourceFile ValueUnit)
         (finishExactModuleBodyRows sourceFile moduleStart moduleName exportRows rowsValue);
+
+  def parseNatExprSomeTwoDefinitionStartedBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
+      parserBind (parseNatRecursiveDataRows sourceFile ValueUnit)
+        (parseNatExprSomeTwoDefinitionExprRows sourceFile moduleStart moduleName exportRows);
+
+  def parseNatExprSomeTwoDefinitionExprRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(natRows : ParserValue)
+      parserBind (parseExprRecursiveDataRows sourceFile ValueUnit)
+        (appendNatExprSomeTwoDefinitionExprRows sourceFile moduleStart moduleName exportRows natRows);
+
+  def appendNatExprSomeTwoDefinitionExprRows : String -> String -> String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(existingRows : ParserValue) λ(exprRows : ParserValue)
+      parserBind (appendProjectionValues existingRows exprRows)
+        (parseNatExprSomeTwoDefinitionSomeRows sourceFile moduleStart moduleName exportRows);
+
+  def parseNatExprSomeTwoDefinitionSomeRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(rowsValue : ParserValue)
+      parserBind (parseSingleConstructorDataRows sourceFile ValueUnit)
+        (appendNatExprSomeTwoDefinitionSomeRows sourceFile moduleStart moduleName exportRows rowsValue);
+
+  def appendNatExprSomeTwoDefinitionSomeRows : String -> String -> String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(existingRows : ParserValue) λ(someExprRows : ParserValue)
+      parserBind (appendProjectionValues existingRows someExprRows)
+        (parseDataTwoDefinitionRows sourceFile moduleStart moduleName exportRows);
+
+  def parseNatExprTwoDefinitionStartedBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
+      parserBind (parseNatRecursiveDataRows sourceFile ValueUnit)
+        (parseNatExprTwoDefinitionExprRows sourceFile moduleStart moduleName exportRows);
+
+  def parseNatExprTwoDefinitionExprRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(natRows : ParserValue)
+      parserBind (parseExprRecursiveDataRows sourceFile ValueUnit)
+        (appendNatExprTwoDefinitionExprRows sourceFile moduleStart moduleName exportRows natRows);
+
+  def appendNatExprTwoDefinitionExprRows : String -> String -> String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(existingRows : ParserValue) λ(exprRows : ParserValue)
+      parserBind (appendProjectionValues existingRows exprRows)
+        (parseDataTwoDefinitionRows sourceFile moduleStart moduleName exportRows);
 
   def parseEqNatInstanceStartedBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
@@ -2066,6 +2108,21 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
     λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(dataRowsValue : ParserValue)
       parserBind (parseSourceDefinitionRows sourceFile ValueUnit)
         (appendDataFourFirstDefinitionRows sourceFile moduleStart moduleName exportRows dataRowsValue);
+
+  def parseDataTwoDefinitionRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(dataRowsValue : ParserValue)
+      parserBind (parseSourceDefinitionRows sourceFile ValueUnit)
+        (appendDataTwoFirstDefinitionRows sourceFile moduleStart moduleName exportRows dataRowsValue);
+
+  def appendDataTwoFirstDefinitionRows : String -> String -> String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(dataRowsValue : ParserValue) λ(firstDefinitionRows : ParserValue)
+      parserBind (appendProjectionValues dataRowsValue firstDefinitionRows)
+        (parseSecondDefinitionAndFinish sourceFile moduleStart moduleName exportRows);
+
+  def parseSecondDefinitionAndFinish : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(firstRows : ParserValue)
+      parserBind (parseSourceDefinitionRows sourceFile ValueUnit)
+        (finishExactModuleBodyRows sourceFile moduleStart moduleName exportRows firstRows);
 
   def appendDataFourFirstDefinitionRows : String -> String -> String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(dataRowsValue : ParserValue) λ(firstDefinitionRows : ParserValue)
@@ -6553,206 +6610,6 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
       parserBind (expectIdentifier "Int")
         parsedUnit;
 
-  def recursiveGadtProjectionKey : String =
-    "recursive-gadt-projection";
-
-  def existentialForallProjectionKey : String =
-    "existential-forall-projection";
-
-  def parseRecursiveAdtSyntax : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue)
-      parserBind (labelUnexpectedSource recursiveGadtModuleSpan (expectText "module"))
-        parseRecursiveAdtModuleName;
-
-  def parseRecursiveAdtModuleName : ParserValue -> Parser ParserValue =
-    λ(_moduleToken : ParserValue)
-      parserBind (expectIdentifier "Main")
-        parseRecursiveAdtExportKeyword;
-
-  def parseRecursiveAdtExportKeyword : ParserValue -> Parser ParserValue =
-    λ(_moduleName : ParserValue)
-      parserBind (expectText "export")
-        parseRecursiveAdtExportOpen;
-
-  def parseRecursiveAdtExportOpen : ParserValue -> Parser ParserValue =
-    λ(_exportToken : ParserValue)
-      parserBind (expectText "(")
-        parseRecursiveAdtNatExport;
-
-  def parseRecursiveAdtNatExport : ParserValue -> Parser ParserValue =
-    λ(_openExport : ParserValue)
-      parserBind (parseTypeWithConstructorsExport "Nat" ValueUnit)
-        parseRecursiveAdtNatExportComma;
-
-  def parseRecursiveAdtNatExportComma : ParserValue -> Parser ParserValue =
-    λ(_natExport : ParserValue)
-      parserBind (expectText ",")
-        parseRecursiveAdtExprExport;
-
-  def parseRecursiveAdtExprExport : ParserValue -> Parser ParserValue =
-    λ(_comma : ParserValue)
-      parserBind (parseTypeWithConstructorsExport "Expr" ValueUnit)
-        parseRecursiveAdtExprExportComma;
-
-  def parseRecursiveAdtExprExportComma : ParserValue -> Parser ParserValue =
-    λ(_exprExport : ParserValue)
-      parserBind (expectText ",")
-        parseRecursiveAdtExportTail;
-
-  def parseRecursiveAdtExportTail : ParserValue -> Parser ParserValue =
-    λ(_comma : ParserValue)
-      parserChoice
-        (parseExistentialValueExports ValueUnit)
-        (parseRecursiveGadtValueExports ValueUnit);
-
-  def parseTypeWithConstructorsExport : String -> ParserValue -> Parser ParserValue =
-    λ(typeName : String) λ(_start : ParserValue)
-      parserBind (expectIdentifier typeName)
-        parseConstructorExportOpen;
-
-  def parseConstructorExportOpen : ParserValue -> Parser ParserValue =
-    λ(_typeName : ParserValue)
-      parserBind (expectText "(")
-        parseConstructorExportFirstDot;
-
-  def parseConstructorExportFirstDot : ParserValue -> Parser ParserValue =
-    λ(_openConstructors : ParserValue)
-      parserBind (expectText ".")
-        parseConstructorExportSecondDot;
-
-  def parseConstructorExportSecondDot : ParserValue -> Parser ParserValue =
-    λ(_firstDot : ParserValue)
-      parserBind (expectText ".")
-        parseConstructorExportClose;
-
-  def parseConstructorExportClose : ParserValue -> Parser ParserValue =
-    λ(_secondDot : ParserValue)
-      parserBind (expectText ")")
-        parsedUnit;
-
-  def parseRecursiveGadtValueExports : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue)
-      parserBind (expectIdentifier "doneNow")
-        parseRecursiveGadtExportComma;
-
-  def parseRecursiveGadtExportComma : ParserValue -> Parser ParserValue =
-    λ(_doneNowExport : ParserValue)
-      parserBind (expectText ",")
-        parseRecursiveGadtMainExport;
-
-  def parseRecursiveGadtMainExport : ParserValue -> Parser ParserValue =
-    λ(_comma : ParserValue)
-      parserBind (expectIdentifier "main")
-        parseRecursiveGadtExportClose;
-
-  def parseRecursiveGadtExportClose : ParserValue -> Parser ParserValue =
-    λ(_mainExport : ParserValue)
-      parserBind (expectText ")")
-        parseRecursiveGadtModuleOpen;
-
-  def parseRecursiveGadtModuleOpen : ParserValue -> Parser ParserValue =
-    λ(_closeExport : ParserValue)
-      parserBind (expectText "{")
-        parseRecursiveGadtBody;
-
-  def parseExistentialValueExports : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue)
-      parserBind (parseTypeWithConstructorsExport "SomeExpr" ValueUnit)
-        parseExistentialSomeExprExportComma;
-
-  def parseExistentialSomeExprExportComma : ParserValue -> Parser ParserValue =
-    λ(_someExprExport : ParserValue)
-      parserBind (expectText ",")
-        parseExistentialUnwrapExport;
-
-  def parseExistentialUnwrapExport : ParserValue -> Parser ParserValue =
-    λ(_comma : ParserValue)
-      parserBind (expectIdentifier "unwrapSome")
-        parseExistentialUnwrapExportComma;
-
-  def parseExistentialUnwrapExportComma : ParserValue -> Parser ParserValue =
-    λ(_unwrapExport : ParserValue)
-      parserBind (expectText ",")
-        parseExistentialMainExport;
-
-  def parseExistentialMainExport : ParserValue -> Parser ParserValue =
-    λ(_comma : ParserValue)
-      parserBind (expectIdentifier "main")
-        parseExistentialExportClose;
-
-  def parseExistentialExportClose : ParserValue -> Parser ParserValue =
-    λ(_mainExport : ParserValue)
-      parserBind (expectText ")")
-        parseExistentialModuleOpen;
-
-  def parseExistentialModuleOpen : ParserValue -> Parser ParserValue =
-    λ(_closeExport : ParserValue)
-      parserBind (expectText "{")
-        parseExistentialBody;
-
-  def parseRecursiveGadtBody : ParserValue -> Parser ParserValue =
-    λ(_openModule : ParserValue)
-      parserBind (labelUnexpectedSource recursiveGadtNatDataSpan (parseNatRecursiveDataDeclaration ValueUnit))
-        parseRecursiveGadtExprData;
-
-  def parseRecursiveGadtExprData : ParserValue -> Parser ParserValue =
-    λ(_natData : ParserValue)
-      parserBind (labelUnexpectedSource recursiveGadtExprDataSpan (parseExprRecursiveDataDeclaration ValueUnit))
-        parseRecursiveGadtDoneNowDefinition;
-
-  def parseRecursiveGadtDoneNowDefinition : ParserValue -> Parser ParserValue =
-    λ(_exprData : ParserValue)
-      parserBind (labelUnexpectedSource recursiveGadtDoneNowDefSpan (parseDoneNowDefinition ValueUnit))
-        parseRecursiveGadtMainDefinition;
-
-  def parseRecursiveGadtMainDefinition : ParserValue -> Parser ParserValue =
-    λ(_doneNowDef : ParserValue)
-      parserBind (labelUnexpectedSource recursiveGadtMainDefSpan (parseRecursiveGadtMainDef ValueUnit))
-        finishRecursiveGadtModule;
-
-  def finishRecursiveGadtModule : ParserValue -> Parser ParserValue =
-    λ(_mainDef : ParserValue)
-      parserBind (expectText "}")
-        recursiveGadtModuleValue;
-
-  def recursiveGadtModuleValue : ParserValue -> Parser ParserValue =
-    λ(_closeModule : ParserValue)
-      moduleKey recursiveGadtProjectionKey;
-
-  def parseExistentialBody : ParserValue -> Parser ParserValue =
-    λ(_openModule : ParserValue)
-      parserBind (labelUnexpectedSource existentialForallNatDataSpan (parseNatRecursiveDataDeclaration ValueUnit))
-        parseExistentialExprData;
-
-  def parseExistentialExprData : ParserValue -> Parser ParserValue =
-    λ(_natData : ParserValue)
-      parserBind (labelUnexpectedSource existentialForallExprDataSpan (parseExprRecursiveDataDeclaration ValueUnit))
-        parseExistentialSomeExprData;
-
-  def parseExistentialSomeExprData : ParserValue -> Parser ParserValue =
-    λ(_exprData : ParserValue)
-      parserBind (labelUnexpectedSource existentialForallSomeExprDataSpan (parseSomeExprDataDeclaration ValueUnit))
-        parseExistentialUnwrapDefinition;
-
-  def parseExistentialUnwrapDefinition : ParserValue -> Parser ParserValue =
-    λ(_someExprData : ParserValue)
-      parserBind (labelUnexpectedSource existentialForallUnwrapSomeDefSpan (parseUnwrapSomeDefinition ValueUnit))
-        parseExistentialMainDefinition;
-
-  def parseExistentialMainDefinition : ParserValue -> Parser ParserValue =
-    λ(_unwrapDef : ParserValue)
-      parserBind (labelUnexpectedSource existentialForallMainDefSpan (parseExistentialMainDef ValueUnit))
-        finishExistentialModule;
-
-  def finishExistentialModule : ParserValue -> Parser ParserValue =
-    λ(_mainDef : ParserValue)
-      parserBind (expectText "}")
-        existentialModuleValue;
-
-  def existentialModuleValue : ParserValue -> Parser ParserValue =
-    λ(_closeModule : ParserValue)
-      moduleKey existentialForallProjectionKey;
-
   def parseSingleConstructorDataRows : String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(_start : ParserValue)
       parserBind (expectText "data")
@@ -7659,46 +7516,6 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
       parserBind (expectText ")")
         parsedUnit;
 
-  def parseRecursiveGadtMainDef : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue)
-      parserBind (expectText "def")
-        parseRecursiveGadtMainName;
-
-  def parseRecursiveGadtMainName : ParserValue -> Parser ParserValue =
-    λ(_defToken : ParserValue)
-      parserBind (expectIdentifier "main")
-        parseBoolMainColon;
-
-  def parseBoolMainColon : ParserValue -> Parser ParserValue =
-    λ(_mainName : ParserValue)
-      parserBind (expectText ":")
-        parseBoolMainType;
-
-  def parseBoolMainType : ParserValue -> Parser ParserValue =
-    λ(_colon : ParserValue)
-      parserBind (expectIdentifier "Bool")
-        parseRecursiveGadtMainEquals;
-
-  def parseRecursiveGadtMainEquals : ParserValue -> Parser ParserValue =
-    λ(_type : ParserValue)
-      parserBind (expectEqualsParser ValueUnit)
-        parseDoneNowCallExpression;
-
-  def parseDoneNowCallExpression : ParserValue -> Parser ParserValue =
-    λ(_equals : ParserValue)
-      parserBind (expectIdentifier "doneNow")
-        parseDoneNowCallArgumentOpen;
-
-  def parseDoneNowCallArgumentOpen : ParserValue -> Parser ParserValue =
-    λ(_functionName : ParserValue)
-      parserBind (expectText "(")
-        parseDoneNowCallStepArgument;
-
-  def parseDoneNowCallStepArgument : ParserValue -> Parser ParserValue =
-    λ(_openArgument : ParserValue)
-      parserBind (parseStepDoneNatZeroExpression ValueUnit)
-        parseDoneNowCallArgumentClose;
-
   def parseStepDoneNatZeroExpression : ParserValue -> Parser ParserValue =
     λ(_openArgument : ParserValue)
       parserBind (expectIdentifier "Step")
@@ -7727,11 +7544,6 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
   def parseStepDoneNatClose : ParserValue -> Parser ParserValue =
     λ(_closeDoneNat : ParserValue)
       parserPure ValueUnit;
-
-  def parseDoneNowCallArgumentClose : ParserValue -> Parser ParserValue =
-    λ(_closeStep : ParserValue)
-      parserBind (expectText ")")
-        parseBoolMainSemicolon;
 
   def parseBoolMainSemicolon : ParserValue -> Parser ParserValue =
     λ(_closeArgument : ParserValue)

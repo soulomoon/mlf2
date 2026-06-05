@@ -22,6 +22,16 @@ end-to-end roadmap order is decided in
 | Diagnostics | Located package parsing and checking preserve file paths/spans for common package, import, and visibility failures. The lexer and parser seeds have seed-owned diagnostic ADTs carrying symbolic source spans for rejected inputs. | Compiler-grade diagnostics need real source ranges, recovery strategy, structured error payloads, and golden diagnostics for package builds. |
 | Fixture evidence | Static fixture files cover trivial file-as-package inputs, multi-file package roots, ordered search paths, runtime parity rows, backend emission over package mode, the compiler frontend seed contract fixture, the bounded lexer evidence fixture, the bounded parser/AST evidence fixture, the bounded parser-program projection artifacts for the basic Bool definition, import-exposing Bool, value-definition-list Int/reference, let/lambda/application Int, typed-annotation Int, data-declaration Nat, case-expression Nat, typeclass/instance declaration, higher-kinded/constrained class, closed type-family/type-level, GADT/existential constructor, qualified import/reference, multi-module export/import, authoritative recursive-let, authoritative cross-module let-polymorphism, recursive-ADT plain Nat, recursive-list tail, recursive-tree first-order, recursive-tree deriving, recursive ADT/typeclass integration, abstract recursive ADT module-use, module-integrated recursive existential, and complex recursive program parser parity tracers, and bounded compiler-seed backend/native execution for the current package entrypoint. | Fixtures do not prove broad source-text lexing/parsing, separate compilation, stable ABI/linking, **Self-Boot Total Native Coverage**, or self-hosting. |
 
+Round 335 extends the parser/lexer and fixture-evidence rows above with a
+bounded parser-parity slice for the exact named recursive-ADT corpus source
+modules `DerivingEq`, `RecursiveGadt`, and `RecursiveExistential`, covering
+the selected deriving, GADT, and existential recursive-ADT syntax families
+through the shared parser-owned source-text library, plus malformed named
+recursive-ADT case branch-arrow diagnostics. The evidence removes the retired
+`Main`-only static recursive-ADT fallback for these surfaces and does not
+claim full parser parity, resolver/checker/backend progress, compiler-package
+progress, platform work, driver work, proof work, or self-boot completion.
+
 Round 334 extends the parser/lexer and fixture-evidence rows above with a
 bounded parser-parity fixture for complex recursive program source text,
 including `module ComplexRecursiveProgram export (Eq, Nat(..), Tree(..), eq,
