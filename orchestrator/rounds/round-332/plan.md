@@ -54,12 +54,15 @@ platform work, proof work, or self-boot progress.
 - Complexity: standard
 - Verification profile: focused
 - Reason: The task is bounded to one parser syntax family, but it is not
-  mechanically local: it changes shared parser-library module-body parsing,
-  imported-definition parsing, fixture registration, aggregate Hspec driver
-  wiring, negative evidence, and shortcut/static audits. Focused verification
-  is sufficient because this is a non-closeout parser-parity slice with no
-  production parser replacement, no checker/backend behavior claim, and no
-  milestone completion claim.
+  only mechanical parser-parity wiring: it changes shared parser-library
+  module-body parsing, imported-definition parsing, import-exposing arity, and
+  generic imported Bool `main` expression parsing for the selected abstract
+  recursive ADT module-use surface. Fixture registration, expected projection,
+  negative evidence, shortcut/static audits, and aggregate Hspec enrollment are
+  routine evidence work and are not the reason this was classified as
+  standard. Focused verification is sufficient because this is a non-closeout
+  parser-parity slice with no production parser replacement, no checker/backend
+  behavior claim, and no milestone completion claim.
 
 ### Steps
 1. Add

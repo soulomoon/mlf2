@@ -35,11 +35,12 @@ Load only for same-round replanning after rejected review:
 - Select from dependency-ready milestones and candidate directions in the
   active roadmap bundle.
 - Classify the selected task's complexity as `simple`, `standard`, or
-  `closeout` using only the task content itself: whether the requested change
-  is narrow, clear, mechanically local, and conceptually small. Do not consider
-  roadmap importance, protected-surface status, validation cost, reviewer need,
-  merge path, milestone proximity, or downstream risk when setting
-  `Complexity`.
+  `closeout` using the active roadmap bundle's Round Execution Profiles.
+  In short: `simple` means the goal, implementation path, and verification
+  boundary are clear; routine mechanical wiring does not by itself upgrade
+  complexity. Do not consider roadmap importance, protected-surface status,
+  validation cost, reviewer need, merge path, milestone proximity, or
+  downstream risk when setting `Complexity`.
 - Choose `Verification profile` separately as `focused`, `standard`, or
   `closeout`, based on evidence required around the task. Put every concern
   outside the task's own content here, not in `Complexity`.

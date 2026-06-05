@@ -47,7 +47,8 @@ package/conformance substrate, and records comparable semantic proof evidence.
 - Semantic changes to future sequencing, milestone meaning, or verification
   policy require delegated `update-roadmap`; controller-owned closeout may only
   update status markers, completion pointers, and compact history.
-- Planner decides `Complexity` from task content only. It chooses
+- Planner decides `Complexity` from task content only using
+  `orchestrator/active-roadmap-bundle.md` Round Execution Profiles. It chooses
   `Verification profile` separately from surrounding risk and evidence needs.
 
 ## Parallel Lanes
@@ -158,8 +159,9 @@ parser parity slices currently merged into `master`.
 Parallel lane: text-parser
 Coordination notes: Continue selecting bounded parser parity slices from the
 shared parser library and shared conformance corpus. Planner should batch
-simple parser fixture/library additions when they share parser owner surface,
-verification commands, and failure mode.
+simple parser fixture/library additions when their goals, implementation
+paths, verification boundaries, parser owner surfaces, and failure modes are
+shared.
 
 Candidate directions:
 - Direction id: direction-4a-canonical-parser-parity
@@ -169,8 +171,10 @@ Candidate directions:
     canonical parser covers source package syntax.
   Preconditions: milestone-3-native-capable-broad-text-substrate
   Parallel hints: Simple fixture/library slices may be planner-completed and
-    batched; non-simple parser owner changes still go through implementer and
-    reviewer.
+    batched, including shared parser-library changes that follow established
+    parser paths and have clear verification boundaries. Parser owner changes
+    go through implementer and reviewer only when the task content itself is
+    non-simple under the active Round Execution Profiles.
   Boundary notes: Do not add compatibility aliases for retired syntax. Do not
     satisfy parser parity by bypassing the canonical parser.
   Extraction notes: Prefer the next smallest shared parser-library or

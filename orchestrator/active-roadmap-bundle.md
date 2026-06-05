@@ -32,11 +32,21 @@ roadmap wording. Planner-authored `plan.md` records these fields in its
 - `Complexity`: `simple`, `standard`, or `closeout`
 - `Verification profile`: `focused`, `standard`, or `closeout`
 
-`Complexity` describes only the selected task's own content: whether the
-requested change is narrow, clear, mechanically local, and conceptually small.
-Do not use surrounding roadmap importance, protected-surface status,
-validation cost, reviewer need, merge path, milestone proximity, or downstream
-risk to upgrade `Complexity`.
+`Complexity` describes only the selected task's own content. A task is
+`simple` when the goal is clear, the implementation path follows an
+established local pattern, and the verification boundary is clear enough that
+the selected evidence can directly prove the slice. Routine wiring such as
+fixture registration, expected outputs, negative cases, guard checks, docs, or
+aggregate-test enrollment does not by itself upgrade complexity when it is
+mechanical and shares the same owner surface and failure mode.
+
+Use `standard` when the task content itself needs new design judgment, changes
+structural shared behavior across ownership boundaries, introduces a new
+abstraction or failure mode, or cannot be locally proven from a clear
+verification boundary. Use `closeout` for milestone closeout or
+semantic/public-contract changes. Do not use surrounding roadmap importance,
+protected-surface status, validation cost, reviewer need, merge path,
+milestone proximity, or downstream risk to upgrade `Complexity`.
 
 `Verification profile` describes the evidence required around the task. Put
 everything outside the task's own content here: protected-surface validation,

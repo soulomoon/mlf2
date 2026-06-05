@@ -51,12 +51,14 @@ compiler-package progress, platform work, proof work, or self-boot progress.
 ### Execution Profile
 - Complexity: standard
 - Verification profile: focused
-- Reason: The selected task is bounded to one parser syntax family, but it is
-  not mechanically local: it changes the shared parser-library grammar,
-  aggregate Hspec driver wiring, fixtures, negative evidence, and guard audits.
-  Focused verification is sufficient because this is a non-closeout
-  parser-parity slice with no production Haskell behavior claim and no
-  milestone completion claim.
+- Reason: The selected task is bounded to one parser syntax family, but it
+  changes structural shared parser-library grammar for the selected
+  typeclass-integration surface rather than only mechanical parser-parity
+  wiring. Fixture registration, expected projection, negative evidence, guard
+  audits, and aggregate Hspec enrollment are routine evidence work and are not
+  the reason this was classified as standard. Focused verification is
+  sufficient because this is a non-closeout parser-parity slice with no
+  production Haskell behavior claim and no milestone completion claim.
 
 ### Steps
 1. Add

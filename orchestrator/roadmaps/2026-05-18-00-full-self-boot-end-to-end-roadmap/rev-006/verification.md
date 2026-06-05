@@ -5,11 +5,11 @@ The shared process contract lives in `orchestrator/active-roadmap-bundle.md`,
 `orchestrator/artifact-manifest.md`, `orchestrator/role-contract.md`, and the
 role prompts under `orchestrator/roles/`.
 
-Planner owns `Complexity` and `Verification profile` in `plan.md`. Complexity
-describes the task content only. Verification profile describes surrounding
-evidence needs. A simple task may still require standard or closeout
-verification, and the planner must complete that task directly when it chooses
-`Complexity: simple`.
+Planner owns `Complexity` and `Verification profile` in `plan.md`.
+`orchestrator/active-roadmap-bundle.md` owns the canonical Round Execution
+Profiles rubric. Verification profile describes surrounding evidence needs. A
+simple task may still require standard or closeout verification, and the
+planner must complete that task directly when it chooses `Complexity: simple`.
 
 ## Baseline Checks
 
@@ -105,8 +105,17 @@ verification, and the planner must complete that task directly when it chooses
 
 ## Roadmap Overrides
 
-- Planner should batch closely related simple parser and conformance additions
-  when the owner surface, verification commands, and failure mode are shared.
+- Parser/conformance additions should be batched when their goals,
+  implementation paths, verification boundaries, owner surfaces, and failure
+  modes are shared.
+- Routine parser-parity wiring, fixture registration, expected projections,
+  negative cases, shortcut guards, docs, and aggregate parser batch enrollment
+  do not by themselves make a parser-library slice non-simple.
+- Parser-library changes remain simple when they follow an established shared
+  parser path and the selected evidence directly proves the slice. Treat them
+  as non-simple only when the task content itself needs new design judgment,
+  changes structural shared parser behavior, introduces a new abstraction or
+  failure mode, or lacks a clear local verification boundary.
 - Planner may directly implement and close simple tasks, including simple docs,
   fixture, parser-library, or control-plane maintenance, when it also runs the
   selected verification profile and records direct evidence.
