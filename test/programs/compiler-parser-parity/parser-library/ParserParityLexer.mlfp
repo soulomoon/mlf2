@@ -42,7 +42,7 @@ module ParserParityLexer export (LexerResult(..), tokenizeCompleteModule, nextLi
 
   def tokenizeCompleteModule : String -> LexerResult =
     λ(sourceText : String)
-      finishScannedInput (scanMany256 (initialScanState sourceText));
+      finishScannedInput (scanMany512 (initialScanState sourceText));
 
   def initialSourceCursor : String -> SourceCursor =
     λ(sourceText : String) SourceCursor sourceText "1" "";
@@ -60,7 +60,7 @@ module ParserParityLexer export (LexerResult(..), tokenizeCompleteModule, nextLi
 
   def reverseScannedInput : ParserSourceInput -> LexerResult =
     λ(reverseInput : ParserSourceInput)
-      finishReverseInput (reverseMany256 (ReverseState reverseInput sourceInputNil));
+      finishReverseInput (reverseMany512 (ReverseState reverseInput sourceInputNil));
 
   def finishReverseInput : ReverseState -> LexerResult =
     λ(state : ReverseState) case state of {
@@ -69,6 +69,9 @@ module ParserParityLexer export (LexerResult(..), tokenizeCompleteModule, nextLi
         SourceInputCons _ _ -> LexerError (UnexpectedSourceText lexerUnknownSpan)
       }
     };
+
+  def reverseMany512 : ReverseState -> ReverseState =
+    λ(state : ReverseState) reverseMany256 (reverseMany256 state);
 
   def reverseMany256 : ReverseState -> ReverseState =
     λ(state : ReverseState) reverseMany128 (reverseMany128 state);
@@ -101,6 +104,9 @@ module ParserParityLexer export (LexerResult(..), tokenizeCompleteModule, nextLi
         SourceInputCons token rest -> ReverseState rest (sourceInputCons token forwardInput)
       }
     };
+
+  def scanMany512 : LexerScanState -> LexerScanState =
+    λ(state : LexerScanState) scanMany256 (scanMany256 state);
 
   def scanMany256 : LexerScanState -> LexerScanState =
     λ(state : LexerScanState) scanMany128 (scanMany128 state);
@@ -1180,12 +1186,18 @@ module ParserParityLexer export (LexerResult(..), tokenizeCompleteModule, nextLi
                                                                                                                               StringMatched -> "63";
                                                                                                                               StringMismatch -> case stringExactMatch "63" lineNumber of {
                                                                                                                                 StringMatched -> "64";
-                                                                                                                                StringMismatch -> case stringExactMatch "64" lineNumber of {
-                                                                                                                                  StringMatched -> "65";
+                                                                                                                            StringMismatch -> case stringExactMatch "64" lineNumber of {
+                                                                                                                              StringMatched -> "65";
+                                                                                                                              StringMismatch -> case stringExactMatch "65" lineNumber of {
+                                                                                                                                StringMatched -> "66";
+                                                                                                                                StringMismatch -> case stringExactMatch "66" lineNumber of {
+                                                                                                                                  StringMatched -> "67";
                                                                                                                                   StringMismatch -> lineNumber
                                                                                                                                 }
                                                                                                                               }
                                                                                                                             }
+                                                                                                                          }
+                                                                                                                        }
                                                                                                                           }
                                                                                                                         }
                                                                                                                       }

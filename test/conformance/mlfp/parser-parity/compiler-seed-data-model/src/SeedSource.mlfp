@@ -1,0 +1,66 @@
+module SeedSource export (SourcePosition(..), SourceSpan(..), SeedIdentifier(..), SeedBoolLiteral(..), SeedInputSymbol(..), SeedInput(..), spanStart, spanEnd, positiveSeedInput, negativeSeedInput) {
+  data SourcePosition =
+      Line1Column1 : SourcePosition
+    | Line1Column4 : SourcePosition
+    | Line1Column5 : SourcePosition
+    | Line1Column6 : SourcePosition
+    | Line1Column9 : SourcePosition
+    | Line1Column10 : SourcePosition
+    | Line1Column11 : SourcePosition
+    | Line1Column12 : SourcePosition
+    | Line1Column16 : SourcePosition;
+
+  data SourceSpan =
+      SpanDefKeyword : SourceSpan
+    | SpanIdentifierMain : SourceSpan
+    | SpanEquals : SourceSpan
+    | SpanBoolTrue : SourceSpan
+    | SpanUnknownSymbol : SourceSpan;
+
+  data SeedIdentifier =
+      IdentifierMain : SeedIdentifier;
+
+  data SeedBoolLiteral =
+      BoolLiteralTrue : SeedBoolLiteral;
+
+  data SeedInputSymbol =
+      InputDef : SourceSpan -> SeedInputSymbol
+    | InputIdentifier : SourceSpan -> SeedIdentifier -> SeedInputSymbol
+    | InputEquals : SourceSpan -> SeedInputSymbol
+    | InputBoolLiteral : SourceSpan -> SeedBoolLiteral -> SeedInputSymbol
+    | InputUnknown : SourceSpan -> SeedInputSymbol;
+
+  data SeedInput =
+      SeedInputNil : SeedInput
+    | SeedInputCons : SeedInputSymbol -> SeedInput -> SeedInput;
+
+  def spanStart : SourceSpan -> SourcePosition =
+    λ(span : SourceSpan) case span of {
+      SpanDefKeyword -> Line1Column1;
+      SpanIdentifierMain -> Line1Column5;
+      SpanEquals -> Line1Column10;
+      SpanBoolTrue -> Line1Column12;
+      SpanUnknownSymbol -> Line1Column5
+    };
+
+  def spanEnd : SourceSpan -> SourcePosition =
+    λ(span : SourceSpan) case span of {
+      SpanDefKeyword -> Line1Column4;
+      SpanIdentifierMain -> Line1Column9;
+      SpanEquals -> Line1Column11;
+      SpanBoolTrue -> Line1Column16;
+      SpanUnknownSymbol -> Line1Column6
+    };
+
+  def positiveSeedInput : SeedInput =
+    SeedInputCons (InputDef SpanDefKeyword)
+      (SeedInputCons (InputIdentifier SpanIdentifierMain IdentifierMain)
+        (SeedInputCons (InputEquals SpanEquals)
+          (SeedInputCons (InputBoolLiteral SpanBoolTrue BoolLiteralTrue)
+            SeedInputNil)));
+
+  def negativeSeedInput : SeedInput =
+    SeedInputCons (InputDef SpanDefKeyword)
+      (SeedInputCons (InputUnknown SpanUnknownSymbol)
+        SeedInputNil);
+}

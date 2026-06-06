@@ -242,6 +242,15 @@ spec =
                 packageSearchPathImportExpectedProjectionPath
                 packageSearchPathImportParserProgramRoot
 
+        it "shared parser-owned .mlfp parser parses compiler-seed data-model package sources" $
+            assertSharedPackageParserParityProjection
+                compilerSeedDataModelSourcePaths
+                compilerSeedDataModelExpectedProjectionPath
+                compilerSeedDataModelParserProgramRoot
+
+        it "compiler-seed data-model parser-parity sources copy selected seed modules" $
+            traverse_ assertSourceCopy compilerSeedDataModelSourceCopyPairs
+
         beforeAll loadParserParityBatchFixture $ do
             it "runs all .mlfp parser parity fixtures through one generated public CLI driver" $ \fixture ->
                 batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
@@ -461,6 +470,7 @@ spec =
             it "shared parser-owned .mlfp parser routes package source-layout fixtures through the generated public CLI driver" $ \fixture -> do
                 crossModuleLetExpected <- readFile packageCrossModuleLetExpectedProjectionPath
                 searchPathImportExpected <- readFile packageSearchPathImportExpectedProjectionPath
+                compilerSeedDataModelExpected <- readFile compilerSeedDataModelExpectedProjectionPath
 
                 batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
                 batchExpectedOutput fixture
@@ -469,12 +479,21 @@ spec =
                 batchExpectedOutput fixture
                     `shouldSatisfy` isInfixOf
                         (batchSection "positive:package-search-path-import" searchPathImportExpected)
+                batchExpectedOutput fixture
+                    `shouldSatisfy` isInfixOf
+                        (batchSection "positive:compiler-seed-data-model" compilerSeedDataModelExpected)
 
             it "parser-owned .mlfp parser reports malformed package-layout import diagnostics through public run-program" $ \fixture -> do
                 batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
                 batchExpectedOutput fixture
                     `shouldSatisfy` isInfixOf
                         (batchSection "negative:package-cross-module-let-import-semicolon" packageLayoutImportSemicolonNegativeEvidenceProjection)
+
+            it "parser-owned .mlfp parser reports malformed compiler-seed data-model diagnostics through public run-program" $ \fixture -> do
+                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
+                batchExpectedOutput fixture
+                    `shouldSatisfy` isInfixOf
+                        (batchSection "negative:compiler-seed-data-model-case-branch" compilerSeedDataModelCaseBranchNegativeEvidenceProjection)
 
             it "shared parser-owned .mlfp parser library routes the generated batch through one entrypoint" $ \fixture -> do
                 sharedParserExists <- doesFileExist (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
@@ -484,6 +503,7 @@ spec =
                 batchSource `shouldSatisfy` isInfixOf "import ParserParityParser exposing"
                 batchSource `shouldSatisfy` isInfixOf "renderParserParityProjectionFromSourceText"
                 batchSource `shouldSatisfy` isInfixOf "renderParserParityPackageProjectionFromSourceTexts"
+                batchSource `shouldSatisfy` isInfixOf "renderParserParityPackageProjectionFromFourSourceTexts"
                 batchSource `shouldSatisfy` isInfixOf "renderParserNegativeEvidenceFromSourceText"
                 batchSource `shouldSatisfy` isInfixOf "renderParserParityRetryEvidence"
 
@@ -715,6 +735,38 @@ packageSearchPathImportMainSourcePath :: FilePath
 packageSearchPathImportMainSourcePath =
     "test/conformance/mlfp/parser-parity/package-search-path-import/roots/main/Main.mlfp"
 
+compilerSeedDataModelSeedSourceOriginalPath :: FilePath
+compilerSeedDataModelSeedSourceOriginalPath =
+    "test/programs/compiler-seed/frontend-contract/SeedSource.mlfp"
+
+compilerSeedDataModelSeedTokenOriginalPath :: FilePath
+compilerSeedDataModelSeedTokenOriginalPath =
+    "test/programs/compiler-seed/frontend-contract/SeedToken.mlfp"
+
+compilerSeedDataModelSeedDiagnosticOriginalPath :: FilePath
+compilerSeedDataModelSeedDiagnosticOriginalPath =
+    "test/programs/compiler-seed/frontend-contract/SeedDiagnostic.mlfp"
+
+compilerSeedDataModelSeedAstOriginalPath :: FilePath
+compilerSeedDataModelSeedAstOriginalPath =
+    "test/programs/compiler-seed/frontend-contract/SeedAst.mlfp"
+
+compilerSeedDataModelSeedSourceSourcePath :: FilePath
+compilerSeedDataModelSeedSourceSourcePath =
+    "test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp"
+
+compilerSeedDataModelSeedTokenSourcePath :: FilePath
+compilerSeedDataModelSeedTokenSourcePath =
+    "test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedToken.mlfp"
+
+compilerSeedDataModelSeedDiagnosticSourcePath :: FilePath
+compilerSeedDataModelSeedDiagnosticSourcePath =
+    "test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedDiagnostic.mlfp"
+
+compilerSeedDataModelSeedAstSourcePath :: FilePath
+compilerSeedDataModelSeedAstSourcePath =
+    "test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedAst.mlfp"
+
 packageCrossModuleLetSourcePaths :: [FilePath]
 packageCrossModuleLetSourcePaths =
     [ packageCrossModuleLetCoreSourcePath
@@ -725,6 +777,22 @@ packageSearchPathImportSourcePaths :: [FilePath]
 packageSearchPathImportSourcePaths =
     [ packageSearchPathImportLibSourcePath
     , packageSearchPathImportMainSourcePath
+    ]
+
+compilerSeedDataModelSourcePaths :: [FilePath]
+compilerSeedDataModelSourcePaths =
+    [ compilerSeedDataModelSeedSourceSourcePath
+    , compilerSeedDataModelSeedTokenSourcePath
+    , compilerSeedDataModelSeedDiagnosticSourcePath
+    , compilerSeedDataModelSeedAstSourcePath
+    ]
+
+compilerSeedDataModelSourceCopyPairs :: [(FilePath, FilePath)]
+compilerSeedDataModelSourceCopyPairs =
+    [ (compilerSeedDataModelSeedSourceOriginalPath, compilerSeedDataModelSeedSourceSourcePath)
+    , (compilerSeedDataModelSeedTokenOriginalPath, compilerSeedDataModelSeedTokenSourcePath)
+    , (compilerSeedDataModelSeedDiagnosticOriginalPath, compilerSeedDataModelSeedDiagnosticSourcePath)
+    , (compilerSeedDataModelSeedAstOriginalPath, compilerSeedDataModelSeedAstSourcePath)
     ]
 
 expectedProjectionPath :: FilePath
@@ -907,6 +975,10 @@ packageSearchPathImportExpectedProjectionPath :: FilePath
 packageSearchPathImportExpectedProjectionPath =
     "test/conformance/mlfp/parser-parity/package-search-path-import/expected/parser-program.txt"
 
+compilerSeedDataModelExpectedProjectionPath :: FilePath
+compilerSeedDataModelExpectedProjectionPath =
+    "test/conformance/mlfp/parser-parity/compiler-seed-data-model/expected/parser-program.txt"
+
 sharedParserLibraryRoot :: FilePath
 sharedParserLibraryRoot =
     "test/programs/compiler-parser-parity/parser-library"
@@ -1011,6 +1083,10 @@ packageSearchPathImportParserProgramRoot :: FilePath
 packageSearchPathImportParserProgramRoot =
     "test/programs/compiler-parser-parity/package-search-path-import"
 
+compilerSeedDataModelParserProgramRoot :: FilePath
+compilerSeedDataModelParserProgramRoot =
+    "test/programs/compiler-parser-parity/compiler-seed-data-model"
+
 sharedParserAuditFiles :: [FilePath]
 sharedParserAuditFiles =
     [ sharedParserLibraryRoot </> "ParserParityToken.mlfp"
@@ -1051,6 +1127,11 @@ sharedParserBannedPhrases =
     , concat ["Deriving", "Eq", "Tokens"]
     , concat ["Recursive", "Gadt", "Tokens"]
     , concat ["Recursive", "Existential", "Tokens"]
+    , concat ["Seed", "Source", "Tokens"]
+    , concat ["Seed", "Token", "Tokens"]
+    , concat ["Seed", "Diagnostic", "Tokens"]
+    , concat ["Seed", "Ast", "Tokens"]
+    , concat ["Compiler", "Seed", "Data", "Model", "Tokens"]
     , concat ["LexerOk ", "basic", "Module", "Tokens"]
     , concat ["LexerOk ", "import", "Bool", "Tokens"]
     , concat ["LexerOk ", "value", "Def", "List", "Tokens"]
@@ -1081,6 +1162,11 @@ sharedParserBannedPhrases =
     , concat ["LexerOk ", "deriving", "Eq", "Tokens"]
     , concat ["LexerOk ", "recursive", "Gadt", "Tokens"]
     , concat ["LexerOk ", "recursive", "Existential", "Tokens"]
+    , concat ["LexerOk ", "seed", "Source", "Tokens"]
+    , concat ["LexerOk ", "seed", "Token", "Tokens"]
+    , concat ["LexerOk ", "seed", "Diagnostic", "Tokens"]
+    , concat ["LexerOk ", "seed", "Ast", "Tokens"]
+    , concat ["LexerOk ", "compiler", "Seed", "Data", "Model", "Tokens"]
     , concat ["First", "Class", "Polymorphism", "Tokens"]
     , concat ["LexerOk ", "first", "Class", "Polymorphism", "Tokens"]
     , concat ["case", " tokens"]
@@ -1108,6 +1194,7 @@ sharedParserBannedPhrases =
     , concat ["deriving-eq", " tokens"]
     , concat ["recursive-gadt", " tokens"]
     , concat ["recursive-existential", " tokens"]
+    , concat ["compiler-seed-data-model", " tokens"]
     , concat ["first-class-polymorphism-source-types", " tokens"]
     ]
 
@@ -1182,6 +1269,7 @@ sharedParserShortcutPhrases =
         , sharedParserRound335ShortcutPhrases
         , sharedParserRound336ShortcutPhrases
         , sharedParserRound337ShortcutPhrases
+        , sharedParserRound338ShortcutPhrases
         ]
 
 sharedParserRound314ShortcutPhrases :: [String]
@@ -1754,6 +1842,48 @@ sharedParserRound337ShortcutPhrases =
     , concat ["package-layout parser negative ", "expected-import-semicolon@"]
     ]
 
+sharedParserRound338ShortcutPhrases :: [String]
+sharedParserRound338ShortcutPhrases =
+    [ concat ["parse", "Compiler", "Seed", "Data", "Model"]
+    , concat ["parse", "Seed", "Source"]
+    , concat ["parse", "Seed", "Token"]
+    , concat ["parse", "Seed", "Diagnostic"]
+    , concat ["parse", "Seed", "Ast"]
+    , concat ["render", "Compiler", "Seed", "Data", "Model"]
+    , concat ["completeModuleKey \"", "SeedSource", "\""]
+    , concat ["completeModuleKey \"", "SeedToken", "\""]
+    , concat ["completeModuleKey \"", "SeedDiagnostic", "\""]
+    , concat ["completeModuleKey \"", "SeedAst", "\""]
+    , concat ["moduleKey \"", "SeedSource", "\""]
+    , concat ["moduleKey \"", "SeedToken", "\""]
+    , concat ["moduleKey \"", "SeedDiagnostic", "\""]
+    , concat ["moduleKey \"", "SeedAst", "\""]
+    , concat ["Seed", "Source", "Tokens"]
+    , concat ["Seed", "Token", "Tokens"]
+    , concat ["Seed", "Diagnostic", "Tokens"]
+    , concat ["Seed", "Ast", "Tokens"]
+    , concat ["LexerOk ", "seed", "Source", "Tokens"]
+    , concat ["LexerOk ", "seed", "Token", "Tokens"]
+    , concat ["LexerOk ", "seed", "Diagnostic", "Tokens"]
+    , concat ["LexerOk ", "seed", "Ast", "Tokens"]
+    , concat ["compiler-seed-data-model", " tokens"]
+    , concat ["stringIndexOf sourceText \"", "module SeedSource export", "\""]
+    , concat ["stringIndexOf sourceText \"", "module SeedToken export", "\""]
+    , concat ["stringIndexOf sourceText \"", "module SeedDiagnostic export", "\""]
+    , concat ["stringIndexOf sourceText \"", "module SeedAst export", "\""]
+    , concat ["stringIndexOf firstSourceText \"", "module SeedSource export", "\""]
+    , concat ["stringIndexOf secondSourceText \"", "module SeedToken export", "\""]
+    , concat ["stringIndexOf thirdSourceText \"", "module SeedDiagnostic export", "\""]
+    , concat ["stringIndexOf fourthSourceText \"", "module SeedAst export", "\""]
+    , concat ["module SeedSource span=", "test/conformance/mlfp/parser-parity/compiler-seed-data-model"]
+    , concat ["constructor Line1Column1 type=SourcePosition span=", "test/conformance/mlfp/parser-parity/compiler-seed-data-model"]
+    , concat ["def spanStart type=SourceSpan -> SourcePosition expr=", "λ(span : SourceSpan) case span of"]
+    , concat ["def positiveSeedInput type=SeedInput expr=", "SeedInputCons"]
+    , concat ["compiler-seed-data-model parser negative ", "expected-case-branch-arrow@"]
+    , "preRenderedCompilerSeedDataModelProjection"
+    , "compilerSeedDataModelProjectionRows"
+    ]
+
 sharedParserCompleteParseRequiredPhrases :: [String]
 sharedParserCompleteParseRequiredPhrases =
     [ "parserStateAtEnd state"
@@ -1794,6 +1924,7 @@ sharedParserStaticNegativeEvidencePhrases =
     , concat ["stringAppend \"complex-recursive-program parser negative ", "expected-case-branch-arrow@\""]
     , concat ["stringAppend \"named-recursive-adt parser negative ", "expected-case-branch-arrow@\""]
     , concat ["stringAppend \"package-layout parser negative ", "expected-import-semicolon@\""]
+    , concat ["stringAppend \"compiler-seed-data-model parser negative ", "expected-case-branch-arrow@\""]
     ]
 
 sharedParserDynamicEvidenceRequiredPhrases :: [String]
@@ -1803,6 +1934,7 @@ sharedParserDynamicEvidenceRequiredPhrases =
     , "tokenizeCompleteModule sourceText"
     , "tokenizeCompleteModule lexerMismatchSourceText"
     , "renderParserParityPackageProjectionFromSourceTexts"
+    , "renderParserParityPackageProjectionFromFourSourceTexts"
     , "renderParserNegativeEvidenceFromSourceText"
     , "renderDiagnosticEvidence"
     ]
@@ -1925,6 +2057,15 @@ parserParityPackagePositiveCases =
         , ParserParityPackageSource "Main" packageSearchPathImportMainSourcePath
         ]
         packageSearchPathImportExpectedProjectionPath
+    , ParserParityPackagePositiveCase
+        "positive:compiler-seed-data-model"
+        "positiveCompilerSeedDataModel"
+        [ ParserParityPackageSource "SeedSource" compilerSeedDataModelSeedSourceSourcePath
+        , ParserParityPackageSource "SeedToken" compilerSeedDataModelSeedTokenSourcePath
+        , ParserParityPackageSource "SeedDiagnostic" compilerSeedDataModelSeedDiagnosticSourcePath
+        , ParserParityPackageSource "SeedAst" compilerSeedDataModelSeedAstSourcePath
+        ]
+        compilerSeedDataModelExpectedProjectionPath
     ]
 
 parserParityNegativeCases :: [ParserParityNegativeCase]
@@ -1959,6 +2100,7 @@ parserParityNegativeCases =
     , ParserParityNegativeCase "negative:complex-recursive-program" "negativeComplexRecursiveProgram" "complex-recursive-program parser negative " complexRecursiveProgramCanonicalSourcePath complexRecursiveProgramNegativeSourceText complexRecursiveProgramNegativeEvidenceProjection
     , ParserParityNegativeCase "negative:named-recursive-adt-case-branch" "negativeNamedRecursiveAdtCaseBranch" "named-recursive-adt parser negative " recursiveGadtCanonicalSourcePath namedRecursiveAdtNegativeSourceText namedRecursiveAdtNegativeEvidenceProjection
     , ParserParityNegativeCase "negative:package-cross-module-let-import-semicolon" "negativePackageCrossModuleLetImportSemicolon" "package-layout parser negative " packageCrossModuleLetMainSourcePath packageLayoutImportSemicolonNegativeSourceText packageLayoutImportSemicolonNegativeEvidenceProjection
+    , ParserParityNegativeCase "negative:compiler-seed-data-model-case-branch" "negativeCompilerSeedDataModelCaseBranch" "compiler-seed-data-model parser negative " compilerSeedDataModelSeedSourceSourcePath compilerSeedDataModelCaseBranchNegativeSourceText compilerSeedDataModelCaseBranchNegativeEvidenceProjection
     ]
 
 assertCanonicalParserParityProjection :: ParserParityPositiveCase -> IO ()
@@ -1986,6 +2128,12 @@ assertSharedPackageParserParityProjection sourcePaths expectedPath parserRoot = 
 
     canonicalProjection `shouldBe` expected
     sharedParserProjection `shouldBe` Right expected
+
+assertSourceCopy :: (FilePath, FilePath) -> IO ()
+assertSourceCopy (sourcePath, copiedPath) = do
+    source <- readFile sourcePath
+    copied <- readFile copiedPath
+    copied `shouldBe` source
 
 writeParserParityBatchPackage :: IO FilePath
 writeParserParityBatchPackage = do
@@ -2023,7 +2171,7 @@ parserParityBatchMainSource loadedPositiveCases loadedPackagePositiveCases =
     unlines $
         [ "module Main export (main) {"
         , "  import Prelude exposing (Unit(..), IO, putStr, stringAppend);"
-        , "  import ParserParityParser exposing (renderParserParityProjectionFromSourceText, renderParserParityPackageProjectionFromSourceTexts, renderParserParityRetryEvidence, renderParserNegativeEvidenceFromSourceText);"
+        , "  import ParserParityParser exposing (renderParserParityProjectionFromSourceText, renderParserParityPackageProjectionFromSourceTexts, renderParserParityPackageProjectionFromFourSourceTexts, renderParserParityRetryEvidence, renderParserNegativeEvidenceFromSourceText);"
         , ""
         , "  def section : String -> String -> String ="
         , "    λ(label : String) λ(output : String)"
@@ -2108,7 +2256,16 @@ packageProjectionRendererCall ident loadedSources =
                 <> packageSourceCallPrefix ident firstSource
                 <> " "
                 <> packageSourceCallPrefix ident secondSource
-        _ -> error "package parser parity fixtures require exactly two source files"
+        [(firstSource, _), (secondSource, _), (thirdSource, _), (fourthSource, _)] ->
+            "renderParserParityPackageProjectionFromFourSourceTexts "
+                <> packageSourceCallPrefix ident firstSource
+                <> " "
+                <> packageSourceCallPrefix ident secondSource
+                <> " "
+                <> packageSourceCallPrefix ident thirdSource
+                <> " "
+                <> packageSourceCallPrefix ident fourthSource
+        _ -> error "package parser parity fixtures require exactly two or four source files"
 
 packageSourceCallPrefix :: String -> ParserParityPackageSource -> String
 packageSourceCallPrefix ident sourceCase =
@@ -2754,6 +2911,77 @@ packageLayoutImportSemicolonNegativeSourceText =
         , "}"
         ]
 
+compilerSeedDataModelCaseBranchNegativeSourceText :: String
+compilerSeedDataModelCaseBranchNegativeSourceText =
+    unlines
+        [ "module SeedSource export (SourcePosition(..), SourceSpan(..), SeedIdentifier(..), SeedBoolLiteral(..), SeedInputSymbol(..), SeedInput(..), spanStart, spanEnd, positiveSeedInput, negativeSeedInput) {"
+        , "  data SourcePosition ="
+        , "      Line1Column1 : SourcePosition"
+        , "    | Line1Column4 : SourcePosition"
+        , "    | Line1Column5 : SourcePosition"
+        , "    | Line1Column6 : SourcePosition"
+        , "    | Line1Column9 : SourcePosition"
+        , "    | Line1Column10 : SourcePosition"
+        , "    | Line1Column11 : SourcePosition"
+        , "    | Line1Column12 : SourcePosition"
+        , "    | Line1Column16 : SourcePosition;"
+        , ""
+        , "  data SourceSpan ="
+        , "      SpanDefKeyword : SourceSpan"
+        , "    | SpanIdentifierMain : SourceSpan"
+        , "    | SpanEquals : SourceSpan"
+        , "    | SpanBoolTrue : SourceSpan"
+        , "    | SpanUnknownSymbol : SourceSpan;"
+        , ""
+        , "  data SeedIdentifier ="
+        , "      IdentifierMain : SeedIdentifier;"
+        , ""
+        , "  data SeedBoolLiteral ="
+        , "      BoolLiteralTrue : SeedBoolLiteral;"
+        , ""
+        , "  data SeedInputSymbol ="
+        , "      InputDef : SourceSpan -> SeedInputSymbol"
+        , "    | InputIdentifier : SourceSpan -> SeedIdentifier -> SeedInputSymbol"
+        , "    | InputEquals : SourceSpan -> SeedInputSymbol"
+        , "    | InputBoolLiteral : SourceSpan -> SeedBoolLiteral -> SeedInputSymbol"
+        , "    | InputUnknown : SourceSpan -> SeedInputSymbol;"
+        , ""
+        , "  data SeedInput ="
+        , "      SeedInputNil : SeedInput"
+        , "    | SeedInputCons : SeedInputSymbol -> SeedInput -> SeedInput;"
+        , ""
+        , "  def spanStart : SourceSpan -> SourcePosition ="
+        , "    λ(span : SourceSpan) case span of {"
+        , "      SpanDefKeyword Line1Column1;"
+        , "      SpanIdentifierMain -> Line1Column5;"
+        , "      SpanEquals -> Line1Column10;"
+        , "      SpanBoolTrue -> Line1Column12;"
+        , "      SpanUnknownSymbol -> Line1Column5"
+        , "    };"
+        , ""
+        , "  def spanEnd : SourceSpan -> SourcePosition ="
+        , "    λ(span : SourceSpan) case span of {"
+        , "      SpanDefKeyword -> Line1Column4;"
+        , "      SpanIdentifierMain -> Line1Column9;"
+        , "      SpanEquals -> Line1Column11;"
+        , "      SpanBoolTrue -> Line1Column16;"
+        , "      SpanUnknownSymbol -> Line1Column6"
+        , "    };"
+        , ""
+        , "  def positiveSeedInput : SeedInput ="
+        , "    SeedInputCons (InputDef SpanDefKeyword)"
+        , "      (SeedInputCons (InputIdentifier SpanIdentifierMain IdentifierMain)"
+        , "        (SeedInputCons (InputEquals SpanEquals)"
+        , "          (SeedInputCons (InputBoolLiteral SpanBoolTrue BoolLiteralTrue)"
+        , "            SeedInputNil)));"
+        , ""
+        , "  def negativeSeedInput : SeedInput ="
+        , "    SeedInputCons (InputDef SpanDefKeyword)"
+        , "      (SeedInputCons (InputUnknown SpanUnknownSymbol)"
+        , "        SeedInputNil);"
+        , "}"
+        ]
+
 retryEvidenceProjection :: String
 retryEvidenceProjection =
     unlines
@@ -3007,6 +3235,16 @@ packageLayoutImportSemicolonNegativeEvidenceProjection =
             [ "package-layout parser negative "
             , "expected-import-semicolon@"
             , "test/conformance/mlfp/parser-parity/package-cross-module-let/src/Main.mlfp:4:3-4:6"
+            ]
+        ]
+
+compilerSeedDataModelCaseBranchNegativeEvidenceProjection :: String
+compilerSeedDataModelCaseBranchNegativeEvidenceProjection =
+    unlines
+        [ concat
+            [ "compiler-seed-data-model parser negative "
+            , "expected-case-branch-arrow@"
+            , "test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:39:34-39:35"
             ]
         ]
 

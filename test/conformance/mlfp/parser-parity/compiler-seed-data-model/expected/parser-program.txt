@@ -1,0 +1,79 @@
+module SeedSource span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:1:1-67:1
+export type-with-constructors SourcePosition span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:1:27-1:45
+export type-with-constructors SourceSpan span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:1:47-1:61
+export type-with-constructors SeedIdentifier span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:1:63-1:81
+export type-with-constructors SeedBoolLiteral span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:1:83-1:102
+export type-with-constructors SeedInputSymbol span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:1:104-1:123
+export type-with-constructors SeedInput span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:1:125-1:138
+export value spanStart span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:1:140-1:149
+export value spanEnd span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:1:151-1:158
+export value positiveSeedInput span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:1:160-1:177
+export value negativeSeedInput span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:1:179-1:196
+data SourcePosition span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:2:3-13:3
+constructor Line1Column1 type=SourcePosition span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:3:7-4:5
+constructor Line1Column4 type=SourcePosition span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:4:7-5:5
+constructor Line1Column5 type=SourcePosition span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:5:7-6:5
+constructor Line1Column6 type=SourcePosition span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:6:7-7:5
+constructor Line1Column9 type=SourcePosition span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:7:7-8:5
+constructor Line1Column10 type=SourcePosition span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:8:7-9:5
+constructor Line1Column11 type=SourcePosition span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:9:7-10:5
+constructor Line1Column12 type=SourcePosition span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:10:7-11:5
+constructor Line1Column16 type=SourcePosition span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:11:7-11:37
+data SourceSpan span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:13:3-20:3
+constructor SpanDefKeyword type=SourceSpan span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:14:7-15:5
+constructor SpanIdentifierMain type=SourceSpan span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:15:7-16:5
+constructor SpanEquals type=SourceSpan span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:16:7-17:5
+constructor SpanBoolTrue type=SourceSpan span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:17:7-18:5
+constructor SpanUnknownSymbol type=SourceSpan span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:18:7-18:37
+data SeedIdentifier span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:20:3-23:3
+constructor IdentifierMain type=SeedIdentifier span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:21:7-21:38
+data SeedBoolLiteral span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:23:3-26:3
+constructor BoolLiteralTrue type=SeedBoolLiteral span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:24:7-24:40
+data SeedInputSymbol span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:26:3-33:3
+constructor InputDef type=SourceSpan -> SeedInputSymbol span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:27:7-28:5
+constructor InputIdentifier type=SourceSpan -> SeedIdentifier -> SeedInputSymbol span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:28:7-29:5
+constructor InputEquals type=SourceSpan -> SeedInputSymbol span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:29:7-30:5
+constructor InputBoolLiteral type=SourceSpan -> SeedBoolLiteral -> SeedInputSymbol span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:30:7-31:5
+constructor InputUnknown type=SourceSpan -> SeedInputSymbol span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:31:7-31:51
+data SeedInput span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:33:3-37:3
+constructor SeedInputNil type=SeedInput span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:34:7-35:5
+constructor SeedInputCons type=SeedInputSymbol -> SeedInput -> SeedInput span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:35:7-35:64
+def spanStart type=SourceSpan -> SourcePosition expr=λ(span : SourceSpan) case span of { SpanDefKeyword -> Line1Column1; SpanIdentifierMain -> Line1Column5; SpanEquals -> Line1Column10; SpanBoolTrue -> Line1Column12; SpanUnknownSymbol -> Line1Column5 } span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:37:3-46:3
+def spanEnd type=SourceSpan -> SourcePosition expr=λ(span : SourceSpan) case span of { SpanDefKeyword -> Line1Column4; SpanIdentifierMain -> Line1Column9; SpanEquals -> Line1Column11; SpanBoolTrue -> Line1Column16; SpanUnknownSymbol -> Line1Column6 } span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:46:3-55:3
+def positiveSeedInput type=SeedInput expr=SeedInputCons (InputDef SpanDefKeyword) (SeedInputCons (InputIdentifier SpanIdentifierMain IdentifierMain) (SeedInputCons (InputEquals SpanEquals) (SeedInputCons (InputBoolLiteral SpanBoolTrue BoolLiteralTrue) SeedInputNil))) span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:55:3-62:3
+def negativeSeedInput type=SeedInput expr=SeedInputCons (InputDef SpanDefKeyword) (SeedInputCons (InputUnknown SpanUnknownSymbol) SeedInputNil) span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:62:3-66:1
+module SeedToken span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedToken.mlfp:1:1-14:1
+export type-with-constructors SeedToken span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedToken.mlfp:1:26-1:39
+export type-with-constructors SeedTokenStream span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedToken.mlfp:1:41-1:60
+import SeedSource span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedToken.mlfp:2:10-2:21
+import exposing type SourceSpan span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedToken.mlfp:2:31-2:41
+import exposing type SeedIdentifier span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedToken.mlfp:2:43-2:57
+import exposing type SeedBoolLiteral span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedToken.mlfp:2:59-2:74
+data SeedToken span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedToken.mlfp:4:3-10:3
+constructor TokenDef type=SourceSpan -> SeedToken span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedToken.mlfp:5:7-6:5
+constructor TokenIdentifier type=SourceSpan -> SeedIdentifier -> SeedToken span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedToken.mlfp:6:7-7:5
+constructor TokenEquals type=SourceSpan -> SeedToken span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedToken.mlfp:7:7-8:5
+constructor TokenBoolLiteral type=SourceSpan -> SeedBoolLiteral -> SeedToken span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedToken.mlfp:8:7-8:68
+data SeedTokenStream span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedToken.mlfp:10:3-13:1
+constructor SeedTokenNil type=SeedTokenStream span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedToken.mlfp:11:7-12:5
+constructor SeedTokenCons type=SeedToken -> SeedTokenStream -> SeedTokenStream span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedToken.mlfp:12:7-12:70
+module SeedDiagnostic span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedDiagnostic.mlfp:1:1-10:1
+export type-with-constructors LexerDiagnosticKind span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedDiagnostic.mlfp:1:31-1:54
+export type-with-constructors LexerDiagnostic span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedDiagnostic.mlfp:1:56-1:75
+import SeedSource span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedDiagnostic.mlfp:2:10-2:21
+import exposing type SourceSpan span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedDiagnostic.mlfp:2:31-2:41
+data LexerDiagnosticKind span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedDiagnostic.mlfp:4:3-7:3
+constructor UnknownInputSymbol type=LexerDiagnosticKind span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedDiagnostic.mlfp:5:7-5:47
+data LexerDiagnostic span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedDiagnostic.mlfp:7:3-9:1
+constructor LexerDiagnostic type=SourceSpan -> LexerDiagnosticKind -> LexerDiagnostic span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedDiagnostic.mlfp:8:7-8:77
+module SeedAst span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedAst.mlfp:1:1-10:1
+export type-with-constructors SeedExpression span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedAst.mlfp:1:24-1:42
+export type-with-constructors SeedDefinition span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedAst.mlfp:1:44-1:62
+import SeedSource span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedAst.mlfp:2:10-2:21
+import exposing type SourceSpan span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedAst.mlfp:2:31-2:41
+import exposing type SeedIdentifier span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedAst.mlfp:2:43-2:57
+import exposing type SeedBoolLiteral span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedAst.mlfp:2:59-2:74
+data SeedExpression span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedAst.mlfp:4:3-7:3
+constructor AstBoolLiteral type=SourceSpan -> SeedBoolLiteral -> SeedExpression span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedAst.mlfp:5:7-5:71
+data SeedDefinition span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedAst.mlfp:7:3-9:1
+constructor AstDefinition type=SourceSpan -> SeedIdentifier -> SourceSpan -> SeedExpression -> SeedDefinition span=test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedAst.mlfp:8:7-8:101

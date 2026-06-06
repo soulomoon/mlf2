@@ -1,3 +1,22 @@
+## 2026-06-06 - Round 338 compiler-seed data-model parser parity slice
+
+- Added parser-parity conformance fixtures copied byte-for-byte from the
+  selected compiler-seed frontend data-model modules: `SeedSource`,
+  `SeedToken`, `SeedDiagnostic`, and `SeedAst`.
+- Added one committed canonical parser-program projection for the selected
+  four-source package order and a thin `.mlfp` parser-parity root that exposes
+  only source path/text pairs before calling the shared parser library.
+- Extended the shared parser-owned source-text library only for bounded
+  structural needs in the selected seed modules: four-source projection,
+  larger token/line bounds for the copied source, export/data rows, repeated
+  five-branch case definitions, and nested constructor applications.
+- Extended `ProgramParserParitySpec` with direct shared-parser equality,
+  aggregate positive registration, source-copy equality checks, one malformed
+  selected case-branch negative, and static shortcut guards.
+- Scope remains bounded parser parity only. This is not full parser parity,
+  resolver, checker, backend, compiler-package, package resolver, driver,
+  platform, proof, or self-boot progress.
+
 ## 2026-06-06 - Round 337 parser parity package source-layout extension
 
 - Added package-layout parser-parity conformance fixtures copied from the

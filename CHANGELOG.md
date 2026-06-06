@@ -37,6 +37,15 @@
 
 ### Added
 - Extended the shared parser-owned parser-parity library with bounded
+  compiler-seed data-model package fixtures for `SeedSource`, `SeedToken`,
+  `SeedDiagnostic`, and `SeedAst`. The new committed projection and thin
+  four-source fixture root copy the selected compiler-seed sources
+  byte-for-byte, preserve stable source order and source paths, route them
+  through shared parser-library entrypoints, and cover one malformed selected
+  case-branch diagnostic through the generated aggregate public CLI driver.
+  This is not full parser parity, resolver/checker/backend, package resolver,
+  compiler-package, driver, platform, proof, or self-boot work.
+- Extended the shared parser-owned parser-parity library with bounded
   package source-layout fixtures for `package-cross-module-let` and
   `package-search-path-import`. The new committed projections copy the exact
   existing run-program conformance sources, preserve individual source paths

@@ -1,0 +1,25 @@
+module ParserParityFixture export (seedSourceSourceFile, seedSourceSourceText, seedTokenSourceFile, seedTokenSourceText, seedDiagnosticSourceFile, seedDiagnosticSourceText, seedAstSourceFile, seedAstSourceText) {
+  def seedSourceSourceFile : String =
+    "test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp";
+
+  def seedSourceSourceText : String =
+    "module SeedSource export (SourcePosition(..), SourceSpan(..), SeedIdentifier(..), SeedBoolLiteral(..), SeedInputSymbol(..), SeedInput(..), spanStart, spanEnd, positiveSeedInput, negativeSeedInput) {\n  data SourcePosition =\n      Line1Column1 : SourcePosition\n    | Line1Column4 : SourcePosition\n    | Line1Column5 : SourcePosition\n    | Line1Column6 : SourcePosition\n    | Line1Column9 : SourcePosition\n    | Line1Column10 : SourcePosition\n    | Line1Column11 : SourcePosition\n    | Line1Column12 : SourcePosition\n    | Line1Column16 : SourcePosition;\n\n  data SourceSpan =\n      SpanDefKeyword : SourceSpan\n    | SpanIdentifierMain : SourceSpan\n    | SpanEquals : SourceSpan\n    | SpanBoolTrue : SourceSpan\n    | SpanUnknownSymbol : SourceSpan;\n\n  data SeedIdentifier =\n      IdentifierMain : SeedIdentifier;\n\n  data SeedBoolLiteral =\n      BoolLiteralTrue : SeedBoolLiteral;\n\n  data SeedInputSymbol =\n      InputDef : SourceSpan -> SeedInputSymbol\n    | InputIdentifier : SourceSpan -> SeedIdentifier -> SeedInputSymbol\n    | InputEquals : SourceSpan -> SeedInputSymbol\n    | InputBoolLiteral : SourceSpan -> SeedBoolLiteral -> SeedInputSymbol\n    | InputUnknown : SourceSpan -> SeedInputSymbol;\n\n  data SeedInput =\n      SeedInputNil : SeedInput\n    | SeedInputCons : SeedInputSymbol -> SeedInput -> SeedInput;\n\n  def spanStart : SourceSpan -> SourcePosition =\n    λ(span : SourceSpan) case span of {\n      SpanDefKeyword -> Line1Column1;\n      SpanIdentifierMain -> Line1Column5;\n      SpanEquals -> Line1Column10;\n      SpanBoolTrue -> Line1Column12;\n      SpanUnknownSymbol -> Line1Column5\n    };\n\n  def spanEnd : SourceSpan -> SourcePosition =\n    λ(span : SourceSpan) case span of {\n      SpanDefKeyword -> Line1Column4;\n      SpanIdentifierMain -> Line1Column9;\n      SpanEquals -> Line1Column11;\n      SpanBoolTrue -> Line1Column16;\n      SpanUnknownSymbol -> Line1Column6\n    };\n\n  def positiveSeedInput : SeedInput =\n    SeedInputCons (InputDef SpanDefKeyword)\n      (SeedInputCons (InputIdentifier SpanIdentifierMain IdentifierMain)\n        (SeedInputCons (InputEquals SpanEquals)\n          (SeedInputCons (InputBoolLiteral SpanBoolTrue BoolLiteralTrue)\n            SeedInputNil)));\n\n  def negativeSeedInput : SeedInput =\n    SeedInputCons (InputDef SpanDefKeyword)\n      (SeedInputCons (InputUnknown SpanUnknownSymbol)\n        SeedInputNil);\n}\n";
+
+  def seedTokenSourceFile : String =
+    "test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedToken.mlfp";
+
+  def seedTokenSourceText : String =
+    "module SeedToken export (SeedToken(..), SeedTokenStream(..)) {\n  import SeedSource exposing (SourceSpan, SeedIdentifier, SeedBoolLiteral);\n\n  data SeedToken =\n      TokenDef : SourceSpan -> SeedToken\n    | TokenIdentifier : SourceSpan -> SeedIdentifier -> SeedToken\n    | TokenEquals : SourceSpan -> SeedToken\n    | TokenBoolLiteral : SourceSpan -> SeedBoolLiteral -> SeedToken;\n\n  data SeedTokenStream =\n      SeedTokenNil : SeedTokenStream\n    | SeedTokenCons : SeedToken -> SeedTokenStream -> SeedTokenStream;\n}\n";
+
+  def seedDiagnosticSourceFile : String =
+    "test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedDiagnostic.mlfp";
+
+  def seedDiagnosticSourceText : String =
+    "module SeedDiagnostic export (LexerDiagnosticKind(..), LexerDiagnostic(..)) {\n  import SeedSource exposing (SourceSpan);\n\n  data LexerDiagnosticKind =\n      UnknownInputSymbol : LexerDiagnosticKind;\n\n  data LexerDiagnostic =\n      LexerDiagnostic : SourceSpan -> LexerDiagnosticKind -> LexerDiagnostic;\n}\n";
+
+  def seedAstSourceFile : String =
+    "test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedAst.mlfp";
+
+  def seedAstSourceText : String =
+    "module SeedAst export (SeedExpression(..), SeedDefinition(..)) {\n  import SeedSource exposing (SourceSpan, SeedIdentifier, SeedBoolLiteral);\n\n  data SeedExpression =\n      AstBoolLiteral : SourceSpan -> SeedBoolLiteral -> SeedExpression;\n\n  data SeedDefinition =\n      AstDefinition : SourceSpan -> SeedIdentifier -> SourceSpan -> SeedExpression -> SeedDefinition;\n}\n";
+}

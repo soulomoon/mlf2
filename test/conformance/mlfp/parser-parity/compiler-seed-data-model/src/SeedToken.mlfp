@@ -1,0 +1,13 @@
+module SeedToken export (SeedToken(..), SeedTokenStream(..)) {
+  import SeedSource exposing (SourceSpan, SeedIdentifier, SeedBoolLiteral);
+
+  data SeedToken =
+      TokenDef : SourceSpan -> SeedToken
+    | TokenIdentifier : SourceSpan -> SeedIdentifier -> SeedToken
+    | TokenEquals : SourceSpan -> SeedToken
+    | TokenBoolLiteral : SourceSpan -> SeedBoolLiteral -> SeedToken;
+
+  data SeedTokenStream =
+      SeedTokenNil : SeedTokenStream
+    | SeedTokenCons : SeedToken -> SeedTokenStream -> SeedTokenStream;
+}
