@@ -1,0 +1,13 @@
+module ParserParityFixture export (coreSourceFile, coreSourceText, mainSourceFile, mainSourceText) {
+  def coreSourceFile : String =
+    "test/conformance/mlfp/parser-parity/package-cross-module-let/src/Core.mlfp";
+
+  def coreSourceText : String =
+    "module Core export (applyId) {\n  def applyId : Int = let id = λx x in id 1;\n}\n";
+
+  def mainSourceFile : String =
+    "test/conformance/mlfp/parser-parity/package-cross-module-let/src/Main.mlfp";
+
+  def mainSourceText : String =
+    "module Main export (main) {\n  import Core exposing (applyId);\n\n  def main : Int = applyId;\n}\n";
+}

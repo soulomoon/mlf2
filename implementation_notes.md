@@ -1,3 +1,27 @@
+## 2026-06-06 - Round 337 parser parity package source-layout extension
+
+- Added package-layout parser-parity conformance fixtures copied from the
+  exact run-program conformance sources for `cross-module-let` and
+  `search-path-package`.
+- Added committed parser-program projection fixtures for
+  `package-cross-module-let` and `package-search-path-import`, preserving the
+  individual `Core.mlfp`, `Main.mlfp`, `SearchLib.mlfp`, and `Main.mlfp`
+  source paths and module names in rendered rows.
+- Added thin `.mlfp` package fixture roots that expose selected source-file
+  path/text pairs before calling
+  `renderParserParityPackageProjectionFromSourceTexts`.
+- Extended `ProgramParserParitySpec` with direct shared-parser package
+  assertions, generated aggregate positive sections, one dynamic package-layout
+  malformed import-semicolon diagnostic, and shortcut/static guards for
+  fixture-specific package parser/token/projection shortcuts.
+- Extended the shared parser-owned source-text library only with a package
+  renderer that parses each source through the existing source-file token,
+  parser-state, projection-row, diagnostic, and dynamic negative-evidence
+  paths before joining rows in explicit source order.
+- Scope remains bounded parser parity only. This is not full parser parity,
+  resolver, checker, backend, compiler-package, driver, platform, proof, or
+  self-boot progress.
+
 ## 2026-06-06 - Round 336 parser parity exact authoritative unified source extension
 
 - Added parser-parity conformance fixtures copied from the exact unified

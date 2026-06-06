@@ -1,0 +1,13 @@
+module ParserParityFixture export (searchLibSourceFile, searchLibSourceText, mainSourceFile, mainSourceText) {
+  def searchLibSourceFile : String =
+    "test/conformance/mlfp/parser-parity/package-search-path-import/roots/lib/SearchLib.mlfp";
+
+  def searchLibSourceText : String =
+    "module SearchLib export (two) {\n  def two : Int = 2;\n}\n";
+
+  def mainSourceFile : String =
+    "test/conformance/mlfp/parser-parity/package-search-path-import/roots/main/Main.mlfp";
+
+  def mainSourceText : String =
+    "module Main export (main) {\n  import SearchLib exposing (two);\n\n  def main : Int = two;\n}\n";
+}

@@ -1,0 +1,8 @@
+module SearchLib span=test/conformance/mlfp/parser-parity/package-search-path-import/roots/lib/SearchLib.mlfp:1:1-4:1
+export value two span=test/conformance/mlfp/parser-parity/package-search-path-import/roots/lib/SearchLib.mlfp:1:26-1:29
+def two type=Int expr=2 span=test/conformance/mlfp/parser-parity/package-search-path-import/roots/lib/SearchLib.mlfp:2:3-3:1
+module Main span=test/conformance/mlfp/parser-parity/package-search-path-import/roots/main/Main.mlfp:1:1-6:1
+export value main span=test/conformance/mlfp/parser-parity/package-search-path-import/roots/main/Main.mlfp:1:21-1:25
+import SearchLib span=test/conformance/mlfp/parser-parity/package-search-path-import/roots/main/Main.mlfp:2:10-2:20
+import exposing value two span=test/conformance/mlfp/parser-parity/package-search-path-import/roots/main/Main.mlfp:2:30-2:33
+def main type=Int expr=two span=test/conformance/mlfp/parser-parity/package-search-path-import/roots/main/Main.mlfp:4:3-5:1

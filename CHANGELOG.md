@@ -36,6 +36,16 @@
   deferred placeholders remain per binding.
 
 ### Added
+- Extended the shared parser-owned parser-parity library with bounded
+  package source-layout fixtures for `package-cross-module-let` and
+  `package-search-path-import`. The new committed projections copy the exact
+  existing run-program conformance sources, preserve individual source paths
+  and module names, route the selected same-root and ordered search-path source
+  pairs through the shared source-text lexer/parser path, and cover one
+  malformed same-root import semicolon diagnostic through the generated
+  aggregate public CLI driver. This is not full parser parity,
+  resolver/checker/backend, compiler-package, driver, platform, proof, or
+  self-boot work.
 - Extended the shared parser-owned parser-parity library with bounded exact
   authoritative unified corpus fixtures for `authoritative-case-analysis`,
   `authoritative-let-polymorphism`,

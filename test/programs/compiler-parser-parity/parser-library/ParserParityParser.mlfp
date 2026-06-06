@@ -1,4 +1,4 @@
-module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseCompleteModule, parseTokens, renderParserParityProjectionFromSourceText, renderParserParityRetryEvidence, renderParserNegativeEvidenceFromSourceText) {
+module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseCompleteModule, parseTokens, renderParserParityProjectionFromSourceText, renderParserParityPackageProjectionFromSourceTexts, renderParserParityRetryEvidence, renderParserNegativeEvidenceFromSourceText) {
   import Prelude exposing (Option(..), stringAppend, stringCharAtOption, stringDrop, stringFromChar, stringIndexOf, stringTake);
   import ParserParityAst exposing (ParsedModule(..), renderParsedModule);
   import ParserParityDiagnostic exposing (ParserDiagnostic(..));
@@ -16,6 +16,16 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
       ParserOk key -> renderParsedModuleOrProjection sourceFile key;
       ParserError _ -> "parser-error"
     };
+
+  def renderParserParityPackageProjectionFromSourceTexts : String -> String -> String -> String -> String =
+    λ(firstSourceFile : String) λ(firstSourceText : String) λ(secondSourceFile : String) λ(secondSourceText : String)
+      case parseCompleteProgramWithSourceFile firstSourceFile firstSourceText of {
+        ParserOk firstRows -> case parseCompleteProgramWithSourceFile secondSourceFile secondSourceText of {
+          ParserOk secondRows -> appendLine firstRows secondRows;
+          ParserError _ -> "parser-error"
+        };
+        ParserError _ -> "parser-error"
+      };
 
   def parseCompleteProgram : String -> ParserResult =
     λ(sourceText : String) parseCompleteProgramWithSourceFile "" sourceText;

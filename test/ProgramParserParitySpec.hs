@@ -230,6 +230,18 @@ spec =
             canonicalProjection `shouldBe` expected
             sharedParserProjection `shouldBe` Right expected
 
+        it "shared parser-owned .mlfp parser parses same-root package source layout" $
+            assertSharedPackageParserParityProjection
+                packageCrossModuleLetSourcePaths
+                packageCrossModuleLetExpectedProjectionPath
+                packageCrossModuleLetParserProgramRoot
+
+        it "shared parser-owned .mlfp parser parses ordered search-path package source layout" $
+            assertSharedPackageParserParityProjection
+                packageSearchPathImportSourcePaths
+                packageSearchPathImportExpectedProjectionPath
+                packageSearchPathImportParserProgramRoot
+
         beforeAll loadParserParityBatchFixture $ do
             it "runs all .mlfp parser parity fixtures through one generated public CLI driver" $ \fixture ->
                 batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
@@ -446,6 +458,24 @@ spec =
                     `shouldSatisfy` isInfixOf
                         (batchSection "negative:named-recursive-adt-case-branch" namedRecursiveAdtNegativeEvidenceProjection)
 
+            it "shared parser-owned .mlfp parser routes package source-layout fixtures through the generated public CLI driver" $ \fixture -> do
+                crossModuleLetExpected <- readFile packageCrossModuleLetExpectedProjectionPath
+                searchPathImportExpected <- readFile packageSearchPathImportExpectedProjectionPath
+
+                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
+                batchExpectedOutput fixture
+                    `shouldSatisfy` isInfixOf
+                        (batchSection "positive:package-cross-module-let" crossModuleLetExpected)
+                batchExpectedOutput fixture
+                    `shouldSatisfy` isInfixOf
+                        (batchSection "positive:package-search-path-import" searchPathImportExpected)
+
+            it "parser-owned .mlfp parser reports malformed package-layout import diagnostics through public run-program" $ \fixture -> do
+                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
+                batchExpectedOutput fixture
+                    `shouldSatisfy` isInfixOf
+                        (batchSection "negative:package-cross-module-let-import-semicolon" packageLayoutImportSemicolonNegativeEvidenceProjection)
+
             it "shared parser-owned .mlfp parser library routes the generated batch through one entrypoint" $ \fixture -> do
                 sharedParserExists <- doesFileExist (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
                 sharedParserExists `shouldBe` True
@@ -453,6 +483,7 @@ spec =
                 let batchSource = batchMainSource fixture
                 batchSource `shouldSatisfy` isInfixOf "import ParserParityParser exposing"
                 batchSource `shouldSatisfy` isInfixOf "renderParserParityProjectionFromSourceText"
+                batchSource `shouldSatisfy` isInfixOf "renderParserParityPackageProjectionFromSourceTexts"
                 batchSource `shouldSatisfy` isInfixOf "renderParserNegativeEvidenceFromSourceText"
                 batchSource `shouldSatisfy` isInfixOf "renderParserParityRetryEvidence"
 
@@ -668,6 +699,34 @@ complexRecursiveProgramCanonicalSourcePath :: FilePath
 complexRecursiveProgramCanonicalSourcePath =
     "test/conformance/mlfp/parser-parity/complex-recursive-program/src/Main.mlfp"
 
+packageCrossModuleLetCoreSourcePath :: FilePath
+packageCrossModuleLetCoreSourcePath =
+    "test/conformance/mlfp/parser-parity/package-cross-module-let/src/Core.mlfp"
+
+packageCrossModuleLetMainSourcePath :: FilePath
+packageCrossModuleLetMainSourcePath =
+    "test/conformance/mlfp/parser-parity/package-cross-module-let/src/Main.mlfp"
+
+packageSearchPathImportLibSourcePath :: FilePath
+packageSearchPathImportLibSourcePath =
+    "test/conformance/mlfp/parser-parity/package-search-path-import/roots/lib/SearchLib.mlfp"
+
+packageSearchPathImportMainSourcePath :: FilePath
+packageSearchPathImportMainSourcePath =
+    "test/conformance/mlfp/parser-parity/package-search-path-import/roots/main/Main.mlfp"
+
+packageCrossModuleLetSourcePaths :: [FilePath]
+packageCrossModuleLetSourcePaths =
+    [ packageCrossModuleLetCoreSourcePath
+    , packageCrossModuleLetMainSourcePath
+    ]
+
+packageSearchPathImportSourcePaths :: [FilePath]
+packageSearchPathImportSourcePaths =
+    [ packageSearchPathImportLibSourcePath
+    , packageSearchPathImportMainSourcePath
+    ]
+
 expectedProjectionPath :: FilePath
 expectedProjectionPath =
     "test/conformance/mlfp/parser-parity/basic-module-def-bool/expected/parser-program.txt"
@@ -840,6 +899,14 @@ complexRecursiveProgramExpectedProjectionPath :: FilePath
 complexRecursiveProgramExpectedProjectionPath =
     "test/conformance/mlfp/parser-parity/complex-recursive-program/expected/parser-program.txt"
 
+packageCrossModuleLetExpectedProjectionPath :: FilePath
+packageCrossModuleLetExpectedProjectionPath =
+    "test/conformance/mlfp/parser-parity/package-cross-module-let/expected/parser-program.txt"
+
+packageSearchPathImportExpectedProjectionPath :: FilePath
+packageSearchPathImportExpectedProjectionPath =
+    "test/conformance/mlfp/parser-parity/package-search-path-import/expected/parser-program.txt"
+
 sharedParserLibraryRoot :: FilePath
 sharedParserLibraryRoot =
     "test/programs/compiler-parser-parity/parser-library"
@@ -935,6 +1002,14 @@ recursiveGadtParserProgramRoot =
 recursiveExistentialParserProgramRoot :: FilePath
 recursiveExistentialParserProgramRoot =
     "test/programs/compiler-parser-parity/recursive-existential"
+
+packageCrossModuleLetParserProgramRoot :: FilePath
+packageCrossModuleLetParserProgramRoot =
+    "test/programs/compiler-parser-parity/package-cross-module-let"
+
+packageSearchPathImportParserProgramRoot :: FilePath
+packageSearchPathImportParserProgramRoot =
+    "test/programs/compiler-parser-parity/package-search-path-import"
 
 sharedParserAuditFiles :: [FilePath]
 sharedParserAuditFiles =
@@ -1106,6 +1181,7 @@ sharedParserShortcutPhrases =
         , sharedParserRound334ShortcutPhrases
         , sharedParserRound335ShortcutPhrases
         , sharedParserRound336ShortcutPhrases
+        , sharedParserRound337ShortcutPhrases
         ]
 
 sharedParserRound314ShortcutPhrases :: [String]
@@ -1648,6 +1724,36 @@ sharedParserRound336ShortcutPhrases =
     , concat ["authoritative-unified parser negative ", "expected-def-semicolon@"]
     ]
 
+sharedParserRound337ShortcutPhrases :: [String]
+sharedParserRound337ShortcutPhrases =
+    [ concat ["parse", "Package", "Cross", "Module", "Let"]
+    , concat ["parse", "Package", "Search", "Path", "Import"]
+    , concat ["render", "Package", "Cross", "Module", "Let"]
+    , concat ["render", "Package", "Search", "Path", "Import"]
+    , concat ["completeModuleKey \"", "package-cross-module-let", "\""]
+    , concat ["completeModuleKey \"", "package-search-path-import", "\""]
+    , concat ["moduleKey \"", "package-cross-module-let", "\""]
+    , concat ["moduleKey \"", "package-search-path-import", "\""]
+    , concat ["programKey \"", "package-cross-module-let", "\""]
+    , concat ["programKey \"", "package-search-path-import", "\""]
+    , concat ["Package", "Cross", "Module", "Let", "Tokens"]
+    , concat ["Package", "Search", "Path", "Import", "Tokens"]
+    , concat ["LexerOk ", "package", "Cross", "Module", "Let", "Tokens"]
+    , concat ["LexerOk ", "package", "Search", "Path", "Import", "Tokens"]
+    , concat ["package-cross-module-let", " tokens"]
+    , concat ["package-search-path-import", " tokens"]
+    , concat ["stringIndexOf sourceText \"", "test/conformance/mlfp/parser-parity/package-cross-module-let", "\""]
+    , concat ["stringIndexOf sourceText \"", "test/conformance/mlfp/parser-parity/package-search-path-import", "\""]
+    , concat ["stringIndexOf firstSourceText \"", "module Core export", "\""]
+    , concat ["stringIndexOf secondSourceText \"", "module Main export", "\""]
+    , "parseWholePackage"
+    , "renderWholePackage"
+    , "concatPackageSourceText"
+    , "combinedPackageSourceText"
+    , "preRenderedPackageProjection"
+    , concat ["package-layout parser negative ", "expected-import-semicolon@"]
+    ]
+
 sharedParserCompleteParseRequiredPhrases :: [String]
 sharedParserCompleteParseRequiredPhrases =
     [ "parserStateAtEnd state"
@@ -1687,6 +1793,7 @@ sharedParserStaticNegativeEvidencePhrases =
     , concat ["stringAppend \"abstract-recursive-adt-module-use parser negative ", "expected-case-branch-arrow@\""]
     , concat ["stringAppend \"complex-recursive-program parser negative ", "expected-case-branch-arrow@\""]
     , concat ["stringAppend \"named-recursive-adt parser negative ", "expected-case-branch-arrow@\""]
+    , concat ["stringAppend \"package-layout parser negative ", "expected-import-semicolon@\""]
     ]
 
 sharedParserDynamicEvidenceRequiredPhrases :: [String]
@@ -1695,6 +1802,7 @@ sharedParserDynamicEvidenceRequiredPhrases =
     , "parseCompleteProgram sourceText"
     , "tokenizeCompleteModule sourceText"
     , "tokenizeCompleteModule lexerMismatchSourceText"
+    , "renderParserParityPackageProjectionFromSourceTexts"
     , "renderParserNegativeEvidenceFromSourceText"
     , "renderDiagnosticEvidence"
     ]
@@ -1731,6 +1839,18 @@ data ParserParityPositiveCase = ParserParityPositiveCase
     , positiveCaseIdentifier :: String
     , positiveCaseSourcePath :: FilePath
     , positiveCaseExpectedPath :: FilePath
+    }
+
+data ParserParityPackageSource = ParserParityPackageSource
+    { packageSourceIdentifier :: String
+    , packageSourcePath :: FilePath
+    }
+
+data ParserParityPackagePositiveCase = ParserParityPackagePositiveCase
+    { packagePositiveCaseLabel :: String
+    , packagePositiveCaseIdentifier :: String
+    , packagePositiveCaseSources :: [ParserParityPackageSource]
+    , packagePositiveCaseExpectedPath :: FilePath
     }
 
 data ParserParityNegativeCase = ParserParityNegativeCase
@@ -1789,6 +1909,24 @@ parserParityPositiveCases =
     , ParserParityPositiveCase "positive:complex-recursive-program" "positiveComplexRecursiveProgram" complexRecursiveProgramCanonicalSourcePath complexRecursiveProgramExpectedProjectionPath
     ]
 
+parserParityPackagePositiveCases :: [ParserParityPackagePositiveCase]
+parserParityPackagePositiveCases =
+    [ ParserParityPackagePositiveCase
+        "positive:package-cross-module-let"
+        "positivePackageCrossModuleLet"
+        [ ParserParityPackageSource "Core" packageCrossModuleLetCoreSourcePath
+        , ParserParityPackageSource "Main" packageCrossModuleLetMainSourcePath
+        ]
+        packageCrossModuleLetExpectedProjectionPath
+    , ParserParityPackagePositiveCase
+        "positive:package-search-path-import"
+        "positivePackageSearchPathImport"
+        [ ParserParityPackageSource "SearchLib" packageSearchPathImportLibSourcePath
+        , ParserParityPackageSource "Main" packageSearchPathImportMainSourcePath
+        ]
+        packageSearchPathImportExpectedProjectionPath
+    ]
+
 parserParityNegativeCases :: [ParserParityNegativeCase]
 parserParityNegativeCases =
     [ ParserParityNegativeCase "negative:import-exposing-def-bool" "negativeImportExposingDefBool" "import parser negative " importCanonicalSourcePath importNegativeSourceText importNegativeEvidenceProjection
@@ -1820,6 +1958,7 @@ parserParityNegativeCases =
     , ParserParityNegativeCase "negative:module-integrated-recursive-existential" "negativeModuleIntegratedRecursiveExistential" "module-integrated-recursive-existential parser negative " moduleIntegratedRecursiveExistentialCanonicalSourcePath moduleIntegratedRecursiveExistentialNegativeSourceText moduleIntegratedRecursiveExistentialNegativeEvidenceProjection
     , ParserParityNegativeCase "negative:complex-recursive-program" "negativeComplexRecursiveProgram" "complex-recursive-program parser negative " complexRecursiveProgramCanonicalSourcePath complexRecursiveProgramNegativeSourceText complexRecursiveProgramNegativeEvidenceProjection
     , ParserParityNegativeCase "negative:named-recursive-adt-case-branch" "negativeNamedRecursiveAdtCaseBranch" "named-recursive-adt parser negative " recursiveGadtCanonicalSourcePath namedRecursiveAdtNegativeSourceText namedRecursiveAdtNegativeEvidenceProjection
+    , ParserParityNegativeCase "negative:package-cross-module-let-import-semicolon" "negativePackageCrossModuleLetImportSemicolon" "package-layout parser negative " packageCrossModuleLetMainSourcePath packageLayoutImportSemicolonNegativeSourceText packageLayoutImportSemicolonNegativeEvidenceProjection
     ]
 
 assertCanonicalParserParityProjection :: ParserParityPositiveCase -> IO ()
@@ -1839,14 +1978,25 @@ assertSharedParserParityProjection sourcePath expectedPath parserRoot = do
     canonicalProjection `shouldBe` expected
     sharedParserProjection `shouldBe` Right expected
 
+assertSharedPackageParserParityProjection :: [FilePath] -> FilePath -> FilePath -> IO ()
+assertSharedPackageParserParityProjection sourcePaths expectedPath parserRoot = do
+    expected <- readFile expectedPath
+    canonicalProjection <- renderCanonicalPackageProjection sourcePaths
+    sharedParserProjection <- runSharedParserBatch parserRoot
+
+    canonicalProjection `shouldBe` expected
+    sharedParserProjection `shouldBe` Right expected
+
 writeParserParityBatchPackage :: IO FilePath
 writeParserParityBatchPackage = do
     loadedPositiveCases <- traverse loadPositiveParserParityCase parserParityPositiveCases
+    loadedPackagePositiveCases <-
+        traverse loadPositivePackageParserParityCase parserParityPackagePositiveCases
     removePathForcibly parserParityBatchPackageRoot
     createDirectoryIfMissing True parserParityBatchPackageRoot
     writeFile
         (parserParityBatchPackageRoot </> "Main.mlfp")
-        (parserParityBatchMainSource loadedPositiveCases)
+        (parserParityBatchMainSource loadedPositiveCases loadedPackagePositiveCases)
     pure parserParityBatchPackageRoot
 
 loadPositiveParserParityCase :: ParserParityPositiveCase -> IO (ParserParityPositiveCase, String)
@@ -1854,12 +2004,26 @@ loadPositiveParserParityCase testCase = do
     sourceText <- readFile (positiveCaseSourcePath testCase)
     pure (testCase, sourceText)
 
-parserParityBatchMainSource :: [(ParserParityPositiveCase, String)] -> String
-parserParityBatchMainSource loadedPositiveCases =
+loadPositivePackageParserParityCase ::
+    ParserParityPackagePositiveCase ->
+    IO (ParserParityPackagePositiveCase, [(ParserParityPackageSource, String)])
+loadPositivePackageParserParityCase testCase = do
+    loadedSources <- traverse loadPackageSource (packagePositiveCaseSources testCase)
+    pure (testCase, loadedSources)
+  where
+    loadPackageSource sourceCase = do
+        sourceText <- readFile (packageSourcePath sourceCase)
+        pure (sourceCase, sourceText)
+
+parserParityBatchMainSource ::
+    [(ParserParityPositiveCase, String)] ->
+    [(ParserParityPackagePositiveCase, [(ParserParityPackageSource, String)])] ->
+    String
+parserParityBatchMainSource loadedPositiveCases loadedPackagePositiveCases =
     unlines $
         [ "module Main export (main) {"
         , "  import Prelude exposing (Unit(..), IO, putStr, stringAppend);"
-        , "  import ParserParityParser exposing (renderParserParityProjectionFromSourceText, renderParserParityRetryEvidence, renderParserNegativeEvidenceFromSourceText);"
+        , "  import ParserParityParser exposing (renderParserParityProjectionFromSourceText, renderParserParityPackageProjectionFromSourceTexts, renderParserParityRetryEvidence, renderParserNegativeEvidenceFromSourceText);"
         , ""
         , "  def section : String -> String -> String ="
         , "    λ(label : String) λ(output : String)"
@@ -1867,6 +2031,7 @@ parserParityBatchMainSource loadedPositiveCases =
         , ""
         ]
             ++ concatMap renderPositiveBatchDefinitions loadedPositiveCases
+            ++ concatMap renderPackagePositiveBatchDefinitions loadedPackagePositiveCases
             ++ concatMap renderNegativeBatchDefinitions parserParityNegativeCases
             ++ renderRetryBatchDefinitions
             ++ [ "  def parserParityBatchOutput : String ="
@@ -1879,6 +2044,7 @@ parserParityBatchMainSource loadedPositiveCases =
   where
     batchSectionNames =
         map ((<> "Section") . positiveCaseIdentifier . fst) loadedPositiveCases
+            ++ map ((<> "Section") . packagePositiveCaseIdentifier . fst) loadedPackagePositiveCases
             ++ map ((<> "Section") . negativeCaseIdentifier) parserParityNegativeCases
             ++ [retryEvidenceIdentifier <> "Section"]
 
@@ -1902,6 +2068,58 @@ renderPositiveBatchDefinitions (testCase, sourceText) =
     ]
   where
     ident = positiveCaseIdentifier testCase
+
+renderPackagePositiveBatchDefinitions ::
+    (ParserParityPackagePositiveCase, [(ParserParityPackageSource, String)]) ->
+    [String]
+renderPackagePositiveBatchDefinitions (testCase, loadedSources) =
+    concatMap (renderPackageSourceBatchDefinitions ident) loadedSources
+        ++ [ "  def " <> ident <> "Section : String ="
+           , "    section "
+                <> show (packagePositiveCaseLabel testCase)
+                <> " ("
+                <> packageProjectionRendererCall ident loadedSources
+                <> ");"
+           , ""
+           ]
+  where
+    ident = packagePositiveCaseIdentifier testCase
+
+renderPackageSourceBatchDefinitions :: String -> (ParserParityPackageSource, String) -> [String]
+renderPackageSourceBatchDefinitions prefix (sourceCase, sourceText) =
+    [ "  def " <> ident <> "SourceFile : String ="
+    , "    " <> show (packageSourcePath sourceCase) <> ";"
+    , ""
+    , "  def " <> ident <> "SourceText : String ="
+    , "    " <> show sourceText <> ";"
+    , ""
+    ]
+  where
+    ident = packageSourceBatchIdentifierWithPrefix prefix sourceCase
+
+packageProjectionRendererCall ::
+    String ->
+    [(ParserParityPackageSource, String)] ->
+    String
+packageProjectionRendererCall ident loadedSources =
+    case loadedSources of
+        [(firstSource, _), (secondSource, _)] ->
+            "renderParserParityPackageProjectionFromSourceTexts "
+                <> packageSourceCallPrefix ident firstSource
+                <> " "
+                <> packageSourceCallPrefix ident secondSource
+        _ -> error "package parser parity fixtures require exactly two source files"
+
+packageSourceCallPrefix :: String -> ParserParityPackageSource -> String
+packageSourceCallPrefix ident sourceCase =
+    packageSourceBatchIdentifierWithPrefix ident sourceCase
+        <> "SourceFile "
+        <> packageSourceBatchIdentifierWithPrefix ident sourceCase
+        <> "SourceText"
+
+packageSourceBatchIdentifierWithPrefix :: String -> ParserParityPackageSource -> String
+packageSourceBatchIdentifierWithPrefix prefix sourceCase =
+    prefix <> packageSourceIdentifier sourceCase
 
 renderNegativeBatchDefinitions :: ParserParityNegativeCase -> [String]
 renderNegativeBatchDefinitions testCase =
@@ -1960,11 +2178,14 @@ appendStringExpressions expressions =
 expectedParserParityBatchOutput :: IO String
 expectedParserParityBatchOutput = do
     positiveSections <- traverse expectedPositiveParserParitySection parserParityPositiveCases
+    packagePositiveSections <-
+        traverse expectedPackagePositiveParserParitySection parserParityPackagePositiveCases
     let negativeSections =
             map expectedNegativeParserParitySection parserParityNegativeCases
     pure $
         concat
             ( positiveSections
+                ++ packagePositiveSections
                 ++ negativeSections
                 ++ [batchSection retryEvidenceLabel retryEvidenceProjection]
             )
@@ -1973,6 +2194,11 @@ expectedPositiveParserParitySection :: ParserParityPositiveCase -> IO String
 expectedPositiveParserParitySection testCase =
     batchSection (positiveCaseLabel testCase)
         <$> readFile (positiveCaseExpectedPath testCase)
+
+expectedPackagePositiveParserParitySection :: ParserParityPackagePositiveCase -> IO String
+expectedPackagePositiveParserParitySection testCase =
+    batchSection (packagePositiveCaseLabel testCase)
+        <$> readFile (packagePositiveCaseExpectedPath testCase)
 
 expectedNegativeParserParitySection :: ParserParityNegativeCase -> String
 expectedNegativeParserParitySection testCase =
@@ -2518,6 +2744,16 @@ namedRecursiveAdtNegativeSourceText =
         , "}"
         ]
 
+packageLayoutImportSemicolonNegativeSourceText :: String
+packageLayoutImportSemicolonNegativeSourceText =
+    unlines
+        [ "module Main export (main) {"
+        , "  import Core exposing (applyId)"
+        , ""
+        , "  def main : Int = applyId;"
+        , "}"
+        ]
+
 retryEvidenceProjection :: String
 retryEvidenceProjection =
     unlines
@@ -2764,6 +3000,16 @@ namedRecursiveAdtNegativeEvidenceProjection =
             ]
         ]
 
+packageLayoutImportSemicolonNegativeEvidenceProjection :: String
+packageLayoutImportSemicolonNegativeEvidenceProjection =
+    unlines
+        [ concat
+            [ "package-layout parser negative "
+            , "expected-import-semicolon@"
+            , "test/conformance/mlfp/parser-parity/package-cross-module-let/src/Main.mlfp:4:3-4:6"
+            ]
+        ]
+
 renderCanonicalProjection :: FilePath -> String -> IO String
 renderCanonicalProjection path source =
     case parseLocatedProgramWithFile path source of
@@ -2771,6 +3017,14 @@ renderCanonicalProjection path source =
             expectationFailure (renderProgramParseError err) >> fail "parse failed"
         Right located ->
             renderLocatedProjection located
+
+renderCanonicalPackageProjection :: [FilePath] -> IO String
+renderCanonicalPackageProjection sourcePaths =
+    concat <$> traverse renderSourcePathProjection sourcePaths
+  where
+    renderSourcePathProjection sourcePath = do
+        source <- readFile sourcePath
+        renderCanonicalProjection sourcePath source
 
 renderLocatedProjection :: P.LocatedProgram -> IO String
 renderLocatedProjection located =

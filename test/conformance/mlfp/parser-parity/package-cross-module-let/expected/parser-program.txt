@@ -1,0 +1,8 @@
+module Core span=test/conformance/mlfp/parser-parity/package-cross-module-let/src/Core.mlfp:1:1-4:1
+export value applyId span=test/conformance/mlfp/parser-parity/package-cross-module-let/src/Core.mlfp:1:21-1:28
+def applyId type=Int expr=let id = λx x in id 1 span=test/conformance/mlfp/parser-parity/package-cross-module-let/src/Core.mlfp:2:3-3:1
+module Main span=test/conformance/mlfp/parser-parity/package-cross-module-let/src/Main.mlfp:1:1-6:1
+export value main span=test/conformance/mlfp/parser-parity/package-cross-module-let/src/Main.mlfp:1:21-1:25
+import Core span=test/conformance/mlfp/parser-parity/package-cross-module-let/src/Main.mlfp:2:10-2:15
+import exposing value applyId span=test/conformance/mlfp/parser-parity/package-cross-module-let/src/Main.mlfp:2:25-2:32
+def main type=Int expr=applyId span=test/conformance/mlfp/parser-parity/package-cross-module-let/src/Main.mlfp:4:3-5:1

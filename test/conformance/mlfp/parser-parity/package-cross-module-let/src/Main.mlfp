@@ -1,0 +1,5 @@
+module Main export (main) {
+  import Core exposing (applyId);
+
+  def main : Int = applyId;
+}

@@ -584,6 +584,17 @@ import-exposing separator evidence through `run-program`. Full parser parity,
 resolver/checker/backend/platform/compiler package/driver/proof work, and
 self-boot evidence remain open.
 
+Round 337 extends the same shared parser-owned source-text parser-parity
+library with bounded package source-layout fixtures copied from the existing
+run-program conformance package sources. It proves committed parser-program
+projections for same-root `Core`/`Main` package files and ordered search-path
+`SearchLib`/`Main` package files while preserving individual source paths,
+module names, import rows, and explicit source ordering. It also records a
+malformed same-root import semicolon diagnostic through the generated aggregate
+public CLI driver. Full parser parity, package resolver/checker/backend,
+compiler-package/platform/driver/proof work, and self-boot evidence remain
+open.
+
 Broad package-manager, persisted-interface, ABI, linker, separate-compilation,
 general FFI, backend-native redesign, or full compiler-driver work remains
 `roadmap-update-required`; none is authorized by this gap budget.
