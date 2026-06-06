@@ -1,3 +1,27 @@
+## 2026-06-06 - Round 336 parser parity exact authoritative unified source extension
+
+- Added parser-parity conformance fixtures copied from the exact unified
+  corpus files `authoritative-case-analysis.mlfp`,
+  `authoritative-let-polymorphism.mlfp`,
+  `authoritative-nullary-overloaded-method.mlfp`, and
+  `authoritative-overloaded-method.mlfp`.
+- Added committed parser-program projection fixtures for those exact
+  authoritative unified corpus paths, including the importless
+  let-polymorphism module with no import rows.
+- Added thin `.mlfp` fixture roots that expose only `sourceFile` and
+  `sourceText` before calling `renderParserParityProjectionFromSourceText`.
+- Extended `ProgramParserParitySpec` with direct shared-parser assertions,
+  generated aggregate positive sections, one dynamic authoritative unified
+  malformed let-polymorphism diagnostic, and shortcut/static guards for
+  fixture-specific parser/token/projection shortcuts.
+- The existing shared parser-owned source-text library already parsed these
+  exact case, let/lambda/application, class/instance, and deriving surfaces
+  through generic token, parser-state, projection-row, diagnostic, and dynamic
+  negative-evidence paths, so no parser-library code change was needed.
+- Scope remains bounded parser parity only. This is not full parser parity,
+  resolver, checker, backend, compiler-package, driver, platform, proof, or
+  self-boot progress.
+
 ## 2026-06-06 - Round 335 parser parity named recursive ADT source-module extension
 
 - Extended the shared parser-owned parser-parity source-text parser library

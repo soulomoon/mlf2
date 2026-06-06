@@ -1,0 +1,7 @@
+module ParserParityFixture export (sourceFile, sourceText) {
+  def sourceFile : String =
+    "test/conformance/mlfp/parser-parity/authoritative-let-polymorphism/src/Main.mlfp";
+
+  def sourceText : String =
+    "module Main export (main) {\n  def main : Int = let id = λx x in id 1;\n}\n";
+}

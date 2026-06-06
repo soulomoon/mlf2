@@ -36,6 +36,19 @@
   deferred placeholders remain per binding.
 
 ### Added
+- Extended the shared parser-owned parser-parity library with bounded exact
+  authoritative unified corpus fixtures for `authoritative-case-analysis`,
+  `authoritative-let-polymorphism`,
+  `authoritative-nullary-overloaded-method`, and
+  `authoritative-overloaded-method`. The committed projections and thin
+  fixture roots copy the exact unified corpus sources, preserve the
+  importless let-polymorphism surface, route the selected case,
+  let/lambda/application, class/instance, and deriving syntax families through
+  the shared source-text lexer/parser path, and cover one malformed
+  authoritative unified let-polymorphism definition through the generated
+  aggregate public CLI driver. This is not full parser parity,
+  resolver/checker/backend, compiler-package, driver, platform, proof, or
+  self-boot work.
 - Extended the shared parser-owned parser-parity library with a bounded named
   recursive-ADT corpus grammar slice for `deriving-eq`, `recursive-gadt`, and
   `recursive-existential`. The new committed projections and thin fixture
