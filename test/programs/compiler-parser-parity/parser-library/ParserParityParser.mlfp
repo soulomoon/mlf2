@@ -2992,141 +2992,171 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
     λ(text : String) λ(_token : ParserValue)
       parserTextValue text;
 
+  data ProjectionRowParser =
+      ProjectionExportRows : ProjectionRowParser
+    | ProjectionImportRows : ProjectionRowParser;
+
+  data ProjectionRowsFinish =
+      ProjectionRowsReturn : ProjectionRowsFinish
+    | ProjectionRowsImportCloseOrSeparator : ProjectionRowsFinish
+    | ProjectionRowsImportFinalClose : ProjectionRowsFinish;
+
+  def parseBoundedDelimitedProjectionItem : ProjectionRowParser -> String -> ParserValue -> Parser ParserValue =
+    λ(rowParser : ProjectionRowParser) λ(sourceFile : String) λ(start : ParserValue) case rowParser of {
+      ProjectionExportRows -> parseProjectionExportItem sourceFile start;
+      ProjectionImportRows -> parseImportProjectionItem sourceFile start
+    };
+
+  def finishBoundedDelimitedProjectionRows : ProjectionRowsFinish -> ParserValue -> Parser ParserValue =
+    λ(finishRows : ProjectionRowsFinish) λ(rowsValue : ParserValue) case finishRows of {
+      ProjectionRowsReturn -> parserPure rowsValue;
+      ProjectionRowsImportCloseOrSeparator -> parseImportProjectionCloseOrSeparator rowsValue;
+      ProjectionRowsImportFinalClose -> parseImportProjectionFinalClose rowsValue
+    };
+
+  def parseBoundedDelimitedProjectionRows : String -> ProjectionRowParser -> ProjectionRowsFinish -> ProjectionRowsFinish -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(rowParser : ProjectionRowParser) λ(finishRows : ProjectionRowsFinish) λ(finishFinalRows : ProjectionRowsFinish) λ(_start : ParserValue)
+      parserBind (parseBoundedDelimitedProjectionItem rowParser sourceFile ValueUnit)
+        (parseBoundedDelimitedProjectionRowsMoreOrDone8 sourceFile rowParser finishRows finishFinalRows);
+
+  def parseBoundedDelimitedProjectionRowsMoreOrDone8 : String -> ProjectionRowParser -> ProjectionRowsFinish -> ProjectionRowsFinish -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(rowParser : ProjectionRowParser) λ(finishRows : ProjectionRowsFinish) λ(finishFinalRows : ProjectionRowsFinish) λ(rowsValue : ParserValue)
+      parserChoice
+        (parserBind (expectText ",") (parseBoundedDelimitedProjectionRowsNextItem8 sourceFile rowParser finishRows finishFinalRows rowsValue))
+        (finishBoundedDelimitedProjectionRows finishRows rowsValue);
+
+  def parseBoundedDelimitedProjectionRowsNextItem8 : String -> ProjectionRowParser -> ProjectionRowsFinish -> ProjectionRowsFinish -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(rowParser : ProjectionRowParser) λ(finishRows : ProjectionRowsFinish) λ(finishFinalRows : ProjectionRowsFinish) λ(rowsValue : ParserValue) λ(_comma : ParserValue)
+      parserBind (parseBoundedDelimitedProjectionItem rowParser sourceFile ValueUnit)
+        (appendBoundedDelimitedProjectionRowsAndContinue7 sourceFile rowParser finishRows finishFinalRows rowsValue);
+
+  def appendBoundedDelimitedProjectionRowsAndContinue7 : String -> ProjectionRowParser -> ProjectionRowsFinish -> ProjectionRowsFinish -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(rowParser : ProjectionRowParser) λ(finishRows : ProjectionRowsFinish) λ(finishFinalRows : ProjectionRowsFinish) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
+      parserBind (appendProjectionValues existingRows nextRows) (parseBoundedDelimitedProjectionRowsMoreOrDone7 sourceFile rowParser finishRows finishFinalRows);
+
+  def parseBoundedDelimitedProjectionRowsMoreOrDone7 : String -> ProjectionRowParser -> ProjectionRowsFinish -> ProjectionRowsFinish -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(rowParser : ProjectionRowParser) λ(finishRows : ProjectionRowsFinish) λ(finishFinalRows : ProjectionRowsFinish) λ(rowsValue : ParserValue)
+      parserChoice
+        (parserBind (expectText ",") (parseBoundedDelimitedProjectionRowsNextItem7 sourceFile rowParser finishRows finishFinalRows rowsValue))
+        (finishBoundedDelimitedProjectionRows finishRows rowsValue);
+
+  def parseBoundedDelimitedProjectionRowsNextItem7 : String -> ProjectionRowParser -> ProjectionRowsFinish -> ProjectionRowsFinish -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(rowParser : ProjectionRowParser) λ(finishRows : ProjectionRowsFinish) λ(finishFinalRows : ProjectionRowsFinish) λ(rowsValue : ParserValue) λ(_comma : ParserValue)
+      parserBind (parseBoundedDelimitedProjectionItem rowParser sourceFile ValueUnit)
+        (appendBoundedDelimitedProjectionRowsAndContinue6 sourceFile rowParser finishRows finishFinalRows rowsValue);
+
+  def appendBoundedDelimitedProjectionRowsAndContinue6 : String -> ProjectionRowParser -> ProjectionRowsFinish -> ProjectionRowsFinish -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(rowParser : ProjectionRowParser) λ(finishRows : ProjectionRowsFinish) λ(finishFinalRows : ProjectionRowsFinish) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
+      parserBind (appendProjectionValues existingRows nextRows) (parseBoundedDelimitedProjectionRowsMoreOrDone6 sourceFile rowParser finishRows finishFinalRows);
+
+  def parseBoundedDelimitedProjectionRowsMoreOrDone6 : String -> ProjectionRowParser -> ProjectionRowsFinish -> ProjectionRowsFinish -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(rowParser : ProjectionRowParser) λ(finishRows : ProjectionRowsFinish) λ(finishFinalRows : ProjectionRowsFinish) λ(rowsValue : ParserValue)
+      parserChoice
+        (parserBind (expectText ",") (parseBoundedDelimitedProjectionRowsNextItem6 sourceFile rowParser finishRows finishFinalRows rowsValue))
+        (finishBoundedDelimitedProjectionRows finishRows rowsValue);
+
+  def parseBoundedDelimitedProjectionRowsNextItem6 : String -> ProjectionRowParser -> ProjectionRowsFinish -> ProjectionRowsFinish -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(rowParser : ProjectionRowParser) λ(finishRows : ProjectionRowsFinish) λ(finishFinalRows : ProjectionRowsFinish) λ(rowsValue : ParserValue) λ(_comma : ParserValue)
+      parserBind (parseBoundedDelimitedProjectionItem rowParser sourceFile ValueUnit)
+        (appendBoundedDelimitedProjectionRowsAndContinue5 sourceFile rowParser finishRows finishFinalRows rowsValue);
+
+  def appendBoundedDelimitedProjectionRowsAndContinue5 : String -> ProjectionRowParser -> ProjectionRowsFinish -> ProjectionRowsFinish -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(rowParser : ProjectionRowParser) λ(finishRows : ProjectionRowsFinish) λ(finishFinalRows : ProjectionRowsFinish) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
+      parserBind (appendProjectionValues existingRows nextRows) (parseBoundedDelimitedProjectionRowsMoreOrDone5 sourceFile rowParser finishRows finishFinalRows);
+
+  def parseBoundedDelimitedProjectionRowsMoreOrDone5 : String -> ProjectionRowParser -> ProjectionRowsFinish -> ProjectionRowsFinish -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(rowParser : ProjectionRowParser) λ(finishRows : ProjectionRowsFinish) λ(finishFinalRows : ProjectionRowsFinish) λ(rowsValue : ParserValue)
+      parserChoice
+        (parserBind (expectText ",") (parseBoundedDelimitedProjectionRowsNextItem5 sourceFile rowParser finishRows finishFinalRows rowsValue))
+        (finishBoundedDelimitedProjectionRows finishRows rowsValue);
+
+  def parseBoundedDelimitedProjectionRowsNextItem5 : String -> ProjectionRowParser -> ProjectionRowsFinish -> ProjectionRowsFinish -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(rowParser : ProjectionRowParser) λ(finishRows : ProjectionRowsFinish) λ(finishFinalRows : ProjectionRowsFinish) λ(rowsValue : ParserValue) λ(_comma : ParserValue)
+      parserBind (parseBoundedDelimitedProjectionItem rowParser sourceFile ValueUnit)
+        (appendBoundedDelimitedProjectionRowsAndContinue4 sourceFile rowParser finishRows finishFinalRows rowsValue);
+
+  def appendBoundedDelimitedProjectionRowsAndContinue4 : String -> ProjectionRowParser -> ProjectionRowsFinish -> ProjectionRowsFinish -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(rowParser : ProjectionRowParser) λ(finishRows : ProjectionRowsFinish) λ(finishFinalRows : ProjectionRowsFinish) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
+      parserBind (appendProjectionValues existingRows nextRows) (parseBoundedDelimitedProjectionRowsMoreOrDone4 sourceFile rowParser finishRows finishFinalRows);
+
+  def parseBoundedDelimitedProjectionRowsMoreOrDone4 : String -> ProjectionRowParser -> ProjectionRowsFinish -> ProjectionRowsFinish -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(rowParser : ProjectionRowParser) λ(finishRows : ProjectionRowsFinish) λ(finishFinalRows : ProjectionRowsFinish) λ(rowsValue : ParserValue)
+      parserChoice
+        (parserBind (expectText ",") (parseBoundedDelimitedProjectionRowsNextItem4 sourceFile rowParser finishRows finishFinalRows rowsValue))
+        (finishBoundedDelimitedProjectionRows finishRows rowsValue);
+
+  def parseBoundedDelimitedProjectionRowsNextItem4 : String -> ProjectionRowParser -> ProjectionRowsFinish -> ProjectionRowsFinish -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(rowParser : ProjectionRowParser) λ(finishRows : ProjectionRowsFinish) λ(finishFinalRows : ProjectionRowsFinish) λ(rowsValue : ParserValue) λ(_comma : ParserValue)
+      parserBind (parseBoundedDelimitedProjectionItem rowParser sourceFile ValueUnit)
+        (appendBoundedDelimitedProjectionRowsAndContinue3 sourceFile rowParser finishRows finishFinalRows rowsValue);
+
+  def appendBoundedDelimitedProjectionRowsAndContinue3 : String -> ProjectionRowParser -> ProjectionRowsFinish -> ProjectionRowsFinish -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(rowParser : ProjectionRowParser) λ(finishRows : ProjectionRowsFinish) λ(finishFinalRows : ProjectionRowsFinish) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
+      parserBind (appendProjectionValues existingRows nextRows) (parseBoundedDelimitedProjectionRowsMoreOrDone3 sourceFile rowParser finishRows finishFinalRows);
+
+  def parseBoundedDelimitedProjectionRowsMoreOrDone3 : String -> ProjectionRowParser -> ProjectionRowsFinish -> ProjectionRowsFinish -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(rowParser : ProjectionRowParser) λ(finishRows : ProjectionRowsFinish) λ(finishFinalRows : ProjectionRowsFinish) λ(rowsValue : ParserValue)
+      parserChoice
+        (parserBind (expectText ",") (parseBoundedDelimitedProjectionRowsNextItem3 sourceFile rowParser finishRows finishFinalRows rowsValue))
+        (finishBoundedDelimitedProjectionRows finishRows rowsValue);
+
+  def parseBoundedDelimitedProjectionRowsNextItem3 : String -> ProjectionRowParser -> ProjectionRowsFinish -> ProjectionRowsFinish -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(rowParser : ProjectionRowParser) λ(finishRows : ProjectionRowsFinish) λ(finishFinalRows : ProjectionRowsFinish) λ(rowsValue : ParserValue) λ(_comma : ParserValue)
+      parserBind (parseBoundedDelimitedProjectionItem rowParser sourceFile ValueUnit)
+        (appendBoundedDelimitedProjectionRowsAndContinue2 sourceFile rowParser finishRows finishFinalRows rowsValue);
+
+  def appendBoundedDelimitedProjectionRowsAndContinue2 : String -> ProjectionRowParser -> ProjectionRowsFinish -> ProjectionRowsFinish -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(rowParser : ProjectionRowParser) λ(finishRows : ProjectionRowsFinish) λ(finishFinalRows : ProjectionRowsFinish) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
+      parserBind (appendProjectionValues existingRows nextRows) (parseBoundedDelimitedProjectionRowsMoreOrDone2 sourceFile rowParser finishRows finishFinalRows);
+
+  def parseBoundedDelimitedProjectionRowsMoreOrDone2 : String -> ProjectionRowParser -> ProjectionRowsFinish -> ProjectionRowsFinish -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(rowParser : ProjectionRowParser) λ(finishRows : ProjectionRowsFinish) λ(finishFinalRows : ProjectionRowsFinish) λ(rowsValue : ParserValue)
+      parserChoice
+        (parserBind (expectText ",") (parseBoundedDelimitedProjectionRowsNextItem2 sourceFile rowParser finishRows finishFinalRows rowsValue))
+        (finishBoundedDelimitedProjectionRows finishRows rowsValue);
+
+  def parseBoundedDelimitedProjectionRowsNextItem2 : String -> ProjectionRowParser -> ProjectionRowsFinish -> ProjectionRowsFinish -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(rowParser : ProjectionRowParser) λ(finishRows : ProjectionRowsFinish) λ(finishFinalRows : ProjectionRowsFinish) λ(rowsValue : ParserValue) λ(_comma : ParserValue)
+      parserBind (parseBoundedDelimitedProjectionItem rowParser sourceFile ValueUnit)
+        (appendBoundedDelimitedProjectionRowsAndContinue1 sourceFile rowParser finishRows finishFinalRows rowsValue);
+
+  def appendBoundedDelimitedProjectionRowsAndContinue1 : String -> ProjectionRowParser -> ProjectionRowsFinish -> ProjectionRowsFinish -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(rowParser : ProjectionRowParser) λ(finishRows : ProjectionRowsFinish) λ(finishFinalRows : ProjectionRowsFinish) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
+      parserBind (appendProjectionValues existingRows nextRows) (parseBoundedDelimitedProjectionRowsMoreOrDone1 sourceFile rowParser finishRows finishFinalRows);
+
+  def parseBoundedDelimitedProjectionRowsMoreOrDone1 : String -> ProjectionRowParser -> ProjectionRowsFinish -> ProjectionRowsFinish -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(rowParser : ProjectionRowParser) λ(finishRows : ProjectionRowsFinish) λ(finishFinalRows : ProjectionRowsFinish) λ(rowsValue : ParserValue)
+      parserChoice
+        (parserBind (expectText ",") (parseBoundedDelimitedProjectionRowsNextItem1 sourceFile rowParser finishRows finishFinalRows rowsValue))
+        (finishBoundedDelimitedProjectionRows finishRows rowsValue);
+
+  def parseBoundedDelimitedProjectionRowsNextItem1 : String -> ProjectionRowParser -> ProjectionRowsFinish -> ProjectionRowsFinish -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(rowParser : ProjectionRowParser) λ(finishRows : ProjectionRowsFinish) λ(finishFinalRows : ProjectionRowsFinish) λ(rowsValue : ParserValue) λ(_comma : ParserValue)
+      parserBind (parseBoundedDelimitedProjectionItem rowParser sourceFile ValueUnit)
+        (appendBoundedDelimitedProjectionRowsAndContinue0 sourceFile rowParser finishRows finishFinalRows rowsValue);
+
+  def appendBoundedDelimitedProjectionRowsAndContinue0 : String -> ProjectionRowParser -> ProjectionRowsFinish -> ProjectionRowsFinish -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(rowParser : ProjectionRowParser) λ(finishRows : ProjectionRowsFinish) λ(finishFinalRows : ProjectionRowsFinish) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
+      parserBind (appendProjectionValues existingRows nextRows) (parseBoundedDelimitedProjectionRowsMoreOrDone0 sourceFile rowParser finishRows finishFinalRows);
+
+  def parseBoundedDelimitedProjectionRowsMoreOrDone0 : String -> ProjectionRowParser -> ProjectionRowsFinish -> ProjectionRowsFinish -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(rowParser : ProjectionRowParser) λ(finishRows : ProjectionRowsFinish) λ(finishFinalRows : ProjectionRowsFinish) λ(rowsValue : ParserValue)
+      parserChoice
+        (parserBind (expectText ",") (parseBoundedDelimitedProjectionRowsNextItem0 sourceFile rowParser finishFinalRows rowsValue))
+        (finishBoundedDelimitedProjectionRows finishRows rowsValue);
+
+  def parseBoundedDelimitedProjectionRowsNextItem0 : String -> ProjectionRowParser -> ProjectionRowsFinish -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(rowParser : ProjectionRowParser) λ(finishFinalRows : ProjectionRowsFinish) λ(rowsValue : ParserValue) λ(_comma : ParserValue)
+      parserBind (parseBoundedDelimitedProjectionItem rowParser sourceFile ValueUnit)
+        (appendBoundedDelimitedProjectionRowsAndFinish finishFinalRows rowsValue);
+
+  def appendBoundedDelimitedProjectionRowsAndFinish : ProjectionRowsFinish -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(finishFinalRows : ProjectionRowsFinish) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
+      parserBind (appendProjectionValues existingRows nextRows) (finishBoundedDelimitedProjectionRows finishFinalRows);
+
   def parseProjectionExportList : String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(_start : ParserValue)
-      parserBind (parseProjectionExportItem sourceFile ValueUnit)
-        (parseProjectionExportMoreOrDone8 sourceFile);
-
-  def parseProjectionExportMoreOrDone8 : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(rowsValue : ParserValue)
-      parserChoice
-        (parserBind (expectText ",") (parseProjectionExportNextItem8 sourceFile rowsValue))
-        (parserPure rowsValue);
-
-  def parseProjectionExportNextItem8 : String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(rowsValue : ParserValue) λ(_comma : ParserValue)
-      parserBind (parseProjectionExportItem sourceFile ValueUnit)
-        (appendExportProjectionRowsAndContinue7 sourceFile rowsValue);
-
-  def appendExportProjectionRowsAndContinue7 : String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
-      parserBind (appendProjectionValues existingRows nextRows) (parseProjectionExportMoreOrDone7 sourceFile);
-
-  def parseProjectionExportMoreOrDone7 : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(rowsValue : ParserValue)
-      parserChoice
-        (parserBind (expectText ",") (parseProjectionExportNextItem7 sourceFile rowsValue))
-        (parserPure rowsValue);
-
-  def parseProjectionExportNextItem7 : String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(rowsValue : ParserValue) λ(_comma : ParserValue)
-      parserBind (parseProjectionExportItem sourceFile ValueUnit)
-        (appendExportProjectionRowsAndContinue6 sourceFile rowsValue);
-
-  def appendExportProjectionRowsAndContinue6 : String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
-      parserBind (appendProjectionValues existingRows nextRows) (parseProjectionExportMoreOrDone6 sourceFile);
-
-  def parseProjectionExportMoreOrDone6 : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(rowsValue : ParserValue)
-      parserChoice
-        (parserBind (expectText ",") (parseProjectionExportNextItem6 sourceFile rowsValue))
-        (parserPure rowsValue);
-
-  def parseProjectionExportNextItem6 : String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(rowsValue : ParserValue) λ(_comma : ParserValue)
-      parserBind (parseProjectionExportItem sourceFile ValueUnit)
-        (appendExportProjectionRowsAndContinue5 sourceFile rowsValue);
-
-  def appendExportProjectionRowsAndContinue5 : String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
-      parserBind (appendProjectionValues existingRows nextRows) (parseProjectionExportMoreOrDone5 sourceFile);
-
-  def parseProjectionExportMoreOrDone5 : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(rowsValue : ParserValue)
-      parserChoice
-        (parserBind (expectText ",") (parseProjectionExportNextItem5 sourceFile rowsValue))
-        (parserPure rowsValue);
-
-  def parseProjectionExportNextItem5 : String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(rowsValue : ParserValue) λ(_comma : ParserValue)
-      parserBind (parseProjectionExportItem sourceFile ValueUnit)
-        (appendExportProjectionRowsAndContinue4 sourceFile rowsValue);
-
-  def appendExportProjectionRowsAndContinue4 : String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
-      parserBind (appendProjectionValues existingRows nextRows) (parseProjectionExportMoreOrDone4 sourceFile);
-
-  def parseProjectionExportMoreOrDone4 : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(rowsValue : ParserValue)
-      parserChoice
-        (parserBind (expectText ",") (parseProjectionExportNextItem4 sourceFile rowsValue))
-        (parserPure rowsValue);
-
-  def parseProjectionExportNextItem4 : String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(rowsValue : ParserValue) λ(_comma : ParserValue)
-      parserBind (parseProjectionExportItem sourceFile ValueUnit)
-        (appendExportProjectionRowsAndContinue3 sourceFile rowsValue);
-
-  def appendExportProjectionRowsAndContinue3 : String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
-      parserBind (appendProjectionValues existingRows nextRows) (parseProjectionExportMoreOrDone3 sourceFile);
-
-  def parseProjectionExportMoreOrDone3 : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(rowsValue : ParserValue)
-      parserChoice
-        (parserBind (expectText ",") (parseProjectionExportNextItem3 sourceFile rowsValue))
-        (parserPure rowsValue);
-
-  def parseProjectionExportNextItem3 : String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(rowsValue : ParserValue) λ(_comma : ParserValue)
-      parserBind (parseProjectionExportItem sourceFile ValueUnit)
-        (appendExportProjectionRowsAndContinue2 sourceFile rowsValue);
-
-  def appendExportProjectionRowsAndContinue2 : String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
-      parserBind (appendProjectionValues existingRows nextRows) (parseProjectionExportMoreOrDone2 sourceFile);
-
-  def parseProjectionExportMoreOrDone2 : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(rowsValue : ParserValue)
-      parserChoice
-        (parserBind (expectText ",") (parseProjectionExportNextItem2 sourceFile rowsValue))
-        (parserPure rowsValue);
-
-  def parseProjectionExportNextItem2 : String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(rowsValue : ParserValue) λ(_comma : ParserValue)
-      parserBind (parseProjectionExportItem sourceFile ValueUnit)
-        (appendExportProjectionRowsAndContinue1 sourceFile rowsValue);
-
-  def appendExportProjectionRowsAndContinue1 : String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
-      parserBind (appendProjectionValues existingRows nextRows) (parseProjectionExportMoreOrDone1 sourceFile);
-
-  def parseProjectionExportMoreOrDone1 : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(rowsValue : ParserValue)
-      parserChoice
-        (parserBind (expectText ",") (parseProjectionExportNextItem1 sourceFile rowsValue))
-        (parserPure rowsValue);
-
-  def parseProjectionExportNextItem1 : String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(rowsValue : ParserValue) λ(_comma : ParserValue)
-      parserBind (parseProjectionExportItem sourceFile ValueUnit)
-        (appendExportProjectionRowsAndContinue0 sourceFile rowsValue);
-
-  def appendExportProjectionRowsAndContinue0 : String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
-      parserBind (appendProjectionValues existingRows nextRows) (parseProjectionExportMoreOrDone0 sourceFile);
-
-  def parseProjectionExportMoreOrDone0 : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(rowsValue : ParserValue)
-      parserChoice
-        (parserBind (expectText ",") (parseProjectionExportNextItem0 sourceFile rowsValue))
-        (parserPure rowsValue);
-
-  def parseProjectionExportNextItem0 : String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(rowsValue : ParserValue) λ(_comma : ParserValue)
-      parserBind (parseProjectionExportItem sourceFile ValueUnit)
-        (appendProjectionValues rowsValue);
+      parseBoundedDelimitedProjectionRows sourceFile ProjectionExportRows ProjectionRowsReturn ProjectionRowsReturn ValueUnit;
 
   def parseProjectionExportItem : String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(_start : ParserValue)
@@ -3876,7 +3906,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
     λ(sourceFile : String) λ(moduleNameToken : ParserValue) λ(exposingToken : ParserValue) λ(itemRows : ParserValue) case moduleNameToken of {
       ValueToken _ -> case itemRows of {
         ValueProjectionRows rows ->
-          parseImportProjectionMoreOrClose sourceFile moduleNameToken
+          parseBoundedDelimitedProjectionRowsMoreOrDone8 sourceFile ProjectionImportRows ProjectionRowsImportCloseOrSeparator ProjectionRowsImportFinalClose
             (ValueProjectionRows
               (appendLine (importModuleRows sourceFile (moduleNameFromValue moduleNameToken) (spanFromTokenStartToTokenStart moduleNameToken exposingToken)) rows));
         ValueModuleKey _ -> parserFail (ExpectedCompleteModule basicUnexpectedSpan);
@@ -3888,170 +3918,18 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
       ValueUnit -> parserFail (ExpectedCompleteModule basicUnexpectedSpan)
     };
 
-  def parseImportProjectionMoreOrClose : String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleNameToken : ParserValue) λ(itemRows : ParserValue)
-      parseImportProjectionMoreOrClose8 sourceFile moduleNameToken itemRows;
-
-  def parseImportProjectionMoreOrClose8 : String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleNameToken : ParserValue) λ(itemRows : ParserValue)
+  def parseImportProjectionCloseOrSeparator : ParserValue -> Parser ParserValue =
+    λ(itemRows : ParserValue)
       parserChoice
-        (parserBind (expectText ",") (parseImportProjectionNextItem8 sourceFile moduleNameToken itemRows))
-        (parserChoice
-          (parserBind (expectText ")") (parseImportProjectionSemicolon itemRows))
-          (parserFailExpectedAtCurrent ParserExpectImportExposingSeparator));
-
-  def parseImportProjectionNextItem8 : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleNameToken : ParserValue) λ(rowsValue : ParserValue) λ(_comma : ParserValue)
-      parserBind (parseImportProjectionItem sourceFile ValueUnit)
-        (appendImportProjectionRowsAndContinue7 sourceFile moduleNameToken rowsValue);
-
-  def appendImportProjectionRowsAndContinue7 : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleNameToken : ParserValue) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
-      parserBind (appendProjectionValues existingRows nextRows) (parseImportProjectionMoreOrClose7 sourceFile moduleNameToken);
-
-  def parseImportProjectionMoreOrClose7 : String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleNameToken : ParserValue) λ(itemRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ",") (parseImportProjectionNextItem7 sourceFile moduleNameToken itemRows))
-        (parserChoice
-          (parserBind (expectText ")") (parseImportProjectionSemicolon itemRows))
-          (parserFailExpectedAtCurrent ParserExpectImportExposingSeparator));
-
-  def parseImportProjectionNextItem7 : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleNameToken : ParserValue) λ(rowsValue : ParserValue) λ(_comma : ParserValue)
-      parserBind (parseImportProjectionItem sourceFile ValueUnit)
-        (appendImportProjectionRowsAndContinue6 sourceFile moduleNameToken rowsValue);
-
-  def appendImportProjectionRowsAndContinue6 : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleNameToken : ParserValue) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
-      parserBind (appendProjectionValues existingRows nextRows) (parseImportProjectionMoreOrClose6 sourceFile moduleNameToken);
-
-  def parseImportProjectionMoreOrClose6 : String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleNameToken : ParserValue) λ(itemRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ",") (parseImportProjectionNextItem6 sourceFile moduleNameToken itemRows))
-        (parserChoice
-          (parserBind (expectText ")") (parseImportProjectionSemicolon itemRows))
-          (parserFailExpectedAtCurrent ParserExpectImportExposingSeparator));
-
-  def parseImportProjectionNextItem6 : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleNameToken : ParserValue) λ(rowsValue : ParserValue) λ(_comma : ParserValue)
-      parserBind (parseImportProjectionItem sourceFile ValueUnit)
-        (appendImportProjectionRowsAndContinue5 sourceFile moduleNameToken rowsValue);
-
-  def appendImportProjectionRowsAndContinue5 : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleNameToken : ParserValue) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
-      parserBind (appendProjectionValues existingRows nextRows) (parseImportProjectionMoreOrClose5 sourceFile moduleNameToken);
-
-  def parseImportProjectionMoreOrClose5 : String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleNameToken : ParserValue) λ(itemRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ",") (parseImportProjectionNextItem5 sourceFile moduleNameToken itemRows))
-        (parserChoice
-          (parserBind (expectText ")") (parseImportProjectionSemicolon itemRows))
-          (parserFailExpectedAtCurrent ParserExpectImportExposingSeparator));
-
-  def parseImportProjectionNextItem5 : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleNameToken : ParserValue) λ(rowsValue : ParserValue) λ(_comma : ParserValue)
-      parserBind (parseImportProjectionItem sourceFile ValueUnit)
-        (appendImportProjectionRowsAndContinue4 sourceFile moduleNameToken rowsValue);
-
-  def appendImportProjectionRowsAndContinue4 : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleNameToken : ParserValue) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
-      parserBind (appendProjectionValues existingRows nextRows) (parseImportProjectionMoreOrClose4 sourceFile moduleNameToken);
-
-  def parseImportProjectionMoreOrClose4 : String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleNameToken : ParserValue) λ(itemRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ",") (parseImportProjectionNextItem4 sourceFile moduleNameToken itemRows))
-        (parserChoice
-          (parserBind (expectText ")") (parseImportProjectionSemicolon itemRows))
-          (parserFailExpectedAtCurrent ParserExpectImportExposingSeparator));
-
-  def parseImportProjectionNextItem4 : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleNameToken : ParserValue) λ(rowsValue : ParserValue) λ(_comma : ParserValue)
-      parserBind (parseImportProjectionItem sourceFile ValueUnit)
-        (appendImportProjectionRowsAndContinue3 sourceFile moduleNameToken rowsValue);
-
-  def appendImportProjectionRowsAndContinue3 : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleNameToken : ParserValue) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
-      parserBind (appendProjectionValues existingRows nextRows) (parseImportProjectionMoreOrClose3 sourceFile moduleNameToken);
-
-  def parseImportProjectionMoreOrClose3 : String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleNameToken : ParserValue) λ(itemRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ",") (parseImportProjectionNextItem3 sourceFile moduleNameToken itemRows))
-        (parserChoice
-          (parserBind (expectText ")") (parseImportProjectionSemicolon itemRows))
-          (parserFailExpectedAtCurrent ParserExpectImportExposingSeparator));
-
-  def parseImportProjectionNextItem3 : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleNameToken : ParserValue) λ(rowsValue : ParserValue) λ(_comma : ParserValue)
-      parserBind (parseImportProjectionItem sourceFile ValueUnit)
-        (appendImportProjectionRowsAndContinue2 sourceFile moduleNameToken rowsValue);
+        (parseImportProjectionFinalClose itemRows)
+        (parserFailExpectedAtCurrent ParserExpectImportExposingSeparator);
 
   def parseImportProjectionSemicolon : ParserValue -> ParserValue -> Parser ParserValue =
     λ(itemsRows : ParserValue) λ(_closeImport : ParserValue)
       parserBind expectImportSemicolonAtCurrent
         (λ(_semicolon : ParserValue) parserPure itemsRows);
 
-  def appendImportProjectionRowsAndContinue2 : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleNameToken : ParserValue) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
-      parserBind (appendProjectionValues existingRows nextRows) (parseImportProjectionMoreOrClose2 sourceFile moduleNameToken);
-
-  def parseImportProjectionMoreOrClose2 : String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleNameToken : ParserValue) λ(itemRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ",") (parseImportProjectionNextItem2 sourceFile moduleNameToken itemRows))
-        (parserChoice
-          (parserBind (expectText ")") (parseImportProjectionSemicolon itemRows))
-          (parserFailExpectedAtCurrent ParserExpectImportExposingSeparator));
-
-  def parseImportProjectionNextItem2 : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleNameToken : ParserValue) λ(rowsValue : ParserValue) λ(_comma : ParserValue)
-      parserBind (parseImportProjectionItem sourceFile ValueUnit)
-        (appendImportProjectionRowsAndContinue1 sourceFile moduleNameToken rowsValue);
-
-  def appendImportProjectionRowsAndContinue1 : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleNameToken : ParserValue) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
-      parserBind (appendProjectionValues existingRows nextRows) (parseImportProjectionMoreOrClose1 sourceFile moduleNameToken);
-
-  def parseImportProjectionMoreOrClose1 : String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleNameToken : ParserValue) λ(itemRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ",") (parseImportProjectionNextItem1 sourceFile moduleNameToken itemRows))
-        (parserChoice
-          (parserBind (expectText ")") (parseImportProjectionSemicolon itemRows))
-          (parserFailExpectedAtCurrent ParserExpectImportExposingSeparator));
-
-  def parseImportProjectionNextItem1 : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleNameToken : ParserValue) λ(rowsValue : ParserValue) λ(_comma : ParserValue)
-      parserBind (parseImportProjectionItem sourceFile ValueUnit)
-        (appendImportProjectionRowsAndClose sourceFile moduleNameToken rowsValue);
-
-  def appendImportProjectionRowsAndClose : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleNameToken : ParserValue) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
-      parserBind (appendProjectionValues existingRows nextRows) (parseImportProjectionMoreOrClose0 sourceFile moduleNameToken);
-
-  def parseImportProjectionMoreOrClose0 : String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(_moduleNameToken : ParserValue) λ(itemRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ",") (parseImportProjectionNextItem0 sourceFile itemRows))
-        (parserChoice
-          (parserBind (expectText ")") (parseImportProjectionSemicolon itemRows))
-          (parserFailExpectedAtCurrent ParserExpectImportExposingSeparator));
-
-  def parseImportProjectionNextItem0 : String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(rowsValue : ParserValue) λ(_comma : ParserValue)
-      parserBind (parseImportProjectionItem sourceFile ValueUnit)
-        (appendFinalImportProjectionRows rowsValue);
-
-  def appendFinalImportProjectionRows : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(existingRows : ParserValue) λ(nextRows : ParserValue)
-      parserBind (appendProjectionValues existingRows nextRows)
-        parseFinalImportProjectionClose;
-
-  def parseFinalImportProjectionClose : ParserValue -> Parser ParserValue =
+  def parseImportProjectionFinalClose : ParserValue -> Parser ParserValue =
     λ(itemsRows : ParserValue)
       parserBind (expectText ")") (parseImportProjectionSemicolon itemsRows);
 

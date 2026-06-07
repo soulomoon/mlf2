@@ -560,6 +560,20 @@ spec =
             traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserExpectationUsePhrases
             removedMatches `shouldBe` []
 
+        it "shared parser-owned .mlfp parser shares bounded projection row lists" $ do
+            sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
+            sharedCombinatorSource <- readFile (sharedParserLibraryRoot </> "ParserParityParserCombinator.mlfp")
+
+            let parserLibrarySource = sharedParserSource <> "\n" <> sharedCombinatorSource
+                removedMatches =
+                    filter
+                        (`isInfixOf` parserLibrarySource)
+                        sharedParserRemovedProjectionListAliases
+
+            traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserBoundedProjectionRowsSubstratePhrases
+            traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserBoundedProjectionRowsUsePhrases
+            removedMatches `shouldBe` []
+
         it "shared parser-owned .mlfp parser reaches success only after complete syntax and dynamic diagnostics" $ do
             sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
             sharedLexerSource <- readFile (sharedParserLibraryRoot </> "ParserParityLexer.mlfp")
@@ -1329,6 +1343,41 @@ sharedParserRemovedExpectationAliases =
     , "labelTypeFamilyEquationEquals"
     , "labelConstructorForallDot"
     ]
+
+sharedParserBoundedProjectionRowsSubstratePhrases :: [String]
+sharedParserBoundedProjectionRowsSubstratePhrases =
+    [ "data ProjectionRowParser"
+    , "data ProjectionRowsFinish"
+    , "def parseBoundedDelimitedProjectionRows : String -> ProjectionRowParser -> ProjectionRowsFinish -> ProjectionRowsFinish"
+    , "def parseBoundedDelimitedProjectionRowsMoreOrDone8"
+    , "def parseBoundedDelimitedProjectionRowsMoreOrDone0"
+    , "def appendBoundedDelimitedProjectionRowsAndFinish"
+    ]
+
+sharedParserBoundedProjectionRowsUsePhrases :: [String]
+sharedParserBoundedProjectionRowsUsePhrases =
+    [ "parseBoundedDelimitedProjectionRows sourceFile ProjectionExportRows ProjectionRowsReturn ProjectionRowsReturn ValueUnit"
+    , "parseBoundedDelimitedProjectionRowsMoreOrDone8 sourceFile ProjectionImportRows ProjectionRowsImportCloseOrSeparator ProjectionRowsImportFinalClose"
+    , "def parseImportProjectionCloseOrSeparator : ParserValue -> Parser ParserValue"
+    , "parserFailExpectedAtCurrent ParserExpectImportExposingSeparator"
+    , "def parseImportProjectionFinalClose : ParserValue -> Parser ParserValue"
+    ]
+
+sharedParserRemovedProjectionListAliases :: [String]
+sharedParserRemovedProjectionListAliases =
+    concat
+        [ [ "parseProjectionExportMoreOrDone" <> show n | n <- [(0 :: Int) .. 8] ]
+        , [ "parseProjectionExportNextItem" <> show n | n <- [(0 :: Int) .. 8] ]
+        , [ "appendExportProjectionRowsAndContinue" <> show n | n <- [(0 :: Int) .. 7] ]
+        , [ "parseImportProjectionMoreOrClose" <> show n | n <- [(0 :: Int) .. 8] ]
+        , [ "parseImportProjectionNextItem" <> show n | n <- [(0 :: Int) .. 8] ]
+        , [ "appendImportProjectionRowsAndContinue" <> show n | n <- [(1 :: Int) .. 7] ]
+        , [ "parseImportProjectionMoreOrClose"
+          , "appendImportProjectionRowsAndClose"
+          , "appendFinalImportProjectionRows"
+          , "parseFinalImportProjectionClose"
+          ]
+        ]
 
 sharedParserEarlySuccessPhrases :: [String]
 sharedParserEarlySuccessPhrases =
