@@ -1,0 +1,11 @@
+module Main export (main) {
+  import Prelude exposing (Unit(..), IO, putStr, stringAppend);
+  import ParserParityFixture exposing (seedLexerSourceFile, seedLexerSourceText);
+  import ParserParityParser exposing (renderParserParityProjectionFromSourceText);
+
+  def main : IO Unit =
+    putStr
+      (stringAppend
+        (renderParserParityProjectionFromSourceText seedLexerSourceFile seedLexerSourceText)
+        "\n");
+}

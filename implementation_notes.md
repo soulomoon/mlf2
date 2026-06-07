@@ -1,3 +1,22 @@
+## 2026-06-07 - Round 339 compiler-seed lexer parser parity slice
+
+- Added a parser-parity conformance fixture copied byte-for-byte from
+  `test/programs/compiler-seed/frontend-contract/SeedLexer.mlfp`.
+- Added the committed canonical parser-program projection for the selected
+  SeedLexer source and a thin `.mlfp` parser-parity root that exposes only the
+  source path/text before calling the shared parser library.
+- Extended the shared parser-owned source-text library only for the bounded
+  SeedLexer needs: the lexer/reverse/string scan budgets, decimal line-number
+  advancement through line 227, seven-argument application chains, and the
+  nested parenthesized token-stream constructor application used in
+  `lexAfterLiteral`.
+- Extended `ProgramParserParitySpec` with direct shared-parser equality,
+  generated aggregate positive coverage, source-copy equality, one malformed
+  case-branch negative, and static shortcut guards.
+- Scope remains bounded parser parity only. This is not full parser parity,
+  resolver, checker, backend, compiler-package, package resolver, driver,
+  platform, proof, or self-boot progress.
+
 ## 2026-06-06 - Round 338 compiler-seed data-model parser parity slice
 
 - Added parser-parity conformance fixtures copied byte-for-byte from the

@@ -36,6 +36,16 @@
   deferred placeholders remain per binding.
 
 ### Added
+- Extended the shared parser-owned parser-parity library with a bounded
+  compiler-seed lexer fixture for `SeedLexer`. The new committed projection
+  and thin fixture root copy the selected compiler-seed source byte-for-byte,
+  preserve the stable source path, route the source through the shared
+  parser-library entrypoints, cover the seven-argument lexer-state
+  application and nested token-stream constructor application grammar paths,
+  and record one malformed lexer-source case-branch diagnostic through the
+  generated aggregate public CLI driver. This is not full parser parity,
+  resolver/checker/backend, compiler-package, package resolver, driver,
+  platform, proof, or self-boot work.
 - Extended the shared parser-owned parser-parity library with bounded
   compiler-seed data-model package fixtures for `SeedSource`, `SeedToken`,
   `SeedDiagnostic`, and `SeedAst`. The new committed projection and thin

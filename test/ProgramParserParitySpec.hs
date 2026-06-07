@@ -248,8 +248,17 @@ spec =
                 compilerSeedDataModelExpectedProjectionPath
                 compilerSeedDataModelParserProgramRoot
 
+        it "shared parser-owned .mlfp parser parses compiler-seed lexer source" $
+            assertSharedParserParityProjection
+                compilerSeedLexerSourcePath
+                compilerSeedLexerExpectedProjectionPath
+                compilerSeedLexerParserProgramRoot
+
         it "compiler-seed data-model parser-parity sources copy selected seed modules" $
             traverse_ assertSourceCopy compilerSeedDataModelSourceCopyPairs
+
+        it "compiler-seed lexer parser-parity source copies the selected seed module" $
+            assertSourceCopy (compilerSeedLexerOriginalPath, compilerSeedLexerSourcePath)
 
         beforeAll loadParserParityBatchFixture $ do
             it "runs all .mlfp parser parity fixtures through one generated public CLI driver" $ \fixture ->
@@ -494,6 +503,20 @@ spec =
                 batchExpectedOutput fixture
                     `shouldSatisfy` isInfixOf
                         (batchSection "negative:compiler-seed-data-model-case-branch" compilerSeedDataModelCaseBranchNegativeEvidenceProjection)
+
+            it "shared parser-owned .mlfp parser routes compiler-seed lexer through the generated public CLI driver" $ \fixture -> do
+                compilerSeedLexerExpected <- readFile compilerSeedLexerExpectedProjectionPath
+
+                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
+                batchExpectedOutput fixture
+                    `shouldSatisfy` isInfixOf
+                        (batchSection "positive:compiler-seed-lexer" compilerSeedLexerExpected)
+
+            it "parser-owned .mlfp parser reports malformed compiler-seed lexer diagnostics through public run-program" $ \fixture -> do
+                batchRunResult fixture `shouldBe` Right (batchExpectedOutput fixture)
+                batchExpectedOutput fixture
+                    `shouldSatisfy` isInfixOf
+                        (batchSection "negative:compiler-seed-lexer-case-branch" compilerSeedLexerCaseBranchNegativeEvidenceProjection)
 
             it "shared parser-owned .mlfp parser library routes the generated batch through one entrypoint" $ \fixture -> do
                 sharedParserExists <- doesFileExist (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
@@ -751,6 +774,10 @@ compilerSeedDataModelSeedAstOriginalPath :: FilePath
 compilerSeedDataModelSeedAstOriginalPath =
     "test/programs/compiler-seed/frontend-contract/SeedAst.mlfp"
 
+compilerSeedLexerOriginalPath :: FilePath
+compilerSeedLexerOriginalPath =
+    "test/programs/compiler-seed/frontend-contract/SeedLexer.mlfp"
+
 compilerSeedDataModelSeedSourceSourcePath :: FilePath
 compilerSeedDataModelSeedSourceSourcePath =
     "test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp"
@@ -766,6 +793,10 @@ compilerSeedDataModelSeedDiagnosticSourcePath =
 compilerSeedDataModelSeedAstSourcePath :: FilePath
 compilerSeedDataModelSeedAstSourcePath =
     "test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedAst.mlfp"
+
+compilerSeedLexerSourcePath :: FilePath
+compilerSeedLexerSourcePath =
+    "test/conformance/mlfp/parser-parity/compiler-seed-lexer/src/SeedLexer.mlfp"
 
 packageCrossModuleLetSourcePaths :: [FilePath]
 packageCrossModuleLetSourcePaths =
@@ -979,6 +1010,10 @@ compilerSeedDataModelExpectedProjectionPath :: FilePath
 compilerSeedDataModelExpectedProjectionPath =
     "test/conformance/mlfp/parser-parity/compiler-seed-data-model/expected/parser-program.txt"
 
+compilerSeedLexerExpectedProjectionPath :: FilePath
+compilerSeedLexerExpectedProjectionPath =
+    "test/conformance/mlfp/parser-parity/compiler-seed-lexer/expected/parser-program.txt"
+
 sharedParserLibraryRoot :: FilePath
 sharedParserLibraryRoot =
     "test/programs/compiler-parser-parity/parser-library"
@@ -1086,6 +1121,10 @@ packageSearchPathImportParserProgramRoot =
 compilerSeedDataModelParserProgramRoot :: FilePath
 compilerSeedDataModelParserProgramRoot =
     "test/programs/compiler-parser-parity/compiler-seed-data-model"
+
+compilerSeedLexerParserProgramRoot :: FilePath
+compilerSeedLexerParserProgramRoot =
+    "test/programs/compiler-parser-parity/compiler-seed-lexer"
 
 sharedParserAuditFiles :: [FilePath]
 sharedParserAuditFiles =
@@ -1270,6 +1309,7 @@ sharedParserShortcutPhrases =
         , sharedParserRound336ShortcutPhrases
         , sharedParserRound337ShortcutPhrases
         , sharedParserRound338ShortcutPhrases
+        , sharedParserRound339ShortcutPhrases
         ]
 
 sharedParserRound314ShortcutPhrases :: [String]
@@ -1884,6 +1924,26 @@ sharedParserRound338ShortcutPhrases =
     , "compilerSeedDataModelProjectionRows"
     ]
 
+sharedParserRound339ShortcutPhrases :: [String]
+sharedParserRound339ShortcutPhrases =
+    [ concat ["parse", "Compiler", "Seed", "Lexer"]
+    , concat ["parse", "Seed", "Lexer"]
+    , concat ["render", "Compiler", "Seed", "Lexer"]
+    , concat ["completeModuleKey \"", "SeedLexer", "\""]
+    , concat ["moduleKey \"", "SeedLexer", "\""]
+    , concat ["Seed", "Lexer", "Tokens"]
+    , concat ["LexerOk ", "seed", "Lexer", "Tokens"]
+    , concat ["compiler-seed-lexer", " tokens"]
+    , concat ["stringIndexOf sourceText \"", "module SeedLexer export", "\""]
+    , concat ["module SeedLexer span=", "test/conformance/mlfp/parser-parity/compiler-seed-lexer"]
+    , concat ["def lexSeedInput type=SeedInput -> LexerResult expr=", "λ(input : SeedInput) case input of"]
+    , concat ["def lexAfterLiteral type=SourceSpan -> SourceSpan -> SeedIdentifier", " -> SourceSpan -> SourceSpan"]
+    , concat ["lexer-positive:def-main-equals-true", ";lexer-negative:unknown@span-unknown-symbol"]
+    , concat ["compiler-seed-lexer parser negative ", "expected-case-branch-arrow@"]
+    , "preRenderedCompilerSeedLexerProjection"
+    , "compilerSeedLexerProjectionRows"
+    ]
+
 sharedParserCompleteParseRequiredPhrases :: [String]
 sharedParserCompleteParseRequiredPhrases =
     [ "parserStateAtEnd state"
@@ -1925,6 +1985,7 @@ sharedParserStaticNegativeEvidencePhrases =
     , concat ["stringAppend \"named-recursive-adt parser negative ", "expected-case-branch-arrow@\""]
     , concat ["stringAppend \"package-layout parser negative ", "expected-import-semicolon@\""]
     , concat ["stringAppend \"compiler-seed-data-model parser negative ", "expected-case-branch-arrow@\""]
+    , concat ["stringAppend \"compiler-seed-lexer parser negative ", "expected-case-branch-arrow@\""]
     ]
 
 sharedParserDynamicEvidenceRequiredPhrases :: [String]
@@ -2039,6 +2100,7 @@ parserParityPositiveCases =
     , ParserParityPositiveCase "positive:abstract-recursive-adt-module-use" "positiveAbstractRecursiveAdtModuleUse" abstractRecursiveAdtModuleUseCanonicalSourcePath abstractRecursiveAdtModuleUseExpectedProjectionPath
     , ParserParityPositiveCase "positive:module-integrated-recursive-existential" "positiveModuleIntegratedRecursiveExistential" moduleIntegratedRecursiveExistentialCanonicalSourcePath moduleIntegratedRecursiveExistentialExpectedProjectionPath
     , ParserParityPositiveCase "positive:complex-recursive-program" "positiveComplexRecursiveProgram" complexRecursiveProgramCanonicalSourcePath complexRecursiveProgramExpectedProjectionPath
+    , ParserParityPositiveCase "positive:compiler-seed-lexer" "positiveCompilerSeedLexer" compilerSeedLexerSourcePath compilerSeedLexerExpectedProjectionPath
     ]
 
 parserParityPackagePositiveCases :: [ParserParityPackagePositiveCase]
@@ -2101,6 +2163,7 @@ parserParityNegativeCases =
     , ParserParityNegativeCase "negative:named-recursive-adt-case-branch" "negativeNamedRecursiveAdtCaseBranch" "named-recursive-adt parser negative " recursiveGadtCanonicalSourcePath namedRecursiveAdtNegativeSourceText namedRecursiveAdtNegativeEvidenceProjection
     , ParserParityNegativeCase "negative:package-cross-module-let-import-semicolon" "negativePackageCrossModuleLetImportSemicolon" "package-layout parser negative " packageCrossModuleLetMainSourcePath packageLayoutImportSemicolonNegativeSourceText packageLayoutImportSemicolonNegativeEvidenceProjection
     , ParserParityNegativeCase "negative:compiler-seed-data-model-case-branch" "negativeCompilerSeedDataModelCaseBranch" "compiler-seed-data-model parser negative " compilerSeedDataModelSeedSourceSourcePath compilerSeedDataModelCaseBranchNegativeSourceText compilerSeedDataModelCaseBranchNegativeEvidenceProjection
+    , ParserParityNegativeCase "negative:compiler-seed-lexer-case-branch" "negativeCompilerSeedLexerCaseBranch" "compiler-seed-lexer parser negative " compilerSeedLexerSourcePath compilerSeedLexerCaseBranchNegativeSourceText compilerSeedLexerCaseBranchNegativeEvidenceProjection
     ]
 
 assertCanonicalParserParityProjection :: ParserParityPositiveCase -> IO ()
@@ -2982,6 +3045,21 @@ compilerSeedDataModelCaseBranchNegativeSourceText =
         , "}"
         ]
 
+compilerSeedLexerCaseBranchNegativeSourceText :: String
+compilerSeedLexerCaseBranchNegativeSourceText =
+    unlines
+        [ "module SeedLexer export (LexerResult(..), lexSeedInput) {"
+        , "  data LexerResult ="
+        , "      LexerOk : LexerResult"
+        , "    | LexerError : LexerResult;"
+        , ""
+        , "  def lexSeedInput : LexerResult ="
+        , "    case LexerOk of {"
+        , "      LexerOk LexerError"
+        , "    };"
+        , "}"
+        ]
+
 retryEvidenceProjection :: String
 retryEvidenceProjection =
     unlines
@@ -3245,6 +3323,16 @@ compilerSeedDataModelCaseBranchNegativeEvidenceProjection =
             [ "compiler-seed-data-model parser negative "
             , "expected-case-branch-arrow@"
             , "test/conformance/mlfp/parser-parity/compiler-seed-data-model/src/SeedSource.mlfp:39:34-39:35"
+            ]
+        ]
+
+compilerSeedLexerCaseBranchNegativeEvidenceProjection :: String
+compilerSeedLexerCaseBranchNegativeEvidenceProjection =
+    unlines
+        [ concat
+            [ "compiler-seed-lexer parser negative "
+            , "expected-case-branch-arrow@"
+            , "test/conformance/mlfp/parser-parity/compiler-seed-lexer/src/SeedLexer.mlfp:9:5-9:6"
             ]
         ]
 

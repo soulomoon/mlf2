@@ -42,7 +42,7 @@ module ParserParityLexer export (LexerResult(..), tokenizeCompleteModule, nextLi
 
   def tokenizeCompleteModule : String -> LexerResult =
     λ(sourceText : String)
-      finishScannedInput (scanMany512 (initialScanState sourceText));
+      finishScannedInput (scanMany2048 (initialScanState sourceText));
 
   def initialSourceCursor : String -> SourceCursor =
     λ(sourceText : String) SourceCursor sourceText "1" "";
@@ -60,7 +60,7 @@ module ParserParityLexer export (LexerResult(..), tokenizeCompleteModule, nextLi
 
   def reverseScannedInput : ParserSourceInput -> LexerResult =
     λ(reverseInput : ParserSourceInput)
-      finishReverseInput (reverseMany512 (ReverseState reverseInput sourceInputNil));
+      finishReverseInput (reverseMany2048 (ReverseState reverseInput sourceInputNil));
 
   def finishReverseInput : ReverseState -> LexerResult =
     λ(state : ReverseState) case state of {
@@ -69,6 +69,12 @@ module ParserParityLexer export (LexerResult(..), tokenizeCompleteModule, nextLi
         SourceInputCons _ _ -> LexerError (UnexpectedSourceText lexerUnknownSpan)
       }
     };
+
+  def reverseMany2048 : ReverseState -> ReverseState =
+    λ(state : ReverseState) reverseMany1024 (reverseMany1024 state);
+
+  def reverseMany1024 : ReverseState -> ReverseState =
+    λ(state : ReverseState) reverseMany512 (reverseMany512 state);
 
   def reverseMany512 : ReverseState -> ReverseState =
     λ(state : ReverseState) reverseMany256 (reverseMany256 state);
@@ -104,6 +110,12 @@ module ParserParityLexer export (LexerResult(..), tokenizeCompleteModule, nextLi
         SourceInputCons token rest -> ReverseState rest (sourceInputCons token forwardInput)
       }
     };
+
+  def scanMany2048 : LexerScanState -> LexerScanState =
+    λ(state : LexerScanState) scanMany1024 (scanMany1024 state);
+
+  def scanMany1024 : LexerScanState -> LexerScanState =
+    λ(state : LexerScanState) scanMany512 (scanMany512 state);
 
   def scanMany512 : LexerScanState -> LexerScanState =
     λ(state : LexerScanState) scanMany256 (scanMany256 state);
@@ -907,14 +919,20 @@ module ParserParityLexer export (LexerResult(..), tokenizeCompleteModule, nextLi
 
   def scanStringLiteralToken : SourceCursor -> LexStep =
     λ(cursor : SourceCursor) case cursor of {
-      SourceCursor sourceText lineNumber linePrefix -> case sourceStartsWith "\"" sourceText of {
-        StringMatched ->
-          finishStringLiteralScan
-            (scanStringLiteralMany64
-              (StringLiteralScanState lineNumber linePrefix "\"" (SourceCursor (stringDrop sourceText 1) lineNumber (stringAppend linePrefix "\""))));
-        StringMismatch -> LexStepError (UnexpectedSourceText lexerUnknownSpan)
-      }
-    };
+        SourceCursor sourceText lineNumber linePrefix -> case sourceStartsWith "\"" sourceText of {
+          StringMatched ->
+            finishStringLiteralScan
+              (scanStringLiteralMany256
+                (StringLiteralScanState lineNumber linePrefix "\"" (SourceCursor (stringDrop sourceText 1) lineNumber (stringAppend linePrefix "\""))));
+          StringMismatch -> LexStepError (UnexpectedSourceText lexerUnknownSpan)
+        }
+      };
+
+  def scanStringLiteralMany256 : StringLiteralScanState -> StringLiteralScanState =
+    λ(state : StringLiteralScanState) scanStringLiteralMany128 (scanStringLiteralMany128 state);
+
+  def scanStringLiteralMany128 : StringLiteralScanState -> StringLiteralScanState =
+    λ(state : StringLiteralScanState) scanStringLiteralMany64 (scanStringLiteralMany64 state);
 
   def scanStringLiteralMany64 : StringLiteralScanState -> StringLiteralScanState =
     λ(state : StringLiteralScanState) scanStringLiteralMany32 (scanStringLiteralMany32 state);
@@ -1060,195 +1078,64 @@ module ParserParityLexer export (LexerResult(..), tokenizeCompleteModule, nextLi
     };
 
   def nextLineNumber : String -> String =
-    λ(lineNumber : String) case stringExactMatch "1" lineNumber of {
-      StringMatched -> "2";
-      StringMismatch -> case stringExactMatch "2" lineNumber of {
-        StringMatched -> "3";
-        StringMismatch -> case stringExactMatch "3" lineNumber of {
-          StringMatched -> "4";
-          StringMismatch -> case stringExactMatch "4" lineNumber of {
-            StringMatched -> "5";
-            StringMismatch -> case stringExactMatch "5" lineNumber of {
-              StringMatched -> "6";
-              StringMismatch -> case stringExactMatch "6" lineNumber of {
-                StringMatched -> "7";
-                StringMismatch -> case stringExactMatch "7" lineNumber of {
-                  StringMatched -> "8";
-                  StringMismatch -> case stringExactMatch "8" lineNumber of {
-                    StringMatched -> "9";
-                    StringMismatch -> case stringExactMatch "9" lineNumber of {
-                      StringMatched -> "10";
-                      StringMismatch -> case stringExactMatch "10" lineNumber of {
-                        StringMatched -> "11";
-                        StringMismatch -> case stringExactMatch "11" lineNumber of {
-                          StringMatched -> "12";
-                          StringMismatch -> case stringExactMatch "12" lineNumber of {
-                            StringMatched -> "13";
-                            StringMismatch -> case stringExactMatch "13" lineNumber of {
-                              StringMatched -> "14";
-                              StringMismatch -> case stringExactMatch "14" lineNumber of {
-                                StringMatched -> "15";
-                                StringMismatch -> case stringExactMatch "15" lineNumber of {
-                                  StringMatched -> "16";
-                                  StringMismatch -> case stringExactMatch "16" lineNumber of {
-                                    StringMatched -> "17";
-                                    StringMismatch -> case stringExactMatch "17" lineNumber of {
-                                      StringMatched -> "18";
-                                      StringMismatch -> case stringExactMatch "18" lineNumber of {
-                                        StringMatched -> "19";
-                                        StringMismatch -> case stringExactMatch "19" lineNumber of {
-                                          StringMatched -> "20";
-                                          StringMismatch -> case stringExactMatch "20" lineNumber of {
-                                            StringMatched -> "21";
-                                            StringMismatch -> case stringExactMatch "21" lineNumber of {
-                                              StringMatched -> "22";
-                                              StringMismatch -> case stringExactMatch "22" lineNumber of {
-                                                StringMatched -> "23";
-                                                StringMismatch -> case stringExactMatch "23" lineNumber of {
-                                                  StringMatched -> "24";
-                                                  StringMismatch -> case stringExactMatch "24" lineNumber of {
-                                                    StringMatched -> "25";
-                                                    StringMismatch -> case stringExactMatch "25" lineNumber of {
-                                                      StringMatched -> "26";
-                                                      StringMismatch -> case stringExactMatch "26" lineNumber of {
-                                                        StringMatched -> "27";
-                                                        StringMismatch -> case stringExactMatch "27" lineNumber of {
-                                                          StringMatched -> "28";
-                                                          StringMismatch -> case stringExactMatch "28" lineNumber of {
-                                                            StringMatched -> "29";
-                                                            StringMismatch -> case stringExactMatch "29" lineNumber of {
-                                                              StringMatched -> "30";
-                                                              StringMismatch -> case stringExactMatch "30" lineNumber of {
-                                                                StringMatched -> "31";
-                                                                StringMismatch -> case stringExactMatch "31" lineNumber of {
-                                                                  StringMatched -> "32";
-                                                                  StringMismatch -> case stringExactMatch "32" lineNumber of {
-                                                                    StringMatched -> "33";
-                                                                  StringMismatch -> case stringExactMatch "33" lineNumber of {
-                                                                    StringMatched -> "34";
-                                                                    StringMismatch -> case stringExactMatch "34" lineNumber of {
-                                                                      StringMatched -> "35";
-                                                                      StringMismatch -> case stringExactMatch "35" lineNumber of {
-                                                                        StringMatched -> "36";
-                                                                        StringMismatch -> case stringExactMatch "36" lineNumber of {
-                                                                          StringMatched -> "37";
-                                                                          StringMismatch -> case stringExactMatch "37" lineNumber of {
-                                                                            StringMatched -> "38";
-                                                                            StringMismatch -> case stringExactMatch "38" lineNumber of {
-                                                                              StringMatched -> "39";
-                                                                              StringMismatch -> case stringExactMatch "39" lineNumber of {
-                                                                                StringMatched -> "40";
-                                                                                StringMismatch -> case stringExactMatch "40" lineNumber of {
-                                                                                  StringMatched -> "41";
-                                                                                  StringMismatch -> case stringExactMatch "41" lineNumber of {
-                                                                                    StringMatched -> "42";
-                                                                                    StringMismatch -> case stringExactMatch "42" lineNumber of {
-                                                                                      StringMatched -> "43";
-                                                                                      StringMismatch -> case stringExactMatch "43" lineNumber of {
-                                                                                        StringMatched -> "44";
-                                                                                        StringMismatch -> case stringExactMatch "44" lineNumber of {
-                                                                                          StringMatched -> "45";
-                                                                                          StringMismatch -> case stringExactMatch "45" lineNumber of {
-                                                                                            StringMatched -> "46";
-                                                                                            StringMismatch -> case stringExactMatch "46" lineNumber of {
-                                                                                              StringMatched -> "47";
-                                                                                              StringMismatch -> case stringExactMatch "47" lineNumber of {
-                                                                                                StringMatched -> "48";
-                                                                                                StringMismatch -> case stringExactMatch "48" lineNumber of {
-                                                                                                  StringMatched -> "49";
-                                                                                                  StringMismatch -> case stringExactMatch "49" lineNumber of {
-                                                                                                    StringMatched -> "50";
-                                                                                                    StringMismatch -> case stringExactMatch "50" lineNumber of {
-                                                                                                      StringMatched -> "51";
-                                                                                                      StringMismatch -> case stringExactMatch "51" lineNumber of {
-                                                                                                        StringMatched -> "52";
-                                                                                                        StringMismatch -> case stringExactMatch "52" lineNumber of {
-                                                                                                          StringMatched -> "53";
-                                                                                                          StringMismatch -> case stringExactMatch "53" lineNumber of {
-                                                                                                            StringMatched -> "54";
-                                                                                                            StringMismatch -> case stringExactMatch "54" lineNumber of {
-                                                                                                              StringMatched -> "55";
-                                                                                                              StringMismatch -> case stringExactMatch "55" lineNumber of {
-                                                                                                                StringMatched -> "56";
-                                                                                                                StringMismatch -> case stringExactMatch "56" lineNumber of {
-                                                                                                                  StringMatched -> "57";
-                                                                                                                  StringMismatch -> case stringExactMatch "57" lineNumber of {
-                                                                                                                    StringMatched -> "58";
-                                                                                                                    StringMismatch -> case stringExactMatch "58" lineNumber of {
-                                                                                                                      StringMatched -> "59";
-                                                                                                                      StringMismatch -> case stringExactMatch "59" lineNumber of {
-                                                                                                                        StringMatched -> "60";
-                                                                                                                        StringMismatch -> case stringExactMatch "60" lineNumber of {
-                                                                                                                          StringMatched -> "61";
-                                                                                                                          StringMismatch -> case stringExactMatch "61" lineNumber of {
-                                                                                                                            StringMatched -> "62";
-                                                                                                                            StringMismatch -> case stringExactMatch "62" lineNumber of {
-                                                                                                                              StringMatched -> "63";
-                                                                                                                              StringMismatch -> case stringExactMatch "63" lineNumber of {
-                                                                                                                                StringMatched -> "64";
-                                                                                                                            StringMismatch -> case stringExactMatch "64" lineNumber of {
-                                                                                                                              StringMatched -> "65";
-                                                                                                                              StringMismatch -> case stringExactMatch "65" lineNumber of {
-                                                                                                                                StringMatched -> "66";
-                                                                                                                                StringMismatch -> case stringExactMatch "66" lineNumber of {
-                                                                                                                                  StringMatched -> "67";
-                                                                                                                                  StringMismatch -> lineNumber
-                                                                                                                                }
-                                                                                                                              }
-                                                                                                                            }
-                                                                                                                          }
-                                                                                                                        }
-                                                                                                                          }
-                                                                                                                        }
-                                                                                                                      }
-                                                                                                                    }
-                                                                                                                  }
-                                                                                                                }
-                                                                                                              }
-                                                                                                            }
-                                                                                                          }
-                                                                                                        }
-                                                                                                      }
-                                                                                                    }
-                                                                                                  }
-                                                                                                }
-                                                                                              }
-                                                                                            }
-                                                                                          }
-                                                                                        }
-                                                                                      }
-                                                                                    }
-                                                                                  }
-                                                                                }
-                                                                              }
-                                                                            }
-                                                                          }
-                                                                        }
-                                                                      }
-                                                                    }
-                                                                  }
-                                                                  }
-                                                                }
-                                                              }
-                                                            }
-                                                          }
-                                                        }
-                                                      }
-                                                    }
-                                                  }
-                                                }
-                                              }
-                                            }
-                                          }
-                                        }
-                                      }
-                                    }
-                                  }
-                                }
-                              }
-                            }
-                          }
-                        }
+    λ(lineNumber : String) case stringCharAtOption lineNumber 1 of {
+      None -> nextOneDigitLineNumber lineNumber;
+      Some _ -> case stringCharAtOption lineNumber 2 of {
+        None -> nextTwoDigitLineNumber (stringTake lineNumber 1) (stringDrop lineNumber 1);
+        Some _ -> nextThreeDigitLineNumber (stringTake lineNumber 1) (stringDrop lineNumber 1)
+      }
+    };
+
+  def nextOneDigitLineNumber : String -> String =
+    λ(digit : String) case stringExactMatch "9" digit of {
+      StringMatched -> "10";
+      StringMismatch -> incrementDigit digit
+    };
+
+  def nextTwoDigitLineNumber : String -> String -> String =
+    λ(tens : String) λ(ones : String) case stringExactMatch "9" ones of {
+      StringMatched -> case stringExactMatch "9" tens of {
+        StringMatched -> "100";
+        StringMismatch -> stringAppend (incrementDigit tens) "0"
+      };
+      StringMismatch -> stringAppend tens (incrementDigit ones)
+    };
+
+  def nextThreeDigitLineNumber : String -> String -> String =
+    λ(hundreds : String) λ(rest : String)
+      nextThreeDigitLineNumberWithDigits hundreds (stringTake rest 1) (stringDrop rest 1);
+
+  def nextThreeDigitLineNumberWithDigits : String -> String -> String -> String =
+    λ(hundreds : String) λ(tens : String) λ(ones : String) case stringExactMatch "9" ones of {
+      StringMatched -> case stringExactMatch "9" tens of {
+        StringMatched -> stringAppend (incrementDigit hundreds) "00";
+        StringMismatch -> stringAppend hundreds (stringAppend (incrementDigit tens) "0")
+      };
+      StringMismatch -> stringAppend hundreds (stringAppend tens (incrementDigit ones))
+    };
+
+  def incrementDigit : String -> String =
+    λ(digit : String) case stringExactMatch "0" digit of {
+      StringMatched -> "1";
+      StringMismatch -> case stringExactMatch "1" digit of {
+        StringMatched -> "2";
+        StringMismatch -> case stringExactMatch "2" digit of {
+          StringMatched -> "3";
+          StringMismatch -> case stringExactMatch "3" digit of {
+            StringMatched -> "4";
+            StringMismatch -> case stringExactMatch "4" digit of {
+              StringMatched -> "5";
+              StringMismatch -> case stringExactMatch "5" digit of {
+                StringMatched -> "6";
+                StringMismatch -> case stringExactMatch "6" digit of {
+                  StringMatched -> "7";
+                  StringMismatch -> case stringExactMatch "7" digit of {
+                    StringMatched -> "8";
+                    StringMismatch -> case stringExactMatch "8" digit of {
+                      StringMatched -> "9";
+                      StringMismatch -> case stringExactMatch "9" digit of {
+                        StringMatched -> "0";
+                        StringMismatch -> digit
                       }
                     }
                   }
