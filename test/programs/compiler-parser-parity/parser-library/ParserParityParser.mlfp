@@ -3,7 +3,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
   import ParserParityAst exposing (ParsedModule(..), renderParsedModule);
   import ParserParityDiagnostic exposing (ParserDiagnostic(..));
   import ParserParityLexer exposing (LexerResult(..), nextLineNumber, tokenizeCompleteModule);
-  import ParserParityParserCombinator exposing (Parser, ParserEnd(..), ParserState(..), ParserStep(..), ParserValue(..), captureSpan, diagnosticLabel, expectIdentifierToken, expectToken, expectTokenPrefix, labelCaseBranchArrow, labelConstructorColon, labelConstructorForallDot, labelDefSemicolon, labelEquals, labelFunctionalDependencyArrow, labelImportAlias, labelImportSemicolon, labelInstanceMethodEquals, labelLetAnnotationType, labelLetIn, labelTypeFamilyEquationEquals, labelUnexpectedSource, parserBind, parserChoice, parserCurrentTokenStartOr, parserFail, parserFailExpectedCaseBranchArrowAtCurrent, parserFailExpectedConstructorForallDotAtCurrent, parserFailExpectedDefSemicolonAtCurrent, parserFailExpectedExpressionCloseParenAtCurrent, parserFailExpectedImportExposingSeparatorAtCurrent, parserFailExpectedImportSemicolonAtCurrent, parserPure, parserReturnAtEndOr, parserStateAtEnd, runParser);
+  import ParserParityParserCombinator exposing (Parser, ParserEnd(..), ParserExpectation(..), ParserState(..), ParserStep(..), ParserValue(..), captureSpan, diagnosticLabel, expectIdentifierToken, expectToken, expectTokenPrefix, labelExpected, parserBind, parserChoice, parserCurrentTokenStartOr, parserFail, parserFailExpected, parserFailExpectedAtCurrent, parserPure, parserReturnAtEndOr, parserStateAtEnd, runParser);
   import ParserParitySource exposing (basicBoolLiteralSpan, basicUnexpectedSpan, caseBranchArrowSpan, constructorForallDotSpan, dataZeroColonSpan, importBoolSemicolonSpan, letInSpan, lexerUnknownSpan, multiparamFundepArrowSpan, qualifiedImportAliasDiagnosticSpan, renderSpan, typedLetForallSpan, typeFamilyEquationEqualsSpan, typeclassInstanceMethodEqualsSpan, valueFirstDefSemicolonSpan);
   import ParserParityToken exposing (ParserInput(..), TokenKind(..), renderTokenPrefixEvidence, tokenEnd, tokenSpan, tokenStart, tokenText);
 
@@ -84,64 +84,67 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
     λ(kind : TokenKind) diagnosticLabel (captureSpan (expectToken kind basicUnexpectedSpan));
 
   def expectEqualsParser : ParserValue -> Parser ParserValue =
-    λ(_start : ParserValue) labelEquals (captureSpan (expectToken (TokenKind "=") basicBoolLiteralSpan));
+    λ(_start : ParserValue)
+      labelExpected ParserExpectEquals (captureSpan (expectToken (TokenKind "=") basicBoolLiteralSpan));
 
   def expectImportSemicolonParser : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
-      parserChoice (expectText ";") (parserFail (ExpectedImportSemicolon importBoolSemicolonSpan));
+      parserChoice (expectText ";") (parserFailExpected ParserExpectImportSemicolon importBoolSemicolonSpan);
 
   def expectImportAliasParser : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
-      labelImportAlias
-        (parserChoice (expectText "identifier:C") (parserFail (ExpectedImportAlias qualifiedImportAliasDiagnosticSpan)));
+      labelExpected ParserExpectImportAlias
+        (parserChoice
+          (expectText "identifier:C")
+          (parserFailExpected ParserExpectImportAlias qualifiedImportAliasDiagnosticSpan));
 
   def expectDefSemicolonParser : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
-      parserChoice (expectText ";") (parserFail (ExpectedDefSemicolon valueFirstDefSemicolonSpan));
+      parserChoice (expectText ";") (parserFailExpected ParserExpectDefSemicolon valueFirstDefSemicolonSpan);
 
   def expectLetInParser : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
-      parserChoice (expectText "in") (parserFail (ExpectedLetIn letInSpan));
+      parserChoice (expectText "in") (parserFailExpected ParserExpectLetIn letInSpan);
 
   def expectLetAnnotationTypeParser : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
-      parserChoice (expectText "forall") (parserFail (ExpectedLetAnnotationType typedLetForallSpan));
+      parserChoice (expectText "forall") (parserFailExpected ParserExpectLetAnnotationType typedLetForallSpan);
 
   def expectConstructorColonParser : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
-      parserChoice (expectText ":") (parserFail (ExpectedConstructorColon dataZeroColonSpan));
+      parserChoice (expectText ":") (parserFailExpected ParserExpectConstructorColon dataZeroColonSpan);
 
   def expectCaseBranchArrowParser : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
-      parserChoice (expectText "->") (parserFail (ExpectedCaseBranchArrow caseBranchArrowSpan));
+      parserChoice (expectText "->") (parserFailExpected ParserExpectCaseBranchArrow caseBranchArrowSpan);
 
   def expectCaseBranchArrowAtCurrentParser : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
-      parserChoice (expectText "->") parserFailExpectedCaseBranchArrowAtCurrent;
+      parserChoice (expectText "->") (parserFailExpectedAtCurrent ParserExpectCaseBranchArrow);
 
   def expectInstanceMethodEqualsParser : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
-      labelInstanceMethodEquals
-        (parserChoice (expectText "=") (parserFail (ExpectedInstanceMethodEquals typeclassInstanceMethodEqualsSpan)));
+      labelExpected ParserExpectInstanceMethodEquals
+        (parserChoice (expectText "=") (parserFailExpected ParserExpectInstanceMethodEquals typeclassInstanceMethodEqualsSpan));
 
   def expectFunctionalDependencyArrowParser : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
-      labelFunctionalDependencyArrow
-        (parserChoice (expectText "→") (parserFail (ExpectedFunctionalDependencyArrow multiparamFundepArrowSpan)));
+      labelExpected ParserExpectFunctionalDependencyArrow
+        (parserChoice (expectText "→") (parserFailExpected ParserExpectFunctionalDependencyArrow multiparamFundepArrowSpan));
 
   def expectTypeFamilyEquationEqualsParser : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
-      labelTypeFamilyEquationEquals
-        (parserChoice (expectText "=") (parserFail (ExpectedTypeFamilyEquationEquals typeFamilyEquationEqualsSpan)));
+      labelExpected ParserExpectTypeFamilyEquationEquals
+        (parserChoice (expectText "=") (parserFailExpected ParserExpectTypeFamilyEquationEquals typeFamilyEquationEqualsSpan));
 
   def expectConstructorForallDotParser : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
-      labelConstructorForallDot
-        (parserChoice (expectText ".") (parserFail (ExpectedConstructorForallDot constructorForallDotSpan)));
+      labelExpected ParserExpectConstructorForallDot
+        (parserChoice (expectText ".") (parserFailExpected ParserExpectConstructorForallDot constructorForallDotSpan));
 
   def expectForallDotParser : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
-      parserChoice (expectText ".") parserFailExpectedConstructorForallDotAtCurrent;
+      parserChoice (expectText ".") (parserFailExpectedAtCurrent ParserExpectConstructorForallDot);
 
   def expectText : String -> Parser ParserValue =
     λ(text : String) expectComplete (TokenKind text);
@@ -153,7 +156,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
     expectTokenPrefix "string-literal:" basicUnexpectedSpan;
 
   def expectImportSemicolonAtCurrent : Parser ParserValue =
-    parserChoice (expectText ";") parserFailExpectedImportSemicolonAtCurrent;
+    parserChoice (expectText ";") (parserFailExpectedAtCurrent ParserExpectImportSemicolon);
 
   def moduleKey : String -> Parser ParserValue =
     λ(key : String) parserPure (ValueModuleKey key);
@@ -677,7 +680,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
 
   def parseSourceDefinitionSemicolonAtCurrent : String -> String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(defStart : String) λ(nameToken : ParserValue) λ(typeValue : ParserValue) λ(exprValue : ParserValue)
-      parserBind (parserChoice (expectText ";") parserFailExpectedDefSemicolonAtCurrent)
+      parserBind (parserChoice (expectText ";") (parserFailExpectedAtCurrent ParserExpectDefSemicolon))
         (finishSourceDefinitionRows sourceFile defStart nameToken typeValue exprValue);
 
   def finishSourceDefinitionRows : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
@@ -2562,13 +2565,13 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
   def parseParenthesizedApplicationFunctionAnnotationClose : ParserValue -> ParserValue -> Parser ParserValue =
     λ(exprValue : ParserValue) λ(typeValue : ParserValue)
       parserBind
-        (parserChoice (expectText ")") parserFailExpectedExpressionCloseParenAtCurrent)
+        (parserChoice (expectText ")") (parserFailExpectedAtCurrent ParserExpectExpressionCloseParen))
         (finishParenthesizedAnnotatedExpression exprValue typeValue);
 
   def parseParenthesizedApplicationFunctionClose : ParserValue -> Parser ParserValue =
     λ(exprValue : ParserValue)
       parserBind
-        (parserChoice (expectText ")") parserFailExpectedExpressionCloseParenAtCurrent)
+        (parserChoice (expectText ")") (parserFailExpectedAtCurrent ParserExpectExpressionCloseParen))
         (finishParenthesizedApplicationFunction exprValue);
 
   def finishParenthesizedApplicationFunction : ParserValue -> ParserValue -> Parser ParserValue =
@@ -2721,7 +2724,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
   def parseParenthesizedExpressionAnnotationClose : ParserValue -> ParserValue -> Parser ParserValue =
     λ(exprValue : ParserValue) λ(typeValue : ParserValue)
       parserBind
-        (parserChoice (expectText ")") parserFailExpectedExpressionCloseParenAtCurrent)
+        (parserChoice (expectText ")") (parserFailExpectedAtCurrent ParserExpectExpressionCloseParen))
         (finishParenthesizedAnnotatedExpression exprValue typeValue);
 
   def finishParenthesizedAnnotatedExpression : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
@@ -2735,7 +2738,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
   def parseParenthesizedExpressionClose : ParserValue -> Parser ParserValue =
     λ(exprValue : ParserValue)
       parserBind
-        (parserChoice (expectText ")") parserFailExpectedExpressionCloseParenAtCurrent)
+        (parserChoice (expectText ")") (parserFailExpectedAtCurrent ParserExpectExpressionCloseParen))
         (finishParenthesizedExpression exprValue);
 
   def finishParenthesizedExpression : ParserValue -> ParserValue -> Parser ParserValue =
@@ -2949,7 +2952,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
   def parseParenthesizedSimpleApplicationArgumentClose : ParserValue -> Parser ParserValue =
     λ(exprValue : ParserValue)
       parserBind
-        (parserChoice (expectText ")") parserFailExpectedExpressionCloseParenAtCurrent)
+        (parserChoice (expectText ")") (parserFailExpectedAtCurrent ParserExpectExpressionCloseParen))
         (finishParenthesizedExpression exprValue);
 
   def parseIdentifierExpressionAtom : ParserValue -> Parser ParserValue =
@@ -3895,7 +3898,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
         (parserBind (expectText ",") (parseImportProjectionNextItem8 sourceFile moduleNameToken itemRows))
         (parserChoice
           (parserBind (expectText ")") (parseImportProjectionSemicolon itemRows))
-          parserFailExpectedImportExposingSeparatorAtCurrent);
+          (parserFailExpectedAtCurrent ParserExpectImportExposingSeparator));
 
   def parseImportProjectionNextItem8 : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(moduleNameToken : ParserValue) λ(rowsValue : ParserValue) λ(_comma : ParserValue)
@@ -3912,7 +3915,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
         (parserBind (expectText ",") (parseImportProjectionNextItem7 sourceFile moduleNameToken itemRows))
         (parserChoice
           (parserBind (expectText ")") (parseImportProjectionSemicolon itemRows))
-          parserFailExpectedImportExposingSeparatorAtCurrent);
+          (parserFailExpectedAtCurrent ParserExpectImportExposingSeparator));
 
   def parseImportProjectionNextItem7 : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(moduleNameToken : ParserValue) λ(rowsValue : ParserValue) λ(_comma : ParserValue)
@@ -3929,7 +3932,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
         (parserBind (expectText ",") (parseImportProjectionNextItem6 sourceFile moduleNameToken itemRows))
         (parserChoice
           (parserBind (expectText ")") (parseImportProjectionSemicolon itemRows))
-          parserFailExpectedImportExposingSeparatorAtCurrent);
+          (parserFailExpectedAtCurrent ParserExpectImportExposingSeparator));
 
   def parseImportProjectionNextItem6 : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(moduleNameToken : ParserValue) λ(rowsValue : ParserValue) λ(_comma : ParserValue)
@@ -3946,7 +3949,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
         (parserBind (expectText ",") (parseImportProjectionNextItem5 sourceFile moduleNameToken itemRows))
         (parserChoice
           (parserBind (expectText ")") (parseImportProjectionSemicolon itemRows))
-          parserFailExpectedImportExposingSeparatorAtCurrent);
+          (parserFailExpectedAtCurrent ParserExpectImportExposingSeparator));
 
   def parseImportProjectionNextItem5 : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(moduleNameToken : ParserValue) λ(rowsValue : ParserValue) λ(_comma : ParserValue)
@@ -3963,7 +3966,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
         (parserBind (expectText ",") (parseImportProjectionNextItem4 sourceFile moduleNameToken itemRows))
         (parserChoice
           (parserBind (expectText ")") (parseImportProjectionSemicolon itemRows))
-          parserFailExpectedImportExposingSeparatorAtCurrent);
+          (parserFailExpectedAtCurrent ParserExpectImportExposingSeparator));
 
   def parseImportProjectionNextItem4 : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(moduleNameToken : ParserValue) λ(rowsValue : ParserValue) λ(_comma : ParserValue)
@@ -3980,7 +3983,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
         (parserBind (expectText ",") (parseImportProjectionNextItem3 sourceFile moduleNameToken itemRows))
         (parserChoice
           (parserBind (expectText ")") (parseImportProjectionSemicolon itemRows))
-          parserFailExpectedImportExposingSeparatorAtCurrent);
+          (parserFailExpectedAtCurrent ParserExpectImportExposingSeparator));
 
   def parseImportProjectionNextItem3 : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(moduleNameToken : ParserValue) λ(rowsValue : ParserValue) λ(_comma : ParserValue)
@@ -4002,7 +4005,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
         (parserBind (expectText ",") (parseImportProjectionNextItem2 sourceFile moduleNameToken itemRows))
         (parserChoice
           (parserBind (expectText ")") (parseImportProjectionSemicolon itemRows))
-          parserFailExpectedImportExposingSeparatorAtCurrent);
+          (parserFailExpectedAtCurrent ParserExpectImportExposingSeparator));
 
   def parseImportProjectionNextItem2 : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(moduleNameToken : ParserValue) λ(rowsValue : ParserValue) λ(_comma : ParserValue)
@@ -4019,7 +4022,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
         (parserBind (expectText ",") (parseImportProjectionNextItem1 sourceFile moduleNameToken itemRows))
         (parserChoice
           (parserBind (expectText ")") (parseImportProjectionSemicolon itemRows))
-          parserFailExpectedImportExposingSeparatorAtCurrent);
+          (parserFailExpectedAtCurrent ParserExpectImportExposingSeparator));
 
   def parseImportProjectionNextItem1 : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(moduleNameToken : ParserValue) λ(rowsValue : ParserValue) λ(_comma : ParserValue)
@@ -4036,7 +4039,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
         (parserBind (expectText ",") (parseImportProjectionNextItem0 sourceFile itemRows))
         (parserChoice
           (parserBind (expectText ")") (parseImportProjectionSemicolon itemRows))
-          parserFailExpectedImportExposingSeparatorAtCurrent);
+          (parserFailExpectedAtCurrent ParserExpectImportExposingSeparator));
 
   def parseImportProjectionNextItem0 : String -> ParserValue -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(rowsValue : ParserValue) λ(_comma : ParserValue)

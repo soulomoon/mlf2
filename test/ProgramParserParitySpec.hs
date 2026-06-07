@@ -546,6 +546,20 @@ spec =
 
             traverse_ (`shouldSatisfy` (`isInfixOf` sharedCombinatorSource)) sharedParserRequiredCombinators
 
+        it "shared parser-owned .mlfp parser centralizes diagnostic expectations" $ do
+            sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
+            sharedCombinatorSource <- readFile (sharedParserLibraryRoot </> "ParserParityParserCombinator.mlfp")
+
+            let parserLibrarySource = sharedParserSource <> "\n" <> sharedCombinatorSource
+                removedMatches =
+                    filter
+                        (`isInfixOf` parserLibrarySource)
+                        sharedParserRemovedExpectationAliases
+
+            traverse_ (`shouldSatisfy` (`isInfixOf` sharedCombinatorSource)) sharedParserExpectationSubstratePhrases
+            traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserExpectationUsePhrases
+            removedMatches `shouldBe` []
+
         it "shared parser-owned .mlfp parser reaches success only after complete syntax and dynamic diagnostics" $ do
             sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
             sharedLexerSource <- readFile (sharedParserLibraryRoot </> "ParserParityLexer.mlfp")
@@ -1271,6 +1285,49 @@ sharedParserRequiredCombinators =
     , "parserChoice"
     , "captureSpan"
     , "diagnosticLabel"
+    ]
+
+sharedParserExpectationSubstratePhrases :: [String]
+sharedParserExpectationSubstratePhrases =
+    [ "data ParserExpectation"
+    , "def parserDiagnosticForExpectation : ParserExpectation -> String -> ParserDiagnostic"
+    , "def parserFailExpectedAtCurrent : ParserExpectation -> Parser ParserValue"
+    , "def labelExpected : ParserExpectation -> Parser ParserValue -> Parser ParserValue"
+    , "UnexpectedSourceText span -> ParserStepError (parserDiagnosticForExpectation expectation span)"
+    ]
+
+sharedParserExpectationUsePhrases :: [String]
+sharedParserExpectationUsePhrases =
+    [ "labelExpected ParserExpectEquals"
+    , "labelExpected ParserExpectImportAlias"
+    , "labelExpected ParserExpectFunctionalDependencyArrow"
+    , "parserFailExpected ParserExpectImportSemicolon"
+    , "parserFailExpectedAtCurrent ParserExpectDefSemicolon"
+    , "parserFailExpectedAtCurrent ParserExpectImportExposingSeparator"
+    , "parserFailExpectedAtCurrent ParserExpectExpressionCloseParen"
+    ]
+
+sharedParserRemovedExpectationAliases :: [String]
+sharedParserRemovedExpectationAliases =
+    [ "parserFailExpectedImportSemicolonAtCurrent"
+    , "parserFailExpectedDefSemicolonAtCurrent"
+    , "parserFailExpectedImportExposingSeparatorAtCurrent"
+    , "parserFailExpectedCaseBranchArrowAtCurrent"
+    , "parserFailExpectedConstructorForallDotAtCurrent"
+    , "parserFailExpectedExpressionCloseParenAtCurrent"
+    , "labelUnexpectedSource"
+    , "labelEquals"
+    , "labelImportSemicolon"
+    , "labelImportAlias"
+    , "labelDefSemicolon"
+    , "labelLetIn"
+    , "labelLetAnnotationType"
+    , "labelConstructorColon"
+    , "labelCaseBranchArrow"
+    , "labelInstanceMethodEquals"
+    , "labelFunctionalDependencyArrow"
+    , "labelTypeFamilyEquationEquals"
+    , "labelConstructorForallDot"
     ]
 
 sharedParserEarlySuccessPhrases :: [String]

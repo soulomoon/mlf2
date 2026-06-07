@@ -1,4 +1,4 @@
-module ParserParityParserCombinator export (ParserState(..), ParserValue(..), ParserStep(..), Parser(..), ParserEnd(..), runParser, parserPure, parserFail, parserFailExpectedImportSemicolonAtCurrent, parserFailExpectedDefSemicolonAtCurrent, parserFailExpectedImportExposingSeparatorAtCurrent, parserFailExpectedCaseBranchArrowAtCurrent, parserFailExpectedConstructorForallDotAtCurrent, parserFailExpectedExpressionCloseParenAtCurrent, parserBind, parserMap, parserChoice, parserReturnAtEndOr, parserCurrentTokenStartOr, captureSpan, diagnosticLabel, labelUnexpectedSource, labelEquals, labelImportSemicolon, labelImportAlias, labelDefSemicolon, labelLetIn, labelLetAnnotationType, labelConstructorColon, labelCaseBranchArrow, labelInstanceMethodEquals, labelFunctionalDependencyArrow, labelTypeFamilyEquationEquals, labelConstructorForallDot, expectToken, expectIdentifierToken, expectTokenPrefix, parserStateAtEnd) {
+module ParserParityParserCombinator export (ParserState(..), ParserValue(..), ParserStep(..), ParserExpectation(..), Parser(..), ParserEnd(..), runParser, parserPure, parserFail, parserFailExpected, parserFailExpectedAtCurrent, parserBind, parserMap, parserChoice, parserReturnAtEndOr, parserCurrentTokenStartOr, captureSpan, diagnosticLabel, labelExpected, expectToken, expectIdentifierToken, expectTokenPrefix, parserStateAtEnd) {
   import Prelude exposing (Option(..), stringIndexOf);
   import ParserParityDiagnostic exposing (ParserDiagnostic(..));
   import ParserParitySource exposing (ParserSourceInput(..), ParserSourceSymbol(..), basicUnexpectedSpan);
@@ -20,6 +20,22 @@ module ParserParityParserCombinator export (ParserState(..), ParserValue(..), Pa
   data ParserStep =
       ParserStepOk : ParserState -> ParserValue -> ParserStep
     | ParserStepError : ParserDiagnostic -> ParserStep;
+
+  data ParserExpectation =
+      ParserExpectEquals : ParserExpectation
+    | ParserExpectImportSemicolon : ParserExpectation
+    | ParserExpectImportAlias : ParserExpectation
+    | ParserExpectImportExposingSeparator : ParserExpectation
+    | ParserExpectDefSemicolon : ParserExpectation
+    | ParserExpectLetIn : ParserExpectation
+    | ParserExpectLetAnnotationType : ParserExpectation
+    | ParserExpectConstructorColon : ParserExpectation
+    | ParserExpectCaseBranchArrow : ParserExpectation
+    | ParserExpectInstanceMethodEquals : ParserExpectation
+    | ParserExpectFunctionalDependencyArrow : ParserExpectation
+    | ParserExpectTypeFamilyEquationEquals : ParserExpectation
+    | ParserExpectConstructorForallDot : ParserExpectation
+    | ParserExpectExpressionCloseParen : ParserExpectation;
 
   data Parser a =
       Parser : (ParserState -> ParserStep) -> Parser a;
@@ -50,35 +66,33 @@ module ParserParityParserCombinator export (ParserState(..), ParserValue(..), Pa
       }
     };
 
-  def parserFailExpectedImportSemicolonAtCurrent : Parser ParserValue =
-    (Parser
-      (λ(state : ParserState)
-        ParserStepError (ExpectedImportSemicolon (currentTokenSpanOr basicUnexpectedSpan state))) : Parser ParserValue);
+  def parserDiagnosticForExpectation : ParserExpectation -> String -> ParserDiagnostic =
+    λ(expectation : ParserExpectation) λ(span : String) case expectation of {
+      ParserExpectEquals -> ExpectedEquals span;
+      ParserExpectImportSemicolon -> ExpectedImportSemicolon span;
+      ParserExpectImportAlias -> ExpectedImportAlias span;
+      ParserExpectImportExposingSeparator -> ExpectedImportExposingSeparator span;
+      ParserExpectDefSemicolon -> ExpectedDefSemicolon span;
+      ParserExpectLetIn -> ExpectedLetIn span;
+      ParserExpectLetAnnotationType -> ExpectedLetAnnotationType span;
+      ParserExpectConstructorColon -> ExpectedConstructorColon span;
+      ParserExpectCaseBranchArrow -> ExpectedCaseBranchArrow span;
+      ParserExpectInstanceMethodEquals -> ExpectedInstanceMethodEquals span;
+      ParserExpectFunctionalDependencyArrow -> ExpectedFunctionalDependencyArrow span;
+      ParserExpectTypeFamilyEquationEquals -> ExpectedTypeFamilyEquationEquals span;
+      ParserExpectConstructorForallDot -> ExpectedConstructorForallDot span;
+      ParserExpectExpressionCloseParen -> ExpectedExpressionCloseParen span
+    };
 
-  def parserFailExpectedDefSemicolonAtCurrent : Parser ParserValue =
-    (Parser
-      (λ(state : ParserState)
-        ParserStepError (ExpectedDefSemicolon (currentTokenSpanOr basicUnexpectedSpan state))) : Parser ParserValue);
+  def parserFailExpected : ParserExpectation -> String -> Parser ParserValue =
+    λ(expectation : ParserExpectation) λ(span : String)
+      parserFail (parserDiagnosticForExpectation expectation span);
 
-  def parserFailExpectedImportExposingSeparatorAtCurrent : Parser ParserValue =
-    (Parser
-      (λ(state : ParserState)
-        ParserStepError (ExpectedImportExposingSeparator (currentTokenSpanOr basicUnexpectedSpan state))) : Parser ParserValue);
-
-  def parserFailExpectedCaseBranchArrowAtCurrent : Parser ParserValue =
-    (Parser
-      (λ(state : ParserState)
-        ParserStepError (ExpectedCaseBranchArrow (currentTokenSpanOr basicUnexpectedSpan state))) : Parser ParserValue);
-
-  def parserFailExpectedConstructorForallDotAtCurrent : Parser ParserValue =
-    (Parser
-      (λ(state : ParserState)
-        ParserStepError (ExpectedConstructorForallDot (currentTokenSpanOr basicUnexpectedSpan state))) : Parser ParserValue);
-
-  def parserFailExpectedExpressionCloseParenAtCurrent : Parser ParserValue =
-    (Parser
-      (λ(state : ParserState)
-        ParserStepError (ExpectedExpressionCloseParen (currentTokenSpanOr basicUnexpectedSpan state))) : Parser ParserValue);
+  def parserFailExpectedAtCurrent : ParserExpectation -> Parser ParserValue =
+    λ(expectation : ParserExpectation)
+      (Parser
+        (λ(state : ParserState)
+          ParserStepError (parserDiagnosticForExpectation expectation (currentTokenSpanOr basicUnexpectedSpan state))) : Parser ParserValue);
 
   def parserBind : Parser ParserValue -> (ParserValue -> Parser ParserValue) -> Parser ParserValue =
     λ(parser : Parser ParserValue) λ(next : ParserValue -> Parser ParserValue)
@@ -142,313 +156,13 @@ module ParserParityParserCombinator export (ParserState(..), ParserValue(..), Pa
   def diagnosticLabel : Parser ParserValue -> Parser ParserValue =
     λ(parser : Parser ParserValue) parserMap (λ(value : ParserValue) value) parser;
 
-  def labelUnexpectedSource : String -> Parser ParserValue -> Parser ParserValue =
-    λ(span : String) λ(parser : Parser ParserValue)
+  def labelExpected : ParserExpectation -> Parser ParserValue -> Parser ParserValue =
+    λ(expectation : ParserExpectation) λ(parser : Parser ParserValue)
       (Parser
         (λ(state : ParserState) case runParser parser state of {
           ParserStepOk nextState value -> ParserStepOk nextState value;
           ParserStepError diagnostic -> case diagnostic of {
-            UnexpectedSourceText _ -> ParserStepError (UnexpectedSourceText span);
-            ExpectedCompleteModule expectedSpan -> ParserStepError (ExpectedCompleteModule expectedSpan);
-            ExpectedEquals expectedSpan -> ParserStepError (ExpectedEquals expectedSpan);
-            ExpectedImportSemicolon expectedSpan -> ParserStepError (ExpectedImportSemicolon expectedSpan);
-            ExpectedImportAlias expectedSpan -> ParserStepError (ExpectedImportAlias expectedSpan);
-            ExpectedImportExposingSeparator expectedSpan -> ParserStepError (ExpectedImportExposingSeparator expectedSpan);
-            ExpectedDefSemicolon expectedSpan -> ParserStepError (ExpectedDefSemicolon expectedSpan);
-            ExpectedLetIn expectedSpan -> ParserStepError (ExpectedLetIn expectedSpan);
-            ExpectedLetAnnotationType expectedSpan -> ParserStepError (ExpectedLetAnnotationType expectedSpan);
-            ExpectedConstructorColon expectedSpan -> ParserStepError (ExpectedConstructorColon expectedSpan);
-            ExpectedCaseBranchArrow expectedSpan -> ParserStepError (ExpectedCaseBranchArrow expectedSpan);
-            ExpectedInstanceMethodEquals expectedSpan -> ParserStepError (ExpectedInstanceMethodEquals expectedSpan);
-            ExpectedFunctionalDependencyArrow expectedSpan -> ParserStepError (ExpectedFunctionalDependencyArrow expectedSpan);
-            ExpectedTypeFamilyEquationEquals expectedSpan -> ParserStepError (ExpectedTypeFamilyEquationEquals expectedSpan);
-            ExpectedConstructorForallDot expectedSpan -> ParserStepError (ExpectedConstructorForallDot expectedSpan);
-            ExpectedExpressionCloseParen expectedSpan -> ParserStepError (ExpectedExpressionCloseParen expectedSpan)
-          }
-        }) : Parser ParserValue);
-
-  def labelEquals : Parser ParserValue -> Parser ParserValue =
-    λ(parser : Parser ParserValue)
-      (Parser
-        (λ(state : ParserState) case runParser parser state of {
-          ParserStepOk nextState value -> ParserStepOk nextState value;
-          ParserStepError diagnostic -> case diagnostic of {
-            UnexpectedSourceText span -> ParserStepError (ExpectedEquals span);
-            ExpectedCompleteModule span -> ParserStepError (ExpectedCompleteModule span);
-            ExpectedEquals span -> ParserStepError (ExpectedEquals span);
-            ExpectedImportSemicolon span -> ParserStepError (ExpectedImportSemicolon span);
-            ExpectedImportAlias span -> ParserStepError (ExpectedImportAlias span);
-            ExpectedImportExposingSeparator span -> ParserStepError (ExpectedImportExposingSeparator span);
-            ExpectedDefSemicolon span -> ParserStepError (ExpectedDefSemicolon span);
-            ExpectedLetIn span -> ParserStepError (ExpectedLetIn span);
-            ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
-            ExpectedConstructorColon span -> ParserStepError (ExpectedConstructorColon span);
-            ExpectedCaseBranchArrow span -> ParserStepError (ExpectedCaseBranchArrow span);
-            ExpectedInstanceMethodEquals span -> ParserStepError (ExpectedInstanceMethodEquals span);
-            ExpectedFunctionalDependencyArrow span -> ParserStepError (ExpectedFunctionalDependencyArrow span);
-            ExpectedTypeFamilyEquationEquals span -> ParserStepError (ExpectedTypeFamilyEquationEquals span);
-            ExpectedConstructorForallDot span -> ParserStepError (ExpectedConstructorForallDot span);
-            ExpectedExpressionCloseParen span -> ParserStepError (ExpectedExpressionCloseParen span)
-          }
-        }) : Parser ParserValue);
-
-  def labelImportSemicolon : Parser ParserValue -> Parser ParserValue =
-    λ(parser : Parser ParserValue)
-      (Parser
-        (λ(state : ParserState) case runParser parser state of {
-          ParserStepOk nextState value -> ParserStepOk nextState value;
-          ParserStepError diagnostic -> case diagnostic of {
-            UnexpectedSourceText span -> ParserStepError (ExpectedImportSemicolon span);
-            ExpectedCompleteModule span -> ParserStepError (ExpectedCompleteModule span);
-            ExpectedEquals span -> ParserStepError (ExpectedEquals span);
-            ExpectedImportSemicolon span -> ParserStepError (ExpectedImportSemicolon span);
-            ExpectedImportAlias span -> ParserStepError (ExpectedImportAlias span);
-            ExpectedImportExposingSeparator span -> ParserStepError (ExpectedImportExposingSeparator span);
-            ExpectedDefSemicolon span -> ParserStepError (ExpectedDefSemicolon span);
-            ExpectedLetIn span -> ParserStepError (ExpectedLetIn span);
-            ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
-            ExpectedConstructorColon span -> ParserStepError (ExpectedConstructorColon span);
-            ExpectedCaseBranchArrow span -> ParserStepError (ExpectedCaseBranchArrow span);
-            ExpectedInstanceMethodEquals span -> ParserStepError (ExpectedInstanceMethodEquals span);
-            ExpectedFunctionalDependencyArrow span -> ParserStepError (ExpectedFunctionalDependencyArrow span);
-            ExpectedTypeFamilyEquationEquals span -> ParserStepError (ExpectedTypeFamilyEquationEquals span);
-            ExpectedConstructorForallDot span -> ParserStepError (ExpectedConstructorForallDot span);
-            ExpectedExpressionCloseParen span -> ParserStepError (ExpectedExpressionCloseParen span)
-          }
-        }) : Parser ParserValue);
-
-  def labelImportAlias : Parser ParserValue -> Parser ParserValue =
-    λ(parser : Parser ParserValue)
-      (Parser
-        (λ(state : ParserState) case runParser parser state of {
-          ParserStepOk nextState value -> ParserStepOk nextState value;
-          ParserStepError diagnostic -> case diagnostic of {
-            UnexpectedSourceText span -> ParserStepError (ExpectedImportAlias span);
-            ExpectedCompleteModule span -> ParserStepError (ExpectedCompleteModule span);
-            ExpectedEquals span -> ParserStepError (ExpectedEquals span);
-            ExpectedImportSemicolon span -> ParserStepError (ExpectedImportSemicolon span);
-            ExpectedImportAlias span -> ParserStepError (ExpectedImportAlias span);
-            ExpectedImportExposingSeparator span -> ParserStepError (ExpectedImportExposingSeparator span);
-            ExpectedDefSemicolon span -> ParserStepError (ExpectedDefSemicolon span);
-            ExpectedLetIn span -> ParserStepError (ExpectedLetIn span);
-            ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
-            ExpectedConstructorColon span -> ParserStepError (ExpectedConstructorColon span);
-            ExpectedCaseBranchArrow span -> ParserStepError (ExpectedCaseBranchArrow span);
-            ExpectedInstanceMethodEquals span -> ParserStepError (ExpectedInstanceMethodEquals span);
-            ExpectedFunctionalDependencyArrow span -> ParserStepError (ExpectedFunctionalDependencyArrow span);
-            ExpectedTypeFamilyEquationEquals span -> ParserStepError (ExpectedTypeFamilyEquationEquals span);
-            ExpectedConstructorForallDot span -> ParserStepError (ExpectedConstructorForallDot span);
-            ExpectedExpressionCloseParen span -> ParserStepError (ExpectedExpressionCloseParen span)
-          }
-        }) : Parser ParserValue);
-
-  def labelDefSemicolon : Parser ParserValue -> Parser ParserValue =
-    λ(parser : Parser ParserValue)
-      (Parser
-        (λ(state : ParserState) case runParser parser state of {
-          ParserStepOk nextState value -> ParserStepOk nextState value;
-          ParserStepError diagnostic -> case diagnostic of {
-            UnexpectedSourceText span -> ParserStepError (ExpectedDefSemicolon span);
-            ExpectedCompleteModule span -> ParserStepError (ExpectedCompleteModule span);
-            ExpectedEquals span -> ParserStepError (ExpectedEquals span);
-            ExpectedImportSemicolon span -> ParserStepError (ExpectedImportSemicolon span);
-            ExpectedImportAlias span -> ParserStepError (ExpectedImportAlias span);
-            ExpectedImportExposingSeparator span -> ParserStepError (ExpectedImportExposingSeparator span);
-            ExpectedDefSemicolon span -> ParserStepError (ExpectedDefSemicolon span);
-            ExpectedLetIn span -> ParserStepError (ExpectedLetIn span);
-            ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
-            ExpectedConstructorColon span -> ParserStepError (ExpectedConstructorColon span);
-            ExpectedCaseBranchArrow span -> ParserStepError (ExpectedCaseBranchArrow span);
-            ExpectedInstanceMethodEquals span -> ParserStepError (ExpectedInstanceMethodEquals span);
-            ExpectedFunctionalDependencyArrow span -> ParserStepError (ExpectedFunctionalDependencyArrow span);
-            ExpectedTypeFamilyEquationEquals span -> ParserStepError (ExpectedTypeFamilyEquationEquals span);
-            ExpectedConstructorForallDot span -> ParserStepError (ExpectedConstructorForallDot span);
-            ExpectedExpressionCloseParen span -> ParserStepError (ExpectedExpressionCloseParen span)
-          }
-        }) : Parser ParserValue);
-
-  def labelLetIn : Parser ParserValue -> Parser ParserValue =
-    λ(parser : Parser ParserValue)
-      (Parser
-        (λ(state : ParserState) case runParser parser state of {
-          ParserStepOk nextState value -> ParserStepOk nextState value;
-          ParserStepError diagnostic -> case diagnostic of {
-            UnexpectedSourceText span -> ParserStepError (ExpectedLetIn span);
-            ExpectedCompleteModule span -> ParserStepError (ExpectedCompleteModule span);
-            ExpectedEquals span -> ParserStepError (ExpectedEquals span);
-            ExpectedImportSemicolon span -> ParserStepError (ExpectedImportSemicolon span);
-            ExpectedImportAlias span -> ParserStepError (ExpectedImportAlias span);
-            ExpectedImportExposingSeparator span -> ParserStepError (ExpectedImportExposingSeparator span);
-            ExpectedDefSemicolon span -> ParserStepError (ExpectedDefSemicolon span);
-            ExpectedLetIn span -> ParserStepError (ExpectedLetIn span);
-            ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
-            ExpectedConstructorColon span -> ParserStepError (ExpectedConstructorColon span);
-            ExpectedCaseBranchArrow span -> ParserStepError (ExpectedCaseBranchArrow span);
-            ExpectedInstanceMethodEquals span -> ParserStepError (ExpectedInstanceMethodEquals span);
-            ExpectedFunctionalDependencyArrow span -> ParserStepError (ExpectedFunctionalDependencyArrow span);
-            ExpectedTypeFamilyEquationEquals span -> ParserStepError (ExpectedTypeFamilyEquationEquals span);
-            ExpectedConstructorForallDot span -> ParserStepError (ExpectedConstructorForallDot span);
-            ExpectedExpressionCloseParen span -> ParserStepError (ExpectedExpressionCloseParen span)
-          }
-        }) : Parser ParserValue);
-
-  def labelLetAnnotationType : Parser ParserValue -> Parser ParserValue =
-    λ(parser : Parser ParserValue)
-      (Parser
-        (λ(state : ParserState) case runParser parser state of {
-          ParserStepOk nextState value -> ParserStepOk nextState value;
-          ParserStepError diagnostic -> case diagnostic of {
-            UnexpectedSourceText span -> ParserStepError (ExpectedLetAnnotationType span);
-            ExpectedCompleteModule span -> ParserStepError (ExpectedCompleteModule span);
-            ExpectedEquals span -> ParserStepError (ExpectedEquals span);
-            ExpectedImportSemicolon span -> ParserStepError (ExpectedImportSemicolon span);
-            ExpectedImportAlias span -> ParserStepError (ExpectedImportAlias span);
-            ExpectedImportExposingSeparator span -> ParserStepError (ExpectedImportExposingSeparator span);
-            ExpectedDefSemicolon span -> ParserStepError (ExpectedDefSemicolon span);
-            ExpectedLetIn span -> ParserStepError (ExpectedLetIn span);
-            ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
-            ExpectedConstructorColon span -> ParserStepError (ExpectedConstructorColon span);
-            ExpectedCaseBranchArrow span -> ParserStepError (ExpectedCaseBranchArrow span);
-            ExpectedInstanceMethodEquals span -> ParserStepError (ExpectedInstanceMethodEquals span);
-            ExpectedFunctionalDependencyArrow span -> ParserStepError (ExpectedFunctionalDependencyArrow span);
-            ExpectedTypeFamilyEquationEquals span -> ParserStepError (ExpectedTypeFamilyEquationEquals span);
-            ExpectedConstructorForallDot span -> ParserStepError (ExpectedConstructorForallDot span);
-            ExpectedExpressionCloseParen span -> ParserStepError (ExpectedExpressionCloseParen span)
-          }
-        }) : Parser ParserValue);
-
-  def labelConstructorColon : Parser ParserValue -> Parser ParserValue =
-    λ(parser : Parser ParserValue)
-      (Parser
-        (λ(state : ParserState) case runParser parser state of {
-          ParserStepOk nextState value -> ParserStepOk nextState value;
-          ParserStepError diagnostic -> case diagnostic of {
-            UnexpectedSourceText span -> ParserStepError (ExpectedConstructorColon span);
-            ExpectedCompleteModule span -> ParserStepError (ExpectedCompleteModule span);
-            ExpectedEquals span -> ParserStepError (ExpectedEquals span);
-            ExpectedImportSemicolon span -> ParserStepError (ExpectedImportSemicolon span);
-            ExpectedImportAlias span -> ParserStepError (ExpectedImportAlias span);
-            ExpectedImportExposingSeparator span -> ParserStepError (ExpectedImportExposingSeparator span);
-            ExpectedDefSemicolon span -> ParserStepError (ExpectedDefSemicolon span);
-            ExpectedLetIn span -> ParserStepError (ExpectedLetIn span);
-            ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
-            ExpectedConstructorColon span -> ParserStepError (ExpectedConstructorColon span);
-            ExpectedCaseBranchArrow span -> ParserStepError (ExpectedCaseBranchArrow span);
-            ExpectedInstanceMethodEquals span -> ParserStepError (ExpectedInstanceMethodEquals span);
-            ExpectedFunctionalDependencyArrow span -> ParserStepError (ExpectedFunctionalDependencyArrow span);
-            ExpectedTypeFamilyEquationEquals span -> ParserStepError (ExpectedTypeFamilyEquationEquals span);
-            ExpectedConstructorForallDot span -> ParserStepError (ExpectedConstructorForallDot span);
-            ExpectedExpressionCloseParen span -> ParserStepError (ExpectedExpressionCloseParen span)
-          }
-        }) : Parser ParserValue);
-
-  def labelCaseBranchArrow : Parser ParserValue -> Parser ParserValue =
-    λ(parser : Parser ParserValue)
-      (Parser
-        (λ(state : ParserState) case runParser parser state of {
-          ParserStepOk nextState value -> ParserStepOk nextState value;
-          ParserStepError diagnostic -> case diagnostic of {
-            UnexpectedSourceText span -> ParserStepError (ExpectedCaseBranchArrow span);
-            ExpectedCompleteModule span -> ParserStepError (ExpectedCompleteModule span);
-            ExpectedEquals span -> ParserStepError (ExpectedEquals span);
-            ExpectedImportSemicolon span -> ParserStepError (ExpectedImportSemicolon span);
-            ExpectedImportAlias span -> ParserStepError (ExpectedImportAlias span);
-            ExpectedImportExposingSeparator span -> ParserStepError (ExpectedImportExposingSeparator span);
-            ExpectedDefSemicolon span -> ParserStepError (ExpectedDefSemicolon span);
-            ExpectedLetIn span -> ParserStepError (ExpectedLetIn span);
-            ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
-            ExpectedConstructorColon span -> ParserStepError (ExpectedConstructorColon span);
-            ExpectedCaseBranchArrow span -> ParserStepError (ExpectedCaseBranchArrow span);
-            ExpectedInstanceMethodEquals span -> ParserStepError (ExpectedInstanceMethodEquals span);
-            ExpectedFunctionalDependencyArrow span -> ParserStepError (ExpectedFunctionalDependencyArrow span);
-            ExpectedTypeFamilyEquationEquals span -> ParserStepError (ExpectedTypeFamilyEquationEquals span);
-            ExpectedConstructorForallDot span -> ParserStepError (ExpectedConstructorForallDot span);
-            ExpectedExpressionCloseParen span -> ParserStepError (ExpectedExpressionCloseParen span)
-          }
-        }) : Parser ParserValue);
-
-  def labelInstanceMethodEquals : Parser ParserValue -> Parser ParserValue =
-    λ(parser : Parser ParserValue)
-      (Parser
-        (λ(state : ParserState) case runParser parser state of {
-          ParserStepOk nextState value -> ParserStepOk nextState value;
-          ParserStepError diagnostic -> case diagnostic of {
-            UnexpectedSourceText span -> ParserStepError (ExpectedInstanceMethodEquals span);
-            ExpectedCompleteModule span -> ParserStepError (ExpectedCompleteModule span);
-            ExpectedEquals span -> ParserStepError (ExpectedEquals span);
-            ExpectedImportSemicolon span -> ParserStepError (ExpectedImportSemicolon span);
-            ExpectedImportAlias span -> ParserStepError (ExpectedImportAlias span);
-            ExpectedImportExposingSeparator span -> ParserStepError (ExpectedImportExposingSeparator span);
-            ExpectedDefSemicolon span -> ParserStepError (ExpectedDefSemicolon span);
-            ExpectedLetIn span -> ParserStepError (ExpectedLetIn span);
-            ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
-            ExpectedConstructorColon span -> ParserStepError (ExpectedConstructorColon span);
-            ExpectedCaseBranchArrow span -> ParserStepError (ExpectedCaseBranchArrow span);
-            ExpectedInstanceMethodEquals span -> ParserStepError (ExpectedInstanceMethodEquals span);
-            ExpectedFunctionalDependencyArrow span -> ParserStepError (ExpectedFunctionalDependencyArrow span);
-            ExpectedTypeFamilyEquationEquals span -> ParserStepError (ExpectedTypeFamilyEquationEquals span);
-            ExpectedConstructorForallDot span -> ParserStepError (ExpectedConstructorForallDot span);
-            ExpectedExpressionCloseParen span -> ParserStepError (ExpectedExpressionCloseParen span)
-          }
-        }) : Parser ParserValue);
-
-  def labelFunctionalDependencyArrow : Parser ParserValue -> Parser ParserValue =
-    λ(parser : Parser ParserValue)
-      (Parser
-        (λ(state : ParserState) case runParser parser state of {
-          ParserStepOk nextState value -> ParserStepOk nextState value;
-          ParserStepError diagnostic -> case diagnostic of {
-            UnexpectedSourceText span -> ParserStepError (ExpectedFunctionalDependencyArrow span);
-            ExpectedCompleteModule span -> ParserStepError (ExpectedCompleteModule span);
-            ExpectedEquals span -> ParserStepError (ExpectedEquals span);
-            ExpectedImportSemicolon span -> ParserStepError (ExpectedImportSemicolon span);
-            ExpectedImportAlias span -> ParserStepError (ExpectedImportAlias span);
-            ExpectedImportExposingSeparator span -> ParserStepError (ExpectedImportExposingSeparator span);
-            ExpectedDefSemicolon span -> ParserStepError (ExpectedDefSemicolon span);
-            ExpectedLetIn span -> ParserStepError (ExpectedLetIn span);
-            ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
-            ExpectedConstructorColon span -> ParserStepError (ExpectedConstructorColon span);
-            ExpectedCaseBranchArrow span -> ParserStepError (ExpectedCaseBranchArrow span);
-            ExpectedInstanceMethodEquals span -> ParserStepError (ExpectedInstanceMethodEquals span);
-            ExpectedFunctionalDependencyArrow span -> ParserStepError (ExpectedFunctionalDependencyArrow span);
-            ExpectedTypeFamilyEquationEquals span -> ParserStepError (ExpectedTypeFamilyEquationEquals span);
-            ExpectedConstructorForallDot span -> ParserStepError (ExpectedConstructorForallDot span);
-            ExpectedExpressionCloseParen span -> ParserStepError (ExpectedExpressionCloseParen span)
-          }
-        }) : Parser ParserValue);
-
-  def labelTypeFamilyEquationEquals : Parser ParserValue -> Parser ParserValue =
-    λ(parser : Parser ParserValue)
-      (Parser
-        (λ(state : ParserState) case runParser parser state of {
-          ParserStepOk nextState value -> ParserStepOk nextState value;
-          ParserStepError diagnostic -> case diagnostic of {
-            UnexpectedSourceText span -> ParserStepError (ExpectedTypeFamilyEquationEquals span);
-            ExpectedCompleteModule span -> ParserStepError (ExpectedCompleteModule span);
-            ExpectedEquals span -> ParserStepError (ExpectedEquals span);
-            ExpectedImportSemicolon span -> ParserStepError (ExpectedImportSemicolon span);
-            ExpectedImportAlias span -> ParserStepError (ExpectedImportAlias span);
-            ExpectedImportExposingSeparator span -> ParserStepError (ExpectedImportExposingSeparator span);
-            ExpectedDefSemicolon span -> ParserStepError (ExpectedDefSemicolon span);
-            ExpectedLetIn span -> ParserStepError (ExpectedLetIn span);
-            ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
-            ExpectedConstructorColon span -> ParserStepError (ExpectedConstructorColon span);
-            ExpectedCaseBranchArrow span -> ParserStepError (ExpectedCaseBranchArrow span);
-            ExpectedInstanceMethodEquals span -> ParserStepError (ExpectedInstanceMethodEquals span);
-            ExpectedFunctionalDependencyArrow span -> ParserStepError (ExpectedFunctionalDependencyArrow span);
-            ExpectedTypeFamilyEquationEquals span -> ParserStepError (ExpectedTypeFamilyEquationEquals span);
-            ExpectedConstructorForallDot span -> ParserStepError (ExpectedConstructorForallDot span);
-            ExpectedExpressionCloseParen span -> ParserStepError (ExpectedExpressionCloseParen span)
-          }
-        }) : Parser ParserValue);
-
-  def labelConstructorForallDot : Parser ParserValue -> Parser ParserValue =
-    λ(parser : Parser ParserValue)
-      (Parser
-        (λ(state : ParserState) case runParser parser state of {
-          ParserStepOk nextState value -> ParserStepOk nextState value;
-          ParserStepError diagnostic -> case diagnostic of {
-            UnexpectedSourceText span -> ParserStepError (ExpectedConstructorForallDot span);
+            UnexpectedSourceText span -> ParserStepError (parserDiagnosticForExpectation expectation span);
             ExpectedCompleteModule span -> ParserStepError (ExpectedCompleteModule span);
             ExpectedEquals span -> ParserStepError (ExpectedEquals span);
             ExpectedImportSemicolon span -> ParserStepError (ExpectedImportSemicolon span);
