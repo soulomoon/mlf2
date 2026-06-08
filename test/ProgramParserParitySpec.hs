@@ -574,6 +574,20 @@ spec =
             traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserBoundedProjectionRowsUsePhrases
             removedMatches `shouldBe` []
 
+        it "shared parser-owned .mlfp parser shares bounded case branch rows" $ do
+            sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
+            sharedCombinatorSource <- readFile (sharedParserLibraryRoot </> "ParserParityParserCombinator.mlfp")
+
+            let parserLibrarySource = sharedParserSource <> "\n" <> sharedCombinatorSource
+                removedMatches =
+                    filter
+                        (`isInfixOf` parserLibrarySource)
+                        sharedParserRemovedCaseBranchAliases
+
+            traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserBoundedCaseBranchRowsSubstratePhrases
+            traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserBoundedCaseBranchRowsUsePhrases
+            removedMatches `shouldBe` []
+
         it "shared parser-owned .mlfp parser reaches success only after complete syntax and dynamic diagnostics" $ do
             sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
             sharedLexerSource <- readFile (sharedParserLibraryRoot </> "ParserParityLexer.mlfp")
@@ -1376,6 +1390,53 @@ sharedParserRemovedProjectionListAliases =
           , "appendImportProjectionRowsAndClose"
           , "appendFinalImportProjectionRows"
           , "parseFinalImportProjectionClose"
+          ]
+        ]
+
+sharedParserBoundedCaseBranchRowsSubstratePhrases :: [String]
+sharedParserBoundedCaseBranchRowsSubstratePhrases =
+    [ "def parseBoundedCaseBranchRows : (ParserValue -> Parser ParserValue) -> ParserValue -> ParserValue -> Parser ParserValue"
+    , "λ(branchParser : ParserValue -> Parser ParserValue)"
+    , "parserBind (branchParser ValueUnit)"
+    , "def parseBoundedCaseBranchRowsMoreOrClose8"
+    , "def parseBoundedCaseBranchRowsMoreOrClose1"
+    , "def appendBoundedCaseBranchRowsAndClose"
+    ]
+
+sharedParserBoundedCaseBranchRowsUsePhrases :: [String]
+sharedParserBoundedCaseBranchRowsUsePhrases =
+    [ "parseBoundedCaseBranchRows parseSourceCaseBranch scrutineeValue ValueUnit"
+    , "parseBoundedCaseBranchRows parseNestedCaseBranchInnerBranch scrutineeValue ValueUnit"
+    , "parseBoundedCaseBranchRows parseNestedCaseBranchInnerBranch4 scrutineeValue ValueUnit"
+    , "parseBoundedCaseBranchRows parseNestedCaseBranchInnerBranch3 scrutineeValue ValueUnit"
+    , "parseBoundedCaseBranchRows parseNestedCaseBranchInnerBranch2 scrutineeValue ValueUnit"
+    , "parseBoundedCaseBranchRows parseNestedCaseBranchInnerBranch1 scrutineeValue ValueUnit"
+    , "parserBind (appendSourceCaseBranchText branchRows nextBranch)"
+    , "parseSourceCaseClose scrutineeValue"
+    ]
+
+sharedParserRemovedCaseBranchAliases :: [String]
+sharedParserRemovedCaseBranchAliases =
+    concat
+        [ [ "parseSourceCaseMoreOrClose" <> show n | n <- [(1 :: Int) .. 8] ]
+        , [ "parseSourceCaseNextBranch" <> show n | n <- [(0 :: Int) .. 7] ]
+        , [ "appendSourceCaseBranchAndContinue" <> show n | n <- [(1 :: Int) .. 7] ]
+        , [ "appendSourceCaseBranchAndClose" ]
+        , [ "parseNestedCaseBranchMoreOrClose" <> show n | n <- [(1 :: Int) .. 8] ]
+        , [ "parseNestedCaseBranchNextBranch" <> show n | n <- [(0 :: Int) .. 7] ]
+        , [ "appendNestedCaseBranchAndContinue" <> show n | n <- [(1 :: Int) .. 7] ]
+        , [ "appendNestedCaseBranchAndClose" ]
+        , [ "parseNestedCaseBranchMoreOrClose" <> show n <> "Depth" <> show depth
+          | depth <- [(1 :: Int) .. 4]
+          , n <- [(1 :: Int) .. 8]
+          ]
+        , [ "parseNestedCaseBranchNextBranch" <> show n <> "Depth" <> show depth
+          | depth <- [(1 :: Int) .. 4]
+          , n <- [(0 :: Int) .. 7]
+          ]
+        , [ "appendNestedCaseBranchAndContinue" <> show n <> "Depth" <> show depth
+          | depth <- [(1 :: Int) .. 4]
+          , n <- [(0 :: Int) .. 7]
           ]
         ]
 

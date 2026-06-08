@@ -1405,8 +1405,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
 
   def parseSourceCaseFirstBranch : ParserValue -> ParserValue -> Parser ParserValue =
     λ(scrutineeValue : ParserValue) λ(_openToken : ParserValue)
-      parserBind (parseSourceCaseBranch ValueUnit)
-        (parseSourceCaseMoreOrClose8 scrutineeValue);
+      parseBoundedCaseBranchRows parseSourceCaseBranch scrutineeValue ValueUnit;
 
   def parseSourceCaseBranch : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
@@ -1555,8 +1554,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
 
   def parseNestedCaseBranchFirstBranch : ParserValue -> ParserValue -> Parser ParserValue =
     λ(scrutineeValue : ParserValue) λ(_openToken : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch ValueUnit)
-        (parseNestedCaseBranchMoreOrClose8 scrutineeValue);
+      parseBoundedCaseBranchRows parseNestedCaseBranchInnerBranch scrutineeValue ValueUnit;
 
   def parseNestedCaseBranchInnerBranch : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
@@ -1596,8 +1594,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
 
   def parseNestedCaseBranchFirstBranch4 : ParserValue -> ParserValue -> Parser ParserValue =
     λ(scrutineeValue : ParserValue) λ(_openToken : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch4 ValueUnit)
-        (parseNestedCaseBranchMoreOrClose8Depth4 scrutineeValue);
+      parseBoundedCaseBranchRows parseNestedCaseBranchInnerBranch4 scrutineeValue ValueUnit;
 
   def parseNestedCaseBranchInnerBranch4 : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
@@ -1614,134 +1611,6 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
       parserBind
         (parserChoice (parseNestedCaseBranchExpression3 ValueUnit) (parseApplicationOrAtomExpression ValueUnit))
         (finishSourceCaseBranch patternValue);
-
-  def parseNestedCaseBranchMoreOrClose8Depth4 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch7Depth4 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch7Depth4 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch4 ValueUnit)
-        (appendNestedCaseBranchAndContinue7Depth4 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue7Depth4 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseNestedCaseBranchMoreOrClose7Depth4 scrutineeValue);
-
-  def parseNestedCaseBranchMoreOrClose7Depth4 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch6Depth4 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch6Depth4 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch4 ValueUnit)
-        (appendNestedCaseBranchAndContinue6Depth4 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue6Depth4 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseNestedCaseBranchMoreOrClose6Depth4 scrutineeValue);
-
-  def parseNestedCaseBranchMoreOrClose6Depth4 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch5Depth4 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch5Depth4 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch4 ValueUnit)
-        (appendNestedCaseBranchAndContinue5Depth4 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue5Depth4 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseNestedCaseBranchMoreOrClose5Depth4 scrutineeValue);
-
-  def parseNestedCaseBranchMoreOrClose5Depth4 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch4Depth4 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch4Depth4 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch4 ValueUnit)
-        (appendNestedCaseBranchAndContinue4Depth4 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue4Depth4 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseNestedCaseBranchMoreOrClose4Depth4 scrutineeValue);
-
-  def parseNestedCaseBranchMoreOrClose4Depth4 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch3Depth4 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch3Depth4 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch4 ValueUnit)
-        (appendNestedCaseBranchAndContinue3Depth4 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue3Depth4 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseNestedCaseBranchMoreOrClose3Depth4 scrutineeValue);
-
-  def parseNestedCaseBranchMoreOrClose3Depth4 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch2Depth4 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch2Depth4 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch4 ValueUnit)
-        (appendNestedCaseBranchAndContinue2Depth4 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue2Depth4 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseNestedCaseBranchMoreOrClose2Depth4 scrutineeValue);
-
-  def parseNestedCaseBranchMoreOrClose2Depth4 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch1Depth4 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch1Depth4 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch4 ValueUnit)
-        (appendNestedCaseBranchAndContinue1Depth4 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue1Depth4 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseNestedCaseBranchMoreOrClose1Depth4 scrutineeValue);
-
-  def parseNestedCaseBranchMoreOrClose1Depth4 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch0Depth4 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch0Depth4 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch4 ValueUnit)
-        (appendNestedCaseBranchAndContinue0Depth4 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue0Depth4 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseSourceCaseClose scrutineeValue);
 
   def parseNestedCaseBranchExpression3 : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
@@ -1765,8 +1634,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
 
   def parseNestedCaseBranchFirstBranch3 : ParserValue -> ParserValue -> Parser ParserValue =
     λ(scrutineeValue : ParserValue) λ(_openToken : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch3 ValueUnit)
-        (parseNestedCaseBranchMoreOrClose8Depth3 scrutineeValue);
+      parseBoundedCaseBranchRows parseNestedCaseBranchInnerBranch3 scrutineeValue ValueUnit;
 
   def parseNestedCaseBranchInnerBranch3 : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
@@ -1783,134 +1651,6 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
       parserBind
         (parserChoice (parseNestedCaseBranchExpression2 ValueUnit) (parseApplicationOrAtomExpression ValueUnit))
         (finishSourceCaseBranch patternValue);
-
-  def parseNestedCaseBranchMoreOrClose8Depth3 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch7Depth3 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch7Depth3 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch3 ValueUnit)
-        (appendNestedCaseBranchAndContinue7Depth3 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue7Depth3 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseNestedCaseBranchMoreOrClose7Depth3 scrutineeValue);
-
-  def parseNestedCaseBranchMoreOrClose7Depth3 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch6Depth3 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch6Depth3 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch3 ValueUnit)
-        (appendNestedCaseBranchAndContinue6Depth3 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue6Depth3 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseNestedCaseBranchMoreOrClose6Depth3 scrutineeValue);
-
-  def parseNestedCaseBranchMoreOrClose6Depth3 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch5Depth3 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch5Depth3 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch3 ValueUnit)
-        (appendNestedCaseBranchAndContinue5Depth3 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue5Depth3 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseNestedCaseBranchMoreOrClose5Depth3 scrutineeValue);
-
-  def parseNestedCaseBranchMoreOrClose5Depth3 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch4Depth3 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch4Depth3 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch3 ValueUnit)
-        (appendNestedCaseBranchAndContinue4Depth3 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue4Depth3 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseNestedCaseBranchMoreOrClose4Depth3 scrutineeValue);
-
-  def parseNestedCaseBranchMoreOrClose4Depth3 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch3Depth3 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch3Depth3 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch3 ValueUnit)
-        (appendNestedCaseBranchAndContinue3Depth3 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue3Depth3 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseNestedCaseBranchMoreOrClose3Depth3 scrutineeValue);
-
-  def parseNestedCaseBranchMoreOrClose3Depth3 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch2Depth3 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch2Depth3 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch3 ValueUnit)
-        (appendNestedCaseBranchAndContinue2Depth3 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue2Depth3 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseNestedCaseBranchMoreOrClose2Depth3 scrutineeValue);
-
-  def parseNestedCaseBranchMoreOrClose2Depth3 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch1Depth3 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch1Depth3 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch3 ValueUnit)
-        (appendNestedCaseBranchAndContinue1Depth3 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue1Depth3 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseNestedCaseBranchMoreOrClose1Depth3 scrutineeValue);
-
-  def parseNestedCaseBranchMoreOrClose1Depth3 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch0Depth3 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch0Depth3 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch3 ValueUnit)
-        (appendNestedCaseBranchAndContinue0Depth3 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue0Depth3 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseSourceCaseClose scrutineeValue);
 
   def parseNestedCaseBranchExpression2 : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
@@ -1934,8 +1674,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
 
   def parseNestedCaseBranchFirstBranch2 : ParserValue -> ParserValue -> Parser ParserValue =
     λ(scrutineeValue : ParserValue) λ(_openToken : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch2 ValueUnit)
-        (parseNestedCaseBranchMoreOrClose8Depth2 scrutineeValue);
+      parseBoundedCaseBranchRows parseNestedCaseBranchInnerBranch2 scrutineeValue ValueUnit;
 
   def parseNestedCaseBranchInnerBranch2 : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
@@ -1952,134 +1691,6 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
       parserBind
         (parserChoice (parseNestedCaseBranchExpression1 ValueUnit) (parseApplicationOrAtomExpression ValueUnit))
         (finishSourceCaseBranch patternValue);
-
-  def parseNestedCaseBranchMoreOrClose8Depth2 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch7Depth2 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch7Depth2 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch2 ValueUnit)
-        (appendNestedCaseBranchAndContinue7Depth2 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue7Depth2 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseNestedCaseBranchMoreOrClose7Depth2 scrutineeValue);
-
-  def parseNestedCaseBranchMoreOrClose7Depth2 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch6Depth2 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch6Depth2 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch2 ValueUnit)
-        (appendNestedCaseBranchAndContinue6Depth2 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue6Depth2 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseNestedCaseBranchMoreOrClose6Depth2 scrutineeValue);
-
-  def parseNestedCaseBranchMoreOrClose6Depth2 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch5Depth2 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch5Depth2 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch2 ValueUnit)
-        (appendNestedCaseBranchAndContinue5Depth2 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue5Depth2 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseNestedCaseBranchMoreOrClose5Depth2 scrutineeValue);
-
-  def parseNestedCaseBranchMoreOrClose5Depth2 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch4Depth2 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch4Depth2 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch2 ValueUnit)
-        (appendNestedCaseBranchAndContinue4Depth2 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue4Depth2 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseNestedCaseBranchMoreOrClose4Depth2 scrutineeValue);
-
-  def parseNestedCaseBranchMoreOrClose4Depth2 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch3Depth2 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch3Depth2 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch2 ValueUnit)
-        (appendNestedCaseBranchAndContinue3Depth2 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue3Depth2 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseNestedCaseBranchMoreOrClose3Depth2 scrutineeValue);
-
-  def parseNestedCaseBranchMoreOrClose3Depth2 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch2Depth2 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch2Depth2 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch2 ValueUnit)
-        (appendNestedCaseBranchAndContinue2Depth2 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue2Depth2 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseNestedCaseBranchMoreOrClose2Depth2 scrutineeValue);
-
-  def parseNestedCaseBranchMoreOrClose2Depth2 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch1Depth2 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch1Depth2 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch2 ValueUnit)
-        (appendNestedCaseBranchAndContinue1Depth2 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue1Depth2 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseNestedCaseBranchMoreOrClose1Depth2 scrutineeValue);
-
-  def parseNestedCaseBranchMoreOrClose1Depth2 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch0Depth2 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch0Depth2 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch2 ValueUnit)
-        (appendNestedCaseBranchAndContinue0Depth2 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue0Depth2 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseSourceCaseClose scrutineeValue);
 
   def parseNestedCaseBranchExpression1 : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
@@ -2103,8 +1714,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
 
   def parseNestedCaseBranchFirstBranch1 : ParserValue -> ParserValue -> Parser ParserValue =
     λ(scrutineeValue : ParserValue) λ(_openToken : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch1 ValueUnit)
-        (parseNestedCaseBranchMoreOrClose8Depth1 scrutineeValue);
+      parseBoundedCaseBranchRows parseNestedCaseBranchInnerBranch1 scrutineeValue ValueUnit;
 
   def parseNestedCaseBranchInnerBranch1 : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
@@ -2122,392 +1732,141 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
         (parserChoice (parseApplicationOrAtomExpression ValueUnit) (parseApplicationOrAtomExpression ValueUnit))
         (finishSourceCaseBranch patternValue);
 
-  def parseNestedCaseBranchMoreOrClose8Depth1 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch7Depth1 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch7Depth1 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch1 ValueUnit)
-        (appendNestedCaseBranchAndContinue7Depth1 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue7Depth1 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseNestedCaseBranchMoreOrClose7Depth1 scrutineeValue);
-
-  def parseNestedCaseBranchMoreOrClose7Depth1 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch6Depth1 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch6Depth1 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch1 ValueUnit)
-        (appendNestedCaseBranchAndContinue6Depth1 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue6Depth1 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseNestedCaseBranchMoreOrClose6Depth1 scrutineeValue);
-
-  def parseNestedCaseBranchMoreOrClose6Depth1 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch5Depth1 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch5Depth1 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch1 ValueUnit)
-        (appendNestedCaseBranchAndContinue5Depth1 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue5Depth1 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseNestedCaseBranchMoreOrClose5Depth1 scrutineeValue);
-
-  def parseNestedCaseBranchMoreOrClose5Depth1 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch4Depth1 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch4Depth1 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch1 ValueUnit)
-        (appendNestedCaseBranchAndContinue4Depth1 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue4Depth1 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseNestedCaseBranchMoreOrClose4Depth1 scrutineeValue);
-
-  def parseNestedCaseBranchMoreOrClose4Depth1 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch3Depth1 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch3Depth1 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch1 ValueUnit)
-        (appendNestedCaseBranchAndContinue3Depth1 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue3Depth1 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseNestedCaseBranchMoreOrClose3Depth1 scrutineeValue);
-
-  def parseNestedCaseBranchMoreOrClose3Depth1 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch2Depth1 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch2Depth1 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch1 ValueUnit)
-        (appendNestedCaseBranchAndContinue2Depth1 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue2Depth1 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseNestedCaseBranchMoreOrClose2Depth1 scrutineeValue);
-
-  def parseNestedCaseBranchMoreOrClose2Depth1 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch1Depth1 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch1Depth1 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch1 ValueUnit)
-        (appendNestedCaseBranchAndContinue1Depth1 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue1Depth1 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseNestedCaseBranchMoreOrClose1Depth1 scrutineeValue);
-
-  def parseNestedCaseBranchMoreOrClose1Depth1 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch0Depth1 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch0Depth1 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch1 ValueUnit)
-        (appendNestedCaseBranchAndContinue0Depth1 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue0Depth1 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseSourceCaseClose scrutineeValue);
-
-  def parseNestedCaseBranchMoreOrClose8 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch7 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch7 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch ValueUnit)
-        (appendNestedCaseBranchAndContinue7 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue7 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseNestedCaseBranchMoreOrClose7 scrutineeValue);
-
-  def parseNestedCaseBranchMoreOrClose7 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch6 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch6 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch ValueUnit)
-        (appendNestedCaseBranchAndContinue6 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue6 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseNestedCaseBranchMoreOrClose6 scrutineeValue);
-
-  def parseNestedCaseBranchMoreOrClose6 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch5 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch5 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch ValueUnit)
-        (appendNestedCaseBranchAndContinue5 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue5 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseNestedCaseBranchMoreOrClose5 scrutineeValue);
-
-  def parseNestedCaseBranchMoreOrClose5 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch4 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch4 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch ValueUnit)
-        (appendNestedCaseBranchAndContinue4 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue4 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseNestedCaseBranchMoreOrClose4 scrutineeValue);
-
-  def parseNestedCaseBranchMoreOrClose4 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch3 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch3 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch ValueUnit)
-        (appendNestedCaseBranchAndContinue3 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue3 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseNestedCaseBranchMoreOrClose3 scrutineeValue);
-
-  def parseNestedCaseBranchMoreOrClose3 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch2 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch2 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch ValueUnit)
-        (appendNestedCaseBranchAndContinue2 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue2 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseNestedCaseBranchMoreOrClose2 scrutineeValue);
-
-  def parseNestedCaseBranchMoreOrClose2 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch1 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch1 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch ValueUnit)
-        (appendNestedCaseBranchAndContinue1 scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndContinue1 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseNestedCaseBranchMoreOrClose1 scrutineeValue);
-
-  def parseNestedCaseBranchMoreOrClose1 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
-      parserChoice
-        (parserBind (expectText ";") (parseNestedCaseBranchNextBranch0 scrutineeValue branchRows))
-        (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
-
-  def parseNestedCaseBranchNextBranch0 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseNestedCaseBranchInnerBranch ValueUnit)
-        (appendNestedCaseBranchAndClose scrutineeValue branchRows);
-
-  def appendNestedCaseBranchAndClose : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
-      parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseSourceCaseClose scrutineeValue);
-
   def finishSourceCaseBranch : ParserValue -> ParserValue -> Parser ParserValue =
     λ(patternValue : ParserValue) λ(bodyValue : ParserValue)
       parserTextValue
         (stringAppend (parserTextFromValue patternValue)
           (stringAppend " -> " (parserTextFromValue bodyValue)));
 
-  def parseSourceCaseMoreOrClose8 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
+  def parseBoundedCaseBranchRows : (ParserValue -> Parser ParserValue) -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(branchParser : ParserValue -> Parser ParserValue) λ(scrutineeValue : ParserValue) λ(_start : ParserValue)
+      parserBind (branchParser ValueUnit)
+        (parseBoundedCaseBranchRowsMoreOrClose8 branchParser scrutineeValue);
+
+  def parseBoundedCaseBranchRowsMoreOrClose8 : (ParserValue -> Parser ParserValue) -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(branchParser : ParserValue -> Parser ParserValue) λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
       parserChoice
-        (parserBind (expectText ";") (parseSourceCaseNextBranch7 scrutineeValue branchRows))
+        (parserBind (expectText ";") (parseBoundedCaseBranchRowsNextBranch7 branchParser scrutineeValue branchRows))
         (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
 
-  def parseSourceCaseNextBranch7 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseSourceCaseBranch ValueUnit)
-        (appendSourceCaseBranchAndContinue7 scrutineeValue branchRows);
+  def parseBoundedCaseBranchRowsNextBranch7 : (ParserValue -> Parser ParserValue) -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(branchParser : ParserValue -> Parser ParserValue) λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
+      parserBind (branchParser ValueUnit)
+        (appendBoundedCaseBranchRowsAndContinue7 branchParser scrutineeValue branchRows);
 
-  def appendSourceCaseBranchAndContinue7 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
+  def appendBoundedCaseBranchRowsAndContinue7 : (ParserValue -> Parser ParserValue) -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(branchParser : ParserValue -> Parser ParserValue) λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
       parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseSourceCaseMoreOrClose7 scrutineeValue);
+        (parseBoundedCaseBranchRowsMoreOrClose7 branchParser scrutineeValue);
 
-  def parseSourceCaseMoreOrClose7 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
+  def parseBoundedCaseBranchRowsMoreOrClose7 : (ParserValue -> Parser ParserValue) -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(branchParser : ParserValue -> Parser ParserValue) λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
       parserChoice
-        (parserBind (expectText ";") (parseSourceCaseNextBranch6 scrutineeValue branchRows))
+        (parserBind (expectText ";") (parseBoundedCaseBranchRowsNextBranch6 branchParser scrutineeValue branchRows))
         (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
 
-  def parseSourceCaseNextBranch6 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseSourceCaseBranch ValueUnit)
-        (appendSourceCaseBranchAndContinue6 scrutineeValue branchRows);
+  def parseBoundedCaseBranchRowsNextBranch6 : (ParserValue -> Parser ParserValue) -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(branchParser : ParserValue -> Parser ParserValue) λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
+      parserBind (branchParser ValueUnit)
+        (appendBoundedCaseBranchRowsAndContinue6 branchParser scrutineeValue branchRows);
 
-  def appendSourceCaseBranchAndContinue6 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
+  def appendBoundedCaseBranchRowsAndContinue6 : (ParserValue -> Parser ParserValue) -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(branchParser : ParserValue -> Parser ParserValue) λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
       parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseSourceCaseMoreOrClose6 scrutineeValue);
+        (parseBoundedCaseBranchRowsMoreOrClose6 branchParser scrutineeValue);
 
-  def parseSourceCaseMoreOrClose6 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
+  def parseBoundedCaseBranchRowsMoreOrClose6 : (ParserValue -> Parser ParserValue) -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(branchParser : ParserValue -> Parser ParserValue) λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
       parserChoice
-        (parserBind (expectText ";") (parseSourceCaseNextBranch5 scrutineeValue branchRows))
+        (parserBind (expectText ";") (parseBoundedCaseBranchRowsNextBranch5 branchParser scrutineeValue branchRows))
         (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
 
-  def parseSourceCaseNextBranch5 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseSourceCaseBranch ValueUnit)
-        (appendSourceCaseBranchAndContinue5 scrutineeValue branchRows);
+  def parseBoundedCaseBranchRowsNextBranch5 : (ParserValue -> Parser ParserValue) -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(branchParser : ParserValue -> Parser ParserValue) λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
+      parserBind (branchParser ValueUnit)
+        (appendBoundedCaseBranchRowsAndContinue5 branchParser scrutineeValue branchRows);
 
-  def appendSourceCaseBranchAndContinue5 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
+  def appendBoundedCaseBranchRowsAndContinue5 : (ParserValue -> Parser ParserValue) -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(branchParser : ParserValue -> Parser ParserValue) λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
       parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseSourceCaseMoreOrClose5 scrutineeValue);
+        (parseBoundedCaseBranchRowsMoreOrClose5 branchParser scrutineeValue);
 
-  def parseSourceCaseMoreOrClose5 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
+  def parseBoundedCaseBranchRowsMoreOrClose5 : (ParserValue -> Parser ParserValue) -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(branchParser : ParserValue -> Parser ParserValue) λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
       parserChoice
-        (parserBind (expectText ";") (parseSourceCaseNextBranch4 scrutineeValue branchRows))
+        (parserBind (expectText ";") (parseBoundedCaseBranchRowsNextBranch4 branchParser scrutineeValue branchRows))
         (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
 
-  def parseSourceCaseNextBranch4 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseSourceCaseBranch ValueUnit)
-        (appendSourceCaseBranchAndContinue4 scrutineeValue branchRows);
+  def parseBoundedCaseBranchRowsNextBranch4 : (ParserValue -> Parser ParserValue) -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(branchParser : ParserValue -> Parser ParserValue) λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
+      parserBind (branchParser ValueUnit)
+        (appendBoundedCaseBranchRowsAndContinue4 branchParser scrutineeValue branchRows);
 
-  def appendSourceCaseBranchAndContinue4 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
+  def appendBoundedCaseBranchRowsAndContinue4 : (ParserValue -> Parser ParserValue) -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(branchParser : ParserValue -> Parser ParserValue) λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
       parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseSourceCaseMoreOrClose4 scrutineeValue);
+        (parseBoundedCaseBranchRowsMoreOrClose4 branchParser scrutineeValue);
 
-  def parseSourceCaseMoreOrClose4 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
+  def parseBoundedCaseBranchRowsMoreOrClose4 : (ParserValue -> Parser ParserValue) -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(branchParser : ParserValue -> Parser ParserValue) λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
       parserChoice
-        (parserBind (expectText ";") (parseSourceCaseNextBranch3 scrutineeValue branchRows))
+        (parserBind (expectText ";") (parseBoundedCaseBranchRowsNextBranch3 branchParser scrutineeValue branchRows))
         (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
 
-  def parseSourceCaseNextBranch3 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseSourceCaseBranch ValueUnit)
-        (appendSourceCaseBranchAndContinue3 scrutineeValue branchRows);
+  def parseBoundedCaseBranchRowsNextBranch3 : (ParserValue -> Parser ParserValue) -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(branchParser : ParserValue -> Parser ParserValue) λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
+      parserBind (branchParser ValueUnit)
+        (appendBoundedCaseBranchRowsAndContinue3 branchParser scrutineeValue branchRows);
 
-  def appendSourceCaseBranchAndContinue3 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
+  def appendBoundedCaseBranchRowsAndContinue3 : (ParserValue -> Parser ParserValue) -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(branchParser : ParserValue -> Parser ParserValue) λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
       parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseSourceCaseMoreOrClose3 scrutineeValue);
+        (parseBoundedCaseBranchRowsMoreOrClose3 branchParser scrutineeValue);
 
-  def parseSourceCaseMoreOrClose3 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
+  def parseBoundedCaseBranchRowsMoreOrClose3 : (ParserValue -> Parser ParserValue) -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(branchParser : ParserValue -> Parser ParserValue) λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
       parserChoice
-        (parserBind (expectText ";") (parseSourceCaseNextBranch2 scrutineeValue branchRows))
+        (parserBind (expectText ";") (parseBoundedCaseBranchRowsNextBranch2 branchParser scrutineeValue branchRows))
         (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
 
-  def parseSourceCaseNextBranch2 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseSourceCaseBranch ValueUnit)
-        (appendSourceCaseBranchAndContinue2 scrutineeValue branchRows);
+  def parseBoundedCaseBranchRowsNextBranch2 : (ParserValue -> Parser ParserValue) -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(branchParser : ParserValue -> Parser ParserValue) λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
+      parserBind (branchParser ValueUnit)
+        (appendBoundedCaseBranchRowsAndContinue2 branchParser scrutineeValue branchRows);
 
-  def appendSourceCaseBranchAndContinue2 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
+  def appendBoundedCaseBranchRowsAndContinue2 : (ParserValue -> Parser ParserValue) -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(branchParser : ParserValue -> Parser ParserValue) λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
       parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseSourceCaseMoreOrClose2 scrutineeValue);
+        (parseBoundedCaseBranchRowsMoreOrClose2 branchParser scrutineeValue);
 
-  def parseSourceCaseMoreOrClose2 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
+  def parseBoundedCaseBranchRowsMoreOrClose2 : (ParserValue -> Parser ParserValue) -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(branchParser : ParserValue -> Parser ParserValue) λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
       parserChoice
-        (parserBind (expectText ";") (parseSourceCaseNextBranch1 scrutineeValue branchRows))
+        (parserBind (expectText ";") (parseBoundedCaseBranchRowsNextBranch1 branchParser scrutineeValue branchRows))
         (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
 
-  def parseSourceCaseNextBranch1 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseSourceCaseBranch ValueUnit)
-        (appendSourceCaseBranchAndContinue1 scrutineeValue branchRows);
+  def parseBoundedCaseBranchRowsNextBranch1 : (ParserValue -> Parser ParserValue) -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(branchParser : ParserValue -> Parser ParserValue) λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
+      parserBind (branchParser ValueUnit)
+        (appendBoundedCaseBranchRowsAndContinue1 branchParser scrutineeValue branchRows);
 
-  def appendSourceCaseBranchAndContinue1 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
+  def appendBoundedCaseBranchRowsAndContinue1 : (ParserValue -> Parser ParserValue) -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(branchParser : ParserValue -> Parser ParserValue) λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
       parserBind (appendSourceCaseBranchText branchRows nextBranch)
-        (parseSourceCaseMoreOrClose1 scrutineeValue);
+        (parseBoundedCaseBranchRowsMoreOrClose1 branchParser scrutineeValue);
 
-  def parseSourceCaseMoreOrClose1 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
+  def parseBoundedCaseBranchRowsMoreOrClose1 : (ParserValue -> Parser ParserValue) -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(branchParser : ParserValue -> Parser ParserValue) λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue)
       parserChoice
-        (parserBind (expectText ";") (parseSourceCaseNextBranch0 scrutineeValue branchRows))
+        (parserBind (expectText ";") (parseBoundedCaseBranchRowsNextBranch0 branchParser scrutineeValue branchRows))
         (parserBind (expectText "}") (finishSourceCaseExpression scrutineeValue branchRows));
 
-  def parseSourceCaseNextBranch0 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
-      parserBind (parseSourceCaseBranch ValueUnit)
-        (appendSourceCaseBranchAndClose scrutineeValue branchRows);
+  def parseBoundedCaseBranchRowsNextBranch0 : (ParserValue -> Parser ParserValue) -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(branchParser : ParserValue -> Parser ParserValue) λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(_semicolon : ParserValue)
+      parserBind (branchParser ValueUnit)
+        (appendBoundedCaseBranchRowsAndClose scrutineeValue branchRows);
 
-  def appendSourceCaseBranchAndClose : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+  def appendBoundedCaseBranchRowsAndClose : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
     λ(scrutineeValue : ParserValue) λ(branchRows : ParserValue) λ(nextBranch : ParserValue)
       parserBind (appendSourceCaseBranchText branchRows nextBranch)
         (parseSourceCaseClose scrutineeValue);
