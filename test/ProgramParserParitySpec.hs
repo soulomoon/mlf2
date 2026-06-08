@@ -636,6 +636,23 @@ spec =
             traverse_ (`shouldSatisfy` (`isInfixOf` staticGuardSource)) sharedParserAnnotatedLambdaRhsGuardPhrases
             removedMatches `shouldBe` []
 
+        it "shared parser-owned .mlfp parser shares bounded source-type arrow-tail text accumulation" $ do
+            sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
+            sharedCombinatorSource <- readFile (sharedParserLibraryRoot </> "ParserParityParserCombinator.mlfp")
+            sharedSpecSource <- readFile "test/ProgramParserParitySpec.hs"
+
+            let parserLibrarySource = sharedParserSource <> "\n" <> sharedCombinatorSource
+                staticGuardSource = parserLibrarySource <> "\n" <> sharedSpecSource
+                removedMatches =
+                    filter
+                        (`isInfixOf` parserLibrarySource)
+                        sharedParserRemovedSourceTypeArrowTailAliases
+
+            traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserSourceTypeArrowTailSubstratePhrases
+            traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserSourceTypeArrowTailUsePhrases
+            traverse_ (`shouldSatisfy` (`isInfixOf` staticGuardSource)) sharedParserSourceTypeArrowTailGuardPhrases
+            removedMatches `shouldBe` []
+
         it "shared parser-owned .mlfp parser reaches success only after complete syntax and dynamic diagnostics" $ do
             sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
             sharedLexerSource <- readFile (sharedParserLibraryRoot </> "ParserParityLexer.mlfp")
@@ -1624,6 +1641,40 @@ sharedParserRemovedAnnotatedLambdaRhsAliases =
         , [ "parseAnnotatedLambdaRhsParamType" <> show n | n <- [(1 :: Int) .. 5] ]
         , [ "parseAnnotatedLambdaRhsParamClose" <> show n | n <- [(1 :: Int) .. 5] ]
         , [ "parseAnnotatedLambdaRhsBody" <> show n | n <- [(1 :: Int) .. 5] ]
+        ]
+
+sharedParserSourceTypeArrowTailSubstratePhrases :: [String]
+sharedParserSourceTypeArrowTailSubstratePhrases =
+    [ "def parseBoundedSourceTypeArrowTailText : (String -> ParserValue -> Parser ParserValue) -> String -> ParserValue -> Parser ParserValue"
+    , "def parseBoundedSourceTypeCodomainText : (String -> ParserValue -> Parser ParserValue) -> String -> ParserValue -> Parser ParserValue"
+    , "appendSourceArrowTypeText prefix rightType"
+    , "parserBind (parseSourceTypeCodomainAtom ValueUnit)"
+    , "def parseBoundedSourceTypeArrowTailTextBudget7"
+    , "def parseBoundedSourceTypeArrowTailTextBudget0"
+    ]
+
+sharedParserSourceTypeArrowTailUsePhrases :: [String]
+sharedParserSourceTypeArrowTailUsePhrases =
+    [ "parserBind (parseSourceTypeCodomainAtom ValueUnit)\n        (parseBoundedSourceTypeArrowTailTextBudget7 (parserTextFromValue leftType))"
+    , "parseBoundedSourceTypeArrowTailText parseBoundedSourceTypeCodomainTextBudget6"
+    , "parseBoundedSourceTypeArrowTailText parseBoundedSourceTypeCodomainTextBudget2"
+    , "parseBoundedSourceTypeCodomainText parseBoundedSourceTypeArrowTailTextBudget0"
+    , "parserTextValue (appendSourceArrowTypeText prefix rightType)"
+    ]
+
+sharedParserSourceTypeArrowTailGuardPhrases :: [String]
+sharedParserSourceTypeArrowTailGuardPhrases =
+    [ "shared parser-owned .mlfp parser shares bounded source-type arrow-tail text accumulation"
+    , "sharedParserSourceTypeArrowTailSubstratePhrases"
+    , "sharedParserSourceTypeArrowTailUsePhrases"
+    , "sharedParserRemovedSourceTypeArrowTailAliases"
+    ]
+
+sharedParserRemovedSourceTypeArrowTailAliases :: [String]
+sharedParserRemovedSourceTypeArrowTailAliases =
+    concat
+        [ [ "parseSourceTypeArrowTailText" <> show n | n <- [(0 :: Int) .. 7] ]
+        , [ "parseSourceTypeCodomainText" <> show n | n <- [(0 :: Int) .. 6] ]
         ]
 
 sharedParserEarlySuccessPhrases :: [String]

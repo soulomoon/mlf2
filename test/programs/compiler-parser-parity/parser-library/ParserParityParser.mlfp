@@ -712,7 +712,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
   def parseSourceTypeCodomain : ParserValue -> ParserValue -> Parser ParserValue =
     λ(leftType : ParserValue) λ(_arrow : ParserValue)
       parserBind (parseSourceTypeCodomainAtom ValueUnit)
-        (parseSourceTypeArrowTailText7 (parserTextFromValue leftType));
+        (parseBoundedSourceTypeArrowTailTextBudget7 (parserTextFromValue leftType));
 
   def parseSourceTypeCodomainAtom : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
@@ -722,79 +722,66 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
     λ(prefix : String) λ(rightType : ParserValue)
       stringAppend prefix (stringAppend " -> " (parserTextFromValue rightType));
 
-  def parseSourceTypeArrowTailText7 : String -> ParserValue -> Parser ParserValue =
-    λ(prefix : String) λ(rightType : ParserValue)
+  def parseBoundedSourceTypeArrowTailText : (String -> ParserValue -> Parser ParserValue) -> String -> ParserValue -> Parser ParserValue =
+    λ(nextCodomain : String -> ParserValue -> Parser ParserValue) λ(prefix : String) λ(rightType : ParserValue)
       parserChoice
-        (parserBind (expectText "->") (parseSourceTypeCodomainText6 (appendSourceArrowTypeText prefix rightType)))
+        (parserBind (expectText "->") (nextCodomain (appendSourceArrowTypeText prefix rightType)))
         (parserTextValue (appendSourceArrowTypeText prefix rightType));
 
-  def parseSourceTypeCodomainText6 : String -> ParserValue -> Parser ParserValue =
-    λ(prefix : String) λ(_arrow : ParserValue)
+  def parseBoundedSourceTypeCodomainText : (String -> ParserValue -> Parser ParserValue) -> String -> ParserValue -> Parser ParserValue =
+    λ(nextTail : String -> ParserValue -> Parser ParserValue) λ(prefix : String) λ(_arrow : ParserValue)
       parserBind (parseSourceTypeCodomainAtom ValueUnit)
-        (parseSourceTypeArrowTailText6 prefix);
+        (nextTail prefix);
 
-  def parseSourceTypeArrowTailText6 : String -> ParserValue -> Parser ParserValue =
+  def parseBoundedSourceTypeArrowTailTextBudget7 : String -> ParserValue -> Parser ParserValue =
     λ(prefix : String) λ(rightType : ParserValue)
-      parserChoice
-        (parserBind (expectText "->") (parseSourceTypeCodomainText5 (appendSourceArrowTypeText prefix rightType)))
-        (parserTextValue (appendSourceArrowTypeText prefix rightType));
+      parseBoundedSourceTypeArrowTailText parseBoundedSourceTypeCodomainTextBudget6 prefix rightType;
 
-  def parseSourceTypeCodomainText5 : String -> ParserValue -> Parser ParserValue =
-    λ(prefix : String) λ(_arrow : ParserValue)
-      parserBind (parseSourceTypeCodomainAtom ValueUnit)
-        (parseSourceTypeArrowTailText5 prefix);
+  def parseBoundedSourceTypeCodomainTextBudget6 : String -> ParserValue -> Parser ParserValue =
+    λ(prefix : String) λ(arrow : ParserValue)
+      parseBoundedSourceTypeCodomainText parseBoundedSourceTypeArrowTailTextBudget6 prefix arrow;
 
-  def parseSourceTypeArrowTailText5 : String -> ParserValue -> Parser ParserValue =
+  def parseBoundedSourceTypeArrowTailTextBudget6 : String -> ParserValue -> Parser ParserValue =
     λ(prefix : String) λ(rightType : ParserValue)
-      parserChoice
-        (parserBind (expectText "->") (parseSourceTypeCodomainText4 (appendSourceArrowTypeText prefix rightType)))
-        (parserTextValue (appendSourceArrowTypeText prefix rightType));
+      parseBoundedSourceTypeArrowTailText parseBoundedSourceTypeCodomainTextBudget5 prefix rightType;
 
-  def parseSourceTypeCodomainText4 : String -> ParserValue -> Parser ParserValue =
-    λ(prefix : String) λ(_arrow : ParserValue)
-      parserBind (parseSourceTypeCodomainAtom ValueUnit)
-        (parseSourceTypeArrowTailText4 prefix);
+  def parseBoundedSourceTypeCodomainTextBudget5 : String -> ParserValue -> Parser ParserValue =
+    λ(prefix : String) λ(arrow : ParserValue)
+      parseBoundedSourceTypeCodomainText parseBoundedSourceTypeArrowTailTextBudget5 prefix arrow;
 
-  def parseSourceTypeArrowTailText4 : String -> ParserValue -> Parser ParserValue =
+  def parseBoundedSourceTypeArrowTailTextBudget5 : String -> ParserValue -> Parser ParserValue =
     λ(prefix : String) λ(rightType : ParserValue)
-      parserChoice
-        (parserBind (expectText "->") (parseSourceTypeCodomainText2 (appendSourceArrowTypeText prefix rightType)))
-        (parserTextValue (appendSourceArrowTypeText prefix rightType));
+      parseBoundedSourceTypeArrowTailText parseBoundedSourceTypeCodomainTextBudget4 prefix rightType;
 
-  def parseSourceTypeArrowTailText3 : String -> ParserValue -> Parser ParserValue =
+  def parseBoundedSourceTypeCodomainTextBudget4 : String -> ParserValue -> Parser ParserValue =
+    λ(prefix : String) λ(arrow : ParserValue)
+      parseBoundedSourceTypeCodomainText parseBoundedSourceTypeArrowTailTextBudget4 prefix arrow;
+
+  def parseBoundedSourceTypeArrowTailTextBudget4 : String -> ParserValue -> Parser ParserValue =
     λ(prefix : String) λ(rightType : ParserValue)
-      parserChoice
-        (parserBind (expectText "->") (parseSourceTypeCodomainText2 (appendSourceArrowTypeText prefix rightType)))
-        (parserTextValue (appendSourceArrowTypeText prefix rightType));
+      parseBoundedSourceTypeArrowTailText parseBoundedSourceTypeCodomainTextBudget2 prefix rightType;
 
-  def parseSourceTypeCodomainText2 : String -> ParserValue -> Parser ParserValue =
-    λ(prefix : String) λ(_arrow : ParserValue)
-      parserBind (parseSourceTypeCodomainAtom ValueUnit)
-        (parseSourceTypeArrowTailText2 prefix);
+  def parseBoundedSourceTypeCodomainTextBudget2 : String -> ParserValue -> Parser ParserValue =
+    λ(prefix : String) λ(arrow : ParserValue)
+      parseBoundedSourceTypeCodomainText parseBoundedSourceTypeArrowTailTextBudget2 prefix arrow;
 
-  def parseSourceTypeArrowTailText2 : String -> ParserValue -> Parser ParserValue =
+  def parseBoundedSourceTypeArrowTailTextBudget2 : String -> ParserValue -> Parser ParserValue =
     λ(prefix : String) λ(rightType : ParserValue)
-      parserChoice
-        (parserBind (expectText "->") (parseSourceTypeCodomainText1 (appendSourceArrowTypeText prefix rightType)))
-        (parserTextValue (appendSourceArrowTypeText prefix rightType));
+      parseBoundedSourceTypeArrowTailText parseBoundedSourceTypeCodomainTextBudget1 prefix rightType;
 
-  def parseSourceTypeCodomainText1 : String -> ParserValue -> Parser ParserValue =
-    λ(prefix : String) λ(_arrow : ParserValue)
-      parserBind (parseSourceTypeCodomainAtom ValueUnit)
-        (parseSourceTypeArrowTailText1 prefix);
+  def parseBoundedSourceTypeCodomainTextBudget1 : String -> ParserValue -> Parser ParserValue =
+    λ(prefix : String) λ(arrow : ParserValue)
+      parseBoundedSourceTypeCodomainText parseBoundedSourceTypeArrowTailTextBudget1 prefix arrow;
 
-  def parseSourceTypeArrowTailText1 : String -> ParserValue -> Parser ParserValue =
+  def parseBoundedSourceTypeArrowTailTextBudget1 : String -> ParserValue -> Parser ParserValue =
     λ(prefix : String) λ(rightType : ParserValue)
-      parserChoice
-        (parserBind (expectText "->") (parseSourceTypeCodomainText0 (appendSourceArrowTypeText prefix rightType)))
-        (parserTextValue (appendSourceArrowTypeText prefix rightType));
+      parseBoundedSourceTypeArrowTailText parseBoundedSourceTypeCodomainTextBudget0 prefix rightType;
 
-  def parseSourceTypeCodomainText0 : String -> ParserValue -> Parser ParserValue =
-    λ(prefix : String) λ(_arrow : ParserValue)
-      parserBind (parseSourceTypeCodomainAtom ValueUnit)
-        (parseSourceTypeArrowTailText0 prefix);
+  def parseBoundedSourceTypeCodomainTextBudget0 : String -> ParserValue -> Parser ParserValue =
+    λ(prefix : String) λ(arrow : ParserValue)
+      parseBoundedSourceTypeCodomainText parseBoundedSourceTypeArrowTailTextBudget0 prefix arrow;
 
-  def parseSourceTypeArrowTailText0 : String -> ParserValue -> Parser ParserValue =
+  def parseBoundedSourceTypeArrowTailTextBudget0 : String -> ParserValue -> Parser ParserValue =
     λ(prefix : String) λ(rightType : ParserValue)
       parserTextValue (appendSourceArrowTypeText prefix rightType);
 
