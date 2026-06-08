@@ -588,6 +588,20 @@ spec =
             traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserBoundedCaseBranchRowsUsePhrases
             removedMatches `shouldBe` []
 
+        it "shared parser-owned .mlfp parser shares bounded application arguments" $ do
+            sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
+            sharedCombinatorSource <- readFile (sharedParserLibraryRoot </> "ParserParityParserCombinator.mlfp")
+
+            let parserLibrarySource = sharedParserSource <> "\n" <> sharedCombinatorSource
+                removedMatches =
+                    filter
+                        (`isInfixOf` parserLibrarySource)
+                        sharedParserRemovedApplicationArgumentAliases
+
+            traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserBoundedApplicationArgumentsSubstratePhrases
+            traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserBoundedApplicationArgumentsUsePhrases
+            removedMatches `shouldBe` []
+
         it "shared parser-owned .mlfp parser reaches success only after complete syntax and dynamic diagnostics" $ do
             sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
             sharedLexerSource <- readFile (sharedParserLibraryRoot </> "ParserParityLexer.mlfp")
@@ -1439,6 +1453,47 @@ sharedParserRemovedCaseBranchAliases =
           , n <- [(0 :: Int) .. 7]
           ]
         ]
+
+sharedParserBoundedApplicationArgumentsSubstratePhrases :: [String]
+sharedParserBoundedApplicationArgumentsSubstratePhrases =
+    [ "def parseBoundedApplicationArguments : (ParserValue -> Parser ParserValue) -> ParserValue -> Parser ParserValue"
+    , "def parseBoundedTwoApplicationArguments : (ParserValue -> Parser ParserValue) -> ParserValue -> Parser ParserValue"
+    , "def parseBoundedSingleApplicationArgument : (ParserValue -> Parser ParserValue) -> ParserValue -> Parser ParserValue"
+    , "λ(argumentParser : ParserValue -> Parser ParserValue)"
+    , "def parseBoundedApplicationArgumentsMoreOrDone6"
+    , "def parseBoundedApplicationArgumentsMoreOrDone0"
+    , "def appendBoundedApplicationArgumentAndContinue0"
+    ]
+
+sharedParserBoundedApplicationArgumentsUsePhrases :: [String]
+sharedParserBoundedApplicationArgumentsUsePhrases =
+    [ "parseBoundedApplicationArguments parseExpressionAtom"
+    , "parseBoundedSingleApplicationArgument parseSimpleExpressionAtom"
+    , "parseBoundedTwoApplicationArguments parseSimpleExpressionAtom"
+    , "parserBind (argumentParser ValueUnit)"
+    , "parserBind (finishApplicationExpression applicationValue argumentValue)"
+    ]
+
+sharedParserRemovedApplicationArgumentAliases :: [String]
+sharedParserRemovedApplicationArgumentAliases =
+    [ "parseApplicationArgumentOrDone"
+    , "parseApplicationSecondArgumentOrDone"
+    , "parseApplicationThirdArgumentOrDone"
+    , "parseApplicationFourthArgumentOrDone"
+    , "parseApplicationFifthArgumentOrDone"
+    , "parseApplicationSixthArgumentOrDone"
+    , "parseApplicationSeventhArgumentOrDone"
+    , "parseApplicationEighthArgumentOrDone"
+    , "parseApplicationNinthArgumentOrDone"
+    , "parseApplicationTenthArgumentOrDone"
+    , "parseApplicationEleventhArgumentOrDone"
+    , "parseApplicationTwelfthArgumentOrDone"
+    , "parseApplicationThirteenthArgumentOrDone"
+    , "parseSimpleApplicationArgumentOrDone"
+    , "parseTwoSimpleApplicationArgumentOrDone"
+    , "parseSimpleApplicationSecondArgumentOrDone"
+    , "parseSimpleApplicationThirdArgumentOrDone"
+    ]
 
 sharedParserEarlySuccessPhrases :: [String]
 sharedParserEarlySuccessPhrases =
