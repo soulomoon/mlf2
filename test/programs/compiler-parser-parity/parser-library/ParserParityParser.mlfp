@@ -2097,64 +2097,49 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
   def parseApplicationOrParenthesizedArgumentExpression : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
       parserBind (parseSimpleExpressionAtom ValueUnit)
-        parseParenthesizedApplicationArgumentOrDone;
+        parseNestedParenthesizedApplicationTopLevelOrDone;
 
-  def parseParenthesizedApplicationArgumentOrDone : ParserValue -> Parser ParserValue =
+  def parseNestedParenthesizedApplicationTopLevelOrDone : ParserValue -> Parser ParserValue =
     λ(functionValue : ParserValue)
       parserChoice
-        (parserBind (parseParenthesizedSimpleApplicationArgument ValueUnit) (appendParenthesizedApplicationArgument functionValue))
+        (parserBind (parseParenthesizedSimpleApplicationArgument ValueUnit) (finishNestedParenthesizedApplicationArgumentWithSecondDepth4 functionValue))
         (parserChoice
-          (parserBind (parseSimpleExpressionAtom ValueUnit) (parseParenthesizedApplicationSimpleSecondOrDone functionValue))
+          (parserBind (parseSimpleExpressionAtom ValueUnit) (finishNestedParenthesizedApplicationArgumentWithSimpleSecond functionValue))
           (parserPure functionValue));
 
-  def parseParenthesizedApplicationSimpleSecondOrDone : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(functionValue : ParserValue) λ(firstArgument : ParserValue)
-      parserBind (finishApplicationExpression functionValue firstArgument)
-        (parseBoundedSingleApplicationArgument parseSimpleExpressionAtom);
-
-  def appendParenthesizedApplicationArgument : ParserValue -> ParserValue -> Parser ParserValue =
+  def finishNestedParenthesizedApplicationArgumentWithSecondDepth4 : ParserValue -> ParserValue -> Parser ParserValue =
     λ(functionValue : ParserValue) λ(argumentValue : ParserValue)
       parserBind (finishApplicationExpression functionValue argumentValue)
-        parseParenthesizedApplicationSecondArgumentOrDone;
+        parseNestedParenthesizedApplicationSecondDepth4OrSimpleDone;
 
-  def parseParenthesizedApplicationSecondArgumentOrDone : ParserValue -> Parser ParserValue =
+  def finishNestedParenthesizedApplicationArgumentWithSecondDepth2 : ParserValue -> ParserValue -> Parser ParserValue =
+    λ(functionValue : ParserValue) λ(argumentValue : ParserValue)
+      parserBind (finishApplicationExpression functionValue argumentValue)
+        parseNestedParenthesizedApplicationSecondDepth2OrSimpleDone;
+
+  def finishNestedParenthesizedApplicationArgumentWithSecondDepth1 : ParserValue -> ParserValue -> Parser ParserValue =
+    λ(functionValue : ParserValue) λ(argumentValue : ParserValue)
+      parserBind (finishApplicationExpression functionValue argumentValue)
+        parseNestedParenthesizedApplicationSecondDepth1OrSimpleDone;
+
+  def finishNestedParenthesizedApplicationArgumentWithSimpleSecond : ParserValue -> ParserValue -> Parser ParserValue =
+    λ(functionValue : ParserValue) λ(argumentValue : ParserValue)
+      parserBind (finishApplicationExpression functionValue argumentValue)
+        (parseBoundedSingleApplicationArgument parseSimpleExpressionAtom);
+
+  def parseNestedParenthesizedApplicationSecondDepth4OrSimpleDone : ParserValue -> Parser ParserValue =
     λ(applicationValue : ParserValue)
       parserChoice
         (parserBind (parseParenthesizedNestedApplicationArgument4 ValueUnit) (finishApplicationExpression applicationValue))
         (parseBoundedSingleApplicationArgument parseSimpleExpressionAtom applicationValue);
 
-  def parseParenthesizedApplicationSimpleSecondOrDone3 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(functionValue : ParserValue) λ(firstArgument : ParserValue)
-      parserBind (finishApplicationExpression functionValue firstArgument)
-        parseParenthesizedApplicationSecondArgumentOrDone;
-
-  def appendParenthesizedApplicationArgument2 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(functionValue : ParserValue) λ(argumentValue : ParserValue)
-      parserBind (finishApplicationExpression functionValue argumentValue)
-        parseParenthesizedApplicationSecondArgumentOrSimpleDone2;
-
-  def parseParenthesizedApplicationSimpleSecondOrDone2 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(functionValue : ParserValue) λ(firstArgument : ParserValue)
-      parserBind (finishApplicationExpression functionValue firstArgument)
-        parseParenthesizedApplicationSecondArgumentOrSimpleDone2;
-
-  def parseParenthesizedApplicationSecondArgumentOrSimpleDone2 : ParserValue -> Parser ParserValue =
+  def parseNestedParenthesizedApplicationSecondDepth2OrSimpleDone : ParserValue -> Parser ParserValue =
     λ(applicationValue : ParserValue)
       parserChoice
         (parserBind (parseParenthesizedNestedApplicationArgument2 ValueUnit) (finishApplicationExpression applicationValue))
         (parseBoundedSingleApplicationArgument parseSimpleExpressionAtom applicationValue);
 
-  def appendParenthesizedApplicationArgument1 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(functionValue : ParserValue) λ(argumentValue : ParserValue)
-      parserBind (finishApplicationExpression functionValue argumentValue)
-        parseParenthesizedApplicationSecondArgumentOrSimpleDone1;
-
-  def parseParenthesizedApplicationSimpleSecondOrDone1 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(functionValue : ParserValue) λ(firstArgument : ParserValue)
-      parserBind (finishApplicationExpression functionValue firstArgument)
-        parseParenthesizedApplicationSecondArgumentOrSimpleDone1;
-
-  def parseParenthesizedApplicationSecondArgumentOrSimpleDone1 : ParserValue -> Parser ParserValue =
+  def parseNestedParenthesizedApplicationSecondDepth1OrSimpleDone : ParserValue -> Parser ParserValue =
     λ(applicationValue : ParserValue)
       parserChoice
         (parserBind (parseParenthesizedNestedApplicationArgument1 ValueUnit) (finishApplicationExpression applicationValue))
@@ -2173,14 +2158,14 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
   def parseApplicationOrNestedParenthesizedArgumentExpression4 : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
       parserBind (parseSimpleExpressionAtom ValueUnit)
-        parseNestedParenthesizedApplicationArgumentOrDone4;
+        parseNestedParenthesizedApplicationArgumentDepth4OrDone;
 
-  def parseNestedParenthesizedApplicationArgumentOrDone4 : ParserValue -> Parser ParserValue =
+  def parseNestedParenthesizedApplicationArgumentDepth4OrDone : ParserValue -> Parser ParserValue =
     λ(functionValue : ParserValue)
       parserChoice
-        (parserBind (parseParenthesizedNestedApplicationArgument4 ValueUnit) (appendParenthesizedApplicationArgument functionValue))
+        (parserBind (parseParenthesizedNestedApplicationArgument4 ValueUnit) (finishNestedParenthesizedApplicationArgumentWithSecondDepth4 functionValue))
         (parserChoice
-          (parserBind (parseSimpleExpressionAtom ValueUnit) (parseParenthesizedApplicationSimpleSecondOrDone3 functionValue))
+          (parserBind (parseSimpleExpressionAtom ValueUnit) (finishNestedParenthesizedApplicationArgumentWithSecondDepth4 functionValue))
           (parserPure functionValue));
 
   def parseParenthesizedNestedApplicationArgument4 : ParserValue -> Parser ParserValue =
@@ -2196,14 +2181,14 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
   def parseApplicationOrNestedParenthesizedArgumentExpression3 : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
       parserBind (parseSimpleExpressionAtom ValueUnit)
-        parseNestedParenthesizedApplicationArgumentOrDone3;
+        parseNestedParenthesizedApplicationArgumentDepth3OrDone;
 
-  def parseNestedParenthesizedApplicationArgumentOrDone3 : ParserValue -> Parser ParserValue =
+  def parseNestedParenthesizedApplicationArgumentDepth3OrDone : ParserValue -> Parser ParserValue =
     λ(functionValue : ParserValue)
       parserChoice
-        (parserBind (parseParenthesizedNestedApplicationArgument3 ValueUnit) (appendParenthesizedApplicationArgument2 functionValue))
+        (parserBind (parseParenthesizedNestedApplicationArgument3 ValueUnit) (finishNestedParenthesizedApplicationArgumentWithSecondDepth2 functionValue))
         (parserChoice
-          (parserBind (parseSimpleExpressionAtom ValueUnit) (parseParenthesizedApplicationSimpleSecondOrDone2 functionValue))
+          (parserBind (parseSimpleExpressionAtom ValueUnit) (finishNestedParenthesizedApplicationArgumentWithSecondDepth2 functionValue))
           (parserPure functionValue));
 
   def parseParenthesizedNestedApplicationArgument3 : ParserValue -> Parser ParserValue =
@@ -2219,14 +2204,14 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
   def parseApplicationOrNestedParenthesizedArgumentExpression2 : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
       parserBind (parseSimpleExpressionAtom ValueUnit)
-        parseNestedParenthesizedApplicationArgumentOrDone2;
+        parseNestedParenthesizedApplicationArgumentDepth2OrDone;
 
-  def parseNestedParenthesizedApplicationArgumentOrDone2 : ParserValue -> Parser ParserValue =
+  def parseNestedParenthesizedApplicationArgumentDepth2OrDone : ParserValue -> Parser ParserValue =
     λ(functionValue : ParserValue)
       parserChoice
-        (parserBind (parseParenthesizedNestedApplicationArgument2 ValueUnit) (appendParenthesizedApplicationArgument1 functionValue))
+        (parserBind (parseParenthesizedNestedApplicationArgument2 ValueUnit) (finishNestedParenthesizedApplicationArgumentWithSecondDepth1 functionValue))
         (parserChoice
-          (parserBind (parseSimpleExpressionAtom ValueUnit) (parseParenthesizedApplicationSimpleSecondOrDone1 functionValue))
+          (parserBind (parseSimpleExpressionAtom ValueUnit) (finishNestedParenthesizedApplicationArgumentWithSecondDepth1 functionValue))
           (parserPure functionValue));
 
   def parseParenthesizedNestedApplicationArgument2 : ParserValue -> Parser ParserValue =
@@ -2242,14 +2227,14 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
   def parseApplicationOrNestedParenthesizedArgumentExpression1 : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
       parserBind (parseSimpleExpressionAtom ValueUnit)
-        parseNestedParenthesizedApplicationArgumentOrDone1;
+        parseNestedParenthesizedApplicationArgumentDepth1OrDone;
 
-  def parseNestedParenthesizedApplicationArgumentOrDone1 : ParserValue -> Parser ParserValue =
+  def parseNestedParenthesizedApplicationArgumentDepth1OrDone : ParserValue -> Parser ParserValue =
     λ(functionValue : ParserValue)
       parserChoice
-        (parserBind (parseParenthesizedNestedApplicationArgument1 ValueUnit) (appendParenthesizedApplicationArgument1 functionValue))
+        (parserBind (parseParenthesizedNestedApplicationArgument1 ValueUnit) (finishNestedParenthesizedApplicationArgumentWithSecondDepth1 functionValue))
         (parserChoice
-          (parserBind (parseSimpleExpressionAtom ValueUnit) (parseParenthesizedApplicationSimpleSecondOrDone1 functionValue))
+          (parserBind (parseSimpleExpressionAtom ValueUnit) (finishNestedParenthesizedApplicationArgumentWithSecondDepth1 functionValue))
           (parserPure functionValue));
 
   def parseParenthesizedNestedApplicationArgument1 : ParserValue -> Parser ParserValue =
@@ -2265,27 +2250,15 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
   def parseApplicationOrNestedParenthesizedArgumentExpression0 : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
       parserBind (parseSimpleExpressionAtom ValueUnit)
-        parseNestedParenthesizedApplicationArgumentOrDone0;
+        parseNestedParenthesizedApplicationArgumentDepth0OrDone;
 
-  def parseNestedParenthesizedApplicationArgumentOrDone0 : ParserValue -> Parser ParserValue =
+  def parseNestedParenthesizedApplicationArgumentDepth0OrDone : ParserValue -> Parser ParserValue =
     λ(functionValue : ParserValue)
       parserChoice
-        (parserBind (parseParenthesizedTwoSimpleApplicationArgument ValueUnit)
-          (appendParenthesizedApplicationSimpleArgument0 functionValue))
+        (parserBind (parseParenthesizedTwoSimpleApplicationArgument ValueUnit) (finishNestedParenthesizedApplicationArgumentWithSimpleSecond functionValue))
         (parserChoice
-          (parserBind (parseSimpleExpressionAtom ValueUnit)
-            (parseParenthesizedApplicationSimpleSecondOrDone0 functionValue))
+          (parserBind (parseSimpleExpressionAtom ValueUnit) (finishNestedParenthesizedApplicationArgumentWithSimpleSecond functionValue))
           (parserPure functionValue));
-
-  def appendParenthesizedApplicationSimpleArgument0 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(functionValue : ParserValue) λ(argumentValue : ParserValue)
-      parserBind (finishApplicationExpression functionValue argumentValue)
-        (parseBoundedSingleApplicationArgument parseSimpleExpressionAtom);
-
-  def parseParenthesizedApplicationSimpleSecondOrDone0 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(functionValue : ParserValue) λ(firstArgument : ParserValue)
-      parserBind (finishApplicationExpression functionValue firstArgument)
-        (parseBoundedSingleApplicationArgument parseSimpleExpressionAtom);
 
   def parseParenthesizedTwoSimpleApplicationArgument : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)

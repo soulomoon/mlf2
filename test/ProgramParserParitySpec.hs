@@ -602,6 +602,23 @@ spec =
             traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserBoundedApplicationArgumentsUsePhrases
             removedMatches `shouldBe` []
 
+        it "shared parser-owned .mlfp parser shares nested parenthesized application depth handling" $ do
+            sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
+            sharedCombinatorSource <- readFile (sharedParserLibraryRoot </> "ParserParityParserCombinator.mlfp")
+            sharedSpecSource <- readFile "test/ProgramParserParitySpec.hs"
+
+            let parserLibrarySource = sharedParserSource <> "\n" <> sharedCombinatorSource
+                staticGuardSource = parserLibrarySource <> "\n" <> sharedSpecSource
+                removedMatches =
+                    filter
+                        (`isInfixOf` parserLibrarySource)
+                        sharedParserRemovedNestedParenthesizedApplicationAliases
+
+            traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserNestedParenthesizedApplicationSubstratePhrases
+            traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserNestedParenthesizedApplicationUsePhrases
+            traverse_ (`shouldSatisfy` (`isInfixOf` staticGuardSource)) sharedParserNestedParenthesizedApplicationGuardPhrases
+            removedMatches `shouldBe` []
+
         it "shared parser-owned .mlfp parser reaches success only after complete syntax and dynamic diagnostics" $ do
             sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
             sharedLexerSource <- readFile (sharedParserLibraryRoot </> "ParserParityLexer.mlfp")
@@ -1494,6 +1511,61 @@ sharedParserRemovedApplicationArgumentAliases =
     , "parseSimpleApplicationSecondArgumentOrDone"
     , "parseSimpleApplicationThirdArgumentOrDone"
     ]
+
+sharedParserNestedParenthesizedApplicationSubstratePhrases :: [String]
+sharedParserNestedParenthesizedApplicationSubstratePhrases =
+    [ "def parseNestedParenthesizedApplicationTopLevelOrDone"
+    , "def finishNestedParenthesizedApplicationArgumentWithSecondDepth4"
+    , "def finishNestedParenthesizedApplicationArgumentWithSecondDepth2"
+    , "def finishNestedParenthesizedApplicationArgumentWithSecondDepth1"
+    , "def finishNestedParenthesizedApplicationArgumentWithSimpleSecond"
+    , "def parseNestedParenthesizedApplicationSecondDepth4OrSimpleDone"
+    , "def parseNestedParenthesizedApplicationSecondDepth2OrSimpleDone"
+    , "def parseNestedParenthesizedApplicationSecondDepth1OrSimpleDone"
+    , "def parseNestedParenthesizedApplicationArgumentDepth4OrDone"
+    , "def parseNestedParenthesizedApplicationArgumentDepth3OrDone"
+    , "def parseNestedParenthesizedApplicationArgumentDepth2OrDone"
+    , "def parseNestedParenthesizedApplicationArgumentDepth1OrDone"
+    , "def parseNestedParenthesizedApplicationArgumentDepth0OrDone"
+    ]
+
+sharedParserNestedParenthesizedApplicationUsePhrases :: [String]
+sharedParserNestedParenthesizedApplicationUsePhrases =
+    [ "parserBind (parseSimpleExpressionAtom ValueUnit)\n        parseNestedParenthesizedApplicationTopLevelOrDone"
+    , "parserBind (parseSimpleExpressionAtom ValueUnit)\n        parseNestedParenthesizedApplicationArgumentDepth4OrDone"
+    , "parserBind (parseSimpleExpressionAtom ValueUnit)\n        parseNestedParenthesizedApplicationArgumentDepth3OrDone"
+    , "parserBind (parseSimpleExpressionAtom ValueUnit)\n        parseNestedParenthesizedApplicationArgumentDepth2OrDone"
+    , "parserBind (parseSimpleExpressionAtom ValueUnit)\n        parseNestedParenthesizedApplicationArgumentDepth1OrDone"
+    , "parserBind (parseSimpleExpressionAtom ValueUnit)\n        parseNestedParenthesizedApplicationArgumentDepth0OrDone"
+    , "parseParenthesizedNestedApplicationArgument4 ValueUnit) (finishNestedParenthesizedApplicationArgumentWithSecondDepth4 functionValue)"
+    , "parseParenthesizedNestedApplicationArgument2 ValueUnit) (finishNestedParenthesizedApplicationArgumentWithSecondDepth1 functionValue)"
+    , "parseParenthesizedNestedApplicationArgument1 ValueUnit) (finishNestedParenthesizedApplicationArgumentWithSecondDepth1 functionValue)"
+    , "parseParenthesizedTwoSimpleApplicationArgument ValueUnit) (finishNestedParenthesizedApplicationArgumentWithSimpleSecond functionValue)"
+    , "parseBoundedSingleApplicationArgument parseSimpleExpressionAtom applicationValue"
+    ]
+
+sharedParserNestedParenthesizedApplicationGuardPhrases :: [String]
+sharedParserNestedParenthesizedApplicationGuardPhrases =
+    [ "shared parser-owned .mlfp parser shares nested parenthesized application depth handling"
+    , "sharedParserNestedParenthesizedApplicationSubstratePhrases"
+    , "sharedParserNestedParenthesizedApplicationUsePhrases"
+    , "sharedParserRemovedNestedParenthesizedApplicationAliases"
+    ]
+
+sharedParserRemovedNestedParenthesizedApplicationAliases :: [String]
+sharedParserRemovedNestedParenthesizedApplicationAliases =
+    concat
+        [ [ concat ["parse", "Parenthesized", "Application", "Argument", "Or", "Done"]
+          , concat ["append", "Parenthesized", "Application", "Argument"]
+          , concat ["parse", "Parenthesized", "Application", "Simple", "Second", "Or", "Done"]
+          , concat ["parse", "Parenthesized", "Application", "Second", "Argument", "Or", "Done"]
+          , concat ["parse", "Parenthesized", "Application", "Second", "Argument", "Or", "Simple", "Done"]
+          , concat ["append", "Parenthesized", "Application", "Simple", "Argument", "0"]
+          ]
+        , [ concat ["parse", "Nested", "Parenthesized", "Application", "Argument", "Or", "Done", show n]
+          | n <- [(0 :: Int) .. 4]
+          ]
+        ]
 
 sharedParserEarlySuccessPhrases :: [String]
 sharedParserEarlySuccessPhrases =
