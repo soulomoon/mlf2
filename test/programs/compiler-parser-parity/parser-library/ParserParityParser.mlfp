@@ -1095,224 +1095,71 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
 
   def parseAnnotatedLambdaRhsExpression : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
+      parseBoundedAnnotatedLambdaRhsExpressionWithBody parseBoundedAnnotatedLambdaRhsBodyExpression5 ValueUnit;
+
+  def parseBoundedAnnotatedLambdaRhsExpressionWithBody : (ParserValue -> Parser ParserValue) -> ParserValue -> Parser ParserValue =
+    λ(bodyParser : ParserValue -> Parser ParserValue) λ(_start : ParserValue)
       parserBind (expectText "lambda")
-        parseAnnotatedLambdaRhsOpen;
+        (parseBoundedAnnotatedLambdaRhsOpenWithBody bodyParser);
 
-  def parseAnnotatedLambdaRhsOpen : ParserValue -> Parser ParserValue =
-    λ(_lambda : ParserValue)
+  def parseBoundedAnnotatedLambdaRhsOpenWithBody : (ParserValue -> Parser ParserValue) -> ParserValue -> Parser ParserValue =
+    λ(bodyParser : ParserValue -> Parser ParserValue) λ(_lambda : ParserValue)
       parserBind (expectText "(")
-        parseAnnotatedLambdaRhsParam;
+        (parseBoundedAnnotatedLambdaRhsParamWithBody bodyParser);
 
-  def parseAnnotatedLambdaRhsParam : ParserValue -> Parser ParserValue =
-    λ(_openParam : ParserValue)
+  def parseBoundedAnnotatedLambdaRhsParamWithBody : (ParserValue -> Parser ParserValue) -> ParserValue -> Parser ParserValue =
+    λ(bodyParser : ParserValue -> Parser ParserValue) λ(_openParam : ParserValue)
       parserBind expectAnyIdentifier
-        parseAnnotatedLambdaRhsParamColon;
+        (parseBoundedAnnotatedLambdaRhsParamColonWithBody bodyParser);
 
-  def parseAnnotatedLambdaRhsParamColon : ParserValue -> Parser ParserValue =
-    λ(paramToken : ParserValue)
+  def parseBoundedAnnotatedLambdaRhsParamColonWithBody : (ParserValue -> Parser ParserValue) -> ParserValue -> Parser ParserValue =
+    λ(bodyParser : ParserValue -> Parser ParserValue) λ(paramToken : ParserValue)
       parserBind (expectText ":")
-        (parseAnnotatedLambdaRhsParamType paramToken);
+        (parseBoundedAnnotatedLambdaRhsParamTypeWithBody bodyParser paramToken);
 
-  def parseAnnotatedLambdaRhsParamType : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(paramToken : ParserValue) λ(_colon : ParserValue)
+  def parseBoundedAnnotatedLambdaRhsParamTypeWithBody : (ParserValue -> Parser ParserValue) -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(bodyParser : ParserValue -> Parser ParserValue) λ(paramToken : ParserValue) λ(_colon : ParserValue)
       parserBind (parseSourceType ValueUnit)
-        (parseAnnotatedLambdaRhsParamClose paramToken);
+        (parseBoundedAnnotatedLambdaRhsParamCloseWithBody bodyParser paramToken);
 
-  def parseAnnotatedLambdaRhsParamClose : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(paramToken : ParserValue) λ(typeValue : ParserValue)
+  def parseBoundedAnnotatedLambdaRhsParamCloseWithBody : (ParserValue -> Parser ParserValue) -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(bodyParser : ParserValue -> Parser ParserValue) λ(paramToken : ParserValue) λ(typeValue : ParserValue)
       parserBind (expectText ")")
-        (parseAnnotatedLambdaRhsBody paramToken typeValue);
+        (parseBoundedAnnotatedLambdaRhsBodyWithBody bodyParser paramToken typeValue);
 
-  def parseAnnotatedLambdaRhsBody : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(paramToken : ParserValue) λ(typeValue : ParserValue) λ(_closeParam : ParserValue)
-      parserBind
-        (parserChoice (parseAnnotatedLambdaRhsExpression5 ValueUnit)
-          (parserChoice (parseSourceCaseExpression ValueUnit) (parseApplicationOrAtomExpression ValueUnit)))
+  def parseBoundedAnnotatedLambdaRhsBodyWithBody : (ParserValue -> Parser ParserValue) -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(bodyParser : ParserValue -> Parser ParserValue) λ(paramToken : ParserValue) λ(typeValue : ParserValue) λ(_closeParam : ParserValue)
+      parserBind (bodyParser ValueUnit)
         (finishAnnotatedLambdaExpression paramToken typeValue);
 
-  def parseAnnotatedLambdaRhsExpression5 : ParserValue -> Parser ParserValue =
+  def parseBoundedAnnotatedLambdaRhsBodyExpression5 : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
-      parserBind (expectText "lambda")
-        parseAnnotatedLambdaRhsOpen5;
+      parserChoice (parseBoundedAnnotatedLambdaRhsExpressionWithBody parseBoundedAnnotatedLambdaRhsBodyExpression4 ValueUnit)
+        (parseBoundedAnnotatedLambdaRhsBodyExpression0 ValueUnit);
 
-  def parseAnnotatedLambdaRhsOpen5 : ParserValue -> Parser ParserValue =
-    λ(_lambda : ParserValue)
-      parserBind (expectText "(")
-        parseAnnotatedLambdaRhsParam5;
-
-  def parseAnnotatedLambdaRhsParam5 : ParserValue -> Parser ParserValue =
-    λ(_openParam : ParserValue)
-      parserBind expectAnyIdentifier
-        parseAnnotatedLambdaRhsParamColon5;
-
-  def parseAnnotatedLambdaRhsParamColon5 : ParserValue -> Parser ParserValue =
-    λ(paramToken : ParserValue)
-      parserBind (expectText ":")
-        (parseAnnotatedLambdaRhsParamType5 paramToken);
-
-  def parseAnnotatedLambdaRhsParamType5 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(paramToken : ParserValue) λ(_colon : ParserValue)
-      parserBind (parseSourceType ValueUnit)
-        (parseAnnotatedLambdaRhsParamClose5 paramToken);
-
-  def parseAnnotatedLambdaRhsParamClose5 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(paramToken : ParserValue) λ(typeValue : ParserValue)
-      parserBind (expectText ")")
-        (parseAnnotatedLambdaRhsBody5 paramToken typeValue);
-
-  def parseAnnotatedLambdaRhsBody5 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(paramToken : ParserValue) λ(typeValue : ParserValue) λ(_closeParam : ParserValue)
-      parserBind
-        (parserChoice (parseAnnotatedLambdaRhsExpression4 ValueUnit)
-          (parserChoice (parseSourceCaseExpression ValueUnit) (parseApplicationOrAtomExpression ValueUnit)))
-        (finishAnnotatedLambdaExpression paramToken typeValue);
-
-  def parseAnnotatedLambdaRhsExpression4 : ParserValue -> Parser ParserValue =
+  def parseBoundedAnnotatedLambdaRhsBodyExpression4 : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
-      parserBind (expectText "lambda")
-        parseAnnotatedLambdaRhsOpen4;
+      parserChoice (parseBoundedAnnotatedLambdaRhsExpressionWithBody parseBoundedAnnotatedLambdaRhsBodyExpression3 ValueUnit)
+        (parseBoundedAnnotatedLambdaRhsBodyExpression0 ValueUnit);
 
-  def parseAnnotatedLambdaRhsOpen4 : ParserValue -> Parser ParserValue =
-    λ(_lambda : ParserValue)
-      parserBind (expectText "(")
-        parseAnnotatedLambdaRhsParam4;
-
-  def parseAnnotatedLambdaRhsParam4 : ParserValue -> Parser ParserValue =
-    λ(_openParam : ParserValue)
-      parserBind expectAnyIdentifier
-        parseAnnotatedLambdaRhsParamColon4;
-
-  def parseAnnotatedLambdaRhsParamColon4 : ParserValue -> Parser ParserValue =
-    λ(paramToken : ParserValue)
-      parserBind (expectText ":")
-        (parseAnnotatedLambdaRhsParamType4 paramToken);
-
-  def parseAnnotatedLambdaRhsParamType4 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(paramToken : ParserValue) λ(_colon : ParserValue)
-      parserBind (parseSourceType ValueUnit)
-        (parseAnnotatedLambdaRhsParamClose4 paramToken);
-
-  def parseAnnotatedLambdaRhsParamClose4 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(paramToken : ParserValue) λ(typeValue : ParserValue)
-      parserBind (expectText ")")
-        (parseAnnotatedLambdaRhsBody4 paramToken typeValue);
-
-  def parseAnnotatedLambdaRhsBody4 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(paramToken : ParserValue) λ(typeValue : ParserValue) λ(_closeParam : ParserValue)
-      parserBind
-        (parserChoice (parseAnnotatedLambdaRhsExpression3 ValueUnit)
-          (parserChoice (parseSourceCaseExpression ValueUnit) (parseApplicationOrAtomExpression ValueUnit)))
-        (finishAnnotatedLambdaExpression paramToken typeValue);
-
-  def parseAnnotatedLambdaRhsExpression3 : ParserValue -> Parser ParserValue =
+  def parseBoundedAnnotatedLambdaRhsBodyExpression3 : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
-      parserBind (expectText "lambda")
-        parseAnnotatedLambdaRhsOpen3;
+      parserChoice (parseBoundedAnnotatedLambdaRhsExpressionWithBody parseBoundedAnnotatedLambdaRhsBodyExpression2 ValueUnit)
+        (parseBoundedAnnotatedLambdaRhsBodyExpression0 ValueUnit);
 
-  def parseAnnotatedLambdaRhsOpen3 : ParserValue -> Parser ParserValue =
-    λ(_lambda : ParserValue)
-      parserBind (expectText "(")
-        parseAnnotatedLambdaRhsParam3;
-
-  def parseAnnotatedLambdaRhsParam3 : ParserValue -> Parser ParserValue =
-    λ(_openParam : ParserValue)
-      parserBind expectAnyIdentifier
-        parseAnnotatedLambdaRhsParamColon3;
-
-  def parseAnnotatedLambdaRhsParamColon3 : ParserValue -> Parser ParserValue =
-    λ(paramToken : ParserValue)
-      parserBind (expectText ":")
-        (parseAnnotatedLambdaRhsParamType3 paramToken);
-
-  def parseAnnotatedLambdaRhsParamType3 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(paramToken : ParserValue) λ(_colon : ParserValue)
-      parserBind (parseSourceType ValueUnit)
-        (parseAnnotatedLambdaRhsParamClose3 paramToken);
-
-  def parseAnnotatedLambdaRhsParamClose3 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(paramToken : ParserValue) λ(typeValue : ParserValue)
-      parserBind (expectText ")")
-        (parseAnnotatedLambdaRhsBody3 paramToken typeValue);
-
-  def parseAnnotatedLambdaRhsBody3 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(paramToken : ParserValue) λ(typeValue : ParserValue) λ(_closeParam : ParserValue)
-      parserBind
-        (parserChoice (parseAnnotatedLambdaRhsExpression2 ValueUnit)
-          (parserChoice (parseSourceCaseExpression ValueUnit) (parseApplicationOrAtomExpression ValueUnit)))
-        (finishAnnotatedLambdaExpression paramToken typeValue);
-
-  def parseAnnotatedLambdaRhsExpression2 : ParserValue -> Parser ParserValue =
+  def parseBoundedAnnotatedLambdaRhsBodyExpression2 : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
-      parserBind (expectText "lambda")
-        parseAnnotatedLambdaRhsOpen2;
+      parserChoice (parseBoundedAnnotatedLambdaRhsExpressionWithBody parseBoundedAnnotatedLambdaRhsBodyExpression1 ValueUnit)
+        (parseBoundedAnnotatedLambdaRhsBodyExpression0 ValueUnit);
 
-  def parseAnnotatedLambdaRhsOpen2 : ParserValue -> Parser ParserValue =
-    λ(_lambda : ParserValue)
-      parserBind (expectText "(")
-        parseAnnotatedLambdaRhsParam2;
-
-  def parseAnnotatedLambdaRhsParam2 : ParserValue -> Parser ParserValue =
-    λ(_openParam : ParserValue)
-      parserBind expectAnyIdentifier
-        parseAnnotatedLambdaRhsParamColon2;
-
-  def parseAnnotatedLambdaRhsParamColon2 : ParserValue -> Parser ParserValue =
-    λ(paramToken : ParserValue)
-      parserBind (expectText ":")
-        (parseAnnotatedLambdaRhsParamType2 paramToken);
-
-  def parseAnnotatedLambdaRhsParamType2 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(paramToken : ParserValue) λ(_colon : ParserValue)
-      parserBind (parseSourceType ValueUnit)
-        (parseAnnotatedLambdaRhsParamClose2 paramToken);
-
-  def parseAnnotatedLambdaRhsParamClose2 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(paramToken : ParserValue) λ(typeValue : ParserValue)
-      parserBind (expectText ")")
-        (parseAnnotatedLambdaRhsBody2 paramToken typeValue);
-
-  def parseAnnotatedLambdaRhsBody2 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(paramToken : ParserValue) λ(typeValue : ParserValue) λ(_closeParam : ParserValue)
-      parserBind
-        (parserChoice (parseAnnotatedLambdaRhsExpression1 ValueUnit)
-          (parserChoice (parseSourceCaseExpression ValueUnit) (parseApplicationOrAtomExpression ValueUnit)))
-        (finishAnnotatedLambdaExpression paramToken typeValue);
-
-  def parseAnnotatedLambdaRhsExpression1 : ParserValue -> Parser ParserValue =
+  def parseBoundedAnnotatedLambdaRhsBodyExpression1 : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
-      parserBind (expectText "lambda")
-        parseAnnotatedLambdaRhsOpen1;
+      parserChoice (parseBoundedAnnotatedLambdaRhsExpressionWithBody parseBoundedAnnotatedLambdaRhsBodyExpression0 ValueUnit)
+        (parseBoundedAnnotatedLambdaRhsBodyExpression0 ValueUnit);
 
-  def parseAnnotatedLambdaRhsOpen1 : ParserValue -> Parser ParserValue =
-    λ(_lambda : ParserValue)
-      parserBind (expectText "(")
-        parseAnnotatedLambdaRhsParam1;
-
-  def parseAnnotatedLambdaRhsParam1 : ParserValue -> Parser ParserValue =
-    λ(_openParam : ParserValue)
-      parserBind expectAnyIdentifier
-        parseAnnotatedLambdaRhsParamColon1;
-
-  def parseAnnotatedLambdaRhsParamColon1 : ParserValue -> Parser ParserValue =
-    λ(paramToken : ParserValue)
-      parserBind (expectText ":")
-        (parseAnnotatedLambdaRhsParamType1 paramToken);
-
-  def parseAnnotatedLambdaRhsParamType1 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(paramToken : ParserValue) λ(_colon : ParserValue)
-      parserBind (parseSourceType ValueUnit)
-        (parseAnnotatedLambdaRhsParamClose1 paramToken);
-
-  def parseAnnotatedLambdaRhsParamClose1 : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(paramToken : ParserValue) λ(typeValue : ParserValue)
-      parserBind (expectText ")")
-        (parseAnnotatedLambdaRhsBody1 paramToken typeValue);
-
-  def parseAnnotatedLambdaRhsBody1 : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(paramToken : ParserValue) λ(typeValue : ParserValue) λ(_closeParam : ParserValue)
-      parserBind
-        (parserChoice (parseSourceCaseExpression ValueUnit) (parseApplicationOrAtomExpression ValueUnit))
-        (finishAnnotatedLambdaExpression paramToken typeValue);
+  def parseBoundedAnnotatedLambdaRhsBodyExpression0 : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      parserChoice (parseSourceCaseExpression ValueUnit) (parseApplicationOrAtomExpression ValueUnit);
 
   def parseSourceLetExpressionIn : ParserValue -> String -> ParserValue -> Parser ParserValue =
     λ(nameToken : ParserValue) λ(annotationText : String) λ(rhsValue : ParserValue)

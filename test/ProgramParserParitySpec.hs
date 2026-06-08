@@ -619,6 +619,23 @@ spec =
             traverse_ (`shouldSatisfy` (`isInfixOf` staticGuardSource)) sharedParserNestedParenthesizedApplicationGuardPhrases
             removedMatches `shouldBe` []
 
+        it "shared parser-owned .mlfp parser shares bounded annotated lambda RHS depth handling" $ do
+            sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
+            sharedCombinatorSource <- readFile (sharedParserLibraryRoot </> "ParserParityParserCombinator.mlfp")
+            sharedSpecSource <- readFile "test/ProgramParserParitySpec.hs"
+
+            let parserLibrarySource = sharedParserSource <> "\n" <> sharedCombinatorSource
+                staticGuardSource = parserLibrarySource <> "\n" <> sharedSpecSource
+                removedMatches =
+                    filter
+                        (`isInfixOf` parserLibrarySource)
+                        sharedParserRemovedAnnotatedLambdaRhsAliases
+
+            traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserAnnotatedLambdaRhsSubstratePhrases
+            traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserAnnotatedLambdaRhsUsePhrases
+            traverse_ (`shouldSatisfy` (`isInfixOf` staticGuardSource)) sharedParserAnnotatedLambdaRhsGuardPhrases
+            removedMatches `shouldBe` []
+
         it "shared parser-owned .mlfp parser reaches success only after complete syntax and dynamic diagnostics" $ do
             sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
             sharedLexerSource <- readFile (sharedParserLibraryRoot </> "ParserParityLexer.mlfp")
@@ -1565,6 +1582,48 @@ sharedParserRemovedNestedParenthesizedApplicationAliases =
         , [ concat ["parse", "Nested", "Parenthesized", "Application", "Argument", "Or", "Done", show n]
           | n <- [(0 :: Int) .. 4]
           ]
+        ]
+
+sharedParserAnnotatedLambdaRhsSubstratePhrases :: [String]
+sharedParserAnnotatedLambdaRhsSubstratePhrases =
+    [ "def parseBoundedAnnotatedLambdaRhsExpressionWithBody : (ParserValue -> Parser ParserValue) -> ParserValue -> Parser ParserValue"
+    , "def parseBoundedAnnotatedLambdaRhsOpenWithBody : (ParserValue -> Parser ParserValue) -> ParserValue -> Parser ParserValue"
+    , "def parseBoundedAnnotatedLambdaRhsParamTypeWithBody : (ParserValue -> Parser ParserValue) -> ParserValue -> ParserValue -> Parser ParserValue"
+    , "def parseBoundedAnnotatedLambdaRhsBodyWithBody : (ParserValue -> Parser ParserValue) -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue"
+    , "parserBind (bodyParser ValueUnit)"
+    , "finishAnnotatedLambdaExpression paramToken typeValue"
+    ]
+
+sharedParserAnnotatedLambdaRhsUsePhrases :: [String]
+sharedParserAnnotatedLambdaRhsUsePhrases =
+    [ "parseBoundedAnnotatedLambdaRhsExpressionWithBody parseBoundedAnnotatedLambdaRhsBodyExpression5 ValueUnit"
+    , "parseBoundedAnnotatedLambdaRhsExpressionWithBody parseBoundedAnnotatedLambdaRhsBodyExpression4 ValueUnit"
+    , "parseBoundedAnnotatedLambdaRhsExpressionWithBody parseBoundedAnnotatedLambdaRhsBodyExpression3 ValueUnit"
+    , "parseBoundedAnnotatedLambdaRhsExpressionWithBody parseBoundedAnnotatedLambdaRhsBodyExpression2 ValueUnit"
+    , "parseBoundedAnnotatedLambdaRhsExpressionWithBody parseBoundedAnnotatedLambdaRhsBodyExpression1 ValueUnit"
+    , "parseBoundedAnnotatedLambdaRhsExpressionWithBody parseBoundedAnnotatedLambdaRhsBodyExpression0 ValueUnit"
+    , "def parseBoundedAnnotatedLambdaRhsBodyExpression0 : ParserValue -> Parser ParserValue"
+    , "parserChoice (parseSourceCaseExpression ValueUnit) (parseApplicationOrAtomExpression ValueUnit)"
+    ]
+
+sharedParserAnnotatedLambdaRhsGuardPhrases :: [String]
+sharedParserAnnotatedLambdaRhsGuardPhrases =
+    [ "shared parser-owned .mlfp parser shares bounded annotated lambda RHS depth handling"
+    , "sharedParserAnnotatedLambdaRhsSubstratePhrases"
+    , "sharedParserAnnotatedLambdaRhsUsePhrases"
+    , "sharedParserRemovedAnnotatedLambdaRhsAliases"
+    ]
+
+sharedParserRemovedAnnotatedLambdaRhsAliases :: [String]
+sharedParserRemovedAnnotatedLambdaRhsAliases =
+    concat
+        [ [ "parseAnnotatedLambdaRhsExpression" <> show n | n <- [(1 :: Int) .. 5] ]
+        , [ "parseAnnotatedLambdaRhsOpen" <> show n | n <- [(1 :: Int) .. 5] ]
+        , [ "parseAnnotatedLambdaRhsParam" <> show n | n <- [(1 :: Int) .. 5] ]
+        , [ "parseAnnotatedLambdaRhsParamColon" <> show n | n <- [(1 :: Int) .. 5] ]
+        , [ "parseAnnotatedLambdaRhsParamType" <> show n | n <- [(1 :: Int) .. 5] ]
+        , [ "parseAnnotatedLambdaRhsParamClose" <> show n | n <- [(1 :: Int) .. 5] ]
+        , [ "parseAnnotatedLambdaRhsBody" <> show n | n <- [(1 :: Int) .. 5] ]
         ]
 
 sharedParserEarlySuccessPhrases :: [String]
