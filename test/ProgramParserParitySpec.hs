@@ -670,6 +670,21 @@ spec =
             traverse_ (`shouldSatisfy` (`isInfixOf` staticGuardSource)) sharedParserConstructorRowAccumulatorGuardPhrases
             removedMatches `shouldBe` []
 
+        it "shared parser-owned .mlfp parser shares bounded source-definition row sequencing" $ do
+            sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
+            sharedSpecSource <- readFile "test/ProgramParserParitySpec.hs"
+
+            let staticGuardSource = sharedParserSource <> "\n" <> sharedSpecSource
+                removedMatches =
+                    filter
+                        (`isInfixOf` sharedParserSource)
+                        sharedParserRemovedSourceDefinitionRowSequenceAliases
+
+            traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserBoundedSourceDefinitionRowSequenceSubstratePhrases
+            traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserBoundedSourceDefinitionRowSequenceUsePhrases
+            traverse_ (`shouldSatisfy` (`isInfixOf` staticGuardSource)) sharedParserSourceDefinitionRowSequenceGuardPhrases
+            removedMatches `shouldBe` []
+
         it "shared parser-owned .mlfp parser reaches success only after complete syntax and dynamic diagnostics" $ do
             sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
             sharedLexerSource <- readFile (sharedParserLibraryRoot </> "ParserParityLexer.mlfp")
@@ -1733,6 +1748,56 @@ sharedParserRemovedConstructorRowAccumulatorAliases =
           , "parseExactNineConstructorDataRowsFinish"
           ]
         ]
+
+sharedParserBoundedSourceDefinitionRowSequenceSubstratePhrases :: [String]
+sharedParserBoundedSourceDefinitionRowSequenceSubstratePhrases =
+    [ "def parseBoundedSourceDefinitionRows : String -> (String -> ParserValue -> Parser ParserValue) -> ParserValue -> Parser ParserValue"
+    , "def parseBoundedSourceDefinitionNextRows : (String -> ParserValue -> Parser ParserValue) -> String -> ParserValue -> Parser ParserValue"
+    , "def appendBoundedSourceDefinitionRowsAndContinue : (String -> ParserValue -> Parser ParserValue) -> String -> ParserValue -> ParserValue -> Parser ParserValue"
+    , "def finishBoundedSourceDefinitionRows : String -> ParserValue -> Parser ParserValue"
+    , "def parseBoundedSourceDefinitionRowsRemaining15"
+    , "def parseBoundedSourceDefinitionRowsRemaining12"
+    , "def parseBoundedSourceDefinitionRowsRemaining3"
+    , "parserBind (parseSourceDefinitionRows sourceFile ValueUnit)"
+    , "parserBind (appendProjectionValues existingRows nextRows)"
+    ]
+
+sharedParserBoundedSourceDefinitionRowSequenceUsePhrases :: [String]
+sharedParserBoundedSourceDefinitionRowSequenceUsePhrases =
+    [ "parseBoundedSourceDefinitionRows sourceFile parseBoundedSourceDefinitionRowsRemaining3 ValueUnit"
+    , "parseBoundedSourceDefinitionRows sourceFile parseBoundedSourceDefinitionRowsRemaining12 ValueUnit"
+    , "parseBoundedSourceDefinitionRows sourceFile parseBoundedSourceDefinitionRowsRemaining15 ValueUnit"
+    , "parserBind (parseFourSourceDefinitionRows sourceFile ValueUnit)\n        (finishSixDataFourDefinitionRows sourceFile moduleStart moduleName exportRows dataRowsValue)"
+    , "parserBind (parseSixteenSourceDefinitionRows sourceFile ValueUnit)\n        (appendProjectionValues dataRowsValue)"
+    ]
+
+sharedParserSourceDefinitionRowSequenceGuardPhrases :: [String]
+sharedParserSourceDefinitionRowSequenceGuardPhrases =
+    [ "shared parser-owned .mlfp parser shares bounded source-definition row sequencing"
+    , "sharedParserBoundedSourceDefinitionRowSequenceSubstratePhrases"
+    , "sharedParserBoundedSourceDefinitionRowSequenceUsePhrases"
+    , "sharedParserRemovedSourceDefinitionRowSequenceAliases"
+    ]
+
+sharedParserRemovedSourceDefinitionRowSequenceAliases :: [String]
+sharedParserRemovedSourceDefinitionRowSequenceAliases =
+    [ "parseFourSourceDefinitionSecondRows"
+    , "parseFourSourceDefinitionThirdRows"
+    , "parseFourSourceDefinitionFourthRows"
+    , "finishFourSourceDefinitionRows"
+    , "finishFourSourceDefinitionRowsThird"
+    , "finishFourSourceDefinitionRowsFourth"
+    , "parseThirteenSourceDefinitionRowsSecondBatch"
+    , "appendThirteenSourceDefinitionRowsSecondBatch"
+    , "parseThirteenSourceDefinitionRowsThirdBatch"
+    , "appendThirteenSourceDefinitionRowsThirdBatch"
+    , "parseThirteenSourceDefinitionRowsFinal"
+    , "parseSixteenSourceDefinitionRowsSecondBatch"
+    , "appendSixteenSourceDefinitionRowsSecondBatch"
+    , "parseSixteenSourceDefinitionRowsThirdBatch"
+    , "appendSixteenSourceDefinitionRowsThirdBatch"
+    , "parseSixteenSourceDefinitionRowsFourthBatch"
+    ]
 
 sharedParserEarlySuccessPhrases :: [String]
 sharedParserEarlySuccessPhrases =

@@ -2501,99 +2501,96 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
       parserBind (appendProjectionValues dataRowsValue definitionRowsValue)
         (finishModuleBodyRows sourceFile moduleStart moduleName exportRows);
 
+  def parseBoundedSourceDefinitionRows : String -> (String -> ParserValue -> Parser ParserValue) -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(remainingRows : String -> ParserValue -> Parser ParserValue) λ(_start : ParserValue)
+      parserBind (parseSourceDefinitionRows sourceFile ValueUnit)
+        (remainingRows sourceFile);
+
+  def parseBoundedSourceDefinitionNextRows : (String -> ParserValue -> Parser ParserValue) -> String -> ParserValue -> Parser ParserValue =
+    λ(remainingRows : String -> ParserValue -> Parser ParserValue) λ(sourceFile : String) λ(existingRows : ParserValue)
+      parserBind (parseSourceDefinitionRows sourceFile ValueUnit)
+        (appendBoundedSourceDefinitionRowsAndContinue remainingRows sourceFile existingRows);
+
+  def appendBoundedSourceDefinitionRowsAndContinue : (String -> ParserValue -> Parser ParserValue) -> String -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(remainingRows : String -> ParserValue -> Parser ParserValue) λ(sourceFile : String) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
+      parserBind (appendProjectionValues existingRows nextRows)
+        (remainingRows sourceFile);
+
+  def finishBoundedSourceDefinitionRows : String -> ParserValue -> Parser ParserValue =
+    λ(_sourceFile : String) λ(rowsValue : ParserValue)
+      parserPure rowsValue;
+
   def parseFourSourceDefinitionRows : String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(_start : ParserValue)
-      parserBind (parseSourceDefinitionRows sourceFile ValueUnit)
-        (parseFourSourceDefinitionSecondRows sourceFile);
-
-  def parseFourSourceDefinitionSecondRows : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(firstDefinitionRows : ParserValue)
-      parserBind (parseSourceDefinitionRows sourceFile ValueUnit)
-        (parseFourSourceDefinitionThirdRows sourceFile firstDefinitionRows);
-
-  def parseFourSourceDefinitionThirdRows : String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(firstDefinitionRows : ParserValue) λ(secondDefinitionRows : ParserValue)
-      parserBind (parseSourceDefinitionRows sourceFile ValueUnit)
-        (parseFourSourceDefinitionFourthRows sourceFile firstDefinitionRows secondDefinitionRows);
-
-  def parseFourSourceDefinitionFourthRows : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(firstDefinitionRows : ParserValue) λ(secondDefinitionRows : ParserValue) λ(thirdDefinitionRows : ParserValue)
-      parserBind (parseSourceDefinitionRows sourceFile ValueUnit)
-        (finishFourSourceDefinitionRows firstDefinitionRows secondDefinitionRows thirdDefinitionRows);
-
-  def finishFourSourceDefinitionRows : ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(firstDefinitionRows : ParserValue) λ(secondDefinitionRows : ParserValue) λ(thirdDefinitionRows : ParserValue) λ(fourthDefinitionRows : ParserValue)
-      parserBind (appendProjectionValues firstDefinitionRows secondDefinitionRows)
-        (finishFourSourceDefinitionRowsThird thirdDefinitionRows fourthDefinitionRows);
-
-  def finishFourSourceDefinitionRowsThird : ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(thirdDefinitionRows : ParserValue) λ(fourthDefinitionRows : ParserValue) λ(firstTwoDefinitionRows : ParserValue)
-      parserBind (appendProjectionValues firstTwoDefinitionRows thirdDefinitionRows)
-        (finishFourSourceDefinitionRowsFourth fourthDefinitionRows);
-
-  def finishFourSourceDefinitionRowsFourth : ParserValue -> ParserValue -> Parser ParserValue =
-    λ(fourthDefinitionRows : ParserValue) λ(firstThreeDefinitionRows : ParserValue)
-      appendProjectionValues firstThreeDefinitionRows fourthDefinitionRows;
+      parseBoundedSourceDefinitionRows sourceFile parseBoundedSourceDefinitionRowsRemaining3 ValueUnit;
 
   def parseThirteenSourceDefinitionRows : String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(_start : ParserValue)
-      parserBind (parseFourSourceDefinitionRows sourceFile ValueUnit)
-        (parseThirteenSourceDefinitionRowsSecondBatch sourceFile);
-
-  def parseThirteenSourceDefinitionRowsSecondBatch : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(firstBatch : ParserValue)
-      parserBind (parseFourSourceDefinitionRows sourceFile ValueUnit)
-        (appendThirteenSourceDefinitionRowsSecondBatch sourceFile firstBatch);
-
-  def appendThirteenSourceDefinitionRowsSecondBatch : String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(firstBatch : ParserValue) λ(secondBatch : ParserValue)
-      parserBind (appendProjectionValues firstBatch secondBatch)
-        (parseThirteenSourceDefinitionRowsThirdBatch sourceFile);
-
-  def parseThirteenSourceDefinitionRowsThirdBatch : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(firstTwoBatches : ParserValue)
-      parserBind (parseFourSourceDefinitionRows sourceFile ValueUnit)
-        (appendThirteenSourceDefinitionRowsThirdBatch sourceFile firstTwoBatches);
-
-  def appendThirteenSourceDefinitionRowsThirdBatch : String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(firstTwoBatches : ParserValue) λ(thirdBatch : ParserValue)
-      parserBind (appendProjectionValues firstTwoBatches thirdBatch)
-        (parseThirteenSourceDefinitionRowsFinal sourceFile);
-
-  def parseThirteenSourceDefinitionRowsFinal : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(firstTwelveRows : ParserValue)
-      parserBind (parseSourceDefinitionRows sourceFile ValueUnit)
-        (appendProjectionValues firstTwelveRows);
+      parseBoundedSourceDefinitionRows sourceFile parseBoundedSourceDefinitionRowsRemaining12 ValueUnit;
 
   def parseSixteenSourceDefinitionRows : String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(_start : ParserValue)
-      parserBind (parseFourSourceDefinitionRows sourceFile ValueUnit)
-        (parseSixteenSourceDefinitionRowsSecondBatch sourceFile);
+      parseBoundedSourceDefinitionRows sourceFile parseBoundedSourceDefinitionRowsRemaining15 ValueUnit;
 
-  def parseSixteenSourceDefinitionRowsSecondBatch : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(firstBatch : ParserValue)
-      parserBind (parseFourSourceDefinitionRows sourceFile ValueUnit)
-        (appendSixteenSourceDefinitionRowsSecondBatch sourceFile firstBatch);
+  def parseBoundedSourceDefinitionRowsRemaining15 : String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(existingRows : ParserValue)
+      parseBoundedSourceDefinitionNextRows parseBoundedSourceDefinitionRowsRemaining14 sourceFile existingRows;
 
-  def appendSixteenSourceDefinitionRowsSecondBatch : String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(firstBatch : ParserValue) λ(secondBatch : ParserValue)
-      parserBind (appendProjectionValues firstBatch secondBatch)
-        (parseSixteenSourceDefinitionRowsThirdBatch sourceFile);
+  def parseBoundedSourceDefinitionRowsRemaining14 : String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(existingRows : ParserValue)
+      parseBoundedSourceDefinitionNextRows parseBoundedSourceDefinitionRowsRemaining13 sourceFile existingRows;
 
-  def parseSixteenSourceDefinitionRowsThirdBatch : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(firstTwoBatches : ParserValue)
-      parserBind (parseFourSourceDefinitionRows sourceFile ValueUnit)
-        (appendSixteenSourceDefinitionRowsThirdBatch sourceFile firstTwoBatches);
+  def parseBoundedSourceDefinitionRowsRemaining13 : String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(existingRows : ParserValue)
+      parseBoundedSourceDefinitionNextRows parseBoundedSourceDefinitionRowsRemaining12 sourceFile existingRows;
 
-  def appendSixteenSourceDefinitionRowsThirdBatch : String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(firstTwoBatches : ParserValue) λ(thirdBatch : ParserValue)
-      parserBind (appendProjectionValues firstTwoBatches thirdBatch)
-        (parseSixteenSourceDefinitionRowsFourthBatch sourceFile);
+  def parseBoundedSourceDefinitionRowsRemaining12 : String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(existingRows : ParserValue)
+      parseBoundedSourceDefinitionNextRows parseBoundedSourceDefinitionRowsRemaining11 sourceFile existingRows;
 
-  def parseSixteenSourceDefinitionRowsFourthBatch : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(firstThreeBatches : ParserValue)
-      parserBind (parseFourSourceDefinitionRows sourceFile ValueUnit)
-        (appendProjectionValues firstThreeBatches);
+  def parseBoundedSourceDefinitionRowsRemaining11 : String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(existingRows : ParserValue)
+      parseBoundedSourceDefinitionNextRows parseBoundedSourceDefinitionRowsRemaining10 sourceFile existingRows;
+
+  def parseBoundedSourceDefinitionRowsRemaining10 : String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(existingRows : ParserValue)
+      parseBoundedSourceDefinitionNextRows parseBoundedSourceDefinitionRowsRemaining9 sourceFile existingRows;
+
+  def parseBoundedSourceDefinitionRowsRemaining9 : String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(existingRows : ParserValue)
+      parseBoundedSourceDefinitionNextRows parseBoundedSourceDefinitionRowsRemaining8 sourceFile existingRows;
+
+  def parseBoundedSourceDefinitionRowsRemaining8 : String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(existingRows : ParserValue)
+      parseBoundedSourceDefinitionNextRows parseBoundedSourceDefinitionRowsRemaining7 sourceFile existingRows;
+
+  def parseBoundedSourceDefinitionRowsRemaining7 : String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(existingRows : ParserValue)
+      parseBoundedSourceDefinitionNextRows parseBoundedSourceDefinitionRowsRemaining6 sourceFile existingRows;
+
+  def parseBoundedSourceDefinitionRowsRemaining6 : String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(existingRows : ParserValue)
+      parseBoundedSourceDefinitionNextRows parseBoundedSourceDefinitionRowsRemaining5 sourceFile existingRows;
+
+  def parseBoundedSourceDefinitionRowsRemaining5 : String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(existingRows : ParserValue)
+      parseBoundedSourceDefinitionNextRows parseBoundedSourceDefinitionRowsRemaining4 sourceFile existingRows;
+
+  def parseBoundedSourceDefinitionRowsRemaining4 : String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(existingRows : ParserValue)
+      parseBoundedSourceDefinitionNextRows parseBoundedSourceDefinitionRowsRemaining3 sourceFile existingRows;
+
+  def parseBoundedSourceDefinitionRowsRemaining3 : String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(existingRows : ParserValue)
+      parseBoundedSourceDefinitionNextRows parseBoundedSourceDefinitionRowsRemaining2 sourceFile existingRows;
+
+  def parseBoundedSourceDefinitionRowsRemaining2 : String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(existingRows : ParserValue)
+      parseBoundedSourceDefinitionNextRows parseBoundedSourceDefinitionRowsRemaining1 sourceFile existingRows;
+
+  def parseBoundedSourceDefinitionRowsRemaining1 : String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(existingRows : ParserValue)
+      parseBoundedSourceDefinitionNextRows finishBoundedSourceDefinitionRows sourceFile existingRows;
 
   def parseFourDataThirteenDefinitionRows : String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(_start : ParserValue)

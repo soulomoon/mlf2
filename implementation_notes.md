@@ -1,3 +1,21 @@
+## 2026-06-09 - Round 349 bounded source-definition row sequencing substrate
+
+- Added a narrow bounded source-definition row sequencing helper family in the
+  shared parser-owned `ParserParityParser.mlfp` library. The helper parses one
+  `parseSourceDefinitionRows` row at a time, appends rows through
+  `appendProjectionValues`, and advances through explicit remaining-count
+  entry points for the selected fixed budgets.
+- Migrated the selected four-, thirteen-, and sixteen-definition row paths onto
+  the helper while preserving the existing exact-count parser entrypoint names
+  and their current callers.
+- Removed the migrated second/third/fourth and batch continuation aliases
+  instead of leaving compatibility wrappers, and added focused static Hspec
+  coverage for the helper surface, migrated call sites, and alias absence.
+- Scope remains bounded compiler-frontend/parser ergonomics substrate only.
+  This is not full parser parity, compiler-package implementation,
+  platform/proof progress, native/backend completion, package-manager/linker
+  work, or self-boot completion.
+
 ## 2026-06-07 - Round 339 compiler-seed lexer parser parity slice
 
 - Added a parser-parity conformance fixture copied byte-for-byte from

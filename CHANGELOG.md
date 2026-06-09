@@ -3,6 +3,14 @@
 ## Unreleased
 
 ### Changed
+- Added a bounded source-definition row sequencing helper family to the shared
+  parser-owned parser-parity library and migrated the existing four-,
+  thirteen-, and sixteen-definition source-definition row paths onto it. The
+  old migrated continuation aliases remain removed under static coverage. This
+  is bounded compiler-frontend/parser ergonomics substrate only, not full
+  parser parity, compiler-package implementation, platform/proof progress,
+  native/backend completion, package-manager/linker work, or self-boot
+  completion.
 - Reused finalized canonical bind-parent maps when building elaboration read
   models, avoiding a repeated structural canonicalization pass in the
   parser-library hot path.
