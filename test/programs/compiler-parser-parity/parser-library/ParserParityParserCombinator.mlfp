@@ -15,6 +15,7 @@ module ParserParityParserCombinator export (ParserState(..), ParserValue(..), Pa
       ValueUnit : ParserValue
     | ValueToken : ParserSourceSymbol -> ParserValue
     | ValueProjectionRows : String -> ParserValue
+    | ValueConstructorRows : String -> ParserValue
     | ValueModuleKey : String -> ParserValue;
 
   data ParserStep =

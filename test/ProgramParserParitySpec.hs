@@ -653,6 +653,23 @@ spec =
             traverse_ (`shouldSatisfy` (`isInfixOf` staticGuardSource)) sharedParserSourceTypeArrowTailGuardPhrases
             removedMatches `shouldBe` []
 
+        it "shared parser-owned .mlfp parser shares constructor row accumulation" $ do
+            sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
+            sharedCombinatorSource <- readFile (sharedParserLibraryRoot </> "ParserParityParserCombinator.mlfp")
+            sharedSpecSource <- readFile "test/ProgramParserParitySpec.hs"
+
+            let parserLibrarySource = sharedParserSource <> "\n" <> sharedCombinatorSource
+                staticGuardSource = parserLibrarySource <> "\n" <> sharedSpecSource
+                removedMatches =
+                    filter
+                        (`isInfixOf` parserLibrarySource)
+                        sharedParserRemovedConstructorRowAccumulatorAliases
+
+            traverse_ (`shouldSatisfy` (`isInfixOf` parserLibrarySource)) sharedParserConstructorRowAccumulatorSubstratePhrases
+            traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserConstructorRowAccumulatorUsePhrases
+            traverse_ (`shouldSatisfy` (`isInfixOf` staticGuardSource)) sharedParserConstructorRowAccumulatorGuardPhrases
+            removedMatches `shouldBe` []
+
         it "shared parser-owned .mlfp parser reaches success only after complete syntax and dynamic diagnostics" $ do
             sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
             sharedLexerSource <- readFile (sharedParserLibraryRoot </> "ParserParityLexer.mlfp")
@@ -1675,6 +1692,46 @@ sharedParserRemovedSourceTypeArrowTailAliases =
     concat
         [ [ "parseSourceTypeArrowTailText" <> show n | n <- [(0 :: Int) .. 7] ]
         , [ "parseSourceTypeCodomainText" <> show n | n <- [(0 :: Int) .. 6] ]
+        ]
+
+sharedParserConstructorRowAccumulatorSubstratePhrases :: [String]
+sharedParserConstructorRowAccumulatorSubstratePhrases =
+    [ "ValueConstructorRows : String -> ParserValue"
+    , "def emptyConstructorRows : ParserValue"
+    , "def constructorRowsFromValue : ParserValue -> String"
+    , "def appendConstructorRow : String -> ParserValue -> ParserValue -> ParserValue -> String -> Parser ParserValue"
+    , "def dataRowsWithConstructorRows : String -> ParserValue -> String -> ParserValue -> String"
+    ]
+
+sharedParserConstructorRowAccumulatorUsePhrases :: [String]
+sharedParserConstructorRowAccumulatorUsePhrases =
+    [ "parseExactFourConstructorDataRowsConstructor1Name sourceFile dataStart dataNameToken emptyConstructorRows"
+    , "parseExactFiveConstructorDataRowsConstructor1Name sourceFile dataStart dataNameToken emptyConstructorRows"
+    , "parseExactNineConstructorDataRowsConstructor1Name sourceFile dataStart dataNameToken emptyConstructorRows"
+    , "parserBind (appendConstructorRow sourceFile constructorRowsValue c4Token t4"
+    , "parserBind (appendConstructorRow sourceFile constructorRowsValue c5Token t5"
+    , "parserBind (appendConstructorRow sourceFile constructorRowsValue c9Token t9"
+    , "dataRowsWithConstructorRows\n                      sourceFile\n                      dataNameToken"
+    ]
+
+sharedParserConstructorRowAccumulatorGuardPhrases :: [String]
+sharedParserConstructorRowAccumulatorGuardPhrases =
+    [ "shared parser-owned .mlfp parser shares constructor row accumulation"
+    , "sharedParserConstructorRowAccumulatorSubstratePhrases"
+    , "sharedParserConstructorRowAccumulatorUsePhrases"
+    , "sharedParserRemovedConstructorRowAccumulatorAliases"
+    ]
+
+sharedParserRemovedConstructorRowAccumulatorAliases :: [String]
+sharedParserRemovedConstructorRowAccumulatorAliases =
+    concat
+        [ [ "parseExactFourConstructorDataRowsConstructor" <> show n <> "Continue" | n <- [(1 :: Int) .. 3] ]
+        , [ "parseExactFiveConstructorDataRowsConstructor" <> show n <> "Continue" | n <- [(1 :: Int) .. 4] ]
+        , [ "parseExactNineConstructorDataRowsConstructor" <> show n <> "Continue" | n <- [(1 :: Int) .. 8] ]
+        , [ "parseExactFourConstructorDataRowsFinish"
+          , "parseExactFiveConstructorDataRowsFinish"
+          , "parseExactNineConstructorDataRowsFinish"
+          ]
         ]
 
 sharedParserEarlySuccessPhrases :: [String]
