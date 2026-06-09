@@ -1,3 +1,22 @@
+## 2026-06-09 - Round 350 bounded complete-program module-row sequencing substrate
+
+- Added a narrow bounded complete-program module-row sequencing helper family
+  in the shared parser-owned `ParserParityParser.mlfp` library. The helper
+  returns accumulated `ValueProjectionRows` at end of input, otherwise parses
+  one more `parseSharedProgramModule`, appends rows with `appendLine`, and
+  advances through explicit remaining-module budget entry points.
+- Migrated the selected two-, three-, and four-module complete-program tail
+  paths onto the helper while preserving the existing four-module maximum and
+  leaving any fifth module to fail through the existing parser reply
+  end-of-input boundary.
+- Removed the migrated second/third/fourth program-module continuation aliases
+  instead of leaving compatibility wrappers, and added focused static Hspec
+  coverage for the helper surface, migrated call sites, and alias absence.
+- Scope remains bounded compiler-frontend/parser ergonomics substrate only.
+  This is not full parser parity, compiler-package implementation,
+  platform/proof progress, native/backend completion, package-manager/linker
+  work, or self-boot completion.
+
 ## 2026-06-09 - Round 349 bounded source-definition row sequencing substrate
 
 - Added a narrow bounded source-definition row sequencing helper family in the

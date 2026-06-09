@@ -499,54 +499,54 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
 
   def parseCompleteProgramTail : String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(moduleValue : ParserValue) case moduleValue of {
-      ValueProjectionRows rows -> parseProgramSecondModuleOrDone sourceFile rows;
+      ValueProjectionRows rows -> parseBoundedProgramModuleRowsRemaining3 sourceFile (ValueProjectionRows rows);
       ValueConstructorRows _ -> parserFail (ExpectedCompleteModule basicUnexpectedSpan);
       ValueModuleKey _ -> parserFail (ExpectedCompleteModule basicUnexpectedSpan);
       ValueToken _ -> parserFail (ExpectedCompleteModule basicUnexpectedSpan);
       ValueUnit -> parserFail (ExpectedCompleteModule basicUnexpectedSpan)
     };
 
-  def parseProgramSecondModuleOrDone : String -> String -> Parser ParserValue =
-    λ(sourceFile : String) λ(rows : String)
-      parserReturnAtEndOr (ValueProjectionRows rows)
-        (parserBind (parseSharedProgramModule sourceFile ValueUnit) (appendSecondProgramModuleRows sourceFile rows));
-
-  def appendSecondProgramModuleRows : String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(existingRows : String) λ(moduleValue : ParserValue) case moduleValue of {
-      ValueProjectionRows moduleRows -> parseProgramThirdModuleOrDone sourceFile (appendLine existingRows moduleRows);
+  def parseBoundedProgramModuleRows : String -> (String -> ParserValue -> Parser ParserValue) -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(remainingModules : String -> ParserValue -> Parser ParserValue) λ(rowsValue : ParserValue) case rowsValue of {
+      ValueProjectionRows rows ->
+        parserReturnAtEndOr (ValueProjectionRows rows)
+          (parserBind (parseSharedProgramModule sourceFile ValueUnit)
+            (appendBoundedProgramModuleRowsAndContinue remainingModules sourceFile rows));
       ValueConstructorRows _ -> parserFail (ExpectedCompleteModule basicUnexpectedSpan);
       ValueModuleKey _ -> parserFail (ExpectedCompleteModule basicUnexpectedSpan);
       ValueToken _ -> parserFail (ExpectedCompleteModule basicUnexpectedSpan);
       ValueUnit -> parserFail (ExpectedCompleteModule basicUnexpectedSpan)
     };
 
-  def parseProgramThirdModuleOrDone : String -> String -> Parser ParserValue =
-    λ(sourceFile : String) λ(rows : String)
-      parserReturnAtEndOr (ValueProjectionRows rows)
-        (parserBind (parseSharedProgramModule sourceFile ValueUnit) (appendThirdProgramModuleRows sourceFile rows));
-
-  def appendThirdProgramModuleRows : String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(existingRows : String) λ(moduleValue : ParserValue) case moduleValue of {
-      ValueProjectionRows moduleRows -> parseProgramFourthModuleOrDone sourceFile (appendLine existingRows moduleRows);
+  def appendBoundedProgramModuleRowsAndContinue : (String -> ParserValue -> Parser ParserValue) -> String -> String -> ParserValue -> Parser ParserValue =
+    λ(remainingModules : String -> ParserValue -> Parser ParserValue) λ(sourceFile : String) λ(existingRows : String) λ(moduleValue : ParserValue) case moduleValue of {
+      ValueProjectionRows moduleRows -> remainingModules sourceFile (ValueProjectionRows (appendLine existingRows moduleRows));
       ValueConstructorRows _ -> parserFail (ExpectedCompleteModule basicUnexpectedSpan);
       ValueModuleKey _ -> parserFail (ExpectedCompleteModule basicUnexpectedSpan);
       ValueToken _ -> parserFail (ExpectedCompleteModule basicUnexpectedSpan);
       ValueUnit -> parserFail (ExpectedCompleteModule basicUnexpectedSpan)
     };
 
-  def parseProgramFourthModuleOrDone : String -> String -> Parser ParserValue =
-    λ(sourceFile : String) λ(rows : String)
-      parserReturnAtEndOr (ValueProjectionRows rows)
-        (parserBind (parseSharedProgramModule sourceFile ValueUnit) (appendFourthProgramModuleRows rows));
-
-  def appendFourthProgramModuleRows : String -> ParserValue -> Parser ParserValue =
-    λ(existingRows : String) λ(moduleValue : ParserValue) case moduleValue of {
-      ValueProjectionRows moduleRows -> parserPure (ValueProjectionRows (appendLine existingRows moduleRows));
+  def finishBoundedProgramModuleRows : String -> ParserValue -> Parser ParserValue =
+    λ(_sourceFile : String) λ(rowsValue : ParserValue) case rowsValue of {
+      ValueProjectionRows _ -> parserPure rowsValue;
       ValueConstructorRows _ -> parserFail (ExpectedCompleteModule basicUnexpectedSpan);
       ValueModuleKey _ -> parserFail (ExpectedCompleteModule basicUnexpectedSpan);
       ValueToken _ -> parserFail (ExpectedCompleteModule basicUnexpectedSpan);
       ValueUnit -> parserFail (ExpectedCompleteModule basicUnexpectedSpan)
     };
+
+  def parseBoundedProgramModuleRowsRemaining3 : String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(rowsValue : ParserValue)
+      parseBoundedProgramModuleRows sourceFile parseBoundedProgramModuleRowsRemaining2 rowsValue;
+
+  def parseBoundedProgramModuleRowsRemaining2 : String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(rowsValue : ParserValue)
+      parseBoundedProgramModuleRows sourceFile parseBoundedProgramModuleRowsRemaining1 rowsValue;
+
+  def parseBoundedProgramModuleRowsRemaining1 : String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(rowsValue : ParserValue)
+      parseBoundedProgramModuleRows sourceFile finishBoundedProgramModuleRows rowsValue;
 
   def parseAnyModule : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)

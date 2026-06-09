@@ -685,6 +685,21 @@ spec =
             traverse_ (`shouldSatisfy` (`isInfixOf` staticGuardSource)) sharedParserSourceDefinitionRowSequenceGuardPhrases
             removedMatches `shouldBe` []
 
+        it "shared parser-owned .mlfp parser shares bounded program module row sequencing" $ do
+            sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
+            sharedSpecSource <- readFile "test/ProgramParserParitySpec.hs"
+
+            let staticGuardSource = sharedParserSource <> "\n" <> sharedSpecSource
+                removedMatches =
+                    filter
+                        (`isInfixOf` sharedParserSource)
+                        sharedParserRemovedProgramModuleRowSequenceAliases
+
+            traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserBoundedProgramModuleRowSequenceSubstratePhrases
+            traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserBoundedProgramModuleRowSequenceUsePhrases
+            traverse_ (`shouldSatisfy` (`isInfixOf` staticGuardSource)) sharedParserProgramModuleRowSequenceGuardPhrases
+            removedMatches `shouldBe` []
+
         it "shared parser-owned .mlfp parser reaches success only after complete syntax and dynamic diagnostics" $ do
             sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
             sharedLexerSource <- readFile (sharedParserLibraryRoot </> "ParserParityLexer.mlfp")
@@ -1797,6 +1812,45 @@ sharedParserRemovedSourceDefinitionRowSequenceAliases =
     , "parseSixteenSourceDefinitionRowsThirdBatch"
     , "appendSixteenSourceDefinitionRowsThirdBatch"
     , "parseSixteenSourceDefinitionRowsFourthBatch"
+    ]
+
+sharedParserBoundedProgramModuleRowSequenceSubstratePhrases :: [String]
+sharedParserBoundedProgramModuleRowSequenceSubstratePhrases =
+    [ "def parseBoundedProgramModuleRows : String -> (String -> ParserValue -> Parser ParserValue) -> ParserValue -> Parser ParserValue"
+    , "def appendBoundedProgramModuleRowsAndContinue : (String -> ParserValue -> Parser ParserValue) -> String -> String -> ParserValue -> Parser ParserValue"
+    , "def finishBoundedProgramModuleRows : String -> ParserValue -> Parser ParserValue"
+    , "def parseBoundedProgramModuleRowsRemaining3"
+    , "def parseBoundedProgramModuleRowsRemaining2"
+    , "def parseBoundedProgramModuleRowsRemaining1"
+    , "parserReturnAtEndOr (ValueProjectionRows rows)"
+    , "parserBind (parseSharedProgramModule sourceFile ValueUnit)"
+    , "appendLine existingRows moduleRows"
+    ]
+
+sharedParserBoundedProgramModuleRowSequenceUsePhrases :: [String]
+sharedParserBoundedProgramModuleRowSequenceUsePhrases =
+    [ "ValueProjectionRows rows -> parseBoundedProgramModuleRowsRemaining3 sourceFile (ValueProjectionRows rows)"
+    , "parseBoundedProgramModuleRows sourceFile parseBoundedProgramModuleRowsRemaining2 rowsValue"
+    , "parseBoundedProgramModuleRows sourceFile parseBoundedProgramModuleRowsRemaining1 rowsValue"
+    , "parseBoundedProgramModuleRows sourceFile finishBoundedProgramModuleRows rowsValue"
+    ]
+
+sharedParserProgramModuleRowSequenceGuardPhrases :: [String]
+sharedParserProgramModuleRowSequenceGuardPhrases =
+    [ "shared parser-owned .mlfp parser shares bounded program module row sequencing"
+    , "sharedParserBoundedProgramModuleRowSequenceSubstratePhrases"
+    , "sharedParserBoundedProgramModuleRowSequenceUsePhrases"
+    , "sharedParserRemovedProgramModuleRowSequenceAliases"
+    ]
+
+sharedParserRemovedProgramModuleRowSequenceAliases :: [String]
+sharedParserRemovedProgramModuleRowSequenceAliases =
+    [ "parseProgramSecondModuleOrDone"
+    , "appendSecondProgramModuleRows"
+    , "parseProgramThirdModuleOrDone"
+    , "appendThirdProgramModuleRows"
+    , "parseProgramFourthModuleOrDone"
+    , "appendFourthProgramModuleRows"
     ]
 
 sharedParserEarlySuccessPhrases :: [String]
