@@ -700,6 +700,21 @@ spec =
             traverse_ (`shouldSatisfy` (`isInfixOf` staticGuardSource)) sharedParserProgramModuleRowSequenceGuardPhrases
             removedMatches `shouldBe` []
 
+        it "shared parser-owned .mlfp parser shares bounded import row sequencing" $ do
+            sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
+            sharedSpecSource <- readFile "test/ProgramParserParitySpec.hs"
+
+            let staticGuardSource = sharedParserSource <> "\n" <> sharedSpecSource
+                removedMatches =
+                    filter
+                        (`isInfixOf` sharedParserSource)
+                        sharedParserRemovedImportRowSequenceAliases
+
+            traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserBoundedImportRowSequenceSubstratePhrases
+            traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserBoundedImportRowSequenceUsePhrases
+            traverse_ (`shouldSatisfy` (`isInfixOf` staticGuardSource)) sharedParserImportRowSequenceGuardPhrases
+            removedMatches `shouldBe` []
+
         it "shared parser-owned .mlfp parser reaches success only after complete syntax and dynamic diagnostics" $ do
             sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
             sharedLexerSource <- readFile (sharedParserLibraryRoot </> "ParserParityLexer.mlfp")
@@ -1851,6 +1866,45 @@ sharedParserRemovedProgramModuleRowSequenceAliases =
     , "appendThirdProgramModuleRows"
     , "parseProgramFourthModuleOrDone"
     , "appendFourthProgramModuleRows"
+    ]
+
+sharedParserBoundedImportRowSequenceSubstratePhrases :: [String]
+sharedParserBoundedImportRowSequenceSubstratePhrases =
+    [ "def parseBoundedOneImportRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue"
+    , "def parseBoundedThreeImportRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue"
+    , "def parseBoundedImportRows : String -> String -> String -> String -> (ParserValue -> Parser ParserValue) -> ParserValue -> Parser ParserValue"
+    , "def parseBoundedImportRowsNext : String -> (ParserValue -> Parser ParserValue) -> ParserValue -> Parser ParserValue"
+    , "def appendBoundedImportRowsAndContinue : (ParserValue -> Parser ParserValue) -> ParserValue -> ParserValue -> Parser ParserValue"
+    , "def parseBoundedImportRowsRemaining2"
+    , "def parseBoundedImportRowsRemaining1"
+    , "parserBind (parseImportProjectionRows sourceFile ValueUnit)"
+    , "parserBind (appendProjectionValues existingRows nextRows)"
+    ]
+
+sharedParserBoundedImportRowSequenceUsePhrases :: [String]
+sharedParserBoundedImportRowSequenceUsePhrases =
+    [ "parseBoundedThreeImportRows sourceFile moduleStart moduleName exportRows ValueUnit"
+    , "parseBoundedOneImportRows sourceFile moduleStart moduleName exportRows ValueUnit"
+    , "parseBoundedImportRows sourceFile moduleStart moduleName exportRows (parseBoundedImportRowsRemaining2 sourceFile moduleStart moduleName exportRows) start"
+    , "parseBoundedImportRows sourceFile moduleStart moduleName exportRows (parseImportedBodyAfterImport sourceFile moduleStart moduleName exportRows) start"
+    , "parseBoundedImportRowsNext sourceFile (parseBoundedImportRowsRemaining1 sourceFile moduleStart moduleName exportRows) rowsValue"
+    , "parseBoundedImportRowsNext sourceFile (parseImportedBodyAfterImport sourceFile moduleStart moduleName exportRows) rowsValue"
+    ]
+
+sharedParserImportRowSequenceGuardPhrases :: [String]
+sharedParserImportRowSequenceGuardPhrases =
+    [ "shared parser-owned .mlfp parser shares bounded import row sequencing"
+    , "sharedParserBoundedImportRowSequenceSubstratePhrases"
+    , "sharedParserBoundedImportRowSequenceUsePhrases"
+    , "sharedParserRemovedImportRowSequenceAliases"
+    ]
+
+sharedParserRemovedImportRowSequenceAliases :: [String]
+sharedParserRemovedImportRowSequenceAliases =
+    [ "parseThreeImportSecondRows"
+    , "appendThreeImportSecondRows"
+    , "parseThreeImportThirdRows"
+    , "appendThreeImportThirdRows"
     ]
 
 sharedParserEarlySuccessPhrases :: [String]

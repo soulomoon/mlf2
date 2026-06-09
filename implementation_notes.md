@@ -1,3 +1,23 @@
+## 2026-06-09 - Round 351 bounded import-row sequencing substrate
+
+- Added a narrow bounded import-row sequencing helper family in the shared
+  parser-owned `ParserParityParser.mlfp` library. The helper parses one
+  `parseImportProjectionRows` row at a time, appends later import rows through
+  `appendProjectionValues`, and advances through explicit one- and
+  three-import budget entry points before the existing post-import body
+  continuation.
+- Migrated the selected one-import and three-import module-body paths onto the
+  helper while preserving `parseImportedBodyAfterImport`, module-body dispatch,
+  import projection row order, post-import body parsing, spans, diagnostics,
+  package source-layout evidence, and aggregate parser-parity outputs.
+- Removed the migrated second/third import continuation aliases instead of
+  leaving compatibility wrappers, and added focused static Hspec coverage for
+  the helper surface, migrated call sites, and alias absence.
+- Scope remains bounded compiler-frontend/parser ergonomics substrate only.
+  This is not full parser parity, compiler-package implementation,
+  platform/proof progress, native/backend completion, package-manager/linker
+  work, or self-boot completion.
+
 ## 2026-06-09 - Round 350 bounded complete-program module-row sequencing substrate
 
 - Added a narrow bounded complete-program module-row sequencing helper family

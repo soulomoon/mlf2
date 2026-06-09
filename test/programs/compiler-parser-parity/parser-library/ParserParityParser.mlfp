@@ -2993,33 +2993,42 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
 
   def parseThreeImportLedBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
-      parserBind (parseImportProjectionRows sourceFile ValueUnit)
-        (parseThreeImportSecondRows sourceFile moduleStart moduleName exportRows);
-
-  def parseThreeImportSecondRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(firstImportRows : ParserValue)
-      parserBind (parseImportProjectionRows sourceFile ValueUnit)
-        (appendThreeImportSecondRows sourceFile moduleStart moduleName exportRows firstImportRows);
-
-  def appendThreeImportSecondRows : String -> String -> String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(firstImportRows : ParserValue) λ(secondImportRows : ParserValue)
-      parserBind (appendProjectionValues firstImportRows secondImportRows)
-        (parseThreeImportThirdRows sourceFile moduleStart moduleName exportRows);
-
-  def parseThreeImportThirdRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(firstTwoImportRows : ParserValue)
-      parserBind (parseImportProjectionRows sourceFile ValueUnit)
-        (appendThreeImportThirdRows sourceFile moduleStart moduleName exportRows firstTwoImportRows);
-
-  def appendThreeImportThirdRows : String -> String -> String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(firstTwoImportRows : ParserValue) λ(thirdImportRows : ParserValue)
-      parserBind (appendProjectionValues firstTwoImportRows thirdImportRows)
-        (parseImportedBodyAfterImport sourceFile moduleStart moduleName exportRows);
+      parseBoundedThreeImportRows sourceFile moduleStart moduleName exportRows ValueUnit;
 
   def parseImportLedBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
+      parseBoundedOneImportRows sourceFile moduleStart moduleName exportRows ValueUnit;
+
+  def parseBoundedOneImportRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(start : ParserValue)
+      parseBoundedImportRows sourceFile moduleStart moduleName exportRows (parseImportedBodyAfterImport sourceFile moduleStart moduleName exportRows) start;
+
+  def parseBoundedThreeImportRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(start : ParserValue)
+      parseBoundedImportRows sourceFile moduleStart moduleName exportRows (parseBoundedImportRowsRemaining2 sourceFile moduleStart moduleName exportRows) start;
+
+  def parseBoundedImportRows : String -> String -> String -> String -> (ParserValue -> Parser ParserValue) -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(_moduleStart : String) λ(_moduleName : String) λ(_exportRows : String) λ(remainingImports : ParserValue -> Parser ParserValue) λ(_start : ParserValue)
       parserBind (parseImportProjectionRows sourceFile ValueUnit)
-        (parseImportedBodyAfterImport sourceFile moduleStart moduleName exportRows);
+        remainingImports;
+
+  def parseBoundedImportRowsNext : String -> (ParserValue -> Parser ParserValue) -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(remainingImports : ParserValue -> Parser ParserValue) λ(existingRows : ParserValue)
+      parserBind (parseImportProjectionRows sourceFile ValueUnit)
+        (appendBoundedImportRowsAndContinue remainingImports existingRows);
+
+  def appendBoundedImportRowsAndContinue : (ParserValue -> Parser ParserValue) -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(remainingImports : ParserValue -> Parser ParserValue) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
+      parserBind (appendProjectionValues existingRows nextRows)
+        remainingImports;
+
+  def parseBoundedImportRowsRemaining2 : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(rowsValue : ParserValue)
+      parseBoundedImportRowsNext sourceFile (parseBoundedImportRowsRemaining1 sourceFile moduleStart moduleName exportRows) rowsValue;
+
+  def parseBoundedImportRowsRemaining1 : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(rowsValue : ParserValue)
+      parseBoundedImportRowsNext sourceFile (parseImportedBodyAfterImport sourceFile moduleStart moduleName exportRows) rowsValue;
 
   def parseImportedBodyAfterImport : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(importRowsValue : ParserValue) case importRowsValue of {
