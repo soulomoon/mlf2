@@ -1,3 +1,24 @@
+## 2026-06-10 - Round 352 bounded module-body source-definition sequencing substrate
+
+- Added exact two- and three-source-definition helper entrypoints in the
+  shared parser-owned `ParserParityParser.mlfp` library. The helpers reuse the
+  existing bounded source-definition row substrate, parse one
+  `parseSourceDefinitionRows` row at a time, and accumulate rows through
+  `appendProjectionValues`.
+- Migrated the selected two-definition, three-definition, and imported
+  three-definition module-body paths onto those helper entrypoints while
+  preserving module-body dispatch, exact definition counts, definition-row
+  order, post-import body parsing, current source-definition semicolon
+  handling, spans, diagnostics, package source-layout evidence, and aggregate
+  parser-parity outputs.
+- Removed the migrated second/third source-definition continuation aliases
+  instead of leaving compatibility wrappers, and added focused static Hspec
+  coverage for helper presence, migrated call sites, and alias absence.
+- Scope remains bounded compiler-frontend/parser ergonomics substrate only.
+  This is not full parser parity, compiler-package implementation,
+  platform/proof progress, native/backend completion, package-manager/linker
+  work, or self-boot completion.
+
 ## 2026-06-09 - Round 351 bounded import-row sequencing substrate
 
 - Added a narrow bounded import-row sequencing helper family in the shared

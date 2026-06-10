@@ -639,33 +639,13 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
 
   def parseTwoDefinitionBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
-      parserBind (parseSourceDefinitionRows sourceFile ValueUnit)
-        (parseTwoDefinitionSecondRows sourceFile moduleStart moduleName exportRows);
-
-  def parseTwoDefinitionSecondRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(firstRows : ParserValue)
-      parserBind (parseSourceDefinitionRows sourceFile ValueUnit)
-        (finishExactModuleBodyRows sourceFile moduleStart moduleName exportRows firstRows);
+      parserBind (parseTwoSourceDefinitionRows sourceFile ValueUnit)
+        (finishModuleBodyRows sourceFile moduleStart moduleName exportRows);
 
   def parseThreeDefinitionBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
-      parserBind (parseSourceDefinitionRows sourceFile ValueUnit)
-        (parseSecondSourceDefinitionRows sourceFile moduleStart moduleName exportRows);
-
-  def parseSecondSourceDefinitionRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(firstRows : ParserValue)
-      parserBind (parseSourceDefinitionRows sourceFile ValueUnit)
-        (appendFirstSecondSourceDefinitionRows sourceFile moduleStart moduleName exportRows firstRows);
-
-  def appendFirstSecondSourceDefinitionRows : String -> String -> String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(firstRows : ParserValue) λ(secondRows : ParserValue)
-      parserBind (appendProjectionValues firstRows secondRows)
-        (parseThirdSourceDefinitionRows sourceFile moduleStart moduleName exportRows);
-
-  def parseThirdSourceDefinitionRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(firstTwoRows : ParserValue)
-      parserBind (parseSourceDefinitionRows sourceFile ValueUnit)
-        (finishExactModuleBodyRows sourceFile moduleStart moduleName exportRows firstTwoRows);
+      parserBind (parseThreeSourceDefinitionRows sourceFile ValueUnit)
+        (finishModuleBodyRows sourceFile moduleStart moduleName exportRows);
 
   def parseSourceDefinitionRows : String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(_start : ParserValue)
@@ -2524,6 +2504,14 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
     λ(sourceFile : String) λ(_start : ParserValue)
       parseBoundedSourceDefinitionRows sourceFile parseBoundedSourceDefinitionRowsRemaining3 ValueUnit;
 
+  def parseTwoSourceDefinitionRows : String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(_start : ParserValue)
+      parseBoundedSourceDefinitionRows sourceFile parseBoundedSourceDefinitionRowsRemaining1 ValueUnit;
+
+  def parseThreeSourceDefinitionRows : String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(_start : ParserValue)
+      parseBoundedSourceDefinitionRows sourceFile parseBoundedSourceDefinitionRowsRemaining2 ValueUnit;
+
   def parseThirteenSourceDefinitionRows : String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(_start : ParserValue)
       parseBoundedSourceDefinitionRows sourceFile parseBoundedSourceDefinitionRowsRemaining12 ValueUnit;
@@ -2750,7 +2738,12 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
   def appendEqNatInstanceRows : String -> String -> String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(existingRows : ParserValue) λ(instanceRowsValue : ParserValue)
       parserBind (appendProjectionValues existingRows instanceRowsValue)
-        (parseSecondSourceDefinitionRows sourceFile moduleStart moduleName exportRows);
+        (parseTwoSourceDefinitionRowsThenFinishModuleBody sourceFile moduleStart moduleName exportRows);
+
+  def parseTwoSourceDefinitionRowsThenFinishModuleBody : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(existingRows : ParserValue)
+      parserBind (parseTwoSourceDefinitionRows sourceFile ValueUnit)
+        (finishExactModuleBodyRows sourceFile moduleStart moduleName exportRows existingRows);
 
   def parseClassDerivedStartedBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
@@ -2903,7 +2896,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
   def appendDataFirstDefinitionRows : String -> String -> String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(dataRowsValue : ParserValue) λ(firstDefinitionRows : ParserValue)
       parserBind (appendProjectionValues dataRowsValue firstDefinitionRows)
-        (parseSecondSourceDefinitionRows sourceFile moduleStart moduleName exportRows);
+        (parseTwoSourceDefinitionRowsThenFinishModuleBody sourceFile moduleStart moduleName exportRows);
 
   def parseTwoDataThreeDefinitionStartedBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
@@ -3077,23 +3070,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
 
   def parseThreeImportedSourceDefinitionRows : String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(_start : ParserValue)
-      parserBind (parseSourceDefinitionRows sourceFile ValueUnit)
-        (parseThreeImportedSourceDefinitionSecondRows sourceFile);
-
-  def parseThreeImportedSourceDefinitionSecondRows : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(firstRows : ParserValue)
-      parserBind (parseSourceDefinitionRows sourceFile ValueUnit)
-        (appendThreeImportedSourceDefinitionSecondRows sourceFile firstRows);
-
-  def appendThreeImportedSourceDefinitionSecondRows : String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(firstRows : ParserValue) λ(secondRows : ParserValue)
-      parserBind (appendProjectionValues firstRows secondRows)
-        (parseThreeImportedSourceDefinitionThirdRows sourceFile);
-
-  def parseThreeImportedSourceDefinitionThirdRows : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(firstTwoRows : ParserValue)
-      parserBind (parseSourceDefinitionRows sourceFile ValueUnit)
-        (appendProjectionValues firstTwoRows);
+      parseThreeSourceDefinitionRows sourceFile ValueUnit;
 
   def parseImportProjectionRows : String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(_start : ParserValue)

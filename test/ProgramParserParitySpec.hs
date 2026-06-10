@@ -685,6 +685,21 @@ spec =
             traverse_ (`shouldSatisfy` (`isInfixOf` staticGuardSource)) sharedParserSourceDefinitionRowSequenceGuardPhrases
             removedMatches `shouldBe` []
 
+        it "shared parser-owned .mlfp parser shares bounded module-body source-definition row sequencing" $ do
+            sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
+            sharedSpecSource <- readFile "test/ProgramParserParitySpec.hs"
+
+            let staticGuardSource = sharedParserSource <> "\n" <> sharedSpecSource
+                removedMatches =
+                    filter
+                        (`isInfixOf` sharedParserSource)
+                        sharedParserRemovedModuleBodySourceDefinitionRowSequenceAliases
+
+            traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserBoundedModuleBodySourceDefinitionRowSequenceSubstratePhrases
+            traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserBoundedModuleBodySourceDefinitionRowSequenceUsePhrases
+            traverse_ (`shouldSatisfy` (`isInfixOf` staticGuardSource)) sharedParserModuleBodySourceDefinitionRowSequenceGuardPhrases
+            removedMatches `shouldBe` []
+
         it "shared parser-owned .mlfp parser shares bounded program module row sequencing" $ do
             sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
             sharedSpecSource <- readFile "test/ProgramParserParitySpec.hs"
@@ -1827,6 +1842,44 @@ sharedParserRemovedSourceDefinitionRowSequenceAliases =
     , "parseSixteenSourceDefinitionRowsThirdBatch"
     , "appendSixteenSourceDefinitionRowsThirdBatch"
     , "parseSixteenSourceDefinitionRowsFourthBatch"
+    ]
+
+sharedParserBoundedModuleBodySourceDefinitionRowSequenceSubstratePhrases :: [String]
+sharedParserBoundedModuleBodySourceDefinitionRowSequenceSubstratePhrases =
+    [ "def parseTwoSourceDefinitionRows : String -> ParserValue -> Parser ParserValue"
+    , "def parseThreeSourceDefinitionRows : String -> ParserValue -> Parser ParserValue"
+    , "parseBoundedSourceDefinitionRows sourceFile parseBoundedSourceDefinitionRowsRemaining1 ValueUnit"
+    , "parseBoundedSourceDefinitionRows sourceFile parseBoundedSourceDefinitionRowsRemaining2 ValueUnit"
+    , "parserBind (parseSourceDefinitionRows sourceFile ValueUnit)"
+    , "parserBind (appendProjectionValues existingRows nextRows)"
+    ]
+
+sharedParserBoundedModuleBodySourceDefinitionRowSequenceUsePhrases :: [String]
+sharedParserBoundedModuleBodySourceDefinitionRowSequenceUsePhrases =
+    [ "parserBind (parseTwoSourceDefinitionRows sourceFile ValueUnit)\n        (finishModuleBodyRows sourceFile moduleStart moduleName exportRows)"
+    , "parserBind (parseThreeSourceDefinitionRows sourceFile ValueUnit)\n        (finishModuleBodyRows sourceFile moduleStart moduleName exportRows)"
+    , "parserBind (parseTwoSourceDefinitionRows sourceFile ValueUnit)\n        (finishExactModuleBodyRows sourceFile moduleStart moduleName exportRows existingRows)"
+    , "parseThreeSourceDefinitionRows sourceFile ValueUnit"
+    , "parserBind (parseThreeImportedSourceDefinitionRows sourceFile ValueUnit)\n                (finishImportedBodyRows sourceFile moduleStart moduleName exportRows importRows)"
+    ]
+
+sharedParserModuleBodySourceDefinitionRowSequenceGuardPhrases :: [String]
+sharedParserModuleBodySourceDefinitionRowSequenceGuardPhrases =
+    [ "shared parser-owned .mlfp parser shares bounded module-body source-definition row sequencing"
+    , "sharedParserBoundedModuleBodySourceDefinitionRowSequenceSubstratePhrases"
+    , "sharedParserBoundedModuleBodySourceDefinitionRowSequenceUsePhrases"
+    , "sharedParserRemovedModuleBodySourceDefinitionRowSequenceAliases"
+    ]
+
+sharedParserRemovedModuleBodySourceDefinitionRowSequenceAliases :: [String]
+sharedParserRemovedModuleBodySourceDefinitionRowSequenceAliases =
+    [ "def parseTwoDefinitionSecondRows :"
+    , "def parseSecondSourceDefinitionRows :"
+    , "def appendFirstSecondSourceDefinitionRows :"
+    , "def parseThirdSourceDefinitionRows :"
+    , "def parseThreeImportedSourceDefinitionSecondRows :"
+    , "def appendThreeImportedSourceDefinitionSecondRows :"
+    , "def parseThreeImportedSourceDefinitionThirdRows :"
     ]
 
 sharedParserBoundedProgramModuleRowSequenceSubstratePhrases :: [String]
