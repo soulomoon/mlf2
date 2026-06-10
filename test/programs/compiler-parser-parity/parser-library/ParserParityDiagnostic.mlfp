@@ -1,4 +1,7 @@
-module ParserParityDiagnostic export (ParserDiagnostic(..)) {
+module ParserParityDiagnostic export (ParserDiagnostic(..), diagnosticEvidenceLabel, diagnosticEvidenceSpan, renderParserDiagnosticEvidence) {
+  import Prelude exposing (stringAppend);
+  import ParserParitySource exposing (renderSpan);
+
   data ParserDiagnostic =
       UnexpectedSourceText : String -> ParserDiagnostic
     | ExpectedCompleteModule : String -> ParserDiagnostic
@@ -16,4 +19,48 @@ module ParserParityDiagnostic export (ParserDiagnostic(..)) {
     | ExpectedTypeFamilyEquationEquals : String -> ParserDiagnostic
     | ExpectedConstructorForallDot : String -> ParserDiagnostic
     | ExpectedExpressionCloseParen : String -> ParserDiagnostic;
+
+  def diagnosticEvidenceLabel : ParserDiagnostic -> String =
+    λ(diagnostic : ParserDiagnostic) case diagnostic of {
+      UnexpectedSourceText _ -> "unexpected-source@";
+      ExpectedCompleteModule _ -> "expected-complete-module@";
+      ExpectedEquals _ -> "expected-equals@";
+      ExpectedImportSemicolon _ -> "expected-import-semicolon@";
+      ExpectedImportAlias _ -> "expected-import-alias@";
+      ExpectedImportExposingSeparator _ -> "expected-import-exposing-separator@";
+      ExpectedDefSemicolon _ -> "expected-def-semicolon@";
+      ExpectedLetIn _ -> "expected-let-in@";
+      ExpectedLetAnnotationType _ -> "expected-let-annotation-type@";
+      ExpectedConstructorColon _ -> "expected-constructor-colon@";
+      ExpectedCaseBranchArrow _ -> "expected-case-branch-arrow@";
+      ExpectedInstanceMethodEquals _ -> "expected-instance-method-equals@";
+      ExpectedFunctionalDependencyArrow _ -> "expected-functional-dependency-arrow@";
+      ExpectedTypeFamilyEquationEquals _ -> "expected-type-family-equation-equals@";
+      ExpectedConstructorForallDot _ -> "expected-constructor-forall-dot@";
+      ExpectedExpressionCloseParen _ -> "expected-expression-close-paren@"
+    };
+
+  def diagnosticEvidenceSpan : ParserDiagnostic -> String =
+    λ(diagnostic : ParserDiagnostic) case diagnostic of {
+      UnexpectedSourceText span -> span;
+      ExpectedCompleteModule span -> span;
+      ExpectedEquals span -> span;
+      ExpectedImportSemicolon span -> span;
+      ExpectedImportAlias span -> span;
+      ExpectedImportExposingSeparator span -> span;
+      ExpectedDefSemicolon span -> span;
+      ExpectedLetIn span -> span;
+      ExpectedLetAnnotationType span -> span;
+      ExpectedConstructorColon span -> span;
+      ExpectedCaseBranchArrow span -> span;
+      ExpectedInstanceMethodEquals span -> span;
+      ExpectedFunctionalDependencyArrow span -> span;
+      ExpectedTypeFamilyEquationEquals span -> span;
+      ExpectedConstructorForallDot span -> span;
+      ExpectedExpressionCloseParen span -> span
+    };
+
+  def renderParserDiagnosticEvidence : String -> ParserDiagnostic -> String =
+    λ(sourceFile : String) λ(diagnostic : ParserDiagnostic)
+      stringAppend (diagnosticEvidenceLabel diagnostic) (renderSpan sourceFile (diagnosticEvidenceSpan diagnostic));
 }

@@ -575,6 +575,23 @@ spec =
             traverse_ (`shouldSatisfy` (`isInfixOf` staticGuardSource)) sharedParserValueSourceSpanGuardPhrases
             removedMatches `shouldBe` []
 
+        it "shared parser-owned .mlfp parser shares diagnostic evidence rendering substrate" $ do
+            sharedDiagnosticSource <- readFile (sharedParserLibraryRoot </> "ParserParityDiagnostic.mlfp")
+            sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
+            sharedSpecSource <- readFile "test/ProgramParserParitySpec.hs"
+
+            let parserLibrarySource = sharedDiagnosticSource <> "\n" <> sharedParserSource
+                staticGuardSource = parserLibrarySource <> "\n" <> sharedSpecSource
+                removedMatches =
+                    filter
+                        (`isInfixOf` sharedParserSource)
+                        sharedParserRemovedDiagnosticEvidenceRendererAliases
+
+            traverse_ (`shouldSatisfy` (`isInfixOf` sharedDiagnosticSource)) sharedParserDiagnosticEvidenceSubstratePhrases
+            traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserDiagnosticEvidenceUsePhrases
+            traverse_ (`shouldSatisfy` (`isInfixOf` staticGuardSource)) sharedParserDiagnosticEvidenceGuardPhrases
+            removedMatches `shouldBe` []
+
         it "shared parser-owned .mlfp parser shares bounded projection row lists" $ do
             sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
             sharedCombinatorSource <- readFile (sharedParserLibraryRoot </> "ParserParityParserCombinator.mlfp")
@@ -1570,6 +1587,56 @@ sharedParserRemovedParserValueSourceSpanFallbackPhrases =
     , "def moduleNameFromValue : ParserValue -> String =\n    λ(value : ParserValue) case value of"
     , "def spanFromTokenBounds : ParserValue -> ParserValue -> String =\n    λ(startValue : ParserValue) λ(endValue : ParserValue) case startValue of"
     , "def spanFromTokenStartToTokenStart : ParserValue -> ParserValue -> String =\n    λ(startValue : ParserValue) λ(endValue : ParserValue) case startValue of"
+    ]
+
+sharedParserDiagnosticEvidenceSubstratePhrases :: [String]
+sharedParserDiagnosticEvidenceSubstratePhrases =
+    [ "module ParserParityDiagnostic export (ParserDiagnostic(..), diagnosticEvidenceLabel, diagnosticEvidenceSpan, renderParserDiagnosticEvidence)"
+    , "import ParserParitySource exposing (renderSpan)"
+    , "def diagnosticEvidenceLabel : ParserDiagnostic -> String"
+    , "UnexpectedSourceText _ -> \"unexpected-source@\""
+    , "ExpectedCompleteModule _ -> \"expected-complete-module@\""
+    , "ExpectedEquals _ -> \"expected-equals@\""
+    , "ExpectedImportSemicolon _ -> \"expected-import-semicolon@\""
+    , "ExpectedImportAlias _ -> \"expected-import-alias@\""
+    , "ExpectedImportExposingSeparator _ -> \"expected-import-exposing-separator@\""
+    , "ExpectedDefSemicolon _ -> \"expected-def-semicolon@\""
+    , "ExpectedLetIn _ -> \"expected-let-in@\""
+    , "ExpectedLetAnnotationType _ -> \"expected-let-annotation-type@\""
+    , "ExpectedConstructorColon _ -> \"expected-constructor-colon@\""
+    , "ExpectedCaseBranchArrow _ -> \"expected-case-branch-arrow@\""
+    , "ExpectedInstanceMethodEquals _ -> \"expected-instance-method-equals@\""
+    , "ExpectedFunctionalDependencyArrow _ -> \"expected-functional-dependency-arrow@\""
+    , "ExpectedTypeFamilyEquationEquals _ -> \"expected-type-family-equation-equals@\""
+    , "ExpectedConstructorForallDot _ -> \"expected-constructor-forall-dot@\""
+    , "ExpectedExpressionCloseParen _ -> \"expected-expression-close-paren@\""
+    , "def diagnosticEvidenceSpan : ParserDiagnostic -> String"
+    , "UnexpectedSourceText span -> span"
+    , "ExpectedExpressionCloseParen span -> span"
+    , "def renderParserDiagnosticEvidence : String -> ParserDiagnostic -> String"
+    , "stringAppend (diagnosticEvidenceLabel diagnostic) (renderSpan sourceFile (diagnosticEvidenceSpan diagnostic))"
+    ]
+
+sharedParserDiagnosticEvidenceUsePhrases :: [String]
+sharedParserDiagnosticEvidenceUsePhrases =
+    [ "import ParserParityDiagnostic exposing (ParserDiagnostic(..), renderParserDiagnosticEvidence)"
+    , "LexerError diagnostic -> stringAppend \"tokens \" (renderParserDiagnosticEvidence sourceFile diagnostic)"
+    , "LexerError diagnostic -> stringAppend \"lexer negative \" (renderParserDiagnosticEvidence sourceFile diagnostic)"
+    , "ParserError diagnostic -> stringAppend prefix (renderParserDiagnosticEvidence sourceFile diagnostic)"
+    ]
+
+sharedParserDiagnosticEvidenceGuardPhrases :: [String]
+sharedParserDiagnosticEvidenceGuardPhrases =
+    [ "shared parser-owned .mlfp parser shares diagnostic evidence rendering substrate"
+    , "sharedParserDiagnosticEvidenceSubstratePhrases"
+    , "sharedParserDiagnosticEvidenceUsePhrases"
+    , "sharedParserRemovedDiagnosticEvidenceRendererAliases"
+    ]
+
+sharedParserRemovedDiagnosticEvidenceRendererAliases :: [String]
+sharedParserRemovedDiagnosticEvidenceRendererAliases =
+    [ "def renderDiagnosticEvidence : String -> ParserDiagnostic -> String"
+    , "renderDiagnosticEvidence sourceFile diagnostic"
     ]
 
 sharedParserBoundedProjectionRowsSubstratePhrases :: [String]
@@ -2756,7 +2823,7 @@ sharedParserDynamicEvidenceRequiredPhrases =
     , "renderParserParityPackageProjectionFromSourceTexts"
     , "renderParserParityPackageProjectionFromFourSourceTexts"
     , "renderParserNegativeEvidenceFromSourceText"
-    , "renderDiagnosticEvidence"
+    , "renderParserDiagnosticEvidence"
     ]
 
 runSharedParserBatch :: FilePath -> IO (Either String String)

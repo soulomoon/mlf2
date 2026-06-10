@@ -1,7 +1,7 @@
 module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseCompleteModule, parseTokens, renderParserParityProjectionFromSourceText, renderParserParityPackageProjectionFromSourceTexts, renderParserParityPackageProjectionFromFourSourceTexts, renderParserParityRetryEvidence, renderParserNegativeEvidenceFromSourceText) {
   import Prelude exposing (Option(..), stringAppend, stringCharAtOption, stringDrop, stringFromChar, stringIndexOf, stringTake);
   import ParserParityAst exposing (ParsedModule(..), renderParsedModule);
-  import ParserParityDiagnostic exposing (ParserDiagnostic(..));
+  import ParserParityDiagnostic exposing (ParserDiagnostic(..), renderParserDiagnosticEvidence);
   import ParserParityLexer exposing (LexerResult(..), nextLineNumber, tokenizeCompleteModule);
   import ParserParityParserCombinator exposing (Parser, ParserEnd(..), ParserExpectation(..), ParserState(..), ParserStep(..), ParserValue(..), captureSpan, diagnosticLabel, expectIdentifierToken, expectToken, expectTokenPrefix, labelExpected, parserBind, parserChoice, parserCurrentTokenStartOr, parserFail, parserFailExpected, parserFailExpectedAtCurrent, parserPure, parserReturnAtEndOr, parserStateAtEnd, runParser);
   import ParserParitySource exposing (basicBoolLiteralSpan, basicUnexpectedSpan, caseBranchArrowSpan, constructorForallDotSpan, dataZeroColonSpan, importBoolSemicolonSpan, letInSpan, lexerUnknownSpan, multiparamFundepArrowSpan, qualifiedImportAliasDiagnosticSpan, renderSpan, typedLetForallSpan, typeFamilyEquationEqualsSpan, typeclassInstanceMethodEqualsSpan, valueFirstDefSemicolonSpan);
@@ -8833,13 +8833,13 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
   def renderPositiveTokenEvidence : String -> String -> String =
     λ(sourceFile : String) λ(sourceText : String) case tokenizeCompleteModule sourceText of {
       LexerOk input -> renderTokenPrefixEvidence sourceFile input;
-      LexerError diagnostic -> stringAppend "tokens " (renderDiagnosticEvidence sourceFile diagnostic)
+      LexerError diagnostic -> stringAppend "tokens " (renderParserDiagnosticEvidence sourceFile diagnostic)
     };
 
   def renderLexerNegativeEvidence : String -> String -> String =
     λ(sourceFile : String) λ(lexerMismatchSourceText : String) case tokenizeCompleteModule lexerMismatchSourceText of {
       LexerOk _ -> "lexer negative unexpected-success";
-      LexerError diagnostic -> stringAppend "lexer negative " (renderDiagnosticEvidence sourceFile diagnostic)
+      LexerError diagnostic -> stringAppend "lexer negative " (renderParserDiagnosticEvidence sourceFile diagnostic)
     };
 
   def basicParserNegativeSourceText : String =
@@ -8852,26 +8852,6 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
   def renderParserNegativeEvidence : String -> String -> ParserResult -> String =
     λ(prefix : String) λ(sourceFile : String) λ(result : ParserResult) case result of {
       ParserOk _ -> stringAppend prefix "unexpected-success";
-      ParserError diagnostic -> stringAppend prefix (renderDiagnosticEvidence sourceFile diagnostic)
-    };
-
-  def renderDiagnosticEvidence : String -> ParserDiagnostic -> String =
-    λ(sourceFile : String) λ(diagnostic : ParserDiagnostic) case diagnostic of {
-      UnexpectedSourceText span -> stringAppend "unexpected-source@" (renderSpan sourceFile span);
-      ExpectedCompleteModule span -> stringAppend "expected-complete-module@" (renderSpan sourceFile span);
-      ExpectedEquals span -> stringAppend "expected-equals@" (renderSpan sourceFile span);
-      ExpectedImportSemicolon span -> stringAppend "expected-import-semicolon@" (renderSpan sourceFile span);
-      ExpectedImportAlias span -> stringAppend "expected-import-alias@" (renderSpan sourceFile span);
-      ExpectedImportExposingSeparator span -> stringAppend "expected-import-exposing-separator@" (renderSpan sourceFile span);
-      ExpectedDefSemicolon span -> stringAppend "expected-def-semicolon@" (renderSpan sourceFile span);
-      ExpectedLetIn span -> stringAppend "expected-let-in@" (renderSpan sourceFile span);
-      ExpectedLetAnnotationType span -> stringAppend "expected-let-annotation-type@" (renderSpan sourceFile span);
-      ExpectedConstructorColon span -> stringAppend "expected-constructor-colon@" (renderSpan sourceFile span);
-      ExpectedCaseBranchArrow span -> stringAppend "expected-case-branch-arrow@" (renderSpan sourceFile span);
-      ExpectedInstanceMethodEquals span -> stringAppend "expected-instance-method-equals@" (renderSpan sourceFile span);
-      ExpectedFunctionalDependencyArrow span -> stringAppend "expected-functional-dependency-arrow@" (renderSpan sourceFile span);
-      ExpectedTypeFamilyEquationEquals span -> stringAppend "expected-type-family-equation-equals@" (renderSpan sourceFile span);
-      ExpectedConstructorForallDot span -> stringAppend "expected-constructor-forall-dot@" (renderSpan sourceFile span);
-      ExpectedExpressionCloseParen span -> stringAppend "expected-expression-close-paren@" (renderSpan sourceFile span)
+      ParserError diagnostic -> stringAppend prefix (renderParserDiagnosticEvidence sourceFile diagnostic)
     };
 }
