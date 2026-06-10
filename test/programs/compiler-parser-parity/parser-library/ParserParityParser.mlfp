@@ -179,32 +179,125 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
   def identifierNameFromTokenText : String -> String =
     λ(text : String) stringDrop text 11;
 
-  def identifierNameFromValue : ParserValue -> String =
+  def parserValueTokenTextOrUnknown : ParserValue -> String =
     λ(value : ParserValue) case value of {
-      ValueToken token -> identifierNameFromTokenText (tokenText token);
+      ValueToken token -> tokenText token;
       ValueProjectionRows _ -> "unknown";
       ValueConstructorRows _ -> "unknown";
       ValueModuleKey _ -> "unknown";
       ValueUnit -> "unknown"
     };
+
+  def parserValueDroppedTokenTextOrUnknown : Int -> ParserValue -> String =
+    λ(prefixWidth : Int) λ(value : ParserValue) case value of {
+      ValueToken token -> stringDrop (tokenText token) prefixWidth;
+      ValueProjectionRows _ -> "unknown";
+      ValueConstructorRows _ -> "unknown";
+      ValueModuleKey _ -> "unknown";
+      ValueUnit -> "unknown"
+    };
+
+  def parserValueProjectionOrTokenTextOrUnknown : ParserValue -> String =
+    λ(value : ParserValue) case value of {
+      ValueProjectionRows text -> text;
+      ValueToken token -> tokenText token;
+      ValueConstructorRows _ -> "unknown";
+      ValueModuleKey _ -> "unknown";
+      ValueUnit -> "unknown"
+    };
+
+  def parserValueConstructorRowsOrEmpty : ParserValue -> String =
+    λ(value : ParserValue) case value of {
+      ValueConstructorRows rows -> rows;
+      ValueProjectionRows _ -> "";
+      ValueModuleKey _ -> "";
+      ValueToken _ -> "";
+      ValueUnit -> ""
+    };
+
+  def parserValueTokenStartCoordinateOrUnexpected : ParserValue -> String =
+    λ(value : ParserValue) case value of {
+      ValueToken token -> tokenStart token;
+      ValueProjectionRows _ -> basicUnexpectedSpan;
+      ValueConstructorRows _ -> basicUnexpectedSpan;
+      ValueModuleKey _ -> basicUnexpectedSpan;
+      ValueUnit -> basicUnexpectedSpan
+    };
+
+  def parserValueTokenEndCoordinateOrUnexpected : ParserValue -> String =
+    λ(value : ParserValue) case value of {
+      ValueToken token -> tokenEnd token;
+      ValueProjectionRows _ -> basicUnexpectedSpan;
+      ValueConstructorRows _ -> basicUnexpectedSpan;
+      ValueModuleKey _ -> basicUnexpectedSpan;
+      ValueUnit -> basicUnexpectedSpan
+    };
+
+  def parserValueModuleKeyOrTokenStartCoordinateOrUnexpected : ParserValue -> String =
+    λ(value : ParserValue) case value of {
+      ValueModuleKey coordinate -> coordinate;
+      ValueToken token -> tokenStart token;
+      ValueProjectionRows _ -> basicUnexpectedSpan;
+      ValueConstructorRows _ -> basicUnexpectedSpan;
+      ValueUnit -> basicUnexpectedSpan
+    };
+
+  def parserValueTokenEndOrModuleKeyCoordinateOrUnexpected : ParserValue -> String =
+    λ(value : ParserValue) case value of {
+      ValueToken token -> tokenEnd token;
+      ValueModuleKey coordinate -> coordinate;
+      ValueProjectionRows _ -> basicUnexpectedSpan;
+      ValueConstructorRows _ -> basicUnexpectedSpan;
+      ValueUnit -> basicUnexpectedSpan
+    };
+
+  def parserValueTokenSpanOrUnexpected : ParserValue -> String =
+    λ(value : ParserValue) case value of {
+      ValueToken token -> tokenSpan token;
+      ValueProjectionRows _ -> basicUnexpectedSpan;
+      ValueConstructorRows _ -> basicUnexpectedSpan;
+      ValueModuleKey _ -> basicUnexpectedSpan;
+      ValueUnit -> basicUnexpectedSpan
+    };
+
+  def parserValueTokenBoundsSpanOrUnexpected : ParserValue -> ParserValue -> String =
+    λ(startValue : ParserValue) λ(endValue : ParserValue) case startValue of {
+      ValueToken startToken -> case endValue of {
+        ValueToken endToken -> stringAppend (tokenStart startToken) (stringAppend "-" (tokenEnd endToken));
+        ValueProjectionRows _ -> basicUnexpectedSpan;
+        ValueConstructorRows _ -> basicUnexpectedSpan;
+        ValueModuleKey _ -> basicUnexpectedSpan;
+        ValueUnit -> basicUnexpectedSpan
+      };
+      ValueProjectionRows _ -> basicUnexpectedSpan;
+      ValueConstructorRows _ -> basicUnexpectedSpan;
+      ValueModuleKey _ -> basicUnexpectedSpan;
+      ValueUnit -> basicUnexpectedSpan
+    };
+
+  def parserValueTokenStartToStartSpanOrUnexpected : ParserValue -> ParserValue -> String =
+    λ(startValue : ParserValue) λ(endValue : ParserValue) case startValue of {
+      ValueToken startToken -> case endValue of {
+        ValueToken endToken -> stringAppend (tokenStart startToken) (stringAppend "-" (tokenStart endToken));
+        ValueProjectionRows _ -> basicUnexpectedSpan;
+        ValueConstructorRows _ -> basicUnexpectedSpan;
+        ValueModuleKey _ -> basicUnexpectedSpan;
+        ValueUnit -> basicUnexpectedSpan
+      };
+      ValueProjectionRows _ -> basicUnexpectedSpan;
+      ValueConstructorRows _ -> basicUnexpectedSpan;
+      ValueModuleKey _ -> basicUnexpectedSpan;
+      ValueUnit -> basicUnexpectedSpan
+    };
+
+  def identifierNameFromValue : ParserValue -> String =
+    λ(value : ParserValue) parserValueDroppedTokenTextOrUnknown 11 value;
 
   def charLiteralTextFromValue : ParserValue -> String =
-    λ(value : ParserValue) case value of {
-      ValueToken token -> stringDrop (tokenText token) 13;
-      ValueProjectionRows _ -> "unknown";
-      ValueConstructorRows _ -> "unknown";
-      ValueModuleKey _ -> "unknown";
-      ValueUnit -> "unknown"
-    };
+    λ(value : ParserValue) parserValueDroppedTokenTextOrUnknown 13 value;
 
   def stringLiteralTextFromValue : ParserValue -> String =
-    λ(value : ParserValue) case value of {
-      ValueToken token -> stringDrop (tokenText token) 15;
-      ValueProjectionRows _ -> "unknown";
-      ValueConstructorRows _ -> "unknown";
-      ValueModuleKey _ -> "unknown";
-      ValueUnit -> "unknown"
-    };
+    λ(value : ParserValue) parserValueDroppedTokenTextOrUnknown 15 value;
 
   def projectionExportKindPrefix : String -> String =
     λ(name : String) case stringCharAtOption name 0 of {
@@ -225,82 +318,30 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
     };
 
   def spanFromTokenBounds : ParserValue -> ParserValue -> String =
-    λ(startValue : ParserValue) λ(endValue : ParserValue) case startValue of {
-      ValueToken startToken -> case endValue of {
-        ValueToken endToken -> stringAppend (tokenStart startToken) (stringAppend "-" (tokenEnd endToken));
-        ValueProjectionRows _ -> basicUnexpectedSpan;
-        ValueConstructorRows _ -> basicUnexpectedSpan;
-        ValueModuleKey _ -> basicUnexpectedSpan;
-        ValueUnit -> basicUnexpectedSpan
-      };
-      ValueProjectionRows _ -> basicUnexpectedSpan;
-      ValueConstructorRows _ -> basicUnexpectedSpan;
-      ValueModuleKey _ -> basicUnexpectedSpan;
-      ValueUnit -> basicUnexpectedSpan
-    };
+    λ(startValue : ParserValue) λ(endValue : ParserValue)
+      parserValueTokenBoundsSpanOrUnexpected startValue endValue;
 
   def spanFromTokenStartToTokenStart : ParserValue -> ParserValue -> String =
-    λ(startValue : ParserValue) λ(endValue : ParserValue) case startValue of {
-      ValueToken startToken -> case endValue of {
-        ValueToken endToken -> stringAppend (tokenStart startToken) (stringAppend "-" (tokenStart endToken));
-        ValueProjectionRows _ -> basicUnexpectedSpan;
-        ValueConstructorRows _ -> basicUnexpectedSpan;
-        ValueModuleKey _ -> basicUnexpectedSpan;
-        ValueUnit -> basicUnexpectedSpan
-      };
-      ValueProjectionRows _ -> basicUnexpectedSpan;
-      ValueConstructorRows _ -> basicUnexpectedSpan;
-      ValueModuleKey _ -> basicUnexpectedSpan;
-      ValueUnit -> basicUnexpectedSpan
-    };
+    λ(startValue : ParserValue) λ(endValue : ParserValue)
+      parserValueTokenStartToStartSpanOrUnexpected startValue endValue;
 
   def coordinateFromValue : ParserValue -> String =
-    λ(value : ParserValue) case value of {
-      ValueModuleKey coordinate -> coordinate;
-      ValueToken token -> tokenStart token;
-      ValueProjectionRows _ -> basicUnexpectedSpan;
-      ValueConstructorRows _ -> basicUnexpectedSpan;
-      ValueUnit -> basicUnexpectedSpan
-    };
+    λ(value : ParserValue) parserValueModuleKeyOrTokenStartCoordinateOrUnexpected value;
 
   def tokenStartCoordinate : ParserValue -> String =
-    λ(value : ParserValue) case value of {
-      ValueToken token -> tokenStart token;
-      ValueModuleKey coordinate -> coordinate;
-      ValueProjectionRows _ -> basicUnexpectedSpan;
-      ValueConstructorRows _ -> basicUnexpectedSpan;
-      ValueUnit -> basicUnexpectedSpan
-    };
+    λ(value : ParserValue) parserValueModuleKeyOrTokenStartCoordinateOrUnexpected value;
 
   def tokenEndCoordinate : ParserValue -> String =
-    λ(value : ParserValue) case value of {
-      ValueToken token -> tokenEnd token;
-      ValueModuleKey coordinate -> coordinate;
-      ValueProjectionRows _ -> basicUnexpectedSpan;
-      ValueConstructorRows _ -> basicUnexpectedSpan;
-      ValueUnit -> basicUnexpectedSpan
-    };
+    λ(value : ParserValue) parserValueTokenEndOrModuleKeyCoordinateOrUnexpected value;
 
   def parserTextFromValue : ParserValue -> String =
-    λ(value : ParserValue) case value of {
-      ValueProjectionRows text -> text;
-      ValueToken token -> tokenText token;
-      ValueConstructorRows _ -> "unknown";
-      ValueModuleKey _ -> "unknown";
-      ValueUnit -> "unknown"
-    };
+    λ(value : ParserValue) parserValueProjectionOrTokenTextOrUnknown value;
 
   def parserTextValue : String -> Parser ParserValue =
     λ(text : String) parserPure (ValueProjectionRows text);
 
   def intLiteralTextFromValue : ParserValue -> String =
-    λ(value : ParserValue) case value of {
-      ValueToken token -> stringDrop (tokenText token) 4;
-      ValueModuleKey _ -> "unknown";
-      ValueProjectionRows _ -> "unknown";
-      ValueConstructorRows _ -> "unknown";
-      ValueUnit -> "unknown"
-    };
+    λ(value : ParserValue) parserValueDroppedTokenTextOrUnknown 4 value;
 
   def spanFromStartToCoordinate : String -> ParserValue -> String =
     λ(startCoordinate : String) λ(endCoordinate : ParserValue)
@@ -396,13 +437,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
     ValueUnit;
 
   def constructorRowsFromValue : ParserValue -> String =
-    λ(value : ParserValue) case value of {
-      ValueConstructorRows rows -> rows;
-      ValueProjectionRows _ -> "";
-      ValueModuleKey _ -> "";
-      ValueToken _ -> "";
-      ValueUnit -> ""
-    };
+    λ(value : ParserValue) parserValueConstructorRowsOrEmpty value;
 
   def appendConstructorRowText : String -> String -> String =
     λ(existingRows : String) λ(nextRows : String) case stringIndexOf "" existingRows of {
@@ -454,7 +489,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
 
   def projectionLineFromToken : String -> String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(prefix : String) λ(value : ParserValue) case value of {
-      ValueToken token -> projectionLineFromSpan sourceFile prefix (tokenSpan token);
+      ValueToken _ -> projectionLineFromSpan sourceFile prefix (parserValueTokenSpanOrUnexpected value);
       ValueProjectionRows _ -> parserFail (ExpectedCompleteModule basicUnexpectedSpan);
       ValueConstructorRows _ -> parserFail (ExpectedCompleteModule basicUnexpectedSpan);
       ValueModuleKey _ -> parserFail (ExpectedCompleteModule basicUnexpectedSpan);
@@ -599,13 +634,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
     };
 
   def moduleNameFromValue : ParserValue -> String =
-    λ(value : ParserValue) case value of {
-      ValueToken token -> moduleNameFromTokenText (tokenText token);
-      ValueProjectionRows _ -> "unknown";
-      ValueConstructorRows _ -> "unknown";
-      ValueModuleKey _ -> "unknown";
-      ValueUnit -> "unknown"
-    };
+    λ(value : ParserValue) parserValueDroppedTokenTextOrUnknown 11 value;
 
   def moduleNameFromTokenText : String -> String =
     λ(text : String) identifierNameFromTokenText text;

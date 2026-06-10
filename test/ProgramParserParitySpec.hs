@@ -560,6 +560,21 @@ spec =
             traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserExpectationUsePhrases
             removedMatches `shouldBe` []
 
+        it "shared parser-owned .mlfp parser shares parser-value source-span extraction substrate" $ do
+            sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
+            sharedSpecSource <- readFile "test/ProgramParserParitySpec.hs"
+
+            let staticGuardSource = sharedParserSource <> "\n" <> sharedSpecSource
+                removedMatches =
+                    filter
+                        (`isInfixOf` sharedParserSource)
+                        sharedParserRemovedParserValueSourceSpanFallbackPhrases
+
+            traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserValueSourceSpanSubstratePhrases
+            traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserValueSourceSpanUsePhrases
+            traverse_ (`shouldSatisfy` (`isInfixOf` staticGuardSource)) sharedParserValueSourceSpanGuardPhrases
+            removedMatches `shouldBe` []
+
         it "shared parser-owned .mlfp parser shares bounded projection row lists" $ do
             sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
             sharedCombinatorSource <- readFile (sharedParserLibraryRoot </> "ParserParityParserCombinator.mlfp")
@@ -1498,6 +1513,63 @@ sharedParserRemovedExpectationAliases =
     , "labelFunctionalDependencyArrow"
     , "labelTypeFamilyEquationEquals"
     , "labelConstructorForallDot"
+    ]
+
+sharedParserValueSourceSpanSubstratePhrases :: [String]
+sharedParserValueSourceSpanSubstratePhrases =
+    [ "def parserValueTokenTextOrUnknown : ParserValue -> String"
+    , "def parserValueDroppedTokenTextOrUnknown : Int -> ParserValue -> String"
+    , "def parserValueProjectionOrTokenTextOrUnknown : ParserValue -> String"
+    , "def parserValueConstructorRowsOrEmpty : ParserValue -> String"
+    , "def parserValueTokenStartCoordinateOrUnexpected : ParserValue -> String"
+    , "def parserValueTokenEndCoordinateOrUnexpected : ParserValue -> String"
+    , "def parserValueModuleKeyOrTokenStartCoordinateOrUnexpected : ParserValue -> String"
+    , "def parserValueTokenEndOrModuleKeyCoordinateOrUnexpected : ParserValue -> String"
+    , "def parserValueTokenSpanOrUnexpected : ParserValue -> String"
+    , "def parserValueTokenBoundsSpanOrUnexpected : ParserValue -> ParserValue -> String"
+    , "def parserValueTokenStartToStartSpanOrUnexpected : ParserValue -> ParserValue -> String"
+    ]
+
+sharedParserValueSourceSpanUsePhrases :: [String]
+sharedParserValueSourceSpanUsePhrases =
+    [ "λ(value : ParserValue) parserValueDroppedTokenTextOrUnknown 11 value"
+    , "λ(value : ParserValue) parserValueDroppedTokenTextOrUnknown 13 value"
+    , "λ(value : ParserValue) parserValueDroppedTokenTextOrUnknown 15 value"
+    , "λ(value : ParserValue) parserValueDroppedTokenTextOrUnknown 4 value"
+    , "λ(value : ParserValue) parserValueProjectionOrTokenTextOrUnknown value"
+    , "λ(value : ParserValue) parserValueConstructorRowsOrEmpty value"
+    , "λ(value : ParserValue) parserValueModuleKeyOrTokenStartCoordinateOrUnexpected value"
+    , "λ(value : ParserValue) parserValueTokenEndOrModuleKeyCoordinateOrUnexpected value"
+    , "parserValueTokenBoundsSpanOrUnexpected startValue endValue"
+    , "parserValueTokenStartToStartSpanOrUnexpected startValue endValue"
+    , "stringAppend startCoordinate (stringAppend \"-\" (coordinateFromValue endCoordinate))"
+    , "stringAppend startCoordinate (stringAppend \"-\" (tokenStartCoordinate endValue))"
+    , "ValueToken _ -> projectionLineFromSpan sourceFile prefix (parserValueTokenSpanOrUnexpected value)"
+    , "constructorRows sourceFile (identifierNameFromValue constructorToken) (parserTextFromValue typeValue) coordinates"
+    ]
+
+sharedParserValueSourceSpanGuardPhrases :: [String]
+sharedParserValueSourceSpanGuardPhrases =
+    [ "shared parser-owned .mlfp parser shares parser-value source-span extraction substrate"
+    , "sharedParserValueSourceSpanSubstratePhrases"
+    , "sharedParserValueSourceSpanUsePhrases"
+    , "sharedParserRemovedParserValueSourceSpanFallbackPhrases"
+    ]
+
+sharedParserRemovedParserValueSourceSpanFallbackPhrases :: [String]
+sharedParserRemovedParserValueSourceSpanFallbackPhrases =
+    [ "def identifierNameFromValue : ParserValue -> String =\n    λ(value : ParserValue) case value of"
+    , "def charLiteralTextFromValue : ParserValue -> String =\n    λ(value : ParserValue) case value of"
+    , "def stringLiteralTextFromValue : ParserValue -> String =\n    λ(value : ParserValue) case value of"
+    , "def intLiteralTextFromValue : ParserValue -> String =\n    λ(value : ParserValue) case value of"
+    , "def parserTextFromValue : ParserValue -> String =\n    λ(value : ParserValue) case value of"
+    , "def coordinateFromValue : ParserValue -> String =\n    λ(value : ParserValue) case value of"
+    , "def tokenStartCoordinate : ParserValue -> String =\n    λ(value : ParserValue) case value of"
+    , "def tokenEndCoordinate : ParserValue -> String =\n    λ(value : ParserValue) case value of"
+    , "def constructorRowsFromValue : ParserValue -> String =\n    λ(value : ParserValue) case value of"
+    , "def moduleNameFromValue : ParserValue -> String =\n    λ(value : ParserValue) case value of"
+    , "def spanFromTokenBounds : ParserValue -> ParserValue -> String =\n    λ(startValue : ParserValue) λ(endValue : ParserValue) case startValue of"
+    , "def spanFromTokenStartToTokenStart : ParserValue -> ParserValue -> String =\n    λ(startValue : ParserValue) λ(endValue : ParserValue) case startValue of"
     ]
 
 sharedParserBoundedProjectionRowsSubstratePhrases :: [String]
