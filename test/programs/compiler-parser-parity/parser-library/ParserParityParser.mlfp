@@ -646,35 +646,11 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
 
   def parseProgramModuleBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_openModule : ParserValue)
-      parserChoice (parseDeclarationLedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)
-        (parserChoice
-          (parseThreeImportLedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)
-          (parserChoice
-            (parseImportLedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)
-            (parseDefinitionLedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)));
-
-  def parseDefinitionLedBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
       parserChoice
-        (parseOneDefinitionBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)
+        (parseThreeImportLedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)
         (parserChoice
-          (parseTwoDefinitionBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)
-          (parseThreeDefinitionBodyRows sourceFile moduleStart moduleName exportRows ValueUnit));
-
-  def parseOneDefinitionBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
-      parserBind (parseSourceDefinitionRowsWithCurrentDefSemicolon sourceFile ValueUnit)
-        (finishModuleBodyRows sourceFile moduleStart moduleName exportRows);
-
-  def parseTwoDefinitionBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
-      parserBind (parseTwoSourceDefinitionRows sourceFile ValueUnit)
-        (finishModuleBodyRows sourceFile moduleStart moduleName exportRows);
-
-  def parseThreeDefinitionBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
-      parserBind (parseThreeSourceDefinitionRows sourceFile ValueUnit)
-        (finishModuleBodyRows sourceFile moduleStart moduleName exportRows);
+          (parseImportLedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)
+          (parseModuleBodyRowsFirst sourceFile moduleStart moduleName exportRows ValueUnit));
 
   def parseSourceDefinitionRows : String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(_start : ParserValue)
@@ -2424,556 +2400,40 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
       ValueUnit -> parserFail (ExpectedCompleteModule basicUnexpectedSpan)
     };
 
-  def parseDeclarationLedBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
+  def parseModuleBodyRowsFirst : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
-      parserChoice (parseEqDerivedNatTreeFourDefinitionStartedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)
-        (parserChoice (parseEqDerivedExprSomeStartedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)
-        (parserChoice (parseNatExprSomeTwoDefinitionStartedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)
-        (parserChoice (parseNatExprTwoDefinitionStartedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)
-        (parserChoice (parseEqNatInstanceStartedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)
-        (parserChoice (parseClassDerivedStartedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)
-        (parserChoice (parseClassStartedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)
-          (parserChoice (parseSixDataFourDefinitionStartedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)
-          (parserChoice (parseTwoDataThreeDefinitionStartedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)
-          (parserChoice (parseTwoConstructorDataThreeDefinitionStartedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)
-            (parserChoice (parseSingleConstructorDataStartedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)
-              (parserChoice
-                (parseNatDataFourDefinitionStartedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)
-                (parserChoice
-                  (parseNatDataThreeDefinitionStartedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)
-                  (parserChoice
-                    (parseNatDataSingleDefinitionStartedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit)
-                    (parseDataStartedBodyRows sourceFile moduleStart moduleName exportRows ValueUnit))))))))))))));
+      parserBind (parseModuleBodyDeclarationRows sourceFile ValueUnit)
+        (parseModuleBodyRowsMoreOrClose sourceFile moduleStart moduleName exportRows);
 
-  def parseSixDataFourDefinitionStartedBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
-      parserBind (parseExactNineConstructorDataRows sourceFile ValueUnit)
-        (parseSixDataFourDefinitionSecondDataRows sourceFile moduleStart moduleName exportRows);
+  def parseModuleBodyRowsFirstAfterPrefix : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(existingRows : ParserValue)
+      parserBind (parseModuleBodyDeclarationRows sourceFile ValueUnit)
+        (appendModuleBodyDeclarationRowsAndContinue (parseModuleBodyRowsMoreOrClose sourceFile moduleStart moduleName exportRows) existingRows);
 
-  def parseSixDataFourDefinitionSecondDataRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(firstDataRows : ParserValue)
-      parserBind (parseExactFiveConstructorDataRows sourceFile ValueUnit)
-        (appendSixDataFourDefinitionSecondDataRows sourceFile moduleStart moduleName exportRows firstDataRows);
+  def parseModuleBodyRowsMoreOrClose : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(rowsValue : ParserValue)
+      parserChoice
+        (parserBind (parseModuleBodyDeclarationRows sourceFile ValueUnit)
+          (appendModuleBodyDeclarationRowsAndContinue (parseModuleBodyRowsMoreOrClose sourceFile moduleStart moduleName exportRows) rowsValue))
+        (finishModuleBodyRows sourceFile moduleStart moduleName exportRows rowsValue);
 
-  def appendSixDataFourDefinitionSecondDataRows : String -> String -> String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(firstDataRows : ParserValue) λ(secondDataRows : ParserValue)
-      parserBind (appendProjectionValues firstDataRows secondDataRows)
-        (parseSixDataFourDefinitionThirdDataRows sourceFile moduleStart moduleName exportRows);
-
-  def parseSixDataFourDefinitionThirdDataRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(firstTwoDataRows : ParserValue)
-      parserBind (parseSingleConstructorDataRows sourceFile ValueUnit)
-        (appendSixDataFourDefinitionThirdDataRows sourceFile moduleStart moduleName exportRows firstTwoDataRows);
-
-  def appendSixDataFourDefinitionThirdDataRows : String -> String -> String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(firstTwoDataRows : ParserValue) λ(thirdDataRows : ParserValue)
-      parserBind (appendProjectionValues firstTwoDataRows thirdDataRows)
-        (parseSixDataFourDefinitionFourthDataRows sourceFile moduleStart moduleName exportRows);
-
-  def parseSixDataFourDefinitionFourthDataRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(firstThreeDataRows : ParserValue)
-      parserBind (parseSingleConstructorDataRows sourceFile ValueUnit)
-        (appendSixDataFourDefinitionFourthDataRows sourceFile moduleStart moduleName exportRows firstThreeDataRows);
-
-  def appendSixDataFourDefinitionFourthDataRows : String -> String -> String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(firstThreeDataRows : ParserValue) λ(fourthDataRows : ParserValue)
-      parserBind (appendProjectionValues firstThreeDataRows fourthDataRows)
-        (parseSixDataFourDefinitionFifthDataRows sourceFile moduleStart moduleName exportRows);
-
-  def parseSixDataFourDefinitionFifthDataRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(firstFourDataRows : ParserValue)
-      parserBind (parseExactFiveConstructorDataRows sourceFile ValueUnit)
-        (appendSixDataFourDefinitionFifthDataRows sourceFile moduleStart moduleName exportRows firstFourDataRows);
-
-  def appendSixDataFourDefinitionFifthDataRows : String -> String -> String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(firstFourDataRows : ParserValue) λ(fifthDataRows : ParserValue)
-      parserBind (appendProjectionValues firstFourDataRows fifthDataRows)
-        (parseSixDataFourDefinitionSixthDataRows sourceFile moduleStart moduleName exportRows);
-
-  def parseSixDataFourDefinitionSixthDataRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(firstFiveDataRows : ParserValue)
-      parserBind (parseTwoConstructorDataRows sourceFile ValueUnit)
-        (appendSixDataFourDefinitionSixthDataRows sourceFile moduleStart moduleName exportRows firstFiveDataRows);
-
-  def appendSixDataFourDefinitionSixthDataRows : String -> String -> String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(firstFiveDataRows : ParserValue) λ(sixthDataRows : ParserValue)
-      parserBind (appendProjectionValues firstFiveDataRows sixthDataRows)
-        (parseSixDataFourDefinitionRows sourceFile moduleStart moduleName exportRows);
-
-  def parseSixDataFourDefinitionRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(dataRowsValue : ParserValue)
-      parserBind (parseFourSourceDefinitionRows sourceFile ValueUnit)
-        (finishSixDataFourDefinitionRows sourceFile moduleStart moduleName exportRows dataRowsValue);
-
-  def finishSixDataFourDefinitionRows : String -> String -> String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(dataRowsValue : ParserValue) λ(definitionRowsValue : ParserValue)
-      parserBind (appendProjectionValues dataRowsValue definitionRowsValue)
-        (finishModuleBodyRows sourceFile moduleStart moduleName exportRows);
-
-  def parseBoundedSourceDefinitionRows : String -> (String -> ParserValue -> Parser ParserValue) -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(remainingRows : String -> ParserValue -> Parser ParserValue) λ(_start : ParserValue)
-      parserBind (parseSourceDefinitionRows sourceFile ValueUnit)
-        (remainingRows sourceFile);
-
-  def parseBoundedSourceDefinitionNextRows : (String -> ParserValue -> Parser ParserValue) -> String -> ParserValue -> Parser ParserValue =
-    λ(remainingRows : String -> ParserValue -> Parser ParserValue) λ(sourceFile : String) λ(existingRows : ParserValue)
-      parserBind (parseSourceDefinitionRows sourceFile ValueUnit)
-        (appendBoundedSourceDefinitionRowsAndContinue remainingRows sourceFile existingRows);
-
-  def appendBoundedSourceDefinitionRowsAndContinue : (String -> ParserValue -> Parser ParserValue) -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(remainingRows : String -> ParserValue -> Parser ParserValue) λ(sourceFile : String) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
+  def appendModuleBodyDeclarationRowsAndContinue : (ParserValue -> Parser ParserValue) -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(continueRows : ParserValue -> Parser ParserValue) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
       parserBind (appendProjectionValues existingRows nextRows)
-        (remainingRows sourceFile);
+        continueRows;
 
-  def finishBoundedSourceDefinitionRows : String -> ParserValue -> Parser ParserValue =
-    λ(_sourceFile : String) λ(rowsValue : ParserValue)
-      parserPure rowsValue;
-
-  def parseFourSourceDefinitionRows : String -> ParserValue -> Parser ParserValue =
+  def parseModuleBodyDeclarationRows : String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(_start : ParserValue)
-      parseBoundedSourceDefinitionRows sourceFile parseBoundedSourceDefinitionRowsRemaining3 ValueUnit;
+      parserChoice (parseCharLiteralDefinitionRows sourceFile ValueUnit)
+        (parserChoice (parseSourceDefinitionRowsWithCurrentDefSemicolon sourceFile ValueUnit)
+          (parserChoice (parseEqClassDeclaration sourceFile ValueUnit)
+            (parserChoice (parseEqNatInstanceDeclarationRows sourceFile ValueUnit)
+              (parseModuleBodyDataDeclarationRows sourceFile ValueUnit))));
 
-  def parseTwoSourceDefinitionRows : String -> ParserValue -> Parser ParserValue =
+  def parseModuleBodyDataDeclarationRows : String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(_start : ParserValue)
-      parseBoundedSourceDefinitionRows sourceFile parseBoundedSourceDefinitionRowsRemaining1 ValueUnit;
-
-  def parseThreeSourceDefinitionRows : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(_start : ParserValue)
-      parseBoundedSourceDefinitionRows sourceFile parseBoundedSourceDefinitionRowsRemaining2 ValueUnit;
-
-  def parseThirteenSourceDefinitionRows : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(_start : ParserValue)
-      parseBoundedSourceDefinitionRows sourceFile parseBoundedSourceDefinitionRowsRemaining12 ValueUnit;
-
-  def parseSixteenSourceDefinitionRows : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(_start : ParserValue)
-      parseBoundedSourceDefinitionRows sourceFile parseBoundedSourceDefinitionRowsRemaining15 ValueUnit;
-
-  def parseBoundedSourceDefinitionRowsRemaining15 : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(existingRows : ParserValue)
-      parseBoundedSourceDefinitionNextRows parseBoundedSourceDefinitionRowsRemaining14 sourceFile existingRows;
-
-  def parseBoundedSourceDefinitionRowsRemaining14 : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(existingRows : ParserValue)
-      parseBoundedSourceDefinitionNextRows parseBoundedSourceDefinitionRowsRemaining13 sourceFile existingRows;
-
-  def parseBoundedSourceDefinitionRowsRemaining13 : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(existingRows : ParserValue)
-      parseBoundedSourceDefinitionNextRows parseBoundedSourceDefinitionRowsRemaining12 sourceFile existingRows;
-
-  def parseBoundedSourceDefinitionRowsRemaining12 : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(existingRows : ParserValue)
-      parseBoundedSourceDefinitionNextRows parseBoundedSourceDefinitionRowsRemaining11 sourceFile existingRows;
-
-  def parseBoundedSourceDefinitionRowsRemaining11 : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(existingRows : ParserValue)
-      parseBoundedSourceDefinitionNextRows parseBoundedSourceDefinitionRowsRemaining10 sourceFile existingRows;
-
-  def parseBoundedSourceDefinitionRowsRemaining10 : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(existingRows : ParserValue)
-      parseBoundedSourceDefinitionNextRows parseBoundedSourceDefinitionRowsRemaining9 sourceFile existingRows;
-
-  def parseBoundedSourceDefinitionRowsRemaining9 : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(existingRows : ParserValue)
-      parseBoundedSourceDefinitionNextRows parseBoundedSourceDefinitionRowsRemaining8 sourceFile existingRows;
-
-  def parseBoundedSourceDefinitionRowsRemaining8 : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(existingRows : ParserValue)
-      parseBoundedSourceDefinitionNextRows parseBoundedSourceDefinitionRowsRemaining7 sourceFile existingRows;
-
-  def parseBoundedSourceDefinitionRowsRemaining7 : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(existingRows : ParserValue)
-      parseBoundedSourceDefinitionNextRows parseBoundedSourceDefinitionRowsRemaining6 sourceFile existingRows;
-
-  def parseBoundedSourceDefinitionRowsRemaining6 : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(existingRows : ParserValue)
-      parseBoundedSourceDefinitionNextRows parseBoundedSourceDefinitionRowsRemaining5 sourceFile existingRows;
-
-  def parseBoundedSourceDefinitionRowsRemaining5 : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(existingRows : ParserValue)
-      parseBoundedSourceDefinitionNextRows parseBoundedSourceDefinitionRowsRemaining4 sourceFile existingRows;
-
-  def parseBoundedSourceDefinitionRowsRemaining4 : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(existingRows : ParserValue)
-      parseBoundedSourceDefinitionNextRows parseBoundedSourceDefinitionRowsRemaining3 sourceFile existingRows;
-
-  def parseBoundedSourceDefinitionRowsRemaining3 : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(existingRows : ParserValue)
-      parseBoundedSourceDefinitionNextRows parseBoundedSourceDefinitionRowsRemaining2 sourceFile existingRows;
-
-  def parseBoundedSourceDefinitionRowsRemaining2 : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(existingRows : ParserValue)
-      parseBoundedSourceDefinitionNextRows parseBoundedSourceDefinitionRowsRemaining1 sourceFile existingRows;
-
-  def parseBoundedSourceDefinitionRowsRemaining1 : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(existingRows : ParserValue)
-      parseBoundedSourceDefinitionNextRows finishBoundedSourceDefinitionRows sourceFile existingRows;
-
-  def parseFourDataThirteenDefinitionRows : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(_start : ParserValue)
-      parserBind (parseTwoConstructorDataRows sourceFile ValueUnit)
-        (parseFourDataThirteenDefinitionSecondDataRows sourceFile);
-
-  def parseFourDataThirteenDefinitionSecondDataRows : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(firstDataRows : ParserValue)
-      parserBind (parseSingleConstructorDataRows sourceFile ValueUnit)
-        (appendFourDataThirteenDefinitionSecondDataRows sourceFile firstDataRows);
-
-  def appendFourDataThirteenDefinitionSecondDataRows : String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(firstDataRows : ParserValue) λ(secondDataRows : ParserValue)
-      parserBind (appendProjectionValues firstDataRows secondDataRows)
-        (parseFourDataThirteenDefinitionThirdDataRows sourceFile);
-
-  def parseFourDataThirteenDefinitionThirdDataRows : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(firstTwoDataRows : ParserValue)
-      parserBind (parseTwoConstructorDataRows sourceFile ValueUnit)
-        (appendFourDataThirteenDefinitionThirdDataRows sourceFile firstTwoDataRows);
-
-  def appendFourDataThirteenDefinitionThirdDataRows : String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(firstTwoDataRows : ParserValue) λ(thirdDataRows : ParserValue)
-      parserBind (appendProjectionValues firstTwoDataRows thirdDataRows)
-        (parseFourDataThirteenDefinitionFourthDataRows sourceFile);
-
-  def parseFourDataThirteenDefinitionFourthDataRows : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(firstThreeDataRows : ParserValue)
-      parserBind (parseTwoConstructorDataRows sourceFile ValueUnit)
-        (appendFourDataThirteenDefinitionFourthDataRows sourceFile firstThreeDataRows);
-
-  def appendFourDataThirteenDefinitionFourthDataRows : String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(firstThreeDataRows : ParserValue) λ(fourthDataRows : ParserValue)
-      parserBind (appendProjectionValues firstThreeDataRows fourthDataRows)
-        (parseFourDataThirteenDefinitionDefinitionRows sourceFile);
-
-  def parseFourDataThirteenDefinitionDefinitionRows : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataRowsValue : ParserValue)
-      parserBind (parseSixteenSourceDefinitionRows sourceFile ValueUnit)
-        (appendProjectionValues dataRowsValue);
-
-  def parseEqDerivedNatTreeFourDefinitionStartedBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
-      parserBind (parseEqClassDeclaration sourceFile ValueUnit)
-        (parseEqDerivedNatTreeNatRows sourceFile moduleStart moduleName exportRows);
-
-  def parseEqDerivedNatTreeNatRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(classRowsValue : ParserValue)
-      parserBind (parseTwoConstructorDerivedDataRows sourceFile ValueUnit)
-        (appendEqDerivedNatTreeNatRows sourceFile moduleStart moduleName exportRows classRowsValue);
-
-  def appendEqDerivedNatTreeNatRows : String -> String -> String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(existingRows : ParserValue) λ(natRows : ParserValue)
-      parserBind (appendProjectionValues existingRows natRows)
-        (parseEqDerivedNatTreeTreeRows sourceFile moduleStart moduleName exportRows);
-
-  def parseEqDerivedNatTreeTreeRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(rowsValue : ParserValue)
-      parserBind (parseTwoConstructorDataRows sourceFile ValueUnit)
-        (appendEqDerivedNatTreeTreeRows sourceFile moduleStart moduleName exportRows rowsValue);
-
-  def appendEqDerivedNatTreeTreeRows : String -> String -> String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(existingRows : ParserValue) λ(treeRows : ParserValue)
-      parserBind (appendProjectionValues existingRows treeRows)
-        (parseDataFourDefinitionRows sourceFile moduleStart moduleName exportRows);
-
-  def parseEqDerivedExprSomeStartedBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
-      parserBind (parseEqClassDeclaration sourceFile ValueUnit)
-        (parseEqDerivedExprSomeNatRows sourceFile moduleStart moduleName exportRows);
-
-  def parseEqDerivedExprSomeNatRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(classRowsValue : ParserValue)
-      parserBind (parseTwoConstructorDerivedDataRows sourceFile ValueUnit)
-        (appendEqDerivedExprSomeNatRows sourceFile moduleStart moduleName exportRows classRowsValue);
-
-  def appendEqDerivedExprSomeNatRows : String -> String -> String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(existingRows : ParserValue) λ(natRows : ParserValue)
-      parserBind (appendProjectionValues existingRows natRows)
-        (parseEqDerivedExprSomeExprRows sourceFile moduleStart moduleName exportRows);
-
-  def parseEqDerivedExprSomeExprRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(rowsValue : ParserValue)
-      parserBind (parseExprRecursiveDataRows sourceFile ValueUnit)
-        (appendEqDerivedExprSomeExprRows sourceFile moduleStart moduleName exportRows rowsValue);
-
-  def appendEqDerivedExprSomeExprRows : String -> String -> String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(existingRows : ParserValue) λ(exprRows : ParserValue)
-      parserBind (appendProjectionValues existingRows exprRows)
-        (parseEqDerivedExprSomeSomeExprRows sourceFile moduleStart moduleName exportRows);
-
-  def parseEqDerivedExprSomeSomeExprRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(rowsValue : ParserValue)
-      parserBind (parseSingleConstructorDataRows sourceFile ValueUnit)
-        (finishExactModuleBodyRows sourceFile moduleStart moduleName exportRows rowsValue);
-
-  def parseNatExprSomeTwoDefinitionStartedBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
-      parserBind (parseNatRecursiveDataRows sourceFile ValueUnit)
-        (parseNatExprSomeTwoDefinitionExprRows sourceFile moduleStart moduleName exportRows);
-
-  def parseNatExprSomeTwoDefinitionExprRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(natRows : ParserValue)
-      parserBind (parseExprRecursiveDataRows sourceFile ValueUnit)
-        (appendNatExprSomeTwoDefinitionExprRows sourceFile moduleStart moduleName exportRows natRows);
-
-  def appendNatExprSomeTwoDefinitionExprRows : String -> String -> String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(existingRows : ParserValue) λ(exprRows : ParserValue)
-      parserBind (appendProjectionValues existingRows exprRows)
-        (parseNatExprSomeTwoDefinitionSomeRows sourceFile moduleStart moduleName exportRows);
-
-  def parseNatExprSomeTwoDefinitionSomeRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(rowsValue : ParserValue)
-      parserBind (parseSingleConstructorDataRows sourceFile ValueUnit)
-        (appendNatExprSomeTwoDefinitionSomeRows sourceFile moduleStart moduleName exportRows rowsValue);
-
-  def appendNatExprSomeTwoDefinitionSomeRows : String -> String -> String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(existingRows : ParserValue) λ(someExprRows : ParserValue)
-      parserBind (appendProjectionValues existingRows someExprRows)
-        (parseDataTwoDefinitionRows sourceFile moduleStart moduleName exportRows);
-
-  def parseNatExprTwoDefinitionStartedBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
-      parserBind (parseNatRecursiveDataRows sourceFile ValueUnit)
-        (parseNatExprTwoDefinitionExprRows sourceFile moduleStart moduleName exportRows);
-
-  def parseNatExprTwoDefinitionExprRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(natRows : ParserValue)
-      parserBind (parseExprRecursiveDataRows sourceFile ValueUnit)
-        (appendNatExprTwoDefinitionExprRows sourceFile moduleStart moduleName exportRows natRows);
-
-  def appendNatExprTwoDefinitionExprRows : String -> String -> String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(existingRows : ParserValue) λ(exprRows : ParserValue)
-      parserBind (appendProjectionValues existingRows exprRows)
-        (parseDataTwoDefinitionRows sourceFile moduleStart moduleName exportRows);
-
-  def parseEqNatInstanceStartedBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
-      parserBind (parseEqClassDeclaration sourceFile ValueUnit)
-        (parseEqNatInstanceStartedBodyTail sourceFile moduleStart moduleName exportRows);
-
-  def parseEqNatInstanceStartedBodyTail : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(classRowsValue : ParserValue)
-      parserBind (parseNatRecursiveDataRows sourceFile ValueUnit)
-        (appendEqNatInstanceDataRows sourceFile moduleStart moduleName exportRows classRowsValue);
-
-  def appendEqNatInstanceDataRows : String -> String -> String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(existingRows : ParserValue) λ(dataRowsValue : ParserValue)
-      parserBind (appendProjectionValues existingRows dataRowsValue)
-        (parseEqNatInstanceRows sourceFile moduleStart moduleName exportRows);
-
-  def parseEqNatInstanceRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(existingRows : ParserValue)
-      parserBind (parseEqNatInstanceDeclarationRows sourceFile ValueUnit)
-        (appendEqNatInstanceRows sourceFile moduleStart moduleName exportRows existingRows);
-
-  def appendEqNatInstanceRows : String -> String -> String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(existingRows : ParserValue) λ(instanceRowsValue : ParserValue)
-      parserBind (appendProjectionValues existingRows instanceRowsValue)
-        (parseTwoSourceDefinitionRowsThenFinishModuleBody sourceFile moduleStart moduleName exportRows);
-
-  def parseTwoSourceDefinitionRowsThenFinishModuleBody : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(existingRows : ParserValue)
-      parserBind (parseTwoSourceDefinitionRows sourceFile ValueUnit)
-        (finishExactModuleBodyRows sourceFile moduleStart moduleName exportRows existingRows);
-
-  def parseClassDerivedStartedBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
-      parserBind (parseEqClassDeclaration sourceFile ValueUnit)
-        (parseClassDerivedStartedBodyTail sourceFile moduleStart moduleName exportRows);
-
-  def parseClassDerivedStartedBodyTail : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(firstRows : ParserValue)
-      parserBind (parseTwoConstructorDerivedDataRows sourceFile ValueUnit)
-        (appendClassDerivedDataRows sourceFile moduleStart moduleName exportRows firstRows);
-
-  def parseClassStartedBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
-      parserBind (parseEqClassDeclaration sourceFile ValueUnit)
-        (parseClassStartedBodyTail sourceFile moduleStart moduleName exportRows);
-
-  def parseClassStartedBodyTail : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(firstRows : ParserValue)
-      parserBind (parseNatDataRowsForClassSurface sourceFile ValueUnit)
-        (appendClassNatRows sourceFile moduleStart moduleName exportRows firstRows);
-
-  def appendClassDerivedDataRows : String -> String -> String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(existingRows : ParserValue) λ(dataRowsValue : ParserValue)
-      parserBind (appendProjectionValues existingRows dataRowsValue)
-        (parseClassDerivedDefinitionRows sourceFile moduleStart moduleName exportRows);
-
-  def parseClassDerivedDefinitionRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(rowsValue : ParserValue)
-      parserBind (parseSourceDefinitionRows sourceFile ValueUnit)
-        (finishExactModuleBodyRows sourceFile moduleStart moduleName exportRows rowsValue);
-
-  def parseNatDataRowsForClassSurface : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(_start : ParserValue)
-      parseNatRecursiveDataRows sourceFile ValueUnit;
-
-  def appendClassNatRows : String -> String -> String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(existingRows : ParserValue) λ(natRows : ParserValue)
-      parserBind (appendProjectionValues existingRows natRows) (parseClassExprRows sourceFile moduleStart moduleName exportRows);
-
-  def parseClassExprRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(rowsValue : ParserValue)
-      parserBind (parseExprDataRowsForClassSurface sourceFile ValueUnit)
-        (appendClassExprRows sourceFile moduleStart moduleName exportRows rowsValue);
-
-  def parseExprDataRowsForClassSurface : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(_start : ParserValue)
-      parseExprRecursiveDataRows sourceFile ValueUnit;
-
-  def appendClassExprRows : String -> String -> String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(existingRows : ParserValue) λ(exprRows : ParserValue)
-      parserBind (appendProjectionValues existingRows exprRows) (parseClassZeroRows sourceFile moduleStart moduleName exportRows);
-
-  def parseClassZeroRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(rowsValue : ParserValue)
-      parserBind (parseZeroDefinitionForClassSurface sourceFile ValueUnit)
-        (finishExactModuleBodyRows sourceFile moduleStart moduleName exportRows rowsValue);
-
-  def parseZeroDefinitionForClassSurface : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(_start : ParserValue)
-      parseZeroDefinition sourceFile ValueUnit;
-
-  def parseDataStartedBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
-      parserBind (parseNatRecursiveDataRows sourceFile ValueUnit)
-        (parseDataStartedBodyTail sourceFile moduleStart moduleName exportRows);
-
-  def parseNatDataSingleDefinitionStartedBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
-      parserBind (parseNatRecursiveDataRows sourceFile ValueUnit)
-        (parseNatDataSingleDefinitionRows sourceFile moduleStart moduleName exportRows);
-
-  def parseNatDataSingleDefinitionRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(firstRows : ParserValue)
-      parserBind (parseSourceDefinitionRows sourceFile ValueUnit)
-        (finishExactModuleBodyRows sourceFile moduleStart moduleName exportRows firstRows);
-
-  def parseNatDataThreeDefinitionStartedBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
-      parserBind (parseNatRecursiveDataRows sourceFile ValueUnit)
-        (parseDataThreeDefinitionRows sourceFile moduleStart moduleName exportRows);
-
-  def parseNatDataThreeDefinitionRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(dataRowsValue : ParserValue)
-      parseDataThreeDefinitionRows sourceFile moduleStart moduleName exportRows dataRowsValue;
-
-  def parseNatDataFourDefinitionStartedBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
-      parserBind (parseNatRecursiveDataRows sourceFile ValueUnit)
-        (parseDataFourDefinitionRows sourceFile moduleStart moduleName exportRows);
-
-  def parseDataFourDefinitionRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(dataRowsValue : ParserValue)
-      parserBind (parseSourceDefinitionRows sourceFile ValueUnit)
-        (appendDataFourFirstDefinitionRows sourceFile moduleStart moduleName exportRows dataRowsValue);
-
-  def parseDataTwoDefinitionRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(dataRowsValue : ParserValue)
-      parserBind (parseSourceDefinitionRows sourceFile ValueUnit)
-        (appendDataTwoFirstDefinitionRows sourceFile moduleStart moduleName exportRows dataRowsValue);
-
-  def appendDataTwoFirstDefinitionRows : String -> String -> String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(dataRowsValue : ParserValue) λ(firstDefinitionRows : ParserValue)
-      parserBind (appendProjectionValues dataRowsValue firstDefinitionRows)
-        (parseSecondDefinitionAndFinish sourceFile moduleStart moduleName exportRows);
-
-  def parseSecondDefinitionAndFinish : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(firstRows : ParserValue)
-      parserBind (parseSourceDefinitionRows sourceFile ValueUnit)
-        (finishExactModuleBodyRows sourceFile moduleStart moduleName exportRows firstRows);
-
-  def appendDataFourFirstDefinitionRows : String -> String -> String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(dataRowsValue : ParserValue) λ(firstDefinitionRows : ParserValue)
-      parserBind (appendProjectionValues dataRowsValue firstDefinitionRows)
-        (parseSecondThirdFourthSourceDefinitionRows sourceFile moduleStart moduleName exportRows);
-
-  def parseSecondThirdFourthSourceDefinitionRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(firstRows : ParserValue)
-      parserBind (parseSourceDefinitionRows sourceFile ValueUnit)
-        (appendFirstSecondSourceDefinitionRowsAndContinue sourceFile moduleStart moduleName exportRows firstRows);
-
-  def appendFirstSecondSourceDefinitionRowsAndContinue : String -> String -> String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(firstRows : ParserValue) λ(secondRows : ParserValue)
-      parserBind (appendProjectionValues firstRows secondRows)
-        (parseThirdFourthSourceDefinitionRows sourceFile moduleStart moduleName exportRows);
-
-  def parseThirdFourthSourceDefinitionRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(firstTwoRows : ParserValue)
-      parserBind (parseSourceDefinitionRows sourceFile ValueUnit)
-        (appendThirdSourceDefinitionRowsAndContinue sourceFile moduleStart moduleName exportRows firstTwoRows);
-
-  def appendThirdSourceDefinitionRowsAndContinue : String -> String -> String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(firstTwoRows : ParserValue) λ(thirdRows : ParserValue)
-      parserBind (appendProjectionValues firstTwoRows thirdRows)
-        (parseFourthSourceDefinitionRows sourceFile moduleStart moduleName exportRows);
-
-  def parseFourthSourceDefinitionRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(firstThreeRows : ParserValue)
-      parserBind (parseSourceDefinitionRows sourceFile ValueUnit)
-        (finishExactModuleBodyRows sourceFile moduleStart moduleName exportRows firstThreeRows);
-
-  def parseDataThreeDefinitionRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(dataRowsValue : ParserValue)
-      parserBind (parseSourceDefinitionRows sourceFile ValueUnit)
-        (appendDataFirstDefinitionRows sourceFile moduleStart moduleName exportRows dataRowsValue);
-
-  def appendNatDataFirstDefinitionRows : String -> String -> String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(dataRowsValue : ParserValue) λ(firstDefinitionRows : ParserValue)
-      appendDataFirstDefinitionRows sourceFile moduleStart moduleName exportRows dataRowsValue firstDefinitionRows;
-
-  def appendDataFirstDefinitionRows : String -> String -> String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(dataRowsValue : ParserValue) λ(firstDefinitionRows : ParserValue)
-      parserBind (appendProjectionValues dataRowsValue firstDefinitionRows)
-        (parseTwoSourceDefinitionRowsThenFinishModuleBody sourceFile moduleStart moduleName exportRows);
-
-  def parseTwoDataThreeDefinitionStartedBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
-      parserBind (parseTwoConstructorDataRows sourceFile ValueUnit)
-        (parseTwoDataThreeDefinitionSecondDataRows sourceFile moduleStart moduleName exportRows);
-
-  def parseTwoConstructorDataThreeDefinitionStartedBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
-      parserBind (parseTwoConstructorDataRows sourceFile ValueUnit)
-        (parseDataThreeDefinitionRows sourceFile moduleStart moduleName exportRows);
-
-  def parseTwoDataThreeDefinitionSecondDataRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(firstDataRows : ParserValue)
-      parserBind (parseTwoConstructorDataRows sourceFile ValueUnit)
-        (appendTwoDataThreeDefinitionRows sourceFile moduleStart moduleName exportRows firstDataRows);
-
-  def appendTwoDataThreeDefinitionRows : String -> String -> String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(firstDataRows : ParserValue) λ(secondDataRows : ParserValue)
-      parserBind (appendProjectionValues firstDataRows secondDataRows)
-        (parseDataThreeDefinitionRows sourceFile moduleStart moduleName exportRows);
-
-  def parseSingleConstructorDataStartedBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(_start : ParserValue)
-      parserBind (parseSingleConstructorDataRows sourceFile ValueUnit)
-        (parseSingleConstructorDefinitionRows sourceFile moduleStart moduleName exportRows);
-
-  def parseSingleConstructorDefinitionRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(firstRows : ParserValue)
-      parserBind (parseSourceDefinitionRows sourceFile ValueUnit)
-        (finishExactModuleBodyRows sourceFile moduleStart moduleName exportRows firstRows);
-
-  def parseDataStartedBodyTail : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(firstRows : ParserValue)
-      parserBind (parseZeroDefinition sourceFile ValueUnit)
-        (appendDataZeroRows sourceFile moduleStart moduleName exportRows firstRows);
-
-  def appendDataZeroRows : String -> String -> String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(existingRows : ParserValue) λ(zeroRows : ParserValue)
-      parserBind (appendProjectionValues existingRows zeroRows) (parseDataSuccRows sourceFile moduleStart moduleName exportRows);
-
-  def parseDataSuccRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(rowsValue : ParserValue)
-      parserBind (parseSuccDefinition sourceFile ValueUnit)
-        (finishExactModuleBodyRows sourceFile moduleStart moduleName exportRows rowsValue);
-
-  def finishExactModuleBodyRows : String -> String -> String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
-      parserBind (appendProjectionValues existingRows nextRows) (finishModuleBodyRows sourceFile moduleStart moduleName exportRows);
+      parserChoice (parseTwoConstructorDerivedDataRows sourceFile ValueUnit)
+        (parseRecursiveConstructorDataRows sourceFile ValueUnit);
 
   def finishModuleBodyRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(bodyRowsValue : ParserValue) case bodyRowsValue of {
@@ -3054,52 +2514,13 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
 
   def parseImportedBodyAfterImport : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(moduleStart : String) λ(moduleName : String) λ(exportRows : String) λ(importRowsValue : ParserValue) case importRowsValue of {
-      ValueProjectionRows importRows ->
-        parserChoice
-          (parserBind (parseFourDataThirteenDefinitionRows sourceFile ValueUnit)
-            (finishImportedBodyRows sourceFile moduleStart moduleName exportRows importRows))
-          (parserChoice
-            (parseImportedMainDefinition sourceFile moduleStart moduleName exportRows importRowsValue)
-            (parserChoice
-              (parserBind (parseImportedTwoDataRows sourceFile ValueUnit)
-                (finishImportedBodyRows sourceFile moduleStart moduleName exportRows importRows))
-              (parserBind (parseThreeImportedSourceDefinitionRows sourceFile ValueUnit)
-                (finishImportedBodyRows sourceFile moduleStart moduleName exportRows importRows))));
+      ValueProjectionRows _ ->
+        parseModuleBodyRowsFirstAfterPrefix sourceFile moduleStart moduleName exportRows importRowsValue;
       ValueConstructorRows _ -> parserFail (ExpectedCompleteModule basicUnexpectedSpan);
       ValueModuleKey _ -> parserFail (ExpectedCompleteModule basicUnexpectedSpan);
       ValueToken _ -> parserFail (ExpectedCompleteModule basicUnexpectedSpan);
       ValueUnit -> parserFail (ExpectedCompleteModule basicUnexpectedSpan)
     };
-
-  def parseImportedTwoDataRows : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(_start : ParserValue)
-      parserChoice
-        (parseImportedFourThenTwoDataRows sourceFile ValueUnit)
-        (parseImportedSingleThenSingleDataRows sourceFile ValueUnit);
-
-  def parseImportedFourThenTwoDataRows : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(_start : ParserValue)
-      parserBind (parseExactFourConstructorDataRows sourceFile ValueUnit)
-        (parseImportedFourThenTwoSecondDataRows sourceFile);
-
-  def parseImportedFourThenTwoSecondDataRows : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(firstDataRows : ParserValue)
-      parserBind (parseTwoConstructorDataRows sourceFile ValueUnit)
-        (appendProjectionValues firstDataRows);
-
-  def parseImportedSingleThenSingleDataRows : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(_start : ParserValue)
-      parserBind (parseSingleConstructorDataRows sourceFile ValueUnit)
-        (parseImportedSingleThenSingleSecondDataRows sourceFile);
-
-  def parseImportedSingleThenSingleSecondDataRows : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(firstDataRows : ParserValue)
-      parserBind (parseSingleConstructorDataRows sourceFile ValueUnit)
-        (appendProjectionValues firstDataRows);
-
-  def parseThreeImportedSourceDefinitionRows : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(_start : ParserValue)
-      parseThreeSourceDefinitionRows sourceFile ValueUnit;
 
   def parseImportProjectionRows : String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(_start : ParserValue)
@@ -3553,14 +2974,14 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
       parserBind (parserCurrentTokenStartOr (tokenEndCoordinate semicolon))
         (λ(defEnd : ParserValue) projectionText (defRows sourceFile "succ" "Nat -> Nat" "λ(n : Nat) Succ n" (spanFromStartToCoordinate defStart defEnd)));
 
-  def finishEqClassRows : String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(classStart : String) λ(methodStart : String) λ(closeClass : ParserValue)
+  def finishEqClassRows : String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(classStart : String) λ(methodRows : ParserValue) λ(closeClass : ParserValue)
       parserBind (parserCurrentTokenStartOr (tokenStartCoordinate closeClass))
         (λ(classEnd : ParserValue)
           projectionText
             (appendLine
               (classRows sourceFile "Eq" "a" (spanFromStartToCoordinate classStart classEnd))
-              (methodSignatureRows sourceFile "eq" "a -> a -> Bool" (spanFromStartToTokenStart methodStart closeClass))));
+              (parserTextFromValue methodRows)));
 
   def parseZeroDefinition : String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(_start : ParserValue)
@@ -3695,52 +3116,110 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
   def parseEqClassOpen : String -> String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(classStart : String) λ(_param : ParserValue)
       parserBind (expectText "{")
-        (parseEqMethodName sourceFile classStart);
+        (parseEqClassMethodRowsFirst sourceFile classStart);
 
-  def parseEqMethodName : String -> String -> ParserValue -> Parser ParserValue =
+  def parseEqClassMethodRowsFirst : String -> String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(classStart : String) λ(_openClass : ParserValue)
-      parserBind (expectIdentifier "eq")
-        (parseEqMethodColon sourceFile classStart);
+      parserBind (parseClassMethodSignatureRow sourceFile ValueUnit)
+        (parseEqClassMethodRowsMoreOrClose3 sourceFile classStart);
 
-  def parseEqMethodColon : String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(classStart : String) λ(methodToken : ParserValue)
+  def parseEqClassMethodRowsMoreOrClose3 : String -> String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(classStart : String) λ(methodRows : ParserValue)
+      parserChoice
+        (parserBind (expectText "}") (finishEqClassRows sourceFile classStart methodRows))
+        (parserBind (parseClassMethodSignatureRow sourceFile ValueUnit)
+          (appendClassMethodRowsAndContinue2 sourceFile classStart methodRows));
+
+  def parseEqClassMethodRowsMoreOrClose2 : String -> String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(classStart : String) λ(methodRows : ParserValue)
+      parserChoice
+        (parserBind (expectText "}") (finishEqClassRows sourceFile classStart methodRows))
+        (parserBind (parseClassMethodSignatureRow sourceFile ValueUnit)
+          (appendClassMethodRowsAndContinue1 sourceFile classStart methodRows));
+
+  def parseEqClassMethodRowsMoreOrClose1 : String -> String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(classStart : String) λ(methodRows : ParserValue)
+      parserChoice
+        (parserBind (expectText "}") (finishEqClassRows sourceFile classStart methodRows))
+        (parserBind (parseClassMethodSignatureRow sourceFile ValueUnit)
+          (appendClassMethodRowsAndContinue0 sourceFile classStart methodRows));
+
+  def parseEqClassMethodRowsMoreOrClose0 : String -> String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(classStart : String) λ(methodRows : ParserValue)
+      parserBind (expectText "}") (finishEqClassRows sourceFile classStart methodRows);
+
+  def appendClassMethodRowsAndContinue2 : String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(classStart : String) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
+      parserBind (appendProjectionValues existingRows nextRows)
+        (parseEqClassMethodRowsMoreOrClose2 sourceFile classStart);
+
+  def appendClassMethodRowsAndContinue1 : String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(classStart : String) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
+      parserBind (appendProjectionValues existingRows nextRows)
+        (parseEqClassMethodRowsMoreOrClose1 sourceFile classStart);
+
+  def appendClassMethodRowsAndContinue0 : String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(classStart : String) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
+      parserBind (appendProjectionValues existingRows nextRows)
+        (parseEqClassMethodRowsMoreOrClose0 sourceFile classStart);
+
+  def expectEqMethodNameParser : ParserValue -> Parser ParserValue =
+    λ(_start : ParserValue)
+      (parserChoice (expectIdentifier "eq") (expectIdentifier "neq") : Parser ParserValue);
+
+  def parseClassMethodSignatureTailRow : String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(methodToken : ParserValue)
+      parseClassMethodSignatureColon sourceFile methodToken;
+
+  def parseClassMethodSignatureRow : String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(_start : ParserValue)
+      parserBind (expectEqMethodNameParser ValueUnit)
+        (parseClassMethodSignatureTailRow sourceFile);
+
+  def parseClassMethodSignatureColon : String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(methodToken : ParserValue)
       parserBind (expectText ":")
-        (parseEqMethodFirstArg sourceFile classStart (tokenStartCoordinate methodToken));
+        (parseClassMethodSignatureType sourceFile methodToken);
 
-  def parseEqMethodFirstArg : String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(classStart : String) λ(methodStart : String) λ(_colon : ParserValue)
+  def parseClassMethodSignatureType : String -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(methodToken : ParserValue) λ(_colon : ParserValue)
       parserBind (expectIdentifier "a")
-        (parseEqMethodFirstArrow sourceFile classStart methodStart);
+        (parseClassMethodSignatureFirstArrow sourceFile methodToken);
 
-  def parseEqMethodFirstArrow : String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(classStart : String) λ(methodStart : String) λ(_firstArg : ParserValue)
+  def parseClassMethodSignatureFirstArrow : String -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(methodToken : ParserValue) λ(_firstArg : ParserValue)
       parserBind (expectText "->")
-        (parseEqMethodSecondArg sourceFile classStart methodStart);
+        (parseClassMethodSignatureSecondArg sourceFile methodToken);
 
-  def parseEqMethodSecondArg : String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(classStart : String) λ(methodStart : String) λ(_arrow : ParserValue)
+  def parseClassMethodSignatureSecondArg : String -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(methodToken : ParserValue) λ(_firstArrow : ParserValue)
       parserBind (expectIdentifier "a")
-        (parseEqMethodSecondArrow sourceFile classStart methodStart);
+        (parseClassMethodSignatureSecondArrow sourceFile methodToken);
 
-  def parseEqMethodSecondArrow : String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(classStart : String) λ(methodStart : String) λ(_secondArg : ParserValue)
+  def parseClassMethodSignatureSecondArrow : String -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(methodToken : ParserValue) λ(_secondArg : ParserValue)
       parserBind (expectText "->")
-        (parseEqMethodResult sourceFile classStart methodStart);
+        (parseClassMethodSignatureResult sourceFile methodToken);
 
-  def parseEqMethodResult : String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(classStart : String) λ(methodStart : String) λ(_arrow : ParserValue)
+  def parseClassMethodSignatureResult : String -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(methodToken : ParserValue) λ(_secondArrow : ParserValue)
       parserBind (expectIdentifier "Bool")
-        (parseEqMethodSemicolon sourceFile classStart methodStart);
+        (parseClassMethodSignatureSemicolon sourceFile methodToken);
 
-  def parseEqMethodSemicolon : String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(classStart : String) λ(methodStart : String) λ(_result : ParserValue)
+  def parseClassMethodSignatureSemicolon : String -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(methodToken : ParserValue) λ(_resultType : ParserValue)
       parserBind (expectText ";")
-        (parseEqClassClose sourceFile classStart methodStart);
+        (finishClassMethodSignatureRow sourceFile methodToken);
 
-  def parseEqClassClose : String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(classStart : String) λ(methodStart : String) λ(_semicolon : ParserValue)
-      parserBind (expectText "}")
-        (finishEqClassRows sourceFile classStart methodStart);
+  def finishClassMethodSignatureRow : String -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(methodToken : ParserValue) λ(semicolon : ParserValue)
+      parserBind (parserCurrentTokenStartOr (tokenEndCoordinate semicolon))
+        (λ(methodEnd : ParserValue)
+          projectionText
+            (methodSignatureRows sourceFile
+              (identifierNameFromValue methodToken)
+              "a -> a -> Bool"
+              (spanFromStartToCoordinate (tokenStartCoordinate methodToken) methodEnd)));
 
   def parseEqNatInstanceDeclarationRows : String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(_start : ParserValue)
@@ -3760,50 +3239,96 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
   def parseEqNatInstanceOpen : String -> ParserValue -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(classToken : ParserValue) λ(typeValue : ParserValue)
       parserBind (expectText "{")
-        (parseEqNatInstanceMethodName sourceFile classToken typeValue);
+        (parseEqNatInstanceMethodRowsFirst sourceFile classToken typeValue);
 
-  def parseEqNatInstanceMethodName : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+  def parseEqNatInstanceMethodRowsFirst : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(classToken : ParserValue) λ(typeValue : ParserValue) λ(_openInstance : ParserValue)
-      parserBind expectAnyIdentifier
-        (parseEqNatInstanceMethodEquals sourceFile classToken typeValue);
+      parserBind (parseInstanceMethodDefinitionRow sourceFile ValueUnit)
+        (parseEqNatInstanceMethodRowsMoreOrClose3 sourceFile classToken typeValue);
 
-  def parseEqNatInstanceMethodEquals : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(classToken : ParserValue) λ(typeValue : ParserValue) λ(methodToken : ParserValue)
+  def parseEqNatInstanceMethodRowsMoreOrClose3 : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(classToken : ParserValue) λ(typeValue : ParserValue) λ(methodRows : ParserValue)
+      parserChoice
+        (parserBind (expectText "}") (finishEqNatInstanceDeclarationRows sourceFile classToken typeValue methodRows))
+        (parserBind (parseInstanceMethodDefinitionRow sourceFile ValueUnit)
+          (appendInstanceMethodRowsAndContinue2 sourceFile classToken typeValue methodRows));
+
+  def appendInstanceMethodRowsAndContinue2 : String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(classToken : ParserValue) λ(typeValue : ParserValue) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
+      parserBind (appendProjectionValues existingRows nextRows)
+        (parseEqNatInstanceMethodRowsMoreOrClose2 sourceFile classToken typeValue);
+
+  def parseEqNatInstanceMethodRowsMoreOrClose2 : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(classToken : ParserValue) λ(typeValue : ParserValue) λ(methodRows : ParserValue)
+      parserChoice
+        (parserBind (expectText "}") (finishEqNatInstanceDeclarationRows sourceFile classToken typeValue methodRows))
+        (parserBind (parseInstanceMethodDefinitionRow sourceFile ValueUnit)
+          (appendInstanceMethodRowsAndContinue1 sourceFile classToken typeValue methodRows));
+
+  def appendInstanceMethodRowsAndContinue1 : String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(classToken : ParserValue) λ(typeValue : ParserValue) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
+      parserBind (appendProjectionValues existingRows nextRows)
+        (parseEqNatInstanceMethodRowsMoreOrClose1 sourceFile classToken typeValue);
+
+  def parseEqNatInstanceMethodRowsMoreOrClose1 : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(classToken : ParserValue) λ(typeValue : ParserValue) λ(methodRows : ParserValue)
+      parserChoice
+        (parserBind (expectText "}") (finishEqNatInstanceDeclarationRows sourceFile classToken typeValue methodRows))
+        (parserBind (parseInstanceMethodDefinitionRow sourceFile ValueUnit)
+          (appendInstanceMethodRowsAndContinue0 sourceFile classToken typeValue methodRows));
+
+  def appendInstanceMethodRowsAndContinue0 : String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(classToken : ParserValue) λ(typeValue : ParserValue) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
+      parserBind (appendProjectionValues existingRows nextRows)
+        (parseEqNatInstanceMethodRowsMoreOrClose0 sourceFile classToken typeValue);
+
+  def parseEqNatInstanceMethodRowsMoreOrClose0 : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(classToken : ParserValue) λ(typeValue : ParserValue) λ(methodRows : ParserValue)
+      parserBind (expectText "}") (finishEqNatInstanceDeclarationRows sourceFile classToken typeValue methodRows);
+
+  def parseInstanceMethodDefinitionTailRow : String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(methodToken : ParserValue)
+      parseInstanceMethodDefinitionEquals sourceFile methodToken;
+
+  def parseInstanceMethodDefinitionRow : String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(_start : ParserValue)
+      parserBind (expectEqMethodNameParser ValueUnit)
+        (parseInstanceMethodDefinitionTailRow sourceFile);
+
+  def parseInstanceMethodDefinitionEquals : String -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(methodToken : ParserValue)
       parserBind (expectInstanceMethodEqualsParser ValueUnit)
-        (parseEqNatInstanceMethodExpression sourceFile classToken typeValue methodToken);
+        (parseInstanceMethodDefinitionExpression sourceFile methodToken);
 
-  def parseEqNatInstanceMethodExpression : String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(classToken : ParserValue) λ(typeValue : ParserValue) λ(methodToken : ParserValue) λ(_equals : ParserValue)
+  def parseInstanceMethodDefinitionExpression : String -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(methodToken : ParserValue) λ(_equals : ParserValue)
       parserBind (parseSourceExpression ValueUnit)
-        (parseEqNatInstanceMethodSemicolon sourceFile classToken typeValue methodToken);
+        (parseInstanceMethodDefinitionSemicolon sourceFile methodToken);
 
-  def parseEqNatInstanceMethodSemicolon : String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(classToken : ParserValue) λ(typeValue : ParserValue) λ(methodToken : ParserValue) λ(exprValue : ParserValue)
+  def parseInstanceMethodDefinitionSemicolon : String -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(methodToken : ParserValue) λ(exprValue : ParserValue)
       parserBind (expectText ";")
-        (captureEqNatInstanceMethodEnd sourceFile classToken typeValue methodToken exprValue);
+        (finishInstanceMethodDefinitionRow sourceFile methodToken exprValue);
 
-  def captureEqNatInstanceMethodEnd : String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(classToken : ParserValue) λ(typeValue : ParserValue) λ(methodToken : ParserValue) λ(exprValue : ParserValue) λ(semicolon : ParserValue)
+  def finishInstanceMethodDefinitionRow : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(methodToken : ParserValue) λ(exprValue : ParserValue) λ(semicolon : ParserValue)
       parserBind (parserCurrentTokenStartOr (tokenEndCoordinate semicolon))
-        (parseEqNatInstanceClose sourceFile classToken typeValue methodToken exprValue);
+        (λ(methodEnd : ParserValue)
+          projectionText
+            (methodDefinitionRows sourceFile
+              (identifierNameFromValue methodToken)
+              (parserTextFromValue exprValue)
+              (spanFromStartToCoordinate (tokenStartCoordinate methodToken) methodEnd)));
 
-  def parseEqNatInstanceClose : String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(classToken : ParserValue) λ(typeValue : ParserValue) λ(methodToken : ParserValue) λ(exprValue : ParserValue) λ(methodEnd : ParserValue)
-      parserBind (expectText "}")
-        (finishEqNatInstanceDeclarationRows sourceFile classToken typeValue methodToken exprValue methodEnd);
-
-  def finishEqNatInstanceDeclarationRows : String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(classToken : ParserValue) λ(typeValue : ParserValue) λ(methodToken : ParserValue) λ(exprValue : ParserValue) λ(methodEnd : ParserValue) λ(_closeInstance : ParserValue)
+  def finishEqNatInstanceDeclarationRows : String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(classToken : ParserValue) λ(typeValue : ParserValue) λ(methodRows : ParserValue) λ(_closeInstance : ParserValue)
       projectionText
         (appendLine
           (instanceRows sourceFile
             (identifierNameFromValue classToken)
             (identifierNameFromValue typeValue)
             (spanFromTokenStartToTokenStart classToken typeValue))
-          (methodDefinitionRows sourceFile
-            (identifierNameFromValue methodToken)
-            (parserTextFromValue exprValue)
-            (spanFromStartToCoordinate (tokenStartCoordinate methodToken) methodEnd)));
+          (parserTextFromValue methodRows));
 
   def parseStepDoneNatSuccZeroExpression : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
@@ -7359,579 +6884,87 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
       parserBind (expectIdentifier "Int")
         parsedUnit;
 
-  def parseExactFourConstructorDataRows : String -> ParserValue -> Parser ParserValue =
+  def parseRecursiveConstructorDataRows : String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(_start : ParserValue)
       parserBind (expectText "data")
-        (parseExactFourConstructorDataRowsName sourceFile);
+        (parseRecursiveConstructorDataRowsName sourceFile);
 
-  def parseExactFourConstructorDataRowsName : String -> ParserValue -> Parser ParserValue =
+  def parseRecursiveConstructorDataRowsName : String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(dataKeyword : ParserValue)
       parserBind expectAnyIdentifier
-        (parseExactFourConstructorDataRowsEquals sourceFile (tokenStartCoordinate dataKeyword));
+        (parseRecursiveConstructorDataRowsHeaderTail sourceFile (tokenStartCoordinate dataKeyword));
 
-  def parseExactFourConstructorDataRowsEquals : String -> String -> ParserValue -> Parser ParserValue =
+  def parseRecursiveConstructorDataRowsHeaderTail : String -> String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue)
+      parserChoice
+        (parserBind (expectText "=")
+          (parseRecursiveConstructorDataRowsFirst sourceFile dataStart dataNameToken ValueUnit))
+        (parserBind expectAnyIdentifier
+          (parseRecursiveConstructorDataRowsParameterEquals sourceFile dataStart dataNameToken));
+
+  def parseRecursiveConstructorDataRowsParameterEquals : String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(parameterToken : ParserValue)
       parserBind (expectText "=")
-        (parseExactFourConstructorDataRowsConstructor1Name sourceFile dataStart dataNameToken emptyConstructorRows);
+        (parseRecursiveConstructorDataRowsFirst sourceFile dataStart dataNameToken parameterToken);
 
-  def parseExactFourConstructorDataRowsConstructor1Name : String -> String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(_equals : ParserValue)
+  def parseRecursiveConstructorDataRowsFirst : String -> String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(parameterValue : ParserValue) λ(_equals : ParserValue)
       parserBind expectAnyIdentifier
-        (parseExactFourConstructorDataRowsConstructor1Colon sourceFile dataStart dataNameToken constructorRowsValue);
+        (parseRecursiveConstructorDataRowsConstructorColon sourceFile dataStart dataNameToken parameterValue emptyConstructorRows);
 
-  def parseExactFourConstructorDataRowsConstructor1Colon : String -> String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c1Token : ParserValue)
+  def parseRecursiveConstructorDataRowsNext : String -> String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(parameterValue : ParserValue) λ(constructorRowsValue : ParserValue)
+      parserBind expectAnyIdentifier
+        (parseRecursiveConstructorDataRowsConstructorColon sourceFile dataStart dataNameToken parameterValue constructorRowsValue);
+
+  def parseRecursiveConstructorDataRowsConstructorColon : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(parameterValue : ParserValue) λ(constructorRowsValue : ParserValue) λ(constructorToken : ParserValue)
       parserBind (expectText ":")
-        (parseExactFourConstructorDataRowsConstructor1Type sourceFile dataStart dataNameToken constructorRowsValue c1Token);
+        (parseRecursiveConstructorDataRowsConstructorType sourceFile dataStart dataNameToken parameterValue constructorRowsValue constructorToken);
 
-  def parseExactFourConstructorDataRowsConstructor1Type : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c1Token : ParserValue) λ(_colon : ParserValue)
+  def parseRecursiveConstructorDataRowsConstructorType : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(parameterValue : ParserValue) λ(constructorRowsValue : ParserValue) λ(constructorToken : ParserValue) λ(_colon : ParserValue)
       parserBind (parseSourceType ValueUnit)
-        (parseExactFourConstructorDataRowsConstructor1Separator sourceFile dataStart dataNameToken constructorRowsValue c1Token);
-
-  def parseExactFourConstructorDataRowsConstructor1Separator : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c1Token : ParserValue) λ(t1 : ParserValue)
-      parserBind (expectText "|")
-        (λ(separatorToken : ParserValue)
-          parserBind (appendConstructorRow sourceFile constructorRowsValue c1Token t1 (spanFromStartToTokenStart (tokenStartCoordinate c1Token) separatorToken))
-            (parseExactFourConstructorDataRowsConstructor2Name sourceFile dataStart dataNameToken));
-
-  def parseExactFourConstructorDataRowsConstructor2Name : String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue)
-      parserBind expectAnyIdentifier
-        (parseExactFourConstructorDataRowsConstructor2Colon sourceFile dataStart dataNameToken constructorRowsValue);
-
-  def parseExactFourConstructorDataRowsConstructor2Colon : String -> String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c2Token : ParserValue)
-      parserBind (expectText ":")
-        (parseExactFourConstructorDataRowsConstructor2Type sourceFile dataStart dataNameToken constructorRowsValue c2Token);
-
-  def parseExactFourConstructorDataRowsConstructor2Type : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c2Token : ParserValue) λ(_colon : ParserValue)
-      parserBind (parseSourceType ValueUnit)
-        (parseExactFourConstructorDataRowsConstructor2Separator sourceFile dataStart dataNameToken constructorRowsValue c2Token);
-
-  def parseExactFourConstructorDataRowsConstructor2Separator : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c2Token : ParserValue) λ(t2 : ParserValue)
-      parserBind (expectText "|")
-        (λ(separatorToken : ParserValue)
-          parserBind (appendConstructorRow sourceFile constructorRowsValue c2Token t2 (spanFromStartToTokenStart (tokenStartCoordinate c2Token) separatorToken))
-            (parseExactFourConstructorDataRowsConstructor3Name sourceFile dataStart dataNameToken));
-
-  def parseExactFourConstructorDataRowsConstructor3Name : String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue)
-      parserBind expectAnyIdentifier
-        (parseExactFourConstructorDataRowsConstructor3Colon sourceFile dataStart dataNameToken constructorRowsValue);
-
-  def parseExactFourConstructorDataRowsConstructor3Colon : String -> String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c3Token : ParserValue)
-      parserBind (expectText ":")
-        (parseExactFourConstructorDataRowsConstructor3Type sourceFile dataStart dataNameToken constructorRowsValue c3Token);
-
-  def parseExactFourConstructorDataRowsConstructor3Type : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c3Token : ParserValue) λ(_colon : ParserValue)
-      parserBind (parseSourceType ValueUnit)
-        (parseExactFourConstructorDataRowsConstructor3Separator sourceFile dataStart dataNameToken constructorRowsValue c3Token);
-
-  def parseExactFourConstructorDataRowsConstructor3Separator : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c3Token : ParserValue) λ(t3 : ParserValue)
-      parserBind (expectText "|")
-        (λ(separatorToken : ParserValue)
-          parserBind (appendConstructorRow sourceFile constructorRowsValue c3Token t3 (spanFromStartToTokenStart (tokenStartCoordinate c3Token) separatorToken))
-            (parseExactFourConstructorDataRowsConstructor4Name sourceFile dataStart dataNameToken));
-
-  def parseExactFourConstructorDataRowsConstructor4Name : String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue)
-      parserBind expectAnyIdentifier
-        (parseExactFourConstructorDataRowsConstructor4Colon sourceFile dataStart dataNameToken constructorRowsValue);
-
-  def parseExactFourConstructorDataRowsConstructor4Colon : String -> String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c4Token : ParserValue)
-      parserBind (expectText ":")
-        (parseExactFourConstructorDataRowsConstructor4Type sourceFile dataStart dataNameToken constructorRowsValue c4Token);
-
-  def parseExactFourConstructorDataRowsConstructor4Type : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c4Token : ParserValue) λ(_colon : ParserValue)
-      parserBind (parseSourceType ValueUnit)
-        (parseExactFourConstructorDataRowsConstructor4Semicolon sourceFile dataStart dataNameToken constructorRowsValue c4Token);
-
-  def parseExactFourConstructorDataRowsConstructor4Semicolon : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c4Token : ParserValue) λ(t4 : ParserValue)
-      parserBind (expectText ";")
-        (λ(semicolonToken : ParserValue)
-          parserBind (appendConstructorRow sourceFile constructorRowsValue c4Token t4 (spanFromStartToTokenStart (tokenStartCoordinate c4Token) semicolonToken))
-            (λ(finalConstructorRowsValue : ParserValue)
-              parserBind (parserCurrentTokenStartOr (tokenEndCoordinate semicolonToken))
-                (λ(dataEnd : ParserValue)
-                  projectionText
-                    (dataRowsWithConstructorRows
-                      sourceFile
-                      dataNameToken
-                      (spanFromStartToCoordinate dataStart dataEnd)
-                      finalConstructorRowsValue))));
-
-  def parseExactFiveConstructorDataRows : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(_start : ParserValue)
-      parserBind (expectText "data")
-        (parseExactFiveConstructorDataRowsName sourceFile);
-
-  def parseExactFiveConstructorDataRowsName : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataKeyword : ParserValue)
-      parserBind expectAnyIdentifier
-        (parseExactFiveConstructorDataRowsEquals sourceFile (tokenStartCoordinate dataKeyword));
-
-  def parseExactFiveConstructorDataRowsEquals : String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue)
-      parserBind (expectText "=")
-        (parseExactFiveConstructorDataRowsConstructor1Name sourceFile dataStart dataNameToken emptyConstructorRows);
-
-  def parseExactFiveConstructorDataRowsConstructor1Name : String -> String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(_equals : ParserValue)
-      parserBind expectAnyIdentifier
-        (parseExactFiveConstructorDataRowsConstructor1Colon sourceFile dataStart dataNameToken constructorRowsValue);
-
-  def parseExactFiveConstructorDataRowsConstructor1Colon : String -> String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c1Token : ParserValue)
-      parserBind (expectText ":")
-        (parseExactFiveConstructorDataRowsConstructor1Type sourceFile dataStart dataNameToken constructorRowsValue c1Token);
-
-  def parseExactFiveConstructorDataRowsConstructor1Type : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c1Token : ParserValue) λ(_colon : ParserValue)
-      parserBind (parseSourceType ValueUnit)
-        (parseExactFiveConstructorDataRowsConstructor1Separator sourceFile dataStart dataNameToken constructorRowsValue c1Token);
-
-  def parseExactFiveConstructorDataRowsConstructor1Separator : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c1Token : ParserValue) λ(t1 : ParserValue)
-      parserBind (expectText "|")
-        (λ(separatorToken : ParserValue)
-          parserBind (appendConstructorRow sourceFile constructorRowsValue c1Token t1 (spanFromStartToTokenStart (tokenStartCoordinate c1Token) separatorToken))
-            (parseExactFiveConstructorDataRowsConstructor2Name sourceFile dataStart dataNameToken));
-
-  def parseExactFiveConstructorDataRowsConstructor2Name : String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue)
-      parserBind expectAnyIdentifier
-        (parseExactFiveConstructorDataRowsConstructor2Colon sourceFile dataStart dataNameToken constructorRowsValue);
-
-  def parseExactFiveConstructorDataRowsConstructor2Colon : String -> String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c2Token : ParserValue)
-      parserBind (expectText ":")
-        (parseExactFiveConstructorDataRowsConstructor2Type sourceFile dataStart dataNameToken constructorRowsValue c2Token);
-
-  def parseExactFiveConstructorDataRowsConstructor2Type : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c2Token : ParserValue) λ(_colon : ParserValue)
-      parserBind (parseSourceType ValueUnit)
-        (parseExactFiveConstructorDataRowsConstructor2Separator sourceFile dataStart dataNameToken constructorRowsValue c2Token);
-
-  def parseExactFiveConstructorDataRowsConstructor2Separator : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c2Token : ParserValue) λ(t2 : ParserValue)
-      parserBind (expectText "|")
-        (λ(separatorToken : ParserValue)
-          parserBind (appendConstructorRow sourceFile constructorRowsValue c2Token t2 (spanFromStartToTokenStart (tokenStartCoordinate c2Token) separatorToken))
-            (parseExactFiveConstructorDataRowsConstructor3Name sourceFile dataStart dataNameToken));
-
-  def parseExactFiveConstructorDataRowsConstructor3Name : String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue)
-      parserBind expectAnyIdentifier
-        (parseExactFiveConstructorDataRowsConstructor3Colon sourceFile dataStart dataNameToken constructorRowsValue);
-
-  def parseExactFiveConstructorDataRowsConstructor3Colon : String -> String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c3Token : ParserValue)
-      parserBind (expectText ":")
-        (parseExactFiveConstructorDataRowsConstructor3Type sourceFile dataStart dataNameToken constructorRowsValue c3Token);
-
-  def parseExactFiveConstructorDataRowsConstructor3Type : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c3Token : ParserValue) λ(_colon : ParserValue)
-      parserBind (parseSourceType ValueUnit)
-        (parseExactFiveConstructorDataRowsConstructor3Separator sourceFile dataStart dataNameToken constructorRowsValue c3Token);
-
-  def parseExactFiveConstructorDataRowsConstructor3Separator : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c3Token : ParserValue) λ(t3 : ParserValue)
-      parserBind (expectText "|")
-        (λ(separatorToken : ParserValue)
-          parserBind (appendConstructorRow sourceFile constructorRowsValue c3Token t3 (spanFromStartToTokenStart (tokenStartCoordinate c3Token) separatorToken))
-            (parseExactFiveConstructorDataRowsConstructor4Name sourceFile dataStart dataNameToken));
-
-  def parseExactFiveConstructorDataRowsConstructor4Name : String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue)
-      parserBind expectAnyIdentifier
-        (parseExactFiveConstructorDataRowsConstructor4Colon sourceFile dataStart dataNameToken constructorRowsValue);
-
-  def parseExactFiveConstructorDataRowsConstructor4Colon : String -> String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c4Token : ParserValue)
-      parserBind (expectText ":")
-        (parseExactFiveConstructorDataRowsConstructor4Type sourceFile dataStart dataNameToken constructorRowsValue c4Token);
-
-  def parseExactFiveConstructorDataRowsConstructor4Type : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c4Token : ParserValue) λ(_colon : ParserValue)
-      parserBind (parseSourceType ValueUnit)
-        (parseExactFiveConstructorDataRowsConstructor4Separator sourceFile dataStart dataNameToken constructorRowsValue c4Token);
-
-  def parseExactFiveConstructorDataRowsConstructor4Separator : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c4Token : ParserValue) λ(t4 : ParserValue)
-      parserBind (expectText "|")
-        (λ(separatorToken : ParserValue)
-          parserBind (appendConstructorRow sourceFile constructorRowsValue c4Token t4 (spanFromStartToTokenStart (tokenStartCoordinate c4Token) separatorToken))
-            (parseExactFiveConstructorDataRowsConstructor5Name sourceFile dataStart dataNameToken));
-
-  def parseExactFiveConstructorDataRowsConstructor5Name : String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue)
-      parserBind expectAnyIdentifier
-        (parseExactFiveConstructorDataRowsConstructor5Colon sourceFile dataStart dataNameToken constructorRowsValue);
-
-  def parseExactFiveConstructorDataRowsConstructor5Colon : String -> String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c5Token : ParserValue)
-      parserBind (expectText ":")
-        (parseExactFiveConstructorDataRowsConstructor5Type sourceFile dataStart dataNameToken constructorRowsValue c5Token);
-
-  def parseExactFiveConstructorDataRowsConstructor5Type : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c5Token : ParserValue) λ(_colon : ParserValue)
-      parserBind (parseSourceType ValueUnit)
-        (parseExactFiveConstructorDataRowsConstructor5Semicolon sourceFile dataStart dataNameToken constructorRowsValue c5Token);
-
-  def parseExactFiveConstructorDataRowsConstructor5Semicolon : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c5Token : ParserValue) λ(t5 : ParserValue)
-      parserBind (expectText ";")
-        (λ(semicolonToken : ParserValue)
-          parserBind (appendConstructorRow sourceFile constructorRowsValue c5Token t5 (spanFromStartToTokenStart (tokenStartCoordinate c5Token) semicolonToken))
-            (λ(finalConstructorRowsValue : ParserValue)
-              parserBind (parserCurrentTokenStartOr (tokenEndCoordinate semicolonToken))
-                (λ(dataEnd : ParserValue)
-                  projectionText
-                    (dataRowsWithConstructorRows
-                      sourceFile
-                      dataNameToken
-                      (spanFromStartToCoordinate dataStart dataEnd)
-                      finalConstructorRowsValue))));
-
-  def parseExactNineConstructorDataRows : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(_start : ParserValue)
-      parserBind (expectText "data")
-        (parseExactNineConstructorDataRowsName sourceFile);
-
-  def parseExactNineConstructorDataRowsName : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataKeyword : ParserValue)
-      parserBind expectAnyIdentifier
-        (parseExactNineConstructorDataRowsEquals sourceFile (tokenStartCoordinate dataKeyword));
-
-  def parseExactNineConstructorDataRowsEquals : String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue)
-      parserBind (expectText "=")
-        (parseExactNineConstructorDataRowsConstructor1Name sourceFile dataStart dataNameToken emptyConstructorRows);
-
-  def parseExactNineConstructorDataRowsConstructor1Name : String -> String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(_equals : ParserValue)
-      parserBind expectAnyIdentifier
-        (parseExactNineConstructorDataRowsConstructor1Colon sourceFile dataStart dataNameToken constructorRowsValue);
-
-  def parseExactNineConstructorDataRowsConstructor1Colon : String -> String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c1Token : ParserValue)
-      parserBind (expectText ":")
-        (parseExactNineConstructorDataRowsConstructor1Type sourceFile dataStart dataNameToken constructorRowsValue c1Token);
-
-  def parseExactNineConstructorDataRowsConstructor1Type : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c1Token : ParserValue) λ(_colon : ParserValue)
-      parserBind (parseSourceType ValueUnit)
-        (parseExactNineConstructorDataRowsConstructor1Separator sourceFile dataStart dataNameToken constructorRowsValue c1Token);
-
-  def parseExactNineConstructorDataRowsConstructor1Separator : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c1Token : ParserValue) λ(t1 : ParserValue)
-      parserBind (expectText "|")
-        (λ(separatorToken : ParserValue)
-          parserBind (appendConstructorRow sourceFile constructorRowsValue c1Token t1 (spanFromStartToTokenStart (tokenStartCoordinate c1Token) separatorToken))
-            (parseExactNineConstructorDataRowsConstructor2Name sourceFile dataStart dataNameToken));
-
-  def parseExactNineConstructorDataRowsConstructor2Name : String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue)
-      parserBind expectAnyIdentifier
-        (parseExactNineConstructorDataRowsConstructor2Colon sourceFile dataStart dataNameToken constructorRowsValue);
-
-  def parseExactNineConstructorDataRowsConstructor2Colon : String -> String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c2Token : ParserValue)
-      parserBind (expectText ":")
-        (parseExactNineConstructorDataRowsConstructor2Type sourceFile dataStart dataNameToken constructorRowsValue c2Token);
-
-  def parseExactNineConstructorDataRowsConstructor2Type : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c2Token : ParserValue) λ(_colon : ParserValue)
-      parserBind (parseSourceType ValueUnit)
-        (parseExactNineConstructorDataRowsConstructor2Separator sourceFile dataStart dataNameToken constructorRowsValue c2Token);
-
-  def parseExactNineConstructorDataRowsConstructor2Separator : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c2Token : ParserValue) λ(t2 : ParserValue)
-      parserBind (expectText "|")
-        (λ(separatorToken : ParserValue)
-          parserBind (appendConstructorRow sourceFile constructorRowsValue c2Token t2 (spanFromStartToTokenStart (tokenStartCoordinate c2Token) separatorToken))
-            (parseExactNineConstructorDataRowsConstructor3Name sourceFile dataStart dataNameToken));
-
-  def parseExactNineConstructorDataRowsConstructor3Name : String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue)
-      parserBind expectAnyIdentifier
-        (parseExactNineConstructorDataRowsConstructor3Colon sourceFile dataStart dataNameToken constructorRowsValue);
-
-  def parseExactNineConstructorDataRowsConstructor3Colon : String -> String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c3Token : ParserValue)
-      parserBind (expectText ":")
-        (parseExactNineConstructorDataRowsConstructor3Type sourceFile dataStart dataNameToken constructorRowsValue c3Token);
-
-  def parseExactNineConstructorDataRowsConstructor3Type : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c3Token : ParserValue) λ(_colon : ParserValue)
-      parserBind (parseSourceType ValueUnit)
-        (parseExactNineConstructorDataRowsConstructor3Separator sourceFile dataStart dataNameToken constructorRowsValue c3Token);
-
-  def parseExactNineConstructorDataRowsConstructor3Separator : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c3Token : ParserValue) λ(t3 : ParserValue)
-      parserBind (expectText "|")
-        (λ(separatorToken : ParserValue)
-          parserBind (appendConstructorRow sourceFile constructorRowsValue c3Token t3 (spanFromStartToTokenStart (tokenStartCoordinate c3Token) separatorToken))
-            (parseExactNineConstructorDataRowsConstructor4Name sourceFile dataStart dataNameToken));
-
-  def parseExactNineConstructorDataRowsConstructor4Name : String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue)
-      parserBind expectAnyIdentifier
-        (parseExactNineConstructorDataRowsConstructor4Colon sourceFile dataStart dataNameToken constructorRowsValue);
-
-  def parseExactNineConstructorDataRowsConstructor4Colon : String -> String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c4Token : ParserValue)
-      parserBind (expectText ":")
-        (parseExactNineConstructorDataRowsConstructor4Type sourceFile dataStart dataNameToken constructorRowsValue c4Token);
-
-  def parseExactNineConstructorDataRowsConstructor4Type : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c4Token : ParserValue) λ(_colon : ParserValue)
-      parserBind (parseSourceType ValueUnit)
-        (parseExactNineConstructorDataRowsConstructor4Separator sourceFile dataStart dataNameToken constructorRowsValue c4Token);
-
-  def parseExactNineConstructorDataRowsConstructor4Separator : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c4Token : ParserValue) λ(t4 : ParserValue)
-      parserBind (expectText "|")
-        (λ(separatorToken : ParserValue)
-          parserBind (appendConstructorRow sourceFile constructorRowsValue c4Token t4 (spanFromStartToTokenStart (tokenStartCoordinate c4Token) separatorToken))
-            (parseExactNineConstructorDataRowsConstructor5Name sourceFile dataStart dataNameToken));
-
-  def parseExactNineConstructorDataRowsConstructor5Name : String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue)
-      parserBind expectAnyIdentifier
-        (parseExactNineConstructorDataRowsConstructor5Colon sourceFile dataStart dataNameToken constructorRowsValue);
-
-  def parseExactNineConstructorDataRowsConstructor5Colon : String -> String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c5Token : ParserValue)
-      parserBind (expectText ":")
-        (parseExactNineConstructorDataRowsConstructor5Type sourceFile dataStart dataNameToken constructorRowsValue c5Token);
-
-  def parseExactNineConstructorDataRowsConstructor5Type : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c5Token : ParserValue) λ(_colon : ParserValue)
-      parserBind (parseSourceType ValueUnit)
-        (parseExactNineConstructorDataRowsConstructor5Separator sourceFile dataStart dataNameToken constructorRowsValue c5Token);
-
-  def parseExactNineConstructorDataRowsConstructor5Separator : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c5Token : ParserValue) λ(t5 : ParserValue)
-      parserBind (expectText "|")
-        (λ(separatorToken : ParserValue)
-          parserBind (appendConstructorRow sourceFile constructorRowsValue c5Token t5 (spanFromStartToTokenStart (tokenStartCoordinate c5Token) separatorToken))
-            (parseExactNineConstructorDataRowsConstructor6Name sourceFile dataStart dataNameToken));
-
-  def parseExactNineConstructorDataRowsConstructor6Name : String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue)
-      parserBind expectAnyIdentifier
-        (parseExactNineConstructorDataRowsConstructor6Colon sourceFile dataStart dataNameToken constructorRowsValue);
-
-  def parseExactNineConstructorDataRowsConstructor6Colon : String -> String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c6Token : ParserValue)
-      parserBind (expectText ":")
-        (parseExactNineConstructorDataRowsConstructor6Type sourceFile dataStart dataNameToken constructorRowsValue c6Token);
-
-  def parseExactNineConstructorDataRowsConstructor6Type : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c6Token : ParserValue) λ(_colon : ParserValue)
-      parserBind (parseSourceType ValueUnit)
-        (parseExactNineConstructorDataRowsConstructor6Separator sourceFile dataStart dataNameToken constructorRowsValue c6Token);
-
-  def parseExactNineConstructorDataRowsConstructor6Separator : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c6Token : ParserValue) λ(t6 : ParserValue)
-      parserBind (expectText "|")
-        (λ(separatorToken : ParserValue)
-          parserBind (appendConstructorRow sourceFile constructorRowsValue c6Token t6 (spanFromStartToTokenStart (tokenStartCoordinate c6Token) separatorToken))
-            (parseExactNineConstructorDataRowsConstructor7Name sourceFile dataStart dataNameToken));
-
-  def parseExactNineConstructorDataRowsConstructor7Name : String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue)
-      parserBind expectAnyIdentifier
-        (parseExactNineConstructorDataRowsConstructor7Colon sourceFile dataStart dataNameToken constructorRowsValue);
-
-  def parseExactNineConstructorDataRowsConstructor7Colon : String -> String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c7Token : ParserValue)
-      parserBind (expectText ":")
-        (parseExactNineConstructorDataRowsConstructor7Type sourceFile dataStart dataNameToken constructorRowsValue c7Token);
-
-  def parseExactNineConstructorDataRowsConstructor7Type : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c7Token : ParserValue) λ(_colon : ParserValue)
-      parserBind (parseSourceType ValueUnit)
-        (parseExactNineConstructorDataRowsConstructor7Separator sourceFile dataStart dataNameToken constructorRowsValue c7Token);
-
-  def parseExactNineConstructorDataRowsConstructor7Separator : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c7Token : ParserValue) λ(t7 : ParserValue)
-      parserBind (expectText "|")
-        (λ(separatorToken : ParserValue)
-          parserBind (appendConstructorRow sourceFile constructorRowsValue c7Token t7 (spanFromStartToTokenStart (tokenStartCoordinate c7Token) separatorToken))
-            (parseExactNineConstructorDataRowsConstructor8Name sourceFile dataStart dataNameToken));
-
-  def parseExactNineConstructorDataRowsConstructor8Name : String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue)
-      parserBind expectAnyIdentifier
-        (parseExactNineConstructorDataRowsConstructor8Colon sourceFile dataStart dataNameToken constructorRowsValue);
-
-  def parseExactNineConstructorDataRowsConstructor8Colon : String -> String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c8Token : ParserValue)
-      parserBind (expectText ":")
-        (parseExactNineConstructorDataRowsConstructor8Type sourceFile dataStart dataNameToken constructorRowsValue c8Token);
-
-  def parseExactNineConstructorDataRowsConstructor8Type : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c8Token : ParserValue) λ(_colon : ParserValue)
-      parserBind (parseSourceType ValueUnit)
-        (parseExactNineConstructorDataRowsConstructor8Separator sourceFile dataStart dataNameToken constructorRowsValue c8Token);
-
-  def parseExactNineConstructorDataRowsConstructor8Separator : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c8Token : ParserValue) λ(t8 : ParserValue)
-      parserBind (expectText "|")
-        (λ(separatorToken : ParserValue)
-          parserBind (appendConstructorRow sourceFile constructorRowsValue c8Token t8 (spanFromStartToTokenStart (tokenStartCoordinate c8Token) separatorToken))
-            (parseExactNineConstructorDataRowsConstructor9Name sourceFile dataStart dataNameToken));
-
-  def parseExactNineConstructorDataRowsConstructor9Name : String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue)
-      parserBind expectAnyIdentifier
-        (parseExactNineConstructorDataRowsConstructor9Colon sourceFile dataStart dataNameToken constructorRowsValue);
-
-  def parseExactNineConstructorDataRowsConstructor9Colon : String -> String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c9Token : ParserValue)
-      parserBind (expectText ":")
-        (parseExactNineConstructorDataRowsConstructor9Type sourceFile dataStart dataNameToken constructorRowsValue c9Token);
-
-  def parseExactNineConstructorDataRowsConstructor9Type : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c9Token : ParserValue) λ(_colon : ParserValue)
-      parserBind (parseSourceType ValueUnit)
-        (parseExactNineConstructorDataRowsConstructor9Semicolon sourceFile dataStart dataNameToken constructorRowsValue c9Token);
-
-  def parseExactNineConstructorDataRowsConstructor9Semicolon : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorRowsValue : ParserValue) λ(c9Token : ParserValue) λ(t9 : ParserValue)
-      parserBind (expectText ";")
-        (λ(semicolonToken : ParserValue)
-          parserBind (appendConstructorRow sourceFile constructorRowsValue c9Token t9 (spanFromStartToTokenStart (tokenStartCoordinate c9Token) semicolonToken))
-            (λ(finalConstructorRowsValue : ParserValue)
-              parserBind (parserCurrentTokenStartOr (tokenEndCoordinate semicolonToken))
-                (λ(dataEnd : ParserValue)
-                  projectionText
-                    (dataRowsWithConstructorRows
-                      sourceFile
-                      dataNameToken
-                      (spanFromStartToCoordinate dataStart dataEnd)
-                      finalConstructorRowsValue))));
-  def parseSingleConstructorDataRows : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(_start : ParserValue)
-      parserBind (expectText "data")
-        (parseSingleConstructorDataName sourceFile);
-
-  def parseSingleConstructorDataName : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataKeyword : ParserValue)
-      parserBind expectAnyIdentifier
-        (parseSingleConstructorDataEquals sourceFile (tokenStartCoordinate dataKeyword));
-
-  def parseSingleConstructorDataEquals : String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue)
-      parserBind (expectText "=")
-        (parseSingleConstructorName sourceFile dataStart dataNameToken);
-
-  def parseSingleConstructorName : String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(_equals : ParserValue)
-      parserBind expectAnyIdentifier
-        (parseSingleConstructorColon sourceFile dataStart dataNameToken);
-
-  def parseSingleConstructorColon : String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorToken : ParserValue)
-      parserBind (expectText ":")
-        (parseSingleConstructorType sourceFile dataStart dataNameToken constructorToken);
-
-  def parseSingleConstructorType : String -> String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorToken : ParserValue) λ(_colon : ParserValue)
-      parserBind (parseSourceType ValueUnit)
-        (parseSingleConstructorSemicolon sourceFile dataStart dataNameToken constructorToken);
-
-  def parseSingleConstructorSemicolon : String -> String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorToken : ParserValue) λ(typeValue : ParserValue)
-      parserBind (expectText ";")
-        (finishSingleConstructorDataRows sourceFile dataStart dataNameToken constructorToken typeValue);
-
-  def finishSingleConstructorDataRows : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(constructorToken : ParserValue) λ(typeValue : ParserValue) λ(semicolonToken : ParserValue)
+        (parseRecursiveConstructorDataRowsConstructorTail sourceFile dataStart dataNameToken parameterValue constructorRowsValue constructorToken);
+
+  def parseRecursiveConstructorDataRowsConstructorTail : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(parameterValue : ParserValue) λ(constructorRowsValue : ParserValue) λ(constructorToken : ParserValue) λ(typeValue : ParserValue)
+      parserChoice
+        (parserBind (expectText "|")
+          (appendRecursiveConstructorDataRowAndContinue sourceFile dataStart dataNameToken parameterValue constructorRowsValue constructorToken typeValue))
+        (parserBind (expectText ";")
+          (appendRecursiveConstructorDataRowAndFinish sourceFile dataStart dataNameToken parameterValue constructorRowsValue constructorToken typeValue));
+
+  def appendRecursiveConstructorDataRowAndContinue : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(parameterValue : ParserValue) λ(constructorRowsValue : ParserValue) λ(constructorToken : ParserValue) λ(typeValue : ParserValue) λ(separatorToken : ParserValue)
+      parserBind (appendConstructorRow sourceFile constructorRowsValue constructorToken typeValue (spanFromStartToTokenStart (tokenStartCoordinate constructorToken) separatorToken))
+        (parseRecursiveConstructorDataRowsNext sourceFile dataStart dataNameToken parameterValue);
+
+  def appendRecursiveConstructorDataRowAndFinish : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(parameterValue : ParserValue) λ(constructorRowsValue : ParserValue) λ(constructorToken : ParserValue) λ(typeValue : ParserValue) λ(semicolonToken : ParserValue)
+      parserBind (appendConstructorRow sourceFile constructorRowsValue constructorToken typeValue (spanFromStartToTokenStart (tokenStartCoordinate constructorToken) semicolonToken))
+        (finishRecursiveConstructorDataRows sourceFile dataStart dataNameToken parameterValue semicolonToken);
+
+  def finishRecursiveConstructorDataRows : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(parameterValue : ParserValue) λ(semicolonToken : ParserValue) λ(constructorRowsValue : ParserValue)
       parserBind (parserCurrentTokenStartOr (tokenEndCoordinate semicolonToken))
-        (λ(dataEnd : ParserValue)
-          projectionText
-            (appendLine
-              (dataRows sourceFile (identifierNameFromValue dataNameToken) (spanFromStartToCoordinate dataStart dataEnd))
-              (constructorRows sourceFile (identifierNameFromValue constructorToken) (parserTextFromValue typeValue) (spanFromStartToTokenStart (tokenStartCoordinate constructorToken) semicolonToken))));
-
-  def parseTwoConstructorDataRows : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(_start : ParserValue)
-      parserBind (expectText "data")
-        (parseTwoConstructorDataRowsName sourceFile);
-
-  def parseTwoConstructorDataRowsName : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataKeyword : ParserValue)
-      parserBind expectAnyIdentifier
-        (parseTwoConstructorDataRowsEquals sourceFile (tokenStartCoordinate dataKeyword));
-
-  def parseTwoConstructorDataRowsEquals : String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue)
-      parserBind (expectText "=")
-        (parseTwoConstructorDataRowsFirstName sourceFile dataStart dataNameToken);
-
-  def parseTwoConstructorDataRowsFirstName : String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(_equals : ParserValue)
-      parserBind expectAnyIdentifier
-        (parseTwoConstructorDataRowsFirstColon sourceFile dataStart dataNameToken);
-
-  def parseTwoConstructorDataRowsFirstColon : String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(firstConstructorToken : ParserValue)
-      parserBind (expectText ":")
-        (parseTwoConstructorDataRowsFirstType sourceFile dataStart dataNameToken firstConstructorToken);
-
-  def parseTwoConstructorDataRowsFirstType : String -> String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(firstConstructorToken : ParserValue) λ(_colon : ParserValue)
-      parserBind (parseSourceType ValueUnit)
-        (parseTwoConstructorDataRowsSeparator sourceFile dataStart dataNameToken firstConstructorToken);
-
-  def parseTwoConstructorDataRowsSeparator : String -> String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(firstConstructorToken : ParserValue) λ(firstType : ParserValue)
-      parserBind (expectText "|")
-        (parseTwoConstructorDataRowsSecondName sourceFile dataStart dataNameToken firstConstructorToken firstType);
-
-  def parseTwoConstructorDataRowsSecondName : String -> String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(firstConstructorToken : ParserValue) λ(firstType : ParserValue) λ(separatorToken : ParserValue)
-      parserBind expectAnyIdentifier
-        (parseTwoConstructorDataRowsSecondColon sourceFile dataStart dataNameToken firstConstructorToken firstType (spanFromStartToTokenStart (tokenStartCoordinate firstConstructorToken) separatorToken));
-
-  def parseTwoConstructorDataRowsSecondColon : String -> String -> ParserValue -> ParserValue -> ParserValue -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(firstConstructorToken : ParserValue) λ(firstType : ParserValue) λ(firstSpan : String) λ(secondConstructorToken : ParserValue)
-      parserBind (expectText ":")
-        (parseTwoConstructorDataRowsSecondType sourceFile dataStart dataNameToken firstConstructorToken firstType firstSpan secondConstructorToken);
-
-  def parseTwoConstructorDataRowsSecondType : String -> String -> ParserValue -> ParserValue -> ParserValue -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(firstConstructorToken : ParserValue) λ(firstType : ParserValue) λ(firstSpan : String) λ(secondConstructorToken : ParserValue) λ(_colon : ParserValue)
-      parserBind (parseSourceType ValueUnit)
-        (parseTwoConstructorDataRowsSemicolon sourceFile dataStart dataNameToken firstConstructorToken firstType firstSpan secondConstructorToken);
-
-  def parseTwoConstructorDataRowsSemicolon : String -> String -> ParserValue -> ParserValue -> ParserValue -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(firstConstructorToken : ParserValue) λ(firstType : ParserValue) λ(firstSpan : String) λ(secondConstructorToken : ParserValue) λ(secondType : ParserValue)
-      parserBind (expectText ";")
-        (finishTwoConstructorDataRows sourceFile dataStart dataNameToken firstConstructorToken firstType firstSpan secondConstructorToken secondType);
-
-  def finishTwoConstructorDataRows : String -> String -> ParserValue -> ParserValue -> ParserValue -> String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(dataNameToken : ParserValue) λ(firstConstructorToken : ParserValue) λ(firstType : ParserValue) λ(firstSpan : String) λ(secondConstructorToken : ParserValue) λ(secondType : ParserValue) λ(semicolonToken : ParserValue)
-      parserBind (parserCurrentTokenStartOr (tokenEndCoordinate semicolonToken))
-        (λ(dataEnd : ParserValue)
-          projectionText
-            (appendLine
-              (dataRows sourceFile (identifierNameFromValue dataNameToken) (spanFromStartToCoordinate dataStart dataEnd))
+        (λ(dataEnd : ParserValue) case parameterValue of {
+          ValueToken parameterToken ->
+            projectionText
               (appendLine
-                (constructorRows sourceFile (identifierNameFromValue firstConstructorToken) (parserTextFromValue firstType) firstSpan)
-                (constructorRows sourceFile (identifierNameFromValue secondConstructorToken) (parserTextFromValue secondType) (spanFromStartToTokenStart (tokenStartCoordinate secondConstructorToken) semicolonToken)))));
+                (dataParamRows sourceFile (identifierNameFromValue dataNameToken) (identifierNameFromTokenText (tokenText parameterToken)) (spanFromStartToCoordinate dataStart dataEnd))
+                (constructorRowsFromValue constructorRowsValue));
+          ValueUnit ->
+            projectionText
+              (dataRowsWithConstructorRows
+                sourceFile
+                dataNameToken
+                (spanFromStartToCoordinate dataStart dataEnd)
+                constructorRowsValue);
+          ValueProjectionRows _ -> parserFail (ExpectedCompleteModule basicUnexpectedSpan);
+          ValueConstructorRows _ -> parserFail (ExpectedCompleteModule basicUnexpectedSpan);
+          ValueModuleKey _ -> parserFail (ExpectedCompleteModule basicUnexpectedSpan)
+        });
 
   def parseTwoConstructorDerivedDataRows : String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(_start : ParserValue)
@@ -8010,173 +7043,6 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
                 (appendLine
                   (constructorRows sourceFile (identifierNameFromValue secondConstructorToken) (parserTextFromValue secondType) (spanFromStartToTokenStart (tokenStartCoordinate secondConstructorToken) derivingToken))
                   (derivingRows sourceFile (identifierNameFromValue classToken) (spanFromTokenBounds classToken classToken))))));
-
-  def parseNatRecursiveDataRows : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(_start : ParserValue)
-      parserBind (expectText "data")
-        (parseNatRecursiveDataRowsName sourceFile);
-
-  def parseNatRecursiveDataRowsName : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataKeyword : ParserValue)
-      parserBind (expectIdentifier "Nat")
-        (parseNatRecursiveDataRowsEquals sourceFile (tokenStartCoordinate dataKeyword));
-
-  def parseNatRecursiveDataRowsEquals : String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(_dataName : ParserValue)
-      parserBind (expectText "=")
-        (parseNatRecursiveDataRowsZero sourceFile dataStart);
-
-  def parseNatRecursiveDataRowsZero : String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(_equals : ParserValue)
-      parserBind (expectIdentifier "Zero")
-        (parseNatRecursiveDataRowsZeroColon sourceFile dataStart);
-
-  def parseNatRecursiveDataRowsZeroColon : String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(zeroToken : ParserValue)
-      parserBind (expectText ":")
-        (parseNatRecursiveDataRowsZeroResult sourceFile dataStart (tokenStartCoordinate zeroToken));
-
-  def parseNatRecursiveDataRowsZeroResult : String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(zeroStart : String) λ(_colon : ParserValue)
-      parserBind (expectIdentifier "Nat")
-        (parseNatRecursiveDataRowsSeparator sourceFile dataStart zeroStart);
-
-  def parseNatRecursiveDataRowsSeparator : String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(zeroStart : String) λ(_zeroType : ParserValue)
-      parserBind (expectText "|")
-        (parseNatRecursiveDataRowsSucc sourceFile dataStart zeroStart);
-
-  def parseNatRecursiveDataRowsSucc : String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(zeroStart : String) λ(separatorToken : ParserValue)
-      parserBind (expectIdentifier "Succ")
-        (parseNatRecursiveDataRowsSuccColon sourceFile dataStart (spanFromStartToTokenStart zeroStart separatorToken));
-
-  def parseNatRecursiveDataRowsSuccColon : String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(zeroSpan : String) λ(succToken : ParserValue)
-      parserBind (expectText ":")
-        (parseNatRecursiveDataRowsSuccArgument sourceFile dataStart zeroSpan (tokenStartCoordinate succToken));
-
-  def parseNatRecursiveDataRowsSuccArgument : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(zeroSpan : String) λ(succStart : String) λ(_colon : ParserValue)
-      parserBind (expectIdentifier "Nat")
-        (parseNatRecursiveDataRowsSuccArrow sourceFile dataStart zeroSpan succStart);
-
-  def parseNatRecursiveDataRowsSuccArrow : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(zeroSpan : String) λ(succStart : String) λ(_argumentType : ParserValue)
-      parserBind (expectText "->")
-        (parseNatRecursiveDataRowsSuccResult sourceFile dataStart zeroSpan succStart);
-
-  def parseNatRecursiveDataRowsSuccResult : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(zeroSpan : String) λ(succStart : String) λ(_arrow : ParserValue)
-      parserBind (expectIdentifier "Nat")
-        (parseNatRecursiveDataRowsSemicolon sourceFile dataStart zeroSpan succStart);
-
-  def parseNatRecursiveDataRowsSemicolon : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(zeroSpan : String) λ(succStart : String) λ(_resultType : ParserValue)
-      parserBind (expectText ";")
-        (finishNatDataRows sourceFile dataStart zeroSpan succStart);
-
-  def finishNatDataRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(zeroSpan : String) λ(succStart : String) λ(semicolonToken : ParserValue)
-      parserBind (parserCurrentTokenStartOr (tokenEndCoordinate semicolonToken))
-        (λ(dataEnd : ParserValue)
-          projectionText
-            (appendLine
-              (dataRows sourceFile "Nat" (spanFromStartToCoordinate dataStart dataEnd))
-              (appendLine
-                (constructorRows sourceFile "Zero" "Nat" zeroSpan)
-                (constructorRows sourceFile "Succ" "Nat -> Nat" (spanFromStartToTokenStart succStart semicolonToken)))));
-
-  def parseExprRecursiveDataRows : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(_start : ParserValue)
-      parserBind (expectText "data")
-        (parseExprRecursiveDataRowsName sourceFile);
-
-  def parseExprRecursiveDataRowsName : String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataKeyword : ParserValue)
-      parserBind (expectIdentifier "Expr")
-        (parseExprRecursiveDataRowsParameter sourceFile (tokenStartCoordinate dataKeyword));
-
-  def parseExprRecursiveDataRowsParameter : String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(_dataName : ParserValue)
-      parserBind (expectIdentifier "a")
-        (parseExprRecursiveDataRowsEquals sourceFile dataStart);
-
-  def parseExprRecursiveDataRowsEquals : String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(_parameter : ParserValue)
-      parserBind (expectText "=")
-        (parseExprRecursiveDataRowsDoneNat sourceFile dataStart);
-
-  def parseExprRecursiveDataRowsDoneNat : String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(_equals : ParserValue)
-      parserBind (expectIdentifier "DoneNat")
-        (parseExprRecursiveDataRowsDoneNatColon sourceFile dataStart);
-
-  def parseExprRecursiveDataRowsDoneNatColon : String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(doneNatToken : ParserValue)
-      parserBind (expectText ":")
-        (parseExprRecursiveDataRowsDoneNatArgument sourceFile dataStart (tokenStartCoordinate doneNatToken));
-
-  def parseExprRecursiveDataRowsDoneNatArgument : String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(doneNatStart : String) λ(_colon : ParserValue)
-      parserBind (expectIdentifier "Nat")
-        (parseExprRecursiveDataRowsDoneNatArrow sourceFile dataStart doneNatStart);
-
-  def parseExprRecursiveDataRowsDoneNatArrow : String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(doneNatStart : String) λ(_argumentType : ParserValue)
-      parserBind (expectText "->")
-        (parseExprRecursiveDataRowsDoneNatResult sourceFile dataStart doneNatStart);
-
-  def parseExprRecursiveDataRowsDoneNatResult : String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(doneNatStart : String) λ(_arrow : ParserValue)
-      parserBind (parseExprNatType ValueUnit)
-        (parseExprRecursiveDataRowsSeparator sourceFile dataStart doneNatStart);
-
-  def parseExprRecursiveDataRowsSeparator : String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(doneNatStart : String) λ(_doneNatResult : ParserValue)
-      parserBind (expectText "|")
-        (parseExprRecursiveDataRowsStep sourceFile dataStart doneNatStart);
-
-  def parseExprRecursiveDataRowsStep : String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(doneNatStart : String) λ(separatorToken : ParserValue)
-      parserBind (expectIdentifier "Step")
-        (parseExprRecursiveDataRowsStepColon sourceFile dataStart (spanFromStartToTokenStart doneNatStart separatorToken));
-
-  def parseExprRecursiveDataRowsStepColon : String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(doneNatSpan : String) λ(stepToken : ParserValue)
-      parserBind (expectText ":")
-        (parseExprRecursiveDataRowsStepArgument sourceFile dataStart doneNatSpan (tokenStartCoordinate stepToken));
-
-  def parseExprRecursiveDataRowsStepArgument : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(doneNatSpan : String) λ(stepStart : String) λ(_colon : ParserValue)
-      parserBind (parseExprAType ValueUnit)
-        (parseExprRecursiveDataRowsStepArrow sourceFile dataStart doneNatSpan stepStart);
-
-  def parseExprRecursiveDataRowsStepArrow : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(doneNatSpan : String) λ(stepStart : String) λ(_argumentType : ParserValue)
-      parserBind (expectText "->")
-        (parseExprRecursiveDataRowsStepResult sourceFile dataStart doneNatSpan stepStart);
-
-  def parseExprRecursiveDataRowsStepResult : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(doneNatSpan : String) λ(stepStart : String) λ(_arrow : ParserValue)
-      parserBind (parseExprAType ValueUnit)
-        (parseExprRecursiveDataRowsSemicolon sourceFile dataStart doneNatSpan stepStart);
-
-  def parseExprRecursiveDataRowsSemicolon : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(doneNatSpan : String) λ(stepStart : String) λ(_resultType : ParserValue)
-      parserBind (expectText ";")
-        (finishExprDataRows sourceFile dataStart doneNatSpan stepStart);
-
-  def finishExprDataRows : String -> String -> String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(dataStart : String) λ(doneNatSpan : String) λ(stepStart : String) λ(semicolonToken : ParserValue)
-      parserBind (parserCurrentTokenStartOr (tokenEndCoordinate semicolonToken))
-        (λ(dataEnd : ParserValue)
-          projectionText
-            (appendLine
-              (dataParamRows sourceFile "Expr" "a" (spanFromStartToCoordinate dataStart dataEnd))
-              (appendLine
-                (constructorRows sourceFile "DoneNat" "Nat -> Expr Nat" doneNatSpan)
-                (constructorRows sourceFile "Step" "Expr a -> Expr a" (spanFromStartToTokenStart stepStart semicolonToken)))));
 
   def parseNatRecursiveDataDeclaration : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)

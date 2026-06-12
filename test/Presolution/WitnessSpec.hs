@@ -37,6 +37,7 @@ import MLF.Constraint.Presolution
     )
 import MLF.Constraint.Presolution.TestSupport
     ( PresolutionState(..)
+    , CopyMapping(..)
     , validateReplayMapTraceContract
     , runPresolutionM
     , normalizeEdgeWitnessesM
@@ -2130,14 +2131,14 @@ spec = do
                         , psPendingWeakens = IntSet.empty
                         , psPendingWeakenOwners = IntMap.empty
                         , psBinderCache = IntMap.empty
-                            , psGraphVersion = 0
-                            , psUnionFindVersion = 0
-                            , psBindParentsVersion = 0
-                            , psBindingModelCache = Nothing
-                            , psEdgeLocalSnapshot = Nothing
-                            , psBindingRepairCache = Nothing
-                            , psBindingRepairDirty = Nothing
-                            , psCachedRootGen = Nothing
+                        , psGraphVersion = 0
+                        , psUnionFindVersion = 0
+                        , psBindParentsVersion = 0
+                        , psBindingModelCache = Nothing
+                        , psEdgeLocalSnapshot = Nothing
+                        , psBindingRepairCache = Nothing
+                        , psBindingRepairDirty = Nothing
+                        , psCachedRootGen = Nothing
                         , psEdgeExpansions = IntMap.empty
                         , psEdgeWitnesses = IntMap.fromList [(edgeId, edgeWitness)]
                         , psEdgeTraces = IntMap.fromList [(edgeId, edgeTrace)]
@@ -2332,6 +2333,81 @@ spec = do
                             getInstanceOps (ewWitness ew') `shouldBe` []
                             etBinderArgs tr' `shouldBe` []
                             etBinderReplayMap tr' `shouldBe` IntMap.empty
+
+        it "normalization does not widen no-replay interiors with dead rewritten binder copies" $ do
+            let edgeId = 24
+                root = NodeId 360
+                sourceA = NodeId 361
+                sourceB = NodeId 362
+                deadCopyA = NodeId 363
+                deadCopyB = NodeId 364
+                argA = NodeId 365
+                argB = NodeId 366
+                nodes =
+                    nodeMapFromList
+                        [ (getNodeId root, TyArrow root root root)
+                        , (getNodeId argA, TyBase argA (BaseTy "Int"))
+                        , (getNodeId argB, TyBase argB (BaseTy "Bool"))
+                        ]
+                c = rootedConstraint emptyConstraint
+                    { cNodes = nodes
+                    , cBindParents = IntMap.empty
+                    }
+                edgeWitness =
+                    EdgeWitness
+                        { ewEdgeId = EdgeId edgeId
+                        , ewLeft = root
+                        , ewRight = root
+                        , ewRoot = root
+                        , ewForallIntros = 0
+                        , ewWitness = InstanceWitness [OpWeaken sourceA, OpWeaken sourceB]
+                        }
+                edgeTrace =
+                    EdgeTrace
+                        { etRoot = root
+                        , etBinderArgs = [(sourceA, argA), (sourceB, argB)]
+                        , etInterior = fromListInterior [root]
+                        , etBinderReplayMap = IntMap.empty
+                        , etReplayDomainBinders = []
+                        , etCopyMap =
+                            CopyMapping
+                                (IntMap.fromList
+                                    [ (getNodeId sourceA, deadCopyA)
+                                    , (getNodeId sourceB, deadCopyB)
+                                    ]
+                                )
+                        , etReplayContract = ReplayContractNone
+                        }
+                st0 =
+                    PresolutionStateInternal
+                        { psConstraint = c
+                        , psPresolution = Presolution IntMap.empty
+                        , psUnionFind = IntMap.empty
+                        , psNextNodeId = 370
+                        , psPendingWeakens = IntSet.empty
+                        , psPendingWeakenOwners = IntMap.empty
+                        , psBinderCache = IntMap.empty
+                            , psGraphVersion = 0
+                            , psUnionFindVersion = 0
+                            , psBindParentsVersion = 0
+                            , psBindingModelCache = Nothing
+                            , psEdgeLocalSnapshot = Nothing
+                            , psBindingRepairCache = Nothing
+                            , psBindingRepairDirty = Nothing
+                            , psCachedRootGen = Nothing
+                        , psEdgeExpansions = IntMap.empty
+                        , psEdgeWitnesses = IntMap.fromList [(edgeId, edgeWitness)]
+                        , psEdgeTraces = IntMap.fromList [(edgeId, edgeTrace)]
+                        }
+            case runPresolutionM defaultTraceConfig st0 normalizeEdgeWitnessesM of
+                Left err ->
+                    expectationFailure ("normalizeEdgeWitnessesM failed: " ++ show err)
+                Right (_, st') ->
+                    case IntMap.lookup edgeId (psEdgeWitnesses st') of
+                        Nothing ->
+                            expectationFailure "Expected normalized witness in psEdgeWitnesses"
+                        Just ew' ->
+                            getInstanceOps (ewWitness ew') `shouldBe` []
 
         it "normalization rejects residual non-root replay-family ops when no-replay projection cannot eliminate them" $ do
             let edgeId = 22

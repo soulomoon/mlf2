@@ -131,6 +131,16 @@ spec =
                 authoritativeOverloadedMethodExpectedProjectionPath
                 authoritativeOverloadedMethodParserProgramRoot
 
+        it "shared parser-owned .mlfp parser recursively sequences class and instance method rows" $ do
+            canonicalProjection <-
+                renderCanonicalProjection
+                    recursiveMethodRowsSourcePath
+                    recursiveMethodRowsSourceText
+            parserRoot <- writeRecursiveMethodRowsParserPackage
+            sharedParserProjection <- runSharedParserBatch parserRoot
+
+            sharedParserProjection `shouldBe` Right canonicalProjection
+
         it "shared parser-owned .mlfp parser parses recursive ADT plain Nat" $ do
             source <- readFile recursiveAdtPlainNatCanonicalSourcePath
             expected <- readFile recursiveAdtPlainNatExpectedProjectionPath
@@ -253,6 +263,20 @@ spec =
                 compilerSeedLexerSourcePath
                 compilerSeedLexerExpectedProjectionPath
                 compilerSeedLexerParserProgramRoot
+
+        beforeAll loadRecursiveModuleBodyBatchFixture $ do
+            it "shared parser-owned .mlfp parser uses recursive module-body declaration sequencing" $ \fixture ->
+                case recursiveModuleBodyRunResult fixture of
+                    Left err -> expectationFailure err
+                    Right output ->
+                        take (length (recursiveModuleBodyExpectedPositiveOutput fixture)) output
+                            `shouldBe` recursiveModuleBodyExpectedPositiveOutput fixture
+
+            it "parser-owned .mlfp parser rejects malformed recursive module-body declaration sequencing" $ \fixture ->
+                case recursiveModuleBodyRunResult fixture of
+                    Left err -> expectationFailure err
+                    Right output ->
+                        traverse_ (assertRecursiveModuleBodyNegativeEvidence output) recursiveModuleBodyNegativeCases
 
         it "compiler-seed data-model parser-parity sources copy selected seed modules" $
             traverse_ assertSourceCopy compilerSeedDataModelSourceCopyPairs
@@ -702,7 +726,7 @@ spec =
             traverse_ (`shouldSatisfy` (`isInfixOf` staticGuardSource)) sharedParserConstructorRowAccumulatorGuardPhrases
             removedMatches `shouldBe` []
 
-        it "shared parser-owned .mlfp parser shares bounded source-definition row sequencing" $ do
+        it "shared parser-owned .mlfp parser recursively sequences module-body declarations" $ do
             sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
             sharedSpecSource <- readFile "test/ProgramParserParitySpec.hs"
 
@@ -710,26 +734,11 @@ spec =
                 removedMatches =
                     filter
                         (`isInfixOf` sharedParserSource)
-                        sharedParserRemovedSourceDefinitionRowSequenceAliases
+                        sharedParserRetiredExactModuleBodySequencePhrases
 
-            traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserBoundedSourceDefinitionRowSequenceSubstratePhrases
-            traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserBoundedSourceDefinitionRowSequenceUsePhrases
-            traverse_ (`shouldSatisfy` (`isInfixOf` staticGuardSource)) sharedParserSourceDefinitionRowSequenceGuardPhrases
-            removedMatches `shouldBe` []
-
-        it "shared parser-owned .mlfp parser shares bounded module-body source-definition row sequencing" $ do
-            sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
-            sharedSpecSource <- readFile "test/ProgramParserParitySpec.hs"
-
-            let staticGuardSource = sharedParserSource <> "\n" <> sharedSpecSource
-                removedMatches =
-                    filter
-                        (`isInfixOf` sharedParserSource)
-                        sharedParserRemovedModuleBodySourceDefinitionRowSequenceAliases
-
-            traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserBoundedModuleBodySourceDefinitionRowSequenceSubstratePhrases
-            traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserBoundedModuleBodySourceDefinitionRowSequenceUsePhrases
-            traverse_ (`shouldSatisfy` (`isInfixOf` staticGuardSource)) sharedParserModuleBodySourceDefinitionRowSequenceGuardPhrases
+            traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserRecursiveModuleBodySequenceSubstratePhrases
+            traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserRecursiveModuleBodySequenceUsePhrases
+            traverse_ (`shouldSatisfy` (`isInfixOf` staticGuardSource)) sharedParserRecursiveModuleBodySequenceGuardPhrases
             removedMatches `shouldBe` []
 
         it "shared parser-owned .mlfp parser shares bounded program module row sequencing" $ do
@@ -760,6 +769,21 @@ spec =
             traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserBoundedImportRowSequenceSubstratePhrases
             traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserBoundedImportRowSequenceUsePhrases
             traverse_ (`shouldSatisfy` (`isInfixOf` staticGuardSource)) sharedParserImportRowSequenceGuardPhrases
+            removedMatches `shouldBe` []
+
+        it "shared parser-owned .mlfp parser guards recursive class and instance method row substrate" $ do
+            sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
+            sharedSpecSource <- readFile "test/ProgramParserParitySpec.hs"
+
+            let staticGuardSource = sharedParserSource <> "\n" <> sharedSpecSource
+                removedMatches =
+                    filter
+                        (`isInfixOf` sharedParserSource)
+                        sharedParserRemovedMethodRowContinuationAliases
+
+            traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserRecursiveMethodRowSubstratePhrases
+            traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserRecursiveMethodRowUsePhrases
+            traverse_ (`shouldSatisfy` (`isInfixOf` staticGuardSource)) sharedParserRecursiveMethodRowGuardPhrases
             removedMatches `shouldBe` []
 
         it "shared parser-owned .mlfp parser reaches success only after complete syntax and dynamic diagnostics" $ do
@@ -1281,6 +1305,37 @@ authoritativeNullaryOverloadedMethodParserProgramRoot =
 authoritativeOverloadedMethodParserProgramRoot :: FilePath
 authoritativeOverloadedMethodParserProgramRoot =
     "test/programs/compiler-parser-parity/authoritative-overloaded-method"
+
+recursiveMethodRowsParserProgramRoot :: FilePath
+recursiveMethodRowsParserProgramRoot =
+    "dist-newstyle/parser-parity-recursive-method-rows"
+
+recursiveMethodRowsSourcePath :: FilePath
+recursiveMethodRowsSourcePath =
+    "test/conformance/mlfp/parser-parity/recursive-method-rows/src/Main.mlfp"
+
+recursiveMethodRowsSourceText :: String
+recursiveMethodRowsSourceText =
+    unlines
+        [ "module Main export (Eq, Nat(..), eq, neq, zero, main) {"
+        , "  class Eq a {"
+        , "    eq : a -> a -> Bool;"
+        , "    neq : a -> a -> Bool;"
+        , "  }"
+        , ""
+        , "  data Nat ="
+        , "      Zero : Nat"
+        , "    | Succ : Nat -> Nat;"
+        , ""
+        , "  instance Eq Nat {"
+        , "    eq = λleft λright true;"
+        , "    neq = λleft λright false;"
+        , "  }"
+        , ""
+        , "  def zero : Nat = Zero;"
+        , "  def main : Bool = eq zero Zero;"
+        , "}"
+        ]
 
 recursiveAdtPlainNatParserProgramRoot :: FilePath
 recursiveAdtPlainNatParserProgramRoot =
@@ -1904,13 +1959,14 @@ sharedParserConstructorRowAccumulatorSubstratePhrases =
 
 sharedParserConstructorRowAccumulatorUsePhrases :: [String]
 sharedParserConstructorRowAccumulatorUsePhrases =
-    [ "parseExactFourConstructorDataRowsConstructor1Name sourceFile dataStart dataNameToken emptyConstructorRows"
-    , "parseExactFiveConstructorDataRowsConstructor1Name sourceFile dataStart dataNameToken emptyConstructorRows"
-    , "parseExactNineConstructorDataRowsConstructor1Name sourceFile dataStart dataNameToken emptyConstructorRows"
-    , "parserBind (appendConstructorRow sourceFile constructorRowsValue c4Token t4"
-    , "parserBind (appendConstructorRow sourceFile constructorRowsValue c5Token t5"
-    , "parserBind (appendConstructorRow sourceFile constructorRowsValue c9Token t9"
-    , "dataRowsWithConstructorRows\n                      sourceFile\n                      dataNameToken"
+    [ "parseRecursiveConstructorDataRowsFirst sourceFile dataStart dataNameToken ValueUnit"
+    , "parseRecursiveConstructorDataRowsFirst sourceFile dataStart dataNameToken parameterToken"
+    , "parseRecursiveConstructorDataRowsNext sourceFile dataStart dataNameToken parameterValue"
+    , "parserBind (appendConstructorRow sourceFile constructorRowsValue constructorToken typeValue"
+    , "finishRecursiveConstructorDataRows sourceFile dataStart dataNameToken parameterValue semicolonToken"
+    , "identifierNameFromTokenText (tokenText parameterToken)"
+    , "def dataRowsWithConstructorRows : String -> ParserValue -> String -> ParserValue -> String"
+    , "dataRowsWithConstructorRows\n                sourceFile\n                dataNameToken"
     ]
 
 sharedParserConstructorRowAccumulatorGuardPhrases :: [String]
@@ -1927,98 +1983,73 @@ sharedParserRemovedConstructorRowAccumulatorAliases =
         [ [ "parseExactFourConstructorDataRowsConstructor" <> show n <> "Continue" | n <- [(1 :: Int) .. 3] ]
         , [ "parseExactFiveConstructorDataRowsConstructor" <> show n <> "Continue" | n <- [(1 :: Int) .. 4] ]
         , [ "parseExactNineConstructorDataRowsConstructor" <> show n <> "Continue" | n <- [(1 :: Int) .. 8] ]
-        , [ "parseExactFourConstructorDataRowsFinish"
+        , [ "def parseExactFourConstructorDataRows"
+          , "def parseExactFiveConstructorDataRows"
+          , "def parseExactNineConstructorDataRows"
+          , "def parseSingleConstructorDataRows"
+          , "def parseTwoConstructorDataRows"
+          , "def parseNatRecursiveDataRows"
+          , "def parseExprRecursiveDataRows"
+          , "identifierNameFromValue parameterToken"
+          , "parseExactFourConstructorDataRowsFinish"
           , "parseExactFiveConstructorDataRowsFinish"
           , "parseExactNineConstructorDataRowsFinish"
           ]
         ]
 
-sharedParserBoundedSourceDefinitionRowSequenceSubstratePhrases :: [String]
-sharedParserBoundedSourceDefinitionRowSequenceSubstratePhrases =
-    [ "def parseBoundedSourceDefinitionRows : String -> (String -> ParserValue -> Parser ParserValue) -> ParserValue -> Parser ParserValue"
-    , "def parseBoundedSourceDefinitionNextRows : (String -> ParserValue -> Parser ParserValue) -> String -> ParserValue -> Parser ParserValue"
-    , "def appendBoundedSourceDefinitionRowsAndContinue : (String -> ParserValue -> Parser ParserValue) -> String -> ParserValue -> ParserValue -> Parser ParserValue"
-    , "def finishBoundedSourceDefinitionRows : String -> ParserValue -> Parser ParserValue"
-    , "def parseBoundedSourceDefinitionRowsRemaining15"
-    , "def parseBoundedSourceDefinitionRowsRemaining12"
-    , "def parseBoundedSourceDefinitionRowsRemaining3"
-    , "parserBind (parseSourceDefinitionRows sourceFile ValueUnit)"
-    , "parserBind (appendProjectionValues existingRows nextRows)"
+sharedParserRecursiveModuleBodySequenceSubstratePhrases :: [String]
+sharedParserRecursiveModuleBodySequenceSubstratePhrases =
+    [ "def parseModuleBodyRowsFirst : String -> String -> String -> String -> ParserValue -> Parser ParserValue"
+    , "def parseModuleBodyRowsFirstAfterPrefix : String -> String -> String -> String -> ParserValue -> Parser ParserValue"
+    , "def parseModuleBodyRowsMoreOrClose : String -> String -> String -> String -> ParserValue -> Parser ParserValue"
+    , "def appendModuleBodyDeclarationRowsAndContinue : (ParserValue -> Parser ParserValue) -> ParserValue -> ParserValue -> Parser ParserValue"
+    , "def parseModuleBodyDeclarationRows : String -> ParserValue -> Parser ParserValue"
+    , "def parseModuleBodyDataDeclarationRows : String -> ParserValue -> Parser ParserValue"
     ]
 
-sharedParserBoundedSourceDefinitionRowSequenceUsePhrases :: [String]
-sharedParserBoundedSourceDefinitionRowSequenceUsePhrases =
-    [ "parseBoundedSourceDefinitionRows sourceFile parseBoundedSourceDefinitionRowsRemaining3 ValueUnit"
-    , "parseBoundedSourceDefinitionRows sourceFile parseBoundedSourceDefinitionRowsRemaining12 ValueUnit"
-    , "parseBoundedSourceDefinitionRows sourceFile parseBoundedSourceDefinitionRowsRemaining15 ValueUnit"
-    , "parserBind (parseFourSourceDefinitionRows sourceFile ValueUnit)\n        (finishSixDataFourDefinitionRows sourceFile moduleStart moduleName exportRows dataRowsValue)"
-    , "parserBind (parseSixteenSourceDefinitionRows sourceFile ValueUnit)\n        (appendProjectionValues dataRowsValue)"
+sharedParserRecursiveModuleBodySequenceUsePhrases :: [String]
+sharedParserRecursiveModuleBodySequenceUsePhrases =
+    [ "parseModuleBodyRowsFirst sourceFile moduleStart moduleName exportRows ValueUnit"
+    , "parseModuleBodyRowsFirstAfterPrefix sourceFile moduleStart moduleName exportRows importRowsValue"
+    , "appendModuleBodyDeclarationRowsAndContinue (parseModuleBodyRowsMoreOrClose sourceFile moduleStart moduleName exportRows) rowsValue"
+    , "parserBind (appendProjectionValues existingRows nextRows)\n        continueRows"
+    , "finishModuleBodyRows sourceFile moduleStart moduleName exportRows rowsValue"
+    , "parseSourceDefinitionRowsWithCurrentDefSemicolon sourceFile ValueUnit"
+    , "parseEqClassDeclaration sourceFile ValueUnit"
+    , "parseEqNatInstanceDeclarationRows sourceFile ValueUnit"
+    , "parseTwoConstructorDerivedDataRows sourceFile ValueUnit"
+    , "parseRecursiveConstructorDataRows sourceFile ValueUnit"
     ]
 
-sharedParserSourceDefinitionRowSequenceGuardPhrases :: [String]
-sharedParserSourceDefinitionRowSequenceGuardPhrases =
-    [ "shared parser-owned .mlfp parser shares bounded source-definition row sequencing"
-    , "sharedParserBoundedSourceDefinitionRowSequenceSubstratePhrases"
-    , "sharedParserBoundedSourceDefinitionRowSequenceUsePhrases"
-    , "sharedParserRemovedSourceDefinitionRowSequenceAliases"
+sharedParserRecursiveModuleBodySequenceGuardPhrases :: [String]
+sharedParserRecursiveModuleBodySequenceGuardPhrases =
+    [ "shared parser-owned .mlfp parser recursively sequences module-body declarations"
+    , "sharedParserRecursiveModuleBodySequenceSubstratePhrases"
+    , "sharedParserRecursiveModuleBodySequenceUsePhrases"
+    , "sharedParserRetiredExactModuleBodySequencePhrases"
+    , "recursiveModuleBodyPositiveCases"
+    , "recursiveModuleBodyNegativeCases"
     ]
 
-sharedParserRemovedSourceDefinitionRowSequenceAliases :: [String]
-sharedParserRemovedSourceDefinitionRowSequenceAliases =
-    [ "parseFourSourceDefinitionSecondRows"
-    , "parseFourSourceDefinitionThirdRows"
-    , "parseFourSourceDefinitionFourthRows"
-    , "finishFourSourceDefinitionRows"
-    , "finishFourSourceDefinitionRowsThird"
-    , "finishFourSourceDefinitionRowsFourth"
-    , "parseThirteenSourceDefinitionRowsSecondBatch"
-    , "appendThirteenSourceDefinitionRowsSecondBatch"
-    , "parseThirteenSourceDefinitionRowsThirdBatch"
-    , "appendThirteenSourceDefinitionRowsThirdBatch"
-    , "parseThirteenSourceDefinitionRowsFinal"
-    , "parseSixteenSourceDefinitionRowsSecondBatch"
-    , "appendSixteenSourceDefinitionRowsSecondBatch"
-    , "parseSixteenSourceDefinitionRowsThirdBatch"
-    , "appendSixteenSourceDefinitionRowsThirdBatch"
-    , "parseSixteenSourceDefinitionRowsFourthBatch"
-    ]
-
-sharedParserBoundedModuleBodySourceDefinitionRowSequenceSubstratePhrases :: [String]
-sharedParserBoundedModuleBodySourceDefinitionRowSequenceSubstratePhrases =
-    [ "def parseTwoSourceDefinitionRows : String -> ParserValue -> Parser ParserValue"
-    , "def parseThreeSourceDefinitionRows : String -> ParserValue -> Parser ParserValue"
-    , "parseBoundedSourceDefinitionRows sourceFile parseBoundedSourceDefinitionRowsRemaining1 ValueUnit"
-    , "parseBoundedSourceDefinitionRows sourceFile parseBoundedSourceDefinitionRowsRemaining2 ValueUnit"
-    , "parserBind (parseSourceDefinitionRows sourceFile ValueUnit)"
-    , "parserBind (appendProjectionValues existingRows nextRows)"
-    ]
-
-sharedParserBoundedModuleBodySourceDefinitionRowSequenceUsePhrases :: [String]
-sharedParserBoundedModuleBodySourceDefinitionRowSequenceUsePhrases =
-    [ "parserBind (parseTwoSourceDefinitionRows sourceFile ValueUnit)\n        (finishModuleBodyRows sourceFile moduleStart moduleName exportRows)"
-    , "parserBind (parseThreeSourceDefinitionRows sourceFile ValueUnit)\n        (finishModuleBodyRows sourceFile moduleStart moduleName exportRows)"
-    , "parserBind (parseTwoSourceDefinitionRows sourceFile ValueUnit)\n        (finishExactModuleBodyRows sourceFile moduleStart moduleName exportRows existingRows)"
-    , "parseThreeSourceDefinitionRows sourceFile ValueUnit"
-    , "parserBind (parseThreeImportedSourceDefinitionRows sourceFile ValueUnit)\n                (finishImportedBodyRows sourceFile moduleStart moduleName exportRows importRows)"
-    ]
-
-sharedParserModuleBodySourceDefinitionRowSequenceGuardPhrases :: [String]
-sharedParserModuleBodySourceDefinitionRowSequenceGuardPhrases =
-    [ "shared parser-owned .mlfp parser shares bounded module-body source-definition row sequencing"
-    , "sharedParserBoundedModuleBodySourceDefinitionRowSequenceSubstratePhrases"
-    , "sharedParserBoundedModuleBodySourceDefinitionRowSequenceUsePhrases"
-    , "sharedParserRemovedModuleBodySourceDefinitionRowSequenceAliases"
-    ]
-
-sharedParserRemovedModuleBodySourceDefinitionRowSequenceAliases :: [String]
-sharedParserRemovedModuleBodySourceDefinitionRowSequenceAliases =
-    [ "def parseTwoDefinitionSecondRows :"
-    , "def parseSecondSourceDefinitionRows :"
-    , "def appendFirstSecondSourceDefinitionRows :"
-    , "def parseThirdSourceDefinitionRows :"
-    , "def parseThreeImportedSourceDefinitionSecondRows :"
-    , "def appendThreeImportedSourceDefinitionSecondRows :"
-    , "def parseThreeImportedSourceDefinitionThirdRows :"
+sharedParserRetiredExactModuleBodySequencePhrases :: [String]
+sharedParserRetiredExactModuleBodySequencePhrases =
+    [ "def parseDeclarationLedBodyRows :"
+    , "def parseDefinitionLedBodyRows :"
+    , "def parseOneDefinitionBodyRows :"
+    , "def parseTwoDefinitionBodyRows :"
+    , "def parseThreeDefinitionBodyRows :"
+    , "def parseBoundedSourceDefinitionRows :"
+    , "def parseBoundedSourceDefinitionRowsRemaining"
+    , "def parseTwoSourceDefinitionRows :"
+    , "def parseThreeSourceDefinitionRows :"
+    , "def parseFourSourceDefinitionRows :"
+    , "def parseThirteenSourceDefinitionRows :"
+    , "def parseSixteenSourceDefinitionRows :"
+    , "def finishExactModuleBodyRows :"
+    , "def finishSixDataFourDefinitionRows :"
+    , "def parseFourDataThirteenDefinitionRows :"
+    , "def parseImportedTwoDataRows :"
+    , "def parseThreeImportedSourceDefinitionRows :"
     ]
 
 sharedParserBoundedProgramModuleRowSequenceSubstratePhrases :: [String]
@@ -2097,6 +2128,79 @@ sharedParserRemovedImportRowSequenceAliases =
     , "appendThreeImportSecondRows"
     , "parseThreeImportThirdRows"
     , "appendThreeImportThirdRows"
+    ]
+
+sharedParserRecursiveMethodRowSubstratePhrases :: [String]
+sharedParserRecursiveMethodRowSubstratePhrases =
+    [ "def parseEqClassMethodRowsFirst : String -> String -> ParserValue -> Parser ParserValue"
+    , "def parseEqClassMethodRowsMoreOrClose3 : String -> String -> ParserValue -> Parser ParserValue"
+    , "def parseEqClassMethodRowsMoreOrClose2 : String -> String -> ParserValue -> Parser ParserValue"
+    , "def parseEqClassMethodRowsMoreOrClose1 : String -> String -> ParserValue -> Parser ParserValue"
+    , "def parseEqClassMethodRowsMoreOrClose0 : String -> String -> ParserValue -> Parser ParserValue"
+    , "def appendClassMethodRowsAndContinue2 : String -> String -> ParserValue -> ParserValue -> Parser ParserValue"
+    , "def appendClassMethodRowsAndContinue1 : String -> String -> ParserValue -> ParserValue -> Parser ParserValue"
+    , "def appendClassMethodRowsAndContinue0 : String -> String -> ParserValue -> ParserValue -> Parser ParserValue"
+    , "def parseClassMethodSignatureRow : String -> ParserValue -> Parser ParserValue"
+    , "def parseClassMethodSignatureTailRow : String -> ParserValue -> Parser ParserValue"
+    , "def finishClassMethodSignatureRow : String -> ParserValue -> ParserValue -> Parser ParserValue"
+    , "def parseEqNatInstanceMethodRowsFirst : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue"
+    , "def parseEqNatInstanceMethodRowsMoreOrClose3 : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue"
+    , "def parseEqNatInstanceMethodRowsMoreOrClose2 : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue"
+    , "def parseEqNatInstanceMethodRowsMoreOrClose1 : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue"
+    , "def parseEqNatInstanceMethodRowsMoreOrClose0 : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue"
+    , "def appendInstanceMethodRowsAndContinue2 : String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue"
+    , "def appendInstanceMethodRowsAndContinue1 : String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue"
+    , "def appendInstanceMethodRowsAndContinue0 : String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue"
+    , "def parseInstanceMethodDefinitionRow : String -> ParserValue -> Parser ParserValue"
+    , "def parseInstanceMethodDefinitionTailRow : String -> ParserValue -> Parser ParserValue"
+    , "def finishInstanceMethodDefinitionRow : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue"
+    ]
+
+sharedParserRecursiveMethodRowUsePhrases :: [String]
+sharedParserRecursiveMethodRowUsePhrases =
+    [ "parserBind (parseClassMethodSignatureRow sourceFile ValueUnit)\n        (parseEqClassMethodRowsMoreOrClose3 sourceFile classStart)"
+    , "parserBind (appendProjectionValues existingRows nextRows)\n        (parseEqClassMethodRowsMoreOrClose2 sourceFile classStart)"
+    , "parserBind (parseClassMethodSignatureRow sourceFile ValueUnit)\n          (appendClassMethodRowsAndContinue2 sourceFile classStart methodRows)"
+    , "parserBind (parseInstanceMethodDefinitionRow sourceFile ValueUnit)\n        (parseEqNatInstanceMethodRowsMoreOrClose3 sourceFile classToken typeValue)"
+    , "parserBind (appendProjectionValues existingRows nextRows)\n        (parseEqNatInstanceMethodRowsMoreOrClose2 sourceFile classToken typeValue)"
+    , "parserBind (parseInstanceMethodDefinitionRow sourceFile ValueUnit)\n          (appendInstanceMethodRowsAndContinue2 sourceFile classToken typeValue methodRows)"
+    , "methodSignatureRows sourceFile\n              (identifierNameFromValue methodToken)"
+    , "\"a -> a -> Bool\""
+    , "methodDefinitionRows sourceFile\n              (identifierNameFromValue methodToken)"
+    , "parserTextFromValue methodRows"
+    , "appendLine\n              (classRows sourceFile \"Eq\" \"a\""
+    , "appendLine\n          (instanceRows sourceFile"
+    ]
+
+sharedParserRecursiveMethodRowGuardPhrases :: [String]
+sharedParserRecursiveMethodRowGuardPhrases =
+    [ "shared parser-owned .mlfp parser recursively sequences class and instance method rows"
+    , "shared parser-owned .mlfp parser guards recursive class and instance method row substrate"
+    , "sharedParserRecursiveMethodRowSubstratePhrases"
+    , "sharedParserRecursiveMethodRowUsePhrases"
+    , "sharedParserRemovedMethodRowContinuationAliases"
+    , "recursiveMethodRowsSourceText"
+    , "writeRecursiveMethodRowsParserPackage"
+    ]
+
+sharedParserRemovedMethodRowContinuationAliases :: [String]
+sharedParserRemovedMethodRowContinuationAliases =
+    [ "def parseEqMethodName :"
+    , "def parseEqMethodColon :"
+    , "def parseEqMethodFirstArg :"
+    , "def parseEqMethodFirstArrow :"
+    , "def parseEqMethodSecondArg :"
+    , "def parseEqMethodSecondArrow :"
+    , "def parseEqMethodResult :"
+    , "def parseEqMethodSemicolon :"
+    , "def parseEqClassClose :"
+    , "def parseEqNatInstanceMethodName :"
+    , "def parseEqNatInstanceMethodEquals :"
+    , "def parseEqNatInstanceMethodExpression :"
+    , "def parseEqNatInstanceMethodSemicolon :"
+    , "def captureEqNatInstanceMethodEnd :"
+    , "def parseEqNatInstanceClose :"
+    , "def parseDataLedSourceDefinitionSuffixRows :"
     ]
 
 sharedParserEarlySuccessPhrases :: [String]
@@ -2830,11 +2934,152 @@ runSharedParserBatch :: FilePath -> IO (Either String String)
 runSharedParserBatch batchRoot =
     runProgramArgs [batchRoot, "--search-path", sharedParserLibraryRoot]
 
+writeRecursiveMethodRowsParserPackage :: IO FilePath
+writeRecursiveMethodRowsParserPackage = do
+    removePathForcibly recursiveMethodRowsParserProgramRoot
+    createDirectoryIfMissing True recursiveMethodRowsParserProgramRoot
+    writeFile
+        (recursiveMethodRowsParserProgramRoot </> "Main.mlfp")
+        $ unlines
+            [ "module Main export (main) {"
+            , "  import Prelude exposing (Unit(..), IO, putStrLn);"
+            , "  import ParserParityParser exposing (renderParserParityProjectionFromSourceText);"
+            , ""
+            , "  def main : IO Unit ="
+            , "    putStrLn (renderParserParityProjectionFromSourceText"
+            , "      " <> show recursiveMethodRowsSourcePath
+            , "      " <> show recursiveMethodRowsSourceText <> ");"
+            , "}"
+            ]
+    pure recursiveMethodRowsParserProgramRoot
+
 data ParserParityBatchFixture = ParserParityBatchFixture
     { batchExpectedOutput :: String
     , batchMainSource :: String
     , batchRunResult :: Either String String
     }
+
+data RecursiveModuleBodyBatchFixture = RecursiveModuleBodyBatchFixture
+    { recursiveModuleBodyExpectedPositiveOutput :: String
+    , recursiveModuleBodyRunResult :: Either String String
+    }
+
+loadRecursiveModuleBodyBatchFixture :: IO RecursiveModuleBodyBatchFixture
+loadRecursiveModuleBodyBatchFixture = do
+    expectedPositiveOutput <- expectedRecursiveModuleBodyPositiveOutput
+    packageRoot <- writeRecursiveModuleBodyBatchPackage
+    runResult <- runSharedParserBatch packageRoot
+    pure
+        RecursiveModuleBodyBatchFixture
+            { recursiveModuleBodyExpectedPositiveOutput = expectedPositiveOutput
+            , recursiveModuleBodyRunResult = runResult
+            }
+
+writeRecursiveModuleBodyBatchPackage :: IO FilePath
+writeRecursiveModuleBodyBatchPackage = do
+    removePathForcibly recursiveModuleBodyBatchPackageRoot
+    createDirectoryIfMissing True recursiveModuleBodyBatchPackageRoot
+    writeFile
+        (recursiveModuleBodyBatchPackageRoot </> "Main.mlfp")
+        recursiveModuleBodyBatchMainSource
+    pure recursiveModuleBodyBatchPackageRoot
+
+recursiveModuleBodyBatchPackageRoot :: FilePath
+recursiveModuleBodyBatchPackageRoot =
+    "dist-newstyle/parser-parity-recursive-module-body"
+
+recursiveModuleBodyBatchMainSource :: String
+recursiveModuleBodyBatchMainSource =
+    unlines $
+        [ "module Main export (main) {"
+        , "  import Prelude exposing (Unit(..), IO, putStr, stringAppend);"
+        , "  import ParserParityParser exposing (renderParserParityProjectionFromSourceText, renderParserNegativeEvidenceFromSourceText);"
+        , ""
+        , "  def section : String -> String -> String ="
+        , "    λ(label : String) λ(output : String)"
+        , "      stringAppend \"== \" (stringAppend label (stringAppend \" ==\\n\" (stringAppend output \"\\n\")));"
+        , ""
+        ]
+            ++ concatMap renderInlinePositiveBatchDefinitions recursiveModuleBodyPositiveCases
+            ++ concatMap renderInlineNegativeBatchDefinitions recursiveModuleBodyNegativeCases
+            ++ [ "  def parserParityBatchOutput : String ="
+               , "    " <> appendStringExpressions recursiveModuleBodyBatchSectionNames <> ";"
+               , ""
+               , "  def main : IO Unit ="
+               , "    putStr parserParityBatchOutput;"
+               , "}"
+               ]
+
+recursiveModuleBodyBatchSectionNames :: [String]
+recursiveModuleBodyBatchSectionNames =
+    map ((<> "Section") . inlinePositiveIdentifier) recursiveModuleBodyPositiveCases
+        ++ map ((<> "Section") . inlineNegativeIdentifier) recursiveModuleBodyNegativeCases
+
+renderInlinePositiveBatchDefinitions :: ParserParityInlinePositiveCase -> [String]
+renderInlinePositiveBatchDefinitions testCase =
+    [ "  def " <> ident <> "SourceFile : String ="
+    , "    " <> show (inlinePositiveSourcePath testCase) <> ";"
+    , ""
+    , "  def " <> ident <> "SourceText : String ="
+    , "    " <> show (inlinePositiveSourceText testCase) <> ";"
+    , ""
+    , "  def " <> ident <> "Section : String ="
+    , "    section "
+        <> show ("positive:recursive-module-body:" <> inlinePositiveIdentifier testCase)
+        <> " (renderParserParityProjectionFromSourceText "
+        <> ident
+        <> "SourceFile "
+        <> ident
+        <> "SourceText);"
+    , ""
+    ]
+  where
+    ident = inlinePositiveIdentifier testCase
+
+renderInlineNegativeBatchDefinitions :: ParserParityInlineNegativeCase -> [String]
+renderInlineNegativeBatchDefinitions testCase =
+    [ "  def " <> ident <> "SourceFile : String ="
+    , "    " <> show (inlineNegativeSourcePath testCase) <> ";"
+    , ""
+    , "  def " <> ident <> "SourceText : String ="
+    , "    " <> show (inlineNegativeSourceText testCase) <> ";"
+    , ""
+    , "  def " <> ident <> "Section : String ="
+    , "    section "
+        <> show ("negative:recursive-module-body:" <> inlineNegativeIdentifier testCase)
+        <> " (renderParserNegativeEvidenceFromSourceText "
+        <> show (inlineNegativePrefix testCase)
+        <> " "
+        <> ident
+        <> "SourceFile "
+        <> ident
+        <> "SourceText);"
+    , ""
+    ]
+  where
+    ident = inlineNegativeIdentifier testCase
+
+expectedRecursiveModuleBodyPositiveOutput :: IO String
+expectedRecursiveModuleBodyPositiveOutput = do
+    sections <- traverse expectedRecursiveModuleBodyPositiveSection recursiveModuleBodyPositiveCases
+    pure (concat sections)
+
+expectedRecursiveModuleBodyPositiveSection :: ParserParityInlinePositiveCase -> IO String
+expectedRecursiveModuleBodyPositiveSection testCase = do
+    projection <-
+        renderCanonicalProjection
+            (inlinePositiveSourcePath testCase)
+            (inlinePositiveSourceText testCase)
+    pure $
+        batchSection
+            ("positive:recursive-module-body:" <> inlinePositiveIdentifier testCase)
+            projection
+
+assertRecursiveModuleBodyNegativeEvidence :: String -> ParserParityInlineNegativeCase -> Expectation
+assertRecursiveModuleBodyNegativeEvidence output testCase = do
+    output `shouldSatisfy` isInfixOf ("== negative:recursive-module-body:" <> inlineNegativeIdentifier testCase <> " ==\n")
+    output `shouldSatisfy` isInfixOf (inlineNegativePrefix testCase)
+    output `shouldSatisfy` (not . isInfixOf (inlineNegativePrefix testCase <> "unexpected-success"))
 
 loadParserParityBatchFixture :: IO ParserParityBatchFixture
 loadParserParityBatchFixture = do
@@ -2879,6 +3124,19 @@ data ParserParityNegativeCase = ParserParityNegativeCase
     , negativeCaseSourcePath :: FilePath
     , negativeCaseSourceText :: String
     , negativeCaseExpected :: String
+    }
+
+data ParserParityInlinePositiveCase = ParserParityInlinePositiveCase
+    { inlinePositiveIdentifier :: String
+    , inlinePositiveSourcePath :: FilePath
+    , inlinePositiveSourceText :: String
+    }
+
+data ParserParityInlineNegativeCase = ParserParityInlineNegativeCase
+    { inlineNegativeIdentifier :: String
+    , inlineNegativePrefix :: String
+    , inlineNegativeSourcePath :: FilePath
+    , inlineNegativeSourceText :: String
     }
 
 parserParityPositiveCases :: [ParserParityPositiveCase]
@@ -2955,6 +3213,78 @@ parserParityPackagePositiveCases =
         ]
         compilerSeedDataModelExpectedProjectionPath
     ]
+
+recursiveModuleBodyPositiveCases :: [ParserParityInlinePositiveCase]
+recursiveModuleBodyPositiveCases =
+    [ ParserParityInlinePositiveCase
+        "recursiveModuleBodyOneDefinition"
+        (recursiveModuleBodySourcePath "one-definition")
+        "module RecursiveBodyOne export (main) {\n  def main : Bool = true;\n}\n"
+    , ParserParityInlinePositiveCase
+        "recursiveModuleBodyTwoDefinitions"
+        (recursiveModuleBodySourcePath "two-definitions")
+        "module RecursiveBodyTwo export (first, main) {\n  def first : Bool = true;\n  def main : Bool = first;\n}\n"
+    , ParserParityInlinePositiveCase
+        "recursiveModuleBodyThreeDefinitions"
+        (recursiveModuleBodySourcePath "three-definitions")
+        "module RecursiveBodyThree export (first, second, main) {\n  def first : Bool = true;\n  def second : Bool = first;\n  def main : Bool = second;\n}\n"
+    , ParserParityInlinePositiveCase
+        "recursiveModuleBodyFourDefinitions"
+        (recursiveModuleBodySourcePath "four-definitions")
+        "module RecursiveBodyFour export (first, second, third, main) {\n  def first : Bool = true;\n  def second : Bool = first;\n  def third : Bool = second;\n  def main : Bool = third;\n}\n"
+    , ParserParityInlinePositiveCase
+        "recursiveModuleBodyFiveDefinitions"
+        (recursiveModuleBodySourcePath "five-definitions")
+        "module RecursiveBodyFive export (first, second, third, fourth, main) {\n  def first : Bool = true;\n  def second : Bool = first;\n  def third : Bool = second;\n  def fourth : Bool = third;\n  def main : Bool = fourth;\n}\n"
+    , ParserParityInlinePositiveCase
+        "recursiveModuleBodyDataDefinition"
+        (recursiveModuleBodySourcePath "data-definition")
+        "module RecursiveBodyData export (Nat(..), main) {\n  data Nat =\n      Zero : Nat\n    | Succ : Nat -> Nat;\n\n  def main : Nat = Zero;\n}\n"
+    , ParserParityInlinePositiveCase
+        "recursiveModuleBodyTenConstructors"
+        (recursiveModuleBodySourcePath "ten-constructors")
+        "module RecursiveBodyTenConstructors export (Many(..), main) {\n  data Many =\n      C1 : Many\n    | C2 : Many\n    | C3 : Many\n    | C4 : Many\n    | C5 : Many\n    | C6 : Many\n    | C7 : Many\n    | C8 : Many\n    | C9 : Many\n    | C10 : Many;\n\n  def main : Many = C10;\n}\n"
+    , ParserParityInlinePositiveCase
+        "recursiveModuleBodyClassDataDefinition"
+        (recursiveModuleBodySourcePath "class-data-definition")
+        "module RecursiveBodyClassData export (Eq, Nat(..), main) {\n  class Eq a {\n    eq : a -> a -> Bool;\n  }\n\n  data Nat =\n      Zero : Nat\n    | Succ : Nat -> Nat;\n\n  def main : Nat = Zero;\n}\n"
+    , ParserParityInlinePositiveCase
+        "recursiveModuleBodyClassDataInstanceDefinition"
+        (recursiveModuleBodySourcePath "class-data-instance-definition")
+        "module RecursiveBodyClassDataInstance export (Eq, Nat(..), eq, same, main) {\n  class Eq a {\n    eq : a -> a -> Bool;\n  }\n\n  data Nat =\n      Zero : Nat\n    | Succ : Nat -> Nat;\n\n  instance Eq Nat {\n    eq = λ(left : Nat) λ(right : Nat) case left of {\n      Zero -> case right of {\n        Zero -> true;\n        Succ _ -> false\n      };\n      Succ leftRest -> case right of {\n        Zero -> false;\n        Succ rightRest -> eq leftRest rightRest\n      }\n    };\n  }\n\n  def same : Nat -> Nat -> Bool = λ(left : Nat) λ(right : Nat) eq left right;\n  def main : Bool = same Zero Zero;\n}\n"
+    , ParserParityInlinePositiveCase
+        "recursiveModuleBodyImportPrefix"
+        (recursiveModuleBodySourcePath "import-prefix")
+        "module RecursiveBodyImport export (main) {\n  import Prelude exposing (Bool);\n  def helper : Bool = true;\n  def main : Bool = helper;\n}\n"
+    ]
+
+recursiveModuleBodyNegativeCases :: [ParserParityInlineNegativeCase]
+recursiveModuleBodyNegativeCases =
+    [ ParserParityInlineNegativeCase
+        "recursiveModuleBodyMissingClose"
+        "recursive-module-body missing-close negative "
+        (recursiveModuleBodySourcePath "missing-close")
+        "module RecursiveBodyMissingClose export (main) {\n  def main : Bool = true;\n"
+    , ParserParityInlineNegativeCase
+        "recursiveModuleBodyMissingDefSemicolon"
+        "recursive-module-body missing-def-semicolon negative "
+        (recursiveModuleBodySourcePath "missing-def-semicolon")
+        "module RecursiveBodyMissingDefSemicolon export (main) {\n  def main : Bool = true\n}\n"
+    , ParserParityInlineNegativeCase
+        "recursiveModuleBodyUnsupportedDeclaration"
+        "recursive-module-body unsupported-declaration negative "
+        (recursiveModuleBodySourcePath "unsupported-declaration")
+        "module RecursiveBodyUnsupportedDeclaration export (main) {\n  type Alias = Bool;\n  def main : Bool = true;\n}\n"
+    , ParserParityInlineNegativeCase
+        "recursiveModuleBodyImportAfterDeclaration"
+        "recursive-module-body import-after-declaration negative "
+        (recursiveModuleBodySourcePath "import-after-declaration")
+        "module RecursiveBodyImportAfterDeclaration export (main) {\n  def helper : Bool = true;\n  import Prelude exposing (Bool);\n  def main : Bool = helper;\n}\n"
+    ]
+
+recursiveModuleBodySourcePath :: FilePath -> FilePath
+recursiveModuleBodySourcePath name =
+    "test/conformance/mlfp/parser-parity/recursive-module-body/src/" <> name <> ".mlfp"
 
 parserParityNegativeCases :: [ParserParityNegativeCase]
 parserParityNegativeCases =
@@ -3903,7 +4233,7 @@ importNegativeEvidenceProjection =
 valueDefListNegativeEvidenceProjection :: String
 valueDefListNegativeEvidenceProjection =
     unlines
-        [ "value-def-list parser negative expected-def-semicolon@test/conformance/mlfp/parser-parity/value-def-list-int-ref/src/Main.mlfp:3:20-3:21"
+        [ "value-def-list parser negative expected-def-semicolon@test/conformance/mlfp/parser-parity/value-def-list-int-ref/src/Main.mlfp:4:3-4:6"
         ]
 
 letLambdaApplicationNegativeEvidenceProjection :: String

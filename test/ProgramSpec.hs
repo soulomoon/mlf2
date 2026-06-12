@@ -1322,6 +1322,21 @@ spec = do
                 )
                 (const False)
 
+        it "allows delayed top-level recursion through lambda closures" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO, Nat(..), putStrLn);"
+                        , "  def finish : Nat -> IO Unit = λ(n : Nat) case n of {"
+                        , "    Zero -> putStrLn \"done\";"
+                        , "    Succ _ -> finish Zero"
+                        , "  };"
+                        , "  def main : IO Unit = finish (Succ Zero);"
+                        , "}"
+                        ]
+            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "done\n"
+
         it "supports IO mains whose result type is not Unit" $ do
             located <-
                 requireLocated $
@@ -1586,6 +1601,33 @@ spec = do
                         ]
             program <- requireParsed programText
             checkProgram program `shouldBe` Left (ProgramPatternConstructorMismatch "Zero" (STBase "Nat"))
+
+        it "rejects constructor pattern fields passed where the wrapper type is expected" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (ParserValue(..), SourceSymbol(..), main) {"
+                        , "  data SourceSymbol ="
+                        , "      SourceSymbol : String -> SourceSymbol;"
+                        , ""
+                        , "  data ParserValue ="
+                        , "      ValueToken : SourceSymbol -> ParserValue"
+                        , "    | ValueUnit : ParserValue;"
+                        , ""
+                        , "  def renderValue : ParserValue -> String ="
+                        , "    λ(value : ParserValue) case value of {"
+                        , "      ValueToken _ -> \"token\";"
+                        , "      ValueUnit -> \"unit\""
+                        , "    };"
+                        , ""
+                        , "  def main : String ="
+                        , "    case ValueToken (SourceSymbol \"identifier:a\") of {"
+                        , "      ValueToken token -> renderValue token;"
+                        , "      ValueUnit -> \"unit\""
+                        , "    };"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            checkProgram program `shouldBe` Left (ProgramTypeMismatch (STBase "SourceSymbol") (STBase "ParserValue"))
 
         it "rejects missing instances instead of reviving route-specific diagnostics" $ do
             let programText =

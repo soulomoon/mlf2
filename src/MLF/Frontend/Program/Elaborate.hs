@@ -1779,8 +1779,30 @@ compileExpectedResolvedMethodArg scope expectedTy expr = do
 
 ensureSourceTypeCompatible :: ElaborateScope -> SrcType -> SrcType -> ElaborateM ()
 ensureSourceTypeCompatible scope expectedTy actualTy =
-  when (sourceTypesNeedNominalRejection scope expectedTy actualTy) $
+  when (sourceTypesNeedRejection scope expectedTy actualTy) $
     throwError (ProgramTypeMismatch actualTy expectedTy)
+
+sourceTypesNeedRejection :: ElaborateScope -> SrcType -> SrcType -> Bool
+sourceTypesNeedRejection scope expectedTy actualTy =
+  not (sourceTypesCompatible scope expectedTy actualTy)
+    || sourceTypesNeedNominalRejection scope expectedTy actualTy
+
+sourceTypesCompatible :: ElaborateScope -> SrcType -> SrcType -> Bool
+sourceTypesCompatible scope expectedTy actualTy =
+  sourceTypesCompatibleMono scope expectedTy actualTy
+    || sourceTypesCompatibleInstantiatingActual scope expectedTy actualTy
+
+sourceTypesCompatibleMono :: ElaborateScope -> SrcType -> SrcType -> Bool
+sourceTypesCompatibleMono scope expectedTy actualTy =
+  matchTypesInScope scope Map.empty expectedTy actualTy /= Nothing
+    || matchTypesInScope scope Map.empty actualTy expectedTy /= Nothing
+    || lowerType scope expectedTy == lowerType scope actualTy
+
+sourceTypesCompatibleInstantiatingActual :: ElaborateScope -> SrcType -> SrcType -> Bool
+sourceTypesCompatibleInstantiatingActual scope expectedTy actualTy =
+  case actualTy of
+    STForall _ _ body -> sourceTypesCompatible scope expectedTy body
+    _ -> False
 
 sourceTypesNeedNominalRejection :: ElaborateScope -> SrcType -> SrcType -> Bool
 sourceTypesNeedNominalRejection scope expectedTy actualTy =

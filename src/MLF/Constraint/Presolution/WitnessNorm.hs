@@ -315,6 +315,15 @@ normalizeEdgeWitnessesM = do
               )
               | (bv, arg) <- binderArgs0
             ]
+        -- Trace source entries still drive replay-contract completeness below,
+        -- but Ω normalization may only widen I(r) with binders that survived
+        -- into the finalized graph.
+        normalizationBinderArgs =
+          IntMap.filterWithKey
+            ( \binderKey _arg ->
+                IntSet.member binderKey liveNodeKeys
+            )
+            binderArgs
         copyToOriginal =
           IntMap.fromListWith
             min
@@ -421,12 +430,13 @@ normalizeEdgeWitnessesM = do
                 isSchemeRootSourceBinder sourceBinder
             ]
     let interiorWithBinders =
-          if IntMap.size binderArgs > 1
-            then IntSet.union interiorNorm (IntSet.fromAscList (IntMap.keys binderArgs))
+          if IntMap.size normalizationBinderArgs > 1
+            then IntSet.union interiorNorm (IntSet.fromAscList (IntMap.keys normalizationBinderArgs))
             else interiorNorm
         isAnnEdge =
           IntSet.member eid (cAnnEdges c0)
         ops0 = map rewriteOp (getInstanceOps (ewWitness w0))
+        precomputedDescendants0 = precomputedDescendantsForOps snapshot ops0
     orderKeys <- cachedOrderKeys c0 canonical orderRoot
     let env =
           OmegaNormalizeEnv
@@ -437,8 +447,8 @@ normalizeEdgeWitnessesM = do
               Witness.orderKeys = orderKeys,
               Witness.canonical = canonical,
               Witness.constraint = c0,
-              Witness.binderArgs = binderArgs,
-              Witness.precomputedDescendants = precomputedDescendantsForOps snapshot ops0,
+              Witness.binderArgs = normalizationBinderArgs,
+              Witness.precomputedDescendants = precomputedDescendants0,
               Witness.binderReplayMap = replayMapRewritten,
               Witness.replayContract = ReplayContractNone,
               Witness.replayDomainBinders = replayBindersAtRoot,

@@ -469,10 +469,12 @@ evalRuntimeExprWithStack context stack deferredValues env expr =
   case expr of
     Surface.EVar name -> lookupRuntimeValue context stack deferredValues env name
     Surface.ELit lit -> Right (RuntimeLit lit)
+    -- Top-level recursion through a lambda body is a delayed call, not a
+    -- recursive value lookup while the binding RHS is being forced.
     Surface.ELam name body ->
-      Right (RuntimeClosure name body env stack deferredValues)
+      Right (RuntimeClosure name body env [] deferredValues)
     Surface.ELamAnn name _ body ->
-      Right (RuntimeClosure name body env stack deferredValues)
+      Right (RuntimeClosure name body env [] deferredValues)
     Surface.EApp fun arg -> do
       funValue <- evalRuntimeExprWithStack context stack deferredValues env fun
       argValue <- evalRuntimeExprWithStack context stack deferredValues env arg
