@@ -186,8 +186,13 @@ library substrate for the compiler-seed/full-parser path instead of another
 core syntax expressibility slice. Planner may select parser-combinator
 helpers, string/char/stream/list APIs, source-span/diagnostic helpers, or
 case/lambda boilerplate reduction when the slice strengthens the reusable
-parser/compiler-frontend substrate. Preserve bounded parser parity as evidence
-and regression guard material; do not treat it as milestone closeout.
+parser/compiler-frontend substrate. Module-body and declaration-internal
+exact-count parser growth are transitional evidence patterns only; prefer
+recursive declaration sequencing that parses supported module-body
+declarations until the module close token, and prefer recursive data
+constructor-list sequencing over adding more fixture-shaped constructor
+ladders. Preserve bounded parser parity as evidence and regression guard
+material; do not treat it as milestone closeout.
 
 Candidate directions:
 - Direction id: direction-4b-compiler-seed-parser-ergonomics-substrate
@@ -212,9 +217,14 @@ Candidate directions:
   Extraction notes: Prefer one strategic substrate slice at a time, such as
     parser state/result helpers, parser-combinator helpers, stronger
     string/char/stream/list APIs, source-span/diagnostic helper payloads, or a
-    narrowly justified reduction of repeated case/lambda plumbing. Keep the
-    round plan concrete; this roadmap direction is not itself an
-    implementation design.
+    narrowly justified reduction of repeated case/lambda plumbing. For
+    parser-owned module bodies, keep recursive declaration-row sequencing over
+    already-supported `data`, `class`, `instance`, and `def` rows until `}` as
+    the body-level substrate. For declaration internals, prefer focused
+    recursive slices such as data constructor-list sequencing before adding any
+    new exact-count wrappers; class and instance method-row internals may remain
+    bounded until their own focused slice. Keep the round plan concrete; this
+    roadmap direction is not itself an implementation design.
 
 - Direction id: direction-4a-canonical-parser-parity
   Summary: Finish remaining canonical parser accept/reject parity for
@@ -235,7 +245,10 @@ Candidate directions:
     milestone from bounded parser-parity fixtures alone.
   Extraction notes: Use after the selected source family can be covered through
     reusable substrate rather than one-off fixture growth; verify by one
-    aggregate parser run when owner surface and failure mode are shared.
+    aggregate parser run when owner surface and failure mode are shared. Do not
+    extend canonical parser parity by adding new exact-count module-body or data
+    constructor-list wrappers when the same coverage can enter through recursive
+    sequencing.
 
 ### [pending] Self-Boot Platform Contract Implementation
 Milestone id: milestone-5-self-boot-platform-contract-implementation

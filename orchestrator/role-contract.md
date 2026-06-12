@@ -55,6 +55,12 @@ Every role-owned structured artifact must satisfy the fields required by the
 artifact contract. If required fields cannot be filled from observable evidence,
 the role must stop with a specific blocker instead of inventing values.
 
+During long-running compile, test, benchmark, or verification commands, role
+subagents must stay quiet instead of sending waiting chatter or periodic
+"still running" updates. Report only when the command completes, fails, needs
+controller/user input, or exposes a concrete blocker. Record durable evidence
+in the role-owned artifact rather than chat messages.
+
 ## Shared Boundaries
 
 - Do not merge.
