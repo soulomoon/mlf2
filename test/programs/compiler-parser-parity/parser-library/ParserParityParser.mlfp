@@ -3121,51 +3121,23 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
   def parseEqClassMethodRowsFirst : String -> String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(classStart : String) λ(_openClass : ParserValue)
       parserBind (parseClassMethodSignatureRow sourceFile ValueUnit)
-        (parseEqClassMethodRowsMoreOrClose3 sourceFile classStart);
+        (parseEqClassMethodRowsMoreOrClose sourceFile classStart);
 
-  def parseEqClassMethodRowsMoreOrClose3 : String -> String -> ParserValue -> Parser ParserValue =
+  def parseEqClassMethodRowsMoreOrClose : String -> String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(classStart : String) λ(methodRows : ParserValue)
       parserChoice
         (parserBind (expectText "}") (finishEqClassRows sourceFile classStart methodRows))
         (parserBind (parseClassMethodSignatureRow sourceFile ValueUnit)
-          (appendClassMethodRowsAndContinue2 sourceFile classStart methodRows));
+          (appendClassMethodRowsAndContinue sourceFile classStart methodRows));
 
-  def parseEqClassMethodRowsMoreOrClose2 : String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(classStart : String) λ(methodRows : ParserValue)
-      parserChoice
-        (parserBind (expectText "}") (finishEqClassRows sourceFile classStart methodRows))
-        (parserBind (parseClassMethodSignatureRow sourceFile ValueUnit)
-          (appendClassMethodRowsAndContinue1 sourceFile classStart methodRows));
-
-  def parseEqClassMethodRowsMoreOrClose1 : String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(classStart : String) λ(methodRows : ParserValue)
-      parserChoice
-        (parserBind (expectText "}") (finishEqClassRows sourceFile classStart methodRows))
-        (parserBind (parseClassMethodSignatureRow sourceFile ValueUnit)
-          (appendClassMethodRowsAndContinue0 sourceFile classStart methodRows));
-
-  def parseEqClassMethodRowsMoreOrClose0 : String -> String -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(classStart : String) λ(methodRows : ParserValue)
-      parserBind (expectText "}") (finishEqClassRows sourceFile classStart methodRows);
-
-  def appendClassMethodRowsAndContinue2 : String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
+  def appendClassMethodRowsAndContinue : String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(classStart : String) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
       parserBind (appendProjectionValues existingRows nextRows)
-        (parseEqClassMethodRowsMoreOrClose2 sourceFile classStart);
+        (parseEqClassMethodRowsMoreOrClose sourceFile classStart);
 
-  def appendClassMethodRowsAndContinue1 : String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(classStart : String) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
-      parserBind (appendProjectionValues existingRows nextRows)
-        (parseEqClassMethodRowsMoreOrClose1 sourceFile classStart);
-
-  def appendClassMethodRowsAndContinue0 : String -> String -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(classStart : String) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
-      parserBind (appendProjectionValues existingRows nextRows)
-        (parseEqClassMethodRowsMoreOrClose0 sourceFile classStart);
-
-  def expectEqMethodNameParser : ParserValue -> Parser ParserValue =
+  def expectMethodNameParser : ParserValue -> Parser ParserValue =
     λ(_start : ParserValue)
-      (parserChoice (expectIdentifier "eq") (expectIdentifier "neq") : Parser ParserValue);
+      expectAnyIdentifier;
 
   def parseClassMethodSignatureTailRow : String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(methodToken : ParserValue)
@@ -3173,7 +3145,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
 
   def parseClassMethodSignatureRow : String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(_start : ParserValue)
-      parserBind (expectEqMethodNameParser ValueUnit)
+      parserBind (expectMethodNameParser ValueUnit)
         (parseClassMethodSignatureTailRow sourceFile);
 
   def parseClassMethodSignatureColon : String -> ParserValue -> Parser ParserValue =
@@ -3244,47 +3216,19 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
   def parseEqNatInstanceMethodRowsFirst : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(classToken : ParserValue) λ(typeValue : ParserValue) λ(_openInstance : ParserValue)
       parserBind (parseInstanceMethodDefinitionRow sourceFile ValueUnit)
-        (parseEqNatInstanceMethodRowsMoreOrClose3 sourceFile classToken typeValue);
+        (parseEqNatInstanceMethodRowsMoreOrClose sourceFile classToken typeValue);
 
-  def parseEqNatInstanceMethodRowsMoreOrClose3 : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+  def parseEqNatInstanceMethodRowsMoreOrClose : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(classToken : ParserValue) λ(typeValue : ParserValue) λ(methodRows : ParserValue)
       parserChoice
         (parserBind (expectText "}") (finishEqNatInstanceDeclarationRows sourceFile classToken typeValue methodRows))
         (parserBind (parseInstanceMethodDefinitionRow sourceFile ValueUnit)
-          (appendInstanceMethodRowsAndContinue2 sourceFile classToken typeValue methodRows));
+          (appendInstanceMethodRowsAndContinue sourceFile classToken typeValue methodRows));
 
-  def appendInstanceMethodRowsAndContinue2 : String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
+  def appendInstanceMethodRowsAndContinue : String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(classToken : ParserValue) λ(typeValue : ParserValue) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
       parserBind (appendProjectionValues existingRows nextRows)
-        (parseEqNatInstanceMethodRowsMoreOrClose2 sourceFile classToken typeValue);
-
-  def parseEqNatInstanceMethodRowsMoreOrClose2 : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(classToken : ParserValue) λ(typeValue : ParserValue) λ(methodRows : ParserValue)
-      parserChoice
-        (parserBind (expectText "}") (finishEqNatInstanceDeclarationRows sourceFile classToken typeValue methodRows))
-        (parserBind (parseInstanceMethodDefinitionRow sourceFile ValueUnit)
-          (appendInstanceMethodRowsAndContinue1 sourceFile classToken typeValue methodRows));
-
-  def appendInstanceMethodRowsAndContinue1 : String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(classToken : ParserValue) λ(typeValue : ParserValue) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
-      parserBind (appendProjectionValues existingRows nextRows)
-        (parseEqNatInstanceMethodRowsMoreOrClose1 sourceFile classToken typeValue);
-
-  def parseEqNatInstanceMethodRowsMoreOrClose1 : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(classToken : ParserValue) λ(typeValue : ParserValue) λ(methodRows : ParserValue)
-      parserChoice
-        (parserBind (expectText "}") (finishEqNatInstanceDeclarationRows sourceFile classToken typeValue methodRows))
-        (parserBind (parseInstanceMethodDefinitionRow sourceFile ValueUnit)
-          (appendInstanceMethodRowsAndContinue0 sourceFile classToken typeValue methodRows));
-
-  def appendInstanceMethodRowsAndContinue0 : String -> ParserValue -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(classToken : ParserValue) λ(typeValue : ParserValue) λ(existingRows : ParserValue) λ(nextRows : ParserValue)
-      parserBind (appendProjectionValues existingRows nextRows)
-        (parseEqNatInstanceMethodRowsMoreOrClose0 sourceFile classToken typeValue);
-
-  def parseEqNatInstanceMethodRowsMoreOrClose0 : String -> ParserValue -> ParserValue -> ParserValue -> Parser ParserValue =
-    λ(sourceFile : String) λ(classToken : ParserValue) λ(typeValue : ParserValue) λ(methodRows : ParserValue)
-      parserBind (expectText "}") (finishEqNatInstanceDeclarationRows sourceFile classToken typeValue methodRows);
+        (parseEqNatInstanceMethodRowsMoreOrClose sourceFile classToken typeValue);
 
   def parseInstanceMethodDefinitionTailRow : String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(methodToken : ParserValue)
@@ -3292,7 +3236,7 @@ module ParserParityParser export (ParserResult(..), parseCompleteProgram, parseC
 
   def parseInstanceMethodDefinitionRow : String -> ParserValue -> Parser ParserValue =
     λ(sourceFile : String) λ(_start : ParserValue)
-      parserBind (expectEqMethodNameParser ValueUnit)
+      parserBind (expectMethodNameParser ValueUnit)
         (parseInstanceMethodDefinitionTailRow sourceFile);
 
   def parseInstanceMethodDefinitionEquals : String -> ParserValue -> Parser ParserValue =
