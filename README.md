@@ -15,7 +15,7 @@ The pipeline takes eMLF terms, builds and solves graphic constraints, and elabor
 - `test/` — Hspec test suite
 - `tasks/` — active/archive task execution logs
 - `papers/` — thesis/paper references
-- `docs/` — architecture/phase/syntax documentation
+- `docs/` — documentation map, architecture, syntax, thesis ledgers, and decisions
 
 ## Build and test
 
@@ -265,10 +265,13 @@ tools accept the emitted opaque-pointer IR by default.
 
 ## Syntax and paper alignment
 
+- Documentation map: `docs/README.md`
 - Canonical syntax spec: `docs/syntax.md`
 - `.mlfp` language reference: `docs/mlfp-language-reference.md`
 - Implementation notes and thesis alignment: `implementation_notes.md`
-- Roadmap: `roadmap.md`
+- Long-form algorithm roadmap: `roadmap.md`
+- Rolling repo progress and next goals: `TODO.md`
+- Active round-execution control plane: `orchestrator/state.json`
 - Known issues / faithfulness gaps: `Bugs.md`
 
 ## Validation command

@@ -43,6 +43,8 @@
 
 ## Guidance Ownership Map
 
+- `docs/README.md`: reader-facing documentation map. It points readers to
+  current surfaces but does not own workflow rules.
 - `docs/architecture.md`: repo layout, public/internal boundaries, module ownership, and key shared abstractions.
 - `tasks/readme`: task-folder quick start.
 - `TODO.md`: rolling next goals.
@@ -50,6 +52,16 @@
 - `CHANGELOG.md`: meaningful project progress.
 - `Bugs.md`: canonical bug tracker.
 - `README.md`: user-facing build and usage guidance.
+- `roadmap.md`: long-form algorithm/background roadmap, not active execution state.
+- `orchestrator/state.json` plus the active roadmap bundle: active control plane for repo-wide round execution.
+- `docs/plans/`, `docs/notes/`, `tasks/`, and historical `orchestrator/`
+  artifacts are execution evidence. Keep them in place for audit trails, but do
+  not treat them as canonical guidance unless a canonical reference, accepted
+  ADR, or the active control plane cites them as current authority.
+- New long-lived documentation should go to its owning canonical surface, an
+  ADR when the decision is durable and trade-off-bearing, a task packet for
+  current task work, or an orchestrator artifact for round execution.
+  `docs/plans/` is not the default scratch space for new documentation.
 
 ## Agent skills
 

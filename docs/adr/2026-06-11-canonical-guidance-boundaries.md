@@ -1,0 +1,3 @@
+# ADR: Preserve Historical Documentation In Place Behind Canonical Guidance Boundaries
+
+Historical plans, task packets, notes, round artifacts, and orchestrator worktree records remain in their existing locations as **Execution Evidence**, while current documentation ownership is made explicit through the `AGENTS.md` **Guidance Ownership Map** and a reader-facing `docs/README.md` map. This avoids link rot and preserves audit trails from prior roadmap and orchestrator work, while preventing historical artifacts from overriding **Canonical Reference** documents or the **Active Control Plane** selected by `orchestrator/state.json`.

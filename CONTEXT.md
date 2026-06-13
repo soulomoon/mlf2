@@ -20,6 +20,22 @@ _Avoid_: snapshot materialization, view setup, solved wrapper construction
 The cleanup direction that deletes outdated compatibility surfaces, including internal solved/view adapters, parser aliases, and parser support for non-canonical legacy syntax, when the paper-backed pipeline no longer needs them.
 _Avoid_: compatibility preservation, syntax grandfathering, parser transition mode, ASCII alias mode
 
+**Guidance Ownership Map**:
+The repo-facing rule ownership map in `AGENTS.md` that names which guidance surface owns each durable workflow or documentation responsibility.
+_Avoid_: scattered source of truth, duplicated doc policy, informal agent convention
+
+**Canonical Reference**:
+A current stable project document that may be cited as present repo truth unless a higher-precedence instruction or newer accepted decision supersedes it.
+_Avoid_: historical plan, task packet, orphan note, round artifact
+
+**Execution Evidence**:
+Historical plans, task packets, notes, round artifacts, and worktree records that support audit trails but do not override **Canonical Reference** documents.
+_Avoid_: canonical guidance, live roadmap, current architecture source of truth
+
+**Active Control Plane**:
+The live orchestrator state plus the active roadmap bundle selected by `orchestrator/state.json` for repo-wide round execution.
+_Avoid_: top-level roadmap stub, archived round, historical worktree
+
 **Full Canonical `.mlfp` Parser Parity**:
 The compiler-in-`.mlfp` frontend target where a `.mlfp` parser accepts the complete canonical `.mlfp` syntax and produces the same program syntax artifact as the current canonical parser, before resolve, checking, elaboration, or driver self-hosting.
 _Avoid_: seed grammar growth, symbolic parser seed, legacy parser compatibility, checker self-hosting
@@ -498,6 +514,9 @@ _Avoid_: diagnostic text, frontend source error, LLVM lowering error
 - **Legacy Surface Retirement** applies consistently to frontend eMLF and explicit xMLF parsers; parser families should not keep different compatibility alias policies.
 - **Legacy Surface Retirement** is enforced by rejection tests for retired syntax, not only by deleting old acceptance tests.
 - **Legacy Surface Retirement** rejection tests assert parse failure, not exact parser diagnostic text.
+- The **Guidance Ownership Map** owns documentation responsibility boundaries; reader-facing maps may point to owners but should not create parallel workflow rules.
+- **Canonical Reference** documents carry current repo truth; **Execution Evidence** preserves audit history and may support, but not override, canonical references.
+- The **Active Control Plane** selects the live roadmap bundle for round execution; historical roadmap, round, task, and worktree records remain **Execution Evidence** after they stop being active.
 - **Full Canonical `.mlfp` Parser Parity** is bounded to parser output and source spans; it does not include the **Resolved Semantic Program Artifact**, source checking, elaboration, backend lowering, compiler driver behavior, or self-hosting.
 - **Full Self-Boot** is stricter than frontend parity: parser, resolver, checker, optimizer/lowering as selected, package/build driver, backend/native emission, and repeat bootstrap evidence must all line up.
 - The end-to-end ordering for **Full Self-Boot** is owned by `docs/adr/2026-05-18-full-self-boot-end-to-end-roadmap.md`; this glossary defines the terms, while that ADR sequences the roadmap families.
