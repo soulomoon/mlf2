@@ -157,7 +157,7 @@ Candidate directions:
   Extraction notes: Use only for focused text regressions blocking active
     parser or proof slices.
 
-### [in-progress] Full Canonical .mlfp Parser Parity
+### [done] Full Canonical .mlfp Parser Parity
 Milestone id: milestone-4-full-canonical-mlfp-parser-parity
 Depends on: milestone-3-native-capable-broad-text-substrate
 Intent: Complete the bridge from bounded parser-parity/compiler-seed syntax
@@ -179,7 +179,14 @@ package-source layout, and compiler-seed data-model/lexer sources, including
 round-339 `SeedLexer.mlfp` equality, source-copy, shortcut-guard,
 malformed-case negative, and aggregate parser Hspec evidence; this is bounded
 evidence only, not full parser parity, compiler-package implementation,
-platform/proof progress, or self-boot completion.
+platform/proof progress, or self-boot completion. round-357 closed milestone 4
+by revalidating recursive module-body declarations, recursive constructor rows,
+recursive class/instance method rows, package-capable parser parity, dynamic
+negative diagnostics, aggregate parser parity, retired-helper absence, full
+Cabal gate, thesis conformance gate, and shortcut/overclaim guards. This is
+parser/compiler-frontend status-only closeout and does not claim
+compiler-package, platform/proof, native/backend, package-manager/linker,
+self-boot, or later-milestone completion.
 Parallel lane: text-parser
 Coordination notes: The next lawful work may target reusable ergonomics and
 library substrate for the compiler-seed/full-parser path instead of another
