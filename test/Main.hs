@@ -37,6 +37,7 @@ import Phi.AlignmentSpec qualified
 import Phi.WitnessDomainSpec qualified
 import PhiSoundnessSpec qualified
 import PipelineSpec qualified
+import PlatformContractSpec qualified
 import ProgramConformanceCorpusSpec qualified
 import ProgramCompilerSeedSpec qualified
 import ProgramPackageBuildGraphSpec qualified
@@ -144,6 +145,7 @@ main = do
     timedSpec "TypeCheckSpec" TypeCheckSpec.spec
     timedSpec "TypeSoundnessSpec" TypeSoundnessSpec.spec
     timedSpec "ReduceSpec" ReduceSpec.spec
+    timedSpec "PlatformContractSpec" PlatformContractSpec.spec
     timedSpec "Elab.ResultTypeUtilSpec" Elab.ResultTypeUtilSpec.spec
     timedSpec "ElaborationSpec" ElaborationSpec.spec
     timedSpec "GeneralizeSpec" GeneralizeSpec.spec

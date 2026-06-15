@@ -1,0 +1,21 @@
+mlf-platform-substrate-contract-v1
+abi-version: mlf-platform-abi-1
+contract-package-id: mlf.platform.substrate.minimal
+contract-package-version: 0.1.0
+target-triple: x86_64-unknown-linux-gnu
+substrate-components:
+- kind=builtin-source name=prelude digest=sha256:2222222222222222222222222222222222222222222222222222222222222222
+- kind=runtime name=mlfp-io digest=sha256:1111111111111111111111111111111111111111111111111111111111111111
+host-toolchain:
+- role=archive-tool path=/opt/mlf/toolchains/llvm-18/bin/llvm-ar digest=sha256:4444444444444444444444444444444444444444444444444444444444444444 unavailable-reason=<none> version=llvm-ar-18.1.8
+- role=c-compiler path=/opt/mlf/toolchains/clang-18/bin/clang digest=sha256:3333333333333333333333333333333333333333333333333333333333333333 unavailable-reason=<none> version=clang-18.1.8
+ambient-input-policy:
+  name: explicit-empty-ambient-inputs
+  inputs:
+  - argv
+  - stdin
+loader-environment-policy:
+  name: scrubbed-loader-environment
+  variables:
+  - DYLD_LIBRARY_PATH=cleared
+  - LD_LIBRARY_PATH=cleared
