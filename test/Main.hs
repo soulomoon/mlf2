@@ -39,6 +39,7 @@ import PhiSoundnessSpec qualified
 import PipelineSpec qualified
 import PlatformContractSpec qualified
 import PlatformEnvironmentPolicySpec qualified
+import PlatformToolchainIdentitySpec qualified
 import ProgramConformanceCorpusSpec qualified
 import ProgramCompilerSeedSpec qualified
 import ProgramPackageBuildGraphSpec qualified
@@ -148,6 +149,7 @@ main = do
     timedSpec "ReduceSpec" ReduceSpec.spec
     timedSpec "PlatformContractSpec" PlatformContractSpec.spec
     timedSpec "PlatformEnvironmentPolicySpec" PlatformEnvironmentPolicySpec.spec
+    timedSpec "PlatformToolchainIdentitySpec" PlatformToolchainIdentitySpec.spec
     timedSpec "Elab.ResultTypeUtilSpec" Elab.ResultTypeUtilSpec.spec
     timedSpec "ElaborationSpec" ElaborationSpec.spec
     timedSpec "GeneralizeSpec" GeneralizeSpec.spec

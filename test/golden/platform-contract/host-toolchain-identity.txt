@@ -1,0 +1,13 @@
+mlf-platform-toolchain-identity-evidence-v1
+target-triple: x86_64-unknown-linux-gnu
+tools:
+  - role=archive-tool availability=available path=/opt/mlf/toolchains/llvm-18/bin/llvm-ar digest=sha256:4444444444444444444444444444444444444444444444444444444444444444 unavailable-reason=<none> version=llvm-ar-18.1.8
+  - role=c-compiler availability=available path=/opt/mlf/toolchains/clang-18/bin/clang digest=sha256:3333333333333333333333333333333333333333333333333333333333333333 unavailable-reason=<none> version=clang-18.1.8
+sysroot: availability=available identity=sysroot:glibc-2.39-x86_64
+system-libraries:
+  - name=libc identity=sha256:5555555555555555555555555555555555555555555555555555555555555555
+  - name=libm identity=sha256:6666666666666666666666666666666666666666666666666666666666666666
+codegen-settings:
+  - key=cpu value=x86-64-v2
+  - key=opt-level value=2
+linker-mode: dynamic
