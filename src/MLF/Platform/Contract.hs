@@ -10,7 +10,13 @@ module MLF.Platform.Contract
     ToolchainToolRole (..),
     ResolvedToolIdentity (..),
     HostToolchainContract (..),
+    AmbientInputName (..),
+    AmbientInputDisposition (..),
+    AmbientInputRule (..),
     AmbientInputPolicy (..),
+    LoaderEnvironmentVariable (..),
+    LoaderEnvironmentDisposition (..),
+    LoaderEnvironmentRule (..),
     LoaderEnvironmentPolicy (..),
     PlatformSubstrateContract (..),
     PlatformContractError (..),
@@ -86,15 +92,49 @@ newtype HostToolchainContract = HostToolchainContract
   }
   deriving (Eq, Ord, Show)
 
+newtype AmbientInputName = AmbientInputName
+  { unAmbientInputName :: String
+  }
+  deriving (Eq, Ord, Show)
+
+data AmbientInputDisposition
+  = AmbientInputScrubbed
+  | AmbientInputDeclared String
+  | AmbientInputNormalized String
+  deriving (Eq, Ord, Show)
+
+data AmbientInputRule = AmbientInputRule
+  { ambientInputRuleName :: AmbientInputName,
+    ambientInputRuleDisposition :: AmbientInputDisposition
+  }
+  deriving (Eq, Ord, Show)
+
 data AmbientInputPolicy = AmbientInputPolicy
   { ambientInputPolicyName :: String,
-    ambientInputPolicyInputs :: [String]
+    ambientInputPolicyRules :: [AmbientInputRule]
+  }
+  deriving (Eq, Ord, Show)
+
+newtype LoaderEnvironmentVariable = LoaderEnvironmentVariable
+  { unLoaderEnvironmentVariable :: String
+  }
+  deriving (Eq, Ord, Show)
+
+data LoaderEnvironmentDisposition
+  = LoaderEnvironmentScrubbed
+  | LoaderEnvironmentDeclared String
+  | LoaderEnvironmentNormalized String
+  deriving (Eq, Ord, Show)
+
+data LoaderEnvironmentRule = LoaderEnvironmentRule
+  { loaderEnvironmentRuleVariable :: LoaderEnvironmentVariable,
+    loaderEnvironmentRuleDisposition :: LoaderEnvironmentDisposition
   }
   deriving (Eq, Ord, Show)
 
 data LoaderEnvironmentPolicy = LoaderEnvironmentPolicy
   { loaderEnvironmentPolicyName :: String,
-    loaderEnvironmentPolicyVariables :: [String]
+    loaderEnvironmentPolicyRules :: [LoaderEnvironmentRule]
   }
   deriving (Eq, Ord, Show)
 
@@ -128,8 +168,14 @@ data PlatformContractError
   | IncompleteResolvedToolIdentity String
   | MissingAmbientInputPolicy
   | EmptyAmbientInputPolicyName
+  | EmptyAmbientInputRuleName
+  | EmptyAmbientInputNormalizedValue String
+  | DuplicateAmbientInputRule String
   | MissingLoaderEnvironmentPolicy
   | EmptyLoaderEnvironmentPolicyName
+  | EmptyLoaderEnvironmentVariable
+  | EmptyLoaderEnvironmentNormalizedValue String
+  | DuplicateLoaderEnvironmentRule String
   deriving (Eq, Ord, Show)
 
 validatePlatformSubstrateContract :: PlatformSubstrateContract -> [PlatformContractError]
@@ -198,10 +244,22 @@ renderPlatformContractError err =
       "ambient-input policy is missing"
     EmptyAmbientInputPolicyName ->
       "ambient-input policy name is empty"
+    EmptyAmbientInputRuleName ->
+      "ambient-input rule name is empty"
+    EmptyAmbientInputNormalizedValue name ->
+      "ambient-input rule " ++ name ++ " has empty normalized value"
+    DuplicateAmbientInputRule name ->
+      "duplicate ambient-input rule: " ++ name
     MissingLoaderEnvironmentPolicy ->
       "loader-environment policy is missing"
     EmptyLoaderEnvironmentPolicyName ->
       "loader-environment policy name is empty"
+    EmptyLoaderEnvironmentVariable ->
+      "loader-environment rule variable is empty"
+    EmptyLoaderEnvironmentNormalizedValue variable ->
+      "loader-environment rule " ++ variable ++ " has empty normalized value"
+    DuplicateLoaderEnvironmentRule variable ->
+      "duplicate loader-environment rule: " ++ variable
 
 renderPlatformContractErrors :: [PlatformContractError] -> String
 renderPlatformContractErrors =
@@ -256,17 +314,39 @@ validateAmbientInputPolicy :: Maybe AmbientInputPolicy -> [PlatformContractError
 validateAmbientInputPolicy value =
   case value of
     Nothing -> [MissingAmbientInputPolicy]
-    Just policy
-      | isBlank (ambientInputPolicyName policy) -> [EmptyAmbientInputPolicyName]
-      | otherwise -> []
+    Just policy ->
+      [EmptyAmbientInputPolicyName | isBlank (ambientInputPolicyName policy)]
+        ++ concatMap validateAmbientInputRule (ambientInputPolicyRules policy)
+        ++ map DuplicateAmbientInputRule (duplicates (map ambientInputRuleKey (ambientInputPolicyRules policy)))
+
+validateAmbientInputRule :: AmbientInputRule -> [PlatformContractError]
+validateAmbientInputRule rule =
+  [EmptyAmbientInputRuleName | isBlank name]
+    ++ case ambientInputRuleDisposition rule of
+      AmbientInputNormalized value
+        | isBlank value -> [EmptyAmbientInputNormalizedValue name]
+      _ -> []
+  where
+    name = ambientInputRuleKey rule
 
 validateLoaderEnvironmentPolicy :: Maybe LoaderEnvironmentPolicy -> [PlatformContractError]
 validateLoaderEnvironmentPolicy value =
   case value of
     Nothing -> [MissingLoaderEnvironmentPolicy]
-    Just policy
-      | isBlank (loaderEnvironmentPolicyName policy) -> [EmptyLoaderEnvironmentPolicyName]
-      | otherwise -> []
+    Just policy ->
+      [EmptyLoaderEnvironmentPolicyName | isBlank (loaderEnvironmentPolicyName policy)]
+        ++ concatMap validateLoaderEnvironmentRule (loaderEnvironmentPolicyRules policy)
+        ++ map DuplicateLoaderEnvironmentRule (duplicates (map loaderEnvironmentRuleKey (loaderEnvironmentPolicyRules policy)))
+
+validateLoaderEnvironmentRule :: LoaderEnvironmentRule -> [PlatformContractError]
+validateLoaderEnvironmentRule rule =
+  [EmptyLoaderEnvironmentVariable | isBlank variable]
+    ++ case loaderEnvironmentRuleDisposition rule of
+      LoaderEnvironmentNormalized value
+        | isBlank value -> [EmptyLoaderEnvironmentNormalizedValue variable]
+      _ -> []
+  where
+    variable = loaderEnvironmentRuleKey rule
 
 renderValidatedContract :: String -> PlatformSubstrateContract -> Either [PlatformContractError] String
 renderValidatedContract header contract =
@@ -326,17 +406,55 @@ renderAmbientInputPolicy :: AmbientInputPolicy -> [String]
 renderAmbientInputPolicy policy =
   [ "ambient-input-policy:",
     "  name: " ++ ambientInputPolicyName policy,
-    "  inputs:"
+    "  rules:"
   ]
-    ++ renderIndentedItems (sort (ambientInputPolicyInputs policy))
+    ++ renderIndentedItems (map renderAmbientInputRule (sortOn ambientInputRuleKey (ambientInputPolicyRules policy)))
+
+renderAmbientInputRule :: AmbientInputRule -> String
+renderAmbientInputRule rule =
+  concat
+    [ "name=",
+      ambientInputRuleKey rule,
+      " ",
+      renderAmbientInputDisposition (ambientInputRuleDisposition rule)
+    ]
+
+renderAmbientInputDisposition :: AmbientInputDisposition -> String
+renderAmbientInputDisposition disposition =
+  case disposition of
+    AmbientInputScrubbed ->
+      "disposition=scrubbed"
+    AmbientInputDeclared value ->
+      "disposition=declared value=" ++ value
+    AmbientInputNormalized value ->
+      "disposition=normalized value=" ++ value
 
 renderLoaderEnvironmentPolicy :: LoaderEnvironmentPolicy -> [String]
 renderLoaderEnvironmentPolicy policy =
   [ "loader-environment-policy:",
     "  name: " ++ loaderEnvironmentPolicyName policy,
-    "  variables:"
+    "  rules:"
   ]
-    ++ renderIndentedItems (sort (loaderEnvironmentPolicyVariables policy))
+    ++ renderIndentedItems (map renderLoaderEnvironmentRule (sortOn loaderEnvironmentRuleKey (loaderEnvironmentPolicyRules policy)))
+
+renderLoaderEnvironmentRule :: LoaderEnvironmentRule -> String
+renderLoaderEnvironmentRule rule =
+  concat
+    [ "variable=",
+      loaderEnvironmentRuleKey rule,
+      " ",
+      renderLoaderEnvironmentDisposition (loaderEnvironmentRuleDisposition rule)
+    ]
+
+renderLoaderEnvironmentDisposition :: LoaderEnvironmentDisposition -> String
+renderLoaderEnvironmentDisposition disposition =
+  case disposition of
+    LoaderEnvironmentScrubbed ->
+      "disposition=scrubbed"
+    LoaderEnvironmentDeclared value ->
+      "disposition=declared value=" ++ value
+    LoaderEnvironmentNormalized value ->
+      "disposition=normalized value=" ++ value
 
 renderIndentedItems :: [String] -> [String]
 renderIndentedItems values =
@@ -369,6 +487,14 @@ substrateComponentKey component =
 toolRoleKey :: ResolvedToolIdentity -> String
 toolRoleKey identity =
   unToolchainToolRole (resolvedToolRole identity)
+
+ambientInputRuleKey :: AmbientInputRule -> String
+ambientInputRuleKey rule =
+  unAmbientInputName (ambientInputRuleName rule)
+
+loaderEnvironmentRuleKey :: LoaderEnvironmentRule -> String
+loaderEnvironmentRuleKey rule =
+  unLoaderEnvironmentVariable (loaderEnvironmentRuleVariable rule)
 
 duplicates :: [String] -> [String]
 duplicates values =

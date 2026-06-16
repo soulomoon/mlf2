@@ -72,15 +72,38 @@ minimalContract =
         Just
           AmbientInputPolicy
             { ambientInputPolicyName = "explicit-empty-ambient-inputs",
-              ambientInputPolicyInputs = ["argv", "stdin"]
+              ambientInputPolicyRules =
+                [ AmbientInputRule
+                    { ambientInputRuleName = AmbientInputName "argv",
+                      ambientInputRuleDisposition = AmbientInputScrubbed
+                    },
+                  AmbientInputRule
+                    { ambientInputRuleName = AmbientInputName "locale",
+                      ambientInputRuleDisposition = AmbientInputNormalized "C.UTF-8"
+                    },
+                  AmbientInputRule
+                    { ambientInputRuleName = AmbientInputName "timezone",
+                      ambientInputRuleDisposition = AmbientInputDeclared "UTC"
+                    }
+                ]
             },
       platformContractLoaderEnvironmentPolicy =
         Just
           LoaderEnvironmentPolicy
             { loaderEnvironmentPolicyName = "scrubbed-loader-environment",
-              loaderEnvironmentPolicyVariables =
-                [ "DYLD_LIBRARY_PATH=cleared",
-                  "LD_LIBRARY_PATH=cleared"
+              loaderEnvironmentPolicyRules =
+                [ LoaderEnvironmentRule
+                    { loaderEnvironmentRuleVariable = LoaderEnvironmentVariable "DYLD_LIBRARY_PATH",
+                      loaderEnvironmentRuleDisposition = LoaderEnvironmentScrubbed
+                    },
+                  LoaderEnvironmentRule
+                    { loaderEnvironmentRuleVariable = LoaderEnvironmentVariable "LD_LIBRARY_PATH",
+                      loaderEnvironmentRuleDisposition = LoaderEnvironmentNormalized "/opt/mlf/runtime/lib"
+                    },
+                  LoaderEnvironmentRule
+                    { loaderEnvironmentRuleVariable = LoaderEnvironmentVariable "MLF_RUNTIME_LIBRARY",
+                      loaderEnvironmentRuleDisposition = LoaderEnvironmentDeclared "/opt/mlf/runtime/lib/libmlfp_io.so"
+                    }
                 ]
             }
     }
@@ -90,7 +113,13 @@ reorderedMinimalContract =
   minimalContract
     { platformContractSubstrateComponents = reverse (platformContractSubstrateComponents minimalContract),
       platformContractHostToolchain =
-        HostToolchainContract (reverse (hostToolchainTools (platformContractHostToolchain minimalContract)))
+        HostToolchainContract (reverse (hostToolchainTools (platformContractHostToolchain minimalContract))),
+      platformContractAmbientInputPolicy =
+        (\policy -> policy {ambientInputPolicyRules = reverse (ambientInputPolicyRules policy)})
+          <$> platformContractAmbientInputPolicy minimalContract,
+      platformContractLoaderEnvironmentPolicy =
+        (\policy -> policy {loaderEnvironmentPolicyRules = reverse (loaderEnvironmentPolicyRules policy)})
+          <$> platformContractLoaderEnvironmentPolicy minimalContract
     }
 
 fingerprintDriftCases :: [(String, PlatformSubstrateContract)]
@@ -140,7 +169,39 @@ fingerprintDriftCases =
             Just
               AmbientInputPolicy
                 { ambientInputPolicyName = "explicit-file-inputs",
-                  ambientInputPolicyInputs = ["argv", "source-root", "stdin"]
+                  ambientInputPolicyRules =
+                    [ AmbientInputRule (AmbientInputName "argv") AmbientInputScrubbed,
+                      AmbientInputRule (AmbientInputName "locale") (AmbientInputNormalized "C.UTF-8"),
+                      AmbientInputRule (AmbientInputName "source-root") (AmbientInputDeclared "/workspace/mlf")
+                    ]
+                }
+        }
+    ),
+    ( "disposition=scrubbed",
+      minimalContract
+        { platformContractAmbientInputPolicy =
+            Just
+              AmbientInputPolicy
+                { ambientInputPolicyName = "explicit-empty-ambient-inputs",
+                  ambientInputPolicyRules =
+                    [ AmbientInputRule (AmbientInputName "argv") AmbientInputScrubbed,
+                      AmbientInputRule (AmbientInputName "locale") AmbientInputScrubbed,
+                      AmbientInputRule (AmbientInputName "timezone") (AmbientInputDeclared "UTC")
+                    ]
+                }
+        }
+    ),
+    ( "value=en_US.UTF-8",
+      minimalContract
+        { platformContractAmbientInputPolicy =
+            Just
+              AmbientInputPolicy
+                { ambientInputPolicyName = "explicit-empty-ambient-inputs",
+                  ambientInputPolicyRules =
+                    [ AmbientInputRule (AmbientInputName "argv") AmbientInputScrubbed,
+                      AmbientInputRule (AmbientInputName "locale") (AmbientInputNormalized "en_US.UTF-8"),
+                      AmbientInputRule (AmbientInputName "timezone") (AmbientInputDeclared "UTC")
+                    ]
                 }
         }
     ),
@@ -150,7 +211,9 @@ fingerprintDriftCases =
             Just
               LoaderEnvironmentPolicy
                 { loaderEnvironmentPolicyName = "preserved-loader-environment",
-                  loaderEnvironmentPolicyVariables = ["LD_LIBRARY_PATH=declared"]
+                  loaderEnvironmentPolicyRules =
+                    [ LoaderEnvironmentRule (LoaderEnvironmentVariable "LD_LIBRARY_PATH") (LoaderEnvironmentDeclared "/declared/lib")
+                    ]
                 }
         }
     )
@@ -198,6 +261,20 @@ invalidContractCases =
       "version string alone is not accepted"
     ),
     ("ambient-input policy", minimalContract {platformContractAmbientInputPolicy = Nothing}, "ambient-input policy is missing"),
+    ( "ambient-input rule",
+      minimalContract
+        { platformContractAmbientInputPolicy =
+            Just (AmbientInputPolicy "explicit-empty-ambient-inputs" [AmbientInputRule (AmbientInputName "") AmbientInputScrubbed])
+        },
+      "ambient-input rule name is empty"
+    ),
+    ( "ambient-input rule",
+      minimalContract
+        { platformContractAmbientInputPolicy =
+            Just (AmbientInputPolicy "explicit-empty-ambient-inputs" [AmbientInputRule (AmbientInputName "locale") (AmbientInputNormalized "")])
+        },
+      "empty normalized value"
+    ),
     ("loader-environment policy", minimalContract {platformContractLoaderEnvironmentPolicy = Nothing}, "loader-environment policy is missing")
   ]
 

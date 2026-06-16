@@ -11,11 +11,13 @@ host-toolchain:
 - role=c-compiler path=/opt/mlf/toolchains/clang-18/bin/clang digest=sha256:3333333333333333333333333333333333333333333333333333333333333333 unavailable-reason=<none> version=clang-18.1.8
 ambient-input-policy:
   name: explicit-empty-ambient-inputs
-  inputs:
-  - argv
-  - stdin
+  rules:
+  - name=argv disposition=scrubbed
+  - name=locale disposition=normalized value=C.UTF-8
+  - name=timezone disposition=declared value=UTC
 loader-environment-policy:
   name: scrubbed-loader-environment
-  variables:
-  - DYLD_LIBRARY_PATH=cleared
-  - LD_LIBRARY_PATH=cleared
+  rules:
+  - variable=DYLD_LIBRARY_PATH disposition=scrubbed
+  - variable=LD_LIBRARY_PATH disposition=normalized value=/opt/mlf/runtime/lib
+  - variable=MLF_RUNTIME_LIBRARY disposition=declared value=/opt/mlf/runtime/lib/libmlfp_io.so

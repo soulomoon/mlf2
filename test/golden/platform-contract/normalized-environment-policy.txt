@@ -1,0 +1,11 @@
+mlf-platform-environment-policy-evidence-v1
+ambient-input-policy: explicit-proof-ambient-inputs
+ambient-inputs:
+  - name=argv disposition=scrubbed observed=<absent>
+  - name=locale disposition=normalized value=C.UTF-8 observed=C.UTF-8
+  - name=timezone disposition=declared value=UTC observed=UTC
+loader-environment-policy: explicit-loader-environment
+loader-environment:
+  - variable=DYLD_LIBRARY_PATH disposition=scrubbed observed=<absent>
+  - variable=LD_LIBRARY_PATH disposition=normalized value=/opt/mlf/runtime/lib observed=/opt/mlf/runtime/lib
+  - variable=MLF_RUNTIME_LIBRARY disposition=declared value=/opt/mlf/runtime/lib/libmlfp_io.so observed=/opt/mlf/runtime/lib/libmlfp_io.so
