@@ -1,0 +1,23 @@
+mlf-platform-checked-package-lock-evidence-v1
+packages:
+  - package=mlf.compiler root=packages/compiler abi-version=mlf-platform-abi-1 substrate-fingerprint=substrate-fingerprint:round-360
+    modules:
+    - module=mlf.compiler:Compiler.Main source-metadata=source-sha256:compiler-main interface-metadata=interface-sha256:compiler-main
+      direct-dependencies:
+        - mlf.compiler:Compiler.Resolve
+        - mlf.prelude:Prelude
+      dependency-interfaces:
+        - module=mlf.compiler:Compiler.Resolve metadata=interface-sha256:compiler-resolve
+        - module=mlf.prelude:Prelude metadata=interface-sha256:prelude
+    - module=mlf.compiler:Compiler.Resolve source-metadata=source-sha256:compiler-resolve interface-metadata=interface-sha256:compiler-resolve
+      direct-dependencies:
+        - mlf.prelude:Prelude
+      dependency-interfaces:
+        - module=mlf.prelude:Prelude metadata=interface-sha256:prelude
+  - package=mlf.prelude root=packages/prelude abi-version=mlf-platform-abi-1 substrate-fingerprint=substrate-fingerprint:round-360
+    modules:
+    - module=mlf.prelude:Prelude source-metadata=source-sha256:prelude interface-metadata=interface-sha256:prelude
+      direct-dependencies:
+        - <none>
+      dependency-interfaces:
+        - <none>
