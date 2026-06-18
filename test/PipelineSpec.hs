@@ -106,7 +106,19 @@ import SpecUtil
     unsafeNormalizeExpr,
   )
 import Test.Hspec
-import Test.QuickCheck (Gen, arbitrary, chooseInt, counterexample, elements, forAll, property, withMaxSuccess, (===))
+import Test.QuickCheck
+  ( Gen,
+    arbitrary,
+    checkCoverage,
+    chooseInt,
+    counterexample,
+    cover,
+    elements,
+    forAll,
+    property,
+    withMaxSuccess,
+    (===),
+  )
 
 expectStrictPipelineFailure :: (Show err, Show ty) => String -> Either err (term, ty) -> Expectation
 expectStrictPipelineFailure label result =
@@ -5701,77 +5713,132 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       property $
         withMaxSuccess 300 $
           forAll genClosedWellTypedExpr $ \expr ->
-            case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
-              Left _ -> property True -- pipeline failure is not a soundness bug
-              Right (term, _ty) ->
-                case typeCheck term of
-                  Left _ -> property True -- skip if typeCheck fails
-                  Right ty ->
-                    case step term of
-                      Nothing -> property True
-                      Just term' ->
-                        case typeCheck term' of
-                          Left _ -> property True -- internal type var limitation
-                          Right ty' ->
-                            counterexample
-                              ( "pipeline preservation failed\nexpr: "
-                                  ++ show expr
-                                  ++ "\nterm: "
-                                  ++ show term
-                                  ++ "\nterm': "
-                                  ++ show term'
-                                  ++ "\ntype(term): "
-                                  ++ show ty
-                                  ++ "\ntype(term'): "
-                                  ++ show ty'
-                              )
-                              (ty' === ty)
+            let pipelineResult = runPipelineElab Set.empty (unsafeNormalizeExpr expr)
+                pipelineSuccess = isRight pipelineResult
+                typeCheckSuccess =
+                  case pipelineResult of
+                    Left _ -> False
+                    Right (term, _ty) -> isRight (typeCheck term)
+                reducible =
+                  case pipelineResult of
+                    Left _ -> False
+                    Right (term, _ty) -> isJust (step term)
+                steppedTypeCheckSuccess =
+                  case pipelineResult of
+                    Left _ -> False
+                    Right (term, _ty) ->
+                      case step term of
+                        Nothing -> False
+                        Just term' -> isRight (typeCheck term')
+             in checkCoverage $
+                  cover 20 pipelineSuccess "pipeline-success" $
+                    cover 20 typeCheckSuccess "typecheck-success" $
+                      cover 5 reducible "reducible" $
+                        cover 5 steppedTypeCheckSuccess "stepped-typecheck-success" $
+                          case pipelineResult of
+                            Left _ -> property True -- pipeline failure is not a soundness bug
+                            Right (term, _ty) ->
+                              case typeCheck term of
+                                Left _ -> property True -- skip if typeCheck fails
+                                Right ty ->
+                                  case step term of
+                                    Nothing -> property True
+                                    Just term' ->
+                                      case typeCheck term' of
+                                        Left _ -> property True -- internal type var limitation
+                                        Right ty' ->
+                                          counterexample
+                                            ( "pipeline preservation failed\nexpr: "
+                                                ++ show expr
+                                                ++ "\nterm: "
+                                                ++ show term
+                                                ++ "\nterm': "
+                                                ++ show term'
+                                                ++ "\ntype(term): "
+                                                ++ show ty
+                                                ++ "\ntype(term'): "
+                                                ++ show ty'
+                                            )
+                                            (ty' === ty)
 
     it "Pipeline progress proxy: elaborated well-typed closed term is value or steps" $
       property $
         withMaxSuccess 300 $
           forAll genClosedWellTypedExpr $ \expr ->
-            case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
-              Left _ -> property True
-              Right (term, _ty) ->
-                case typeCheck term of
-                  Left _ -> property True
-                  Right _ ->
-                    counterexample
-                      ( "pipeline progress failed\nexpr: "
-                          ++ show expr
-                          ++ "\nterm: "
-                          ++ show term
-                      )
-                      (isValue term || isJust (step term))
+            let pipelineResult = runPipelineElab Set.empty (unsafeNormalizeExpr expr)
+                pipelineSuccess = isRight pipelineResult
+                typeCheckSuccess =
+                  case pipelineResult of
+                    Left _ -> False
+                    Right (term, _ty) -> isRight (typeCheck term)
+                valueResult =
+                  case pipelineResult of
+                    Left _ -> False
+                    Right (term, _ty) -> isValue term
+                stepResult =
+                  case pipelineResult of
+                    Left _ -> False
+                    Right (term, _ty) -> isJust (step term)
+             in checkCoverage $
+                  cover 20 pipelineSuccess "pipeline-success" $
+                    cover 20 typeCheckSuccess "typecheck-success" $
+                      cover 20 valueResult "value" $
+                        cover 5 stepResult "steps" $
+                          case pipelineResult of
+                            Left _ -> property True
+                            Right (term, _ty) ->
+                              case typeCheck term of
+                                Left _ -> property True
+                                Right _ ->
+                                  counterexample
+                                    ( "pipeline progress failed\nexpr: "
+                                        ++ show expr
+                                        ++ "\nterm: "
+                                        ++ show term
+                                    )
+                                    (isValue term || isJust (step term))
 
     it "Pipeline multi-step preservation proxy: typeCheck(term) = typeCheck(normalize term)" $
       property $
         withMaxSuccess 300 $
           forAll genClosedWellTypedExpr $ \expr ->
-            case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
-              Left _ -> property True
-              Right (term, _ty) ->
-                case typeCheck term of
-                  Left _ -> property True
-                  Right ty ->
-                    let term' = normalize term
-                     in case typeCheck term' of
-                          Left _ -> property True -- internal type var limitation
-                          Right ty' ->
-                            counterexample
-                              ( "pipeline multi-step preservation failed\nexpr: "
-                                  ++ show expr
-                                  ++ "\nterm: "
-                                  ++ show term
-                                  ++ "\nnormalize(term): "
-                                  ++ show term'
-                                  ++ "\ntype(term): "
-                                  ++ show ty
-                                  ++ "\ntype(normalize): "
-                                  ++ show ty'
-                              )
-                              (ty' === ty)
+            let pipelineResult = runPipelineElab Set.empty (unsafeNormalizeExpr expr)
+                pipelineSuccess = isRight pipelineResult
+                typeCheckSuccess =
+                  case pipelineResult of
+                    Left _ -> False
+                    Right (term, _ty) -> isRight (typeCheck term)
+                normalizedTypeCheckSuccess =
+                  case pipelineResult of
+                    Left _ -> False
+                    Right (term, _ty) -> isRight (typeCheck term) && isRight (typeCheck (normalize term))
+             in checkCoverage $
+                  cover 20 pipelineSuccess "pipeline-success" $
+                    cover 20 typeCheckSuccess "typecheck-success" $
+                      cover 10 normalizedTypeCheckSuccess "normalized-typecheck-success" $
+                        case pipelineResult of
+                          Left _ -> property True
+                          Right (term, _ty) ->
+                            case typeCheck term of
+                              Left _ -> property True
+                              Right ty ->
+                                let term' = normalize term
+                                 in case typeCheck term' of
+                                      Left _ -> property True -- internal type var limitation
+                                      Right ty' ->
+                                        counterexample
+                                          ( "pipeline multi-step preservation failed\nexpr: "
+                                              ++ show expr
+                                              ++ "\nterm: "
+                                              ++ show term
+                                              ++ "\nnormalize(term): "
+                                              ++ show term'
+                                              ++ "\ntype(term): "
+                                              ++ show ty
+                                              ++ "\ntype(normalize): "
+                                              ++ show ty'
+                                          )
+                                          (ty' === ty)
 
     it "Pipeline one-step normalization proxy: representative elaborated terms preserve their normal form" $ do
       let cases =

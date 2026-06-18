@@ -636,15 +636,22 @@ spec = do
                         ]
                 genOps = listOf genOp
             in forAll genOps $ \ops ->
-                case normalizeInstanceOpsFull env ops of
-                    Left _ -> property True
-                    Right ops' ->
-                        conjoin
-                            [ validateNormalizedWitness env ops' === Right ()
-                            , getInstanceOps
-                                (mkInstanceWitness (validatedInstanceOpsAfterNormalization ops'))
-                                === ops'
-                            ]
+                let normalized = normalizeInstanceOpsFull env ops
+                    normalizationSuccess =
+                        case normalized of
+                            Left _ -> False
+                            Right _ -> True
+                 in checkCoverage $
+                    cover 10 normalizationSuccess "normalization-success" $
+                        case normalized of
+                            Left _ -> property True
+                            Right ops' ->
+                                conjoin
+                                    [ validateNormalizedWitness env ops' === Right ()
+                                    , getInstanceOps
+                                        (mkInstanceWitness (validatedInstanceOpsAfterNormalization ops'))
+                                        === ops'
+                                    ]
 
         it "allows ops on binders that are later eliminated (paper normalization only)" $ do
             let c = mkNormalizeConstraint
@@ -1619,19 +1626,33 @@ spec = do
             forAll (genInstanceOps 10) $ \ops ->
                 forAll genNormalizeEnvParams $ \envParams ->
                     let env = mkTestNormalizeEnv envParams
-                     in case normalizeInstanceOpsFull env ops of
-                            Left _ -> property True  -- Normalization failure is acceptable
-                            Right ops1 ->
-                                case normalizeInstanceOpsFull env ops1 of
-                                    Left _ -> property False  -- Second normalization should not fail
-                                    Right ops2 -> ops1 === ops2
+                        normalized = normalizeInstanceOpsFull env ops
+                        normalizationSuccess =
+                            case normalized of
+                                Left _ -> False
+                                Right _ -> True
+                     in checkCoverage $
+                        cover 10 normalizationSuccess "normalization-success" $
+                            case normalized of
+                                Left _ -> property True  -- Normalization failure is acceptable
+                                Right ops1 ->
+                                    case normalizeInstanceOpsFull env ops1 of
+                                        Left _ -> property False  -- Second normalization should not fail
+                                        Right ops2 -> ops1 === ops2
         it "canonicalized witnesses have no redundant operations" $ property $
             forAll (genInstanceOps 10) $ \ops ->
                 forAll genNormalizeEnvParams $ \envParams ->
                     let env = mkTestNormalizeEnv envParams
-                     in case normalizeInstanceOpsFull env ops of
-                            Left _ -> property True  -- Normalization failure is acceptable
-                            Right ops' -> property $ not (hasRedundantOps ops')
+                        normalized = normalizeInstanceOpsFull env ops
+                        normalizationSuccess =
+                            case normalized of
+                                Left _ -> False
+                                Right _ -> True
+                     in checkCoverage $
+                        cover 10 normalizationSuccess "normalization-success" $
+                            case normalized of
+                                Left _ -> property True  -- Normalization failure is acceptable
+                                Right ops' -> property $ not (hasRedundantOps ops')
 
     describe "Phase 4 regression matrix" $ do
         it "keeps compose expansions aligned with interleaved witness steps" $ do

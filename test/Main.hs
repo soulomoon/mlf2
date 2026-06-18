@@ -39,6 +39,7 @@ import PhiSoundnessSpec qualified
 import PipelineSpec qualified
 import PlatformContractSpec qualified
 import PlatformEnvironmentPolicySpec qualified
+import PlatformNativeLinkRecordSpec qualified
 import PlatformPackageLockSpec qualified
 import PlatformToolchainIdentitySpec qualified
 import ProgramConformanceCorpusSpec qualified
@@ -151,6 +152,7 @@ main = do
     timedSpec "PlatformContractSpec" PlatformContractSpec.spec
     timedSpec "PlatformEnvironmentPolicySpec" PlatformEnvironmentPolicySpec.spec
     timedSpec "PlatformPackageLockSpec" PlatformPackageLockSpec.spec
+    timedSpec "PlatformNativeLinkRecordSpec" PlatformNativeLinkRecordSpec.spec
     timedSpec "PlatformToolchainIdentitySpec" PlatformToolchainIdentitySpec.spec
     timedSpec "Elab.ResultTypeUtilSpec" Elab.ResultTypeUtilSpec.spec
     timedSpec "ElaborationSpec" ElaborationSpec.spec

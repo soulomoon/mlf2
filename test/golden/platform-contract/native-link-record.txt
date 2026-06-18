@@ -1,0 +1,32 @@
+mlf-platform-native-link-record-v1
+proof-action-id: stage0.link.compiler
+owning-stage: stage0
+stage-owned-output-directory: .self-boot/stage0
+target-triple: x86_64-unknown-linux-gnu
+linker-mode: dynamic
+linker-argv:
+  - /opt/mlf/toolchains/clang-18/bin/clang
+  - -target
+  - x86_64-unknown-linux-gnu
+  - .self-boot/stage0/obj/compiler-main.o
+  - .self-boot/stage0/obj/compiler-runtime.o
+  - -o
+  - .self-boot/stage0/bin/mlfp-stage1
+object-inputs:
+  - path=.self-boot/stage0/obj/compiler-main.o hash=sha256:1111111111111111111111111111111111111111111111111111111111111111
+  - path=.self-boot/stage0/obj/compiler-runtime.o hash=sha256:2222222222222222222222222222222222222222222222222222222222222222
+resolved-linked-libraries:
+  - name=libSystem kind=framework link-mode=dynamic path=<none> framework=framework:libSystem.B platform-package=<none> hash=sha256:4444444444444444444444444444444444444444444444444444444444444444
+  - name=mlf.prelude kind=platform-package link-mode=static path=<none> framework=<none> platform-package=package:mlf.prelude@lock-sha256:5555 hash=<none>
+  - name=mlfp-io kind=runtime link-mode=dynamic path=.self-boot/stage0/lib/libmlfp_io.so framework=<none> platform-package=<none> hash=sha256:3333333333333333333333333333333333333333333333333333333333333333
+library-search-paths:
+  - .self-boot/stage0/lib
+  - /opt/mlf/toolchains/clang-18/lib
+rpaths:
+  - $ORIGIN/../lib
+  - .self-boot/stage0/lib
+install-names:
+  - @rpath/libSystem.B.dylib
+  - libmlfp_io.so
+output-artifact: path=.self-boot/stage0/bin/mlfp-stage1 hash=sha256:6666666666666666666666666666666666666666666666666666666666666666
+exit-status: exited code=0

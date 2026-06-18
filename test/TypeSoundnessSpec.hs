@@ -188,26 +188,36 @@ spec = describe "Phase 7 theorem obligations" $ do
         property $
             withMaxSuccess 300 $
                 forAll genClosedWellTypedElabTerm $ \term ->
-                    case typeCheck term of
-                        Left err ->
-                            counterexample
-                                ( "generator produced ill-typed term:\n"
-                                    ++ show term
-                                    ++ "\nerror: "
-                                    ++ show err
-                                )
-                                False
-                        Right ty
-                            | not (isValue term) -> property True  -- only check values
-                            | ty == TBase (BaseTy "Int") ->
-                                counterexample
-                                    ("canonical-forms (Int) failed on value: " ++ show term)
-                                    (isLitInt term)
-                            | ty == TBase (BaseTy "Bool") ->
-                                counterexample
-                                    ("canonical-forms (Bool) failed on value: " ++ show term)
-                                    (isLitBool term)
-                            | otherwise -> property True  -- non-base types: skip
+                    let checked = typeCheck term
+                        valueTerm = isValue term
+                        baseValue =
+                            case checked of
+                                Right (TBase (BaseTy "Int")) -> valueTerm
+                                Right (TBase (BaseTy "Bool")) -> valueTerm
+                                _ -> False
+                    in checkCoverage $
+                        cover 20 valueTerm "value" $
+                        cover 10 baseValue "base-value" $
+                            case checked of
+                                Left err ->
+                                    counterexample
+                                        ( "generator produced ill-typed term:\n"
+                                            ++ show term
+                                            ++ "\nerror: "
+                                            ++ show err
+                                        )
+                                        False
+                                Right ty
+                                    | not valueTerm -> property True  -- only check values
+                                    | ty == TBase (BaseTy "Int") ->
+                                        counterexample
+                                            ("canonical-forms (Int) failed on value: " ++ show term)
+                                            (isLitInt term)
+                                    | ty == TBase (BaseTy "Bool") ->
+                                        counterexample
+                                            ("canonical-forms (Bool) failed on value: " ++ show term)
+                                            (isLitBool term)
+                                    | otherwise -> property True  -- non-base types: skip
 
     it "Recursive-runtime obligations carry matching ERoll/EUnroll/context evidence" $
         property $
