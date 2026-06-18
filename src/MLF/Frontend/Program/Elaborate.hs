@@ -529,6 +529,7 @@ lowerConstructorBinding :: ElaborateScope -> ConstructorInfo -> LoweredBinding
 lowerConstructorBinding scope ctorInfo =
   LoweredBinding
     { loweredBindingName = ctorRuntimeName ctorInfo,
+      loweredBindingIdentity = loweredBindingIdentityFromConstructorInfo ctorInfo,
       loweredBindingSourceType = canonicalSourceType scope (quantifyFreeTypeVars (ctorType ctorInfo)),
       loweredBindingExpectedType = constructorBindingExpectedType scope ctorInfo,
       loweredBindingSurfaceExpr = constructorSurfaceExpr scope ctorInfo,
@@ -537,12 +538,13 @@ lowerConstructorBinding scope ctorInfo =
       loweredBindingExportedAsMain = False
     }
 
-lowerExprBinding :: ElaborateScope -> String -> SrcType -> Bool -> P.Expr -> Either ProgramError LoweredBinding
-lowerExprBinding scope runtimeName expectedTy exportedAsMain expr = do
+lowerExprBinding :: ElaborateScope -> LoweredBindingIdentity -> SrcType -> Bool -> P.Expr -> Either ProgramError LoweredBinding
+lowerExprBinding scope identity expectedTy exportedAsMain expr = do
   result <- runElaborateM (compileExpr scope (Just expectedTy) expr)
   pure
     LoweredBinding
-      { loweredBindingName = runtimeName,
+      { loweredBindingName = loweredIdentityRuntimeName identity,
+        loweredBindingIdentity = identity,
         loweredBindingSourceType = canonicalSourceType scope expectedTy,
         loweredBindingExpectedType = lowerType scope expectedTy,
         loweredBindingSurfaceExpr = elaborateResultValue result,
@@ -551,8 +553,8 @@ lowerExprBinding scope runtimeName expectedTy exportedAsMain expr = do
         loweredBindingExportedAsMain = exportedAsMain
       }
 
-lowerConstrainedExprBinding :: ElaborateScope -> String -> [P.ClassConstraint] -> SrcType -> Bool -> P.Expr -> Either ProgramError LoweredBinding
-lowerConstrainedExprBinding scope runtimeName constraints visibleTy exportedAsMain expr = do
+lowerConstrainedExprBinding :: ElaborateScope -> LoweredBindingIdentity -> [P.ClassConstraint] -> SrcType -> Bool -> P.Expr -> Either ProgramError LoweredBinding
+lowerConstrainedExprBinding scope identity constraints visibleTy exportedAsMain expr = do
   result <- runElaborateM $ do
     (scopeWithEvidence, evidenceParams) <- extendConstraintEvidence scope constraints
     let (_, bodyExpectedTy) = splitForalls visibleTy
@@ -561,7 +563,8 @@ lowerConstrainedExprBinding scope runtimeName constraints visibleTy exportedAsMa
   let expectedTy = constrainedRuntimeType scope constraints visibleTy
   pure
     LoweredBinding
-      { loweredBindingName = runtimeName,
+      { loweredBindingName = loweredIdentityRuntimeName identity,
+        loweredBindingIdentity = identity,
         loweredBindingSourceType = canonicalSourceType scope visibleTy,
         loweredBindingExpectedType = lowerType scope expectedTy,
         loweredBindingSurfaceExpr = elaborateResultValue result,
@@ -573,8 +576,8 @@ lowerConstrainedExprBinding scope runtimeName constraints visibleTy exportedAsMa
     wrapEvidence (runtimeName0, evidenceTy) acc =
       surfaceLamAnn runtimeName0 evidenceTy acc
 
-lowerConstrainedResolvedExprBinding :: ElaborateScope -> String -> [ConstraintInfo] -> TypeView -> Bool -> P.ResolvedExpr -> Either ProgramError LoweredBinding
-lowerConstrainedResolvedExprBinding scope runtimeName constraints visibleView exportedAsMain expr = do
+lowerConstrainedResolvedExprBinding :: ElaborateScope -> LoweredBindingIdentity -> [ConstraintInfo] -> TypeView -> Bool -> P.ResolvedExpr -> Either ProgramError LoweredBinding
+lowerConstrainedResolvedExprBinding scope identity constraints visibleView exportedAsMain expr = do
   result <- runElaborateM $ do
     (scopeWithEvidence, evidenceParams) <- extendConstraintEvidenceInfo scope constraints
     let (_, bodyExpectedTy) = splitForalls (typeViewDisplay visibleView)
@@ -583,7 +586,8 @@ lowerConstrainedResolvedExprBinding scope runtimeName constraints visibleView ex
   let expectedTy = constrainedRuntimeTypeInfo scope constraints visibleView
   pure
     LoweredBinding
-      { loweredBindingName = runtimeName,
+      { loweredBindingName = loweredIdentityRuntimeName identity,
+        loweredBindingIdentity = identity,
         loweredBindingSourceType = canonicalSourceType scope (typeViewDisplay visibleView),
         loweredBindingExpectedType = lowerType scope expectedTy,
         loweredBindingSurfaceExpr = elaborateResultValue result,
@@ -595,8 +599,8 @@ lowerConstrainedResolvedExprBinding scope runtimeName constraints visibleView ex
     wrapEvidence (runtimeName0, evidenceTy) acc =
       surfaceLamAnn runtimeName0 evidenceTy acc
 
-lowerResolvedConstrainedExprBinding :: ElaborateScope -> String -> P.ResolvedConstrainedType -> Bool -> P.ResolvedExpr -> Either ProgramError LoweredBinding
-lowerResolvedConstrainedExprBinding scope runtimeName ty exportedAsMain expr = do
+lowerResolvedConstrainedExprBinding :: ElaborateScope -> LoweredBindingIdentity -> P.ResolvedConstrainedType -> Bool -> P.ResolvedExpr -> Either ProgramError LoweredBinding
+lowerResolvedConstrainedExprBinding scope identity ty exportedAsMain expr = do
   constraints <- mapM (resolvedConstraintInfoForScope scope) (P.constrainedConstraints ty)
   bodyView <- resolvedTypeViewForScope scope (P.constrainedBody ty)
   let visibleView =
@@ -618,7 +622,7 @@ lowerResolvedConstrainedExprBinding scope runtimeName ty exportedAsMain expr = d
           }
   lowerConstrainedResolvedExprBinding
     scope
-    runtimeName
+    identity
     constraints
     visibleView
     exportedAsMain

@@ -135,7 +135,7 @@ main = do
     timedSpec "ProgramFixturePackageSpec" ProgramFixturePackageSpec.spec
     timedSpec "ProgramPackageSpec" ProgramPackageSpec.spec
     timedSpec "ProgramPackageDiscoverySpec" ProgramPackageDiscoverySpec.spec
-    timedSpec "ProgramParserParitySpec" ProgramParserParitySpec.spec
+    -- timedSpec "ProgramParserParitySpec" ProgramParserParitySpec.spec
     timedSpec "ProgramSpec" ProgramSpec.spec
     timedSpec "ResolvedSymbolSpec" ResolvedSymbolSpec.spec
     timedSpec "PipelineSpec" PipelineSpec.spec

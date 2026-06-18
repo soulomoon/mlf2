@@ -160,9 +160,34 @@ shapes, not qualified strings. Deferred method finalization carries paired
 display/identity type views so instance and evidence lookup stay semantic even
 after eMLF type recovery.
 
+### Resolved xMLF identity target
+
+The accepted target for checked xMLF is **Resolved xMLF Identity IR**; see
+`docs/adr/2026-06-18-resolved-xmlf-identity-ir.md`.
+
+Today `MLF.Types.Elab.ElabTerm` still stores executable term variables and
+binders as strings. `CheckedBinding` has started carrying a `ResolvedVar`
+beside the string term, and constructor bindings carry a `ConstructorId`
+reference consumed by backend conversion. Remaining term occurrences still need
+the same resolved identity migration. Final checked terms should carry resolved
+variable identity throughout, with constructor occurrences represented by an
+`IdDetails`-style constructor reference rather than by a string that must be
+classified later.
+
+The target does not duplicate every checked module declaration inside every
+term occurrence. `CheckedModule` remains the declaration owner for data,
+classes, instances, and exports. The term layer carries executable identity
+needed to typecheck, reduce, run, analyze dependencies, and convert to backend
+IR without returning to source spelling or string-keyed constructor recovery.
+Source spellings remain diagnostics/rendering data; `SymbolIdentity` remains
+the semantic equality key.
+
 ## Key graph and witness types
 
 - `Expr` (`MLF.Frontend.Syntax`) — surface eMLF terms
+- `ElabTerm` (`MLF.Types.Elab`) — current checked xMLF term representation;
+  still string-based for executable variables during migration toward resolved
+  xMLF identity
 - `Constraint` (`MLF.Constraint.Types.Graph`) — constraint graph plus binding tree
 - `TyNode` — graph nodes (`TyVar`, `TyArrow`, `TyForall`, `TyBase`, `TyCon`, `TyExp`, `TyMu`, `TyBottom`)
 - `InstEdge` — instantiation edges (`<=`)

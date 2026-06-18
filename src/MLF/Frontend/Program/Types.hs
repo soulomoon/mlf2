@@ -64,6 +64,18 @@ module MLF.Frontend.Program.Types
     ClassInfo (..),
     ValueInfo (..),
     InstanceInfo (..),
+    LocalRef (..),
+    PrimitiveRef (..),
+    DeferredRef (..),
+    ConstructorRef (..),
+    IdDetails (..),
+    LoweredBindingIdentity (..),
+    ResolvedVar (..),
+    constructorRefFromInfo,
+    loweredBindingIdentityFromConstructorInfo,
+    loweredBindingIdentityFromValueInfo,
+    resolvedVarFromLoweredBinding,
+    checkedBindingConstructorRef,
     DeferredBindingMode (..),
     DeferredMethodEvidence (..),
     DeferredMethodCall (..),
@@ -842,6 +854,118 @@ data InstanceInfo = InstanceInfo
   }
   deriving (Eq, Show)
 
+newtype LocalRef = LocalRef
+  { localRefName :: String
+  }
+  deriving (Eq, Ord, Show)
+
+newtype PrimitiveRef = PrimitiveRef
+  { primitiveRefName :: String
+  }
+  deriving (Eq, Ord, Show)
+
+newtype DeferredRef = DeferredRef
+  { deferredRefName :: String
+  }
+  deriving (Eq, Ord, Show)
+
+data ConstructorRef = ConstructorRef
+  { constructorRefSymbol :: SymbolIdentity,
+    constructorRefRuntimeName :: String,
+    constructorRefOwnerType :: SymbolIdentity,
+    constructorRefOwnerRuntimeName :: String,
+    constructorRefIndex :: Int,
+    constructorRefForalls :: [(String, Maybe SrcType)],
+    constructorRefArgs :: [SrcType],
+    constructorRefResult :: SrcType
+  }
+  deriving (Eq, Show)
+
+data IdDetails
+  = LocalId LocalRef
+  | TopLevelId SymbolIdentity
+  | ConstructorId ConstructorRef
+  | MethodId SymbolIdentity
+  | PrimitiveId PrimitiveRef
+  | DeferredId DeferredRef
+  deriving (Eq, Show)
+
+data LoweredBindingIdentity = LoweredBindingIdentity
+  { loweredIdentityDisplayName :: String,
+    loweredIdentityRuntimeName :: String,
+    loweredIdentityDetails :: IdDetails
+  }
+  deriving (Eq, Show)
+
+data ResolvedVar = ResolvedVar
+  { resolvedVarName :: String,
+    resolvedVarRuntimeName :: String,
+    resolvedVarType :: ElabType,
+    resolvedVarDetails :: IdDetails
+  }
+  deriving (Eq, Show)
+
+constructorRefFromInfo :: ConstructorInfo -> ConstructorRef
+constructorRefFromInfo ctor =
+  ConstructorRef
+    { constructorRefSymbol = ctorInfoSymbol ctor,
+      constructorRefRuntimeName = ctorRuntimeName ctor,
+      constructorRefOwnerType = ctorOwningTypeIdentity ctor,
+      constructorRefOwnerRuntimeName = qualifiedNameForSymbol (ctorOwningTypeIdentity ctor),
+      constructorRefIndex = ctorIndex ctor,
+      constructorRefForalls = ctorForalls ctor,
+      constructorRefArgs = ctorArgs ctor,
+      constructorRefResult = ctorResult ctor
+    }
+
+loweredBindingIdentityFromConstructorInfo :: ConstructorInfo -> LoweredBindingIdentity
+loweredBindingIdentityFromConstructorInfo ctor =
+  LoweredBindingIdentity
+    { loweredIdentityDisplayName = ctorName ctor,
+      loweredIdentityRuntimeName = ctorRuntimeName ctor,
+      loweredIdentityDetails = ConstructorId (constructorRefFromInfo ctor)
+    }
+
+loweredBindingIdentityFromValueInfo :: ValueInfo -> LoweredBindingIdentity
+loweredBindingIdentityFromValueInfo valueInfo =
+  case valueInfo of
+    OrdinaryValue
+      { valueDisplayName = displayName,
+        valueRuntimeName = runtimeName,
+        valueInfoSymbol = symbol
+      } ->
+        LoweredBindingIdentity
+          { loweredIdentityDisplayName = displayName,
+            loweredIdentityRuntimeName = runtimeName,
+            loweredIdentityDetails = TopLevelId symbol
+          }
+    ConstructorValue {valueCtorInfo = ctor} ->
+      loweredBindingIdentityFromConstructorInfo ctor
+    OverloadedMethod
+      { valueDisplayName = displayName,
+        valueInfoSymbol = symbol
+      } ->
+      LoweredBindingIdentity
+        { loweredIdentityDisplayName = displayName,
+          loweredIdentityRuntimeName = displayName,
+          loweredIdentityDetails = MethodId symbol
+        }
+
+resolvedVarFromLoweredBinding :: LoweredBinding -> ElabType -> ResolvedVar
+resolvedVarFromLoweredBinding lowered ty =
+  ResolvedVar
+    { resolvedVarName = loweredIdentityDisplayName identity,
+      resolvedVarRuntimeName = loweredIdentityRuntimeName identity,
+      resolvedVarType = ty,
+      resolvedVarDetails = loweredIdentityDetails identity
+    }
+  where
+    identity = loweredBindingIdentity lowered
+
+qualifiedNameForSymbol :: SymbolIdentity -> String
+qualifiedNameForSymbol identity =
+  symbolDefiningModule identity ++ "." ++ symbolDefiningName identity
+
 data DeferredBindingMode
   = DeferredBindingScheme
   | DeferredBindingMonomorphic
@@ -910,6 +1034,7 @@ data ModuleExports = ModuleExports
 
 data LoweredBinding = LoweredBinding
   { loweredBindingName :: String,
+    loweredBindingIdentity :: LoweredBindingIdentity,
     loweredBindingSourceType :: SrcType,
     loweredBindingExpectedType :: SrcType,
     loweredBindingSurfaceExpr :: SurfaceExpr,
@@ -921,6 +1046,7 @@ data LoweredBinding = LoweredBinding
 
 data CheckedBinding = CheckedBinding
   { checkedBindingName :: String,
+    checkedBindingResolvedVar :: ResolvedVar,
     checkedBindingSourceType :: SrcType,
     checkedBindingSurfaceExpr :: SurfaceExpr,
     checkedBindingDeferredObligations :: Map String DeferredProgramObligation,
@@ -929,6 +1055,12 @@ data CheckedBinding = CheckedBinding
     checkedBindingExportedAsMain :: Bool
   }
   deriving (Eq, Show)
+
+checkedBindingConstructorRef :: CheckedBinding -> Maybe ConstructorRef
+checkedBindingConstructorRef binding =
+  case resolvedVarDetails (checkedBindingResolvedVar binding) of
+    ConstructorId ref -> Just ref
+    _ -> Nothing
 
 data CheckedModule = CheckedModule
   { checkedModuleName :: P.ModuleName,

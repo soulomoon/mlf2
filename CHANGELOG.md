@@ -3,6 +3,15 @@
 ## Unreleased
 
 ### Changed
+- Accepted Resolved xMLF Identity IR as the checked-term target: final checked
+  executable references should carry resolved variable identity and
+  constructor references instead of bare strings, while checked module metadata
+  remains the declaration owner during migration.
+- Started the checked-binding side of that migration: lowered bindings now carry
+  `LoweredBindingIdentity`, finalized bindings carry `ResolvedVar`, constructor
+  bindings carry `ConstructorId ConstructorRef`, and backend constructor-binding
+  synthesis consumes that checked identity instead of reclassifying by binding
+  name.
 - Added exact two- and three-source-definition helper entrypoints to the
   shared parser-owned parser-parity library and migrated the selected two- and
   three-definition module-body paths plus the imported three-definition body

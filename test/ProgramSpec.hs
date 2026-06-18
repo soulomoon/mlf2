@@ -22,11 +22,14 @@ import MLF.Frontend.Program.Finalize
 import MLF.Frontend.Program.Resolve (resolveProgram)
 import MLF.Frontend.Program.Types
     ( ConstructorInfo (..)
+    , ConstructorRef (..)
     , ConstructorShape (..)
     , DataInfo (..)
+    , IdDetails (..)
     , ResolvedLocalSymbols (..)
     , ResolvedModuleDiagnosticAdapter (..)
     , ResolvedSemanticModule (..)
+    , ResolvedVar (..)
     , constructorOwnerRuntimeTypeTrackable
     , mkResolvedSymbol
     , resolvedModuleName
@@ -278,6 +281,31 @@ spec = do
                         , ctorOwnerConstructors = [nothingShape, justShape]
                         }
             constructorOwnerRuntimeTypeTrackable Map.empty nothingCtor `shouldBe` False
+
+        it "records constructor bindings with resolved constructor identity" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (Option(..), main) {"
+                        , "  data Option ="
+                        , "      None : Option;"
+                        , ""
+                        , "  def main : Option = None;"
+                        , "}"
+                        ]
+            checked <- requireChecked (withPrelude program)
+            binding <- requireCheckedBinding "Main__None" checked
+            case checkedBindingResolvedVar binding of
+                ResolvedVar
+                    { resolvedVarName = "None"
+                    , resolvedVarRuntimeName = "Main__None"
+                    , resolvedVarDetails = ConstructorId ctorRef
+                    } -> do
+                        constructorRefRuntimeName ctorRef `shouldBe` "Main__None"
+                        constructorRefOwnerRuntimeName ctorRef `shouldBe` "Main.Option"
+                        constructorRefIndex ctorRef `shouldBe` 0
+                resolvedVar ->
+                    expectationFailure ("expected constructor resolved var, got: " ++ show resolvedVar)
 
     describe "MLF.Program parse/pretty" $ do
         mapM_ roundtripFixture fixturePaths

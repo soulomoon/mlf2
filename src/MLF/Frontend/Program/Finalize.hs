@@ -105,6 +105,7 @@ import MLF.Frontend.Program.Types
     freeTypeVarsTypeView,
     freeTypeVarsTypeViews,
     methodInfoOwnerClassSymbolIdentity,
+    resolvedVarFromLoweredBinding,
     SymbolIdentity,
     splitArrows,
     splitForalls,
@@ -295,6 +296,7 @@ finalizeOpaqueUncheckedBindingWithContext context lowered placeholderTy = do
   Right
     CheckedBinding
       { checkedBindingName = loweredBindingName lowered,
+        checkedBindingResolvedVar = resolvedVarFromLoweredBinding lowered placeholderTy,
         checkedBindingSourceType = loweredBindingSourceType lowered,
         checkedBindingSurfaceExpr = loweredBindingSurfaceExpr lowered,
         checkedBindingDeferredObligations = loweredBindingDeferredObligations lowered,
@@ -1031,6 +1033,7 @@ finalizeCheckedBindingFromTermWithReadContext context mbCheckContext lowered ter
         Right
           CheckedBinding
             { checkedBindingName = loweredBindingName lowered,
+              checkedBindingResolvedVar = resolvedVarFromLoweredBinding lowered acceptedTy,
               checkedBindingSourceType = loweredBindingSourceType lowered,
               checkedBindingSurfaceExpr = loweredBindingSurfaceExpr lowered,
               checkedBindingDeferredObligations = loweredBindingDeferredObligations lowered,

@@ -14,6 +14,13 @@ module MLF.Frontend.Program.Check
     MethodInfo (..),
     InstanceInfo (..),
     ValueInfo (..),
+    LocalRef (..),
+    PrimitiveRef (..),
+    DeferredRef (..),
+    ConstructorRef (..),
+    IdDetails (..),
+    LoweredBindingIdentity (..),
+    ResolvedVar (..),
     ExportedTypeInfo (..),
     ModuleExports (..),
     checkProgram,
@@ -101,12 +108,18 @@ import MLF.Frontend.Program.Types
     ClassInfo (..),
     ConstructorShape (..),
     ConstructorInfo (..),
+    ConstructorRef (..),
     DataInfo (..),
+    DeferredRef (..),
     ExportedTypeInfo (..),
+    IdDetails (..),
     InstanceInfo (..),
+    LocalRef (..),
     LoweredBinding (..),
+    LoweredBindingIdentity (..),
     MethodInfo (..),
     ModuleExports (..),
+    PrimitiveRef (..),
     ProgramDiagnostic (..),
     ProgramError (..),
     ResolvedLocalSymbols (..),
@@ -114,6 +127,7 @@ import MLF.Frontend.Program.Types
     ResolvedSemanticModule (..),
     ResolvedSemanticProgramArtifact (..),
     ResolvedSymbol (..),
+    ResolvedVar (..),
     SymbolOrigin (..),
     SymbolIdentity (..),
     SymbolNamespace (..),
@@ -131,6 +145,7 @@ import MLF.Frontend.Program.Types
     dataInfoSymbolIdentity,
     diagnosticForProgramError,
     instanceInfoClassSymbolIdentity,
+    loweredBindingIdentityFromValueInfo,
     methodInfoOwnerClassSymbolIdentity,
     methodInfoSymbolIdentity,
     mkResolvedSymbol,
@@ -1159,14 +1174,13 @@ lowerInstanceMethod :: ElaborateScope -> ClassInfo -> InstanceInfo -> P.Resolved
 lowerInstanceMethod elaborateScope classInfo instanceInfo methodDef =
   case instanceMethods instanceInfo Map.! P.methodDefName methodDef of
     valueInfo@OrdinaryValue {} -> do
-      let methodRuntimeName = valueRuntimeName valueInfo
-          methodSourceView =
+      let methodSourceView =
             TypeView
               { typeViewDisplay = valueType valueInfo,
                 typeViewIdentity = valueIdentityType valueInfo
               }
       liftEither
-        (lowerConstrainedResolvedExprBinding elaborateScope methodRuntimeName (valueConstraintInfos valueInfo) methodSourceView False (P.methodDefExpr methodDef))
+        (lowerConstrainedResolvedExprBinding elaborateScope (loweredBindingIdentityFromValueInfo valueInfo) (valueConstraintInfos valueInfo) methodSourceView False (P.methodDefExpr methodDef))
     _ -> throwError (ProgramUnexpectedInstanceMethod (className classInfo) (P.methodDefName methodDef))
 
 data DefWorkItem = DefWorkItem
@@ -1238,7 +1252,7 @@ lowerDefWorkItem elaborateScope scope localDefNames defDecl = do
         liftEither $
           lowerResolvedConstrainedExprBinding
             elaborateScope
-            (valueRuntimeName ordinary)
+            (loweredBindingIdentityFromValueInfo ordinary)
             (P.defDeclType defDecl)
             (P.defDeclName defDecl == "main")
             (P.defDeclExpr defDecl)
@@ -3924,7 +3938,7 @@ checkDef finalizeContext elaborateScope scope defDecl = do
   case valueInfo of
     ordinary@OrdinaryValue {} -> do
       liftEither
-        ( lowerResolvedConstrainedExprBinding elaborateScope (valueRuntimeName ordinary) (P.defDeclType defDecl) (P.defDeclName defDecl == "main") (P.defDeclExpr defDecl)
+        ( lowerResolvedConstrainedExprBinding elaborateScope (loweredBindingIdentityFromValueInfo ordinary) (P.defDeclType defDecl) (P.defDeclName defDecl == "main") (P.defDeclExpr defDecl)
             >>= finalizeBindingAllowOpaqueWithContext finalizeContext
         )
     _ -> throwError (ProgramDuplicateValue (P.defDeclName defDecl))

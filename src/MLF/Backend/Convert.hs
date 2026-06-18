@@ -105,6 +105,7 @@ import MLF.Frontend.Program.Types
   ( CheckedBinding (..),
     CheckedModule (..),
     CheckedProgram (..),
+    ConstructorRef (..),
     ConstructorInfo (..),
     DataInfo (..),
     ResolvedModule (..),
@@ -112,6 +113,7 @@ import MLF.Frontend.Program.Types
     ResolvedScope (..),
     ResolvedSymbol (..),
     SymbolIdentity (..),
+    checkedBindingConstructorRef,
     resolvedModuleName,
     resolvedModuleScope,
   )
@@ -367,7 +369,7 @@ checkedBindingEnvType context checkedModule binding = do
             (checkedBindingSourceType binding)
             rawBackendTy
       finalBindingTy =
-        case Map.lookup (checkedBindingName binding) (ccConstructors context) of
+        case constructorMetaForBinding context binding of
           Just constructorMeta
             | constructorBindingResultMatches sourceBindingTy constructorMeta,
               backendConstructorContainsVarApp (cmBackend constructorMeta) ->
@@ -421,7 +423,7 @@ convertCheckedBinding context env checkedModule binding = do
             (checkedBindingSourceType binding)
             rawBindingTy
   (convertedBindingTy, expr, liftedBindings) <-
-    case Map.lookup (checkedBindingName binding) (ccConstructors context) of
+    case constructorMetaForBinding context binding of
       Just constructorMeta
         | constructorBindingResultMatches bindingTy constructorMeta ->
             do
@@ -467,6 +469,11 @@ convertCheckedBinding context env checkedModule binding = do
             backendBindingExportedAsMain = checkedBindingExportedAsMain binding
           }
   Right (convertedBinding : liftedBindings)
+
+constructorMetaForBinding :: ConvertContext -> CheckedBinding -> Maybe ConstructorMeta
+constructorMetaForBinding context binding = do
+  constructorRef <- checkedBindingConstructorRef binding
+  Map.lookup (constructorRefRuntimeName constructorRef) (ccConstructors context)
 
 extendContextWithLiftedRecursiveLets :: ConvertContext -> [LiftedRecursiveLet] -> ConvertContext
 extendContextWithLiftedRecursiveLets context liftedSpecs =
