@@ -55,7 +55,6 @@ import MLF.Frontend.Program.Elaborate
     lowerResolvedConstrainedExprBinding,
     mkElaborateScope,
     resolveInstanceInfoWithIdentityType,
-    sourceTypeViewInScope,
   )
 import MLF.Frontend.Program.Finalize
   ( FinalizeContext,
@@ -76,9 +75,9 @@ import MLF.Frontend.Program.Finalize
 import MLF.Frontend.Program.Interface
   ( ModuleInterface,
     ProgramInterfaceError,
-    moduleInterfaceData,
+    moduleInterfaceDataByIdentity,
     moduleInterfaceExports,
-    moduleInterfaceId,
+    moduleInterfaceIdentity,
     moduleInterfaceFromCheckedModule,
     moduleInterfaceInstances,
     packageInterfaceFromCheckedProgram,
@@ -100,6 +99,7 @@ import MLF.Frontend.Program.Package
     trivialProgramPackage,
   )
 import MLF.Frontend.Program.Resolve (resolveProgram)
+import MLF.Frontend.Symbol (symbolIdentityStableName)
 import MLF.Frontend.Program.TypeFamilies (normalizeTypeFamiliesInProgram)
 import MLF.Frontend.Program.Types
   ( CheckedBinding (..),
@@ -112,6 +112,7 @@ import MLF.Frontend.Program.Types
     DataInfo (..),
     DeferredRef (..),
     ExportedTypeInfo (..),
+    FunctionalDependencyInfo (..),
     IdDetails (..),
     InstanceInfo (..),
     LocalRef (..),
@@ -137,24 +138,50 @@ import MLF.Frontend.Program.Types
     ValueInfo (..),
     applyTypeHead,
     applyConstraintInfoSubst,
+    checkedBindingName,
+    constraintTypeView,
+    classInfoIdentityModule,
+    classInfoIdentityName,
+    className,
+    classParamBinderIdentities,
+    classParamNames,
     classInfoSymbolIdentity,
     constrainedVisibleType,
+    ctorName,
     constructorInfoSymbolIdentity,
     constructorOwnerShapes,
     constructorShapeFromInfo,
+    dataInfoIdentityName,
+    dataInfoIdentityQualifiedName,
     dataInfoSymbolIdentity,
     diagnosticForProgramError,
+    instanceClassName,
     instanceInfoClassSymbolIdentity,
     loweredBindingIdentityFromValueInfo,
+    lookupClassMethod,
+    lookupInstanceMethod,
+    methodInfoIdentityName,
+    methodName,
     methodInfoOwnerClassSymbolIdentity,
     methodInfoSymbolIdentity,
+    mkExportedTypeInfo,
+    moduleExportsFromMaps,
+    exportedClassesForDisplay,
+    exportedTypesForDisplay,
+    exportedTypeConstructorsForDisplay,
+    exportedValuesForDisplay,
+    mkTypeView,
     mkResolvedSymbol,
     resolvedProgramSemanticArtifact,
     displayConstraint,
     specializeMethodTypes,
+    specializeMethodTypeView,
     substituteTypeVar,
     splitArrows,
     splitForalls,
+    typeParamBinderIdentity,
+    typeViewFromResolved,
+    typeViewSubstFromTypeParams,
     valueInfoSymbolIdentity,
   )
 import MLF.Util.Timing
@@ -169,15 +196,28 @@ import MLF.Frontend.Syntax
     ResolvedSrcBound (..),
     ResolvedSrcTy (..),
     ResolvedSrcType,
+    ResolvedTypeBinderRef (..),
     SrcBound (..),
     SrcTy (..),
     SrcType,
+    resolvedSrcTypeBinderName,
     resolvedSrcTypeIdentityType,
     resolvedSrcTypeToSrcType,
   )
 import qualified MLF.Frontend.Syntax.Program as P
 import System.IO.Unsafe (unsafePerformIO)
 import MLF.Frontend.TypeLevel (TypeFamilyDecl, familyDeclName)
+import MLF.Types.Identity
+  ( IdentityGenerator,
+    LocalIdentity (..),
+    TypeBinderIdentity,
+    UniqueIdentity,
+    freshIdentity,
+    freshLocalRef,
+    identityGeneratorAfter,
+    symbolGeneratedIdentities,
+    typeBinderIdentityFromUnique,
+  )
 
 type TcM a = Either ProgramError a
 
@@ -188,12 +228,12 @@ runTcM = id
 
 data Scope = Scope
   { scopeValues :: Map String ValueInfo,
-    scopeValuesByIdentity :: Map SymbolIdentity [(String, ValueInfo)],
+    scopeValuesByIdentity :: Map SymbolIdentity [ValueInfo],
     scopeTypes :: Map String DataInfo,
-    scopeTypesByIdentity :: Map SymbolIdentity [(String, DataInfo)],
+    scopeTypesByIdentity :: Map SymbolIdentity [DataInfo],
     scopeHiddenTypes :: Map String DataInfo,
     scopeClasses :: Map String ClassInfo,
-    scopeClassesByIdentity :: Map SymbolIdentity [(String, ClassInfo)],
+    scopeClassesByIdentity :: Map SymbolIdentity [ClassInfo],
     scopeInstances :: [InstanceInfo]
   }
   deriving (Eq, Show)
@@ -209,7 +249,7 @@ data DisplayNameEnv = DisplayNameEnv
 
 data KindEnv = KindEnv
   { kindTypeConstructors :: Map SymbolIdentity P.SrcKind,
-    kindTypeVariables :: Map String KindTerm,
+    kindTypeVariables :: Map ResolvedTypeBinderRef KindTerm,
     kindMetaSubst :: Map Int KindTerm,
     kindNextMeta :: Int
   }
@@ -267,9 +307,9 @@ scopeElaborateTypes :: Scope -> Map String DataInfo
 scopeElaborateTypes scope =
   scopeTypes scope `Map.union` scopeHiddenTypes scope
 
-indexByIdentity :: (a -> SymbolIdentity) -> Map String a -> Map SymbolIdentity [(String, a)]
+indexByIdentity :: (a -> SymbolIdentity) -> Map String a -> Map SymbolIdentity [a]
 indexByIdentity identityOf =
-  Map.fromListWith (++) . map (\(name, info) -> (identityOf info, [(name, info)])) . Map.toList
+  Map.fromListWith (++) . map (\info -> (identityOf info, [info])) . Map.elems
 
 emptyDisplayNameEnv :: DisplayNameEnv
 emptyDisplayNameEnv =
@@ -323,6 +363,137 @@ displayNameEnvFromResolvedLocals resolvedModule =
             symbol <- symbols
         ]
 
+resolvedProgramIdentityGenerator :: ResolvedSemanticProgramArtifact -> IdentityGenerator
+resolvedProgramIdentityGenerator =
+  identityGeneratorAfter . resolvedProgramGeneratedIdentities
+
+resolvedProgramGeneratedIdentities :: ResolvedSemanticProgramArtifact -> [UniqueIdentity]
+resolvedProgramGeneratedIdentities (ResolvedSemanticProgramArtifact modules0) =
+  concatMap resolvedModuleGeneratedIdentities modules0
+
+resolvedModuleGeneratedIdentities :: ResolvedSemanticModule -> [UniqueIdentity]
+resolvedModuleGeneratedIdentities resolvedModule =
+  symbolGeneratedIdentities (resolvedSemanticModuleIdentity resolvedModule)
+    ++ resolvedLocalSymbolsGeneratedIdentities (resolvedSemanticModuleLocalSymbols resolvedModule)
+    ++ concatMap resolvedDeclGeneratedIdentities (P.moduleDecls (resolvedSemanticModuleSyntax resolvedModule))
+
+resolvedLocalSymbolsGeneratedIdentities :: ResolvedLocalSymbols -> [UniqueIdentity]
+resolvedLocalSymbolsGeneratedIdentities localSymbols =
+  concatMap resolvedSymbolGeneratedIdentities $
+    concatMap concat $
+      [ Map.elems (resolvedLocalValues localSymbols),
+        Map.elems (resolvedLocalTypes localSymbols),
+        Map.elems (resolvedLocalClasses localSymbols)
+      ]
+
+resolvedSymbolGeneratedIdentities :: ResolvedSymbol -> [UniqueIdentity]
+resolvedSymbolGeneratedIdentities =
+  symbolGeneratedIdentities . resolvedSymbolIdentity
+
+resolvedLocalRefGeneratedIdentities :: LocalRef -> [UniqueIdentity]
+resolvedLocalRefGeneratedIdentities (LocalRef (GeneratedLocalId identity) _) =
+  [identity]
+
+resolvedDeclGeneratedIdentities :: P.ResolvedDecl -> [UniqueIdentity]
+resolvedDeclGeneratedIdentities = \case
+  P.DeclClass decl ->
+    resolvedSymbolGeneratedIdentities (P.classDeclName decl)
+      ++ concatMap resolvedClassConstraintGeneratedIdentities (P.classDeclSuperclasses decl)
+      ++ concatMap (resolvedSymbolGeneratedIdentities . P.methodSigName) (P.classDeclMethods decl)
+      ++ concatMap (resolvedConstrainedTypeGeneratedIdentities . P.methodSigType) (P.classDeclMethods decl)
+  P.DeclInstance decl ->
+    resolvedSymbolGeneratedIdentities (P.instanceDeclClass decl)
+      ++ concatMap resolvedClassConstraintGeneratedIdentities (P.instanceDeclConstraints decl)
+      ++ concatMap resolvedSrcTypeGeneratedIdentities (NE.toList (P.instanceDeclTypes decl))
+      ++ concatMap resolvedMethodDefGeneratedIdentities (P.instanceDeclMethods decl)
+  P.DeclData decl ->
+    resolvedSymbolGeneratedIdentities (P.dataDeclName decl)
+      ++ concatMap (resolvedSymbolGeneratedIdentities . P.constructorDeclName) (P.dataDeclConstructors decl)
+      ++ concatMap (resolvedSrcTypeGeneratedIdentities . P.constructorDeclType) (P.dataDeclConstructors decl)
+      ++ concatMap resolvedSymbolGeneratedIdentities (P.dataDeclDeriving decl)
+  P.DeclTypeFamily _ ->
+    []
+  P.DeclDef decl ->
+    resolvedSymbolGeneratedIdentities (P.defDeclName decl)
+      ++ resolvedConstrainedTypeGeneratedIdentities (P.defDeclType decl)
+      ++ resolvedExprGeneratedIdentities (P.defDeclExpr decl)
+
+resolvedMethodDefGeneratedIdentities :: P.ResolvedMethodDef -> [UniqueIdentity]
+resolvedMethodDefGeneratedIdentities methodDef =
+  resolvedSymbolGeneratedIdentities (P.methodDefName methodDef)
+    ++ resolvedExprGeneratedIdentities (P.methodDefExpr methodDef)
+
+resolvedClassConstraintGeneratedIdentities :: P.ResolvedClassConstraint -> [UniqueIdentity]
+resolvedClassConstraintGeneratedIdentities constraint =
+  resolvedSymbolGeneratedIdentities (P.constraintClassName constraint)
+    ++ concatMap resolvedSrcTypeGeneratedIdentities (NE.toList (P.constraintTypes constraint))
+
+resolvedConstrainedTypeGeneratedIdentities :: P.ResolvedConstrainedType -> [UniqueIdentity]
+resolvedConstrainedTypeGeneratedIdentities ty =
+  concatMap resolvedClassConstraintGeneratedIdentities (P.constrainedConstraints ty)
+    ++ resolvedSrcTypeGeneratedIdentities (P.constrainedBody ty)
+
+resolvedSrcTypeGeneratedIdentities :: ResolvedSrcTy n v -> [UniqueIdentity]
+resolvedSrcTypeGeneratedIdentities = \case
+  RSTVar ref -> resolvedTypeBinderGeneratedIdentities ref
+  RSTArrow dom cod -> resolvedSrcTypeGeneratedIdentities dom ++ resolvedSrcTypeGeneratedIdentities cod
+  RSTBase symbol -> resolvedSymbolGeneratedIdentities symbol
+  RSTCon symbol args ->
+    resolvedSymbolGeneratedIdentities symbol
+      ++ concatMap resolvedSrcTypeGeneratedIdentities (NE.toList args)
+  RSTVarApp ref args ->
+    resolvedTypeBinderGeneratedIdentities ref
+      ++ concatMap resolvedSrcTypeGeneratedIdentities (NE.toList args)
+  RSTTyLam ref body ->
+    resolvedTypeBinderGeneratedIdentities ref
+      ++ resolvedSrcTypeGeneratedIdentities body
+  RSTTyApp fun arg -> resolvedSrcTypeGeneratedIdentities fun ++ resolvedSrcTypeGeneratedIdentities arg
+  RSTForall ref mb body ->
+    resolvedTypeBinderGeneratedIdentities ref
+      ++ maybe [] (resolvedSrcTypeGeneratedIdentities . unResolvedSrcBound) mb
+      ++ resolvedSrcTypeGeneratedIdentities body
+  RSTMu ref body ->
+    resolvedTypeBinderGeneratedIdentities ref
+      ++ resolvedSrcTypeGeneratedIdentities body
+  RSTBottom -> []
+
+resolvedTypeBinderGeneratedIdentities :: ResolvedTypeBinderRef -> [UniqueIdentity]
+resolvedTypeBinderGeneratedIdentities ref =
+  [resolvedTypeBinderIdentity ref]
+
+resolvedExprGeneratedIdentities :: P.ResolvedExpr -> [UniqueIdentity]
+resolvedExprGeneratedIdentities = \case
+  P.EVar (P.ResolvedLocalValue ref) -> resolvedLocalRefGeneratedIdentities ref
+  P.EVar (P.ResolvedGlobalValue symbol) -> resolvedSymbolGeneratedIdentities symbol
+  P.ELit _ -> []
+  P.ELam param body ->
+    resolvedLocalRefGeneratedIdentities (P.paramName param)
+      ++ maybe [] resolvedSrcTypeGeneratedIdentities (P.paramType param)
+      ++ resolvedExprGeneratedIdentities body
+  P.EApp fun arg -> resolvedExprGeneratedIdentities fun ++ resolvedExprGeneratedIdentities arg
+  P.ELet name mbTy rhs body ->
+    resolvedLocalRefGeneratedIdentities name
+      ++ maybe [] resolvedSrcTypeGeneratedIdentities mbTy
+      ++ resolvedExprGeneratedIdentities rhs
+      ++ resolvedExprGeneratedIdentities body
+  P.EAnn inner ty -> resolvedExprGeneratedIdentities inner ++ resolvedSrcTypeGeneratedIdentities ty
+  P.ECase scrutinee alts ->
+    resolvedExprGeneratedIdentities scrutinee
+      ++ concatMap resolvedAltGeneratedIdentities alts
+
+resolvedAltGeneratedIdentities :: P.ResolvedAlt -> [UniqueIdentity]
+resolvedAltGeneratedIdentities (P.Alt pattern0 body) =
+  resolvedPatternGeneratedIdentities pattern0 ++ resolvedExprGeneratedIdentities body
+
+resolvedPatternGeneratedIdentities :: P.ResolvedPattern -> [UniqueIdentity]
+resolvedPatternGeneratedIdentities = \case
+  P.PatCtor symbol patterns ->
+    resolvedSymbolGeneratedIdentities symbol
+      ++ concatMap resolvedPatternGeneratedIdentities patterns
+  P.PatVar ref -> resolvedLocalRefGeneratedIdentities ref
+  P.PatWildcard -> []
+  P.PatAnn inner ty -> resolvedPatternGeneratedIdentities inner ++ resolvedSrcTypeGeneratedIdentities ty
+
 displayNameEnvFromData :: Map String DataInfo -> DisplayNameEnv
 displayNameEnvFromData dataInfos =
   emptyDisplayNameEnv
@@ -346,7 +517,7 @@ displayNameEnvFromClasses classInfos =
         Map.fromListWith (++)
           [ (methodInfoSymbolIdentity methodInfo, [methodName methodInfo])
             | classInfo <- Map.elems classInfos,
-              methodInfo <- Map.elems (classMethods classInfo)
+              methodInfo <- Map.elems (classMethodsByIdentity classInfo)
           ],
       dneClasses =
         Map.fromListWith (++)
@@ -364,6 +535,14 @@ displayNameEnvFromValues values0 =
             | (name, valueInfo) <- Map.toList values0
           ]
     }
+
+checkedDataByIdentity :: Map String DataInfo -> Map SymbolIdentity DataInfo
+checkedDataByIdentity =
+  Map.fromList . map (\dataInfo -> (dataInfoSymbolIdentity dataInfo, dataInfo)) . Map.elems
+
+checkedClassesByIdentity :: Map String ClassInfo -> Map SymbolIdentity ClassInfo
+checkedClassesByIdentity =
+  Map.fromList . map (\classInfo -> (classInfoSymbolIdentity classInfo, classInfo)) . Map.elems
 
 addValues :: Map String ValueInfo -> Map String ValueInfo -> Either ProgramError (Map String ValueInfo)
 addValues base incoming =
@@ -404,16 +583,16 @@ addClasses base incoming =
     base
     (Map.toList incoming)
 
-lookupValueInfo :: Scope -> String -> TcM ValueInfo
-lookupValueInfo scope name =
-  case Map.lookup name (scopeValues scope) of
-    Just info -> pure info
-    Nothing -> throwError (ProgramUnknownValue name)
+lookupValueInfoByIdentity :: Scope -> SymbolIdentity -> String -> TcM ValueInfo
+lookupValueInfoByIdentity scope identity displayName =
+  case Map.lookup identity (scopeValuesByIdentity scope) of
+    Just (info : _) -> pure info
+    _ -> throwError (ProgramUnknownValue displayName)
 
 lookupClassInfoBySymbol :: Scope -> ResolvedSymbol -> TcM ClassInfo
 lookupClassInfoBySymbol scope symbol =
   case Map.lookup (resolvedSymbolIdentity symbol) (scopeClassesByIdentity scope) of
-    Just ((_, info) : _) -> pure info
+    Just (info : _) -> pure info
     Nothing -> throwError (ProgramUnknownClass (resolvedSymbolDisplayName symbol))
     Just [] -> throwError (ProgramUnknownClass (resolvedSymbolDisplayName symbol))
 
@@ -462,18 +641,18 @@ checkResolvedProgramCore mbGraph resolved = do
 
 checkedProgramFromCheckedModules :: ResolvedProgram -> [CheckedModule] -> TcM CheckedProgram
 checkedProgramFromCheckedModules resolved modulesChecked = do
-  let mainNames =
-        [ checkedBindingName binding
+  let mainBindings =
+        [ binding
           | checked <- modulesChecked,
             binding <- checkedModuleBindings checked,
             checkedBindingExportedAsMain binding
         ]
-  mainRuntime <-
-    case mainNames of
+  mainBinding <-
+    case mainBindings of
       [] -> throwError ProgramMainNotFound
-      [name] -> pure name
-      names -> throwError (ProgramMultipleMainDefinitions names)
-  pure (checkedProgramFromModules resolved modulesChecked mainRuntime)
+      [binding] -> pure binding
+      bindings -> throwError (ProgramMultipleMainDefinitions (map checkedBindingName bindings))
+  pure (checkedProgramFromModules resolved modulesChecked (checkedBindingResolvedVar mainBinding))
 
 checkLocatedProgram :: P.LocatedProgram -> Either ProgramDiagnostic CheckedProgram
 checkLocatedProgram located =
@@ -575,11 +754,11 @@ checkResolvedProgramCoreWithTiming timing mbGraph resolved = do
         "program.check.modules.main-binding"
         (evaluate (runTcM (checkedProgramFromCheckedModules resolved modulesChecked)))
 
-checkedProgramFromModules :: ResolvedProgram -> [CheckedModule] -> String -> CheckedProgram
-checkedProgramFromModules resolved modulesChecked mainRuntime =
+checkedProgramFromModules :: ResolvedProgram -> [CheckedModule] -> ResolvedVar -> CheckedProgram
+checkedProgramFromModules resolved modulesChecked mainResolved =
   CheckedProgram
     { checkedProgramModules = modulesChecked,
-      checkedProgramMain = mainRuntime,
+      checkedProgramMainResolvedVar = mainResolved,
       checkedProgramResolved = resolved
     }
 
@@ -594,78 +773,10 @@ liftEitherWithInterface =
     interfaceErrorMessage err =
       "invalid .mlfp interface artifact: " ++ renderProgramInterfaceError err
 
-lookupResolvedLocalTypeIdentity :: ResolvedSemanticModule -> P.TypeName -> TcM SymbolIdentity
-lookupResolvedLocalTypeIdentity resolvedModule name =
-  resolvedSymbolIdentity <$>
-    uniqueResolvedLocalSymbol
-      ProgramDuplicateType
-      name
-      (resolvedLocalTypes (resolvedSemanticModuleLocalSymbols resolvedModule))
-
-lookupResolvedLocalClassIdentity :: ResolvedSemanticModule -> P.ClassName -> TcM SymbolIdentity
-lookupResolvedLocalClassIdentity resolvedModule name =
-  resolvedSymbolIdentity <$>
-    uniqueResolvedLocalSymbol
-      ProgramDuplicateClass
-      name
-      (resolvedLocalClasses (resolvedSemanticModuleLocalSymbols resolvedModule))
-
-lookupResolvedLocalValueIdentity ::
-  ResolvedSemanticModule ->
-  SymbolNamespace ->
-  Maybe SymbolOwnerIdentity ->
-  P.ValueName ->
-  TcM SymbolIdentity
-lookupResolvedLocalValueIdentity resolvedModule namespace owner name =
-  resolvedSymbolIdentity <$> uniqueResolvedLocalSymbol ProgramDuplicateValue name matchingSymbols
-  where
-    matchingSymbols =
-      Map.map
-        ( filter
-            ( \symbol ->
-                let identity = resolvedSymbolIdentity symbol
-                 in symbolNamespace identity == namespace
-                      && symbolOwnerIdentity identity == owner
-            )
-        )
-        (resolvedLocalValues (resolvedSemanticModuleLocalSymbols resolvedModule))
-
-lookupResolvedLocalValueSymbol ::
-  ResolvedSemanticModule ->
-  SymbolNamespace ->
-  Maybe SymbolOwnerIdentity ->
-  P.ValueName ->
-  TcM ResolvedSymbol
-lookupResolvedLocalValueSymbol resolvedModule namespace owner name =
-  uniqueResolvedLocalSymbol ProgramDuplicateValue name matchingSymbols
-  where
-    matchingSymbols =
-      Map.map
-        ( filter
-            ( \symbol ->
-                let identity = resolvedSymbolIdentity symbol
-                 in symbolNamespace identity == namespace
-                      && symbolOwnerIdentity identity == owner
-            )
-        )
-        (resolvedLocalValues (resolvedSemanticModuleLocalSymbols resolvedModule))
-
-uniqueResolvedLocalSymbol ::
-  (String -> ProgramError) ->
-  String ->
-  Map String [ResolvedSymbol] ->
-  TcM ResolvedSymbol
-uniqueResolvedLocalSymbol duplicateErr name symbolsByName =
-  case Map.lookup name symbolsByName of
-    Just [symbol] -> pure symbol
-    Just [] -> throwError (duplicateErr name)
-    Just _ -> throwError (duplicateErr name)
-    Nothing -> throwError (duplicateErr name)
-
 checkModules :: Maybe PackageModuleGraph -> ResolvedSemanticProgramArtifact -> TcM [CheckedModule]
-checkModules mbGraph (ResolvedSemanticProgramArtifact resolvedModules) = do
+checkModules mbGraph artifact@(ResolvedSemanticProgramArtifact resolvedModules) = do
   ensureDistinctBy ProgramDuplicateModule resolvedSemanticModuleName resolvedModules
-  go [] [] resolvedModules
+  go (resolvedProgramIdentityGenerator artifact) [] [] resolvedModules
   where
     nodesByModule =
       Map.fromList
@@ -674,18 +785,18 @@ checkModules mbGraph (ResolvedSemanticProgramArtifact resolvedModules) = do
             node <- packageModuleGraphNodes graph
         ]
 
-    go _ checkedAcc [] = pure (reverse checkedAcc)
-    go interfaceAcc checkedAcc (resolvedModule : rest) = do
-      checked <-
+    go _ _ checkedAcc [] = pure (reverse checkedAcc)
+    go generator0 interfaceAcc checkedAcc (resolvedModule : rest) = do
+      (checked, generator1) <-
         if isBuiltinPreludeModule nodesByModule mbGraph resolvedModule
-          then checkedBuiltinPreludeModule resolvedModule
-          else checkModule resolvedModule interfaceAcc
+          then checkedBuiltinPreludeModule generator0 resolvedModule
+          else checkModule generator0 resolvedModule interfaceAcc
       node <- moduleInterfaceNodeForResolved nodesByModule mbGraph resolvedModule
       interface <- liftEitherWithInterface (moduleInterfaceFromCheckedModule node checked)
-      go (interface : interfaceAcc) (checked : checkedAcc) rest
+      go generator1 (interface : interfaceAcc) (checked : checkedAcc) rest
 
 checkModulesWithTiming :: TimingConfig -> Maybe PackageModuleGraph -> ResolvedSemanticProgramArtifact -> IO (TcM [CheckedModule])
-checkModulesWithTiming timing mbGraph (ResolvedSemanticProgramArtifact resolvedModules) = do
+checkModulesWithTiming timing mbGraph artifact@(ResolvedSemanticProgramArtifact resolvedModules) = do
   distinctResult <-
     timeProgramDetailIO
       timing
@@ -695,7 +806,7 @@ checkModulesWithTiming timing mbGraph (ResolvedSemanticProgramArtifact resolvedM
     Left err ->
       pure (Left err)
     Right () ->
-      go [] [] resolvedModules
+      go (resolvedProgramIdentityGenerator artifact) [] [] resolvedModules
   where
     nodesByModule =
       Map.fromList
@@ -704,9 +815,9 @@ checkModulesWithTiming timing mbGraph (ResolvedSemanticProgramArtifact resolvedM
             node <- packageModuleGraphNodes graph
         ]
 
-    go _ checkedAcc [] =
+    go _ _ checkedAcc [] =
       pure (Right (reverse checkedAcc))
-    go interfaceAcc checkedAcc (resolvedModule : rest) = do
+    go generator0 interfaceAcc checkedAcc (resolvedModule : rest) = do
       let moduleName0 = resolvedSemanticModuleName resolvedModule
           isBuiltinPrelude = isBuiltinPreludeModule nodesByModule mbGraph resolvedModule
       checkedResult <-
@@ -715,16 +826,16 @@ checkModulesWithTiming timing mbGraph (ResolvedSemanticProgramArtifact resolvedM
             timeProgramDetailIO
               timing
               ("program.check.module." ++ moduleName0 ++ ".cache")
-              (evaluate (checkedBuiltinPreludeModule resolvedModule))
+              (evaluate (checkedBuiltinPreludeModule generator0 resolvedModule))
           else
             timeProgramDetailIO
               timing
               ("program.check.module." ++ moduleName0)
-              (checkModuleWithTiming timing resolvedModule interfaceAcc)
+              (checkModuleWithTiming timing generator0 resolvedModule interfaceAcc)
       case checkedResult of
         Left err ->
           pure (Left err)
-        Right checked -> do
+        Right (checked, generator1) -> do
           interfaceResult <-
             timeProgramDetailIO
               timing
@@ -736,24 +847,36 @@ checkModulesWithTiming timing mbGraph (ResolvedSemanticProgramArtifact resolvedM
             Left err ->
               pure (Left err)
             Right interface ->
-              go (interface : interfaceAcc) (checked : checkedAcc) rest
+              go generator1 (interface : interfaceAcc) (checked : checkedAcc) rest
 
 builtinPreludeSourcePath :: FilePath
 builtinPreludeSourcePath = "<mlfp-prelude>"
 
-builtinPreludeCheckCache :: MVar (Maybe (TcM CheckedModule))
+builtinPreludeCheckCache :: MVar (Maybe BuiltinPreludeCheckCacheEntry)
 builtinPreludeCheckCache = unsafePerformIO (newMVar Nothing)
 {-# NOINLINE builtinPreludeCheckCache #-}
 
-checkedBuiltinPreludeModule :: ResolvedSemanticModule -> TcM CheckedModule
-checkedBuiltinPreludeModule resolvedModule =
+type BuiltinPreludeCheckCacheEntry =
+  ( IdentityGenerator,
+    [UniqueIdentity],
+    TcM (CheckedModule, IdentityGenerator)
+  )
+
+checkedBuiltinPreludeModule :: IdentityGenerator -> ResolvedSemanticModule -> TcM (CheckedModule, IdentityGenerator)
+checkedBuiltinPreludeModule generator0 resolvedModule =
   unsafePerformIO $
     modifyMVar builtinPreludeCheckCache $ \case
-      Just cached ->
-        pure (Just cached, cached)
+      Just (cachedGenerator, cachedIdentities, cached)
+        | cachedGenerator == generator0 && cachedIdentities == resolvedIdentities ->
+            pure (Just (cachedGenerator, cachedIdentities, cached), cached)
       Nothing -> do
-        checked <- evaluate (checkModule resolvedModule [])
-        pure (Just checked, checked)
+        checked <- evaluate (checkModule generator0 resolvedModule [])
+        pure (Just (generator0, resolvedIdentities, checked), checked)
+      Just _ -> do
+        checked <- evaluate (checkModule generator0 resolvedModule [])
+        pure (Just (generator0, resolvedIdentities, checked), checked)
+  where
+    resolvedIdentities = resolvedModuleGeneratedIdentities resolvedModule
 {-# NOINLINE checkedBuiltinPreludeModule #-}
 
 isBuiltinPreludeModule ::
@@ -801,42 +924,40 @@ moduleInterfaceNodeForResolved nodesByModule mbGraph resolvedModule =
   where
     moduleName0 = resolvedSemanticModuleName resolvedModule
 
-checkModule :: ResolvedSemanticModule -> [ModuleInterface] -> TcM CheckedModule
-checkModule resolvedModule priorInterfaces = do
+checkModule :: IdentityGenerator -> ResolvedSemanticModule -> [ModuleInterface] -> TcM (CheckedModule, IdentityGenerator)
+checkModule generator0 resolvedModule priorInterfaces = do
   let resolvedSyntax = resolvedSemanticModuleSyntax resolvedModule
       moduleName0 = resolvedSemanticModuleName resolvedModule
-      priorExports = Map.fromList [(moduleInterfaceName interface, moduleInterfaceExports interface) | interface <- priorInterfaces]
-      priorData = Map.fromList [(moduleInterfaceName interface, moduleInterfaceData interface) | interface <- priorInterfaces]
+      priorExportsByIdentity = Map.fromList [(moduleInterfaceIdentity interface, moduleInterfaceExports interface) | interface <- priorInterfaces]
+      priorData = Map.fromList [(moduleInterfaceIdentity interface, moduleInterfaceDataByIdentity interface) | interface <- priorInterfaces]
       priorInstances = concatMap moduleInterfaceInstances priorInterfaces
-      unqualifiedClassIdentities = importedUnqualifiedClassIdentities priorExports (P.moduleImports resolvedSyntax)
+      unqualifiedClassIdentities = importedUnqualifiedClassIdentities priorExportsByIdentity (P.moduleImports resolvedSyntax)
       visibleImportedInstances =
-        visibleInstancesForImports priorExports priorData priorInstances unqualifiedClassIdentities (P.moduleImports resolvedSyntax)
+        visibleInstancesForImports priorExportsByIdentity priorData priorInstances unqualifiedClassIdentities (P.moduleImports resolvedSyntax)
   ensureDistinctImportAliases (P.moduleImports resolvedSyntax)
   rejectUnsupportedTypeFamilies resolvedSyntax
   rejectUnsupportedGeneralizedClassFeaturesModule P.refDisplayName resolvedSrcTypeToSrcType resolvedSyntax
-  importScope <- buildImportScopeResolved priorExports (P.moduleImports resolvedSyntax)
+  importScope <- buildImportScopeResolved priorExportsByIdentity (P.moduleImports resolvedSyntax)
   let importedEnv = displayNameEnvFromScope importScope
       localSymbolEnv = displayNameEnvFromResolvedLocals resolvedModule
       baseNameEnv = localSymbolEnv `preferDisplayNames` importedEnv
-  localData <- buildLocalDataInfo baseNameEnv resolvedModule resolvedSyntax
+  localData <- buildLocalDataInfo baseNameEnv resolvedSyntax
   let dataNameEnv = displayNameEnvFromData localData `preferDisplayNames` baseNameEnv
-  localClasses <- buildLocalClassInfo dataNameEnv resolvedModule resolvedSyntax
+  localClasses <- buildLocalClassInfo dataNameEnv resolvedSyntax
   let classNameEnv = displayNameEnvFromClasses localClasses `preferDisplayNames` dataNameEnv
-  localDefs <- buildLocalDefInfo classNameEnv resolvedModule resolvedSyntax
-  localValues0 <- addConstructorValues moduleName0 localData
+  localDefs <- buildLocalDefInfo classNameEnv resolvedSyntax
+  localValues0 <- addConstructorValues localData
   localValues1 <- mergeMaps ProgramDuplicateValue localValues0 localDefs
   let localMethodValues =
         Map.fromList
           [ ( methodName method,
               OverloadedMethod
-                { valueDisplayName = methodName method,
-                  valueInfoSymbol = methodInfoSymbolIdentity method,
-                  valueMethodInfo = method,
-                  valueOriginModule = moduleName0
+                { valueInfoSymbol = methodInfoSymbolIdentity method,
+                  valueMethodInfo = method
                 }
             )
             | classInfo <- Map.elems localClasses,
-              method <- Map.elems (classMethods classInfo)
+              method <- Map.elems (classMethodsByIdentity classInfo)
           ]
   localValues <- mergeMaps ProgramDuplicateValue localValues1 localMethodValues
   let valueNameEnv = displayNameEnvFromValues localValues `preferDisplayNames` classNameEnv
@@ -847,8 +968,9 @@ checkModule resolvedModule priorInterfaces = do
       fullNameEnv = valueNameEnv `preferDisplayNames` displayNameEnvFromScope scope0
   validateModuleKinds scope0 resolvedSyntax
   validateLocalClassMethodConstraints scope0 resolvedSyntax
-  derivedInstances <- synthesizeDerivedInstances fullNameEnv scope0 resolvedModule resolvedSyntax
-  instanceSkeletons <- buildInstanceSkeletons fullNameEnv scope0 resolvedSyntax derivedInstances
+  derivedInstances <- synthesizeDerivedInstances (resolvedSemanticModuleIdentity resolvedModule) fullNameEnv scope0 resolvedSyntax
+  (instanceSkeletons, generator1) <-
+    buildInstanceSkeletons (resolvedSemanticModuleIdentity resolvedModule) generator0 fullNameEnv scope0 resolvedSyntax derivedInstances
   let scope1 = withScopeInstances (scopeInstances scope0 ++ instanceSkeletons) scope0
   let elaborateScope = mkElaborateScope (scopeValues scope1) (scopeElaborateTypes scope1) (scopeClasses scope1) (scopeInstances scope1)
   finalizeContext <- mkFinalizeContext elaborateScope
@@ -862,35 +984,35 @@ checkModule resolvedModule priorInterfaces = do
   instanceBindings <- checkInstances finalizeContext elaborateScope scope1 (derivedInstances ++ explicitInstances resolvedSyntax)
   defBindings <- mapM (checkDef finalizeContext elaborateScope scope1) (moduleDefDecls resolvedSyntax)
   exports <- buildExports resolvedSyntax localData localClasses localValues
-  let exportedMainRuntime =
-        case Map.lookup "main" (exportedValues exports) of
-          Just OrdinaryValue {valueRuntimeName = runtimeName} -> Just runtimeName
-          _ -> Nothing
+  let exportedMain = exportedMainIdentity resolvedSyntax exports
       markExportedMain binding =
         binding
           { checkedBindingExportedAsMain =
-              Just (checkedBindingName binding) == exportedMainRuntime
+              maybe False (\identity -> checkedBindingValueIdentity binding == Just identity) exportedMain
           }
   pure
-    CheckedModule
-      { checkedModuleName = moduleName0,
-        checkedModuleBindings = constructorBindings ++ instanceBindings ++ map markExportedMain defBindings,
-        checkedModuleData = localData,
-        checkedModuleClasses = localClasses,
-        checkedModuleInstances = instanceSkeletons,
-        checkedModuleExports = exports
-      }
+    ( CheckedModule
+        { checkedModuleName = moduleName0,
+          checkedModuleIdentity = resolvedSemanticModuleIdentity resolvedModule,
+          checkedModuleBindings = constructorBindings ++ instanceBindings ++ map markExportedMain defBindings,
+          checkedModuleData = checkedDataByIdentity localData,
+          checkedModuleClasses = checkedClassesByIdentity localClasses,
+          checkedModuleInstances = instanceSkeletons,
+          checkedModuleExports = exports
+        },
+      generator1
+    )
 
-checkModuleWithTiming :: TimingConfig -> ResolvedSemanticModule -> [ModuleInterface] -> IO (TcM CheckedModule)
-checkModuleWithTiming timing resolvedModule priorInterfaces = do
+checkModuleWithTiming :: TimingConfig -> IdentityGenerator -> ResolvedSemanticModule -> [ModuleInterface] -> IO (TcM (CheckedModule, IdentityGenerator))
+checkModuleWithTiming timing generator0 resolvedModule priorInterfaces = do
   let resolvedSyntax = resolvedSemanticModuleSyntax resolvedModule
       moduleName0 = resolvedSemanticModuleName resolvedModule
-      priorExports = Map.fromList [(moduleInterfaceName interface, moduleInterfaceExports interface) | interface <- priorInterfaces]
-      priorData = Map.fromList [(moduleInterfaceName interface, moduleInterfaceData interface) | interface <- priorInterfaces]
+      priorExportsByIdentity = Map.fromList [(moduleInterfaceIdentity interface, moduleInterfaceExports interface) | interface <- priorInterfaces]
+      priorData = Map.fromList [(moduleInterfaceIdentity interface, moduleInterfaceDataByIdentity interface) | interface <- priorInterfaces]
       priorInstances = concatMap moduleInterfaceInstances priorInterfaces
-      unqualifiedClassIdentities = importedUnqualifiedClassIdentities priorExports (P.moduleImports resolvedSyntax)
+      unqualifiedClassIdentities = importedUnqualifiedClassIdentities priorExportsByIdentity (P.moduleImports resolvedSyntax)
       visibleImportedInstances =
-        visibleInstancesForImports priorExports priorData priorInstances unqualifiedClassIdentities (P.moduleImports resolvedSyntax)
+        visibleInstancesForImports priorExportsByIdentity priorData priorInstances unqualifiedClassIdentities (P.moduleImports resolvedSyntax)
       timePhase :: String -> TcM a -> IO (TcM a)
       timePhase = timeCheckModulePhase timing moduleName0
   preflightResult <-
@@ -901,43 +1023,41 @@ checkModuleWithTiming timing resolvedModule priorInterfaces = do
   case preflightResult of
     Left err -> pure (Left err)
     Right () -> do
-      importScopeResult <- timePhase "import-scope" (buildImportScopeResolved priorExports (P.moduleImports resolvedSyntax))
+      importScopeResult <- timePhase "import-scope" (buildImportScopeResolved priorExportsByIdentity (P.moduleImports resolvedSyntax))
       case importScopeResult of
         Left err -> pure (Left err)
         Right importScope -> do
           let importedEnv = displayNameEnvFromScope importScope
               localSymbolEnv = displayNameEnvFromResolvedLocals resolvedModule
               baseNameEnv = localSymbolEnv `preferDisplayNames` importedEnv
-          localDataResult <- timePhase "local-data" (buildLocalDataInfo baseNameEnv resolvedModule resolvedSyntax)
+          localDataResult <- timePhase "local-data" (buildLocalDataInfo baseNameEnv resolvedSyntax)
           case localDataResult of
             Left err -> pure (Left err)
             Right localData -> do
               let dataNameEnv = displayNameEnvFromData localData `preferDisplayNames` baseNameEnv
-              localClassesResult <- timePhase "local-classes" (buildLocalClassInfo dataNameEnv resolvedModule resolvedSyntax)
+              localClassesResult <- timePhase "local-classes" (buildLocalClassInfo dataNameEnv resolvedSyntax)
               case localClassesResult of
                 Left err -> pure (Left err)
                 Right localClasses -> do
                   let classNameEnv = displayNameEnvFromClasses localClasses `preferDisplayNames` dataNameEnv
-                  localDefsResult <- timePhase "local-defs" (buildLocalDefInfo classNameEnv resolvedModule resolvedSyntax)
+                  localDefsResult <- timePhase "local-defs" (buildLocalDefInfo classNameEnv resolvedSyntax)
                   case localDefsResult of
                     Left err -> pure (Left err)
                     Right localDefs -> do
                       localValuesResult <-
                         timePhase "local-values" $ do
-                          localValues0 <- addConstructorValues moduleName0 localData
+                          localValues0 <- addConstructorValues localData
                           localValues1 <- mergeMaps ProgramDuplicateValue localValues0 localDefs
                           let localMethodValues =
                                 Map.fromList
                                   [ ( methodName method,
                                       OverloadedMethod
-                                        { valueDisplayName = methodName method,
-                                          valueInfoSymbol = methodInfoSymbolIdentity method,
-                                          valueMethodInfo = method,
-                                          valueOriginModule = moduleName0
+                                        { valueInfoSymbol = methodInfoSymbolIdentity method,
+                                          valueMethodInfo = method
                                         }
                                     )
                                     | classInfo <- Map.elems localClasses,
-                                      method <- Map.elems (classMethods classInfo)
+                                      method <- Map.elems (classMethodsByIdentity classInfo)
                                   ]
                           mergeMaps ProgramDuplicateValue localValues1 localMethodValues
                       case localValuesResult of
@@ -962,25 +1082,42 @@ checkModuleWithTiming timing resolvedModule priorInterfaces = do
                               case validationResult of
                                 Left err -> pure (Left err)
                                 Right () -> do
-                                  derivedInstancesResult <- timePhase "derived-instances" (synthesizeDerivedInstances fullNameEnv scope0 resolvedModule resolvedSyntax)
+                                  derivedInstancesResult <- timePhase "derived-instances" (synthesizeDerivedInstances (resolvedSemanticModuleIdentity resolvedModule) fullNameEnv scope0 resolvedSyntax)
                                   case derivedInstancesResult of
                                     Left err -> pure (Left err)
                                     Right derivedInstances -> do
-                                      instanceSkeletonsResult <- timePhase "instance-skeletons" (buildInstanceSkeletons fullNameEnv scope0 resolvedSyntax derivedInstances)
+                                      instanceSkeletonsResult <-
+                                        timePhase "instance-skeletons" $
+                                          buildInstanceSkeletons (resolvedSemanticModuleIdentity resolvedModule) generator0 fullNameEnv scope0 resolvedSyntax derivedInstances
                                       case instanceSkeletonsResult of
                                         Left err -> pure (Left err)
-                                        Right instanceSkeletons -> do
+                                        Right (instanceSkeletons, generator1) -> do
                                           let scope1 = withScopeInstances (scopeInstances scope0 ++ instanceSkeletons) scope0
                                               elaborateScope = mkElaborateScope (scopeValues scope1) (scopeElaborateTypes scope1) (scopeClasses scope1) (scopeInstances scope1)
                                           finalizeContextResult <- timePhase "finalize-context" (mkFinalizeContext elaborateScope)
                                           case finalizeContextResult of
                                             Left err -> pure (Left err)
                                             Right finalizeContext -> do
-                                              finalizeCheckedModuleWithTiming timing moduleName0 resolvedSyntax localData localClasses localValues instanceSkeletons finalizeContext elaborateScope scope1 derivedInstances
+                                              checkedResult <-
+                                                finalizeCheckedModuleWithTiming
+                                                  timing
+                                                  moduleName0
+                                                  (resolvedSemanticModuleIdentity resolvedModule)
+                                                  resolvedSyntax
+                                                  localData
+                                                  localClasses
+                                                  localValues
+                                                  instanceSkeletons
+                                                  finalizeContext
+                                                  elaborateScope
+                                                  scope1
+                                                  derivedInstances
+                                              pure (fmap (\checked -> (checked, generator1)) checkedResult)
 
 finalizeCheckedModuleWithTiming ::
   TimingConfig ->
   P.ModuleName ->
+  SymbolIdentity ->
   P.ResolvedModuleSyntax ->
   Map String DataInfo ->
   Map String ClassInfo ->
@@ -991,7 +1128,7 @@ finalizeCheckedModuleWithTiming ::
   Scope ->
   [P.ResolvedInstanceDecl] ->
   IO (TcM CheckedModule)
-finalizeCheckedModuleWithTiming timing moduleName0 resolvedSyntax localData localClasses localValues instanceSkeletons finalizeContext elaborateScope scope1 derivedInstances = do
+finalizeCheckedModuleWithTiming timing moduleName0 moduleIdentity resolvedSyntax localData localClasses localValues instanceSkeletons finalizeContext elaborateScope scope1 derivedInstances = do
   constructorBindingsResult <-
     timeCheckModulePhaseIO timing moduleName0 "constructor-bindings" $
       checkConstructorsWithTiming timing moduleName0 finalizeContext elaborateScope localData
@@ -1013,21 +1150,19 @@ finalizeCheckedModuleWithTiming timing moduleName0 resolvedSyntax localData loca
               exportsResult <- timeCheckModulePhase timing moduleName0 "exports" (buildExports resolvedSyntax localData localClasses localValues)
               pure $ do
                 exports <- exportsResult
-                let exportedMainRuntime =
-                      case Map.lookup "main" (exportedValues exports) of
-                        Just OrdinaryValue {valueRuntimeName = runtimeName} -> Just runtimeName
-                        _ -> Nothing
+                let exportedMain = exportedMainIdentity resolvedSyntax exports
                     markExportedMain binding =
                       binding
                         { checkedBindingExportedAsMain =
-                            Just (checkedBindingName binding) == exportedMainRuntime
+                            maybe False (\identity -> checkedBindingValueIdentity binding == Just identity) exportedMain
                         }
                 pure
                   CheckedModule
                     { checkedModuleName = moduleName0,
+                      checkedModuleIdentity = moduleIdentity,
                       checkedModuleBindings = constructorBindings ++ instanceBindings ++ map markExportedMain defBindings,
-                      checkedModuleData = localData,
-                      checkedModuleClasses = localClasses,
+                      checkedModuleData = checkedDataByIdentity localData,
+                      checkedModuleClasses = checkedClassesByIdentity localClasses,
                       checkedModuleInstances = instanceSkeletons,
                       checkedModuleExports = exports
                     }
@@ -1122,17 +1257,17 @@ lowerInstanceWithTiming timing moduleName0 instanceLabel elaborateScope scope in
   case instanceResult of
     Left err -> pure (Left err)
     Right (classInfo, instanceInfo) ->
-      lowerInstanceMethodsWithTiming timing moduleName0 instanceLabel elaborateScope classInfo instanceInfo (P.instanceDeclMethods instDecl)
+      lowerInstanceMethodsWithTiming timing moduleName0 instanceLabel elaborateScope classInfo instanceInfo (fmap typeViewFromResolved (P.instanceDeclTypes instDecl)) (P.instanceDeclMethods instDecl)
 
-lowerInstanceMethodsWithTiming :: TimingConfig -> P.ModuleName -> String -> ElaborateScope -> ClassInfo -> InstanceInfo -> [P.ResolvedMethodDef] -> IO (TcM [LoweredBinding])
-lowerInstanceMethodsWithTiming timing moduleName0 instanceLabel elaborateScope classInfo instanceInfo methodDefs =
+lowerInstanceMethodsWithTiming :: TimingConfig -> P.ModuleName -> String -> ElaborateScope -> ClassInfo -> InstanceInfo -> NonEmpty TypeView -> [P.ResolvedMethodDef] -> IO (TcM [LoweredBinding])
+lowerInstanceMethodsWithTiming timing moduleName0 instanceLabel elaborateScope classInfo instanceInfo instanceHeadViews methodDefs =
   go [] methodDefs
   where
     go acc [] = pure (Right (reverse acc))
     go acc (methodDef : rest) = do
       result <-
-        timeCheckModuleOperation timing moduleName0 (instanceLabel ++ ".method." ++ P.methodDefName methodDef ++ ".lower") $
-          lowerInstanceMethod elaborateScope classInfo instanceInfo methodDef
+        timeCheckModuleOperation timing moduleName0 (instanceLabel ++ ".method." ++ P.refDisplayName (P.methodDefName methodDef) ++ ".lower") $
+          lowerInstanceMethod elaborateScope classInfo instanceInfo instanceHeadViews methodDef
       case result of
         Left err -> pure (Left err)
         Right lowered -> go (lowered : acc) rest
@@ -1145,7 +1280,7 @@ checkInstances finalizeContext elaborateScope scope instDecls = do
 lowerInstance :: ElaborateScope -> Scope -> P.ResolvedInstanceDecl -> TcM [LoweredBinding]
 lowerInstance elaborateScope scope instDecl = do
   (classInfo, instanceInfo) <- lookupInstanceForDecl scope instDecl
-  mapM (lowerInstanceMethod elaborateScope classInfo instanceInfo) (P.instanceDeclMethods instDecl)
+  mapM (lowerInstanceMethod elaborateScope classInfo instanceInfo (fmap typeViewFromResolved (P.instanceDeclTypes instDecl))) (P.instanceDeclMethods instDecl)
 
 lookupInstanceForDecl :: Scope -> P.ResolvedInstanceDecl -> TcM (ClassInfo, InstanceInfo)
 lookupInstanceForDecl scope instDecl = do
@@ -1170,23 +1305,24 @@ lookupInstanceForDecl scope instDecl = do
         )
         (scopeInstances scope)
 
-lowerInstanceMethod :: ElaborateScope -> ClassInfo -> InstanceInfo -> P.ResolvedMethodDef -> TcM LoweredBinding
-lowerInstanceMethod elaborateScope classInfo instanceInfo methodDef =
-  case instanceMethods instanceInfo Map.! P.methodDefName methodDef of
-    valueInfo@OrdinaryValue {} -> do
-      let methodSourceView =
-            TypeView
-              { typeViewDisplay = valueType valueInfo,
-                typeViewIdentity = valueIdentityType valueInfo
+lowerInstanceMethod :: ElaborateScope -> ClassInfo -> InstanceInfo -> NonEmpty TypeView -> P.ResolvedMethodDef -> TcM LoweredBinding
+lowerInstanceMethod elaborateScope classInfo instanceInfo instanceHeadViews methodDef =
+  case lookupClassMethod (P.methodDefName methodDef) classInfo of
+    Just methodInfo | Just valueInfo@OrdinaryValue {} <- lookupInstanceMethod methodInfo instanceInfo -> do
+      let methodBodyView = specializeMethodTypeView methodInfo instanceHeadViews
+          methodSourceView =
+            (mkTypeView (valueType valueInfo) (valueIdentityType valueInfo))
+              { typeViewBinderIdentities = typeViewBinderIdentities methodBodyView
               }
       liftEither
-        (lowerConstrainedResolvedExprBinding elaborateScope (loweredBindingIdentityFromValueInfo valueInfo) (valueConstraintInfos valueInfo) methodSourceView False (P.methodDefExpr methodDef))
-    _ -> throwError (ProgramUnexpectedInstanceMethod (className classInfo) (P.methodDefName methodDef))
+        (lowerConstrainedResolvedExprBinding elaborateScope (loweredBindingIdentityFromValueInfo valueInfo) (valueConstraintInfos valueInfo) methodSourceView methodBodyView False (P.methodDefExpr methodDef))
+    _ -> throwError (ProgramUnexpectedInstanceMethod (className classInfo) (P.refDisplayName (P.methodDefName methodDef)))
 
 data DefWorkItem = DefWorkItem
   { defWorkItemDecl :: P.ResolvedDefDecl,
+    defWorkItemIdentity :: SymbolIdentity,
     defWorkItemLowered :: LoweredBinding,
-    defWorkItemDependencies :: [String]
+    defWorkItemDependencies :: [SymbolIdentity]
   }
 
 checkDefsWithTiming :: TimingConfig -> P.ModuleName -> FinalizeContext -> ElaborateScope -> Scope -> [P.ResolvedDefDecl] -> IO (TcM [CheckedBinding])
@@ -1196,12 +1332,12 @@ checkDefsWithTiming timing moduleName0 finalizeContext elaborateScope scope defD
     Left err -> pure (Left err)
     Right workItems -> do
       batchSize <- moduleDefBatchSize
-      nonRecursiveNamesResult <-
+      nonRecursiveIdentitiesResult <-
         timeCheckModuleOperation timing moduleName0 "defs.scc_classification" $
-          Right (nonRecursiveDefNames workItems)
-      case nonRecursiveNamesResult of
+          Right (nonRecursiveDefIdentities workItems)
+      case nonRecursiveIdentitiesResult of
         Left err -> pure (Left err)
-        Right nonRecursiveNames -> do
+        Right nonRecursiveIdentities -> do
           moduleContextResult <-
             timeCheckModuleOperation timing moduleName0 "defs.module_finalize_context" $
               mkModuleFinalizeContext finalizeContext (map defWorkItemLowered workItems)
@@ -1214,7 +1350,7 @@ checkDefsWithTiming timing moduleName0 finalizeContext elaborateScope scope defD
                 finalizeContext
                 (Just moduleContext)
                 batchSize
-                nonRecursiveNames
+                nonRecursiveIdentities
                 workItems
 
 lowerDefWorkItemsWithTiming ::
@@ -1225,27 +1361,28 @@ lowerDefWorkItemsWithTiming ::
   [P.ResolvedDefDecl] ->
   IO (TcM [DefWorkItem])
 lowerDefWorkItemsWithTiming timing moduleName0 elaborateScope scope defDecls =
-  go [] defDecls
+  let identities = map (resolvedSymbolIdentity . P.defDeclName) defDecls
+   in go (Set.fromList identities) [] (zip defDecls identities)
   where
-    localDefNames = Set.fromList (map P.defDeclName defDecls)
-
-    go acc [] = pure (Right (reverse acc))
-    go acc (defDecl : rest) = do
+    go _ acc [] = pure (Right (reverse acc))
+    go localDefIdentities acc ((defDecl, identity) : rest) = do
       result <-
-        timeCheckModuleOperation timing moduleName0 ("def." ++ P.defDeclName defDecl ++ ".lower") $
-          lowerDefWorkItem elaborateScope scope localDefNames defDecl
+        timeCheckModuleOperation timing moduleName0 ("def." ++ P.refDisplayName (P.defDeclName defDecl) ++ ".lower") $
+          lowerDefWorkItem elaborateScope scope localDefIdentities defDecl identity
       case result of
         Left err -> pure (Left err)
-        Right workItem -> go (workItem : acc) rest
+        Right workItem -> go localDefIdentities (workItem : acc) rest
 
 lowerDefWorkItem ::
   ElaborateScope ->
   Scope ->
-  Set.Set String ->
+  Set.Set SymbolIdentity ->
   P.ResolvedDefDecl ->
+  SymbolIdentity ->
   TcM DefWorkItem
-lowerDefWorkItem elaborateScope scope localDefNames defDecl = do
-  valueInfo <- lookupValueInfo scope (P.defDeclName defDecl)
+lowerDefWorkItem elaborateScope scope localDefIdentities defDecl identity = do
+  let defName = P.refDisplayName (P.defDeclName defDecl)
+  valueInfo <- lookupValueInfoByIdentity scope identity defName
   case valueInfo of
     ordinary@OrdinaryValue {} -> do
       lowered <-
@@ -1254,36 +1391,37 @@ lowerDefWorkItem elaborateScope scope localDefNames defDecl = do
             elaborateScope
             (loweredBindingIdentityFromValueInfo ordinary)
             (P.defDeclType defDecl)
-            (P.defDeclName defDecl == "main")
+            (resolvedDefDeclIsMain defDecl)
             (P.defDeclExpr defDecl)
       pure
         DefWorkItem
           { defWorkItemDecl = defDecl,
+            defWorkItemIdentity = valueInfoSymbolIdentity ordinary,
             defWorkItemLowered = lowered,
-            defWorkItemDependencies = localResolvedDefDependencies localDefNames (P.defDeclExpr defDecl)
+            defWorkItemDependencies = localResolvedDefDependencies localDefIdentities (P.defDeclExpr defDecl)
           }
-    _ -> throwError (ProgramDuplicateValue (P.defDeclName defDecl))
+    _ -> throwError (ProgramDuplicateValue defName)
 
-localResolvedDefDependencies :: Set.Set String -> P.ResolvedExpr -> [String]
-localResolvedDefDependencies localDefNames expr =
-  Set.toList (Set.fromList (collectFreeResolvedValues Set.empty expr) `Set.intersection` localDefNames)
+localResolvedDefDependencies :: Set.Set SymbolIdentity -> P.ResolvedExpr -> [SymbolIdentity]
+localResolvedDefDependencies localDefIdentities expr =
+  Set.toList (Set.fromList (collectFreeResolvedGlobalValues Set.empty expr) `Set.intersection` localDefIdentities)
 
-collectFreeResolvedValues :: Set.Set String -> P.ResolvedExpr -> [String]
-collectFreeResolvedValues bound expr =
+collectFreeResolvedGlobalValues :: Set.Set LocalRef -> P.ResolvedExpr -> [SymbolIdentity]
+collectFreeResolvedGlobalValues bound expr =
   case expr of
-    P.EVar (P.ResolvedLocalValue name)
-      | name `Set.member` bound -> []
-      | otherwise -> [name]
-    P.EVar P.ResolvedGlobalValue {} -> []
+    P.EVar P.ResolvedLocalValue {} -> []
+    P.EVar (P.ResolvedGlobalValue symbol) -> [resolvedSymbolIdentity symbol]
     P.ELit {} -> []
-    P.ELam param body -> collectFreeResolvedValues (Set.insert (P.paramName param) bound) body
-    P.EApp fun arg -> collectFreeResolvedValues bound fun ++ collectFreeResolvedValues bound arg
-    P.ELet name _ rhs body -> collectFreeResolvedValues bound rhs ++ collectFreeResolvedValues (Set.insert name bound) body
-    P.EAnn inner _ -> collectFreeResolvedValues bound inner
-    P.ECase scrutinee alts -> collectFreeResolvedValues bound scrutinee ++ concatMap collectAlt alts
+    P.ELam param body -> collectFreeResolvedGlobalValues (Set.insert (P.paramName param) bound) body
+    P.EApp fun arg -> collectFreeResolvedGlobalValues bound fun ++ collectFreeResolvedGlobalValues bound arg
+    P.ELet name _ rhs body ->
+      collectFreeResolvedGlobalValues bound rhs
+        ++ collectFreeResolvedGlobalValues (Set.insert name bound) body
+    P.EAnn inner _ -> collectFreeResolvedGlobalValues bound inner
+    P.ECase scrutinee alts -> collectFreeResolvedGlobalValues bound scrutinee ++ concatMap collectAlt alts
   where
     collectAlt (P.Alt pattern0 body) =
-      collectFreeResolvedValues (bound `Set.union` Set.fromList (patternBinders pattern0)) body
+      collectFreeResolvedGlobalValues (bound `Set.union` Set.fromList (patternBinders pattern0)) body
 
     patternBinders = \case
       P.PatCtor _ patterns -> concatMap patternBinders patterns
@@ -1291,16 +1429,16 @@ collectFreeResolvedValues bound expr =
       P.PatWildcard -> []
       P.PatAnn inner _ -> patternBinders inner
 
-nonRecursiveDefNames :: [DefWorkItem] -> Set.Set String
-nonRecursiveDefNames workItems =
+nonRecursiveDefIdentities :: [DefWorkItem] -> Set.Set SymbolIdentity
+nonRecursiveDefIdentities workItems =
   Set.fromList
-    [ P.defDeclName (defWorkItemDecl workItem)
+    [ defWorkItemIdentity workItem
     | AcyclicSCC workItem <- stronglyConnComp (map graphNode workItems)
     ]
   where
     graphNode workItem =
       ( workItem,
-        P.defDeclName (defWorkItemDecl workItem),
+        defWorkItemIdentity workItem,
         defWorkItemDependencies workItem
       )
 
@@ -1310,18 +1448,18 @@ finalizeDefWorkItemsWithTiming ::
   FinalizeContext ->
   Maybe ModuleFinalizeContext ->
   Int ->
-  Set.Set String ->
+  Set.Set SymbolIdentity ->
   [DefWorkItem] ->
   IO (TcM [CheckedBinding])
-finalizeDefWorkItemsWithTiming timing moduleName0 finalizeContext moduleContext batchSize nonRecursiveNames workItems
+finalizeDefWorkItemsWithTiming timing moduleName0 finalizeContext moduleContext batchSize nonRecursiveIdentities workItems
   | Just moduleContext0 <- moduleContext =
-      finalizeDefWorkItemLayersWithTiming timing moduleName0 finalizeContext moduleContext0 batchSize nonRecursiveNames workItems
+      finalizeDefWorkItemLayersWithTiming timing moduleName0 finalizeContext moduleContext0 batchSize nonRecursiveIdentities workItems
   | otherwise =
       go [] workItems
   where
     go acc [] = pure (Right (reverse acc))
     go acc (workItem : rest) = do
-      result <- finalizeDefWorkItemWithTiming timing moduleName0 finalizeContext moduleContext nonRecursiveNames workItem
+      result <- finalizeDefWorkItemWithTiming timing moduleName0 finalizeContext moduleContext nonRecursiveIdentities workItem
       case result of
         Left err -> pure (Left err)
         Right binding -> go (binding : acc) rest
@@ -1332,35 +1470,35 @@ finalizeDefWorkItemLayersWithTiming ::
   FinalizeContext ->
   ModuleFinalizeContext ->
   Int ->
-  Set.Set String ->
+  Set.Set SymbolIdentity ->
   [DefWorkItem] ->
   IO (TcM [CheckedBinding])
-finalizeDefWorkItemLayersWithTiming timing moduleName0 finalizeContext moduleContext batchSize nonRecursiveNames workItems = do
-  let layers = nonRecursiveDefLayers batchSize nonRecursiveNames workItems
-      layeredNames = Set.unions (map (Set.fromList . map defWorkItemName) layers)
+finalizeDefWorkItemLayersWithTiming timing moduleName0 finalizeContext moduleContext batchSize nonRecursiveIdentities workItems = do
+  let layers = nonRecursiveDefLayers batchSize nonRecursiveIdentities workItems
+      layeredIdentities = Set.unions (map (Set.fromList . map defWorkItemIdentity) layers)
       fallbackItems =
         [ workItem
         | workItem <- workItems
-        , defWorkItemName workItem `Set.notMember` layeredNames
+        , defWorkItemIdentity workItem `Set.notMember` layeredIdentities
         ]
   layerResults <- finalizeLayers Map.empty (1 :: Int) layers
   case layerResults of
     Left err -> pure (Left err)
-    Right checkedByName0 -> do
-      fallbackResult <- finalizeFallbackItems checkedByName0 fallbackItems
+    Right checkedByIdentity0 -> do
+      fallbackResult <- finalizeFallbackItems checkedByIdentity0 fallbackItems
       pure $ do
-        checkedByName <- fallbackResult
+        checkedByIdentity <- fallbackResult
         traverse
           ( \workItem ->
-              case Map.lookup (defWorkItemRuntimeName workItem) checkedByName of
+              case Map.lookup (defWorkItemIdentity workItem) checkedByIdentity of
                 Just checked -> Right checked
                 Nothing -> Left (ProgramPipelineError ("missing checked definition `" ++ defWorkItemName workItem ++ "`"))
           )
           workItems
   where
-    finalizeLayers checkedByName _ [] =
-      pure (Right checkedByName)
-    finalizeLayers checkedByName index (layer : rest) = do
+    finalizeLayers checkedByIdentity _ [] =
+      pure (Right checkedByIdentity)
+    finalizeLayers checkedByIdentity index (layer : rest) = do
       let layerOperation = "defs.layer_" ++ show index
           layerLabel = checkModuleOperationLabel moduleName0 layerOperation
       layerResult <-
@@ -1383,14 +1521,14 @@ finalizeDefWorkItemLayersWithTiming timing moduleName0 finalizeContext moduleCon
       case layerResult of
         Left err -> pure (Left err)
         Right checkedLayer -> do
-          let checkedByName' =
+          let checkedByIdentity' =
                 foldl'
-                  ( \acc checked ->
-                      Map.insert (checkedBindingName checked) checked acc
+                  ( \acc (workItem, checked) ->
+                      Map.insert (defWorkItemIdentity workItem) checked acc
                   )
-                  checkedByName
-                  checkedLayer
-          finalizeLayers checkedByName' (index + 1) rest
+                  checkedByIdentity
+                  (zip layer checkedLayer)
+          finalizeLayers checkedByIdentity' (index + 1) rest
 
     finalizeLayerIndividually _layerIndex layer =
       goLayer [] (1 :: Int) layer
@@ -1403,63 +1541,60 @@ finalizeDefWorkItemLayersWithTiming timing moduleName0 finalizeContext moduleCon
               moduleName0
               finalizeContext
               (Just moduleContext)
-              nonRecursiveNames
+              nonRecursiveIdentities
               workItem
           case result of
             Left err -> pure (Left err)
             Right checked ->
               checked `seq` goLayer (checked : acc) (itemIndex + 1) rest
 
-    finalizeFallbackItems checkedByName [] =
-      pure (Right checkedByName)
-    finalizeFallbackItems checkedByName workItems0@(workItem : rest)
-      | moduleDeferredLayerEligibleDefWorkItem nonRecursiveNames workItem = do
+    finalizeFallbackItems checkedByIdentity [] =
+      pure (Right checkedByIdentity)
+    finalizeFallbackItems checkedByIdentity workItems0@(workItem : rest)
+      | moduleDeferredLayerEligibleDefWorkItem nonRecursiveIdentities workItem = do
           let (deferredLayer, remaining) =
                 splitAt
                   batchSize
-                  (takeWhile (moduleDeferredLayerEligibleDefWorkItem nonRecursiveNames) workItems0)
+                  (takeWhile (moduleDeferredLayerEligibleDefWorkItem nonRecursiveIdentities) workItems0)
           if length deferredLayer <= 1
-            then finalizeFallbackItem checkedByName workItem rest
+            then finalizeFallbackItem checkedByIdentity workItem rest
             else do
               layerResult <-
                 finalizeDeferredBindingLayerAllowOpaqueWithModuleContextWithTiming
                   timing
-                  (checkModuleOperationLabel moduleName0 ("defs.deferred_layer_" ++ show (Map.size checkedByName + 1)))
+                  (checkModuleOperationLabel moduleName0 ("defs.deferred_layer_" ++ show (Map.size checkedByIdentity + 1)))
                   moduleContext
                   (map defWorkItemLowered deferredLayer)
               case layerResult of
                 Left err -> pure (Left err)
                 Right checkedLayer -> do
-                  let checkedByName' =
+                  let checkedByIdentity' =
                         foldl'
-                          ( \acc checked ->
-                              Map.insert (checkedBindingName checked) checked acc
+                          ( \acc (workItem0, checked) ->
+                              Map.insert (defWorkItemIdentity workItem0) checked acc
                           )
-                          checkedByName
-                          checkedLayer
-                  finalizeFallbackItems checkedByName' remaining
-    finalizeFallbackItems checkedByName (workItem : rest) =
-      finalizeFallbackItem checkedByName workItem rest
+                          checkedByIdentity
+                          (zip deferredLayer checkedLayer)
+                  finalizeFallbackItems checkedByIdentity' remaining
+    finalizeFallbackItems checkedByIdentity (workItem : rest) =
+      finalizeFallbackItem checkedByIdentity workItem rest
 
-    finalizeFallbackItem checkedByName workItem rest = do
+    finalizeFallbackItem checkedByIdentity workItem rest = do
       result <-
         finalizeDefWorkItemWithTiming
           timing
           moduleName0
           finalizeContext
           (Just moduleContext)
-          nonRecursiveNames
+          nonRecursiveIdentities
           workItem
       case result of
         Left err -> pure (Left err)
         Right checked ->
-          finalizeFallbackItems (Map.insert (checkedBindingName checked) checked checkedByName) rest
+          finalizeFallbackItems (Map.insert (defWorkItemIdentity workItem) checked checkedByIdentity) rest
 
 defWorkItemName :: DefWorkItem -> String
-defWorkItemName = P.defDeclName . defWorkItemDecl
-
-defWorkItemRuntimeName :: DefWorkItem -> String
-defWorkItemRuntimeName = loweredBindingName . defWorkItemLowered
+defWorkItemName = P.refDisplayName . P.defDeclName . defWorkItemDecl
 
 moduleLayerEligibleDefWorkItem :: DefWorkItem -> Bool
 moduleLayerEligibleDefWorkItem workItem =
@@ -1467,15 +1602,15 @@ moduleLayerEligibleDefWorkItem workItem =
    in Map.null (loweredBindingDeferredObligations lowered)
         && not (Builtins.srcTypeMentionsOpaqueBuiltin (loweredBindingSourceType lowered))
 
-moduleDeferredLayerEligibleDefWorkItem :: Set.Set String -> DefWorkItem -> Bool
-moduleDeferredLayerEligibleDefWorkItem nonRecursiveNames workItem =
-  defWorkItemName workItem `Set.member` nonRecursiveNames
+moduleDeferredLayerEligibleDefWorkItem :: Set.Set SymbolIdentity -> DefWorkItem -> Bool
+moduleDeferredLayerEligibleDefWorkItem nonRecursiveIdentities workItem =
+  defWorkItemIdentity workItem `Set.member` nonRecursiveIdentities
     && let lowered = defWorkItemLowered workItem
         in not (Map.null (loweredBindingDeferredObligations lowered))
              && not (Builtins.srcTypeMentionsOpaqueBuiltin (loweredBindingSourceType lowered))
 
-nonRecursiveDefLayers :: Int -> Set.Set String -> [DefWorkItem] -> [[DefWorkItem]]
-nonRecursiveDefLayers batchSize nonRecursiveNames workItems =
+nonRecursiveDefLayers :: Int -> Set.Set SymbolIdentity -> [DefWorkItem] -> [[DefWorkItem]]
+nonRecursiveDefLayers batchSize nonRecursiveIdentities workItems =
   concatMap (chunksOf batchSize) (dependencyLayers eligible)
   where
     -- Local references are still checked through the declared source types,
@@ -1485,22 +1620,22 @@ nonRecursiveDefLayers batchSize nonRecursiveNames workItems =
     eligible =
       [ workItem
       | workItem <- workItems
-      , defWorkItemName workItem `Set.member` nonRecursiveNames
+      , defWorkItemIdentity workItem `Set.member` nonRecursiveIdentities
       , moduleLayerEligibleDefWorkItem workItem
       ]
-    eligibleNames = Set.fromList (map defWorkItemName eligible)
+    eligibleIdentities = Set.fromList (map defWorkItemIdentity eligible)
     eligibleDependencies workItem =
       Set.fromList
         [ dep
         | dep <- defWorkItemDependencies workItem
-        , dep `Set.member` eligibleNames
+        , dep `Set.member` eligibleIdentities
         ]
 
     dependencyLayers [] = []
     dependencyLayers remaining =
-      let remainingNames = Set.fromList (map defWorkItemName remaining)
+      let remainingIdentities = Set.fromList (map defWorkItemIdentity remaining)
           isReady workItem =
-            Set.null (eligibleDependencies workItem `Set.intersection` remainingNames)
+            Set.null (eligibleDependencies workItem `Set.intersection` remainingIdentities)
           (ready, blocked) = partition isReady remaining
        in case ready of
             [] -> [remaining]
@@ -1516,14 +1651,14 @@ finalizeDefWorkItemWithTiming ::
   P.ModuleName ->
   FinalizeContext ->
   Maybe ModuleFinalizeContext ->
-  Set.Set String ->
+  Set.Set SymbolIdentity ->
   DefWorkItem ->
   IO (TcM CheckedBinding)
-finalizeDefWorkItemWithTiming timing moduleName0 finalizeContext moduleContext nonRecursiveNames workItem =
+finalizeDefWorkItemWithTiming timing moduleName0 finalizeContext moduleContext nonRecursiveIdentities workItem =
   timeProgramOperationIO timing label $
     case moduleContext of
       Just moduleContext0
-        | moduleContextEligibleDefWorkItem nonRecursiveNames workItem ->
+        | moduleContextEligibleDefWorkItem nonRecursiveIdentities workItem ->
             if timingProgramDefDetails timing
               then
                 finalizeBindingAllowOpaqueWithModuleContextWithTiming
@@ -1545,7 +1680,7 @@ finalizeDefWorkItemWithTiming timing moduleName0 finalizeContext moduleContext n
           else
             evaluate (finalizeBindingAllowOpaqueWithContext finalizeContext lowered)
   where
-    defName = P.defDeclName (defWorkItemDecl workItem)
+    defName = defWorkItemName workItem
     lowered = defWorkItemLowered workItem
     label = checkModuleOperationLabel moduleName0 ("def." ++ defName)
 
@@ -1557,13 +1692,9 @@ moduleDefBatchSize = do
       Just n | n > 1 -> n
       _ -> 16
 
-moduleContextEligibleDefWorkItem :: Set.Set String -> DefWorkItem -> Bool
-moduleContextEligibleDefWorkItem nonRecursiveNames workItem =
-  P.defDeclName (defWorkItemDecl workItem) `Set.member` nonRecursiveNames
-
-moduleInterfaceName :: ModuleInterface -> P.ModuleName
-moduleInterfaceName =
-  packageModuleName . moduleInterfaceId
+moduleContextEligibleDefWorkItem :: Set.Set SymbolIdentity -> DefWorkItem -> Bool
+moduleContextEligibleDefWorkItem nonRecursiveIdentities workItem =
+  defWorkItemIdentity workItem `Set.member` nonRecursiveIdentities
 
 moduleDefDecls :: P.ModuleF p -> [P.DefDeclF p]
 moduleDefDecls = foldr collect [] . P.moduleDecls
@@ -1639,13 +1770,14 @@ rejectUnsupportedGeneralizedClassFeaturesModule _renderClass _renderTy mod0 =
     rejectConstraint _constraint =
       pure ()
 
-buildImportScopeResolved :: Map P.ModuleName ModuleExports -> [P.ResolvedImport] -> TcM Scope
+buildImportScopeResolved :: Map SymbolIdentity ModuleExports -> [P.ResolvedImport] -> TcM Scope
 buildImportScopeResolved priorExports imports0 = foldM go emptyScope imports0
   where
     go scope imp = do
       let moduleName0 = resolvedImportDefiningModule imp
+          moduleIdentity = resolvedImportModuleIdentity imp
       exports <-
-        case Map.lookup moduleName0 priorExports of
+        case Map.lookup moduleIdentity priorExports of
           Nothing -> throwError (ProgramUnknownImportModule moduleName0)
           Just ex -> pure ex
       case P.importAlias imp of
@@ -1663,13 +1795,17 @@ resolvedImportDefiningModule :: P.ResolvedImport -> P.ModuleName
 resolvedImportDefiningModule =
   symbolDefiningModule . resolvedSymbolIdentity . P.importModuleName
 
+resolvedImportModuleIdentity :: P.ResolvedImport -> SymbolIdentity
+resolvedImportModuleIdentity =
+  resolvedSymbolIdentity . P.importModuleName
+
 addAllExports :: Scope -> ModuleExports -> TcM Scope
 addAllExports scope exports = do
-  let (scopeWithOwners, importedValues) = prepareBulkImportedValues exports scope (exportedValues exports)
+  let (scopeWithOwners, importedValues) = prepareBulkImportedValues exports scope (exportedValuesForDisplay exports)
   liftEither $ do
     values <- addValues (scopeValues scopeWithOwners) importedValues
-    types <- addTypes (scopeTypes scopeWithOwners) (Map.map exportedTypeData (exportedTypes exports))
-    classes <- addClasses (scopeClasses scopeWithOwners) (exportedClasses exports)
+    types <- addTypes (scopeTypes scopeWithOwners) (Map.map exportedTypeData (exportedTypesForDisplay exports))
+    classes <- addClasses (scopeClasses scopeWithOwners) (exportedClassesForDisplay exports)
     pure (mkScopeWithHidden values types (scopeHiddenTypes scopeWithOwners) classes (scopeInstances scopeWithOwners))
 
 prepareBulkImportedValues :: ModuleExports -> Scope -> Map String ValueInfo -> (Scope, Map String ValueInfo)
@@ -1684,60 +1820,55 @@ prepareBulkImportedValue _ scope valueInfo = (scope, valueInfo)
 
 constructorOwnerVisibleInExports :: ConstructorInfo -> ModuleExports -> Bool
 constructorOwnerVisibleInExports ctorInfo exports =
-  any
-    ((== ctorOwningTypeIdentity ctorInfo) . dataInfoSymbolIdentity . exportedTypeData)
-    (Map.elems (exportedTypes exports))
+  Map.member (ctorOwningTypeIdentity ctorInfo) (exportedTypesByIdentity exports)
 
 qualifyModuleExports :: P.ModuleName -> ModuleExports -> ModuleExports
 qualifyModuleExports alias exports =
-  ModuleExports
-    { exportedValues = qualifiedValues,
-      exportedTypes = qualifiedTypes,
-      exportedClasses = qualifiedClasses
-    }
+  moduleExportsFromMaps qualifiedValues qualifiedTypes qualifiedClasses
   where
     qualifiedName name = alias ++ "." ++ name
-    exportedTypeNames = Map.keysSet (exportedTypes exports)
-    exportedClassNames = Map.keysSet (exportedClasses exports)
+    exportedTypeNames = Map.keysSet (exportedTypesForDisplay exports)
+    exportedClassNames = Map.keysSet (exportedClassesForDisplay exports)
 
     qualifiedTypes =
       Map.fromList
         [ let qualifiedDataInfo = qualifyDataInfo dataInfo
-              visibleCtorNames = Set.fromList (Map.keys ctors)
+              visibleCtorIdentities = Map.keysSet (exportedTypeConstructorsByIdentity typeInfo)
+              qualifiedCtorsByIdentity =
+                Map.fromList [(ctorInfoSymbol ctor, ctor) | ctor <- dataConstructors qualifiedDataInfo]
+              qualifiedCtors =
+                [ (qualifiedName sourceName, qualifiedCtor)
+                  | (sourceName, ctor) <- Map.toList (exportedTypeConstructorsForDisplay typeInfo),
+                    ctorInfoSymbol ctor `Set.member` visibleCtorIdentities,
+                    Just qualifiedCtor <- [Map.lookup (ctorInfoSymbol ctor) qualifiedCtorsByIdentity]
+                ]
            in ( qualifiedName typeName,
-                ExportedTypeInfo
-                  { exportedTypeData = qualifiedDataInfo,
-                    exportedTypeConstructors =
-                      Map.fromList
-                        [ (ctorName ctor, ctor)
-                          | ctor <- dataConstructors qualifiedDataInfo,
-                            unqualifyQualifiedName alias (ctorName ctor) `Set.member` visibleCtorNames
-                        ]
-                  }
+                mkExportedTypeInfo qualifiedDataInfo qualifiedCtors
               )
-          | (typeName, ExportedTypeInfo dataInfo ctors) <- Map.toList (exportedTypes exports)
+          | (typeName, typeInfo) <- Map.toList (exportedTypesForDisplay exports),
+            let dataInfo = exportedTypeData typeInfo
         ]
 
     qualifiedClasses =
       Map.fromList
         [ (qualifiedName className0, qualifyClassInfo classInfo)
-          | (className0, classInfo) <- Map.toList (exportedClasses exports)
+          | (className0, classInfo) <- Map.toList (exportedClassesForDisplay exports)
         ]
 
     qualifiedCtorValues =
       Map.fromList
-        [ ( ctorName ctor,
+        [ ( sourceName,
             ConstructorValue
-              { valueDisplayName = ctorName ctor,
-                valueInfoSymbol = constructorInfoSymbolIdentity dataInfo ctor,
+              { valueInfoSymbol = constructorInfoSymbolIdentity dataInfo ctor,
                 valueRuntimeName = ctorRuntimeName ctor,
                 valueType = ctorType ctor,
-                valueCtorInfo = ctor,
-                valueOriginModule = dataModule dataInfo
+                valueIdentityType = ctorTypeIdentity ctor,
+                valueCtorInfo = ctor
               }
           )
-          | ExportedTypeInfo dataInfo ctors <- Map.elems qualifiedTypes,
-            ctor <- Map.elems ctors
+          | typeInfo <- Map.elems qualifiedTypes,
+            let dataInfo = exportedTypeData typeInfo,
+            (sourceName, ctor) <- Map.toList (exportedTypeConstructorsForDisplay typeInfo)
         ]
 
     qualifiedExportedValues =
@@ -1745,7 +1876,7 @@ qualifyModuleExports alias exports =
         [ ( qualifiedName name,
             qualifyValueInfo name valueInfo
           )
-          | (name, valueInfo) <- Map.toList (exportedValues exports)
+          | (name, valueInfo) <- Map.toList (exportedValuesForDisplay exports)
         ]
 
     qualifiedValues = qualifiedCtorValues `Map.union` qualifiedExportedValues
@@ -1753,25 +1884,21 @@ qualifyModuleExports alias exports =
     qualifyDataInfo dataInfo =
       let qualifyCtor ctor = qualifyConstructorInfo ctor
        in dataInfo
-            { dataName = dataName dataInfo,
-              dataConstructors = map qualifyCtor (dataConstructors dataInfo)
+            { dataConstructors = map qualifyCtor (dataConstructors dataInfo)
             }
 
     qualifyConstructorInfo ctor =
       ctor
-        { ctorName = qualifiedName (ctorName ctor),
-          ctorType = qualifySrcType (ctorType ctor),
+        { ctorType = qualifySrcType (ctorType ctor),
           ctorArgs = map qualifySrcType (ctorArgs ctor),
           ctorResult = qualifySrcType (ctorResult ctor),
-          ctorOwningType = ctorOwningType ctor,
           ctorOwningTypeIdentity = ctorOwningTypeIdentity ctor,
           ctorOwnerConstructors = map qualifyConstructorShape (ctorOwnerConstructors ctor)
         }
 
     qualifyConstructorShape shape =
       shape
-        { constructorShapeName = qualifiedName (constructorShapeName shape),
-          constructorShapeForalls =
+        { constructorShapeForalls =
             [ (name, fmap qualifySrcType mbBound)
               | (name, mbBound) <- constructorShapeForalls shape
             ],
@@ -1780,11 +1907,9 @@ qualifyModuleExports alias exports =
         }
 
     qualifyClassInfo classInfo =
-      let qualifiedClassName = qualifiedName (className classInfo)
-          qualifyConstraintInfo constraintInfo =
+      let qualifyConstraintInfo constraintInfo =
             constraintInfo
               { constraintDisplayClass = qualifiedClassNameFor (constraintDisplayClass constraintInfo),
-                constraintTypeView = qualifyTypeView (constraintTypeView constraintInfo),
                 constraintTypeViews = fmap qualifyTypeView (constraintTypeViews constraintInfo)
               }
           qualifyTypeView view =
@@ -1793,48 +1918,42 @@ qualifyModuleExports alias exports =
               }
           qualifyMethod methodInfo =
             methodInfo
-              { methodClassName = qualifiedClassName,
-                methodType = qualifySrcType (methodType methodInfo),
+              { methodType = qualifySrcType (methodType methodInfo),
                 methodConstraints = map qualifyConstraint (methodConstraints methodInfo),
                 methodConstraintInfos = map qualifyConstraintInfo (methodConstraintInfos methodInfo)
               }
+          qualifiedMethodsByIdentity = Map.map qualifyMethod (classMethodsByIdentity classInfo)
        in classInfo
-            { className = qualifiedClassName,
-              classSuperclasses = map qualifyConstraint (classSuperclasses classInfo),
+            { classSuperclasses = map qualifyConstraint (classSuperclasses classInfo),
               classSuperclassInfos = map qualifyConstraintInfo (classSuperclassInfos classInfo),
-              classMethods = Map.map qualifyMethod (classMethods classInfo)
+              classMethodsByIdentity = qualifiedMethodsByIdentity
             }
 
-    qualifyValueInfo sourceName valueInfo =
+    qualifyValueInfo _sourceName valueInfo =
       case valueInfo of
         OrdinaryValue {} ->
           valueInfo
-            { valueDisplayName = qualifiedName sourceName,
-              valueType = qualifySrcType (valueType valueInfo),
+            { valueType = qualifySrcType (valueType valueInfo),
               valueConstraints = map qualifyConstraint (valueConstraints valueInfo)
             }
         OverloadedMethod {valueMethodInfo = methodInfo} ->
           OverloadedMethod
-            { valueDisplayName = qualifiedName sourceName,
-              valueInfoSymbol = valueInfoSymbolIdentity valueInfo,
-              valueMethodInfo = qualifyMethodFromExport methodInfo,
-              valueOriginModule = valueOriginModule valueInfo
+            { valueInfoSymbol = valueInfoSymbolIdentity valueInfo,
+              valueMethodInfo = qualifyMethodFromExport methodInfo
             }
         ConstructorValue {valueCtorInfo = ctorInfo} ->
           let qualifiedCtorInfo = qualifyConstructorInfo ctorInfo
            in ConstructorValue
-                { valueDisplayName = qualifiedName sourceName,
-                  valueInfoSymbol = valueInfoSymbolIdentity valueInfo,
+                { valueInfoSymbol = valueInfoSymbolIdentity valueInfo,
                   valueRuntimeName = valueRuntimeName valueInfo,
                   valueType = qualifySrcType (valueType valueInfo),
-                  valueCtorInfo = qualifiedCtorInfo,
-                  valueOriginModule = valueOriginModule valueInfo
+                  valueIdentityType = valueIdentityType valueInfo,
+                  valueCtorInfo = qualifiedCtorInfo
                 }
 
     qualifyMethodFromExport methodInfo =
       methodInfo
-        { methodClassName = qualifiedClassNameFor (methodClassName methodInfo),
-          methodType = qualifySrcType (methodType methodInfo),
+        { methodType = qualifySrcType (methodType methodInfo),
           methodConstraints = map qualifyConstraint (methodConstraints methodInfo),
           methodConstraintInfos = map qualifyConstraintInfoFromExport (methodConstraintInfos methodInfo)
         }
@@ -1842,7 +1961,6 @@ qualifyModuleExports alias exports =
     qualifyConstraintInfoFromExport constraintInfo =
       constraintInfo
         { constraintDisplayClass = qualifiedClassNameFor (constraintDisplayClass constraintInfo),
-          constraintTypeView = qualifyTypeViewFromExport (constraintTypeView constraintInfo),
           constraintTypeViews = fmap qualifyTypeViewFromExport (constraintTypeViews constraintInfo)
         }
 
@@ -1881,13 +1999,6 @@ qualifyModuleExports alias exports =
         STMu name body -> STMu name (qualifySrcType body)
         STBottom -> STBottom
 
-unqualifyQualifiedName :: P.ModuleName -> String -> String
-unqualifyQualifiedName alias name =
-  case splitAt (length alias + 1) name of
-    (prefix, rest)
-      | prefix == alias ++ "." -> rest
-    _ -> name
-
 classIdentity :: ClassInfo -> ClassIdentity
 classIdentity = classInfoSymbolIdentity
 
@@ -1901,22 +2012,16 @@ methodClassIdentity valueInfo =
 resolvedMethodOwnerClassIdentity :: ResolvedSymbol -> Maybe ClassIdentity
 resolvedMethodOwnerClassIdentity symbol =
   case symbolOwnerIdentity (resolvedSymbolIdentity symbol) of
-    Just (SymbolOwnerClass moduleName0 className0) ->
-      Just
-        SymbolIdentity
-          { symbolNamespace = SymbolClass,
-            symbolDefiningModule = moduleName0,
-            symbolDefiningName = className0,
-            symbolOwnerIdentity = Nothing
-          }
+    Just (SymbolOwnerClass ownerClassIdentity) ->
+      Just ownerClassIdentity
     _ -> Nothing
 
 instanceClassIdentity :: InstanceInfo -> ClassIdentity
 instanceClassIdentity = instanceInfoClassSymbolIdentity
 
 visibleInstancesForImports ::
-  Map P.ModuleName ModuleExports ->
-  Map P.ModuleName (Map String DataInfo) ->
+  Map SymbolIdentity ModuleExports ->
+  Map SymbolIdentity (Map SymbolIdentity DataInfo) ->
   [InstanceInfo] ->
   Set.Set ClassIdentity ->
   [P.ResolvedImport] ->
@@ -1929,27 +2034,29 @@ visibleInstancesForImports priorExports priorData priorInstances unqualifiedClas
         ++ qualifiedInstancesForImport priorExports priorData priorInstances unqualifiedClassIdentities imp
 
 unqualifiedInstancesForImport ::
-  Map P.ModuleName ModuleExports ->
-  Map P.ModuleName (Map String DataInfo) ->
+  Map SymbolIdentity ModuleExports ->
+  Map SymbolIdentity (Map SymbolIdentity DataInfo) ->
   [InstanceInfo] ->
   Set.Set ClassIdentity ->
   P.ResolvedImport ->
   [InstanceInfo]
 unqualifiedInstancesForImport priorExports priorData priorInstances unqualifiedClassIdentities imp =
-  case Map.lookup (resolvedImportDefiningModule imp) priorExports of
+  case Map.lookup moduleIdentity priorExports of
     Nothing -> []
     Just exports ->
       let importClassIdentities = importUnqualifiedClassIdentitiesFor exports imp
-          unqualifiedTypeNames = importUnqualifiedTypeNames exports imp
+          unqualifiedTypeIdentities = importUnqualifiedTypeIdentities exports imp
        in [ instanceInfo
             | instanceInfo <- priorInstances,
-              instanceBelongsToModule (resolvedImportDefiningModule imp) instanceInfo,
-              instanceVisibleForUnqualifiedImport priorData unqualifiedClassIdentities importClassIdentities unqualifiedTypeNames instanceInfo
+              instanceBelongsToModule moduleIdentity instanceInfo,
+              instanceVisibleForUnqualifiedImport priorData unqualifiedClassIdentities importClassIdentities unqualifiedTypeIdentities instanceInfo
           ]
+  where
+    moduleIdentity = resolvedImportModuleIdentity imp
 
 qualifiedInstancesForImport ::
-  Map P.ModuleName ModuleExports ->
-  Map P.ModuleName (Map String DataInfo) ->
+  Map SymbolIdentity ModuleExports ->
+  Map SymbolIdentity (Map SymbolIdentity DataInfo) ->
   [InstanceInfo] ->
   Set.Set ClassIdentity ->
   P.ResolvedImport ->
@@ -1958,24 +2065,26 @@ qualifiedInstancesForImport priorExports priorData priorInstances _unqualifiedCl
   case P.importAlias imp of
     Nothing -> []
     Just _alias ->
-      case Map.lookup (resolvedImportDefiningModule imp) priorExports of
+      case Map.lookup moduleIdentity priorExports of
         Nothing -> []
         Just exports ->
           [ instanceInfo
             | instanceInfo <- priorInstances,
-              instanceBelongsToModule (resolvedImportDefiningModule imp) instanceInfo,
+              instanceBelongsToModule moduleIdentity instanceInfo,
               instanceVisibleForQualifiedImport priorData exports instanceInfo
           ]
+  where
+    moduleIdentity = resolvedImportModuleIdentity imp
 
 importedUnqualifiedClassIdentities ::
-  Map P.ModuleName ModuleExports ->
+  Map SymbolIdentity ModuleExports ->
   [P.ResolvedImport] ->
   Set.Set ClassIdentity
 importedUnqualifiedClassIdentities priorExports =
   Set.unions . map importUnqualifiedClassIdentities
   where
     importUnqualifiedClassIdentities imp =
-      case Map.lookup (resolvedImportDefiningModule imp) priorExports of
+      case Map.lookup (resolvedImportModuleIdentity imp) priorExports of
         Nothing -> Set.empty
         Just exports -> importUnqualifiedClassIdentitiesFor exports imp
 
@@ -1983,8 +2092,8 @@ importUnqualifiedClassIdentitiesFor :: ModuleExports -> P.ResolvedImport -> Set.
 importUnqualifiedClassIdentitiesFor exports imp =
   case (P.importAlias imp, P.importExposing imp) of
     (Nothing, Nothing) ->
-      Set.fromList (map classIdentity (Map.elems (exportedClasses exports)))
-        `Set.union` overloadedMethodClassIdentities (Map.elems (exportedValues exports))
+      Map.keysSet (exportedClassesByIdentity exports)
+        `Set.union` overloadedMethodClassIdentities (Map.elems (exportedValuesByIdentity exports))
     (_, Just items) -> Set.unions (map importItemClassIdentities items)
     (Just _, Nothing) -> Set.empty
   where
@@ -2026,48 +2135,41 @@ classDependencyIdentityClosure exports = go Set.empty
                   | constraint <- classSuperclassInfos classInfo
                 ]
 
-importUnqualifiedTypeNames :: ModuleExports -> P.ResolvedImport -> Set.Set String
-importUnqualifiedTypeNames exports imp =
+importUnqualifiedTypeIdentities :: ModuleExports -> P.ResolvedImport -> Set.Set SymbolIdentity
+importUnqualifiedTypeIdentities exports imp =
   case (P.importAlias imp, P.importExposing imp) of
-    (Nothing, Nothing) -> exportedTypeIdentityNames exports
-    (_, Just items) -> importExposedTypeIdentityNames items
+    (Nothing, Nothing) -> exportedTypeIdentities exports
+    (_, Just items) -> importExposedTypeIdentities items
     (Just _, Nothing) -> Set.empty
 
-importExposedTypeIdentityNames :: [P.ResolvedExportItem] -> Set.Set String
-importExposedTypeIdentityNames items =
-  Set.fromList (concatMap exposedTypeIdentityName items)
+importExposedTypeIdentities :: [P.ResolvedExportItem] -> Set.Set SymbolIdentity
+importExposedTypeIdentities items =
+  Set.fromList (concatMap exposedTypeIdentity items)
   where
-    exposedTypeIdentityName item =
+    exposedTypeIdentity item =
       case item of
-        P.ExportType ref -> resolvedExportTypeIdentityNames ref
-        P.ExportTypeWithConstructors ref -> resolvedExportTypeIdentityNames ref
+        P.ExportType ref -> resolvedExportTypeIdentities ref
+        P.ExportTypeWithConstructors ref -> resolvedExportTypeIdentities ref
         P.ExportValue {} -> []
 
-    resolvedExportTypeIdentityNames ref =
-      [ symbolIdentityTypeName (resolvedSymbolIdentity symbol)
-        | symbol <- P.resolvedExportTypeSymbols ref,
-          symbolNamespace (resolvedSymbolIdentity symbol) == SymbolType
+    resolvedExportTypeIdentities ref =
+      [ identity
+      | symbol <- P.resolvedExportTypeSymbols ref,
+        let identity = resolvedSymbolIdentity symbol,
+        symbolNamespace identity == SymbolType
       ]
 
-exportedTypeIdentityNames :: ModuleExports -> Set.Set String
-exportedTypeIdentityNames exports =
-  Set.fromList
-    [ symbolIdentityTypeName (dataInfoSymbolIdentity dataInfo)
-      | ExportedTypeInfo dataInfo _ <- Map.elems (exportedTypes exports)
-    ]
-
-symbolIdentityTypeName :: SymbolIdentity -> String
-symbolIdentityTypeName identity =
-  symbolDefiningModule identity ++ "." ++ symbolDefiningName identity
+exportedTypeIdentities :: ModuleExports -> Set.Set SymbolIdentity
+exportedTypeIdentities = Map.keysSet . exportedTypesByIdentity
 
 instanceVisibleForUnqualifiedImport ::
-  Map P.ModuleName (Map String DataInfo) ->
+  Map SymbolIdentity (Map SymbolIdentity DataInfo) ->
   Set.Set ClassIdentity ->
   Set.Set ClassIdentity ->
-  Set.Set String ->
+  Set.Set SymbolIdentity ->
   InstanceInfo ->
   Bool
-instanceVisibleForUnqualifiedImport priorData unqualifiedClassIdentities importClassIdentities unqualifiedTypeNames instanceInfo =
+instanceVisibleForUnqualifiedImport priorData unqualifiedClassIdentities importClassIdentities unqualifiedTypeIdentities instanceInfo =
   (classVisibleGlobally && originDataVisible && not (Set.null originDataMentions))
     || (classVisibleThroughImport && Set.null originDataMentions)
   where
@@ -2075,34 +2177,20 @@ instanceVisibleForUnqualifiedImport priorData unqualifiedClassIdentities importC
     classVisibleGlobally = identity `Set.member` unqualifiedClassIdentities
     classVisibleThroughImport = identity `Set.member` importClassIdentities
     originDataMentions = instanceOriginDataMentions priorData instanceInfo
-    originDataVisible = originDataMentions `Set.isSubsetOf` unqualifiedTypeNames
+    originDataVisible = originDataMentions `Set.isSubsetOf` unqualifiedTypeIdentities
 
-instanceVisibleForQualifiedImport :: Map P.ModuleName (Map String DataInfo) -> ModuleExports -> InstanceInfo -> Bool
+instanceVisibleForQualifiedImport :: Map SymbolIdentity (Map SymbolIdentity DataInfo) -> ModuleExports -> InstanceInfo -> Bool
 instanceVisibleForQualifiedImport priorData exports instanceInfo =
   originDataVisible
     && ( instanceClassIdentity instanceInfo `Set.member` exportedClassIdentities
-           || any (srcTypeMentionsAny exportedTypeNames) (instanceHeadIdentityTypes instanceInfo)
+           || any (not . Set.null . srcTypeMentionedDataIdentities exportedDataByIdentity) (instanceHeadIdentityTypes instanceInfo)
        )
   where
-    exportedTypeNames = exportedTypeIdentityNames exports
-    exportedClassIdentities = Set.fromList (map classIdentity (Map.elems (exportedClasses exports)))
-    originDataVisible = instanceOriginDataMentions priorData instanceInfo `Set.isSubsetOf` exportedTypeNames
-
-srcTypeMentionsAny :: Set.Set String -> SrcType -> Bool
-srcTypeMentionsAny names ty =
-  case ty of
-    STVar {} -> False
-    STBase name -> name `Set.member` names
-    STCon name args -> name `Set.member` names || any (srcTypeMentionsAny names) args
-    STVarApp _ args -> any (srcTypeMentionsAny names) args
-    STTyLam _ body -> srcTypeMentionsAny names body
-    STTyApp fun arg -> srcTypeMentionsAny names fun || srcTypeMentionsAny names arg
-    STArrow dom cod -> srcTypeMentionsAny names dom || srcTypeMentionsAny names cod
-    STForall _ mb body ->
-      maybe False (srcTypeMentionsAny names . unSrcBound) mb
-        || srcTypeMentionsAny names body
-    STMu _ body -> srcTypeMentionsAny names body
-    STBottom -> False
+    exportedDataByIdentity =
+      Map.map exportedTypeData (exportedTypesByIdentity exports)
+    exportedTypeIdentities0 = exportedTypeIdentities exports
+    exportedClassIdentities = Map.keysSet (exportedClassesByIdentity exports)
+    originDataVisible = instanceOriginDataMentions priorData instanceInfo `Set.isSubsetOf` exportedTypeIdentities0
 
 distinctInstanceHeads :: [InstanceInfo] -> [InstanceInfo]
 distinctInstanceHeads = reverse . foldl' add []
@@ -2116,62 +2204,70 @@ sameInstanceHead left right =
   instanceClassIdentity left == instanceClassIdentity right
     && instanceHeadIdentityTypes left == instanceHeadIdentityTypes right
 
-instanceExportedTypeMentions :: Set.Set String -> InstanceInfo -> Set.Set String
-instanceExportedTypeMentions exportedTypeNames instanceInfo =
+instanceExportedTypeMentions :: Map SymbolIdentity DataInfo -> InstanceInfo -> Set.Set SymbolIdentity
+instanceExportedTypeMentions dataByIdentity instanceInfo =
   Set.unions (headMentions : constraintMentions ++ methodMentions)
   where
-    headMentions = foldMap (srcTypeMentionedNames exportedTypeNames) (instanceHeadIdentityTypes instanceInfo)
+    headMentions = foldMap (srcTypeMentionedDataIdentities dataByIdentity) (instanceHeadIdentityTypes instanceInfo)
     constraintMentions =
       concatMap
-        (map (srcTypeMentionedNames exportedTypeNames . typeViewIdentity) . NE.toList . constraintTypeViews)
+        (map (srcTypeMentionedDataIdentities dataByIdentity . typeViewIdentity) . NE.toList . constraintTypeViews)
         (instanceConstraintInfos instanceInfo)
-    methodMentions = concatMap valueExportedTypeMentions (Map.elems (instanceMethods instanceInfo))
+    methodMentions = concatMap valueExportedTypeMentions (Map.elems (instanceMethodsByIdentity instanceInfo))
 
     valueExportedTypeMentions valueInfo =
       case valueInfo of
         OrdinaryValue {} ->
-          srcTypeMentionedNames exportedTypeNames (valueIdentityType valueInfo)
+          srcTypeMentionedDataIdentities dataByIdentity (valueIdentityType valueInfo)
             : concatMap
-              (map (srcTypeMentionedNames exportedTypeNames . typeViewIdentity) . NE.toList . constraintTypeViews)
+              (map (srcTypeMentionedDataIdentities dataByIdentity . typeViewIdentity) . NE.toList . constraintTypeViews)
               (valueConstraintInfos valueInfo)
         _ -> []
 
-instanceOriginDataMentions :: Map P.ModuleName (Map String DataInfo) -> InstanceInfo -> Set.Set String
+instanceOriginDataMentions :: Map SymbolIdentity (Map SymbolIdentity DataInfo) -> InstanceInfo -> Set.Set SymbolIdentity
 instanceOriginDataMentions priorData instanceInfo =
-  case Map.lookup (instanceOriginModule instanceInfo) priorData of
+  case Map.lookup (instanceOriginModuleIdentity instanceInfo) priorData of
     Nothing -> Set.empty
     Just dataInfos ->
-      instanceExportedTypeMentions
-        (Set.fromList [symbolIdentityTypeName (dataInfoSymbolIdentity info) | info <- Map.elems dataInfos])
-        instanceInfo
+      instanceExportedTypeMentions dataInfos instanceInfo
 
-srcTypeMentionedNames :: Set.Set String -> SrcType -> Set.Set String
-srcTypeMentionedNames names ty =
+srcTypeMentionedDataIdentities :: Map SymbolIdentity DataInfo -> SrcType -> Set.Set SymbolIdentity
+srcTypeMentionedDataIdentities dataByIdentity ty =
   case ty of
     STVar {} -> Set.empty
-    STBase name
-      | name `Set.member` names -> Set.singleton name
-      | otherwise -> Set.empty
+    STBase name -> sourceTypeHeadDataIdentities dataByIdentity name
     STCon name args ->
-      let headNames
-            | name `Set.member` names = Set.singleton name
-            | otherwise = Set.empty
-       in Set.unions (headNames : map (srcTypeMentionedNames names) (NE.toList args))
-    STVarApp _ args -> Set.unions (map (srcTypeMentionedNames names) (NE.toList args))
-    STTyLam _ body -> srcTypeMentionedNames names body
+      Set.unions (sourceTypeHeadDataIdentities dataByIdentity name : map (srcTypeMentionedDataIdentities dataByIdentity) (NE.toList args))
+    STVarApp _ args -> Set.unions (map (srcTypeMentionedDataIdentities dataByIdentity) (NE.toList args))
+    STTyLam _ body -> srcTypeMentionedDataIdentities dataByIdentity body
     STTyApp fun arg ->
-      srcTypeMentionedNames names fun `Set.union` srcTypeMentionedNames names arg
+      srcTypeMentionedDataIdentities dataByIdentity fun `Set.union` srcTypeMentionedDataIdentities dataByIdentity arg
     STArrow dom cod ->
-      srcTypeMentionedNames names dom `Set.union` srcTypeMentionedNames names cod
+      srcTypeMentionedDataIdentities dataByIdentity dom `Set.union` srcTypeMentionedDataIdentities dataByIdentity cod
     STForall _ mb body ->
-      maybe Set.empty (srcTypeMentionedNames names . unSrcBound) mb
-        `Set.union` srcTypeMentionedNames names body
-    STMu _ body -> srcTypeMentionedNames names body
+      maybe Set.empty (srcTypeMentionedDataIdentities dataByIdentity . unSrcBound) mb
+        `Set.union` srcTypeMentionedDataIdentities dataByIdentity body
+    STMu _ body -> srcTypeMentionedDataIdentities dataByIdentity body
     STBottom -> Set.empty
 
-instanceBelongsToModule :: P.ModuleName -> InstanceInfo -> Bool
-instanceBelongsToModule moduleName0 instanceInfo =
-  instanceOriginModule instanceInfo == moduleName0
+sourceTypeHeadDataIdentities :: Map SymbolIdentity DataInfo -> String -> Set.Set SymbolIdentity
+sourceTypeHeadDataIdentities dataByIdentity name =
+  Set.fromList
+    [ dataInfoSymbolIdentity dataInfo
+    | dataInfo <- Map.elems dataByIdentity,
+      sourceTypeHeadMatchesData name dataInfo
+    ]
+
+sourceTypeHeadMatchesData :: String -> DataInfo -> Bool
+sourceTypeHeadMatchesData name dataInfo =
+  name == symbolIdentityStableName identity
+    || name == dataInfoIdentityQualifiedName dataInfo
+  where
+    identity = dataInfoSymbolIdentity dataInfo
+
+instanceBelongsToModule :: SymbolIdentity -> InstanceInfo -> Bool
+instanceBelongsToModule moduleIdentity instanceInfo =
+  instanceOriginModuleIdentity instanceInfo == moduleIdentity
 
 applyResolvedImportItem :: P.ModuleName -> ModuleExports -> Scope -> P.ResolvedExportItem -> TcM Scope
 applyResolvedImportItem moduleName0 exports scope item =
@@ -2204,22 +2300,21 @@ applyResolvedImportItem moduleName0 exports scope item =
     P.ExportTypeWithConstructors ref ->
       case exportedTypeByRef ref exports of
         Just (typeName, typeInfo) -> do
-          when (Map.null (exportedTypeConstructors typeInfo)) $
+          when (Map.null (exportedTypeConstructorsByIdentity typeInfo)) $
             throwError (ProgramImportNotExported moduleName0 typeName)
           let dataInfo = exportedTypeData typeInfo
               ctorValues =
                 Map.fromList
                   [ ( ctorName ctor,
                       ConstructorValue
-                        { valueDisplayName = ctorName ctor,
-                          valueInfoSymbol = constructorInfoSymbolIdentity dataInfo ctor,
+                        { valueInfoSymbol = constructorInfoSymbolIdentity dataInfo ctor,
                           valueRuntimeName = ctorRuntimeName ctor,
                           valueType = ctorType ctor,
-                          valueCtorInfo = ctor,
-                          valueOriginModule = dataModule dataInfo
+                          valueIdentityType = ctorTypeIdentity ctor,
+                          valueCtorInfo = ctor
                         }
                     )
-                    | ctor <- Map.elems (exportedTypeConstructors typeInfo)
+                    | ctor <- Map.elems (exportedTypeConstructorsByIdentity typeInfo)
                   ]
           values <- liftEither (addValues (scopeValues scope) ctorValues)
           types <- liftEither (addTypes (scopeTypes scope) (Map.singleton typeName dataInfo))
@@ -2233,11 +2328,12 @@ prepareImportedValue exports scope valueInfo =
       case exportedConstructorOwnerType ctorInfo exports of
         Just dataInfo ->
           let hiddenDataInfo = hiddenOwnerDataInfo dataInfo
-              hiddenTypes = Map.insert (dataName hiddenDataInfo) hiddenDataInfo (scopeHiddenTypes scope)
+              hiddenTypes = Map.insert (hiddenOwnerTypeName dataInfo) hiddenDataInfo (scopeHiddenTypes scope)
               hiddenCtorInfo = importedHiddenConstructorInfo ctorInfo hiddenDataInfo
               importedInfo =
                 valueInfo
                   { valueType = ctorType hiddenCtorInfo,
+                    valueIdentityType = ctorTypeIdentity hiddenCtorInfo,
                     valueCtorInfo = hiddenCtorInfo
                   }
            in (withScopeHiddenTypes hiddenTypes scope, importedInfo)
@@ -2271,8 +2367,8 @@ hiddenOwnerDataInfo dataInfo =
   let hiddenName = hiddenOwnerTypeName dataInfo
       ownerNames =
         Set.fromList
-          [ dataName dataInfo,
-            symbolDefiningName (dataInfoSymbolIdentity dataInfo)
+          [ dataInfoIdentityName dataInfo,
+            dataInfoIdentityQualifiedName dataInfo
           ]
       rewrite = rewriteOwnerTypeHeads ownerNames hiddenName
       rewriteShape shape =
@@ -2293,12 +2389,10 @@ hiddenOwnerDataInfo dataInfo =
               ],
             ctorArgs = map rewrite (ctorArgs ctor),
             ctorResult = rewrite (ctorResult ctor),
-            ctorOwningType = hiddenName,
             ctorOwnerConstructors = map rewriteShape (ctorOwnerConstructors ctor)
           }
    in dataInfo
-        { dataName = hiddenName,
-          dataConstructors = map rewriteCtor (dataConstructors dataInfo)
+        { dataConstructors = map rewriteCtor (dataConstructors dataInfo)
         }
 
 hiddenOwnerTypeName :: DataInfo -> String
@@ -2331,35 +2425,26 @@ importedHiddenConstructorInfo ctorInfo hiddenDataInfo =
   case find ((== ctorInfoSymbol ctorInfo) . ctorInfoSymbol) (dataConstructors hiddenDataInfo) of
     Just hiddenCtorInfo ->
       hiddenCtorInfo
-        { ctorName = ctorName ctorInfo,
-          ctorRuntimeName = ctorRuntimeName ctorInfo
+        { ctorRuntimeName = ctorRuntimeName ctorInfo
         }
     Nothing -> ctorInfo
 
 exportedConstructorOwnerType :: ConstructorInfo -> ModuleExports -> Maybe DataInfo
 exportedConstructorOwnerType ctorInfo exports =
-  case
-    [ dataInfo
-      | ExportedTypeInfo dataInfo _ <- Map.elems (exportedTypes exports),
-        dataInfoSymbolIdentity dataInfo == ctorOwningTypeIdentity ctorInfo
-    ] of
-    dataInfo : _ -> Just dataInfo
-    [] -> Just (constructorOwnerDataInfoFromShapes ctorInfo)
+  case Map.lookup (ctorOwningTypeIdentity ctorInfo) (exportedTypesByIdentity exports) of
+    Just typeInfo -> Just (exportedTypeData typeInfo)
+    Nothing -> Just (constructorOwnerDataInfoFromShapes ctorInfo)
 
 constructorOwnerDataInfoFromShapes :: ConstructorInfo -> DataInfo
 constructorOwnerDataInfoFromShapes ctorInfo =
   DataInfo
-    { dataName = ctorOwningType ctorInfo,
-      dataInfoSymbol = ownerIdentity,
-      dataModule = symbolDefiningModule ownerIdentity,
+    { dataInfoSymbol = ownerIdentity,
       dataTypeParams = typeParams,
-      dataParams = paramNames,
       dataConstructors = constructors
     }
   where
     ownerIdentity = ctorOwningTypeIdentity ctorInfo
     ownerShapes = constructorOwnerShapes ctorInfo
-    paramNames = P.typeParamNames typeParams
     typeParams =
       case [params | shape <- ownerShapes, let params = constructorShapeOwnerTypeParams shape, not (null params)] of
         params : _ -> params
@@ -2367,15 +2452,15 @@ constructorOwnerDataInfoFromShapes ctorInfo =
     constructors = map constructorInfoFromShape ownerShapes
 
     constructorInfoFromShape shape =
-      ConstructorInfo
-        { ctorName = constructorShapeName shape,
-          ctorInfoSymbol = constructorShapeSymbol shape,
-          ctorRuntimeName = constructorShapeRuntimeName shape,
-          ctorType = constructorShapeType shape,
-          ctorForalls = constructorShapeForalls shape,
-          ctorArgs = constructorShapeArgs shape,
-          ctorResult = constructorShapeResult shape,
-          ctorOwningType = ctorOwningType ctorInfo,
+          ConstructorInfo
+            { ctorInfoSymbol = constructorShapeSymbol shape,
+              ctorRuntimeName = constructorShapeRuntimeName shape,
+              ctorType = constructorShapeType shape,
+              ctorTypeIdentity = constructorShapeTypeIdentity shape,
+              ctorForalls = constructorShapeForalls shape,
+              ctorForallBinderIdentities = constructorShapeForallBinderIdentities shape,
+              ctorArgs = constructorShapeArgs shape,
+              ctorResult = constructorShapeResult shape,
           ctorOwningTypeIdentity = ownerIdentity,
           ctorIndex = constructorShapeIndex shape,
           ctorOwnerConstructors = ownerShapes
@@ -2387,6 +2472,13 @@ constructorShapeType shape =
     (\(name, mbBound) body -> STForall name (fmap SrcBound mbBound) body)
     (foldr STArrow (constructorShapeResult shape) (constructorShapeArgs shape))
     (constructorShapeForalls shape)
+
+constructorShapeTypeIdentity :: ConstructorShape -> SrcType
+constructorShapeTypeIdentity shape =
+  foldr
+    (\(name, mbBound) body -> STForall name (fmap SrcBound mbBound) body)
+    (foldr STArrow (constructorShapeResultIdentity shape) (constructorShapeArgsIdentity shape))
+    (constructorShapeForallsIdentity shape)
 
 inferredConstructorOwnerTypeParams :: ConstructorInfo -> [ConstructorShape] -> [P.TypeParam]
 inferredConstructorOwnerTypeParams ctorInfo ownerShapes =
@@ -2406,12 +2498,18 @@ constructorOwnerResultArgs :: ConstructorInfo -> SrcType -> Maybe (NonEmpty SrcT
 constructorOwnerResultArgs ctorInfo ty =
   case ty of
     STBase name
-      | name == ctorOwningType ctorInfo || name == symbolDefiningName (ctorOwningTypeIdentity ctorInfo) ->
+      | ownerHeadMatches name ->
           Nothing
     STCon name args
-      | name == ctorOwningType ctorInfo || name == symbolDefiningName (ctorOwningTypeIdentity ctorInfo) ->
+      | ownerHeadMatches name ->
           Just args
     _ -> Nothing
+  where
+    ownerIdentity = ctorOwningTypeIdentity ctorInfo
+    ownerHeadMatches name =
+      name == symbolIdentityStableName ownerIdentity
+        || name == symbolDefiningName ownerIdentity
+        || name == symbolDefiningModule ownerIdentity ++ "." ++ symbolDefiningName ownerIdentity
 
 firstSrcTypeVarName :: [SrcType] -> Maybe String
 firstSrcTypeVarName tys =
@@ -2458,38 +2556,71 @@ kindFromMaxApplicationArity arity =
 
 exportedValueByIdentity :: SymbolIdentity -> ModuleExports -> Maybe (String, ValueInfo)
 exportedValueByIdentity identity exports =
-  find ((== identity) . valueInfoSymbolIdentity . snd) (Map.toList (exportedValues exports))
+  (,) <$> Map.lookup identity (exportedValueDisplaysByIdentity exports) <*> Map.lookup identity (exportedValuesByIdentity exports)
+
+exportedMainIdentity :: P.ResolvedModuleSyntax -> ModuleExports -> Maybe SymbolIdentity
+exportedMainIdentity mod0 exports = do
+  mainIdentity <- moduleMainDefinitionIdentity mod0
+  (_, OrdinaryValue {}) <- exportedValueByIdentity mainIdentity exports
+  pure mainIdentity
+
+moduleMainDefinitionIdentity :: P.ResolvedModuleSyntax -> Maybe SymbolIdentity
+moduleMainDefinitionIdentity mod0 =
+  case
+    [ resolvedSymbolIdentity (P.defDeclName defDecl)
+    | defDecl <- moduleDefDecls mod0
+    , resolvedDefDeclIsMain defDecl
+    ]
+  of
+    [identity] -> Just identity
+    _ -> Nothing
+
+resolvedDefDeclIsMain :: P.ResolvedDefDecl -> Bool
+resolvedDefDeclIsMain defDecl =
+  case resolvedSymbolIdentity (P.defDeclName defDecl) of
+    SymbolIdentity {symbolNamespace = SymbolValue, symbolDefiningName = "main", symbolOwnerIdentity = Nothing} -> True
+    _ -> False
+
+checkedBindingValueIdentity :: CheckedBinding -> Maybe SymbolIdentity
+checkedBindingValueIdentity binding =
+  case resolvedVarDetails (checkedBindingResolvedVar binding) of
+    TopLevelId identity -> Just identity
+    _ -> Nothing
 
 exportedTypeByRef :: P.ResolvedExportTypeRef -> ModuleExports -> Maybe (String, ExportedTypeInfo)
 exportedTypeByRef ref exports =
   case [symbol | symbol <- P.resolvedExportTypeSymbols ref, symbolNamespace (resolvedSymbolIdentity symbol) == SymbolType] of
-    symbol : _ -> find ((== resolvedSymbolIdentity symbol) . dataInfoSymbolIdentity . exportedTypeData . snd) (Map.toList (exportedTypes exports))
+    symbol : _ -> exportedTypeByIdentity (resolvedSymbolIdentity symbol) exports
     [] -> Nothing
 
 exportedClassByRef :: P.ResolvedExportTypeRef -> ModuleExports -> Maybe (String, ClassInfo)
 exportedClassByRef ref exports =
   case [symbol | symbol <- P.resolvedExportTypeSymbols ref, symbolNamespace (resolvedSymbolIdentity symbol) == SymbolClass] of
-    symbol : _ -> find ((== resolvedSymbolIdentity symbol) . classInfoSymbolIdentity . snd) (Map.toList (exportedClasses exports))
+    symbol : _ -> exportedClassByIdentity (resolvedSymbolIdentity symbol) exports
     [] -> Nothing
+
+exportedTypeByIdentity :: SymbolIdentity -> ModuleExports -> Maybe (String, ExportedTypeInfo)
+exportedTypeByIdentity identity exports =
+  (,) <$> Map.lookup identity (exportedTypeDisplaysByIdentity exports) <*> Map.lookup identity (exportedTypesByIdentity exports)
 
 exportedClassByIdentity :: ClassIdentity -> ModuleExports -> Maybe (String, ClassInfo)
 exportedClassByIdentity identity exports =
-  find ((== identity) . classInfoSymbolIdentity . snd) (Map.toList (exportedClasses exports))
+  (,) <$> Map.lookup identity (exportedClassDisplaysByIdentity exports) <*> Map.lookup identity (exportedClassesByIdentity exports)
 
 displaySrcTypeForResolved :: DisplayNameEnv -> ResolvedSrcType -> TcM SrcType
 displaySrcTypeForResolved env = \case
-  RSTVar name -> pure (STVar name)
+  RSTVar ref -> pure (STVar (resolvedSrcTypeBinderName ref))
   RSTArrow dom cod -> STArrow <$> displaySrcTypeForResolved env dom <*> displaySrcTypeForResolved env cod
   RSTBase symbol -> STBase <$> displayTypeHeadName env symbol
   RSTCon symbol args -> STCon <$> displayTypeHeadName env symbol <*> traverse (displaySrcTypeForResolved env) args
-  RSTVarApp name args -> STVarApp name <$> traverse (displaySrcTypeForResolved env) args
-  RSTTyLam name body -> STTyLam name <$> displaySrcTypeForResolved env body
+  RSTVarApp ref args -> STVarApp (resolvedSrcTypeBinderName ref) <$> traverse (displaySrcTypeForResolved env) args
+  RSTTyLam ref body -> STTyLam (resolvedSrcTypeBinderName ref) <$> displaySrcTypeForResolved env body
   RSTTyApp fun arg -> STTyApp <$> displaySrcTypeForResolved env fun <*> displaySrcTypeForResolved env arg
-  RSTForall name mb body ->
-    STForall name
+  RSTForall ref mb body ->
+    STForall (resolvedSrcTypeBinderName ref)
       <$> traverse (fmap SrcBound . displaySrcTypeForResolved env . unResolvedSrcBound) mb
       <*> displaySrcTypeForResolved env body
-  RSTMu name body -> STMu name <$> displaySrcTypeForResolved env body
+  RSTMu ref body -> STMu (resolvedSrcTypeBinderName ref) <$> displaySrcTypeForResolved env body
   RSTBottom -> pure STBottom
 
 displayTypeHeadName :: DisplayNameEnv -> ResolvedSymbol -> TcM String
@@ -2511,10 +2642,9 @@ displayClassConstraintForResolved env constraint = do
       }
 
 typeViewForDisplayEnv :: DisplayNameEnv -> ResolvedSrcType -> TcM TypeView
-typeViewForDisplayEnv env ty =
-  TypeView
-    <$> displaySrcTypeForResolved env ty
-    <*> pure (resolvedSrcTypeIdentityType ty)
+typeViewForDisplayEnv env ty = do
+  display <- displaySrcTypeForResolved env ty
+  pure (typeViewFromResolved ty) {typeViewDisplay = display}
 
 constraintInfoForDisplayEnv :: DisplayNameEnv -> P.ResolvedClassConstraint -> TcM ConstraintInfo
 constraintInfoForDisplayEnv env constraint = do
@@ -2522,7 +2652,6 @@ constraintInfoForDisplayEnv env constraint = do
   ConstraintInfo
     <$> displayClassName env (P.constraintClassName constraint)
     <*> pure (resolvedSymbolIdentity (P.constraintClassName constraint))
-    <*> pure (NE.head views)
     <*> pure views
 
 displayConstrainedTypeForResolved :: DisplayNameEnv -> P.ResolvedConstrainedType -> TcM P.ConstrainedType
@@ -2633,9 +2762,24 @@ validateClassApplicationArity classInfo actual =
 extendKindParams :: [P.TypeParam] -> KindEnv -> TcM KindEnv
 extendKindParams params env =
   foldM
-    (\acc param -> bindKindVariable (P.typeParamName param) (kindFromSrc (P.typeParamKind param)) acc)
+    ( \acc param -> do
+        ref <- typeParamResolvedRef param
+        bindKindVariable
+          ref
+          (kindFromSrc (P.typeParamKind param))
+          acc
+    )
     env
     params
+  where
+    typeParamResolvedRef :: P.TypeParam -> TcM ResolvedTypeBinderRef
+    typeParamResolvedRef param =
+      case P.typeParamRef param of
+        Just ref -> pure ref
+        Nothing ->
+          throwError $
+            ProgramPipelineError
+              ("resolved type parameter `" ++ P.typeParamName param ++ "` is missing identity")
 
 checkResolvedKind :: KindEnv -> ResolvedSrcType -> P.SrcKind -> TcM KindEnv
 checkResolvedKind env ty expected =
@@ -2644,24 +2788,24 @@ checkResolvedKind env ty expected =
 checkResolvedKindTerm :: KindEnv -> ResolvedSrcType -> KindTerm -> TcM KindEnv
 checkResolvedKindTerm env ty expected =
   case ty of
-    RSTVar name -> bindKindVariable name expected env
+    RSTVar ref -> bindKindVariable ref expected env
     RSTArrow dom cod -> do
       env1 <- requireKindTerm env ty expected KTType
       env2 <- checkResolvedKindTerm env1 dom KTType
       checkResolvedKindTerm env2 cod KTType
-    RSTForall name mb body -> do
+    RSTForall ref mb body -> do
       env1 <- requireKindTerm env ty expected KTType
       env2 <-
         case mb of
           Nothing -> pure env1
           Just bound -> checkResolvedKindTerm env1 (unResolvedSrcBound bound) KTType
-      withScopedKindVariable name KTType env2 $ \env3 ->
+      withScopedKindVariable ref KTType env2 $ \env3 ->
         checkResolvedKindTerm env3 body KTType
-    RSTMu name body -> do
+    RSTMu ref body -> do
       env1 <- requireKindTerm env ty expected KTType
-      withScopedKindVariable name KTType env1 $ \env2 ->
+      withScopedKindVariable ref KTType env1 $ \env2 ->
         checkResolvedKindTerm env2 body KTType
-    RSTVarApp name args -> checkVarAppKind env name args expected
+    RSTVarApp ref args -> checkVarAppKind env ref args expected
     RSTTyApp fun arg -> checkTyAppKind env ty fun arg expected
     _ -> do
       (actual, env1) <- inferResolvedKindTerm env ty
@@ -2670,14 +2814,14 @@ checkResolvedKindTerm env ty expected =
 inferResolvedKindTerm :: KindEnv -> ResolvedSrcType -> TcM (KindTerm, KindEnv)
 inferResolvedKindTerm env ty =
   case ty of
-    RSTVar name -> kindTermForVariable name env
+    RSTVar ref -> kindTermForVariable ref env
     RSTBase symbol -> do
       kind0 <- resolvedTypeHeadKind env symbol
       pure (kindFromSrc kind0, env)
     RSTCon symbol args -> do
       headKind <- kindFromSrc <$> resolvedTypeHeadKind env symbol
-      applyKindArgs env (resolvedSymbolDisplayName symbol) headKind args
-    RSTVarApp name args -> inferVarAppKind env name args
+      applyKindArgs env (RSTBase symbol) (resolvedSymbolDisplayName symbol) headKind args
+    RSTVarApp ref args -> inferVarAppKind env ref args
     RSTTyLam {} ->
       throwError (ProgramKindMismatch (resolvedSrcTypeToSrcType ty) P.KType (P.KArrow P.KType P.KType))
     RSTTyApp fun arg -> inferTyAppKind env ty fun arg
@@ -2685,26 +2829,26 @@ inferResolvedKindTerm env ty =
       env1 <- checkResolvedKindTerm env dom KTType
       env2 <- checkResolvedKindTerm env1 cod KTType
       pure (KTType, env2)
-    RSTForall name mb body -> do
+    RSTForall ref mb body -> do
       env1 <-
         case mb of
           Nothing -> pure env
           Just bound -> checkResolvedKindTerm env (unResolvedSrcBound bound) KTType
       env2 <-
-        withScopedKindVariable name KTType env1 $ \env3 ->
+        withScopedKindVariable ref KTType env1 $ \env3 ->
           checkResolvedKindTerm env3 body KTType
       pure (KTType, env2)
-    RSTMu name body -> do
+    RSTMu ref body -> do
       env1 <-
-        withScopedKindVariable name KTType env $ \env2 ->
+        withScopedKindVariable ref KTType env $ \env2 ->
           checkResolvedKindTerm env2 body KTType
       pure (KTType, env1)
     RSTBottom -> pure (KTType, env)
 
-checkVarAppKind :: KindEnv -> String -> NonEmpty ResolvedSrcType -> KindTerm -> TcM KindEnv
-checkVarAppKind env name args expected = do
-  (actual, env1) <- inferVarAppKind env name args
-  requireKindTerm env1 (RSTVarApp name args) expected actual
+checkVarAppKind :: KindEnv -> ResolvedTypeBinderRef -> NonEmpty ResolvedSrcType -> KindTerm -> TcM KindEnv
+checkVarAppKind env ref args expected = do
+  (actual, env1) <- inferVarAppKind env ref args
+  requireKindTerm env1 (RSTVarApp ref args) expected actual
 
 checkTyAppKind :: KindEnv -> ResolvedSrcType -> ResolvedSrcType -> ResolvedSrcType -> KindTerm -> TcM KindEnv
 checkTyAppKind env whole fun arg expected = do
@@ -2726,13 +2870,14 @@ inferTyAppKind env whole fun arg = do
     KTType ->
       throwError (ProgramKindMismatch (resolvedSrcTypeToSrcType whole) P.KType P.KType)
 
-inferVarAppKind :: KindEnv -> String -> NonEmpty ResolvedSrcType -> TcM (KindTerm, KindEnv)
-inferVarAppKind env name args = do
-  (headKind, env1) <- kindTermForVariable name env
-  applyKindArgs env1 name headKind args
+inferVarAppKind :: KindEnv -> ResolvedTypeBinderRef -> NonEmpty ResolvedSrcType -> TcM (KindTerm, KindEnv)
+inferVarAppKind env ref args = do
+  let name = resolvedSrcTypeBinderName ref
+  (headKind, env1) <- kindTermForVariable ref env
+  applyKindArgs env1 (RSTVar ref) name headKind args
 
-applyKindArgs :: KindEnv -> String -> KindTerm -> NonEmpty ResolvedSrcType -> TcM (KindTerm, KindEnv)
-applyKindArgs env headName headKind args =
+applyKindArgs :: KindEnv -> ResolvedSrcType -> String -> KindTerm -> NonEmpty ResolvedSrcType -> TcM (KindTerm, KindEnv)
+applyKindArgs env headTy headName headKind args =
   go 0 env headKind (NE.toList args)
   where
     go _ env0 kind0 [] = pure (zonkKindTerm env0 kind0, env0)
@@ -2744,7 +2889,7 @@ applyKindArgs env headName headKind args =
         KTMeta meta -> do
           (argKind, env1) <- inferResolvedKindTerm env0 arg
           let (resultKind, env2) = freshKindMeta env1
-          env3 <- requireKindTerm env2 (RSTVar headName) (KTMeta meta) (KTArrow argKind resultKind)
+          env3 <- requireKindTerm env2 headTy (KTMeta meta) (KTArrow argKind resultKind)
           go (consumed + 1) env3 resultKind rest
         KTType ->
           throwError (ProgramTypeArityMismatch headName consumed (consumed + length rest + 1))
@@ -2794,13 +2939,13 @@ kindMetaOccurs meta term env =
     KTArrow dom cod -> kindMetaOccurs meta dom env || kindMetaOccurs meta cod env
     KTMeta other -> meta == other
 
-kindTermForVariable :: String -> KindEnv -> TcM (KindTerm, KindEnv)
-kindTermForVariable name env =
-  case Map.lookup name (kindTypeVariables env) of
+kindTermForVariable :: ResolvedTypeBinderRef -> KindEnv -> TcM (KindTerm, KindEnv)
+kindTermForVariable ref env =
+  case Map.lookup ref (kindTypeVariables env) of
     Just kind0 -> pure (zonkKindTerm env kind0, env)
     Nothing ->
       let (kind0, env1) = freshKindMeta env
-       in pure (kind0, env1 {kindTypeVariables = Map.insert name kind0 (kindTypeVariables env1)})
+       in pure (kind0, env1 {kindTypeVariables = Map.insert ref kind0 (kindTypeVariables env1)})
 
 freshKindMeta :: KindEnv -> (KindTerm, KindEnv)
 freshKindMeta env =
@@ -2832,12 +2977,12 @@ zonkKindTerm env kind0 =
 typeHeadArity :: KindEnv -> ResolvedSrcType -> Maybe (String, Int, Int)
 typeHeadArity env ty =
   case ty of
-    RSTVar name ->
-      withActualArity 0 <$> kindForVar name
+    RSTVar ref ->
+      withActualArity 0 <$> kindForVar ref
     RSTBase symbol ->
       withActualArity 0 <$> kindForHead symbol
-    RSTVarApp name args ->
-      withActualArity (NE.length args) <$> kindForVar name
+    RSTVarApp ref args ->
+      withActualArity (NE.length args) <$> kindForVar ref
     RSTCon symbol args ->
       withActualArity (NE.length args) <$> kindForHead symbol
     _ -> Nothing
@@ -2845,9 +2990,9 @@ typeHeadArity env ty =
     withActualArity actualArgs (headName, expectedArgs) =
       (headName, expectedArgs, actualArgs)
 
-    kindForVar name =
-      case Map.lookup name (kindTypeVariables env) of
-        Just kind0 -> Just (name, kindTermArity env kind0)
+    kindForVar ref =
+      case Map.lookup ref (kindTypeVariables env) of
+        Just kind0 -> Just (resolvedSrcTypeBinderName ref, kindTermArity env kind0)
         Nothing -> Nothing
 
     kindForHead symbol =
@@ -2874,24 +3019,24 @@ isArrowKind kind0 =
     P.KArrow {} -> True
     P.KType -> False
 
-bindKindVariable :: String -> KindTerm -> KindEnv -> TcM KindEnv
-bindKindVariable name expected env =
-  case Map.lookup name (kindTypeVariables env) of
-    Just actual -> requireKindTerm env (RSTVar name) expected actual
+bindKindVariable :: ResolvedTypeBinderRef -> KindTerm -> KindEnv -> TcM KindEnv
+bindKindVariable ref expected env =
+  case Map.lookup ref (kindTypeVariables env) of
+    Just actual -> requireKindTerm env (RSTVar ref) expected actual
     Nothing ->
-      pure env {kindTypeVariables = Map.insert name (zonkKindTerm env expected) (kindTypeVariables env)}
+      pure env {kindTypeVariables = Map.insert ref (zonkKindTerm env expected) (kindTypeVariables env)}
 
-withScopedKindVariable :: String -> KindTerm -> KindEnv -> (KindEnv -> TcM KindEnv) -> TcM KindEnv
-withScopedKindVariable name kind0 env action = do
-  let previous = Map.lookup name (kindTypeVariables env)
-      envWithBinder = env {kindTypeVariables = Map.insert name kind0 (kindTypeVariables env)}
+withScopedKindVariable :: ResolvedTypeBinderRef -> KindTerm -> KindEnv -> (KindEnv -> TcM KindEnv) -> TcM KindEnv
+withScopedKindVariable ref kind0 env action = do
+  let previous = Map.lookup ref (kindTypeVariables env)
+      envWithBinder = env {kindTypeVariables = Map.insert ref kind0 (kindTypeVariables env)}
   envAfter <- action envWithBinder
   pure
     envAfter
       { kindTypeVariables =
           case previous of
-            Just previousKind -> Map.insert name previousKind (kindTypeVariables envAfter)
-            Nothing -> Map.delete name (kindTypeVariables envAfter)
+            Just previousKind -> Map.insert ref previousKind (kindTypeVariables envAfter)
+            Nothing -> Map.delete ref (kindTypeVariables envAfter)
       }
 
 resolvedTypeHeadKind :: KindEnv -> ResolvedSymbol -> TcM P.SrcKind
@@ -2902,14 +3047,26 @@ resolvedTypeHeadKind env symbol =
 
 resolvedTypeHeadKindMaybe :: KindEnv -> ResolvedSymbol -> Maybe P.SrcKind
 resolvedTypeHeadKindMaybe env symbol
-  | isBuiltinTypeSymbol symbol = Builtins.builtinTypeKind (symbolDefiningName (resolvedSymbolIdentity symbol))
+  | Just kind0 <- builtinTypeKindByIdentity (resolvedSymbolIdentity symbol) = Just kind0
   | otherwise = Map.lookup (resolvedSymbolIdentity symbol) (kindTypeConstructors env)
 
-buildLocalDataInfo :: DisplayNameEnv -> ResolvedSemanticModule -> P.ResolvedModuleSyntax -> TcM (Map String DataInfo)
-buildLocalDataInfo displayEnv resolvedModule mod0 = do
+builtinTypeKindByIdentity :: SymbolIdentity -> Maybe P.SrcKind
+builtinTypeKindByIdentity identity =
+  Map.lookup identity builtinTypeKindsByIdentity
+
+builtinTypeKindsByIdentity :: Map SymbolIdentity P.SrcKind
+builtinTypeKindsByIdentity =
+  Map.fromList
+    [ (Builtins.builtinTypeIdentity name, kind0)
+    | name <- Set.toList Builtins.builtinTypeNames,
+      Just kind0 <- [Builtins.builtinTypeKind name]
+    ]
+
+buildLocalDataInfo :: DisplayNameEnv -> P.ResolvedModuleSyntax -> TcM (Map String DataInfo)
+buildLocalDataInfo displayEnv mod0 = do
   let dataDecls = moduleDataDecls mod0
-  ensureDistinctBy ProgramDuplicateType P.dataDeclName dataDecls
-  ctorNames <- pure (concatMap (map P.constructorDeclName . P.dataDeclConstructors) dataDecls)
+  ensureDistinctBy ProgramDuplicateType P.dataDeclDisplayName dataDecls
+  ctorNames <- pure (concatMap (map (P.refDisplayName . P.constructorDeclName) . P.dataDeclConstructors) dataDecls)
   ensureDistinctPlain ProgramDuplicateConstructor ctorNames
   pure . Map.fromList =<< mapM toDataInfo dataDecls
   where
@@ -2917,7 +3074,9 @@ buildLocalDataInfo displayEnv resolvedModule mod0 = do
       let params = P.dataDeclParams dataDecl
           paramNames = P.typeParamNames params
       ensureDistinctPlain ProgramDuplicateTypeParameter paramNames
-      dataIdentity <- lookupResolvedLocalTypeIdentity resolvedModule (P.dataDeclName dataDecl)
+      let dataSymbol = P.dataDeclName dataDecl
+          dataIdentity = resolvedSymbolIdentity dataSymbol
+          dataName0 = P.refDisplayName dataSymbol
       constructors0 <- zipWithM (toCtorInfo dataDecl dataIdentity) [0 ..] (P.dataDeclConstructors dataDecl)
       let ownerShapes =
             [ (constructorShapeFromInfo ctor) {constructorShapeOwnerTypeParams = params}
@@ -2928,48 +3087,51 @@ buildLocalDataInfo displayEnv resolvedModule mod0 = do
               | ctor <- constructors0
             ]
       pure
-        ( P.dataDeclName dataDecl,
+        ( dataName0,
           DataInfo
-            { dataName = P.dataDeclName dataDecl,
-              dataInfoSymbol = dataIdentity,
-              dataModule = P.moduleName mod0,
+            { dataInfoSymbol = dataIdentity,
               dataTypeParams = params,
-              dataParams = paramNames,
               dataConstructors = constructors
             }
         )
 
     toCtorInfo dataDecl dataIdentity index ctorDecl = do
-      ctorIdentity <-
-        lookupResolvedLocalValueIdentity
-          resolvedModule
-          SymbolConstructor
-          (Just (SymbolOwnerType (P.moduleName mod0) (P.dataDeclName dataDecl)))
-          (P.constructorDeclName ctorDecl)
+      let ctorSymbol = P.constructorDeclName ctorDecl
+          ctorIdentity = resolvedSymbolIdentity ctorSymbol
       validateConstructorResult dataIdentity dataDecl ctorDecl (constructorResolvedResult (P.constructorDeclType ctorDecl))
       ctorType0 <- displaySrcTypeForResolved displayEnv (P.constructorDeclType ctorDecl)
-      let (foralls, ctorBody) = splitForalls ctorType0
+      let ctorTypeIdentity0 = resolvedSrcTypeIdentityType (P.constructorDeclType ctorDecl)
+          ctorForallBinderIdentities0 = constructorForallBinderIdentities (P.constructorDeclType ctorDecl)
+          (foralls, ctorBody) = splitForalls ctorType0
           (args0, result0) = splitArrows ctorBody
       pure
         ConstructorInfo
-          { ctorName = P.constructorDeclName ctorDecl,
-            ctorInfoSymbol = ctorIdentity,
-            ctorRuntimeName = qualify (P.moduleName mod0) (P.constructorDeclName ctorDecl),
+          { ctorInfoSymbol = ctorIdentity,
+            ctorRuntimeName = qualify (symbolDefiningModule ctorIdentity) (symbolDefiningName ctorIdentity),
             ctorType = ctorType0,
+            ctorTypeIdentity = ctorTypeIdentity0,
             ctorForalls = foralls,
+            ctorForallBinderIdentities = ctorForallBinderIdentities0,
             ctorArgs = args0,
             ctorResult = result0,
-            ctorOwningType = P.dataDeclName dataDecl,
             ctorOwningTypeIdentity = dataIdentity,
             ctorIndex = index,
             ctorOwnerConstructors = []
           }
 
+    constructorForallBinderIdentities :: ResolvedSrcType -> [Maybe TypeBinderIdentity]
+    constructorForallBinderIdentities ty =
+      case ty of
+        RSTForall ref _ body ->
+          Just (typeBinderIdentityFromUnique (resolvedTypeBinderIdentity ref))
+            : constructorForallBinderIdentities body
+        _ -> []
+
     validateConstructorResult :: SymbolIdentity -> P.ResolvedDataDecl -> P.ResolvedConstructorDecl -> ResolvedSrcType -> TcM ()
     validateConstructorResult dataIdentity dataDecl ctorDecl resultTy =
-      let owner = P.dataDeclName dataDecl
+      let owner = P.dataDeclDisplayName dataDecl
           params = P.typeParamNames (P.dataDeclParams dataDecl)
-          invalid = throwError (ProgramInvalidConstructorResult (P.constructorDeclName ctorDecl) (resolvedSrcTypeToSrcType resultTy) owner)
+          invalid = throwError (ProgramInvalidConstructorResult (P.refDisplayName (P.constructorDeclName ctorDecl)) (resolvedSrcTypeToSrcType resultTy) owner)
        in case constructorResultHead resultTy of
             Just (symbol, argCount)
               | resolvedSymbolIdentity symbol == dataIdentity && argCount == length params -> pure ()
@@ -3000,69 +3162,64 @@ buildLocalDataInfo displayEnv resolvedModule mod0 = do
            in (dom : args, result)
         _ -> ([], resultTy)
 
-buildLocalClassInfo :: DisplayNameEnv -> ResolvedSemanticModule -> P.ResolvedModuleSyntax -> TcM (Map String ClassInfo)
-buildLocalClassInfo displayEnv resolvedModule mod0 = do
+buildLocalClassInfo :: DisplayNameEnv -> P.ResolvedModuleSyntax -> TcM (Map String ClassInfo)
+buildLocalClassInfo displayEnv mod0 = do
   let classDecls = moduleClassDecls mod0
-  ensureDistinctBy ProgramDuplicateClass P.classDeclName classDecls
+  ensureDistinctBy ProgramDuplicateClass P.classDeclDisplayName classDecls
   pure . Map.fromList =<< mapM toClassInfo classDecls
   where
     toClassInfo classDecl = do
-      ensureDistinctBy ProgramDuplicateMethod P.methodSigName (P.classDeclMethods classDecl)
-      resolvedClassIdentity <- lookupResolvedLocalClassIdentity resolvedModule (P.classDeclName classDecl)
-      let classParam = P.classDeclParam classDecl
-          classParamName0 = P.typeParamName classParam
+      ensureDistinctBy ProgramDuplicateMethod P.methodSigDisplayName (P.classDeclMethods classDecl)
+      let classSymbol = P.classDeclName classDecl
+          classIdentity0 = resolvedSymbolIdentity classSymbol
+          className0 = P.refDisplayName classSymbol
           classParams = P.classDeclParams classDecl
           classParamNames0 = fmap P.typeParamName classParams
+          classParamIdentityNames0 = fmap P.typeParamIdentityName classParams
+          classParamBinderIdentities0 = fmap typeParamBinderIdentity classParams
       ensureDistinctPlain ProgramDuplicateTypeParameter (NE.toList classParamNames0)
-      validateFunctionalDependencies (P.classDeclName classDecl) classParamNames0 (P.classDeclFundeps classDecl)
+      validateFunctionalDependencies className0 classParamNames0 (P.classDeclFundeps classDecl)
+      fundeps0 <- mapM (functionalDependencyInfo className0 classParams) (P.classDeclFundeps classDecl)
       superclasses0 <- mapM (displayClassConstraintForResolved displayEnv) (P.classDeclSuperclasses classDecl)
       superclassInfos0 <- mapM (constraintInfoForDisplayEnv displayEnv) (P.classDeclSuperclasses classDecl)
-      methods <-
-        Map.fromList
-          <$> forM
-            (P.classDeclMethods classDecl)
-            ( \sig -> do
-                methodIdentity <-
-                  lookupResolvedLocalValueIdentity
-                    resolvedModule
-                    SymbolMethod
-                    (Just (SymbolOwnerClass (P.moduleName mod0) (P.classDeclName classDecl)))
-                    (P.methodSigName sig)
-                methodSigType0 <- displayConstrainedTypeForResolved displayEnv (P.methodSigType sig)
-                methodConstraintInfos0 <- mapM (constraintInfoForDisplayEnv displayEnv) (P.constrainedConstraints (P.methodSigType sig))
-                pure
-                  ( P.methodSigName sig,
+      methodEntries <-
+        forM
+          (P.classDeclMethods classDecl)
+          ( \sig -> do
+              let methodSymbol = P.methodSigName sig
+                  methodIdentity = resolvedSymbolIdentity methodSymbol
+                  methodName0 = P.refDisplayName methodSymbol
+              methodSigType0 <- displayConstrainedTypeForResolved displayEnv (P.methodSigType sig)
+              methodConstraintInfos0 <- mapM (constraintInfoForDisplayEnv displayEnv) (P.constrainedConstraints (P.methodSigType sig))
+              let methodBodyView = typeViewFromResolved (P.constrainedBody (P.methodSigType sig))
+                  methodInfo =
                     MethodInfo
-                      { methodClassName = P.classDeclName classDecl,
-                        methodInfoSymbol = methodIdentity,
-                        methodClassModule = P.moduleName mod0,
-                        methodName = P.methodSigName sig,
-                        methodRuntimeBase = qualify (P.moduleName mod0) (P.classDeclName classDecl ++ "__" ++ P.methodSigName sig),
+                      { methodInfoSymbol = methodIdentity,
                         methodType = P.constrainedBody methodSigType0,
-                        methodTypeIdentity = resolvedSrcTypeIdentityType (P.constrainedBody (P.methodSigType sig)),
+                        methodTypeIdentity = typeViewIdentity methodBodyView,
+                        methodTypeBinderIdentities = typeViewBinderIdentities methodBodyView,
                         methodConstraints = P.constrainedConstraints methodSigType0,
                         methodConstraintInfos = methodConstraintInfos0,
-                        methodTypeParam = classParam,
-                        methodParamName = classParamName0,
-                        methodTypeParams = classParams,
-                        methodParamNames = classParamNames0
+                        methodParamNames = classParamNames0,
+                        methodParamIdentityNames = classParamIdentityNames0,
+                        methodParamBinderIdentities = classParamBinderIdentities0
                       }
-                  )
-            )
+              pure (methodName0, methodInfo)
+          )
+      let methodsByIdentity =
+            Map.fromList
+              [ (methodInfoSymbolIdentity methodInfo, methodInfo)
+              | (_, methodInfo) <- methodEntries
+              ]
       pure
-        ( P.classDeclName classDecl,
+        ( className0,
           ClassInfo
-            { className = P.classDeclName classDecl,
-              classInfoSymbol = resolvedClassIdentity,
-              classModule = P.moduleName mod0,
-              classTypeParam = classParam,
-              classParamName = classParamName0,
+            { classInfoSymbol = classIdentity0,
               classTypeParams = classParams,
-              classParamNames = classParamNames0,
               classSuperclasses = superclasses0,
               classSuperclassInfos = superclassInfos0,
-              classFunctionalDependencies = P.classDeclFundeps classDecl,
-              classMethods = methods
+              classFunctionalDependencies = fundeps0,
+              classMethodsByIdentity = methodsByIdentity
             }
         )
 
@@ -3087,6 +3244,24 @@ validateFunctionalDependencies className0 paramNames fundeps =
             dup : _ -> Just dup
             [] -> Nothing
 
+functionalDependencyInfo :: P.ClassName -> NonEmpty P.TypeParam -> P.FunctionalDependency -> TcM FunctionalDependencyInfo
+functionalDependencyInfo className0 params fundep =
+  FunctionalDependencyInfo
+    <$> traverse lookupParam (P.fundepDeterminers fundep)
+    <*> traverse lookupParam (P.fundepDetermined fundep)
+  where
+    paramRefs =
+      Map.fromList
+        [ (P.typeParamName param, identity)
+        | param <- NE.toList params,
+          Just identity <- [typeParamBinderIdentity param]
+        ]
+
+    lookupParam name =
+      case Map.lookup name paramRefs of
+        Just identity -> pure identity
+        Nothing -> throwError (ProgramInvalidFunctionalDependency className0 name)
+
 validateLocalClassMethodConstraints :: Scope -> P.ResolvedModuleSyntax -> TcM ()
 validateLocalClassMethodConstraints scope mod0 =
   mapM_ validateClassDecl (moduleClassDecls mod0)
@@ -3106,14 +3281,17 @@ validateResolvedClassConstraintClasses scope =
     _ <- lookupClassInfoBySymbol scope (P.constraintClassName constraint)
     pure ()
 
-buildLocalDefInfo :: DisplayNameEnv -> ResolvedSemanticModule -> P.ResolvedModuleSyntax -> TcM (Map String ValueInfo)
-buildLocalDefInfo displayEnv resolvedModule mod0 = do
+buildLocalDefInfo :: DisplayNameEnv -> P.ResolvedModuleSyntax -> TcM (Map String ValueInfo)
+buildLocalDefInfo displayEnv mod0 = do
   let defs = moduleDefDecls mod0
-  ensureDistinctBy ProgramDuplicateValue P.defDeclName defs
+  ensureDistinctBy ProgramDuplicateValue (P.refDisplayName . P.defDeclName) defs
   Map.fromList <$> mapM toValueInfo defs
   where
     toValueInfo defDecl = do
-      valueIdentity <- lookupResolvedLocalValueIdentity resolvedModule SymbolValue Nothing (P.defDeclName defDecl)
+      let defSymbol = P.defDeclName defDecl
+          defName = P.refDisplayName defSymbol
+          valueIdentity = resolvedSymbolIdentity defSymbol
+          valueIdentityName = symbolDefiningName valueIdentity
       defType0 <- displayConstrainedTypeForResolved displayEnv (P.defDeclType defDecl)
       defConstraintInfos0 <- mapM (constraintInfoForDisplayEnv displayEnv) (P.constrainedConstraints (P.defDeclType defDecl))
       let defIdentityType0 =
@@ -3122,44 +3300,46 @@ buildLocalDefInfo displayEnv resolvedModule mod0 = do
                 (map displayConstraint defConstraintInfos0)
                 (resolvedSrcTypeIdentityType (P.constrainedBody (P.defDeclType defDecl)))
       pure
-        ( P.defDeclName defDecl,
+        ( defName,
           OrdinaryValue
-            { valueDisplayName = P.defDeclName defDecl,
-              valueInfoSymbol = valueIdentity,
-              valueRuntimeName = qualify (P.moduleName mod0) (P.defDeclName defDecl),
+            { valueInfoSymbol = valueIdentity,
+              valueRuntimeName = qualify (symbolDefiningModule valueIdentity) valueIdentityName,
               valueType = constrainedVisibleType defType0,
               valueIdentityType = defIdentityType0,
               valueConstraints = P.constrainedConstraints defType0,
-              valueConstraintInfos = defConstraintInfos0,
-              valueOriginModule = P.moduleName mod0
+              valueConstraintInfos = defConstraintInfos0
             }
         )
 
-addConstructorValues :: P.ModuleName -> Map String DataInfo -> TcM (Map String ValueInfo)
-addConstructorValues moduleName0 dataInfos =
+addConstructorValues :: Map String DataInfo -> TcM (Map String ValueInfo)
+addConstructorValues dataInfos =
   pure $
     Map.fromList
       [ ( ctorName ctor,
           ConstructorValue
-            { valueDisplayName = ctorName ctor,
-              valueInfoSymbol = constructorInfoSymbolIdentity dataInfo ctor,
+            { valueInfoSymbol = constructorInfoSymbolIdentity dataInfo ctor,
               valueRuntimeName = ctorRuntimeName ctor,
               valueType = ctorType ctor,
-              valueCtorInfo = ctor,
-              valueOriginModule = moduleName0
+              valueIdentityType = ctorTypeIdentity ctor,
+              valueCtorInfo = ctor
             }
         )
         | dataInfo <- Map.elems dataInfos,
           ctor <- dataConstructors dataInfo
       ]
 
-synthesizeDerivedInstances :: DisplayNameEnv -> Scope -> ResolvedSemanticModule -> P.ResolvedModuleSyntax -> TcM [P.ResolvedInstanceDecl]
-synthesizeDerivedInstances displayEnv scope resolvedModule mod0 = do
+synthesizeDerivedInstances ::
+  SymbolIdentity ->
+  DisplayNameEnv ->
+  Scope ->
+  P.ResolvedModuleSyntax ->
+  TcM [P.ResolvedInstanceDecl]
+synthesizeDerivedInstances moduleIdentity _displayEnv scope mod0 = do
   candidates <- concat <$> mapM deriveForData (moduleDataDecls mod0)
   let pendingInstances = map (\(_, _, classInfo, instDecl) -> pendingDerivedInstance classInfo instDecl) candidates
       validationScope = withScopeInstances (scopeInstances scope ++ pendingInstances) scope
   mapM_
-    (\(_, displayDataDecl, classInfo, _) -> validateEqDerivingFields classInfo validationScope displayDataDecl)
+    (\(resolvedDataDecl, displayDataDecl, classInfo, _) -> validateEqDerivingFields classInfo validationScope resolvedDataDecl displayDataDecl)
     candidates
   pure [instDecl | (_, _, _, instDecl) <- candidates]
   where
@@ -3167,7 +3347,7 @@ synthesizeDerivedInstances displayEnv scope resolvedModule mod0 = do
       displayDataDecl <- resolvedDataDeclForEnv dataDecl
       forM (P.dataDeclDeriving dataDecl) $ \classSymbol -> do
         classInfo <- lookupClassInfoBySymbol scope classSymbol
-        if symbolDefiningName (classInfoSymbolIdentity classInfo) == "Eq"
+        if classInfoIdentityName classInfo == "Eq"
           then
             case eqMethodReference classInfo of
               Just eqMethodSymbol -> do
@@ -3177,19 +3357,14 @@ synthesizeDerivedInstances displayEnv scope resolvedModule mod0 = do
           else throwError (ProgramUnsupportedDeriving (resolvedSymbolDisplayName classSymbol))
 
     eqMethodReference classInfo =
-      toResolvedValueSymbol . snd <$> find matchesEqMethod (Map.toList (scopeValues scope))
+      methodSymbol <$> find ((== "eq") . methodInfoIdentityName) (Map.elems (classMethodsByIdentity classInfo))
       where
-        matchesEqMethod (_, OverloadedMethod {valueMethodInfo = methodInfo}) =
-          methodInfoOwnerClassSymbolIdentity methodInfo == classInfoSymbolIdentity classInfo
-            && methodName methodInfo == "eq"
-        matchesEqMethod _ = False
-
-    toResolvedValueSymbol valueInfo =
-      mkResolvedSymbol
-        (valueInfoSymbolIdentity valueInfo)
-        (valueDisplayName valueInfo)
-        (valueDisplayName valueInfo)
-        (SymbolLocal (valueOriginModule valueInfo))
+        methodSymbol methodInfo =
+          mkResolvedSymbol
+            (methodInfoSymbolIdentity methodInfo)
+            (methodInfoIdentityName methodInfo)
+            (methodName methodInfo)
+            (SymbolLocal (classInfoIdentityModule classInfo))
 
     pendingDerivedInstance classInfo instDecl =
       let headTy = resolvedSrcTypeToSrcType (P.instanceDeclType instDecl)
@@ -3198,44 +3373,33 @@ synthesizeDerivedInstances displayEnv scope resolvedModule mod0 = do
             [ ConstraintInfo
                 { constraintDisplayClass = className classInfo,
                   constraintClassSymbol = classInfoSymbolIdentity classInfo,
-                  constraintTypeView =
-                    TypeView
-                      { typeViewDisplay = resolvedSrcTypeToSrcType (P.constraintType constraint),
-                        typeViewIdentity = resolvedSrcTypeIdentityType (P.constraintType constraint)
-                      },
                   constraintTypeViews =
                     fmap
                       ( \constraintTy ->
-                          TypeView
-                            { typeViewDisplay = resolvedSrcTypeToSrcType constraintTy,
-                              typeViewIdentity = resolvedSrcTypeIdentityType constraintTy
-                            }
+                          typeViewFromResolved constraintTy
                       )
                       (P.constraintTypes constraint)
                 }
               | constraint <- P.instanceDeclConstraints instDecl
             ]
        in InstanceInfo
-        { instanceClassName = className classInfo,
-          instanceClassSymbol = classInfoSymbolIdentity classInfo,
-          instanceClassModule = classModule classInfo,
-          instanceOriginModule = P.moduleName mod0,
+        { instanceClassSymbol = classInfoSymbolIdentity classInfo,
+          instanceOriginModuleIdentity = moduleIdentity,
           instanceConstraints = map displayConstraint constraintInfos,
           instanceConstraintInfos = constraintInfos,
-          instanceHeadType = headTy,
-          instanceHeadIdentityType = headIdentityTy,
           instanceHeadTypes = headTy :| [],
           instanceHeadIdentityTypes = headIdentityTy :| [],
-          instanceMethods = Map.empty
+          instanceMethodsByIdentity = Map.empty
         }
 
+    resolvedDataDeclForEnv :: P.ResolvedDataDecl -> TcM P.DataDecl
     resolvedDataDeclForEnv dataDecl = do
       constructors <-
         forM (P.dataDeclConstructors dataDecl) $ \ctor ->
-          P.ConstructorDecl (P.constructorDeclName ctor) <$> displaySrcTypeForResolved displayEnv (P.constructorDeclType ctor)
+          pure (P.ConstructorDecl (P.refDisplayName (P.constructorDeclName ctor)) (resolvedSrcTypeToSrcType (P.constructorDeclType ctor)))
       pure
         P.DataDecl
-          { P.dataDeclName = P.dataDeclName dataDecl,
+          { P.dataDeclName = P.dataDeclDisplayName dataDecl,
             P.dataDeclParams = P.dataDeclParams dataDecl,
             P.dataDeclConstructors = constructors,
             P.dataDeclDeriving = map resolvedSymbolDisplayName (P.dataDeclDeriving dataDecl)
@@ -3244,11 +3408,13 @@ synthesizeDerivedInstances displayEnv scope resolvedModule mod0 = do
     constructorFieldTypes ctor =
       fst (splitArrows (snd (splitForalls (P.constructorDeclType ctor))))
 
-    validateEqDerivingFields :: ClassInfo -> Scope -> P.DataDecl -> TcM ()
-    validateEqDerivingFields eqClassInfo validationScope dataDecl =
-      mapM_ (validateEqDerivingField eqClassInfo validationScope dataDecl) (concatMap constructorFieldTypes (P.dataDeclConstructors dataDecl))
+    validateEqDerivingFields :: ClassInfo -> Scope -> P.ResolvedDataDecl -> P.DataDecl -> TcM ()
+    validateEqDerivingFields eqClassInfo validationScope resolvedDataDecl displayDataDecl =
+      mapM_
+        (validateEqDerivingField eqClassInfo validationScope displayDataDecl)
+        (concatMap (resolvedConstructorFieldTypes . P.constructorDeclType) (P.dataDeclConstructors resolvedDataDecl))
 
-    validateEqDerivingField :: ClassInfo -> Scope -> P.DataDecl -> SrcType -> TcM ()
+    validateEqDerivingField :: ClassInfo -> Scope -> P.DataDecl -> ResolvedSrcType -> TcM ()
     validateEqDerivingField eqClassInfo validationScope dataDecl fieldTy
       | constraintTypeSatisfiable
           (classInfoSymbolIdentity eqClassInfo)
@@ -3258,13 +3424,13 @@ synthesizeDerivedInstances displayEnv scope resolvedModule mod0 = do
           Set.empty
           (classInfoSymbolIdentity eqClassInfo)
           (className eqClassInfo)
-          (sourceTypeViewInScope (scopeToElaborateScope validationScope) fieldTy) =
+          (typeViewFromResolved fieldTy) =
           pure ()
-      | otherwise = throwError (ProgramDerivingMissingFieldInstance (className eqClassInfo) fieldTy)
+      | otherwise = throwError (ProgramDerivingMissingFieldInstance (className eqClassInfo) (resolvedSrcTypeToSrcType fieldTy))
 
     constraintTypeSatisfiable :: ClassIdentity -> P.ClassName -> Scope -> P.DataDecl -> Set.Set (ClassIdentity, String) -> ClassIdentity -> P.ClassName -> TypeView -> Bool
     constraintTypeSatisfiable derivedClassIdentity derivedClassName validationScope dataDecl seen classIdentity0 className0 fieldView
-      | classIdentity0 == derivedClassIdentity && fieldCoveredByDerivedConstraints dataDecl (typeViewDisplay fieldView) = True
+      | classIdentity0 == derivedClassIdentity && fieldCoveredByDerivedConstraints dataDecl fieldView = True
       | key `Set.member` seen = False
       | otherwise =
           case resolveInstanceInfoWithIdentityType elaborateScope classIdentity0 className0 fieldView of
@@ -3290,10 +3456,12 @@ synthesizeDerivedInstances displayEnv scope resolvedModule mod0 = do
         (constraintDisplayClass constraint)
         (constraintTypeView constraint)
 
-    fieldCoveredByDerivedConstraints dataDecl fieldTy =
-      case fieldTy of
-        STVar name -> name `elem` P.typeParamNames (P.dataDeclParams dataDecl)
-        _ -> isRecursiveOwnerField dataDecl fieldTy
+    fieldCoveredByDerivedConstraints dataDecl fieldView =
+      case typeViewIdentity fieldView of
+        STVar name -> name `elem` map P.typeParamIdentityName (P.dataDeclParams dataDecl)
+        _ ->
+          isRecursiveOwnerField dataDecl (typeViewDisplay fieldView)
+            || isRecursiveOwnerField dataDecl (typeViewIdentity fieldView)
 
     derivedConstraintParams dataDecl =
       let params = Set.fromList (P.typeParamNames (P.dataDeclParams dataDecl))
@@ -3322,78 +3490,110 @@ synthesizeDerivedInstances displayEnv scope resolvedModule mod0 = do
     scopeToElaborateScope scope0 =
       mkElaborateScope (scopeValues scope0) (scopeElaborateTypes scope0) (scopeClasses scope0) (scopeInstances scope0)
 
-    mkEqInstance classSymbol classInfo eqMethodSymbol resolvedDataDecl displayDataDecl = do
-      dataSymbol <-
-        uniqueResolvedLocalSymbol
-          ProgramDuplicateType
-          (P.dataDeclName resolvedDataDecl)
-          (resolvedLocalTypes (resolvedSemanticModuleLocalSymbols resolvedModule))
+    mkEqInstance classSymbol _classInfo eqMethodSymbol resolvedDataDecl displayDataDecl = do
+      let dataSymbol = P.dataDeclName resolvedDataDecl
+          dataName0 = symbolDefiningName (resolvedSymbolIdentity dataSymbol)
+          andSymbol = Builtins.builtinValueSymbol "__mlfp_and"
       boolSymbol <- pure (Builtins.builtinTypeSymbol "Bool")
-      andSymbol <- valueSymbolForName "__mlfp_and"
+      paramRefs <- traverse resolvedDataParamRef (P.dataDeclParams resolvedDataDecl)
       ctorEntries <-
         forM (P.dataDeclConstructors resolvedDataDecl) $ \ctor -> do
-          ctorSymbol <-
-            lookupResolvedLocalValueSymbol
-              resolvedModule
-              SymbolConstructor
-              (Just (SymbolOwnerType (P.moduleName mod0) (P.dataDeclName resolvedDataDecl)))
-              (P.constructorDeclName ctor)
-          ctorTy <- displaySrcTypeForResolved displayEnv (P.constructorDeclType ctor)
-          let argTypes = fst (splitArrows (snd (splitForalls ctorTy)))
+          let ctorSymbol = P.constructorDeclName ctor
+              argTypes = resolvedConstructorFieldTypes (P.constructorDeclType ctor)
           pure (ctor, ctorSymbol, argTypes)
-      let headTy = dataDeclHeadResolvedType dataSymbol resolvedDataDecl
-          headDisplayTy = dataDeclHeadType displayDataDecl
-          eqClassName = className classInfo
-          left = P.Param "left" (Just headTy)
-          right = P.Param "right" (Just headTy)
-          selfName = "__derived_eq_" ++ P.dataDeclName resolvedDataDecl
+      let deriveGen0 =
+            identityGeneratorAfter
+              ( concatMap resolvedTypeBinderGeneratedIdentities paramRefs
+                  ++ resolvedDeclGeneratedIdentities (P.DeclData resolvedDataDecl)
+              )
+          derivedConstraintParamNames = Set.fromList (derivedConstraintParams displayDataDecl)
+          headTy = dataDeclHeadResolvedType dataSymbol paramRefs
+          (leftRef, deriveGen1) = freshLocalRef "left" deriveGen0
+          (rightRef, deriveGen2) = freshLocalRef "right" deriveGen1
+          left = P.Param leftRef (Just headTy)
+          right = P.Param rightRef (Just headTy)
+          selfName = "__derived_eq_" ++ dataName0
+          (selfRef, deriveGen3) = freshLocalRef selfName deriveGen2
+          (recursiveBody, _) =
+            deriveEqBody
+              eqMethodSymbol
+              andSymbol
+              displayDataDecl
+              ctorEntries
+              leftRef
+              rightRef
+              (Just selfRef)
+              deriveGen3
+          (nonRecursiveBody, _) =
+            deriveEqBody
+              eqMethodSymbol
+              andSymbol
+              displayDataDecl
+              ctorEntries
+              leftRef
+              rightRef
+              Nothing
+              deriveGen3
           methodBody =
             if hasRecursiveOwnerFields displayDataDecl
               then
                 P.ELet
-                  selfName
+                  selfRef
                   (Just (RSTArrow headTy (RSTArrow headTy (RSTBase boolSymbol))))
-                  (P.ELam left (P.ELam right (deriveEqBody eqClassName eqMethodSymbol andSymbol headDisplayTy displayDataDecl ctorEntries (Just selfName))))
-                  (P.EVar (P.ResolvedLocalValue selfName))
+                  (P.ELam left (P.ELam right recursiveBody))
+                  (P.EVar (P.ResolvedLocalValue selfRef))
               else
-                P.ELam left (P.ELam right (deriveEqBody eqClassName eqMethodSymbol andSymbol headDisplayTy displayDataDecl ctorEntries Nothing))
+                P.ELam left (P.ELam right nonRecursiveBody)
       pure
         P.InstanceDecl
             { P.instanceDeclClass = classSymbol,
               P.instanceDeclConstraints =
                 [ P.ClassConstraint
                     { P.constraintClassName = classSymbol,
-                      P.constraintTypes = RSTVar paramName :| []
+                      P.constraintTypes = RSTVar paramRef :| []
                     }
-                  | paramName <- derivedConstraintParams displayDataDecl
+                  | paramRef <- paramRefs,
+                    resolvedSrcTypeBinderName paramRef `Set.member` derivedConstraintParamNames
                 ],
               P.instanceDeclTypes = headTy :| [],
-              P.instanceDeclMethods = [P.MethodDef "eq" methodBody]
+              P.instanceDeclMethods = [P.MethodDef eqMethodSymbol methodBody]
             }
+      where
+        resolvedDataParamRef :: P.TypeParam -> TcM ResolvedTypeBinderRef
+        resolvedDataParamRef param =
+          case P.typeParamRef param of
+            Just ref -> pure ref
+            Nothing ->
+              throwError $
+                ProgramPipelineError
+                  ("resolved data parameter `" ++ P.typeParamName param ++ "` is missing identity")
 
     hasRecursiveOwnerFields dataDecl =
       any (isRecursiveOwnerField dataDecl) (concatMap constructorFieldTypes (P.dataDeclConstructors dataDecl))
 
-    deriveEqBody eqClassName eqMethodSymbol andSymbol headTy dataDecl ctorEntries mbSelfName =
-      P.ECase
-        (P.EVar (P.ResolvedLocalValue "left"))
-        [ P.Alt
-            (P.PatCtor ctorSymbol (map P.PatVar leftNames))
-            (P.ECase (P.EVar (P.ResolvedLocalValue "right")) (matchingAlt ctor ctorSymbol argTypes leftNames : mismatchAlts ctor))
-          | (ctor, ctorSymbol, argTypes) <- ctorEntries,
-            let leftNames = ["l" ++ show i | i <- [1 .. length argTypes]]
-        ]
+    deriveEqBody eqMethodSymbol andSymbol dataDecl ctorEntries leftRef rightRef mbSelfRef generator0 =
+      let (alts, generator1) = deriveCtorAlts generator0 ctorEntries
+       in (P.ECase (P.EVar (P.ResolvedLocalValue leftRef)) alts, generator1)
       where
-        recursiveEqName = qualify (P.moduleName mod0) (renderInstanceName eqClassName headTy "eq")
+        deriveCtorAlts generator [] = ([], generator)
+        deriveCtorAlts generator ((ctor, ctorSymbol, argTypes) : rest) =
+          let fieldNames prefix = [prefix ++ show i | i <- [1 .. length argTypes]]
+              (leftRefs, generator1) = freshLocalRefs (fieldNames "l") generator
+              (rightRefs, generator2) = freshLocalRefs (fieldNames "r") generator1
+              alt =
+                P.Alt
+                  (P.PatCtor ctorSymbol (map P.PatVar leftRefs))
+                  (P.ECase (P.EVar (P.ResolvedLocalValue rightRef)) (matchingAlt ctor ctorSymbol argTypes leftRefs rightRefs : mismatchAlts ctor))
+              (restAlts, generator3) = deriveCtorAlts generator2 rest
+           in (alt : restAlts, generator3)
 
-        matchingAlt _ ctorSymbol argTypes leftNames =
-          let rightNames = ["r" ++ show i | i <- [1 .. length leftNames]]
-           in P.Alt (P.PatCtor ctorSymbol (map P.PatVar rightNames)) (foldEqCalls (zip3 argTypes leftNames rightNames))
+        matchingAlt _ ctorSymbol argTypes leftRefs rightRefs =
+          P.Alt (P.PatCtor ctorSymbol (map P.PatVar rightRefs)) (foldEqCalls (zip3 argTypes leftRefs rightRefs))
 
         mismatchAlts ctor =
           [ P.Alt (P.PatCtor otherSymbol [P.PatWildcard | _ <- otherArgTypes]) (P.ELit (LBool False))
             | (other, otherSymbol, otherArgTypes) <- ctorEntries,
-              P.constructorDeclName other /= P.constructorDeclName ctor
+              resolvedSymbolIdentity (P.constructorDeclName other) /= resolvedSymbolIdentity (P.constructorDeclName ctor)
           ]
 
         foldEqCalls [] = P.ELit (LBool True)
@@ -3404,14 +3604,25 @@ synthesizeDerivedInstances displayEnv scope resolvedModule mod0 = do
             (foldEqCalls rest)
 
         eqCall argTy l r =
-          let eqRef =
-                case mbSelfName of
-                  Just selfName | isRecursiveOwnerField dataDecl argTy -> P.ResolvedLocalValue selfName
-                  _ ->
-                    if isRecursiveOwnerField dataDecl argTy
-                      then P.ResolvedLocalValue recursiveEqName
-                      else P.ResolvedGlobalValue eqMethodSymbol
-           in P.EApp (P.EApp (P.EVar eqRef) (P.EVar (P.ResolvedLocalValue l))) (P.EVar (P.ResolvedLocalValue r))
+          let (eqRef, annotateArgs) =
+                case mbSelfRef of
+                  Just selfRef | isRecursiveOwnerField dataDecl (resolvedSrcTypeToSrcType argTy) -> (P.ResolvedLocalValue selfRef, False)
+                  _ -> (P.ResolvedGlobalValue eqMethodSymbol, True)
+              field ref =
+                let var = P.EVar (P.ResolvedLocalValue ref)
+                 in if annotateArgs then P.EAnn var argTy else var
+              left = field l
+              right = field r
+           in P.EApp (P.EApp (P.EVar eqRef) left) right
+
+        freshLocalRefs :: [String] -> IdentityGenerator -> ([LocalRef], IdentityGenerator)
+        freshLocalRefs names generator =
+          case names of
+            [] -> ([], generator)
+            name : rest ->
+              let (ref, generator1) = freshLocalRef name generator
+                  (refs, generator2) = freshLocalRefs rest generator1
+               in (ref : refs, generator2)
 
     isRecursiveOwnerField dataDecl argTy =
       argTy == dataDeclHeadType dataDecl
@@ -3421,20 +3632,33 @@ synthesizeDerivedInstances displayEnv scope resolvedModule mod0 = do
         [] -> STBase (P.dataDeclName dataDecl)
         param0 : paramsRest -> STCon (P.dataDeclName dataDecl) (STVar param0 :| map STVar paramsRest)
 
-    dataDeclHeadResolvedType dataSymbol dataDecl =
-      case P.typeParamNames (P.dataDeclParams dataDecl) of
+    dataDeclHeadResolvedType dataSymbol paramRefs =
+      case paramRefs of
         [] -> RSTBase dataSymbol
         param0 : paramsRest -> RSTCon dataSymbol (RSTVar param0 :| map RSTVar paramsRest)
 
-    valueSymbolForName name =
-      case Map.lookup name (scopeValues scope) of
-        Just valueInfo -> pure (toResolvedValueSymbol valueInfo)
-        Nothing -> throwError (ProgramUnknownValue name)
+    resolvedConstructorFieldTypes ty =
+      fst (splitResolvedArrows (stripResolvedForalls ty))
 
-buildInstanceSkeletons :: DisplayNameEnv -> Scope -> P.ResolvedModuleSyntax -> [P.ResolvedInstanceDecl] -> TcM [InstanceInfo]
-buildInstanceSkeletons displayEnv scope mod0 derived = do
+    stripResolvedForalls (RSTForall _ _ body) = stripResolvedForalls body
+    stripResolvedForalls ty = ty
+
+    splitResolvedArrows (RSTArrow dom cod) =
+      let (args, result) = splitResolvedArrows cod
+       in (dom : args, result)
+    splitResolvedArrows ty = ([], ty)
+
+buildInstanceSkeletons ::
+  SymbolIdentity ->
+  IdentityGenerator ->
+  DisplayNameEnv ->
+  Scope ->
+  P.ResolvedModuleSyntax ->
+  [P.ResolvedInstanceDecl] ->
+  TcM ([InstanceInfo], IdentityGenerator)
+buildInstanceSkeletons moduleIdentity generator0 displayEnv scope mod0 derived = do
   let instances0 = derived ++ explicitInstances mod0
-  infos <- mapM toInstanceInfo instances0
+  (infos, generator1) <- buildInstanceInfos generator0 instances0
   case duplicateLocalInstances infos of
     info : _ -> throwError (duplicateInstanceError info)
     [] -> pure ()
@@ -3456,19 +3680,24 @@ buildInstanceSkeletons displayEnv scope mod0 derived = do
     (left, right) : _ ->
       throwError (overlappingInstanceError left right)
     [] -> pure ()
-  pure infos
+  pure (infos, generator1)
   where
-    toInstanceInfo instDecl = do
+    buildInstanceInfos generator [] =
+      pure ([], generator)
+    buildInstanceInfos generator (instDecl : rest) = do
+      (info, generator1) <- toInstanceInfo generator instDecl
+      (infos, generator2) <- buildInstanceInfos generator1 rest
+      pure (info : infos, generator2)
+
+    toInstanceInfo generator0' instDecl = do
       classInfo <- lookupClassInfoBySymbol scope (P.instanceDeclClass instDecl)
       instanceClassName0 <- displayClassName displayEnv (P.instanceDeclClass instDecl)
       validateResolvedClassConstraintClasses scope (P.instanceDeclConstraints instDecl)
       let instanceHeadTysResolved = P.instanceDeclTypes instDecl
       validateClassApplicationArity classInfo (length instanceHeadTysResolved)
       instanceHeadTypes0 <- mapM (displaySrcTypeForResolved displayEnv) instanceHeadTysResolved
-      let instanceHeadType0 = NE.head instanceHeadTypes0
-          instanceHeadIdentityTypes0 = fmap resolvedSrcTypeIdentityType instanceHeadTysResolved
-          instanceHeadIdentityType0 = NE.head instanceHeadIdentityTypes0
-          instanceHeadViews0 = NE.zipWith TypeView instanceHeadTypes0 instanceHeadIdentityTypes0
+      let instanceHeadIdentityTypes0 = fmap resolvedSrcTypeIdentityType instanceHeadTysResolved
+          instanceHeadViews0 = fmap typeViewFromResolved instanceHeadTysResolved
       declaredInstanceConstraints0 <- mapM (displayClassConstraintForResolved displayEnv) (P.instanceDeclConstraints instDecl)
       declaredInstanceConstraintInfos0 <- mapM (constraintInfoForDisplayEnv displayEnv) (P.instanceDeclConstraints instDecl)
       let superclassConstraints0 =
@@ -3477,74 +3706,99 @@ buildInstanceSkeletons displayEnv scope mod0 derived = do
               (classSuperclasses classInfo)
           superclassConstraintInfos0 =
             map
-              (substituteConstraintInfoTypes (classParamNames classInfo) instanceHeadViews0)
+              (applyConstraintInfoSubst (typeViewSubstFromTypeParams (classTypeParams classInfo) instanceHeadViews0))
               (classSuperclassInfos classInfo)
           instanceConstraints0 = declaredInstanceConstraints0 ++ superclassConstraints0
           instanceConstraintInfos0 = declaredInstanceConstraintInfos0 ++ superclassConstraintInfos0
-      let methodMap = classMethods classInfo
-          expected = Map.keysSet methodMap
-          provided = Set.fromList (map P.methodDefName (P.instanceDeclMethods instDecl))
+      let methodMapByIdentity = classMethodsByIdentity classInfo
+          expected = Map.keysSet methodMapByIdentity
+          provided = Set.fromList (map (resolvedSymbolIdentity . P.methodDefName) (P.instanceDeclMethods instDecl))
       case Set.toList (expected Set.\\ provided) of
-        (missing : _) -> throwError (ProgramMissingInstanceMethod instanceClassName0 missing)
+        (missing : _) ->
+          case Map.lookup missing methodMapByIdentity of
+            Just methodInfo -> throwError (ProgramMissingInstanceMethod instanceClassName0 (methodName methodInfo))
+            Nothing -> throwError (ProgramMissingInstanceMethod instanceClassName0 (symbolDefiningName missing))
         [] -> pure ()
       case Set.toList (provided Set.\\ expected) of
-        (extra : _) -> throwError (ProgramUnexpectedInstanceMethod instanceClassName0 extra)
+        (extra : _) ->
+          let extraName =
+                case find ((== extra) . resolvedSymbolIdentity . P.methodDefName) (P.instanceDeclMethods instDecl) of
+                  Just methodDef -> P.refDisplayName (P.methodDefName methodDef)
+                  Nothing -> symbolDefiningName extra
+           in throwError (ProgramUnexpectedInstanceMethod instanceClassName0 extraName)
         [] -> pure ()
-      let instanceMethodInfos =
+      let buildInstanceMethodEntries generator [] =
+            pure ([], generator)
+          buildInstanceMethodEntries generator (methodDef : rest) = do
+            (entry, generator1') <- buildInstanceMethodEntry generator methodDef
+            (entries, generator2') <- buildInstanceMethodEntries generator1' rest
+            pure (entry : entries, generator2')
+
+          buildInstanceMethodEntry generator methodDef = do
+            methodInfo <-
+              case lookupClassMethod (P.methodDefName methodDef) classInfo of
+                Just info -> pure info
+                Nothing -> throwError (ProgramUnexpectedInstanceMethod instanceClassName0 (P.refDisplayName (P.methodDefName methodDef)))
+            let (methodIdentity, generator1') = freshIdentity generator
+                rawMethodType = specializeMethodTypes (methodType methodInfo) (classParamNames classInfo) instanceHeadTypes0
+                rawMethodIdentityType = specializeMethodTypes (methodTypeIdentity methodInfo) (methodParamIdentityNames methodInfo) instanceHeadIdentityTypes0
+                methodValueConstraints =
+                  declaredInstanceConstraints0
+                    ++ map
+                      (substituteConstraintTypes (classParamNames classInfo) instanceHeadTypes0)
+                      (methodConstraints methodInfo)
+                methodValueConstraintInfos =
+                  declaredInstanceConstraintInfos0
+                    ++ map
+                      (applyConstraintInfoSubst (typeViewSubstFromTypeParams (classTypeParams classInfo) instanceHeadViews0))
+                      (methodConstraintInfos methodInfo)
+                methodValueIdentityType =
+                  constrainedVisibleType $
+                    P.ConstrainedType
+                      (map displayConstraint methodValueConstraintInfos)
+                      rawMethodIdentityType
+                methodName0 = methodName methodInfo
+                methodRuntimeName =
+                  renderInstanceNameHead
+                    (classInfoIdentityName classInfo)
+                    instanceHeadIdentityTypes0
+                    (methodInfoIdentityName methodInfo)
+                methodValueIdentity =
+                  SymbolIdentity
+                    { symbolUniqueIdentity = methodIdentity,
+                      symbolNamespace = SymbolValue,
+                      symbolDefiningModule = P.moduleName mod0,
+                      symbolDefiningName = methodRuntimeName,
+                      symbolOwnerIdentity = Nothing
+                    }
+                methodValue =
+                  OrdinaryValue
+                    { valueInfoSymbol = methodValueIdentity,
+                      valueRuntimeName = qualify (symbolDefiningModule methodValueIdentity) methodRuntimeName,
+                      valueType = constrainedVisibleType (P.ConstrainedType methodValueConstraints rawMethodType),
+                      valueIdentityType = methodValueIdentityType,
+                      valueConstraints = methodValueConstraints,
+                      valueConstraintInfos = methodValueConstraintInfos
+                    }
+            pure ((methodName0, methodInfo, methodValue), generator1')
+      (instanceMethodEntries, generator1') <- buildInstanceMethodEntries generator0' (P.instanceDeclMethods instDecl)
+      let instanceMethodInfosByIdentity =
             Map.fromList
-              [ let methodInfo = methodMap Map.! P.methodDefName methodDef
-                    rawMethodType = specializeMethodTypes (methodType methodInfo) (classParamNames classInfo) instanceHeadTypes0
-                    rawMethodIdentityType = specializeMethodTypes (methodTypeIdentity methodInfo) (classParamNames classInfo) instanceHeadIdentityTypes0
-                    methodValueConstraints =
-                      declaredInstanceConstraints0
-                        ++ map
-                          (substituteConstraintTypes (classParamNames classInfo) instanceHeadTypes0)
-                          (methodConstraints methodInfo)
-                    methodValueConstraintInfos =
-                      declaredInstanceConstraintInfos0
-                        ++ map
-                          (substituteConstraintInfoTypes (classParamNames classInfo) instanceHeadViews0)
-                          (methodConstraintInfos methodInfo)
-                    methodValueIdentityType =
-                      constrainedVisibleType $
-                        P.ConstrainedType
-                          (map displayConstraint methodValueConstraintInfos)
-                          rawMethodIdentityType
-                 in ( P.methodDefName methodDef,
-                      OrdinaryValue
-                        { valueDisplayName = P.methodDefName methodDef,
-                          valueInfoSymbol =
-                            SymbolIdentity
-                              { symbolNamespace = SymbolValue,
-                                symbolDefiningModule = P.moduleName mod0,
-                                symbolDefiningName = renderInstanceNameHead instanceClassName0 instanceHeadTypes0 (P.methodDefName methodDef),
-                                symbolOwnerIdentity = Nothing
-                          },
-                          valueRuntimeName = qualify (P.moduleName mod0) (renderInstanceNameHead instanceClassName0 instanceHeadTypes0 (P.methodDefName methodDef)),
-                          valueType = constrainedVisibleType (P.ConstrainedType methodValueConstraints rawMethodType),
-                          valueIdentityType = methodValueIdentityType,
-                          valueConstraints = methodValueConstraints,
-                          valueConstraintInfos = methodValueConstraintInfos,
-                          valueOriginModule = P.moduleName mod0
-                        }
-                    )
-                | methodDef <- P.instanceDeclMethods instDecl
+              [ (methodInfoSymbolIdentity methodInfo, valueInfo)
+              | (_, methodInfo, valueInfo) <- instanceMethodEntries
               ]
       pure
-        InstanceInfo
-          { instanceClassName = instanceClassName0,
-            instanceClassSymbol = classInfoSymbolIdentity classInfo,
-            instanceClassModule = classModule classInfo,
-            instanceOriginModule = P.moduleName mod0,
-            instanceConstraints = instanceConstraints0,
-            instanceConstraintInfos = instanceConstraintInfos0,
-            instanceHeadType = instanceHeadType0,
-            instanceHeadIdentityType = instanceHeadIdentityType0,
-            instanceHeadTypes = instanceHeadTypes0,
-            instanceHeadIdentityTypes = instanceHeadIdentityTypes0,
-            instanceMethods = instanceMethodInfos
-          }
-
+        ( InstanceInfo
+            { instanceClassSymbol = classInfoSymbolIdentity classInfo,
+              instanceOriginModuleIdentity = moduleIdentity,
+              instanceConstraints = instanceConstraints0,
+              instanceConstraintInfos = instanceConstraintInfos0,
+              instanceHeadTypes = instanceHeadTypes0,
+              instanceHeadIdentityTypes = instanceHeadIdentityTypes0,
+              instanceMethodsByIdentity = instanceMethodInfosByIdentity
+            },
+          generator1'
+        )
     duplicateInstanceError info =
       case instanceHeadTypes info of
         ty :| [] -> ProgramDuplicateInstance (instanceClassName info) ty
@@ -3627,10 +3881,15 @@ buildInstanceSkeletons displayEnv scope mod0 derived = do
       foldMap freeTypeVarsInType (projectInstanceTypes indices tys)
 
     functionalDependencyIndices classInfo fundep =
-      (,) <$> traverse lookupParamIndex (P.fundepDeterminers fundep) <*> traverse lookupParamIndex (P.fundepDetermined fundep)
+      (,) <$> traverse lookupParamIndex (functionalDependencyDeterminerRefs fundep) <*> traverse lookupParamIndex (functionalDependencyDeterminedRefs fundep)
       where
-        paramIndices = Map.fromList (zip (NE.toList (classParamNames classInfo)) [(0 :: Int) ..])
-        lookupParamIndex name = Map.lookup name paramIndices
+        paramIndices =
+          Map.fromList
+            [ (identity, ix)
+            | (mbIdentity, ix) <- zip (NE.toList (classParamBinderIdentities classInfo)) [(0 :: Int) ..],
+              Just identity <- [mbIdentity]
+            ]
+        lookupParamIndex identity = Map.lookup identity paramIndices
 
     projectInstanceTypes indices tys =
       let values = NE.toList tys
@@ -3638,7 +3897,7 @@ buildInstanceSkeletons displayEnv scope mod0 derived = do
 
     classInfoForInstance info =
       case Map.lookup (instanceInfoClassSymbolIdentity info) (scopeClassesByIdentity scope) of
-        Just ((_, classInfo) : _) -> Just classInfo
+        Just (classInfo : _) -> Just classInfo
         _ -> Nothing
 
     firstJust [] = Nothing
@@ -3887,25 +4146,8 @@ buildInstanceSkeletons displayEnv scope mod0 derived = do
         { P.constraintTypes = fmap (substituteTypeVars paramNames headTys) (P.constraintTypes constraint)
         }
 
-    substituteConstraintInfoTypes paramNames headViews constraint =
-      let views = fmap substituteView (constraintTypeViews constraint)
-       in constraint
-            { constraintTypeView = NE.head views,
-              constraintTypeViews = views
-            }
-      where
-        substituteView view =
-          TypeView
-            { typeViewDisplay = substituteTypeVars paramNames (fmap typeViewDisplay headViews) (typeViewDisplay view),
-              typeViewIdentity = substituteTypeVars paramNames (fmap typeViewIdentity headViews) (typeViewIdentity view)
-            }
-
     substituteTypeVars paramNames headTys ty =
       Map.foldrWithKey substituteTypeVar ty (Map.fromList (zip (NE.toList paramNames) (NE.toList headTys)))
-
-renderInstanceName :: P.ClassName -> SrcType -> P.MethodName -> String
-renderInstanceName className0 headTy =
-  renderInstanceNameHead className0 (headTy :| [])
 
 renderInstanceNameHead :: P.ClassName -> NonEmpty SrcType -> P.MethodName -> String
 renderInstanceNameHead className0 headTys methodName0 =
@@ -3934,44 +4176,61 @@ sanitizeType = \case
 
 checkDef :: FinalizeContext -> ElaborateScope -> Scope -> P.ResolvedDefDecl -> TcM CheckedBinding
 checkDef finalizeContext elaborateScope scope defDecl = do
-  valueInfo <- lookupValueInfo scope (P.defDeclName defDecl)
+  let defName = P.refDisplayName (P.defDeclName defDecl)
+      identity = resolvedSymbolIdentity (P.defDeclName defDecl)
+  valueInfo <- lookupValueInfoByIdentity scope identity defName
   case valueInfo of
     ordinary@OrdinaryValue {} -> do
       liftEither
-        ( lowerResolvedConstrainedExprBinding elaborateScope (loweredBindingIdentityFromValueInfo ordinary) (P.defDeclType defDecl) (P.defDeclName defDecl == "main") (P.defDeclExpr defDecl)
+        ( lowerResolvedConstrainedExprBinding elaborateScope (loweredBindingIdentityFromValueInfo ordinary) (P.defDeclType defDecl) (resolvedDefDeclIsMain defDecl) (P.defDeclExpr defDecl)
             >>= finalizeBindingAllowOpaqueWithContext finalizeContext
         )
-    _ -> throwError (ProgramDuplicateValue (P.defDeclName defDecl))
+    _ -> throwError (ProgramDuplicateValue defName)
 
 buildExports :: P.ResolvedModuleSyntax -> Map String DataInfo -> Map String ClassInfo -> Map String ValueInfo -> TcM ModuleExports
 buildExports mod0 localData localClasses localValues = do
   let exportItems = P.moduleExports mod0
       defaultValues = Map.filter (\info -> case info of OverloadedMethod {} -> True; ConstructorValue {} -> True; OrdinaryValue {} -> True) localValues
-      defaultTypes = Map.fromList [(name, ExportedTypeInfo info Map.empty) | (name, info) <- Map.toList localData]
+      defaultTypes = Map.fromList [(name, mkExportedTypeInfo info []) | (name, info) <- Map.toList localData]
       defaultClasses = localClasses
+      localValuesByIdentity = identityExportIndex valueInfoSymbolIdentity localValues
+      localDataByIdentity = identityExportIndex dataInfoSymbolIdentity localData
+      localClassesByIdentity = identityExportIndex classInfoSymbolIdentity localClasses
   case exportItems of
     Nothing ->
       pure
-        ModuleExports
-          { exportedValues = defaultValues,
-            exportedTypes = defaultTypes,
-            exportedClasses = defaultClasses
-          }
+        (moduleExportsFromMaps defaultValues defaultTypes defaultClasses)
     Just items -> do
-      values <- foldM (collectResolvedExportValue localValues localClasses localData) Map.empty items
-      types <- foldM (collectResolvedExportType (P.moduleName mod0) localData) Map.empty items
-      classes <- foldM (collectResolvedExportClass localClasses) Map.empty items
+      values <- foldM (collectResolvedExportValue localValuesByIdentity localClassesByIdentity localDataByIdentity) Map.empty items
+      types <- foldM (collectResolvedExportType (P.moduleName mod0) localDataByIdentity) Map.empty items
+      classes <- foldM (collectResolvedExportClass localClassesByIdentity) Map.empty items
       pure
-        ModuleExports
-          { exportedValues = values,
-            exportedTypes = types,
-            exportedClasses = classes
-          }
+        (moduleExportsFromMaps values types classes)
 
-collectResolvedExportValue :: Map String ValueInfo -> Map String ClassInfo -> Map String DataInfo -> Map String ValueInfo -> P.ResolvedExportItem -> TcM (Map String ValueInfo)
+type IdentityExportIndex a = (Map SymbolIdentity a, Map SymbolIdentity String)
+
+identityExportIndex :: (a -> SymbolIdentity) -> Map String a -> IdentityExportIndex a
+identityExportIndex identityFor values =
+  ( Map.fromListWith
+      (flip const)
+      [ (identityFor info, info)
+      | (_, info) <- Map.toList values
+      ],
+    Map.fromListWith
+      (flip const)
+      [ (identityFor info, name)
+      | (name, info) <- Map.toList values
+      ]
+  )
+
+lookupIdentityExport :: SymbolIdentity -> IdentityExportIndex a -> Maybe (String, a)
+lookupIdentityExport identity (infos, displays) =
+  (,) <$> Map.lookup identity displays <*> Map.lookup identity infos
+
+collectResolvedExportValue :: IdentityExportIndex ValueInfo -> IdentityExportIndex ClassInfo -> IdentityExportIndex DataInfo -> Map String ValueInfo -> P.ResolvedExportItem -> TcM (Map String ValueInfo)
 collectResolvedExportValue localValues localClasses localData acc = \case
   P.ExportValue symbol ->
-    case localValueByIdentity (resolvedSymbolIdentity symbol) localValues of
+    case lookupIdentityExport (resolvedSymbolIdentity symbol) localValues of
       Just (name, info) -> pure (Map.insert name info acc)
       Nothing -> throwError (ProgramExportNotLocal (resolvedSymbolDisplayName symbol))
   P.ExportTypeWithConstructors ref ->
@@ -3981,12 +4240,11 @@ collectResolvedExportValue localValues localClasses localData acc = \case
               Map.fromList
                 [ ( ctorName ctor,
                     ConstructorValue
-                      { valueDisplayName = ctorName ctor,
-                        valueInfoSymbol = constructorInfoSymbolIdentity dataInfo ctor,
+                      { valueInfoSymbol = constructorInfoSymbolIdentity dataInfo ctor,
                         valueRuntimeName = ctorRuntimeName ctor,
                         valueType = ctorType ctor,
-                        valueCtorInfo = ctor,
-                        valueOriginModule = dataModule dataInfo
+                        valueIdentityType = ctorTypeIdentity ctor,
+                        valueCtorInfo = ctor
                       }
                   )
                   | ctor <- dataConstructors dataInfo
@@ -4000,32 +4258,30 @@ collectResolvedExportValue localValues localClasses localData acc = \case
               Map.fromList
                 [ ( methodName method,
                     OverloadedMethod
-                      { valueDisplayName = methodName method,
-                        valueInfoSymbol = methodInfoSymbolIdentity method,
-                        valueMethodInfo = method,
-                        valueOriginModule = classModule classInfo
+                      { valueInfoSymbol = methodInfoSymbolIdentity method,
+                        valueMethodInfo = method
                       }
                   )
-                  | method <- Map.elems (classMethods classInfo)
+                  | method <- Map.elems (classMethodsByIdentity classInfo)
                 ]
          in liftEither (addValues acc methodValues)
       Nothing -> pure acc
 
-collectResolvedExportType :: P.ModuleName -> Map String DataInfo -> Map String ExportedTypeInfo -> P.ResolvedExportItem -> TcM (Map String ExportedTypeInfo)
+collectResolvedExportType :: P.ModuleName -> IdentityExportIndex DataInfo -> Map String ExportedTypeInfo -> P.ResolvedExportItem -> TcM (Map String ExportedTypeInfo)
 collectResolvedExportType moduleName0 localData acc = \case
   P.ExportType ref ->
     case localDataByRef ref localData of
-      Just (typeName, dataInfo) -> pure (Map.insert typeName (ExportedTypeInfo dataInfo Map.empty) acc)
+      Just (typeName, dataInfo) -> pure (Map.insert typeName (mkExportedTypeInfo dataInfo []) acc)
       Nothing
         | moduleName0 == "Prelude",
           Just dataInfo <- builtinOpaqueDataByRef ref ->
-            pure (Map.insert (P.resolvedExportTypeName ref) (ExportedTypeInfo dataInfo Map.empty) acc)
+            pure (Map.insert (P.resolvedExportTypeName ref) (mkExportedTypeInfo dataInfo []) acc)
       Nothing -> pure acc
   P.ExportTypeWithConstructors ref ->
     case localDataByRef ref localData of
       Just (typeName, dataInfo) ->
         pure
-          (Map.insert typeName (ExportedTypeInfo dataInfo (Map.fromList [(ctorName ctor, ctor) | ctor <- dataConstructors dataInfo])) acc)
+          (Map.insert typeName (mkExportedTypeInfo dataInfo [(ctorName ctor, ctor) | ctor <- dataConstructors dataInfo]) acc)
       Nothing -> throwError (ProgramExportNotLocal (P.resolvedExportTypeName ref))
   P.ExportValue _ -> pure acc
 
@@ -4034,14 +4290,19 @@ builtinOpaqueDataByRef ref =
   case
     [ dataInfo
       | symbol <- P.resolvedExportTypeSymbols ref,
-        Builtins.isBuiltinTypeSymbol symbol,
-        Just dataInfo <- [Map.lookup (symbolDefiningName (resolvedSymbolIdentity symbol)) Builtins.builtinOpaqueTypes]
+        Just dataInfo <- [Map.lookup (resolvedSymbolIdentity symbol) builtinOpaqueTypesByIdentity]
     ]
   of
     dataInfo : _ -> Just dataInfo
     [] -> Nothing
+  where
+    builtinOpaqueTypesByIdentity =
+      Map.fromList
+        [ (dataInfoSymbolIdentity dataInfo, dataInfo)
+        | dataInfo <- Map.elems Builtins.builtinOpaqueTypes
+        ]
 
-collectResolvedExportClass :: Map String ClassInfo -> Map String ClassInfo -> P.ResolvedExportItem -> TcM (Map String ClassInfo)
+collectResolvedExportClass :: IdentityExportIndex ClassInfo -> Map String ClassInfo -> P.ResolvedExportItem -> TcM (Map String ClassInfo)
 collectResolvedExportClass localClasses acc = \case
   P.ExportType ref ->
     case localClassByRef ref localClasses of
@@ -4049,20 +4310,16 @@ collectResolvedExportClass localClasses acc = \case
       Nothing -> pure acc
   _ -> pure acc
 
-localValueByIdentity :: SymbolIdentity -> Map String ValueInfo -> Maybe (String, ValueInfo)
-localValueByIdentity identity =
-  find ((== identity) . valueInfoSymbolIdentity . snd) . Map.toList
-
-localDataByRef :: P.ResolvedExportTypeRef -> Map String DataInfo -> Maybe (String, DataInfo)
+localDataByRef :: P.ResolvedExportTypeRef -> IdentityExportIndex DataInfo -> Maybe (String, DataInfo)
 localDataByRef ref localData =
   case [symbol | symbol <- P.resolvedExportTypeSymbols ref, symbolNamespace (resolvedSymbolIdentity symbol) == SymbolType] of
-    symbol : _ -> find ((== resolvedSymbolIdentity symbol) . dataInfoSymbolIdentity . snd) (Map.toList localData)
+    symbol : _ -> lookupIdentityExport (resolvedSymbolIdentity symbol) localData
     [] -> Nothing
 
-localClassByRef :: P.ResolvedExportTypeRef -> Map String ClassInfo -> Maybe (String, ClassInfo)
+localClassByRef :: P.ResolvedExportTypeRef -> IdentityExportIndex ClassInfo -> Maybe (String, ClassInfo)
 localClassByRef ref localClasses =
   case [symbol | symbol <- P.resolvedExportTypeSymbols ref, symbolNamespace (resolvedSymbolIdentity symbol) == SymbolClass] of
-    symbol : _ -> find ((== resolvedSymbolIdentity symbol) . classInfoSymbolIdentity . snd) (Map.toList localClasses)
+    symbol : _ -> lookupIdentityExport (resolvedSymbolIdentity symbol) localClasses
     [] -> Nothing
 
 -- Helpers --------------------------------------------------------------------

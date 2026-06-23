@@ -1,11 +1,9 @@
 module MLF.XMLF.Syntax (
     XmlfType (..),
-    XmlfComp (..),
-    XmlfTerm (..)
+    XmlfComp (..)
 ) where
 
 import Data.List.NonEmpty (NonEmpty)
-import MLF.Frontend.Syntax (Lit)
 
 -- | Paper-faithful xMLF types (thesis §14.2.1, Fig. 14.2.1).
 data XmlfType
@@ -29,17 +27,4 @@ data XmlfComp
     | XCElim
     | XCIntro
     | XCSeq XmlfComp XmlfComp
-    deriving (Eq, Show)
-
--- | xMLF terms (thesis §14.2.1, Fig. 14.2.2), plus literals as an implementation extension.
-data XmlfTerm
-    = XVar String
-    | XLit Lit
-    | XLam String XmlfType XmlfTerm
-    | XApp XmlfTerm XmlfTerm
-    | XTyAbs String XmlfType XmlfTerm
-    | XTyInst XmlfTerm XmlfComp
-    | XRoll XmlfType XmlfTerm
-    | XUnroll XmlfTerm
-    | XLet String XmlfTerm XmlfTerm
     deriving (Eq, Show)

@@ -15,6 +15,10 @@ module MLF.Frontend.Syntax.Program
     , TypeName
     , SrcKind (..)
     , TypeParam (..)
+    , typeParamName
+    , typeParamIdentityName
+    , typeParamKind
+    , typeParamRef
     , firstOrderTypeParam
     , typeParamNames
     , typeParamIsFirstOrder
@@ -57,9 +61,11 @@ module MLF.Frontend.Syntax.Program
     , ClassDecl
     , ResolvedClassDecl
     , classDeclParam
+    , classDeclDisplayName
     , MethodSigF (..)
     , MethodSig
     , ResolvedMethodSig
+    , methodSigDisplayName
     , InstanceDeclF (..)
     , InstanceDecl
     , ResolvedInstanceDecl
@@ -70,6 +76,7 @@ module MLF.Frontend.Syntax.Program
     , DataDeclF (..)
     , DataDecl
     , ResolvedDataDecl
+    , dataDeclDisplayName
     , ConstructorDeclF (..)
     , ConstructorDecl
     , ResolvedConstructorDecl
@@ -93,6 +100,7 @@ module MLF.Frontend.Syntax.Program
     , ProgramSrcType
     , ModuleRef
     , ValueRef
+    , ValueBinder
     , ExportValueRef
     , TypeRef
     , ExportTypeRef
@@ -134,12 +142,17 @@ import MLF.Frontend.Syntax
     , SrcType
     , TypeParam (..)
     , firstOrderTypeParam
+    , typeParamName
+    , typeParamIdentityName
+    , typeParamKind
+    , typeParamRef
     , resolvedSrcTypeIdentityType
     , resolvedSrcTypeToSrcType
     , typeParamIsFirstOrder
     , typeParamNames
     )
 import MLF.Frontend.TypeLevel (TypeFamilyDecl)
+import MLF.Types.Identity (LocalRef (..))
 
 data ProgramPhase = Parsed | Resolved
     deriving (Eq, Show)
@@ -157,7 +170,7 @@ type MethodName = String
 type ValueName = String
 
 data ResolvedValueRef
-    = ResolvedLocalValue ValueName
+    = ResolvedLocalValue LocalRef
     | ResolvedGlobalValue ResolvedSymbol
     deriving (Eq, Show)
 
@@ -165,7 +178,11 @@ data ResolvedExportTypeRef = ResolvedExportTypeRef
     { resolvedExportTypeName :: TypeName
     , resolvedExportTypeSymbols :: [ResolvedSymbol]
     }
-    deriving (Eq, Show)
+    deriving (Show)
+
+instance Eq ResolvedExportTypeRef where
+    left == right =
+        resolvedExportTypeSymbols left == resolvedExportTypeSymbols right
 
 type family ProgramSrcType (p :: ProgramPhase) where
     ProgramSrcType 'Parsed = SrcType
@@ -178,6 +195,34 @@ type family ModuleRef (p :: ProgramPhase) where
 type family ValueRef (p :: ProgramPhase) where
     ValueRef 'Parsed = ValueName
     ValueRef 'Resolved = ResolvedValueRef
+
+type family ValueBinder (p :: ProgramPhase) where
+    ValueBinder 'Parsed = ValueName
+    ValueBinder 'Resolved = LocalRef
+
+type family ClassDeclName (p :: ProgramPhase) where
+    ClassDeclName 'Parsed = ClassName
+    ClassDeclName 'Resolved = ResolvedSymbol
+
+type family MethodSigName (p :: ProgramPhase) where
+    MethodSigName 'Parsed = MethodName
+    MethodSigName 'Resolved = ResolvedSymbol
+
+type family MethodDefName (p :: ProgramPhase) where
+    MethodDefName 'Parsed = MethodName
+    MethodDefName 'Resolved = ResolvedSymbol
+
+type family DefDeclName (p :: ProgramPhase) where
+    DefDeclName 'Parsed = ValueName
+    DefDeclName 'Resolved = ResolvedSymbol
+
+type family DataDeclName (p :: ProgramPhase) where
+    DataDeclName 'Parsed = TypeName
+    DataDeclName 'Resolved = ResolvedSymbol
+
+type family ConstructorDeclName (p :: ProgramPhase) where
+    ConstructorDeclName 'Parsed = ConstructorName
+    ConstructorDeclName 'Resolved = ResolvedSymbol
 
 type family ExportValueRef (p :: ProgramPhase) where
     ExportValueRef 'Parsed = ValueName
@@ -208,10 +253,13 @@ instance RefDisplay String where
 instance RefDisplay ResolvedSymbol where
     refDisplayName = symbolDisplayName . resolvedSymbolSpelling
 
+instance RefDisplay LocalRef where
+    refDisplayName = localRefName
+
 instance RefDisplay ResolvedValueRef where
     refDisplayName ref =
         case ref of
-            ResolvedLocalValue name -> name
+            ResolvedLocalValue name -> refDisplayName name
             ResolvedGlobalValue symbol -> refDisplayName symbol
 
 instance RefDisplay ResolvedExportTypeRef where
@@ -446,16 +494,20 @@ type Decl = DeclF 'Parsed
 type ResolvedDecl = DeclF 'Resolved
 
 data ClassDeclF (p :: ProgramPhase) = ClassDecl
-    { classDeclName :: ClassName
+    { classDeclName :: ClassDeclName p
     , classDeclSuperclasses :: [ClassConstraintF p]
     , classDeclParams :: NonEmpty TypeParam
     , classDeclFundeps :: [FunctionalDependency]
     , classDeclMethods :: [MethodSigF p]
     }
 
-deriving instance (Eq (ClassConstraintF p), Eq (MethodSigF p)) => Eq (ClassDeclF p)
+deriving instance
+    (Eq (ClassDeclName p), Eq (ClassConstraintF p), Eq (MethodSigF p)) =>
+    Eq (ClassDeclF p)
 
-deriving instance (Show (ClassConstraintF p), Show (MethodSigF p)) => Show (ClassDeclF p)
+deriving instance
+    (Show (ClassDeclName p), Show (ClassConstraintF p), Show (MethodSigF p)) =>
+    Show (ClassDeclF p)
 
 type ClassDecl = ClassDeclF 'Parsed
 
@@ -464,18 +516,28 @@ type ResolvedClassDecl = ClassDeclF 'Resolved
 classDeclParam :: ClassDeclF p -> TypeParam
 classDeclParam = NE.head . classDeclParams
 
+classDeclDisplayName :: RefDisplay (ClassDeclName p) => ClassDeclF p -> String
+classDeclDisplayName = refDisplayName . classDeclName
+
 data MethodSigF (p :: ProgramPhase) = MethodSig
-    { methodSigName :: MethodName
+    { methodSigName :: MethodSigName p
     , methodSigType :: ConstrainedTypeF p
     }
 
-deriving instance Eq (ConstrainedTypeF p) => Eq (MethodSigF p)
+deriving instance
+    (Eq (MethodSigName p), Eq (ConstrainedTypeF p)) =>
+    Eq (MethodSigF p)
 
-deriving instance Show (ConstrainedTypeF p) => Show (MethodSigF p)
+deriving instance
+    (Show (MethodSigName p), Show (ConstrainedTypeF p)) =>
+    Show (MethodSigF p)
 
 type MethodSig = MethodSigF 'Parsed
 
 type ResolvedMethodSig = MethodSigF 'Resolved
+
+methodSigDisplayName :: RefDisplay (MethodSigName p) => MethodSigF p -> String
+methodSigDisplayName = refDisplayName . methodSigName
 
 data InstanceDeclF (p :: ProgramPhase) = InstanceDecl
     { instanceDeclConstraints :: [ClassConstraintF p]
@@ -500,62 +562,65 @@ instanceDeclType :: InstanceDeclF p -> ProgramSrcType p
 instanceDeclType = NE.head . instanceDeclTypes
 
 data MethodDefF (p :: ProgramPhase) = MethodDef
-    { methodDefName :: MethodName
+    { methodDefName :: MethodDefName p
     , methodDefExpr :: ExprF p
     }
 
-deriving instance Eq (ExprF p) => Eq (MethodDefF p)
+deriving instance (Eq (MethodDefName p), Eq (ExprF p)) => Eq (MethodDefF p)
 
-deriving instance Show (ExprF p) => Show (MethodDefF p)
+deriving instance (Show (MethodDefName p), Show (ExprF p)) => Show (MethodDefF p)
 
 type MethodDef = MethodDefF 'Parsed
 
 type ResolvedMethodDef = MethodDefF 'Resolved
 
 data DataDeclF (p :: ProgramPhase) = DataDecl
-    { dataDeclName :: TypeName
+    { dataDeclName :: DataDeclName p
     , dataDeclParams :: [TypeParam]
     , dataDeclConstructors :: [ConstructorDeclF p]
     , dataDeclDeriving :: [ClassRef p]
     }
 
 deriving instance
-    (Eq (ConstructorDeclF p), Eq (ClassRef p)) =>
+    (Eq (DataDeclName p), Eq (ConstructorDeclF p), Eq (ClassRef p)) =>
     Eq (DataDeclF p)
 
 deriving instance
-    (Show (ConstructorDeclF p), Show (ClassRef p)) =>
+    (Show (DataDeclName p), Show (ConstructorDeclF p), Show (ClassRef p)) =>
     Show (DataDeclF p)
 
 type DataDecl = DataDeclF 'Parsed
 
 type ResolvedDataDecl = DataDeclF 'Resolved
 
+dataDeclDisplayName :: RefDisplay (DataDeclName p) => DataDeclF p -> String
+dataDeclDisplayName = refDisplayName . dataDeclName
+
 data ConstructorDeclF (p :: ProgramPhase) = ConstructorDecl
-    { constructorDeclName :: ConstructorName
+    { constructorDeclName :: ConstructorDeclName p
     , constructorDeclType :: ProgramSrcType p
     }
 
-deriving instance Eq (ProgramSrcType p) => Eq (ConstructorDeclF p)
+deriving instance (Eq (ConstructorDeclName p), Eq (ProgramSrcType p)) => Eq (ConstructorDeclF p)
 
-deriving instance Show (ProgramSrcType p) => Show (ConstructorDeclF p)
+deriving instance (Show (ConstructorDeclName p), Show (ProgramSrcType p)) => Show (ConstructorDeclF p)
 
 type ConstructorDecl = ConstructorDeclF 'Parsed
 
 type ResolvedConstructorDecl = ConstructorDeclF 'Resolved
 
 data DefDeclF (p :: ProgramPhase) = DefDecl
-    { defDeclName :: ValueName
+    { defDeclName :: DefDeclName p
     , defDeclType :: ConstrainedTypeF p
     , defDeclExpr :: ExprF p
     }
 
 deriving instance
-    (Eq (ConstrainedTypeF p), Eq (ExprF p)) =>
+    (Eq (DefDeclName p), Eq (ConstrainedTypeF p), Eq (ExprF p)) =>
     Eq (DefDeclF p)
 
 deriving instance
-    (Show (ConstrainedTypeF p), Show (ExprF p)) =>
+    (Show (DefDeclName p), Show (ConstrainedTypeF p), Show (ExprF p)) =>
     Show (DefDeclF p)
 
 type DefDecl = DefDeclF 'Parsed
@@ -567,16 +632,16 @@ data ExprF (p :: ProgramPhase)
     | ELit Lit
     | ELam (ParamF p) (ExprF p)
     | EApp (ExprF p) (ExprF p)
-    | ELet ValueName (Maybe (ProgramSrcType p)) (ExprF p) (ExprF p)
+    | ELet (ValueBinder p) (Maybe (ProgramSrcType p)) (ExprF p) (ExprF p)
     | EAnn (ExprF p) (ProgramSrcType p)
     | ECase (ExprF p) [AltF p]
 
 deriving instance
-    (Eq (ValueRef p), Eq (ProgramSrcType p), Eq (ParamF p), Eq (AltF p)) =>
+    (Eq (ValueRef p), Eq (ValueBinder p), Eq (ProgramSrcType p), Eq (ParamF p), Eq (AltF p)) =>
     Eq (ExprF p)
 
 deriving instance
-    (Show (ValueRef p), Show (ProgramSrcType p), Show (ParamF p), Show (AltF p)) =>
+    (Show (ValueRef p), Show (ValueBinder p), Show (ProgramSrcType p), Show (ParamF p), Show (AltF p)) =>
     Show (ExprF p)
 
 type Expr = ExprF 'Parsed
@@ -584,13 +649,13 @@ type Expr = ExprF 'Parsed
 type ResolvedExpr = ExprF 'Resolved
 
 data ParamF (p :: ProgramPhase) = Param
-    { paramName :: ValueName
+    { paramName :: ValueBinder p
     , paramType :: Maybe (ProgramSrcType p)
     }
 
-deriving instance Eq (ProgramSrcType p) => Eq (ParamF p)
+deriving instance (Eq (ValueBinder p), Eq (ProgramSrcType p)) => Eq (ParamF p)
 
-deriving instance Show (ProgramSrcType p) => Show (ParamF p)
+deriving instance (Show (ValueBinder p), Show (ProgramSrcType p)) => Show (ParamF p)
 
 type Param = ParamF 'Parsed
 
@@ -615,16 +680,16 @@ type ResolvedAlt = AltF 'Resolved
 
 data PatternF (p :: ProgramPhase)
     = PatCtor (ConstructorRef p) [PatternF p]
-    | PatVar ValueName
+    | PatVar (ValueBinder p)
     | PatWildcard
     | PatAnn (PatternF p) (ProgramSrcType p)
 
 deriving instance
-    (Eq (ConstructorRef p), Eq (ProgramSrcType p)) =>
+    (Eq (ConstructorRef p), Eq (ValueBinder p), Eq (ProgramSrcType p)) =>
     Eq (PatternF p)
 
 deriving instance
-    (Show (ConstructorRef p), Show (ProgramSrcType p)) =>
+    (Show (ConstructorRef p), Show (ValueBinder p), Show (ProgramSrcType p)) =>
     Show (PatternF p)
 
 type Pattern = PatternF 'Parsed
@@ -671,7 +736,7 @@ unresolveDecl decl =
 unresolveClassDecl :: ResolvedClassDecl -> ClassDecl
 unresolveClassDecl decl =
     ClassDecl
-        { classDeclName = classDeclName decl
+        { classDeclName = refDisplayName (classDeclName decl)
         , classDeclSuperclasses = map unresolveClassConstraint (classDeclSuperclasses decl)
         , classDeclParams = classDeclParams decl
         , classDeclFundeps = classDeclFundeps decl
@@ -681,7 +746,7 @@ unresolveClassDecl decl =
 unresolveMethodSig :: ResolvedMethodSig -> MethodSig
 unresolveMethodSig sig =
     MethodSig
-        { methodSigName = methodSigName sig
+        { methodSigName = refDisplayName (methodSigName sig)
         , methodSigType = unresolveConstrainedType (methodSigType sig)
         }
 
@@ -697,14 +762,14 @@ unresolveInstanceDecl decl =
 unresolveMethodDef :: ResolvedMethodDef -> MethodDef
 unresolveMethodDef def =
     MethodDef
-        { methodDefName = methodDefName def
+        { methodDefName = refDisplayName (methodDefName def)
         , methodDefExpr = unresolveExpr (methodDefExpr def)
         }
 
 unresolveDataDecl :: ResolvedDataDecl -> DataDecl
 unresolveDataDecl decl =
     DataDecl
-        { dataDeclName = dataDeclName decl
+        { dataDeclName = refDisplayName (dataDeclName decl)
         , dataDeclParams = dataDeclParams decl
         , dataDeclConstructors = map unresolveConstructorDecl (dataDeclConstructors decl)
         , dataDeclDeriving = map refDisplayName (dataDeclDeriving decl)
@@ -713,14 +778,14 @@ unresolveDataDecl decl =
 unresolveConstructorDecl :: ResolvedConstructorDecl -> ConstructorDecl
 unresolveConstructorDecl decl =
     ConstructorDecl
-        { constructorDeclName = constructorDeclName decl
+        { constructorDeclName = refDisplayName (constructorDeclName decl)
         , constructorDeclType = resolvedSrcTypeToSrcType (constructorDeclType decl)
         }
 
 unresolveDefDecl :: ResolvedDefDecl -> DefDecl
 unresolveDefDecl decl =
     DefDecl
-        { defDeclName = defDeclName decl
+        { defDeclName = refDisplayName (defDeclName decl)
         , defDeclType = unresolveConstrainedType (defDeclType decl)
         , defDeclExpr = unresolveExpr (defDeclExpr decl)
         }
@@ -747,14 +812,14 @@ unresolveExpr expr =
         ELam param body -> ELam (unresolveParam param) (unresolveExpr body)
         EApp fun arg -> EApp (unresolveExpr fun) (unresolveExpr arg)
         ELet name mbTy rhs body ->
-            ELet name (fmap resolvedSrcTypeToSrcType mbTy) (unresolveExpr rhs) (unresolveExpr body)
+            ELet (refDisplayName name) (fmap resolvedSrcTypeToSrcType mbTy) (unresolveExpr rhs) (unresolveExpr body)
         EAnn inner ty -> EAnn (unresolveExpr inner) (resolvedSrcTypeToSrcType ty)
         ECase scrutinee alts -> ECase (unresolveExpr scrutinee) (map unresolveAlt alts)
 
 unresolveParam :: ResolvedParam -> Param
 unresolveParam param =
     Param
-        { paramName = paramName param
+        { paramName = refDisplayName (paramName param)
         , paramType = fmap resolvedSrcTypeToSrcType (paramType param)
         }
 
@@ -769,6 +834,6 @@ unresolvePattern :: ResolvedPattern -> Pattern
 unresolvePattern pattern0 =
     case pattern0 of
         PatCtor ctor args -> PatCtor (refDisplayName ctor) (map unresolvePattern args)
-        PatVar name -> PatVar name
+        PatVar name -> PatVar (refDisplayName name)
         PatWildcard -> PatWildcard
         PatAnn inner ty -> PatAnn (unresolvePattern inner) (resolvedSrcTypeToSrcType ty)

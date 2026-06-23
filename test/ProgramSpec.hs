@@ -1,9 +1,14 @@
+{-# LANGUAGE GADTs #-}
+
 module ProgramSpec (spec) where
 
 import Data.Either (isLeft, isRight)
-import Data.List (isInfixOf)
+import Data.List (isInfixOf, nub)
 import Data.List.NonEmpty (NonEmpty (..))
+import Data.Maybe (isJust)
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
+import MLF.Constraint.Types.Graph (NodeId (..))
 import MLF.API
     ( Lit (..)
     , SrcTy (..)
@@ -13,31 +18,55 @@ import MLF.API
     , renderProgramParseError
     )
 import MLF.Frontend.Program.Check (checkResolvedProgram)
-import MLF.Frontend.Program.Elaborate (lowerType, mkElaborateScope)
+import MLF.Frontend.Program.Elaborate (lowerConstructorBinding, lowerType, mkElaborateScope)
 import MLF.Frontend.Program.Finalize
-    ( recoverSourceType
+    ( finalizeBindingWithContext
+    , mkFinalizeContext
+    , recoverSourceType
+    , resolvedForallSubst
     , sourceForallMatches
     , stripVacuousForallsAndTypeAbs
     )
+import qualified MLF.Frontend.Program.Builtins as Builtins
 import MLF.Frontend.Program.Resolve (resolveProgram)
+import MLF.Frontend.Program.Run (runCheckedProgramOutput)
 import MLF.Frontend.Program.Types
     ( ConstructorInfo (..)
     , ConstructorRef (..)
     , ConstructorShape (..)
     , DataInfo (..)
+    , DeferredCaseCall (..)
+    , DeferredConstructorCall (..)
+    , DeferredMethodEvidence (..)
+    , DeferredMethodCall (..)
+    , DeferredRef (..)
+    , DeferredProgramObligation (..)
+    , EvidenceInfo (..)
+    , EvidenceMethod (..)
     , IdDetails (..)
+    , InstanceInfo (..)
+    , LocalRef (..)
+    , LoweredBinding (..)
     , ResolvedLocalSymbols (..)
     , ResolvedModuleDiagnosticAdapter (..)
     , ResolvedSemanticModule (..)
     , ResolvedVar (..)
+    , ValueInfo (..)
+    , checkedBindingName
+    , ctorName
     , constructorOwnerRuntimeTypeTrackable
+    , constructorShapeFromInfo
+    , dataName
     , mkResolvedSymbol
     , resolvedModuleName
     , resolvedModuleReferences
     , resolvedModuleSyntax
     )
+import qualified MLF.Frontend.Program.Types as ProgramTypes
 import MLF.Frontend.Program.Prelude (withPrelude, withPreludeLocated)
-import MLF.Frontend.Syntax (ResolvedSrcTy (..), mkSrcBound)
+import MLF.Frontend.Symbol (symbolIdentityStableName)
+import MLF.Frontend.Syntax (ResolvedSrcTy (..), ResolvedTypeBinderRef (..), mkSrcBound)
+import qualified MLF.Frontend.Syntax as Surface
 import MLF.Frontend.Syntax.Program
 import MLF.Frontend.TypeLevel
     ( TypeLevelKind (..)
@@ -52,11 +81,35 @@ import MLF.Frontend.TypeLevel
     , familyEquationRhs
     )
 import MLF.Pipeline
+import qualified MLF.Primitive.Inventory as PrimitiveInventory
 import qualified MLF.Types.Elab as Elab
+import MLF.Types.Identity (LocalIdentity (..), PrimitiveRef (..), typeBinderIdentityFromNode)
 import MLF.Program.CLI (runProgramFile)
 import Test.Hspec
 
+import ElabTermTestSupport
+    ( generatedLocalRefForName
+    , generatedResolvedLocal
+    , mkTestDeferredVar
+    , mkTestTyAbs
+    , testTForall
+    , testTVar
+    )
 import Parity.ProgramMatrix
+
+generatedSymbolIdentity :: Int -> SymbolNamespace -> String -> String -> Maybe SymbolOwnerIdentity -> SymbolIdentity
+generatedSymbolIdentity unique namespace moduleName name owner =
+    SymbolIdentity
+        { symbolUniqueIdentity = UniqueIdentity unique
+        , symbolNamespace = namespace
+        , symbolDefiningModule = moduleName
+        , symbolDefiningName = name
+        , symbolOwnerIdentity = owner
+        }
+
+generatedSymbolOwnerType :: Int -> String -> String -> SymbolOwnerIdentity
+generatedSymbolOwnerType unique moduleName name =
+    SymbolOwnerType (generatedSymbolIdentity unique SymbolType moduleName name Nothing)
 
 spec :: Spec
 spec = do
@@ -106,6 +159,55 @@ spec = do
                 expected = bounded "f" (STBase "Int")
                 actual = bounded "g" (STBase "Bool")
             sourceForallMatches expected actual `shouldBe` False
+
+        it "does not resolve type-view substitutions by name when binder identity is known" $ do
+            let identity = typeBinderIdentityFromNode (NodeId 991301)
+                replacement = ProgramTypes.mkTypeView (STBase "Int") (STBase "Int")
+                subst = Map.singleton (ProgramTypes.TypeViewSubstByName "a") replacement
+            ProgramTypes.lookupTypeViewSubst (ProgramTypes.TypeViewSubstByIdentity identity "a" "a") subst
+                `shouldBe` Nothing
+            ProgramTypes.lookupTypeViewSubst (ProgramTypes.TypeViewSubstByName "a") subst
+                `shouldBe` Just replacement
+
+        it "does not hydrate identity-bearing type-binder substitutions from stale name keys" $ do
+            let identity = typeBinderIdentityFromNode (NodeId 991304)
+                replacement = ProgramTypes.mkTypeView (STBase "Int") (STBase "Int")
+                nameSubst = Map.singleton (ProgramTypes.TypeViewSubstByName "a") replacement
+                identitySubst =
+                    ProgramTypes.typeBinderSubstFromTypeViewSubst
+                        [("a", Just identity)]
+                        nameSubst
+                unresolvedSubst =
+                    ProgramTypes.typeBinderSubstFromTypeViewSubst
+                        [("a", Nothing)]
+                        nameSubst
+            ProgramTypes.lookupTypeBinderSubst ("a", Just identity) identitySubst
+                `shouldBe` Nothing
+            ProgramTypes.lookupTypeBinderSubst ("a", Nothing) unresolvedSubst
+                `shouldBe` Just (STBase "Int")
+
+        it "does not resolve resolved forall substitutions by stale name when binder identity differs" $ do
+            let expectedIdentity = typeBinderIdentityFromNode (NodeId 991302)
+                staleIdentity = typeBinderIdentityFromNode (NodeId 991303)
+                ref = Elab.typeBinderRefFromIdentity expectedIdentity "a"
+                sourceView =
+                    (ProgramTypes.mkTypeView (STForall "a" Nothing (STVar "a")) (STForall "a" Nothing (STVar "a")))
+                        { ProgramTypes.typeViewBinderIdentities = Map.singleton "a" expectedIdentity
+                        }
+                replacement = ProgramTypes.mkTypeView (STBase "Int") (STBase "Int")
+                subst = Map.singleton (ProgramTypes.TypeViewSubstByIdentity staleIdentity "a" "a") replacement
+            resolvedForallSubst subst sourceView [(ref, Nothing)] `shouldBe` Map.empty
+
+        it "does not resolve resolved forall substitutions by name when binder identity is known" $ do
+            let expectedIdentity = typeBinderIdentityFromNode (NodeId 991305)
+                ref = Elab.typeBinderRefFromIdentity expectedIdentity "a"
+                sourceView =
+                    (ProgramTypes.mkTypeView (STForall "a" Nothing (STVar "a")) (STForall "a" Nothing (STVar "a")))
+                        { ProgramTypes.typeViewBinderIdentities = Map.singleton "a" expectedIdentity
+                        }
+                replacement = ProgramTypes.mkTypeView (STBase "Int") (STBase "Int")
+                subst = Map.singleton (ProgramTypes.TypeViewSubstByName "a") replacement
+            resolvedForallSubst subst sourceView [(ref, Nothing)] `shouldBe` Map.empty
 
         it "matches bound variable-headed applications against instantiated constructor heads" $ do
             let expected =
@@ -169,53 +271,50 @@ spec = do
             sourceForallMatches expected actual `shouldBe` False
 
         it "keeps vacuous foralls when matching type abstractions still carry instantiations" $ do
-            let ty = Elab.TForall "a" Nothing (Elab.TVar "result")
+            let ty = testTForall "a" Nothing (testTVar "result")
                 retainedTerm =
-                    Elab.ETyAbs
-                        "a"
+                    mkTestTyAbs "a"
                         Nothing
-                        (Elab.ETyInst (Elab.EVar "poly") (Elab.InstApp (Elab.TVar "a")))
-                strippedTerm = Elab.ETyAbs "a" Nothing (Elab.EVar "value")
+                        (Elab.ETyInst (mkTestDeferredVar "poly") (Elab.InstApp (testTVar "a")))
+                strippedTerm = mkTestTyAbs "a" Nothing (mkTestDeferredVar "value")
             stripVacuousForallsAndTypeAbs ty retainedTerm `shouldBe` (ty, retainedTerm)
-            stripVacuousForallsAndTypeAbs ty strippedTerm `shouldBe` (Elab.TVar "result", Elab.EVar "value")
+            stripVacuousForallsAndTypeAbs ty strippedTerm `shouldBe` (testTVar "result", mkTestDeferredVar "value")
+
+        it "keeps vacuous foralls when resolved sidecar types still mention the binder" $ do
+            let ty = testTForall "a" Nothing (testTVar "result")
+                resolved =
+                    ResolvedVar
+                        { resolvedVarRuntimeName = "value"
+                        , resolvedVarType = testTVar "a"
+                        , resolvedVarDetails = LocalId (generatedLocalRefForName "$value#0")
+                        }
+                retainedTerm = mkTestTyAbs "a" Nothing (Elab.EVarNode resolved)
+            stripVacuousForallsAndTypeAbs ty retainedTerm `shouldBe` (ty, retainedTerm)
 
         it "recovers higher-kinded data heads with partially applied constructor parameters" $ do
             let typeIdentity =
-                    SymbolIdentity
-                        { symbolNamespace = SymbolType
-                        , symbolDefiningModule = "Main"
-                        , symbolDefiningName = "Apply"
-                        , symbolOwnerIdentity = Nothing
-                        }
+                    generatedSymbolIdentity 1001 SymbolType "Main" "Apply" Nothing
                 ctorIdentity =
-                    SymbolIdentity
-                        { symbolNamespace = SymbolConstructor
-                        , symbolDefiningModule = "Main"
-                        , symbolDefiningName = "Apply"
-                        , symbolOwnerIdentity = Just (SymbolOwnerType "Main" "Apply")
-                        }
+                    generatedSymbolIdentity 1002 SymbolConstructor "Main" "Apply" (Just (SymbolOwnerType typeIdentity))
                 applyResult = STCon "Apply" (STVar "f" :| [STVar "a"])
                 applyCtor =
                     ConstructorInfo
-                        { ctorName = "Apply"
-                        , ctorInfoSymbol = ctorIdentity
+                        { ctorInfoSymbol = ctorIdentity
                         , ctorRuntimeName = "$Apply"
                         , ctorType = STArrow (STVarApp "f" (STVar "a" :| [])) applyResult
+                        , ctorTypeIdentity = STArrow (STVarApp "f" (STVar "a" :| [])) (STCon "Main.Apply" (STVar "f" :| [STVar "a"]))
                         , ctorForalls = []
+                        , ctorForallBinderIdentities = []
                         , ctorArgs = [STVarApp "f" (STVar "a" :| [])]
                         , ctorResult = applyResult
-                        , ctorOwningType = "Apply"
                         , ctorOwningTypeIdentity = typeIdentity
                         , ctorIndex = 0
                         , ctorOwnerConstructors = []
                         }
                 applyInfo =
                     DataInfo
-                        { dataName = "Apply"
-                        , dataInfoSymbol = typeIdentity
-                        , dataModule = "Main"
+                        { dataInfoSymbol = typeIdentity
                         , dataTypeParams = [TypeParam "f" (KArrow KType KType), firstOrderTypeParam "a"]
-                        , dataParams = ["f", "a"]
                         , dataConstructors = [applyCtor]
                         }
                 scope = mkElaborateScope Map.empty (Map.singleton "Apply" applyInfo) Map.empty []
@@ -227,60 +326,98 @@ spec = do
                         )
             recoverSourceType scope (lowerType scope visible) `shouldBe` visible
 
+        it "lowers data encoding binders from data identity when data names are stale" $ do
+            let typeIdentity =
+                    generatedSymbolIdentity 1011 SymbolType "Main" "Box" Nothing
+                ctorIdentity =
+                    generatedSymbolIdentity 1012 SymbolConstructor "Main" "Box" (Just (SymbolOwnerType typeIdentity))
+                ctorInfo =
+                    ConstructorInfo
+                        { ctorInfoSymbol = ctorIdentity
+                        , ctorRuntimeName = "$Box"
+                        , ctorType = STArrow (STBase "Int") (STBase "Box")
+                        , ctorTypeIdentity = STArrow (STBase "Int") (STBase "Main.Box")
+                        , ctorForalls = []
+                        , ctorForallBinderIdentities = []
+                        , ctorArgs = [STBase "Int"]
+                        , ctorResult = STBase "Box"
+                        , ctorOwningTypeIdentity = typeIdentity
+                        , ctorIndex = 0
+                        , ctorOwnerConstructors = []
+                        }
+                dataInfo =
+                    DataInfo
+                        { dataInfoSymbol = typeIdentity
+                        , dataTypeParams = []
+                        , dataConstructors = [ctorInfo]
+                        }
+                scope = mkElaborateScope Map.empty (Map.singleton "Box" dataInfo) Map.empty []
+                expected =
+                    STMu
+                        "$Main.Box_self"
+                        ( STForall
+                            "$Main.Box_result"
+                            Nothing
+                            ( STArrow
+                                (STArrow (STBase "Int") (STVar "$Main.Box_result"))
+                                (STVar "$Main.Box_result")
+                            )
+                        )
+            lowerType scope (STBase "Box") `shouldBe` expected
+
         it "treats owner-shaped variable-headed constructor imports as non-trackable" $ do
             let typeIdentity =
-                    SymbolIdentity
-                        { symbolNamespace = SymbolType
-                        , symbolDefiningModule = "Core"
-                        , symbolDefiningName = "MaybeF"
-                        , symbolOwnerIdentity = Nothing
-                        }
-                ctorIdentity name =
-                    SymbolIdentity
-                        { symbolNamespace = SymbolConstructor
-                        , symbolDefiningModule = "Core"
-                        , symbolDefiningName = name
-                        , symbolOwnerIdentity = Just (SymbolOwnerType "Core" "MaybeF")
-                        }
+                    generatedSymbolIdentity 1021 SymbolType "Core" "MaybeF" Nothing
+                ctorIdentity unique name =
+                    generatedSymbolIdentity unique SymbolConstructor "Core" name (Just (SymbolOwnerType typeIdentity))
                 resultTy = STCon "MaybeF" (STVar "f" :| [STVar "a"])
+                resultTyIdentity = STCon "Core.MaybeF" (STVar "f" :| [STVar "a"])
                 ownerTypeParams = [TypeParam "f" (KArrow KType KType), firstOrderTypeParam "a"]
                 nothingShape =
                     ConstructorShape
-                        { constructorShapeName = "NothingF"
-                        , constructorShapeSymbol = ctorIdentity "NothingF"
+                        { constructorShapeSymbol = ctorIdentity 1022 "NothingF"
                         , constructorShapeRuntimeName = "Core__NothingF"
                         , constructorShapeForalls = []
+                        , constructorShapeForallsIdentity = []
+                        , constructorShapeForallBinderIdentities = []
                         , constructorShapeArgs = []
+                        , constructorShapeArgsIdentity = []
                         , constructorShapeResult = resultTy
+                        , constructorShapeResultIdentity = resultTyIdentity
                         , constructorShapeIndex = 0
                         , constructorShapeOwnerTypeParams = ownerTypeParams
                         }
                 justShape =
                     ConstructorShape
-                        { constructorShapeName = "JustF"
-                        , constructorShapeSymbol = ctorIdentity "JustF"
+                        { constructorShapeSymbol = ctorIdentity 1023 "JustF"
                         , constructorShapeRuntimeName = "Core__JustF"
                         , constructorShapeForalls = []
+                        , constructorShapeForallsIdentity = []
+                        , constructorShapeForallBinderIdentities = []
                         , constructorShapeArgs = [STVarApp "f" (STVar "a" :| [])]
+                        , constructorShapeArgsIdentity = [STVarApp "f" (STVar "a" :| [])]
                         , constructorShapeResult = resultTy
+                        , constructorShapeResultIdentity = resultTyIdentity
                         , constructorShapeIndex = 1
                         , constructorShapeOwnerTypeParams = ownerTypeParams
                         }
                 nothingCtor =
                     ConstructorInfo
-                        { ctorName = "NothingF"
-                        , ctorInfoSymbol = ctorIdentity "NothingF"
+                        { ctorInfoSymbol = ctorIdentity 1022 "NothingF"
                         , ctorRuntimeName = "Core__NothingF"
                         , ctorType = resultTy
+                        , ctorTypeIdentity = resultTyIdentity
                         , ctorForalls = []
+                        , ctorForallBinderIdentities = []
                         , ctorArgs = []
                         , ctorResult = resultTy
-                        , ctorOwningType = "MaybeF"
                         , ctorOwningTypeIdentity = typeIdentity
                         , ctorIndex = 0
                         , ctorOwnerConstructors = [nothingShape, justShape]
                         }
             constructorOwnerRuntimeTypeTrackable Map.empty nothingCtor `shouldBe` False
+            constructorShapeResultIdentity (constructorShapeFromInfo nothingCtor) `shouldBe` resultTyIdentity
+            map constructorShapeResultIdentity (ProgramTypes.constructorOwnerShapes nothingCtor) `shouldBe` [resultTyIdentity, resultTyIdentity]
 
         it "records constructor bindings with resolved constructor identity" $ do
             program <-
@@ -297,15 +434,496 @@ spec = do
             binding <- requireCheckedBinding "Main__None" checked
             case checkedBindingResolvedVar binding of
                 ResolvedVar
-                    { resolvedVarName = "None"
-                    , resolvedVarRuntimeName = "Main__None"
+                    { resolvedVarRuntimeName = "Main__None"
                     , resolvedVarDetails = ConstructorId ctorRef
                     } -> do
-                        constructorRefRuntimeName ctorRef `shouldBe` "Main__None"
-                        constructorRefOwnerRuntimeName ctorRef `shouldBe` "Main.Option"
-                        constructorRefIndex ctorRef `shouldBe` 0
+                        symbolDefiningName (constructorRefSymbol ctorRef) `shouldBe` "None"
                 resolvedVar ->
                     expectationFailure ("expected constructor resolved var, got: " ++ show resolvedVar)
+            mainBinding <- requireCheckedBinding "Main__main" checked
+            map (symbolDefiningName . constructorRefSymbol) (resolvedConstructorRefs (checkedBindingTerm mainBinding))
+                `shouldContain` ["None"]
+
+        it "keeps constructor metadata identity type separate from visible type" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (Option(..), main) {"
+                        , "  data Option ="
+                        , "      None : Option;"
+                        , ""
+                        , "  def main : Option = None;"
+                        , "}"
+                        ]
+            checked <- requireChecked (withPrelude program)
+            dataInfo <- requireCheckedData "Main" "Option" checked
+            ctorInfo <- requireDataConstructor "None" dataInfo
+            ctorType ctorInfo `shouldBe` STBase "Option"
+            ctorTypeIdentity ctorInfo `shouldBe` STBase (symbolIdentityStableName (dataInfoSymbol dataInfo))
+
+        it "finalizes constructor bindings from metadata without the surface pipeline" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (Option(..), main) {"
+                        , "  data Option ="
+                        , "      None : Option;"
+                        , ""
+                        , "  def main : Option = None;"
+                        , "}"
+                        ]
+            checked <- requireChecked (withPrelude program)
+            dataInfo <- requireCheckedData "Main" "Option" checked
+            ctorInfo <- requireDataConstructor "None" dataInfo
+            let scope = mkElaborateScope Map.empty (Map.singleton "Option" dataInfo) Map.empty []
+            finalizeContext <- requireFinalizeContext scope
+            let poisonedLowered =
+                    (lowerConstructorBinding scope ctorInfo)
+                        { loweredBindingSurfaceExpr = Surface.EVar "$missing_constructor_pipeline_input"
+                        }
+            binding <-
+                case finalizeBindingWithContext finalizeContext poisonedLowered of
+                    Left err -> expectationFailure ("metadata constructor finalization failed: " ++ show err) >> fail "metadata constructor finalization failed"
+                    Right checkedBinding -> pure checkedBinding
+            checkedBindingName binding `shouldBe` "Main__None"
+            fmap (symbolDefiningName . constructorRefSymbol) (ProgramTypes.checkedBindingConstructorRef binding)
+                `shouldBe` Just "None"
+
+        it "finalizes monomorphic field constructor bindings from metadata without the surface pipeline" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (Box(..), main) {"
+                        , "  data Box ="
+                        , "      Box : Int -> Box;"
+                        , ""
+                        , "  def main : Box = Box 1;"
+                        , "}"
+                        ]
+            checked <- requireChecked (withPrelude program)
+            dataInfo <- requireCheckedData "Main" "Box" checked
+            ctorInfo <- requireDataConstructor "Box" dataInfo
+            let scope = mkElaborateScope Map.empty (Map.singleton "Box" dataInfo) Map.empty []
+            finalizeContext <- requireFinalizeContext scope
+            let poisonedLowered =
+                    (lowerConstructorBinding scope ctorInfo)
+                        { loweredBindingSurfaceExpr = Surface.EVar "$missing_constructor_pipeline_input"
+                        }
+            binding <-
+                case finalizeBindingWithContext finalizeContext poisonedLowered of
+                    Left err -> expectationFailure ("metadata constructor finalization failed: " ++ show err) >> fail "metadata constructor finalization failed"
+                    Right checkedBinding -> pure checkedBinding
+            checkedBindingName binding `shouldBe` "Main__Box"
+            fmap (symbolDefiningName . constructorRefSymbol) (ProgramTypes.checkedBindingConstructorRef binding)
+                `shouldBe` Just "Box"
+            resolvedLocalBinders (checkedBindingTerm binding)
+                `shouldSatisfy` any
+                    ( \localRef ->
+                        localRefName localRef == "$Box_arg1"
+                            && isGeneratedLocalRef localRef
+                    )
+
+        it "finalizes monomorphic multi-constructor bindings from metadata without the surface pipeline" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (Nat(..), main) {"
+                        , "  data Nat ="
+                        , "      Zero : Nat"
+                        , "    | Succ : Nat -> Nat;"
+                        , ""
+                        , "  def main : Nat = Succ Zero;"
+                        , "}"
+                        ]
+            checked <- requireChecked (withPrelude program)
+            dataInfo <- requireCheckedData "Main" "Nat" checked
+            let scope = mkElaborateScope Map.empty (Map.singleton "Nat" dataInfo) Map.empty []
+            finalizeContext <- requireFinalizeContext scope
+            mapM_
+                ( \ctorName0 -> do
+                    ctorInfo <- requireDataConstructor ctorName0 dataInfo
+                    let poisonedLowered =
+                            (lowerConstructorBinding scope ctorInfo)
+                                { loweredBindingSurfaceExpr = Surface.EVar "$missing_constructor_pipeline_input"
+                                }
+                    binding <-
+                        case finalizeBindingWithContext finalizeContext poisonedLowered of
+                            Left err -> expectationFailure ("metadata constructor finalization failed: " ++ show err) >> fail "metadata constructor finalization failed"
+                            Right checkedBinding -> pure checkedBinding
+                    fmap (symbolDefiningName . constructorRefSymbol) (ProgramTypes.checkedBindingConstructorRef binding)
+                        `shouldBe` Just ctorName0
+                )
+                ["Zero", "Succ"]
+
+        it "records parameterized constructor binding binders with resolved local identity" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (Box(..), main) {"
+                        , "  data Box a ="
+                        , "      Box : a -> Box a;"
+                        , ""
+                        , "  def main : Box Int = Box 1;"
+                        , "}"
+                        ]
+            checked <- requireChecked (withPrelude program)
+            binding <- requireCheckedBinding "Main__Box" checked
+            resolvedLocalBinders (checkedBindingTerm binding) `shouldSatisfy` (not . null)
+            unresolvedTermVarRefs (checkedBindingTerm binding) `shouldBe` []
+
+        it "finalizes non-nullary parameterized constructor bindings from metadata without the surface pipeline" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (Box(..), main) {"
+                        , "  data Box a ="
+                        , "      Box : a -> Box a;"
+                        , ""
+                        , "  def main : Box Int = Box 1;"
+                        , "}"
+                        ]
+            checked <- requireChecked (withPrelude program)
+            dataInfo <- requireCheckedData "Main" "Box" checked
+            ctorInfo <- requireDataConstructor "Box" dataInfo
+            let scope = mkElaborateScope Map.empty (Map.singleton "Box" dataInfo) Map.empty []
+            finalizeContext <- requireFinalizeContext scope
+            let poisonedLowered =
+                    (lowerConstructorBinding scope ctorInfo)
+                        { loweredBindingSurfaceExpr = Surface.EVar "$missing_constructor_pipeline_input"
+                        }
+            binding <-
+                case finalizeBindingWithContext finalizeContext poisonedLowered of
+                    Left err -> expectationFailure ("metadata constructor finalization failed: " ++ show err) >> fail "metadata constructor finalization failed"
+                    Right checkedBinding -> pure checkedBinding
+            checkedBindingName binding `shouldBe` "Main__Box"
+            fmap (symbolDefiningName . constructorRefSymbol) (ProgramTypes.checkedBindingConstructorRef binding)
+                `shouldBe` Just "Box"
+            unresolvedTermVarRefs (checkedBindingTerm binding) `shouldBe` []
+
+        it "keeps parameterized nullary constructor bindings on the surface pipeline" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (Option(..), main) {"
+                        , "  data Option a ="
+                        , "      None : Option a;"
+                        , ""
+                        , "  def main : Option Bool = None;"
+                        , "}"
+                        ]
+            checked <- requireChecked (withPrelude program)
+            dataInfo <- requireCheckedData "Main" "Option" checked
+            ctorInfo <- requireDataConstructor "None" dataInfo
+            let scope = mkElaborateScope Map.empty (Map.singleton "Option" dataInfo) Map.empty []
+            finalizeContext <- requireFinalizeContext scope
+            let poisonedLowered =
+                    (lowerConstructorBinding scope ctorInfo)
+                        { loweredBindingSurfaceExpr = Surface.EVar "$missing_constructor_pipeline_input"
+                        }
+            case finalizeBindingWithContext finalizeContext poisonedLowered of
+                Left (ProgramUnknownValue "$missing_constructor_pipeline_input") -> pure ()
+                Left err -> expectationFailure ("expected surface-pipeline failure, got: " ++ show err)
+                Right _ -> expectationFailure "parameterized nullary constructor unexpectedly used metadata fast path"
+
+        it "records lambda and let binders with resolved local identity" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (apply, main) {"
+                        , "  def apply : Int -> Int = λx let y = x in y;"
+                        , "  def main : Int = apply 1;"
+                        , "}"
+                        ]
+            checked <- requireChecked (withPrelude program)
+            applyBinding <- requireCheckedBinding "Main__apply" checked
+            let term = checkedBindingTerm applyBinding
+                binderRefs = resolvedLocalBinders term
+                occurrenceRefs = resolvedLocalOccurrences term
+                binderNames = map localRefName binderRefs
+            binderNames `shouldSatisfy` (not . null)
+            binderRefs `shouldSatisfy` all isGeneratedLocalRef
+            occurrenceRefs `shouldMatchList` binderRefs
+
+        it "stores checked program executable references as resolved identity terms" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (Option(..), apply, main) {"
+                        , "  data Option ="
+                        , "      None : Option"
+                        , "    | Some : Int -> Option;"
+                        , ""
+                        , "  def apply : Int -> Int = λx let y = x in y;"
+                        , "  def main : Option = Some (apply 1);"
+                        , "}"
+                        ]
+            checked <- requireChecked program
+            checkedProgramUnresolvedTermVarNames checked `shouldBe` []
+
+        it "records polymorphic let binders with complete scheme sidecars" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  def main : Int = let id : ∀a. a -> a = λx x in id 1;"
+                        , "}"
+                        ]
+            checked <- requireChecked (withPrelude program)
+            mainBinding <- requireCheckedBinding "Main__main" checked
+            resolvedLocalLetTypes (checkedBindingTerm mainBinding)
+                `shouldSatisfy` any isPolymorphicIdentityType
+
+        it "decodes Church data using resolved local handler identity" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (Option(..), main) {"
+                        , "  data Option ="
+                        , "      None : Option;"
+                        , ""
+                        , "  def main : Option = None;"
+                        , "}"
+                        ]
+            checked <- requireChecked (withPrelude program)
+            let handlerType = testTVar "r"
+                handlerRef = generatedLocalRefForName "$None-handler"
+                binder =
+                    ResolvedVar
+                        { resolvedVarRuntimeName = "runtime-handler"
+                        , resolvedVarType = handlerType
+                        , resolvedVarDetails = LocalId handlerRef
+                        }
+                occurrence =
+                    binder
+                        { resolvedVarRuntimeName = "stale-runtime-handler"
+                        , resolvedVarDetails =
+                            LocalId
+                                ( handlerRef
+                                    { localRefName = "$stale-handler-reference"
+                                    }
+                                )
+                        }
+                churchNone =
+                    mkTestTyAbs "r" Nothing $
+                        Elab.ELam binder (Elab.EVarNode occurrence)
+                checked' = replaceCheckedBindingTerm "Main__main" churchNone checked
+            (programRunOutput <$> runCheckedProgramOutput checked') `shouldBe` Right "None\n"
+
+        it "decodes Church data using generated source type identity aliases" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (Option(..), main) {"
+                        , "  data Option ="
+                        , "      None : Option;"
+                        , ""
+                        , "  def main : Option = None;"
+                        , "}"
+                        ]
+            checked <- requireChecked (withPrelude program)
+            dataInfo <- requireCheckedData "Main" "Option" checked
+            let checked' =
+                    replaceCheckedBindingSourceType
+                        "Main__main"
+                        (STBase (symbolIdentityStableName (dataInfoSymbol dataInfo)))
+                        checked
+            (programRunOutput <$> runCheckedProgramOutput checked') `shouldBe` Right "None\n"
+
+        it "runs pure primitive calls by resolved primitive identity instead of runtime name" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  def main : String = \"placeholder\";"
+                        , "}"
+                        ]
+            checked <- requireChecked (withPrelude program)
+            let intTy = Elab.TBase (BaseTy "Int")
+                stringTy = Elab.TBase (BaseTy "String")
+                primitiveTy = Elab.TArrow intTy stringTy
+                staleStringFromInt =
+                    ResolvedVar
+                        { resolvedVarRuntimeName = "$stale_string_from_int"
+                        , resolvedVarType = primitiveTy
+                        , resolvedVarDetails =
+                            PrimitiveId
+                                PrimitiveRef
+                                    { primitiveRefSymbol =
+                                        Builtins.builtinValueIdentity PrimitiveInventory.stringFromIntPrimitiveName
+                                    }
+                        }
+                checkedTerm = Elab.EApp (Elab.EVarNode staleStringFromInt) (Elab.ELit (LInt 7))
+                checked' = replaceCheckedBindingTerm "Main__main" checkedTerm checked
+            (programRunOutput <$> runCheckedProgramOutput checked') `shouldBe` Right "\"7\"\n"
+
+        it "does not run primitive-spelled top-level refs without primitive identity" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  def main : String = \"placeholder\";"
+                        , "}"
+                        ]
+            checked <- requireChecked (withPrelude program)
+            let intTy = Elab.TBase (BaseTy "Int")
+                stringTy = Elab.TBase (BaseTy "String")
+                primitiveTy = Elab.TArrow intTy stringTy
+                fakePrimitiveSpelling =
+                    ResolvedVar
+                        { resolvedVarRuntimeName = PrimitiveInventory.stringFromIntPrimitiveName
+                        , resolvedVarType = primitiveTy
+                        , resolvedVarDetails =
+                            TopLevelId (generatedSymbolIdentity 1031 SymbolValue "Main" "notStringFromInt" Nothing)
+                        }
+                checkedTerm = Elab.EApp (Elab.EVarNode fakePrimitiveSpelling) (Elab.ELit (LInt 7))
+                checked' = replaceCheckedBindingTerm "Main__main" checkedTerm checked
+            (programRunOutput <$> runCheckedProgramOutput checked')
+                `shouldNotBe` Right "\"7\"\n"
+
+        it "runs Prelude stringFromList by resolved identity instead of runtime name" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (List(..), stringFromList);"
+                        , "  def main : String = stringFromList Nil;"
+                        , "}"
+                        ]
+            checked <- requireCheckedLocated (withPreludeLocated located)
+            mainBinding <- requireCheckedBinding "Main__main" checked
+            let checked' =
+                    replaceCheckedBindingTerm
+                        "Main__main"
+                        (poisonPrimitiveRuntimeNames "$stale_string_from_list" (checkedBindingTerm mainBinding))
+                        checked
+            (programRunOutput <$> runCheckedProgramOutput checked') `shouldBe` Right "\"\"\n"
+
+        it "runs checked IO terms by resolved identity instead of retained surface names" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO);"
+                        , "  def main : IO Unit = __io_bind (__io_pure 1) (λ(_n : Int) __io_putStrLn \"term-runtime\");"
+                        , "}"
+                        ]
+            checked <- requireCheckedLocated (withPreludeLocated located)
+            let checked' =
+                    replaceCheckedBindingSurfaceExpr
+                        "Main__main"
+                        (Surface.EVar "$stale_surface_should_not_run")
+                        checked
+            (programRunOutput <$> runCheckedProgramOutput checked') `shouldBe` Right "term-runtime\n"
+
+        it "runs checked IO main by resolved binding identity instead of checked binding name" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO);"
+                        , "  def main : IO Unit = __io_putStrLn \"binding-identity\";"
+                        , "}"
+                        ]
+            checked <- requireCheckedLocated (withPreludeLocated located)
+            let checked' = renameCheckedBindingName "Main__main" "$stale_main_binding_name" checked
+            (programRunOutput <$> runCheckedProgramOutput checked') `shouldBe` Right "binding-identity\n"
+
+        it "classifies checked IO main by checked type identity instead of source type name" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO);"
+                        , "  def main : IO Unit = __io_putStrLn \"type-identity\";"
+                        , "}"
+                        ]
+            checked <- requireCheckedLocated (withPreludeLocated located)
+            let checked' =
+                    replaceCheckedBindingSourceType
+                        "Main__main"
+                        (STCon "$stale_io" (STBase "$stale_unit" :| []))
+                        checked
+            (programRunOutput <$> runCheckedProgramOutput checked') `shouldBe` Right "type-identity\n"
+
+        it "keeps checked pure dependencies reachable by resolved identity instead of checked binding name" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  def helper : Int = 41;"
+                        , "  def main : Int = helper;"
+                        , "}"
+                        ]
+            checked <- requireChecked program
+            let checked' = renameCheckedBindingName "Main__helper" "$stale_helper_binding_name" checked
+            (programRunOutput <$> runCheckedProgramOutput checked') `shouldBe` Right "41\n"
+
+        it "keeps runtime recursion detection keyed by resolved identity instead of checked binding name" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO);"
+                        , "  def helper : IO Unit = __io_putStrLn \"helper\";"
+                        , "  def main : IO Unit = helper;"
+                        , "}"
+                        ]
+            checked <- requireCheckedLocated (withPreludeLocated located)
+            let checked' = renameCheckedBindingName "Main__helper" "Main__main" checked
+            (programRunOutput <$> runCheckedProgramOutput checked') `shouldBe` Right "helper\n"
+
+        it "runs checked IO constructors by resolved constructor identity instead of constructor runtime name" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO, bind, pure, putStrLn);"
+                        , "  data Option ="
+                        , "      None : Option;"
+                        , "  def action : IO Option = pure None;"
+                        , "  def after : Option -> IO Unit = λvalue case value of {"
+                        , "    None -> putStrLn \"ctor-identity\""
+                        , "  };"
+                        , "  def main : IO Unit = bind action after;"
+                        , "}"
+                        ]
+            checked <- requireCheckedLocated (withPreludeLocated located)
+            let checked' =
+                    renameCheckedConstructorRuntimeNamesWhere
+                        (== "Main__None")
+                        "$stale_none_runtime_name"
+                        checked
+            (programRunOutput <$> runCheckedProgramOutput checked') `shouldBe` Right "ctor-identity\n"
+
+        it "runs checked IO local environments by resolved local identity instead of binder spelling" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO);"
+                        , "  def main : IO Unit = __io_putStrLn \"placeholder\";"
+                        , "}"
+                        ]
+            checked <- requireCheckedLocated (withPreludeLocated located)
+            let intElabTy = Elab.TBase (BaseTy "Int")
+                outer = generatedResolvedLocal 100 "x" "runtime-x" intElabTy
+                inner = generatedResolvedLocal 101 "x" "runtime-x" intElabTy
+                ioBind = primitiveTerm "__io_bind"
+                ioPure = primitiveTerm "__io_pure"
+                ioPutStrLn = primitiveTerm "__io_putStrLn"
+                stringFromInt = primitiveTerm "__string_from_int"
+                checkedTerm =
+                    Elab.EApp
+                        (Elab.EApp ioBind (Elab.EApp ioPure (Elab.ELit (LInt 1))))
+                        ( Elab.ELam outer $
+                            Elab.EApp
+                                ( Elab.ELam inner $
+                                    Elab.EApp ioPutStrLn (Elab.EApp stringFromInt (Elab.EVarNode outer))
+                                )
+                                (Elab.ELit (LInt 2))
+                        )
+                checked' = replaceCheckedBindingTerm "Main__main" checkedTerm checked
+            (programRunOutput <$> runCheckedProgramOutput checked') `shouldBe` Right "1\n"
 
     describe "MLF.Program parse/pretty" $ do
         mapM_ roundtripFixture fixturePaths
@@ -984,7 +1602,12 @@ spec = do
                         , "  def main : IO Unit = __io_bind (__io_pure Unit) (λ(_n : Unit) __io_putStrLn \"world\");"
                         , "}"
                         ]
-            checkLocatedProgram (withPreludeLocated located) `shouldSatisfy` isRight
+            checked <-
+                case checkLocatedProgram (withPreludeLocated located) of
+                    Left err -> expectationFailure ("check failed: " ++ show err) >> fail "check failed"
+                    Right checked -> pure checked
+            mainBinding <- requireCheckedBinding "Main__main" checked
+            unresolvedTermVarRefs (checkedBindingTerm mainBinding) `shouldBe` []
 
         it "rejects inconsistent direct IO bind primitive arguments" $ do
             located <-
@@ -1161,7 +1784,26 @@ spec = do
                         , "  def main : IO Unit = bind action after;"
                         , "}"
                         ]
-            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "nat\n"
+            checked <- requireCheckedLocated (withPreludeLocated located)
+            mainBinding <- requireCheckedBinding "Main__main" checked
+            unresolvedTermVarRefs (checkedBindingTerm mainBinding) `shouldBe` []
+            (programRunOutput <$> runCheckedProgramOutput checked) `shouldBe` Right "nat\n"
+
+        it "seeds local binders after deferred identities in the same checked binding" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO, Nat(..));"
+                        , "  def main : IO Unit = __io_bind (__io_pure Zero) (λ(n : Nat) __io_putStrLn \"nat\");"
+                        , "}"
+                        ]
+            checked <- requireCheckedLocated (withPreludeLocated located)
+            mainBinding <- requireCheckedBinding "Main__main" checked
+            resolvedLocalBinders (checkedBindingTerm mainBinding) `shouldSatisfy` any isGeneratedLocalRef
+            generatedLocalIdentityValues (checkedBindingTerm mainBinding)
+                `shouldSatisfy` all (`notElem` generatedDeferredIdentityValues mainBinding)
+            (programRunOutput <$> runCheckedProgramOutput checked) `shouldBe` Right "nat\n"
 
         it "resolves deferred non-nullary constructors named Unit as functions" $ do
             located <-
@@ -1219,7 +1861,10 @@ spec = do
                         , "  def main : IO Unit = bind action after;"
                         , "}"
                         ]
-            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "succ\n"
+            checked <- requireCheckedLocated (withPreludeLocated located)
+            mainBinding <- requireCheckedBinding "Main__main" checked
+            unresolvedTermVarRefs (checkedBindingTerm mainBinding) `shouldBe` []
+            (programRunOutput <$> runCheckedProgramOutput checked) `shouldBe` Right "succ\n"
 
         it "resolves deferred method placeholders inside IO continuations" $ do
             located <-
@@ -1241,7 +1886,38 @@ spec = do
                         , "  def main : IO Unit = bind action after;"
                         , "}"
                         ]
-            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "succ\n"
+            checked <- requireCheckedLocated (withPreludeLocated located)
+            mainBinding <- requireCheckedBinding "Main__main" checked
+            unresolvedTermVarRefs (checkedBindingTerm mainBinding) `shouldBe` []
+            (programRunOutput <$> runCheckedProgramOutput checked) `shouldBe` Right "succ\n"
+
+        it "dispatches deferred IO methods by resolved identity instead of checked binding name" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO, Nat(..), bind, pure, putStrLn);"
+                        , "  class Speak a {"
+                        , "    speak : a -> IO Unit;"
+                        , "  }"
+                        , "  instance Speak Nat {"
+                        , "    speak = λn case n of {"
+                        , "      Zero -> putStrLn \"zero\";"
+                        , "      Succ rest -> putStrLn \"succ\""
+                        , "    };"
+                        , "  }"
+                        , "  def after : Nat -> IO Unit = λn speak n;"
+                        , "  def action : IO Nat = pure (Succ Zero);"
+                        , "  def main : IO Unit = bind action after;"
+                        , "}"
+                        ]
+            checked <- requireCheckedLocated (withPreludeLocated located)
+            let checked' =
+                    renameInstanceMethodRuntimeNamesWhere
+                        (\name -> "speak" `isInfixOf` name)
+                        "$stale_speak_runtime_name"
+                        checked
+            (programRunOutput <$> runCheckedProgramOutput checked') `shouldBe` Right "succ\n"
 
         it "preserves parameterized constructor instantiations for IO method dispatch" $ do
             located <-
@@ -1311,6 +1987,42 @@ spec = do
                         , "}"
                         ]
             (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "picked\n"
+
+        it "looks up local deferred evidence by resolved identity instead of evidence runtime name" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (Eq, Token(..), Pair(..), Pick, eq, pick, selected, main) {"
+                        , "  import Prelude exposing (Unit(..), IO, bind, pure, putStrLn);"
+                        , "  class Eq a {"
+                        , "    eq : a -> a -> Bool;"
+                        , "  }"
+                        , "  instance Eq Bool {"
+                        , "    eq = λleft λright true;"
+                        , "  }"
+                        , "  data Token a ="
+                        , "      Token : Token a;"
+                        , "  data Pair a b ="
+                        , "      Pair : Token b -> Pair a b;"
+                        , "  class Pick a {"
+                        , "    pick : Eq b => Pair a b;"
+                        , "  }"
+                        , "  instance Pick Bool {"
+                        , "    pick = Pair Token;"
+                        , "  }"
+                        , "  def selected : (Pick Bool, Eq Bool) => Pair Bool Bool = pick;"
+                        , "  def after : Pair Bool Bool -> IO Unit = λpair case pair of {"
+                        , "    Pair _ -> putStrLn \"picked\""
+                        , "  };"
+                        , "  def action : IO (Pair Bool Bool) = pure selected;"
+                        , "  def main : IO Unit = bind action after;"
+                        , "}"
+                        ]
+            checked <- requireCheckedLocated (withPreludeLocated located)
+            checkedProgramDeferredEvidenceMethods checked
+                `shouldSatisfy` any (isJust . evidenceMethodResolvedVar)
+            let checked' = poisonResolvedDeferredEvidenceRuntimeNames "$stale_evidence_runtime_name" checked
+            (programRunOutput <$> runCheckedProgramOutput checked') `shouldBe` Right "picked\n"
 
         it "constructs IO ADT payloads with function fields without runtime type inference" $ do
             located <-
@@ -1418,6 +2130,30 @@ spec = do
                         ]
                 )
                 (const False)
+
+        it "rejects opaque primitive dependencies by resolved identity instead of runtime name" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO);"
+                        , "  def main : Unit = (λ(_action : IO Unit) Unit) (__io_pure Unit);"
+                        , "}"
+                        ]
+            checked <- requireCheckedLocated (withPreludeLocated located)
+            mainBinding <- requireCheckedBinding "Main__main" checked
+            let checked' =
+                    replaceCheckedBindingTerm
+                        "Main__main"
+                        (poisonPrimitiveRuntimeNames "$stale_io_pure" (checkedBindingTerm mainBinding))
+                        checked
+            case runCheckedProgramOutput checked' of
+                Left (ProgramPipelineError text) -> do
+                    text `shouldSatisfy` isInfixOf "run-program does not support IO dependencies yet"
+                    text `shouldSatisfy` isInfixOf "__io_pure"
+                    text `shouldNotSatisfy` isInfixOf "$stale_io_pure"
+                other ->
+                    expectationFailure ("expected opaque primitive rejection, got " ++ show other)
 
         it "rejects a user module named Prelude when the built-in Prelude is active" $ do
             located <-
@@ -1613,6 +2349,25 @@ spec = do
                         `shouldSatisfy` isInfixOf "$case_scrutinee"
                 Left err -> expectationFailure ("checkProgram failed: " ++ show err)
 
+        it "does not treat a local value named id as identity in case scrutinees" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (B(..), main) {"
+                        , "  data B ="
+                        , "      BZ : B"
+                        , "    | BO : B;"
+                        , ""
+                        , "  def main : B ="
+                        , "    let id : B -> B = λx BO in"
+                        , "    case (id BZ) of {"
+                        , "      BZ -> BZ;"
+                        , "      BO -> BO"
+                        , "    };"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            (prettyValue <$> runProgram program) `shouldBe` Right "BO"
+
         it "rejects constructor arity mismatches as pattern errors" $ do
             let programText =
                     unlines
@@ -1673,7 +2428,7 @@ spec = do
                         , "}"
                         ]
             program <- requireParsed programText
-            checkProgram program `shouldBe` Left (ProgramNoMatchingInstance "Eq" (STBase "Nat"))
+            checkProgram program `shouldBe` Left (ProgramNoMatchingInstance "Eq" (STBase "Main.Nat"))
 
         it "rejects ordinary type mismatches directly" $ do
             let programText =
@@ -2031,12 +2786,7 @@ spec = do
                         ]
                 junkSymbol =
                     mkResolvedSymbol
-                        SymbolIdentity
-                            { symbolNamespace = SymbolValue
-                            , symbolDefiningModule = "Ghost"
-                            , symbolDefiningName = "ghost"
-                            , symbolOwnerIdentity = Nothing
-                            }
+                        (generatedSymbolIdentity 1041 SymbolValue "Ghost" "ghost" Nothing)
                         "ghost"
                         "ghost"
                         (SymbolLocal "Ghost")
@@ -2138,7 +2888,7 @@ spec = do
                             ]
                     case mainModules of
                         [mainModule] ->
-                            case [defDecl | DeclDef defDecl <- moduleDecls mainModule, defDeclName defDecl == "main"] of
+                            case [defDecl | DeclDef defDecl <- moduleDecls mainModule, refDisplayName (defDeclName defDecl) == "main"] of
                                 [mainDef] -> do
                                     case constrainedBody (defDeclType mainDef) of
                                         RSTBase typeSymbol -> do
@@ -2146,7 +2896,10 @@ spec = do
                                             symbolDefiningModule (resolvedSymbolIdentity typeSymbol) `shouldBe` "Core"
                                         other -> expectationFailure ("expected resolved type symbol, got " ++ show other)
                                     case defDeclExpr mainDef of
-                                        ELet "local" Nothing (EVar (ResolvedGlobalValue answerSymbol)) (ECase (EVar (ResolvedLocalValue "local")) [Alt (PatCtor ctorSymbol []) (EVar (ResolvedLocalValue "local"))]) -> do
+                                        ELet localRef Nothing (EVar (ResolvedGlobalValue answerSymbol)) (ECase (EVar (ResolvedLocalValue scrutineeRef)) [Alt (PatCtor ctorSymbol []) (EVar (ResolvedLocalValue bodyRef))]) -> do
+                                            localRefName localRef `shouldBe` "local"
+                                            scrutineeRef `shouldBe` localRef
+                                            bodyRef `shouldBe` localRef
                                             symbolDisplayName (resolvedSymbolSpelling answerSymbol) `shouldBe` "C.answer"
                                             symbolDefiningModule (resolvedSymbolIdentity answerSymbol) `shouldBe` "Core"
                                             symbolDisplayName (resolvedSymbolSpelling ctorSymbol) `shouldBe` "C.Token"
@@ -2156,40 +2909,301 @@ spec = do
                         other -> expectationFailure ("expected one Main module, got " ++ show (length other))
                 Left err -> expectationFailure ("expected check success, got " ++ show err)
 
+        it "uses globally unique resolved local identities across modules" $ do
+            let programText =
+                    unlines
+                        [ "module A export (a) {"
+                        , "  def a : Int -> Int = λx x;"
+                        , "}"
+                        , ""
+                        , "module B export (b) {"
+                        , "  def b : Bool -> Bool = λx x;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            case resolveProgram program of
+                Left err -> expectationFailure ("expected resolve success, got " ++ show err)
+                Right resolved -> do
+                    let lambdaRefs =
+                            [ paramName param
+                            | resolvedModule <- resolvedProgramModules resolved
+                            , DeclDef def <- moduleDecls (resolvedModuleSyntax resolvedModule)
+                            , ELam param _ <- [defDeclExpr def]
+                            ]
+                        identities = map localRefIdentity lambdaRefs
+                    map localRefName lambdaRefs `shouldBe` ["x", "x"]
+                    length identities `shouldBe` length (nub identities)
+
+        it "assigns generated identities to resolved forall type binders and occurrences" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  def main : ∀ a. a -> a = λx x;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            case resolveProgram program of
+                Left err -> expectationFailure ("expected resolve success, got " ++ show err)
+                Right resolved -> do
+                    let mainTypes =
+                            [ defDeclType def
+                            | resolvedModule <- resolvedProgramModules resolved
+                            , resolvedModuleName resolvedModule == "Main"
+                            , DeclDef def <- moduleDecls (resolvedModuleSyntax resolvedModule)
+                            , refDisplayName (defDeclName def) == "main"
+                            ]
+                    case mainTypes of
+                        [ConstrainedType [] (RSTForall binder Nothing (RSTArrow (RSTVar dom) (RSTVar cod)))] -> do
+                            resolvedTypeBinderName binder `shouldBe` "a"
+                            resolvedTypeBinderIdentity dom `shouldBe` resolvedTypeBinderIdentity binder
+                            resolvedTypeBinderIdentity cod `shouldBe` resolvedTypeBinderIdentity binder
+                        other -> expectationFailure ("expected resolved forall identity type, got " ++ show other)
+
+        it "assigns generated identities to local resolved symbols" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (Box(..), Eq, eq, main) {"
+                        , "  class Eq a {"
+                        , "    eq : a -> a -> Bool;"
+                        , "  }"
+                        , "  data Box ="
+                        , "      Box : Box;"
+                        , "  def main : Box = Box;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            case resolveProgram program of
+                Left err -> expectationFailure ("expected resolve success, got " ++ show err)
+                Right resolved -> do
+                    let modules = resolvedProgramModules resolved
+                        localSymbols =
+                            concatMap (concat . Map.elems . ProgramTypes.resolvedModuleLocalValues) modules
+                                ++ concatMap (concat . Map.elems . ProgramTypes.resolvedModuleLocalTypes) modules
+                                ++ concatMap (concat . Map.elems . ProgramTypes.resolvedModuleLocalClasses) modules
+                        generatedIds = map (symbolUniqueIdentity . resolvedSymbolIdentity) localSymbols
+                    length generatedIds `shouldBe` length (nub generatedIds)
+
+        it "assigns generated identities to declaration type parameter refs" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (Eq, eq, Box(..)) {"
+                        , "  class Eq a {"
+                        , "    eq : a -> a -> Bool;"
+                        , "  }"
+                        , ""
+                        , "  data Box a ="
+                        , "      Box : a -> Box a;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            case resolveProgram program of
+                Left err -> expectationFailure ("expected resolve success, got " ++ show err)
+                Right resolved ->
+                    case resolvedProgramModules resolved of
+                        [resolvedModule] ->
+                            case moduleDecls (resolvedModuleSyntax resolvedModule) of
+                                [DeclClass classDecl, DeclData dataDecl] -> do
+                                    classParamRef <-
+                                        case typeParamRef (classDeclParam classDecl) of
+                                            Just ref -> pure ref
+                                            Nothing -> expectationFailure "expected resolved class type parameter ref" >> fail "missing class param ref"
+                                    (classDomRef, classCodRef) <-
+                                        case classDeclMethods classDecl of
+                                            [methodSig] ->
+                                                case constrainedBody (methodSigType methodSig) of
+                                                    RSTArrow (RSTVar domRef) (RSTArrow (RSTVar codRef) (RSTBase _)) ->
+                                                        pure (domRef, codRef)
+                                                    other -> expectationFailure ("expected resolved class param refs, got " ++ show other) >> fail "unexpected method type"
+                                            other -> expectationFailure ("expected one method, got " ++ show other) >> fail "unexpected methods"
+                                    dataParamRef <-
+                                        case dataDeclParams dataDecl of
+                                            [param] ->
+                                                case typeParamRef param of
+                                                    Just ref -> pure ref
+                                                    Nothing -> expectationFailure "expected resolved data type parameter ref" >> fail "missing data param ref"
+                                            other -> expectationFailure ("expected one data parameter, got " ++ show other) >> fail "unexpected data params"
+                                    (dataFieldRef, dataResultRef) <-
+                                        case dataDeclConstructors dataDecl of
+                                            [ctorDecl] ->
+                                                case constructorDeclType ctorDecl of
+                                                    RSTArrow (RSTVar fieldRef) (RSTCon _ (RSTVar resultRef :| [])) ->
+                                                        pure (fieldRef, resultRef)
+                                                    other -> expectationFailure ("expected resolved data param refs, got " ++ show other) >> fail "unexpected constructor type"
+                                            other -> expectationFailure ("expected one constructor, got " ++ show other) >> fail "unexpected constructors"
+                                    resolvedTypeBinderIdentity classParamRef `shouldBe` resolvedTypeBinderIdentity classDomRef
+                                    resolvedTypeBinderIdentity classDomRef `shouldBe` resolvedTypeBinderIdentity classCodRef
+                                    resolvedTypeBinderIdentity dataParamRef `shouldBe` resolvedTypeBinderIdentity dataFieldRef
+                                    resolvedTypeBinderIdentity dataFieldRef `shouldBe` resolvedTypeBinderIdentity dataResultRef
+                                    resolvedTypeBinderIdentity classDomRef `shouldNotBe` resolvedTypeBinderIdentity dataFieldRef
+                                other -> expectationFailure ("unexpected declarations: " ++ show other)
+                        other -> expectationFailure ("expected one module, got " ++ show other)
+
+        it "assigns generated identities to implicit type parameter refs" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (Eq, eq, Box(..), keep) {"
+                        , "  class Eq a {"
+                        , "    eq : a -> a -> Bool;"
+                        , "  }"
+                        , ""
+                        , "  data Box a ="
+                        , "      Box : a -> Box a;"
+                        , ""
+                        , "  instance Eq a => Eq (Box a) {"
+                        , "    eq = λleft λright true;"
+                        , "  }"
+                        , ""
+                        , "  def keep : a -> a = λvalue value;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            case resolveProgram program of
+                Left err -> expectationFailure ("expected resolve success, got " ++ show err)
+                Right resolved ->
+                    case resolvedProgramModules resolved of
+                        [resolvedModule] ->
+                            case moduleDecls (resolvedModuleSyntax resolvedModule) of
+                                [DeclClass {}, DeclData {}, DeclInstance instDecl, DeclDef defDecl] -> do
+                                    (constraintRef, headRef) <-
+                                        case (constraintTypes <$> instanceDeclConstraints instDecl, instanceDeclTypes instDecl) of
+                                            ([RSTVar constraintRef0 :| []], RSTCon _ (RSTVar headRef0 :| []) :| []) ->
+                                                pure (constraintRef0, headRef0)
+                                            other -> expectationFailure ("expected resolved instance param refs, got " ++ show other) >> fail "unexpected instance type"
+                                    (defArgRef, defResultRef) <-
+                                        case constrainedBody (defDeclType defDecl) of
+                                            RSTArrow (RSTVar argRef) (RSTVar resultRef) ->
+                                                pure (argRef, resultRef)
+                                            other -> expectationFailure ("expected resolved def param refs, got " ++ show other) >> fail "unexpected def type"
+                                    resolvedTypeBinderIdentity constraintRef `shouldBe` resolvedTypeBinderIdentity headRef
+                                    resolvedTypeBinderIdentity defArgRef `shouldBe` resolvedTypeBinderIdentity defResultRef
+                                    resolvedTypeBinderIdentity constraintRef `shouldNotBe` resolvedTypeBinderIdentity defArgRef
+                                other -> expectationFailure ("unexpected declarations: " ++ show other)
+                        other -> expectationFailure ("expected one module, got " ++ show other)
+
+        it "reuses generated def type identities in expression annotations" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (keep) {"
+                        , "  def keep : a -> a = λ(value : a) let same : a = value in (same : a);"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            case resolveProgram program of
+                Left err -> expectationFailure ("expected resolve success, got " ++ show err)
+                Right resolved ->
+                    case resolvedProgramModules resolved of
+                        [resolvedModule] ->
+                            case moduleDecls (resolvedModuleSyntax resolvedModule) of
+                                [DeclDef defDecl] -> do
+                                    (sigArgRef, sigResultRef) <-
+                                        case constrainedBody (defDeclType defDecl) of
+                                            RSTArrow (RSTVar argRef) (RSTVar resultRef) ->
+                                                pure (argRef, resultRef)
+                                            other -> expectationFailure ("expected resolved def signature refs, got " ++ show other) >> fail "unexpected def type"
+                                    (paramRef, letRef, annRef) <-
+                                        case defDeclExpr defDecl of
+                                            ELam Param {paramType = Just (RSTVar paramRef0)}
+                                                (ELet _ (Just (RSTVar letRef0)) _ (EAnn _ (RSTVar annRef0))) ->
+                                                    pure (paramRef0, letRef0, annRef0)
+                                            other -> expectationFailure ("expected resolved expression annotation refs, got " ++ show other) >> fail "unexpected def expr"
+                                    let identities = map resolvedTypeBinderIdentity [sigArgRef, sigResultRef, paramRef, letRef, annRef]
+                                    length (nub identities) `shouldBe` 1
+                                other -> expectationFailure ("unexpected declarations: " ++ show other)
+                        other -> expectationFailure ("expected one module, got " ++ show other)
+
+        it "assigns stable generated identities to builtin symbols" $ do
+            let builtinIds =
+                    map (symbolUniqueIdentity . Builtins.builtinTypeIdentity) (Set.toList Builtins.builtinTypeNames)
+                        ++ map (symbolUniqueIdentity . Builtins.builtinValueIdentity) (Set.toList PrimitiveInventory.primitiveValueNames)
+                generatedIds = builtinIds
+            length generatedIds `shouldBe` length (nub generatedIds)
+            all ((< 0) . uniqueIdentityValue) generatedIds `shouldBe` True
+
+        it "reuses generated module identity on resolved imports" $ do
+            let programText =
+                    unlines
+                        [ "module Lib export (value) {"
+                        , "  def value : Int = 1;"
+                        , "}"
+                        , "module Main {"
+                        , "  import Lib;"
+                        , "  def main : Int = value;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            case resolveProgram program of
+                Left err -> expectationFailure ("expected resolve success, got " ++ show err)
+                Right resolved -> do
+                    let modules = resolvedProgramModules resolved
+                        libIdentity =
+                            [ ProgramTypes.resolvedModuleIdentity resolvedModule
+                            | resolvedModule <- modules
+                            , resolvedModuleName resolvedModule == "Lib"
+                            ]
+                        importIdentity =
+                            [ resolvedSymbolIdentity (importModuleName imp)
+                            | resolvedModule <- modules
+                            , resolvedModuleName resolvedModule == "Main"
+                            , imp <- moduleImports (resolvedModuleSyntax resolvedModule)
+                            ]
+                    map symbolUniqueIdentity importIdentity `shouldBe` map symbolUniqueIdentity libIdentity
+
+        it "assigns generated identity layer ids to checked instance method values" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (Monoid, Nat(..), mempty, append, main) {"
+                        , "  class Monoid a {"
+                        , "    mempty : a;"
+                        , "    append : a -> a -> a;"
+                        , "  }"
+                        , "  data Nat ="
+                        , "      Zero : Nat;"
+                        , "  instance Monoid Nat {"
+                        , "    mempty = Zero;"
+                        , "    append = λleft λright left;"
+                        , "  }"
+                        , "  def main : Nat = append mempty Zero;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            case resolveProgram program of
+                Left err -> expectationFailure ("expected resolve success, got " ++ show err)
+                Right resolved ->
+                    case checkResolvedProgram resolved of
+                        Left err -> expectationFailure ("expected check success, got " ++ show err)
+                        Right checked -> do
+                            let resolvedSymbols =
+                                    concatMap (concat . Map.elems . ProgramTypes.resolvedModuleLocalValues) (resolvedProgramModules resolved)
+                                        ++ concatMap (concat . Map.elems . ProgramTypes.resolvedModuleLocalTypes) (resolvedProgramModules resolved)
+                                        ++ concatMap (concat . Map.elems . ProgramTypes.resolvedModuleLocalClasses) (resolvedProgramModules resolved)
+                                resolvedIds = map (symbolUniqueIdentity . resolvedSymbolIdentity) resolvedSymbols
+                                instanceMethodIds =
+                                    [ identity
+                                    | checkedModule <- ProgramTypes.checkedProgramModules checked
+                                    , instanceInfo <- ProgramTypes.checkedModuleInstances checkedModule
+                                    , valueInfo <- Map.elems (instanceMethodsByIdentity instanceInfo)
+                                    , let identity = symbolUniqueIdentity (valueInfoSymbol valueInfo)
+                                    ]
+                            length instanceMethodIds `shouldBe` 2
+                            length instanceMethodIds `shouldBe` length (nub instanceMethodIds)
+                            all (`notElem` resolvedIds) instanceMethodIds `shouldBe` True
+
         it "rejects constructor result heads with matching display but different resolved identity" $ do
             let localBox =
                     mkResolvedSymbol
-                        ( SymbolIdentity
-                            { symbolNamespace = SymbolType
-                            , symbolDefiningModule = "Main"
-                            , symbolDefiningName = "Box"
-                            , symbolOwnerIdentity = Nothing
-                            }
-                        )
+                        (generatedSymbolIdentity 9101 SymbolType "Main" "Box" Nothing)
                         "Box"
                         "Box"
                         (SymbolLocal "Main")
                 foreignBox =
                     mkResolvedSymbol
-                        ( SymbolIdentity
-                            { symbolNamespace = SymbolType
-                            , symbolDefiningModule = "Other"
-                            , symbolDefiningName = "Box"
-                            , symbolOwnerIdentity = Nothing
-                            }
-                        )
+                        (generatedSymbolIdentity 9104 SymbolType "Other" "Box" Nothing)
                         "Box"
                         "Box"
                         (SymbolQualifiedImport "Other" "Other")
                 badCtor =
                     mkResolvedSymbol
-                        ( SymbolIdentity
-                            { symbolNamespace = SymbolConstructor
-                            , symbolDefiningModule = "Main"
-                            , symbolDefiningName = "Bad"
-                            , symbolOwnerIdentity = Just (SymbolOwnerType "Main" "Box")
-                            }
-                        )
+                        (generatedSymbolIdentity 9105 SymbolConstructor "Main" "Bad" (Just (generatedSymbolOwnerType 9101 "Main" "Box")))
                         "Bad"
                         "Bad"
                         (SymbolLocal "Main")
@@ -2205,6 +3219,7 @@ spec = do
                         { resolvedModuleSemantic =
                             ResolvedSemanticModule
                                 { resolvedSemanticModuleName = "Main"
+                                , resolvedSemanticModuleIdentity = ProgramTypes.moduleSymbolIdentity (UniqueIdentity 9001) "Main"
                                 , resolvedSemanticModuleSyntax =
                                     Module
                                         { moduleName = "Main"
@@ -2213,11 +3228,11 @@ spec = do
                                         , moduleDecls =
                                             [ DeclData
                                                 DataDecl
-                                                    { dataDeclName = "Box"
+                                                    { dataDeclName = localBox
                                                     , dataDeclParams = []
                                                     , dataDeclConstructors =
                                                         [ ConstructorDecl
-                                                            { constructorDeclName = "Bad"
+                                                            { constructorDeclName = badCtor
                                                             , constructorDeclType = RSTBase foreignBox
                                                             }
                                                         ]
@@ -2242,40 +3257,74 @@ spec = do
             checkResolvedProgram (ResolvedProgram [resolvedModule])
                 `shouldBe` Left (ProgramInvalidConstructorResult "Bad" (STBase "Box") "Box")
 
+        it "rejects resolved data parameters without generated identities" $ do
+            let boxType =
+                    mkResolvedSymbol
+                        (generatedSymbolIdentity 9051 SymbolType "Main" "Box" Nothing)
+                        "Box"
+                        "Box"
+                        (SymbolLocal "Main")
+                resolvedScope =
+                    ResolvedScope
+                        { resolvedScopeValues = Map.empty
+                        , resolvedScopeTypes = Map.singleton "Box" boxType
+                        , resolvedScopeClasses = Map.empty
+                        , resolvedScopeModules = Map.empty
+                        }
+                resolvedModule =
+                    ResolvedModule
+                        { resolvedModuleSemantic =
+                            ResolvedSemanticModule
+                                { resolvedSemanticModuleName = "Main"
+                                , resolvedSemanticModuleIdentity = ProgramTypes.moduleSymbolIdentity (UniqueIdentity 9050) "Main"
+                                , resolvedSemanticModuleSyntax =
+                                    Module
+                                        { moduleName = "Main"
+                                        , moduleExports = Nothing
+                                        , moduleImports = []
+                                        , moduleDecls =
+                                            [ DeclData
+                                                DataDecl
+                                                    { dataDeclName = boxType
+                                                    , dataDeclParams = [TypeParam "a" KType]
+                                                    , dataDeclConstructors = []
+                                                    , dataDeclDeriving = []
+                                                    }
+                                            ]
+                                        }
+                                , resolvedSemanticModuleLocalSymbols =
+                                    ResolvedLocalSymbols
+                                        { resolvedLocalValues = Map.empty
+                                        , resolvedLocalTypes = Map.singleton "Box" [boxType]
+                                        , resolvedLocalClasses = Map.empty
+                                        }
+                                , resolvedSemanticModuleScope = resolvedScope
+                                , resolvedSemanticModuleExports = resolvedScope
+                                }
+                        , resolvedModuleDiagnosticAdapter =
+                            ResolvedModuleDiagnosticAdapter
+                                { resolvedDiagnosticReferences = []
+                                }
+                        }
+            checkResolvedProgram (ResolvedProgram [resolvedModule])
+                `shouldBe` Left (ProgramPipelineError "resolved type parameter `a` is missing identity")
+
         it "checks resolved syntax by identity when display spellings are stale" $ do
             let boxType =
                     mkResolvedSymbol
-                        ( SymbolIdentity
-                            { symbolNamespace = SymbolType
-                            , symbolDefiningModule = "Main"
-                            , symbolDefiningName = "Box"
-                            , symbolOwnerIdentity = Nothing
-                            }
-                        )
+                        (generatedSymbolIdentity 9101 SymbolType "Main" "Box" Nothing)
                         "stale.Box"
                         "stale.Box"
                         (SymbolLocal "Main")
                 boxCtor =
                     mkResolvedSymbol
-                        ( SymbolIdentity
-                            { symbolNamespace = SymbolConstructor
-                            , symbolDefiningModule = "Main"
-                            , symbolDefiningName = "Box"
-                            , symbolOwnerIdentity = Just (SymbolOwnerType "Main" "Box")
-                            }
-                        )
+                        (generatedSymbolIdentity 9102 SymbolConstructor "Main" "Box" (Just (generatedSymbolOwnerType 9101 "Main" "Box")))
                         "stale.Box"
                         "stale.Box"
                         (SymbolLocal "Main")
                 mainValue =
                     mkResolvedSymbol
-                        ( SymbolIdentity
-                            { symbolNamespace = SymbolValue
-                            , symbolDefiningModule = "Main"
-                            , symbolDefiningName = "main"
-                            , symbolOwnerIdentity = Nothing
-                            }
-                        )
+                        (generatedSymbolIdentity 9103 SymbolValue "Main" "main" Nothing)
                         "stale.main"
                         "stale.main"
                         (SymbolLocal "Main")
@@ -2291,6 +3340,7 @@ spec = do
                         { resolvedModuleSemantic =
                             ResolvedSemanticModule
                                 { resolvedSemanticModuleName = "Main"
+                                , resolvedSemanticModuleIdentity = ProgramTypes.moduleSymbolIdentity (UniqueIdentity 9001) "Main"
                                 , resolvedSemanticModuleSyntax =
                                     Module
                                         { moduleName = "Main"
@@ -2299,11 +3349,11 @@ spec = do
                                         , moduleDecls =
                                             [ DeclData
                                                 DataDecl
-                                                    { dataDeclName = "Box"
+                                                    { dataDeclName = boxType
                                                     , dataDeclParams = []
                                                     , dataDeclConstructors =
                                                         [ ConstructorDecl
-                                                            { constructorDeclName = "Box"
+                                                            { constructorDeclName = boxCtor
                                                             , constructorDeclType = RSTBase boxType
                                                             }
                                                         ]
@@ -2311,9 +3361,95 @@ spec = do
                                                     }
                                             , DeclDef
                                                 DefDecl
-                                                    { defDeclName = "main"
+                                                    { defDeclName = mainValue
                                                     , defDeclType = ConstrainedType [] (RSTBase boxType)
                                                     , defDeclExpr = EVar (ResolvedGlobalValue boxCtor)
+                                                    }
+                                            ]
+                                        }
+                                , resolvedSemanticModuleLocalSymbols =
+                                    ResolvedLocalSymbols
+                                        { resolvedLocalValues = Map.fromList [("Box", [boxCtor]), ("main", [mainValue])]
+                                        , resolvedLocalTypes = Map.singleton "Box" [boxType]
+                                        , resolvedLocalClasses = Map.empty
+                                        }
+                                , resolvedSemanticModuleScope = resolvedScope
+                                , resolvedSemanticModuleExports = resolvedScope
+                                }
+                        , resolvedModuleDiagnosticAdapter =
+                            ResolvedModuleDiagnosticAdapter
+                                { resolvedDiagnosticReferences = []
+                                }
+                        }
+            case checkResolvedProgram (ResolvedProgram [resolvedModule]) of
+                Left err -> expectationFailure ("check failed: " ++ show err)
+                Right checked -> do
+                    mainBinding <- requireCheckedBinding "Main__main" checked
+                    checkedBindingResolvedVar mainBinding
+                        `shouldSatisfy` \resolvedVar@ResolvedVar {resolvedVarRuntimeName, resolvedVarDetails} ->
+                            Elab.resolvedVarName resolvedVar == "main"
+                                && resolvedVarRuntimeName == "Main__main"
+                                && resolvedVarDetails == TopLevelId (resolvedSymbolIdentity mainValue)
+
+        it "does not let resolved local spellings shadow global identities" $ do
+            let boxType =
+                    mkResolvedSymbol
+                        (generatedSymbolIdentity 9201 SymbolType "Main" "Box" Nothing)
+                        "Box"
+                        "Box"
+                        (SymbolLocal "Main")
+                boxCtor =
+                    mkResolvedSymbol
+                        (generatedSymbolIdentity 9202 SymbolConstructor "Main" "Box" (Just (generatedSymbolOwnerType 9201 "Main" "Box")))
+                        "Box"
+                        "Box"
+                        (SymbolLocal "Main")
+                mainValue =
+                    mkResolvedSymbol
+                        (generatedSymbolIdentity 9203 SymbolValue "Main" "main" Nothing)
+                        "main"
+                        "main"
+                        (SymbolLocal "Main")
+                shadowRef = LocalRef (GeneratedLocalId (UniqueIdentity 42)) "Box"
+                resolvedScope =
+                    ResolvedScope
+                        { resolvedScopeValues = Map.fromList [("Box", boxCtor), ("main", mainValue)]
+                        , resolvedScopeTypes = Map.singleton "Box" boxType
+                        , resolvedScopeClasses = Map.empty
+                        , resolvedScopeModules = Map.empty
+                        }
+                resolvedModule =
+                    ResolvedModule
+                        { resolvedModuleSemantic =
+                            ResolvedSemanticModule
+                                { resolvedSemanticModuleName = "Main"
+                                , resolvedSemanticModuleIdentity = ProgramTypes.moduleSymbolIdentity (UniqueIdentity 9001) "Main"
+                                , resolvedSemanticModuleSyntax =
+                                    Module
+                                        { moduleName = "Main"
+                                        , moduleExports = Nothing
+                                        , moduleImports = []
+                                        , moduleDecls =
+                                            [ DeclData
+                                                DataDecl
+                                                    { dataDeclName = boxType
+                                                    , dataDeclParams = []
+                                                    , dataDeclConstructors =
+                                                        [ ConstructorDecl
+                                                            { constructorDeclName = boxCtor
+                                                            , constructorDeclType = RSTBase boxType
+                                                            }
+                                                        ]
+                                                    , dataDeclDeriving = []
+                                                    }
+                                            , DeclDef
+                                                DefDecl
+                                                    { defDeclName = mainValue
+                                                    , defDeclType = ConstrainedType [] (RSTBase boxType)
+                                                    , defDeclExpr =
+                                                        EApp
+                                                            (ELam (Param shadowRef Nothing) (EVar (ResolvedGlobalValue boxCtor)))
+                                                            (ELit (LInt 0))
                                                     }
                                             ]
                                         }
@@ -2336,37 +3472,19 @@ spec = do
         it "elaborates resolved annotations and patterns by identity with stale spellings" $ do
             let boxType =
                     mkResolvedSymbol
-                        ( SymbolIdentity
-                            { symbolNamespace = SymbolType
-                            , symbolDefiningModule = "Main"
-                            , symbolDefiningName = "Box"
-                            , symbolOwnerIdentity = Nothing
-                            }
-                        )
+                        (generatedSymbolIdentity 9301 SymbolType "Main" "Box" Nothing)
                         "wrong.Box"
                         "wrong.Box"
                         (SymbolLocal "Main")
                 boxCtor =
                     mkResolvedSymbol
-                        ( SymbolIdentity
-                            { symbolNamespace = SymbolConstructor
-                            , symbolDefiningModule = "Main"
-                            , symbolDefiningName = "Box"
-                            , symbolOwnerIdentity = Just (SymbolOwnerType "Main" "Box")
-                            }
-                        )
+                        (generatedSymbolIdentity 9302 SymbolConstructor "Main" "Box" (Just (generatedSymbolOwnerType 9301 "Main" "Box")))
                         "wrong.Box"
                         "wrong.Box"
                         (SymbolLocal "Main")
                 mainValue =
                     mkResolvedSymbol
-                        ( SymbolIdentity
-                            { symbolNamespace = SymbolValue
-                            , symbolDefiningModule = "Main"
-                            , symbolDefiningName = "main"
-                            , symbolOwnerIdentity = Nothing
-                            }
-                        )
+                        (generatedSymbolIdentity 9303 SymbolValue "Main" "main" Nothing)
                         "wrong.main"
                         "wrong.main"
                         (SymbolLocal "Main")
@@ -2382,6 +3500,7 @@ spec = do
                         { resolvedModuleSemantic =
                             ResolvedSemanticModule
                                 { resolvedSemanticModuleName = "Main"
+                                , resolvedSemanticModuleIdentity = ProgramTypes.moduleSymbolIdentity (UniqueIdentity 9001) "Main"
                                 , resolvedSemanticModuleSyntax =
                                     Module
                                         { moduleName = "Main"
@@ -2390,11 +3509,11 @@ spec = do
                                         , moduleDecls =
                                             [ DeclData
                                                 DataDecl
-                                                    { dataDeclName = "Box"
+                                                    { dataDeclName = boxType
                                                     , dataDeclParams = []
                                                     , dataDeclConstructors =
                                                         [ ConstructorDecl
-                                                            { constructorDeclName = "Box"
+                                                            { constructorDeclName = boxCtor
                                                             , constructorDeclType = RSTBase boxType
                                                             }
                                                         ]
@@ -2402,7 +3521,7 @@ spec = do
                                                     }
                                             , DeclDef
                                                 DefDecl
-                                                    { defDeclName = "main"
+                                                    { defDeclName = mainValue
                                                     , defDeclType = ConstrainedType [] (RSTBase boxType)
                                                     , defDeclExpr =
                                                         ECase
@@ -2665,10 +3784,10 @@ spec = do
             located <- requireLocatedWithFile "missing-instance.mlfp" programText
             case checkLocatedProgram located of
                 Left diagnostic -> do
-                    diagnosticError diagnostic `shouldBe` ProgramNoMatchingInstance "Eq" (STBase "Nat")
+                    diagnosticError diagnostic `shouldBe` ProgramNoMatchingInstance "Eq" (STBase "Main.Nat")
                     diagnosticSpan diagnostic `shouldBe` Nothing
                     renderProgramDiagnostic diagnostic
-                        `shouldSatisfy` isInfixOf "error: no matching instance for `Eq STBase \"Nat\"`"
+                        `shouldSatisfy` isInfixOf "error: no matching instance for `Eq STBase \"Main.Nat\"`"
                 Right _ -> expectationFailure "expected missing instance diagnostic"
 
         it "renders unknown instance class diagnostics at the instance head" $ do
@@ -2835,6 +3954,11 @@ spec = do
             Left err -> expectationFailure ("check failed: " ++ show err) >> fail "check failed"
             Right checked -> pure checked
 
+    requireCheckedLocated located =
+        case checkLocatedProgram located of
+            Left err -> expectationFailure ("check failed: " ++ show err) >> fail "check failed"
+            Right checked -> pure checked
+
     requireCheckedBinding name checked =
         case
             [ binding
@@ -2845,6 +3969,393 @@ spec = do
         of
             binding : _ -> pure binding
             [] -> expectationFailure ("missing checked binding: " ++ name) >> fail "missing checked binding"
+
+    requireCheckedData moduleName name checked =
+        case
+            [ dataInfo
+            | checkedModule <- checkedProgramModules checked
+            , checkedModuleName checkedModule == moduleName
+            , dataInfo <- Map.elems (checkedModuleData checkedModule)
+            , dataName dataInfo == name
+            ]
+        of
+            dataInfo : _ -> pure dataInfo
+            [] -> expectationFailure ("missing checked data: " ++ moduleName ++ "." ++ name) >> fail "missing checked data"
+
+    requireDataConstructor name dataInfo =
+        case [ctorInfo | ctorInfo <- dataConstructors dataInfo, ctorName ctorInfo == name] of
+            ctorInfo : _ -> pure ctorInfo
+            [] -> expectationFailure ("missing constructor: " ++ name) >> fail "missing constructor"
+
+    requireFinalizeContext scope =
+        case mkFinalizeContext scope of
+            Left err -> expectationFailure ("finalize context failed: " ++ show err) >> fail "finalize context failed"
+            Right finalizeContext -> pure finalizeContext
+
+replaceCheckedBindingTerm :: String -> Elab.XmlfTerm -> CheckedProgram -> CheckedProgram
+replaceCheckedBindingTerm name term checked =
+    checked
+        { checkedProgramModules =
+            map replaceModule (checkedProgramModules checked)
+        }
+  where
+    replaceModule checkedModule =
+        checkedModule
+            { checkedModuleBindings =
+                map replaceBinding (checkedModuleBindings checkedModule)
+            }
+
+    replaceBinding binding
+        | checkedBindingName binding == name =
+            binding {checkedBindingTerm = term}
+        | otherwise = binding
+
+replaceCheckedBindingSourceType :: String -> Surface.SrcType -> CheckedProgram -> CheckedProgram
+replaceCheckedBindingSourceType name sourceType checked =
+    checked
+        { checkedProgramModules =
+            map replaceModule (checkedProgramModules checked)
+        }
+  where
+    replaceModule checkedModule =
+        checkedModule
+            { checkedModuleBindings =
+                map replaceBinding (checkedModuleBindings checkedModule)
+            }
+
+    replaceBinding binding
+        | checkedBindingName binding == name =
+            binding {checkedBindingSourceType = sourceType}
+        | otherwise = binding
+
+poisonPrimitiveRuntimeNames :: String -> Elab.XmlfTerm -> Elab.XmlfTerm
+poisonPrimitiveRuntimeNames replacement term =
+    case term of
+        Elab.EVarNode resolved@ResolvedVar {resolvedVarDetails = PrimitiveId ref} ->
+            Elab.EVarNode
+                resolved
+                    { resolvedVarRuntimeName = replacement
+                    , resolvedVarDetails = PrimitiveId ref
+                    }
+        Elab.EVarNode resolved@ResolvedVar {resolvedVarDetails = TopLevelId _} ->
+            Elab.EVarNode resolved {resolvedVarRuntimeName = replacement}
+        Elab.EVarNode {} -> term
+        Elab.ELit {} -> term
+        Elab.ELam resolved body -> Elab.ELam resolved (go body)
+        Elab.EApp fun arg -> Elab.EApp (go fun) (go arg)
+        Elab.ELet resolved scheme rhs body -> Elab.ELet resolved scheme (go rhs) (go body)
+        Elab.ETyAbsRef ref mbBound body -> Elab.ETyAbsRef ref mbBound (go body)
+        Elab.ETyInst body inst -> Elab.ETyInst (go body) inst
+        Elab.ERoll ty body -> Elab.ERoll ty (go body)
+        Elab.EUnroll body -> Elab.EUnroll (go body)
+  where
+    go = poisonPrimitiveRuntimeNames replacement
+
+primitiveTerm :: String -> Elab.XmlfTerm
+primitiveTerm name =
+    Elab.EVarNode
+        ResolvedVar
+            { resolvedVarRuntimeName = name
+            , resolvedVarType = Elab.TBottom
+            , resolvedVarDetails =
+                PrimitiveId
+                    PrimitiveRef
+                        { primitiveRefSymbol = Builtins.builtinValueIdentity name
+                        }
+            }
+
+replaceCheckedBindingSurfaceExpr :: String -> Surface.SurfaceExpr -> CheckedProgram -> CheckedProgram
+replaceCheckedBindingSurfaceExpr name expr checked =
+    checked
+        { checkedProgramModules =
+            map replaceModule (checkedProgramModules checked)
+        }
+  where
+    replaceModule checkedModule =
+        checkedModule
+            { checkedModuleBindings =
+                map replaceBinding (checkedModuleBindings checkedModule)
+            }
+
+    replaceBinding binding
+        | checkedBindingName binding == name =
+            binding {checkedBindingSurfaceExpr = expr}
+        | otherwise = binding
+
+renameCheckedBindingName :: String -> String -> CheckedProgram -> CheckedProgram
+renameCheckedBindingName oldName newName checked =
+    checked
+        { checkedProgramModules =
+            map renameModule (checkedProgramModules checked)
+        }
+  where
+    renameModule checkedModule =
+        checkedModule
+            { checkedModuleBindings =
+                map renameBinding (checkedModuleBindings checkedModule)
+            }
+
+    renameBinding binding
+        | checkedBindingName binding == oldName =
+            binding
+                { checkedBindingResolvedVar =
+                    (checkedBindingResolvedVar binding)
+                        { resolvedVarRuntimeName = newName
+                        }
+                }
+        | otherwise = binding
+
+renameCheckedConstructorRuntimeNamesWhere :: (String -> Bool) -> String -> CheckedProgram -> CheckedProgram
+renameCheckedConstructorRuntimeNamesWhere predicate replacement checked =
+    checked
+        { checkedProgramModules =
+            map renameModule (checkedProgramModules checked)
+        }
+  where
+    renameModule checkedModule =
+        checkedModule
+            { checkedModuleData =
+                fmap renameDataInfo (checkedModuleData checkedModule)
+            }
+
+    renameDataInfo dataInfo =
+        dataInfo
+            { dataConstructors =
+                map renameConstructor (dataConstructors dataInfo)
+            }
+
+    renameConstructor ctorInfo@ConstructorInfo {ctorRuntimeName = runtimeName}
+        | predicate runtimeName =
+            ctorInfo {ctorRuntimeName = replacement}
+    renameConstructor ctorInfo = ctorInfo
+
+renameInstanceMethodRuntimeNamesWhere :: (String -> Bool) -> String -> CheckedProgram -> CheckedProgram
+renameInstanceMethodRuntimeNamesWhere predicate replacement checked =
+    checked
+        { checkedProgramModules =
+            map replaceModule (checkedProgramModules checked)
+        }
+  where
+    replaceModule checkedModule =
+        checkedModule
+            { checkedModuleInstances =
+                map replaceInstance (checkedModuleInstances checkedModule)
+            }
+
+    replaceInstance instanceInfo =
+        instanceInfo
+            { instanceMethodsByIdentity =
+                fmap replaceValueInfo (instanceMethodsByIdentity instanceInfo)
+            }
+
+    replaceValueInfo valueInfo@OrdinaryValue {valueRuntimeName = runtimeName}
+        | predicate runtimeName =
+            valueInfo {valueRuntimeName = replacement}
+    replaceValueInfo valueInfo = valueInfo
+
+checkedProgramDeferredEvidenceMethods :: CheckedProgram -> [EvidenceMethod]
+checkedProgramDeferredEvidenceMethods checked =
+    concatMap checkedBindingDeferredEvidenceMethods
+        [ binding
+        | checkedModule <- checkedProgramModules checked
+        , binding <- checkedModuleBindings checkedModule
+        ]
+
+checkedBindingDeferredEvidenceMethods :: CheckedBinding -> [EvidenceMethod]
+checkedBindingDeferredEvidenceMethods binding =
+    concatMap obligationEvidenceMethods (Map.elems (checkedBindingDeferredObligations binding))
+
+obligationEvidenceMethods :: DeferredProgramObligation -> [EvidenceMethod]
+obligationEvidenceMethods obligation =
+    case obligation of
+        DeferredMethod deferred ->
+            maybe [] ((: []) . deferredMethodEvidenceMethod) (deferredMethodEvidence deferred)
+                ++ concatMap evidenceInfoMethods (deferredMethodLocalEvidence deferred)
+        DeferredConstructor {} -> []
+        DeferredCase {} -> []
+
+evidenceInfoMethods :: EvidenceInfo -> [EvidenceMethod]
+evidenceInfoMethods evidence =
+    Map.elems (evidenceMethodsByIdentity evidence)
+
+poisonResolvedDeferredEvidenceRuntimeNames :: String -> CheckedProgram -> CheckedProgram
+poisonResolvedDeferredEvidenceRuntimeNames replacement =
+    mapDeferredEvidenceMethods poisonEvidenceMethod
+  where
+    poisonEvidenceMethod method
+        | Just _ <- evidenceMethodResolvedVar method =
+            method {evidenceMethodRuntimeName = replacement}
+        | otherwise = method
+
+mapDeferredEvidenceMethods :: (EvidenceMethod -> EvidenceMethod) -> CheckedProgram -> CheckedProgram
+mapDeferredEvidenceMethods f checked =
+    checked
+        { checkedProgramModules =
+            map mapModule (checkedProgramModules checked)
+        }
+  where
+    mapModule checkedModule =
+        checkedModule
+            { checkedModuleBindings =
+                map mapBinding (checkedModuleBindings checkedModule)
+            }
+
+    mapBinding binding =
+        binding
+            { checkedBindingDeferredObligations =
+                fmap mapObligation (checkedBindingDeferredObligations binding)
+            }
+
+    mapObligation obligation =
+        case obligation of
+            DeferredMethod deferred ->
+                DeferredMethod
+                    deferred
+                        { deferredMethodEvidence = mapDeferredMethodEvidence <$> deferredMethodEvidence deferred
+                        , deferredMethodLocalEvidence = map mapEvidenceInfo (deferredMethodLocalEvidence deferred)
+                        }
+            DeferredConstructor {} -> obligation
+            DeferredCase {} -> obligation
+
+    mapDeferredMethodEvidence evidence =
+        evidence
+            { deferredMethodEvidenceMethod =
+                f (deferredMethodEvidenceMethod evidence)
+            }
+
+    mapEvidenceInfo evidence =
+        evidence
+            { evidenceMethodsByIdentity =
+                fmap f (evidenceMethodsByIdentity evidence)
+            }
+
+resolvedConstructorRefs :: Elab.XmlfTerm -> [ProgramTypes.ConstructorRef]
+resolvedConstructorRefs term =
+    case term of
+        Elab.EVarNode ResolvedVar {resolvedVarDetails = ConstructorId ctorRef} ->
+            [ctorRef]
+        Elab.EVarNode {} -> []
+        Elab.ELit {} -> []
+        Elab.ELam _ body -> resolvedConstructorRefs body
+        Elab.EApp fun arg -> resolvedConstructorRefs fun ++ resolvedConstructorRefs arg
+        Elab.ELet _ _ rhs body -> resolvedConstructorRefs rhs ++ resolvedConstructorRefs body
+        Elab.ETyAbsRef _ _ body -> resolvedConstructorRefs body
+        Elab.ETyInst body _ -> resolvedConstructorRefs body
+        Elab.ERoll _ body -> resolvedConstructorRefs body
+        Elab.EUnroll body -> resolvedConstructorRefs body
+
+resolvedLocalBinders :: Elab.XmlfTerm -> [LocalRef]
+resolvedLocalBinders term =
+    case term of
+        Elab.ELam ResolvedVar {resolvedVarDetails = LocalId localRef} body ->
+            localRef : resolvedLocalBinders body
+        Elab.ELam ResolvedVar {resolvedVarDetails = EvidenceId localRef} body ->
+            localRef : resolvedLocalBinders body
+        Elab.ELet ResolvedVar {resolvedVarDetails = LocalId localRef} _ rhs body ->
+            localRef : resolvedLocalBinders rhs ++ resolvedLocalBinders body
+        Elab.ELet ResolvedVar {resolvedVarDetails = EvidenceId localRef} _ rhs body ->
+            localRef : resolvedLocalBinders rhs ++ resolvedLocalBinders body
+        Elab.ELam _ body -> resolvedLocalBinders body
+        Elab.ELet _ _ rhs body -> resolvedLocalBinders rhs ++ resolvedLocalBinders body
+        Elab.EVarNode {} -> []
+        Elab.ELit {} -> []
+        Elab.EApp fun arg -> resolvedLocalBinders fun ++ resolvedLocalBinders arg
+        Elab.ETyAbsRef _ _ body -> resolvedLocalBinders body
+        Elab.ETyInst body _ -> resolvedLocalBinders body
+        Elab.ERoll _ body -> resolvedLocalBinders body
+        Elab.EUnroll body -> resolvedLocalBinders body
+
+isGeneratedLocalRef :: LocalRef -> Bool
+isGeneratedLocalRef localRef =
+    case localRefIdentity localRef of
+        GeneratedLocalId {} -> True
+
+generatedLocalIdentityValues :: Elab.XmlfTerm -> [UniqueIdentity]
+generatedLocalIdentityValues term =
+    [ identity
+    | localRef <- resolvedLocalBinders term
+    , GeneratedLocalId identity <- [localRefIdentity localRef]
+    ]
+
+resolvedLocalLetTypes :: Elab.XmlfTerm -> [Elab.ElabType]
+resolvedLocalLetTypes term =
+    case term of
+        Elab.ELet ResolvedVar {resolvedVarDetails = LocalId {}, resolvedVarType = ty} _ rhs body ->
+            ty : resolvedLocalLetTypes rhs ++ resolvedLocalLetTypes body
+        Elab.EVarNode {} -> []
+        Elab.ELit {} -> []
+        Elab.ELam _ body -> resolvedLocalLetTypes body
+        Elab.EApp fun arg -> resolvedLocalLetTypes fun ++ resolvedLocalLetTypes arg
+        Elab.ELet _ _ rhs body -> resolvedLocalLetTypes rhs ++ resolvedLocalLetTypes body
+        Elab.ETyAbsRef _ _ body -> resolvedLocalLetTypes body
+        Elab.ETyInst body _ -> resolvedLocalLetTypes body
+        Elab.ERoll _ body -> resolvedLocalLetTypes body
+        Elab.EUnroll body -> resolvedLocalLetTypes body
+
+isPolymorphicIdentityType :: Elab.ElabType -> Bool
+isPolymorphicIdentityType ty =
+    case ty of
+        Elab.TForallRef ref Nothing (Elab.TArrow (Elab.TVarRef argRef) (Elab.TVarRef resultRef)) ->
+            Elab.typeBinderRefsSameIdentity argRef ref
+                && Elab.typeBinderRefsSameIdentity resultRef ref
+        _ -> False
+
+resolvedLocalOccurrences :: Elab.XmlfTerm -> [LocalRef]
+resolvedLocalOccurrences term =
+    case term of
+        Elab.EVarNode ResolvedVar {resolvedVarDetails = LocalId localRef} ->
+            [localRef]
+        Elab.EVarNode ResolvedVar {resolvedVarDetails = EvidenceId localRef} ->
+            [localRef]
+        Elab.EVarNode {} -> []
+        Elab.ELit {} -> []
+        Elab.ELam _ body -> resolvedLocalOccurrences body
+        Elab.EApp fun arg -> resolvedLocalOccurrences fun ++ resolvedLocalOccurrences arg
+        Elab.ELet _ _ rhs body -> resolvedLocalOccurrences rhs ++ resolvedLocalOccurrences body
+        Elab.ETyAbsRef _ _ body -> resolvedLocalOccurrences body
+        Elab.ETyInst body _ -> resolvedLocalOccurrences body
+        Elab.ERoll _ body -> resolvedLocalOccurrences body
+        Elab.EUnroll body -> resolvedLocalOccurrences body
+
+checkedBindingDeferredRefs :: CheckedBinding -> [DeferredRef]
+checkedBindingDeferredRefs binding =
+    map deferredObligationRef (Map.elems (checkedBindingDeferredObligations binding))
+  where
+    deferredObligationRef obligation =
+        case obligation of
+            DeferredMethod deferred -> deferredMethodRef deferred
+            DeferredConstructor deferred -> deferredConstructorRef deferred
+            DeferredCase deferred -> deferredCaseRef deferred
+
+generatedDeferredIdentityValues :: CheckedBinding -> [UniqueIdentity]
+generatedDeferredIdentityValues binding =
+    [ identity
+    | ref <- checkedBindingDeferredRefs binding
+    , let identity = deferredRefIdentity ref
+    ]
+
+unresolvedTermVarRefs :: Elab.XmlfTerm -> [DeferredRef]
+unresolvedTermVarRefs term =
+    case term of
+        Elab.EVarNode resolved ->
+            maybe [] pure (Elab.deferredResolvedVarRef resolved)
+        Elab.ELit {} -> []
+        Elab.ELam _ body -> unresolvedTermVarRefs body
+        Elab.EApp fun arg -> unresolvedTermVarRefs fun ++ unresolvedTermVarRefs arg
+        Elab.ELet _ _ rhs body -> unresolvedTermVarRefs rhs ++ unresolvedTermVarRefs body
+        Elab.ETyAbsRef _ _ body -> unresolvedTermVarRefs body
+        Elab.ETyInst body _ -> unresolvedTermVarRefs body
+        Elab.ERoll _ body -> unresolvedTermVarRefs body
+        Elab.EUnroll body -> unresolvedTermVarRefs body
+
+checkedProgramUnresolvedTermVarNames :: CheckedProgram -> [(String, [String])]
+checkedProgramUnresolvedTermVarNames checked =
+    [ (checkedBindingName binding, names)
+    | checkedModule <- checkedProgramModules checked
+    , binding <- checkedModuleBindings checkedModule
+    , let names = map deferredRefName (unresolvedTermVarRefs (checkedBindingTerm binding))
+    , not (null names)
+    ]
 
 requireParsed :: String -> IO Program
 requireParsed input =

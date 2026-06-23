@@ -12,7 +12,6 @@ where
 
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import qualified Data.Set as Set
 import MLF.Constraint.Presolution.Plan.BinderPlan.Alias
   ( AliasEnv (..),
     boundMentionsSelfAliasFor,
@@ -22,9 +21,21 @@ import MLF.Constraint.Presolution.Plan.BinderPlan.Types (BinderPlan (..), Binder
 import MLF.Constraint.Presolution.Plan.BinderPlan.Util
 import MLF.Constraint.Types.Graph
 import qualified MLF.Constraint.VarStore as VarStore
-import MLF.Reify.Core (reifyBoundWithNames, reifyBoundWithNamesOnConstraint, reifyTypeWithNames)
-import MLF.Reify.TypeOps (freeTypeVarsFrom)
-import MLF.Types.Elab (Ty (..))
+import MLF.Reify.Core
+  ( namedNodes,
+    reifyBoundWithRefs,
+    reifyBoundWithRefsOnConstraint,
+  )
+import MLF.Reify.Type (reifyTypeWithNamedSetRefs)
+import MLF.Reify.TypeOps (freeTypeVarRefsType)
+import MLF.Types.Elab
+  ( Ty (..),
+    typeBinderIdentityFromNode,
+    typeBinderRefFromIdentity,
+    typeBinderRefName,
+    typeBinderRefNode,
+    typeBinderRefsSameIdentity,
+  )
 import MLF.Util.ElabError (ElabError)
 import MLF.Util.Graph (reachableFrom)
 import MLF.Util.Names (alphaName)
@@ -472,9 +483,21 @@ buildBinderPlan BinderPlanInput {..} = do
   let binderIds = map getNodeId bindersCanon
       candidateSet = IntSet.fromList binderIds
       nameForDep k = "t" ++ show k
+      refForDep k = typeBinderRefFromIdentity (typeBinderIdentityFromNode (NodeId k)) (nameForDep k)
+      depFromRef ref =
+        case typeBinderRefNode ref of
+          Just node -> Just (getNodeId node)
+          Nothing -> nameToId (typeBinderRefName ref)
+      depsFromRefs k allowed refs =
+        [ dep
+          | ref <- refs,
+            Just dep <- [depFromRef ref],
+            dep /= k,
+            IntSet.member dep allowed
+        ]
       substDeps =
         IntMap.fromList
-          [ (k, nameForDep k)
+          [ (k, refForDep k)
             | k <- binderIds
           ]
       substDepsBase =
@@ -482,7 +505,7 @@ buildBinderPlan BinderPlanInput {..} = do
           Just _ ->
             IntMap.fromListWith
               (\_ old -> old)
-              [ (getNodeId baseN, nameForDep k)
+              [ (getNodeId baseN, typeBinderRefFromIdentity (typeBinderIdentityFromNode baseN) (nameForDep k))
                 | k <- binderIds,
                   Just baseN <- [IntMap.lookup k solvedToBasePref]
               ]
@@ -491,7 +514,7 @@ buildBinderPlan BinderPlanInput {..} = do
       substDepsFor k =
         IntMap.union substDeps $
           IntMap.fromList
-            [ (aliasKey, nameForDep binderKey)
+            [ (aliasKey, typeBinderRefFromIdentity (typeBinderIdentityFromNode (canonical (NodeId aliasKey))) (nameForDep binderKey))
               | (aliasKey, binderKey) <- IntMap.toList gammaAlias,
                 aliasKey /= binderKey,
                 binderKey /= k
@@ -530,33 +553,25 @@ buildBinderPlan BinderPlanInput {..} = do
                             bnd0
                      in case VarStore.lookupVarBound baseConstraint baseK of
                           Nothing -> do
-                            let boundTy = TVar (nameForDep k)
-                                freeNames = Set.toList (freeTypeVarsFrom Set.empty boundTy)
-                                deps =
-                                  [ dep
-                                    | name <- freeNames,
-                                      Just dep <- [nameToId name],
-                                      dep /= k,
-                                      IntSet.member dep candidateSet
-                                  ]
+                            let boundTy = TVarRef (refForDep k)
+                                freeRefs = freeTypeVarRefsType boundTy
+                                deps = depsFromRefs k candidateSet freeRefs
                             pure deps
                           Just bnd -> do
                             let bndRoot = boundRootForDepsBase bnd
-                            boundTy <- reifyBoundWithNamesOnConstraint baseConstraint substDepsBase bndRoot
+                            boundTy <-
+                              reifyBoundWithRefsOnConstraint
+                                baseConstraint
+                                substDepsBase
+                                bndRoot
                             let bndRootKey = getNodeId bndRoot
-                                freeNames0 = Set.toList (freeTypeVarsFrom Set.empty boundTy)
-                                freeNames =
+                                freeRefs0 = freeTypeVarRefsType boundTy
+                                freeRefs =
                                   case (boundTy, lookupNodeIn baseNodes bndRoot, VarStore.lookupVarBound baseConstraint bndRoot) of
                                     (TBottom, Just TyVar {}, Nothing) ->
-                                      [nameForDep bndRootKey]
-                                    _ -> freeNames0
-                                deps =
-                                  [ dep
-                                    | name <- freeNames,
-                                      Just dep <- [nameToId name],
-                                      dep /= k,
-                                      IntSet.member dep candidateSet
-                                  ]
+                                      [refForDep bndRootKey]
+                                    _ -> freeRefs0
+                                deps = depsFromRefs k candidateSet freeRefs
                             traceGeneralizeM
                               ( "generalizeAt: boundDeps k="
                                   ++ show k
@@ -564,8 +579,8 @@ buildBinderPlan BinderPlanInput {..} = do
                                   ++ show bndRoot
                                   ++ " boundTy="
                                   ++ show boundTy
-                                  ++ " freeNames="
-                                  ++ show freeNames
+                                  ++ " freeRefs="
+                                  ++ show freeRefs
                                   ++ " deps="
                                   ++ show deps
                               )
@@ -574,34 +589,26 @@ buildBinderPlan BinderPlanInput {..} = do
                 let subst = substDepsFor k
                 case VarStore.lookupVarBound constraint (canonical (NodeId k)) of
                   Nothing -> do
-                    let boundTy = TVar (nameForDep k)
-                        freeNames = Set.toList (freeTypeVarsFrom Set.empty boundTy)
-                        deps =
-                          [ dep
-                            | name <- freeNames,
-                              Just dep <- [nameToId name],
-                              dep /= k,
-                              IntSet.member dep candidateSet
-                          ]
+                    let boundTy = TVarRef (refForDep k)
+                        freeRefs = freeTypeVarRefsType boundTy
+                        deps = depsFromRefs k candidateSet freeRefs
                     pure deps
                   Just bnd -> do
                     let bndRoot = boundRootForDeps bnd
-                    boundTy <- reifyBoundWithNames resForReify subst bndRoot
+                    boundTy <-
+                      reifyBoundWithRefs
+                        resForReify
+                        subst
+                        bndRoot
                     let bndRootC = canonical bndRoot
                         bndRootKey = getNodeId bndRootC
-                        freeNames0 = Set.toList (freeTypeVarsFrom Set.empty boundTy)
-                        freeNames =
+                        freeRefs0 = freeTypeVarRefsType boundTy
+                        freeRefs =
                           case (boundTy, lookupNodeInMap nodes bndRootC, VarStore.lookupVarBound constraint bndRootC) of
                             (TBottom, Just TyVar {}, Nothing) ->
-                              [nameForDep bndRootKey]
-                            _ -> freeNames0
-                        deps =
-                          [ dep
-                            | name <- freeNames,
-                              Just dep <- [nameToId name],
-                              dep /= k,
-                              IntSet.member dep candidateSet
-                          ]
+                              [refForDep bndRootKey]
+                            _ -> freeRefs0
+                        deps = depsFromRefs k candidateSet freeRefs
                     traceGeneralizeM
                       ( "generalizeAt: boundDeps k="
                           ++ show k
@@ -609,8 +616,8 @@ buildBinderPlan BinderPlanInput {..} = do
                           ++ show bndRoot
                           ++ " boundTy="
                           ++ show boundTy
-                          ++ " freeNames="
-                          ++ show freeNames
+                          ++ " freeRefs="
+                          ++ show freeRefs
                           ++ " deps="
                           ++ show deps
                       )
@@ -632,17 +639,22 @@ buildBinderPlan BinderPlanInput {..} = do
 
   closedBinderSet <- closeBinderSet (IntSet.fromList binderIds)
   let provisionalIds = IntSet.toList closedBinderSet
-      provisionalNames = map nameForDep provisionalIds
-      provisionalSubst = IntMap.fromList (zip provisionalIds provisionalNames)
+      provisionalSubst = IntMap.fromList [(key, refForDep key) | key <- provisionalIds]
   bodyClosureIds <- do
-    targetTy <- reifyTypeWithNames resForReify provisionalSubst (canonical target0)
+    targetNamedSet <- namedNodes resForReify
+    targetTy <-
+      reifyTypeWithNamedSetRefs
+        resForReify
+        provisionalSubst
+        targetNamedSet
+        (canonical target0)
     pure
       [ dep
-        | name <- Set.toList (freeTypeVarsFrom Set.empty targetTy),
+        | ref <- freeTypeVarRefsType targetTy,
           Just dep <-
-            [ case [bid | (bid, nm) <- IntMap.toList provisionalSubst, nm == name] of
+            [ case [bid | (bid, provisionalRef) <- IntMap.toList provisionalSubst, typeBinderRefsSameIdentity provisionalRef ref] of
                 (bid : _) -> Just bid
-                [] -> nameToId name
+                [] -> depFromRef ref
             ],
           IntSet.member dep binderCandidateKeys
       ]
@@ -662,13 +674,17 @@ buildBinderPlan BinderPlanInput {..} = do
         ++ show ordered0
     )
   let names = zipWith alphaName [0 ..] ordered0
-      subst0 = IntMap.fromList (zip ordered0 names)
+      refs =
+        [ typeBinderRefFromIdentity (typeBinderIdentityFromNode (NodeId key)) name
+          | (key, name) <- zip ordered0 names
+        ]
+      subst0 = IntMap.fromList (zip ordered0 refs)
   pure
     BinderPlan
       { bpBindersCanon = bindersCanonClosed,
         bpBinderIds = binderIdsClosed,
         bpOrderedBinderIds = ordered0,
-        bpBinderNames = names,
+        bpBinderNames = map typeBinderRefName refs,
         bpSubst0 = subst0,
         bpNestedSchemeInteriorSet = nestedSchemeInteriorSet,
         bpGammaAlias = gammaAlias,

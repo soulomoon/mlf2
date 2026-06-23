@@ -6,13 +6,19 @@ import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
 import MLF.Backend.IR
 import MLF.Backend.StructuralRecursiveData
-import MLF.Constraint.Types.Graph (BaseTy (..))
+import MLF.Constraint.Types.Graph (BaseTy (..), NodeId (..))
+import MLF.Frontend.Symbol (SymbolIdentity (..), SymbolNamespace (..))
+import MLF.Types.Identity (typeBinderIdentityFromNode)
+import MLF.Types.Unique (UniqueIdentity (..))
 import Test.Hspec
 
 spec :: Spec
 spec = describe "MLF.Backend.StructuralRecursiveData" $ do
   it "requires exact canonical data identity for metadata-light matches" $ do
     metadataLightStructuralDataMatches (BaseTy "Core.T") [] "$Core.T_self" nullaryStructuralBody
+      `shouldBe` True
+
+    metadataLightStructuralDataMatches (BaseTy "Core.T") [] "$Core.T_self1" nullaryStructuralBody
       `shouldBe` True
 
     metadataLightStructuralDataMatches (BaseTy "Other.T") [] "$Core.T_self" nullaryStructuralBody
@@ -25,9 +31,13 @@ spec = describe "MLF.Backend.StructuralRecursiveData" $ do
     metadataLightStructuralDataMatches (BaseTy "List") [intTy] "$List_self" (listStructuralBody intTy)
       `shouldBe` True
 
+  it "treats freshened recursive self fields as self payloads" $
+    metadataLightStructuralDataMatches (BaseTy "List") [intTy] "$List_self" (freshenedSelfListStructuralBody intTy)
+      `shouldBe` True
+
   it "matches recursive payloads with a self-cycle guard and returns focused field evidence" $ do
     let structuralTy = structuralListTy intTy
-        substitution = Map.fromList [("a", intTy)]
+        substitution = subst [("a", intTy)]
 
     case matchStructuralDataDeclaration Map.empty listData substitution structuralTy of
       Right match -> do
@@ -37,24 +47,72 @@ spec = describe "MLF.Backend.StructuralRecursiveData" $ do
         expectationFailure ("expected recursive structural match, got " ++ show mismatch)
 
     case matchFocusedStructuralConstructor Map.empty listData consConstructor substitution structuralTy of
-      Right match ->
+      Right match -> do
+        srcmConstructorName match `shouldBe` "Cons"
         srcmFieldTypes match `shouldBe` [intTy, structuralTy]
       Left mismatch ->
         expectationFailure ("expected focused constructor match, got " ++ show mismatch)
 
+  it "matches focused constructors by identity when the constructor name is stale" $ do
+    let structuralTy = structuralListTy intTy
+        substitution = subst [("a", intTy)]
+
+    case matchFocusedStructuralConstructor Map.empty identityListData staleConsConstructor substitution structuralTy of
+      Right match -> do
+        srcmConstructorIdentity match `shouldBe` Just consIdentity
+        srcmConstructorName match `shouldBe` "Cons"
+        srcmFieldTypes match `shouldBe` [intTy, structuralTy]
+      Left mismatch ->
+        expectationFailure ("expected identity-focused constructor match, got " ++ show mismatch)
+
   it "rejects substitution mismatches in recursive payload fields" $ do
     let structuralTy = structuralListTy boolTy
-        substitution = Map.fromList [("a", intTy)]
+        substitution = subst [("a", intTy)]
 
     matchStructuralDataDeclaration Map.empty listData substitution structuralTy
       `shouldSatisfy` isLeft
 
   it "rejects missing or extra structural constructors under metadata-backed matching" $ do
-    matchStructuralDataDeclaration Map.empty listData (Map.fromList [("a", intTy)]) missingConsStructuralListTy
+    matchStructuralDataDeclaration Map.empty listData (subst [("a", intTy)]) missingConsStructuralListTy
       `shouldSatisfy` isLeft
 
-    matchStructuralDataDeclaration Map.empty listData (Map.fromList [("a", intTy)]) extraConstructorStructuralListTy
+    matchStructuralDataDeclaration Map.empty listData (subst [("a", intTy)]) extraConstructorStructuralListTy
       `shouldSatisfy` isLeft
+
+  it "matches constructor parameters by identity when binder names collide" $ do
+    let leftIdentity = typeBinderIdentityFromNode (NodeId 991301)
+        rightIdentity = typeBinderIdentityFromNode (NodeId 991302)
+        leftKey = BackendTypeSubstitutionByIdentity leftIdentity
+        rightKey = BackendTypeSubstitutionByIdentity rightIdentity
+        leftVar = BTVarWithIdentity (Just leftIdentity) "a"
+        rightVar = BTVarWithIdentity (Just rightIdentity) "a"
+        parameterBounds = Map.fromList [(leftKey, Nothing), (rightKey, Nothing)]
+        expected = BTArrow leftVar rightVar
+        actual = BTArrow intTy boolTy
+
+    matchBackendTypeParametersWithTypeBounds Map.empty [] parameterBounds Map.empty expected actual
+      `shouldBe` Just (Map.fromList [(leftKey, intTy), (rightKey, boolTy)])
+
+  it "checks actual type variable bounds by identity when names are stale" $ do
+    let expectedIdentity = typeBinderIdentityFromNode (NodeId 991303)
+        actualIdentity = typeBinderIdentityFromNode (NodeId 991304)
+        expectedKey = BackendTypeSubstitutionByIdentity expectedIdentity
+        actualKey = BackendTypeSubstitutionByIdentity actualIdentity
+        parameterBounds = Map.singleton expectedKey (Just intTy)
+        typeBounds = Map.fromList [(actualKey, Just intTy), (BackendTypeSubstitutionByName "a", Just boolTy)]
+        expected = BTVarWithIdentity (Just expectedIdentity) "a"
+        actual = BTVarWithIdentity (Just actualIdentity) "a"
+
+    matchBackendTypeParametersWithTypeBounds typeBounds [] parameterBounds Map.empty expected actual
+      `shouldBe` Just (Map.singleton expectedKey actual)
+
+  it "does not match identity-bearing parameters through name-only bounds" $ do
+    let identity = typeBinderIdentityFromNode (NodeId 991305)
+        parameterBounds = Map.singleton (BackendTypeSubstitutionByName "a") Nothing
+        expected = BTVarWithIdentity (Just identity) "a"
+
+    matchBackendTypeParametersWithTypeBounds Map.empty [] parameterBounds Map.empty expected intTy
+      `shouldBe` Nothing
 
   it "keeps metadata-light skeleton evidence from standing in for full ADT evidence" $ do
     metadataLightStructuralDataMatches (BaseTy "UnitLike") [] "$UnitLike_self" nullaryStructuralBody
@@ -68,6 +126,10 @@ isLeft =
   \case
     Left _ -> True
     Right _ -> False
+
+subst :: [(String, BackendType)] -> Map.Map BackendTypeSubstitutionKey BackendType
+subst =
+  Map.fromList . map (\(name, ty) -> (BackendTypeSubstitutionByName name, ty))
 
 intTy :: BackendType
 intTy = BTBase (BaseTy "Int")
@@ -103,6 +165,43 @@ consConstructor =
       backendConstructorForalls = [],
       backendConstructorFields = [BTVar "a", listTy (BTVar "a")],
       backendConstructorResult = listTy (BTVar "a")
+    }
+
+identityListData :: BackendData
+identityListData =
+  listData
+    { backendDataConstructors =
+        [nilConstructor, consConstructorWithIdentity]
+    }
+
+consConstructorWithIdentity :: BackendConstructor
+consConstructorWithIdentity =
+  BackendConstructorWithIdentity
+    { backendConstructorIdentity = Just consIdentity,
+      backendConstructorNameWithIdentity = "Cons",
+      backendConstructorForallsWithIdentity = [],
+      backendConstructorFieldsWithIdentity = [BTVar "a", listTy (BTVar "a")],
+      backendConstructorResultWithIdentity = listTy (BTVar "a")
+    }
+
+staleConsConstructor :: BackendConstructor
+staleConsConstructor =
+  BackendConstructorWithIdentity
+    { backendConstructorIdentity = Just consIdentity,
+      backendConstructorNameWithIdentity = "$stale_Cons",
+      backendConstructorForallsWithIdentity = [],
+      backendConstructorFieldsWithIdentity = [BTVar "a", listTy (BTVar "a")],
+      backendConstructorResultWithIdentity = listTy (BTVar "a")
+    }
+
+consIdentity :: SymbolIdentity
+consIdentity =
+  SymbolIdentity
+    { symbolUniqueIdentity = UniqueIdentity 990101,
+      symbolNamespace = SymbolConstructor,
+      symbolDefiningModule = "Main",
+      symbolDefiningName = "Cons",
+      symbolOwnerIdentity = Nothing
     }
 
 unitLikeData :: BackendData
@@ -152,6 +251,16 @@ listStructuralBody headField =
     ( BTArrow
         (BTVar "r")
         (BTArrow (BTArrow headField (BTArrow (BTVar "$List_self") (BTVar "r"))) (BTVar "r"))
+    )
+
+freshenedSelfListStructuralBody :: BackendType -> BackendType
+freshenedSelfListStructuralBody headField =
+  BTForall
+    "r"
+    Nothing
+    ( BTArrow
+        (BTVar "r")
+        (BTArrow (BTArrow headField (BTArrow (BTVar "$List_self1") (BTVar "r"))) (BTVar "r"))
     )
 
 nullaryStructuralBody :: BackendType

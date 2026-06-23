@@ -15,8 +15,8 @@ module MLF.Elab.Run.ResultType.View (
     rtvReadModel,
     rtvBaseVarOnlyNodes,
     rtvReifyWithNamedSetNoFallback,
-    rtvReifyWithNamesNoFallback,
-    rtvReifyBaseWithNamesNoFallback,
+    rtvReifyNoFallback,
+    rtvReifyBaseNoFallback,
     rtvSchemeBodyTarget,
     rtvResolveCanonicalScope,
     rtvBindingScopeRefCanonical,
@@ -70,10 +70,10 @@ import MLF.Elab.Run.ResultType.Types
     , rtcEdgeTraces
     , rtcEdgeWitnesses
     )
-import MLF.Elab.Types (ElabScheme)
-import MLF.Reify.Core
-    ( reifyTypeWithNamedSetNoFallbackReadModel
-    , reifyTypeWithNamesNoFallbackReadModel
+import MLF.Elab.Types (ElabScheme, TypeBinderRef)
+import MLF.Reify.Type
+    ( reifyTypeWithNamedSetRefsNoFallbackReadModel
+    , reifyTypeWithRefsNoFallbackReadModel
     )
 import MLF.Types.Elab (ElabType)
 import MLF.Util.ElabError (ElabError(..), bindingToElab)
@@ -84,7 +84,7 @@ data ResultTypeView (p :: Phase) = ResultTypeView
     , rtvReadModel0 :: Either ElabError (ElabReadModel p)
     , rtvBaseReadModel0 :: Either ElabError (ElabReadModel p)
     , rtvBaseVarOnlyNodes0 :: NodeMap TyNode
-    , rtvGeneralizeCache0 :: Map.Map (Int, Int) (ElabScheme, IntMap.IntMap String)
+    , rtvGeneralizeCache0 :: Map.Map (Int, Int) (ElabScheme, IntMap.IntMap TypeBinderRef)
     , rtvFallbackIndex0 :: ResultTypeFallbackIndex
     }
 
@@ -142,7 +142,7 @@ buildResultTypeView inputs = do
 rtvWithKnownGeneralization
     :: NodeRef
     -> NodeId
-    -> (ElabScheme, IntMap.IntMap String)
+    -> (ElabScheme, IntMap.IntMap TypeBinderRef)
     -> ResultTypeView p
     -> ResultTypeView p
 rtvWithKnownGeneralization scopeRoot target result view =
@@ -214,31 +214,28 @@ rtvBaseVarOnlyNodes view
 
 rtvReifyWithNamedSetNoFallback
     :: ResultTypeView p
-    -> IntMap.IntMap String
     -> IntSet.IntSet
     -> NodeId
     -> Either ElabError ElabType
-rtvReifyWithNamedSetNoFallback view subst namedSet nid = do
+rtvReifyWithNamedSetNoFallback view namedSet nid = do
     readModel <- rtvReadModel view
-    reifyTypeWithNamedSetNoFallbackReadModel readModel subst namedSet nid
+    reifyTypeWithNamedSetRefsNoFallbackReadModel readModel IntMap.empty namedSet nid
 
-rtvReifyWithNamesNoFallback
+rtvReifyNoFallback
     :: ResultTypeView p
-    -> IntMap.IntMap String
     -> NodeId
     -> Either ElabError ElabType
-rtvReifyWithNamesNoFallback view subst nid = do
+rtvReifyNoFallback view nid = do
     readModel <- rtvReadModel view
-    reifyTypeWithNamesNoFallbackReadModel readModel subst nid
+    reifyTypeWithRefsNoFallbackReadModel readModel IntMap.empty nid
 
-rtvReifyBaseWithNamesNoFallback
+rtvReifyBaseNoFallback
     :: ResultTypeView p
-    -> IntMap.IntMap String
     -> NodeId
     -> Either ElabError ElabType
-rtvReifyBaseWithNamesNoFallback view subst nid = do
+rtvReifyBaseNoFallback view nid = do
     readModel <- rtvBaseReadModel view
-    reifyTypeWithNamesNoFallbackReadModel readModel subst nid
+    reifyTypeWithRefsNoFallbackReadModel readModel IntMap.empty nid
 
 rtvReadModel :: ResultTypeView p -> Either ElabError (ElabReadModel p)
 rtvReadModel view
@@ -302,7 +299,7 @@ rtvGeneralizeTarget
     :: ResultTypeView p
     -> NodeRef
     -> NodeId
-    -> Either ElabError (ElabScheme, IntMap.IntMap String)
+    -> Either ElabError (ElabScheme, IntMap.IntMap TypeBinderRef)
 rtvGeneralizeTarget view scopeRoot target =
     case Map.lookup (generalizeCacheKey scopeRoot target) (rtvGeneralizeCache0 view) of
         Just result -> Right result

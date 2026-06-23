@@ -51,7 +51,7 @@ import Control.Applicative ((<|>))
 import Control.Monad (foldM, unless, when)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.List (elemIndex, findIndex, sortBy)
+import Data.List (findIndex, sortBy)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import qualified Data.Set as Set
@@ -62,7 +62,7 @@ import MLF.Constraint.Presolution.Base (InteriorNodes (..))
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness
 import MLF.Constraint.Types.Presolution ()
-import MLF.Elab.Inst (applyInstantiation, composeInst, instMany, schemeToType, splitForalls)
+import MLF.Elab.Inst (applyInstantiation, composeInst, instMany, schemeToType)
 import MLF.Elab.Phi.Context (contextToNodeBoundWithOrderKeys)
 import MLF.Elab.Phi.Omega.Domain
   ( OmegaContext (..),
@@ -82,29 +82,35 @@ import MLF.Elab.Phi.VSpine
     assertSpineSync,
     mkVSpine,
     vSpineBinderAt,
+    vSpineBinderRefs,
     vSpineBoundAt,
     vSpineIdAt,
     vSpineIds,
     vSpineLength,
-    vSpineNameAt,
-    vSpineNames,
     vSpineNull,
     vsDeleteAt,
     vsInsertAt,
     vsUpdateBound
   )
-import MLF.Elab.Run.Instantiation (containsForallType, inferInstAppArgsFromScheme)
+import MLF.Elab.Run.Instantiation (containsForallType, inferInstAppArgsFromSchemeRefs)
 import MLF.Elab.Sigma (bubbleReorderTo)
 import MLF.Elab.Types
-import MLF.Reify.TypeOps (alphaEqType, composeTypeHead, freeTypeVarsList, inlineAliasBoundsWithBy, inlineBaseBoundsType, substTypeCapture)
+import MLF.Reify.TypeOps (alphaEqType, composeTypeHeadRef, freeTypeVarRefsList, inlineAliasBoundsWithBy, inlineBaseBoundsType, splitForallsRefs, substTypeCaptureRef)
 import MLF.Util.Graph (topoSortBy)
-import MLF.Util.Names (parseNameId)
 import qualified MLF.Util.Order as Order
 import qualified MLF.Util.OrderKey as OrderKey
 import MLF.Util.Trace (traceGeneralize)
 import Text.Read (readMaybe)
 
-newtype ApplyFun i = ApplyFun {runApplyFun :: Set.Set String -> Ty i}
+data TypeArgKey
+  = TypeArgIdentity TypeBinderIdentity
+  deriving (Eq, Ord, Show)
+
+typeArgKeyForRef :: TypeBinderRef -> TypeArgKey
+typeArgKeyForRef =
+  TypeArgIdentity . typeBinderRefIdentity
+
+newtype ApplyFun i = ApplyFun {runApplyFun :: Set.Set TypeArgKey -> Ty i}
 
 phiWithSchemeOmega ::
   OmegaContext p ->
@@ -136,15 +142,15 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
 
     constraint = pvConstraint presolutionView
 
-    reifyBoundWithNamesAt :: IntMap.IntMap String -> NodeId -> Either ElabError ElabType
-    reifyBoundWithNamesAt = ocReifyBoundWithNames ctx
+    reifyBoundWithRefsAt :: IntMap.IntMap TypeBinderRef -> NodeId -> Either ElabError ElabType
+    reifyBoundWithRefsAt = ocReifyBoundWithRefs ctx
 
-    reifyTypeWithNamedSetNoFallbackAt ::
-      IntMap.IntMap String ->
+    reifyTypeWithNamedSetRefsNoFallbackAt ::
+      IntMap.IntMap TypeBinderRef ->
       IntSet.IntSet ->
       NodeId ->
       Either ElabError ElabType
-    reifyTypeWithNamedSetNoFallbackAt = ocReifyTypeWithNamedSetNoFallback ctx
+    reifyTypeWithNamedSetRefsNoFallbackAt = ocReifyTypeWithNamedSetRefsNoFallback ctx
 
     copyMap :: IntMap.IntMap NodeId
     copyMap = ocCopyMap ctx
@@ -178,7 +184,7 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
     domainEnv = mkOmegaDomainEnv ctx
 
     replayBinderKeys :: [Int]
-    replayBinderKeys = IntMap.keys (siSubst si)
+    replayBinderKeys = schemeInfoBinderIdentityKeys si
 
     resolveTraceBinderTarget' :: Bool -> String -> NodeId -> Either ElabError NodeId
     resolveTraceBinderTarget' requireBinder opName =
@@ -317,7 +323,7 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
     orderKeys = orderKeysFromRoot orderKeysRoot
 
     orderKeysRoot :: NodeId
-    orderKeysRoot = lcaRootForBinders [NodeId k | k <- IntMap.keys (siSubst si)]
+    orderKeysRoot = lcaRootForBinders [NodeId k | k <- schemeInfoBinderIdentityKeys si]
 
     orderKeysForBinders binders =
       case binders of
@@ -325,30 +331,30 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
         _ -> orderKeysFromRoot (lcaRootForBinders binders)
 
     schemeBinderKeys :: IntSet.IntSet
-    schemeBinderKeys = IntSet.fromAscList (IntMap.keys (siSubst si))
+    schemeBinderKeys = schemeInfoBinderIdentityKeySet si
 
     isSchemeBinder :: NodeId -> Bool
     isSchemeBinder nid =
       IntSet.member (getNodeId nid) schemeBinderKeys
         && isTyVarNode domainEnv nid
 
-    substForTypes :: IntMap.IntMap String
+    substForTypes :: IntMap.IntMap TypeBinderRef
     substForTypes =
       case mSchemeInfo of
-        Just si' -> siSubst si'
+        Just si' -> schemeInfoBinderRefSubst si'
         Nothing -> IntMap.empty
 
-    traceArgMap :: IntSet.IntSet -> Map.Map String ElabType
+    traceArgMap :: IntSet.IntSet -> Map.Map TypeArgKey ElabType
     traceArgMap namedSet' =
       case (mTrace, mSchemeInfo) of
         (Just tr, Just si') ->
-          let subst = siSubst si'
-              nameFor nid = IntMap.lookup (getNodeId (canonicalNode nid)) subst
+          let subst = schemeInfoBinderRefSubst si'
+              refFor nid = IntMap.lookup (getNodeId (canonicalNode nid)) subst
               reifyArg arg =
                 let argC = canonicalNode arg
-                    direct = reifyTypeWithNamedSetNoFallbackAt subst namedSet' argC
+                    direct = reifyTypeWithNamedSetRefsNoFallbackAt subst namedSet' argC
                     viaBound = case lookupVarBound argC of
-                      Just bnd -> reifyBoundWithNamesAt subst bnd
+                      Just bnd -> reifyBoundWithRefsAt subst bnd
                       Nothing -> direct
                  in case (direct, viaBound) of
                       (Right tyDirect, Right tyBound)
@@ -359,15 +365,15 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                       (Left _, Right tyBound) -> Right tyBound
                       (Left err, Left _) -> Left err
               entries =
-                [ (name, ty)
+                [ (typeArgKeyForRef ref, ty)
                   | (binder, arg) <- etBinderArgs tr,
-                    Just name <- [nameFor binder],
+                    Just ref <- [refFor binder],
                     Right ty <- [reifyArg arg]
                 ]
            in Map.fromList entries
         _ -> Map.empty
 
-    inferredArgMapFromTarget :: IntSet.IntSet -> Map.Map String ElabType
+    inferredArgMapFromTarget :: IntSet.IntSet -> Map.Map TypeArgKey ElabType
     inferredArgMapFromTarget namedSet' =
       case mSchemeInfo of
         Nothing -> Map.empty
@@ -382,101 +388,107 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
            in case mbArgs of
                 Nothing -> Map.empty
                 Just args ->
-                  let (binds, _) = splitForalls (schemeToType (siScheme si'))
-                      names = map fst binds
-                   in Map.fromList (zip names args)
+                  let refs = map fst (schemeBinderRefs (siScheme si'))
+                   in Map.fromList (zip (map typeArgKeyForRef refs) args)
 
     preferInferredArg :: ElabType -> ElabType -> ElabType
     preferInferredArg targetArg traceArg =
       case targetArg of
-        TVar _
+        TVarRef _
           | not (containsBottomTy traceArg) -> traceArg
         _ -> targetArg
 
-    inferredArgMap :: IntSet.IntSet -> Map.Map String ElabType
+    inferredArgMap :: IntSet.IntSet -> Map.Map TypeArgKey ElabType
     inferredArgMap namedSet' =
       Map.unionWith preferInferredArg (inferredArgMapFromTarget namedSet') (traceArgMap namedSet')
 
     applyInferredArgs :: IntSet.IntSet -> ElabType -> ElabType
     applyInferredArgs namedSet' = applyInferredArgsWith namedSet' Set.empty
 
-    applyInferredArgsWith :: IntSet.IntSet -> Set.Set String -> ElabType -> ElabType
+    applyInferredArgsWith :: IntSet.IntSet -> Set.Set TypeArgKey -> ElabType -> ElabType
     applyInferredArgsWith namedSet' bound0 ty0 = runApplyFun (cataIx alg ty0) bound0
       where
         inferredArgMap' = inferredArgMap namedSet'
         alg :: TyIF i ApplyFun -> ApplyFun i
         alg ty = case ty of
-          TVarIF v ->
+          TVarIFRef ref ->
             ApplyFun $ \bound ->
-              if Set.member v bound
-                then TVar v
-                else case Map.lookup v inferredArgMap' of
-                  Just instTy -> instTy
-                  Nothing -> TVar v
+              let key = typeArgKeyForRef ref
+               in if Set.member key bound
+                    then TVarRef ref
+                    else case Map.lookup key inferredArgMap' of
+                      Just instTy -> instTy
+                      Nothing -> TVarRef ref
           TArrowIF a b ->
             ApplyFun $ \bound ->
               TArrow (runApplyFun a bound) (runApplyFun b bound)
-          TConIF c args ->
+          TConIFWithIdentity identity c args ->
             ApplyFun $ \bound ->
-              TCon c (fmap (\f -> runApplyFun f bound) args)
-          TVarAppIF v args ->
+              TConWithIdentity identity c (fmap (\f -> runApplyFun f bound) args)
+          TVarAppIFRef ref args ->
             ApplyFun $ \bound ->
               let args' = fmap (\f -> runApplyFun f bound) args
-               in if Set.member v bound
-                    then TVarApp v args'
-                    else case Map.lookup v inferredArgMap' of
-                      Just instTy -> composeTypeHead v instTy args'
-                      Nothing -> TVarApp v args'
-          TBaseIF b -> ApplyFun (const (TBase b))
+                  key = typeArgKeyForRef ref
+               in if Set.member key bound
+                    then TVarAppRef ref args'
+                    else case Map.lookup key inferredArgMap' of
+                      Just instTy -> composeTypeHeadRef ref instTy args'
+                      Nothing -> TVarAppRef ref args'
+          TBaseIFWithIdentity identity b -> ApplyFun (const (TBaseWithIdentity identity b))
           TBottomIF -> ApplyFun (const TBottom)
-          TForallIF v mb body ->
+          TForallIFRef ref mb body ->
             ApplyFun $ \bound ->
-              let bound' = Set.insert v bound
+              let bound' = Set.insert (typeArgKeyForRef ref) bound
                   mb' = fmap (\f -> runApplyFun f bound) mb
-               in TForall v mb' (runApplyFun body bound')
-          TMuIF v body ->
+               in TForallRef ref mb' (runApplyFun body bound')
+          TMuIFRef ref body ->
             ApplyFun $ \bound ->
-              let bound' = Set.insert v bound
-               in TMu v (runApplyFun body bound')
+              let bound' = Set.insert (typeArgKeyForRef ref) bound
+               in TMuRef ref (runApplyFun body bound')
 
     _binderArgType :: IntSet.IntSet -> NodeId -> Maybe ElabType
     _binderArgType namedSet' binder = do
-      name <- IntMap.lookup (getNodeId (canonicalNode binder)) substForTypes
-      Map.lookup name (inferredArgMap namedSet')
+      ref <- IntMap.lookup (getNodeId (canonicalNode binder)) substForTypes
+      Map.lookup (typeArgKeyForRef ref) (inferredArgMap namedSet')
+
+    substRefForTypeRef :: TypeBinderRef -> Maybe TypeBinderRef
+    substRefForTypeRef ref = do
+      nid <- typeBinderRefNode ref
+      IntMap.lookup (getNodeId nid) substForTypes
 
     reifyTypeArg :: IntSet.IntSet -> Maybe NodeId -> NodeId -> Either ElabError ElabType
     reifyTypeArg namedSet' mbBinder arg = do
       let argC = canonicalNode arg
       ty <- case lookupVarBound argC of
-        Just bnd -> reifyTypeWithNamedSetNoFallbackAt substForTypes namedSet' bnd
-        Nothing -> reifyTypeWithNamedSetNoFallbackAt substForTypes namedSet' argC
+        Just bnd -> reifyTypeWithNamedSetRefsNoFallbackAt substForTypes namedSet' bnd
+        Nothing -> reifyTypeWithNamedSetRefsNoFallbackAt substForTypes namedSet' argC
       let inferredSingleton =
             case Map.toList (inferredArgMapFromTarget namedSet') of
               [(_name, inferredTy)] -> Just inferredTy
               _ -> Nothing
           chosenTy0 =
             case (ty, inferredSingleton) of
-              (TVar _, Just inferredTy)
+              (TVarRef _, Just inferredTy)
                 | not (containsBottomTy inferredTy) -> inferredTy
               _ -> ty
           chosenTy1 =
             case (chosenTy0, inferredSingleton) of
-              (TVar _, _) -> chosenTy0
-              (_, Just (TVar inferredVar)) ->
-                case (parseNameId inferredVar >>= (`IntMap.lookup` substForTypes))
-                  <|> Just inferredVar of
-                  Just binderName ->
-                    case filter (/= binderName) (freeTypeVarsList chosenTy0) of
-                      [fv] -> substTypeCapture fv (TVar binderName) chosenTy0
+              (_, Just (TVarRef inferredRef)) ->
+                let binderRef =
+                      fromMaybe
+                        inferredRef
+                        (substRefForTypeRef inferredRef)
+                 in case filter (not . typeBinderRefsSameIdentity binderRef) (freeTypeVarRefsList chosenTy0) of
+                      [fv] -> substTypeCaptureRef fv (TVarRef binderRef) chosenTy0
                       _ -> chosenTy0
-                  Nothing -> chosenTy0
+              (TVarRef _, _) -> chosenTy0
               _ -> chosenTy0
           chosenTy = substSchemeNames chosenTy1
           rescuedTy =
             case (mbBinder, chosenTy) of
               (Just binder, TBottom) ->
                 case IntMap.lookup (getNodeId (canonicalNode binder)) substForTypes of
-                  Just binderName -> TVar binderName
+                  Just binderRef -> TVarRef binderRef
                   Nothing -> chosenTy
               _ -> chosenTy
       debugPhi
@@ -489,7 +501,7 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
             ++ " inferredMap="
             ++ show (inferredArgMap namedSet')
             ++ " freeChosen="
-            ++ show (freeTypeVarsList chosenTy0)
+            ++ show (freeTypeVarRefsList chosenTy0)
             ++ " ty="
             ++ show ty
             ++ " chosenTy0="
@@ -508,46 +520,43 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
       where
         alg :: TyIF i Ty -> Ty i
         alg tyNode = case tyNode of
-          TVarIF v ->
-            case parseNameId v of
-              Just nid ->
-                case IntMap.lookup nid substForTypes of
-                  Just name -> TVar name
-                  Nothing -> TVar v
-              Nothing -> TVar v
+          TVarIFRef ref ->
+            case substRefForTypeRef ref of
+              Just substRef -> TVarRef substRef
+              Nothing -> TVarRef ref
           TArrowIF a b -> TArrow a b
-          TConIF c args -> TCon c args
-          TVarAppIF v args ->
-            let v' =
-                  case parseNameId v >>= (`IntMap.lookup` substForTypes) of
-                    Just name -> name
-                    Nothing -> v
-             in TVarApp v' args
-          TBaseIF b -> TBase b
-          TForallIF v mb body -> TForall v mb body
-          TMuIF v body -> TMu v body
+          TConIFWithIdentity identity c args -> TConWithIdentity identity c args
+          TVarAppIFRef ref args ->
+            let ref' =
+                  case substRefForTypeRef ref of
+                    Just substRef -> substRef
+                    Nothing -> ref
+             in TVarAppRef ref' args
+          TBaseIFWithIdentity identity b -> TBaseWithIdentity identity b
+          TForallIFRef ref mb body -> TForallRef ref mb body
+          TMuIFRef ref body -> TMuRef ref body
           TBottomIF -> TBottom
 
     containsBottomTy :: Ty v -> Bool
     containsBottomTy ty = case ty of
-      TVar _ -> False
+      TVarRef _ -> False
       TBase _ -> False
       TBottom -> True
       TArrow a b -> containsBottomTy a || containsBottomTy b
       TCon _ args -> any containsBottomTy args
-      TVarApp _ args -> any containsBottomTy args
-      TForall _ mb body -> maybe False containsBottomTy mb || containsBottomTy body
-      TMu _ body -> containsBottomTy body
+      TVarAppRef _ args -> any containsBottomTy args
+      TForallRef _ mb body -> maybe False containsBottomTy mb || containsBottomTy body
+      TMuRef _ body -> containsBottomTy body
 
     reifyBoundType :: NodeId -> Either ElabError ElabType
-    reifyBoundType = reifyBoundWithNamesAt substForTypes
+    reifyBoundType = reifyBoundWithRefsAt substForTypes
 
     reifyTargetTypeForInst :: IntSet.IntSet -> NodeId -> Either ElabError ElabType
     reifyTargetTypeForInst namedSet' nid = do
       let nidC = canonicalNode nid
       ty <- case lookupVarBound nidC of
-        Just bnd -> reifyTypeWithNamedSetNoFallbackAt substForTypes namedSet' bnd
-        Nothing -> reifyTypeWithNamedSetNoFallbackAt substForTypes namedSet' nidC
+        Just bnd -> reifyTypeWithNamedSetRefsNoFallbackAt substForTypes namedSet' bnd
+        Nothing -> reifyTypeWithNamedSetRefsNoFallbackAt substForTypes namedSet' nidC
       pure (inlineBaseBounds ty)
 
     inlineBaseBounds :: ElabType -> ElabType
@@ -571,12 +580,11 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
         canonicalNode
         (cNodes constraint)
         lookupVarBound
-        (reifyBoundWithNamesAt substForTypes)
+        (reifyBoundWithRefsAt substForTypes)
 
     inferInstAppArgs :: ElabScheme -> ElabType -> Maybe [ElabType]
     inferInstAppArgs scheme targetTy =
-      let (binds, body) = splitForalls (schemeToType scheme)
-       in inferInstAppArgsFromScheme binds body targetTy
+      inferInstAppArgsFromSchemeRefs (schemeBinderRefs scheme) (schemeBody scheme) targetTy
 
     -- \| Paper Def. 15.3.4 / Fig. 15.3.5: Φ(e) = Σ; O; Φχe(Ω).
     -- Thesis treats quantifier introduction (O) and witness replay (Ω) as
@@ -585,8 +593,8 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
     phiWithScheme :: Either ElabError Instantiation
     phiWithScheme = do
       let ty0 = schemeToType (siScheme si)
-          subst = siSubst si
-          lookupBinder (NodeId i) = IntMap.lookup i subst
+          subst = schemeInfoBinderRefSubst si
+          lookupBinder (NodeId i) = typeBinderRefName <$> IntMap.lookup i subst
           ids0 = idsForStartType si ty0
           binderKeys = IntSet.fromAscList (IntMap.keys subst)
       -- Always attempt Σ(g) / ϕR at the start (thesis Def. 15.3.4), even if Ω has no Raise steps.
@@ -621,29 +629,29 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
     inferredOmegaInst :: IntSet.IntSet -> VSpine -> Instantiation
     inferredOmegaInst namedSet' vs =
       let inferred = inferredArgMap namedSet'
-          names = vSpineNames vs
-          isIdentityArg :: String -> ElabType -> Bool
-          isIdentityArg name ty = case ty of
-            TVar v -> v == name
+          refs = vSpineBinderRefs vs
+          isIdentityArg :: TypeBinderRef -> ElabType -> Bool
+          isIdentityArg ref ty = case ty of
+            TVarRef argRef -> typeBinderRefsSameIdentity ref argRef
             _ -> False
           isPresent = maybe False (const True)
           firstUseful =
             findIndex
-              ( \name ->
-                  case Map.lookup name inferred of
-                    Just ty -> not (isIdentityArg name ty)
+              ( \ref ->
+                  case Map.lookup (typeArgKeyForRef ref) inferred of
+                    Just ty -> not (isIdentityArg ref ty)
                     Nothing -> False
               )
-              names
+              refs
        in case firstUseful of
             Nothing -> InstId
             Just startIdx ->
-              let suffixNames = drop startIdx names
-                  argsMaybe = map (`Map.lookup` inferred) suffixNames
+              let suffixRefs = drop startIdx refs
+                  argsMaybe = map (flip Map.lookup inferred . typeArgKeyForRef) suffixRefs
                   prefixLen = length (takeWhile isPresent argsMaybe)
                   hasOutOfOrder = any isPresent (drop prefixLen argsMaybe)
                   args = mapMaybe id (take prefixLen argsMaybe)
-                  prefixBefore = take startIdx names
+                  prefixBefore = take startIdx refs
                in if prefixLen == 0 || hasOutOfOrder
                     then InstId
                     else underContext prefixBefore (instMany (map InstApp args))
@@ -655,13 +663,12 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
       if vSpineLength vs0 < 2
         then Right (InstId, ty, ids)
         else do
-          let schemeArity = case siScheme si of
-                Forall binds _ -> length binds
+          let schemeArity = length (schemeBinderRefs (siScheme si))
               missingIdPositions =
                 [ i
-                  | ((i, (name, _)), Nothing) <- zip (zip [(0 :: Int) ..] schemeBinders) ids,
+                  | ((i, (ref, _)), Nothing) <- zip (zip [(0 :: Int) ..] schemeBinders) ids,
                     i < schemeArity,
-                    binderRequiresIdentity name
+                    binderRequiresIdentity ref
                 ]
           -- Builtin type schemes (e.g. __io_bind) have synthetic binder names
           -- that never flow through the generalizer, so all identities are
@@ -688,31 +695,37 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
               desired <- desiredBinderOrder orderKeysForSort vs0
               reorderTo vs0 ty ids desired
       where
-        schemeBinders =
-          case siScheme si of
-            Forall binds _ -> binds
+        schemeBinders = schemeBinderRefs (siScheme si)
+        schemeBinderRefSubst = schemeInfoBinderRefSubst si
 
-        binderRequiresIdentity name = case parseBinderId name of
+        binderRequiresIdentity ref = case parseBinderId name of
           Just _ -> True
-          Nothing -> name `elem` IntMap.elems (siSubst si)
+          Nothing ->
+            any
+              (\substRef ->
+                 typeBinderRefsSameIdentity ref substRef
+              )
+              (IntMap.elems schemeBinderRefSubst)
+          where
+            name = typeBinderRefName ref
 
     desiredBinderOrder :: IntMap.IntMap Order.OrderKey -> VSpine -> Either ElabError [Maybe NodeId]
     desiredBinderOrder orderKeysActive vs0 = do
       let n = vSpineLength vs0
       binders <- mapM (vSpineBinderAt vs0) [0 .. n - 1]
-      let binderMap = IntMap.fromList (zip [0 ..] binders)
-          names = [name | (name, _, _) <- binders]
-          nameIndex nm = elemIndex nm names
+      let refs = vSpineBinderRefs vs0
+          binderMap = IntMap.fromList (zip [0 ..] binders)
+          refIndex ref = findIndex (typeBinderRefsSameIdentity ref) refs
 
           -- Bound dependencies: if a occurs free in b's bound, then a must appear before b.
           depsFor :: Int -> [Int]
           depsFor i =
-            case IntMap.lookup i binderMap of
-              Just (binderName, Just bnd, _) ->
+            case (IntMap.lookup i binderMap, listToMaybe (drop i refs)) of
+              (Just (_binderName, Just bnd, _), Just binderRef) ->
                 [ j
-                  | v <- freeTypeVarsList bnd,
-                    v /= binderName,
-                    Just j <- [nameIndex v]
+                  | ref <- freeTypeVarRefsList bnd,
+                    not (typeBinderRefsSameIdentity ref binderRef),
+                    Just j <- [refIndex ref]
                 ]
               _ -> []
 
@@ -843,7 +856,7 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                       else do
                         i' <- binderIndex binderKeys (vSpineIds vs) bvResolved
                         argTy <- reifyTypeArg namedSet' (Just bvResolved) (canonicalNode arg)
-                        prefix <- prefixBinderNames vs i'
+                        prefix <- prefixBinderRefs vs i'
                         let inst = underContext prefix (InstInside (InstBot argTy))
                             newBound = either (const Nothing) Just (elabToBound argTy)
                             vs' = vsUpdateBound i' newBound vs
@@ -978,8 +991,8 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                         if nReplay == mReplay
                           then go binderKeys namedSet' vs accum rest lookupBinder
                           else do
-                            mName <- binderNameFor binderKeys vs mReplay lookupBinder
-                            let hAbs = InstSeq (InstInside (InstAbstr mName)) InstElim
+                            mRef <- binderRefFor binderKeys vs mReplay lookupBinder
+                            let hAbs = InstSeq (InstInside (instAbstrWithRef mRef)) InstElim
                             (inst, vs') <- atBinderWith False binderKeys vs nReplay (pure hAbs)
                             go binderKeys namedSet' vs' (inst : accum) rest lookupBinder
       (OpRaiseMerge n m : rest) -> do
@@ -1018,16 +1031,16 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                       else do
                         if nReplay == orderRoot
                           then do
-                            mName <- binderNameFor binderKeys vs mReplay lookupBinder
+                            mRef <- binderRefFor binderKeys vs mReplay lookupBinder
                             let vs' = VSpine [] BodyNonBottom
-                            go binderKeys namedSet' vs' (InstAbstr mName : accum) rest lookupBinder
+                            go binderKeys namedSet' vs' (instAbstrWithRef mRef : accum) rest lookupBinder
                           else do
                             case lookupBinderIndex' binderKeys (vSpineIds vs) nReplay of
                               Nothing ->
                                 Left (PhiTranslatabilityError ["OpRaiseMerge: binder " ++ show n ++ " not found in quantifier spine"])
                               Just _ -> do
-                                mName <- binderNameFor binderKeys vs mReplay lookupBinder
-                                let hAbs = InstSeq (InstInside (InstAbstr mName)) InstElim
+                                mRef <- binderRefFor binderKeys vs mReplay lookupBinder
+                                let hAbs = InstSeq (InstInside (instAbstrWithRef mRef)) InstElim
                                 (inst, vs') <- atBinderWith False binderKeys vs nReplay (pure hAbs)
                                 go binderKeys namedSet' vs' (inst : accum) rest lookupBinder
 
@@ -1098,11 +1111,11 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
              in case debugPhi ("OpRaise: binderIndex=" ++ show mbIndex) mbIndex of
                   Just i -> do
                     -- Spine binder case
-                    (boundName, mbBound, _) <- vSpineBinderAt vs i
-                    let names = vSpineNames vs
+                    (boundRef, mbBound, _) <- vSpineBinderAt vs i
+                    let refs = vSpineBinderRefs vs
                         inferredMap = inferredArgMap namedSet'
                         inferredBound =
-                          Map.lookup boundName inferredMap
+                          Map.lookup (typeArgKeyForRef boundRef) inferredMap
                             <|> case Map.elems inferredMap of
                               [singleTy] -> Just singleTy
                               _ -> Nothing
@@ -1116,34 +1129,36 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                             Nothing -> fromMaybe TBottom inferredBound
                         boundTy =
                           case (mbBound, boundTyRaw) of
-                            (Nothing, TVar {}) -> boundTyRaw
+                            (Nothing, TVarRef {}) -> boundTyRaw
                             (Nothing, _) -> inlineAliasBounds boundTyRaw
                             _ -> inlineAliasBoundsAsBound boundTyRaw
-                        deps = filter (/= boundName) (freeTypeVarsList boundTy)
-                        depIdxs = mapMaybe (`elemIndex` names) deps
+                        deps = filter (not . typeBinderRefsSameIdentity boundRef) (freeTypeVarRefsList boundTy)
+                        depIdxs = mapMaybe (\ref -> findIndex (typeBinderRefsSameIdentity ref) refs) deps
                         cutoff = if null depIdxs then (-1) else maximum depIdxs
                         insertIndex = cutoff + 1
 
                     when (insertIndex > i) $
                       Left (PhiInvariantError "OpRaise: computed insertion point is after binder")
 
-                    let prefixBefore = take insertIndex names
-                        between = take (i - insertIndex) (drop insertIndex names)
-                        hAbsBeta = InstSeq (InstInside (InstAbstr "β")) InstElim
+                    let prefixBefore = take insertIndex refs
+                        between = take (i - insertIndex) (drop insertIndex refs)
+                        betaRef = typeBinderRefFromIdentity (typeBinderIdentityFromNode nC) "β"
+                        hAbsBeta = InstSeq (InstInside (instAbstrWithRef betaRef)) InstElim
                         aliasOld = underContext between hAbsBeta
 
                         local =
                           instMany
                             [ InstIntro,
                               InstInside (InstBot boundTy),
-                              InstUnder "β" aliasOld
+                              instUnderWithRef betaRef aliasOld
                             ]
 
                         inst = underContext prefixBefore local
 
-                    let vsNoN = vsDeleteAt i vs
+                    let raisedRef = typeBinderRefFromIdentity (typeBinderIdentityFromNode nC) (typeBinderRefName boundRef)
+                        vsNoN = vsDeleteAt i vs
                         newBound = either (const Nothing) Just (elabToBound boundTy)
-                        vs' = vsInsertAt insertIndex (boundName, newBound, Just nC) vsNoN
+                        vs' = vsInsertAt insertIndex (raisedRef, newBound, Just nC) vsNoN
                     go binderKeys namedSet' vs' (inst : accum) rest lookupBinder
                   Nothing -> do
                     -- Non-spine node case: select an insertion point `m = min-prec{...}` (Fig. 10)
@@ -1159,13 +1174,13 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                       case lookupBindParent (typeRef nC) of
                         Just (TypeRef parent, _) ->
                           case lookupNodePV (canonicalNode parent) of
-                            Just TyForall {} -> reifyTypeWithNamedSetNoFallbackAt substForTypes namedSet' nC
+                            Just TyForall {} -> reifyTypeWithNamedSetRefsNoFallbackAt substForTypes namedSet' nC
                             _ -> reifyBoundType nC
                         _ -> reifyBoundType nC
                     let nodeTy = applyInferredArgs namedSet' (inlineAliasBounds nodeTy0)
                     nodeTyBound <-
                       case lookupVarBound (canonicalNode nC) of
-                        Just bnd -> reifyTypeWithNamedSetNoFallbackAt substForTypes namedSet' bnd
+                        Just bnd -> reifyTypeWithNamedSetRefsNoFallbackAt substForTypes namedSet' bnd
                         Nothing -> pure nodeTy
                     let nodeTyBound' = inlineAliasBounds nodeTyBound
 
@@ -1175,12 +1190,12 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                     _ <- pure $ debugPhi ("OpRaise: traceArgs=" ++ show (fmap etBinderArgs mTrace)) ()
 
                     let ids = vSpineIds vs
-                        names = vSpineNames vs
+                        refs = vSpineBinderRefs vs
 
                     -- Compute dependency cutoff: the new binder must be inserted after any
                     -- binder that appears free in `Txi(n)`.
-                    let deps = freeTypeVarsList nodeTy
-                        depIdxs = mapMaybe (`elemIndex` names) deps
+                    let deps = freeTypeVarRefsList nodeTy
+                        depIdxs = mapMaybe (\ref -> findIndex (typeBinderRefsSameIdentity ref) refs) deps
                         cutoff = if null depIdxs then (-1) else maximum depIdxs
                         minIdx = min (cutoff + 1) (vSpineLength vs)
 
@@ -1240,27 +1255,28 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                                                         instMany (map InstApp args)
                                                   _ -> InstApp nodeTyBoundInlined
                                               Nothing -> InstApp nodeTyBoundInlined
-                                          prefixBefore = take minIdx names
+                                          prefixBefore = take minIdx refs
                                           inst = underContext prefixBefore instArgInst
                                        in Just (inst, numToDelete)
                                     else Nothing
                             _ -> Nothing
                     case mbCandidate of
                       Just (insertIdx, ctxMn) -> do
-                        let prefixBefore = take insertIdx names
+                        let prefixBefore = take insertIdx refs
+                            betaRef = typeBinderRefFromIdentity (typeBinderIdentityFromNode nC) "β"
                             aliasOld = applyContext ctxMn InstElim
 
                             local =
                               instMany
                                 [ InstIntro,
                                   InstInside (InstBot boundTyBot),
-                                  InstUnder "β" aliasOld
+                                  instUnderWithRef betaRef aliasOld
                                 ]
 
                             inst = underContext prefixBefore local
 
                         let newBound = either (const Nothing) Just (elabToBound boundTyBot)
-                            vs' = vsInsertAt insertIdx ("β", newBound, Just nC) vs
+                            vs' = vsInsertAt insertIdx (betaRef, newBound, Just nC) vs
                         go binderKeys namedSet' vs' (inst : accum) rest lookupBinder
                       Nothing ->
                         case mbRootInst of
@@ -1287,26 +1303,31 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
     idsForStartType si' ty =
       let nameToId =
             Map.fromList
-              [ (nm, NodeId k)
-                | (k, nm) <- IntMap.toList (siSubst si')
+              [ (typeBinderRefName ref, NodeId key)
+                | (key, ref) <- IntMap.toList (schemeInfoBinderRefSubst si')
               ]
-          (qs, _) = splitForalls ty
+          (qs, _) = splitForallsRefs ty
        in [ case Map.lookup nm nameToId of
               Just nid -> Just nid
               Nothing -> parseBinderId nm
-            | (nm, _) <- qs
+            | (ref, _) <- qs,
+              let nm = typeBinderRefName ref
           ]
 
     parseBinderId :: String -> Maybe NodeId
     parseBinderId ('t' : rest) = NodeId <$> readMaybe rest
     parseBinderId _ = Nothing
 
-    binderNameFor :: IntSet.IntSet -> VSpine -> NodeId -> (NodeId -> Maybe String) -> Either ElabError String
-    binderNameFor binderKeys vs nid lookupBinder =
+    binderRefFor :: IntSet.IntSet -> VSpine -> NodeId -> (NodeId -> Maybe String) -> Either ElabError TypeBinderRef
+    binderRefFor binderKeys vs nid lookupBinder =
       case lookupBinderIndex' binderKeys (vSpineIds vs) nid of
-        Just i -> vSpineNameAt vs i
+        Just i ->
+          case drop i (vSpineBinderRefs vs) of
+            ref : _ -> Right ref
+            [] -> Left (PhiInvariantError "binderRefFor: index out of range")
         Nothing ->
-          Right (fromMaybe ("t" ++ show (getNodeId nid)) (lookupBinder nid))
+          let name = fromMaybe ("t" ++ show (getNodeId nid)) (lookupBinder nid)
+           in Right (typeBinderRefFromIdentity (typeBinderIdentityFromNode nid) name)
 
     atBinderWith ::
       Bool ->
@@ -1317,7 +1338,7 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
       Either ElabError (Instantiation, VSpine)
     atBinderWith keep binderKeys vs nid mkInner = do
       i <- binderIndex binderKeys (vSpineIds vs) nid
-      prefix <- prefixBinderNames vs i
+      prefix <- prefixBinderRefs vs i
       inner <- mkInner
       let vs' = if keep then vs else vsDeleteAt i vs
       pure (underContext prefix inner, vs')
@@ -1339,13 +1360,13 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
             PhiInvariantError $
               "binder " ++ show nid ++ " not found in identity list " ++ show ids
 
-    prefixBinderNames :: VSpine -> Int -> Either ElabError [String]
-    prefixBinderNames vs i
-      | i < 0 || i > length names =
-          Left (PhiInvariantError "prefixBinderNames: index out of range")
-      | otherwise = Right (take i names)
+    prefixBinderRefs :: VSpine -> Int -> Either ElabError [TypeBinderRef]
+    prefixBinderRefs vs i
+      | i < 0 || i > length refs =
+          Left (PhiInvariantError "prefixBinderRefs: index out of range")
+      | otherwise = Right (take i refs)
       where
-        names = vSpineNames vs
+        refs = vSpineBinderRefs vs
 
-    underContext :: [String] -> Instantiation -> Instantiation
-    underContext prefix inner = foldr InstUnder inner prefix
+    underContext :: [TypeBinderRef] -> Instantiation -> Instantiation
+    underContext prefix inner = foldr instUnderWithRef inner prefix

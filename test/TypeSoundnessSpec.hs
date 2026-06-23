@@ -21,10 +21,10 @@ import Test.QuickCheck
     , (===)
     )
 
-import MLF.Constraint.Types.Graph (BaseTy(..))
+import MLF.Constraint.Types.Graph (BaseTy(..), NodeId(..))
 import MLF.Elab.Pipeline
     ( BoundType
-    , ElabTerm(..)
+    , XmlfTerm(..)
     , ElabType
     , Instantiation(..)
     , Ty(..)
@@ -34,6 +34,14 @@ import MLF.Elab.Pipeline
     , step
     , typeCheck
     )
+import ElabTermTestSupport (mkTestDeferredVar, mkTestLocalLam, mkTestLocalLet, mkTestTyAbs, testTMu, testTVar)
+import MLF.Types.Elab
+    ( TypeBinderRef
+    , instUnderWithRef
+    , resolvedVarReferenceName
+    , typeBinderIdentityFromNode
+    , typeBinderRefFromIdentity
+    )
 import MLF.Frontend.Syntax (Lit(..))
 
 spec :: Spec
@@ -41,7 +49,7 @@ spec = describe "Phase 7 theorem obligations" $ do
     it "Preservation proxy: if typeCheck t = Right tau and step t = Just t', then typeCheck t' = Right tau" $
         property $
             withMaxSuccess 300 $
-                forAll genClosedWellTypedElabTerm $ \term ->
+                forAll genClosedWellTypedXmlfTerm $ \term ->
                     checkCoverage $
                         cover 20 (isJust (step term)) "reducible" $
                         cover 20 (isValue term) "value" $
@@ -78,7 +86,7 @@ spec = describe "Phase 7 theorem obligations" $ do
     it "Progress proxy for closed terms: well-typed term is value or steps" $
         property $
             withMaxSuccess 300 $
-                forAll genClosedWellTypedElabTerm $ \term ->
+                forAll genClosedWellTypedXmlfTerm $ \term ->
                     checkCoverage $
                         cover 20 (isValue term) "value" $
                         cover 20 (isJust (step term)) "steps" $
@@ -110,7 +118,7 @@ spec = describe "Phase 7 theorem obligations" $ do
     it "Multi-step preservation proxy: typeCheck t = Right tau => typeCheck (normalize t) = Right tau" $
         property $
             withMaxSuccess 300 $
-                forAll genClosedWellTypedElabTerm $ \term ->
+                forAll genClosedWellTypedXmlfTerm $ \term ->
                     checkCoverage $
                         cover 5 (isETyAbsBounded term) "ETyAbs-bounded" $
                         cover 5 (isETyInst term) "ETyInst" $
@@ -143,7 +151,7 @@ spec = describe "Phase 7 theorem obligations" $ do
     it "One-step normalization proxy: stepping preserves the final normal form" $
         property $
             withMaxSuccess 300 $
-                forAll genClosedWellTypedElabTerm $ \term ->
+                forAll genClosedWellTypedXmlfTerm $ \term ->
                     checkCoverage $
                         cover 20 (isJust (step term)) "reducible" $
                         cover 20 (not (isJust (step term))) "normal form" $
@@ -187,7 +195,7 @@ spec = describe "Phase 7 theorem obligations" $ do
     it "Canonical-forms proxy: values at base type are the expected literals" $
         property $
             withMaxSuccess 300 $
-                forAll genClosedWellTypedElabTerm $ \term ->
+                forAll genClosedWellTypedXmlfTerm $ \term ->
                     let checked = typeCheck term
                         valueTerm = isValue term
                         baseValue =
@@ -274,21 +282,21 @@ data RuntimeContextEvidence
 
 data RecursiveRuntimeWitness = RecursiveRuntimeWitness
     { rrObligations :: [RecursiveRuntimeObligation]
-    , rrTerm :: ElabTerm
+    , rrTerm :: XmlfTerm
     , rrContext :: [RuntimeContextEvidence]
     }
     deriving (Eq, Show)
 
 recursiveRuntimeTy :: ElabType
-recursiveRuntimeTy = TMu "self" (TArrow (TVar "self") intTy)
+recursiveRuntimeTy = testTMu "self" (TArrow (testTVar "self") intTy)
 
-recursiveRuntimeBody :: ElabTerm
-recursiveRuntimeBody = ELam "self" recursiveRuntimeTy (ELit (LInt 1))
+recursiveRuntimeBody :: XmlfTerm
+recursiveRuntimeBody = mkTestLocalLam "self" recursiveRuntimeTy (ELit (LInt 1))
 
-recursiveRollTerm :: ElabTerm
+recursiveRollTerm :: XmlfTerm
 recursiveRollTerm = ERoll recursiveRuntimeTy recursiveRuntimeBody
 
-recursiveUnrollTerm :: ElabTerm
+recursiveUnrollTerm :: XmlfTerm
 recursiveUnrollTerm = EUnroll recursiveRollTerm
 
 genRecursiveRuntimeWitness :: Gen RecursiveRuntimeWitness
@@ -341,26 +349,26 @@ recursiveRuntimeObligationsSatisfied witness =
         UnrollObligation -> termHasUnrollEvidence (rrTerm witness)
         RecursiveContextObligation -> hasRecursiveContextEvidence (rrContext witness)
 
-termHasRollEvidence :: ElabTerm -> Bool
+termHasRollEvidence :: XmlfTerm -> Bool
 termHasRollEvidence term = case term of
-    EVar _ -> False
+    EVarNode _ -> False
     ELit _ -> False
-    ELam _ _ body -> termHasRollEvidence body
+    ELam _ body -> termHasRollEvidence body
     EApp f a -> termHasRollEvidence f || termHasRollEvidence a
     ELet _ _ rhs body -> termHasRollEvidence rhs || termHasRollEvidence body
-    ETyAbs _ _ body -> termHasRollEvidence body
+    ETyAbsRef _ _ body -> termHasRollEvidence body
     ETyInst e _ -> termHasRollEvidence e
     ERoll _ _ -> True
     EUnroll body -> termHasRollEvidence body
 
-termHasUnrollEvidence :: ElabTerm -> Bool
+termHasUnrollEvidence :: XmlfTerm -> Bool
 termHasUnrollEvidence term = case term of
-    EVar _ -> False
+    EVarNode _ -> False
     ELit _ -> False
-    ELam _ _ body -> termHasUnrollEvidence body
+    ELam _ body -> termHasUnrollEvidence body
     EApp f a -> termHasUnrollEvidence f || termHasUnrollEvidence a
     ELet _ _ rhs body -> termHasUnrollEvidence rhs || termHasUnrollEvidence body
-    ETyAbs _ _ body -> termHasUnrollEvidence body
+    ETyAbsRef _ _ body -> termHasUnrollEvidence body
     ETyInst e _ -> termHasUnrollEvidence e
     ERoll _ body -> termHasUnrollEvidence body
     EUnroll _ -> True
@@ -403,7 +411,7 @@ freshVar i = "v" ++ show i
 
 -- | Generate a well-typed closed term at a given type, using a typing context.
 --   The Int parameter is the size budget; the second Int is a fresh-name counter.
-genTermAtType :: TyCtx -> Int -> Int -> ElabType -> Gen (ElabTerm, Int)
+genTermAtType :: TyCtx -> Int -> Int -> ElabType -> Gen (XmlfTerm, Int)
 genTermAtType ctx size fresh goalTy
     | size <= 0 = genAtom ctx fresh goalTy
     | otherwise = frequency $
@@ -412,14 +420,14 @@ genTermAtType ctx size fresh goalTy
     -- Atoms: variables in scope at the right type, or literals
     atomWeight = [(3, genAtom ctx fresh goalTy)]
 
-    -- Lambda: if goal is TArrow a b, generate ELam
+    -- Lambda: if goal is TArrow a b, generate an identity-backed local lambda.
     lamWeight = case goalTy of
         TArrow argTy resTy ->
             let v = freshVar fresh
                 ctx' = Map.insert v argTy ctx
             in [(2, do
                     (body, fresh') <- genTermAtType ctx' (size - 1) (fresh + 1) resTy
-                    pure (ELam v argTy body, fresh')
+                    pure (mkTestLocalLam v argTy body, fresh')
                )]
         _ -> []
 
@@ -440,14 +448,14 @@ genTermAtType ctx size fresh goalTy
             (rhs, fresh1) <- genTermAtType ctx (size - 1) (fresh + 1) rhsTy
             let ctx' = Map.insert v rhsTy ctx
             (body, fresh2) <- genTermAtType ctx' (size - 1) fresh1 goalTy
-            pure (ELet v (schemeFromType rhsTy) rhs body, fresh2)
+            pure (mkTestLocalLet v (schemeFromType rhsTy) rhs body, fresh2)
         )]
 
 -- | Generate an atomic term at a given type (leaf of the generation tree).
-genAtom :: TyCtx -> Int -> ElabType -> Gen (ElabTerm, Int)
+genAtom :: TyCtx -> Int -> ElabType -> Gen (XmlfTerm, Int)
 genAtom ctx fresh goalTy =
     let varCandidates =
-            [ EVar v
+            [ mkTestDeferredVar v
             | (v, ty) <- Map.toList ctx
             , ty == goalTy
             ]
@@ -462,7 +470,7 @@ genAtom ctx fresh goalTy =
                 let v = freshVar fresh
                     ctx' = Map.insert v argTy ctx
                 (body, fresh') <- genAtom ctx' (fresh + 1) resTy
-                pure (ELam v argTy body, fresh')
+                pure (mkTestLocalLam v argTy body, fresh')
             _ -> do
                 lit <- genLitAtType goalTy
                 pure (lit, fresh)
@@ -473,17 +481,17 @@ genAtom ctx fresh goalTy =
         then fallback
         else frequency candidates
 
-genIntLit :: Gen ElabTerm
+genIntLit :: Gen XmlfTerm
 genIntLit = do
     n <- chooseInt (-10, 10)
     pure (ELit (LInt (fromIntegral n)))
 
-genBoolLit :: Gen ElabTerm
+genBoolLit :: Gen XmlfTerm
 genBoolLit = ELit . LBool <$> arbitrary
 
 -- | Generate a literal at a specific ground type. Falls back to int for
 --   types that have no literal form.
-genLitAtType :: ElabType -> Gen ElabTerm
+genLitAtType :: ElabType -> Gen XmlfTerm
 genLitAtType ty
     | ty == intTy  = genIntLit
     | ty == boolTy = genBoolLit
@@ -492,8 +500,8 @@ genLitAtType ty
 -- | Top-level generator: pick a random goal type, generate a closed well-typed
 --   term at that type using the sized combinator. Uses frequency to cover both
 --   monomorphic and polymorphic (ETyAbs, ETyInst) forms.
-genClosedWellTypedElabTerm :: Gen ElabTerm
-genClosedWellTypedElabTerm = sized $ \s -> do
+genClosedWellTypedXmlfTerm :: Gen XmlfTerm
+genClosedWellTypedXmlfTerm = sized $ \s -> do
     goalTy <- genTy (min s 1)
     let depth = min s 3  -- cap depth to keep terms tractable
     (term, fresh) <- genTermAtType Map.empty depth 0 goalTy
@@ -509,99 +517,103 @@ genClosedWellTypedElabTerm = sized $ \s -> do
         ]
 
 -- | Wrap in a vacuous unbounded type abstraction: Λα. term
-genUnboundedTyAbsWrap :: Int -> ElabTerm -> Gen ElabTerm
+genUnboundedTyAbsWrap :: Int -> XmlfTerm -> Gen XmlfTerm
 genUnboundedTyAbsWrap fresh term = do
     let tv = "t" ++ show fresh
-    pure (ETyAbs tv Nothing term)
+    pure (mkTestTyAbs tv Nothing term)
 
 -- | Wrap in a bounded type abstraction: Λ(α ⩾ τ). term
 --   The bound is a ground type, and the body doesn't mention α.
-genBoundedTyAbsWrap :: Int -> ElabType -> ElabTerm -> Gen ElabTerm
+genBoundedTyAbsWrap :: Int -> ElabType -> XmlfTerm -> Gen XmlfTerm
 genBoundedTyAbsWrap fresh _goalTy term = do
     let tv = "t" ++ show fresh
     bound <- genGroundBound
-    pure (ETyAbs tv (Just bound) term)
+    pure (mkTestTyAbs tv (Just bound) term)
 
 -- | InstElim: (Λα. body) N — eliminate a vacuous type abstraction
-genInstElim :: Int -> ElabTerm -> Gen ElabTerm
+genInstElim :: Int -> XmlfTerm -> Gen XmlfTerm
 genInstElim fresh term = do
     let tv = "t" ++ show fresh
-    pure (ETyInst (ETyAbs tv Nothing term) InstElim)
+    pure (ETyInst (mkTestTyAbs tv Nothing term) InstElim)
 
 -- | InstInside with InstBot: (Λα. body) ∀(⩾ τ)
-genInstInsideBot :: Int -> ElabType -> ElabTerm -> Gen ElabTerm
+genInstInsideBot :: Int -> ElabType -> XmlfTerm -> Gen XmlfTerm
 genInstInsideBot fresh _goalTy term = do
     let tv = "t" ++ show fresh
     ty <- genGroundTy
-    pure (ETyInst (ETyAbs tv Nothing term) (InstInside (InstBot ty)))
+    pure (ETyInst (mkTestTyAbs tv Nothing term) (InstInside (InstBot ty)))
 
 -- | InstApp: (Λα. body) ⟨τ⟩
-genInstApp :: Int -> ElabType -> ElabTerm -> Gen ElabTerm
+genInstApp :: Int -> ElabType -> XmlfTerm -> Gen XmlfTerm
 genInstApp fresh goalTy term = do
     let tv = "t" ++ show fresh
-    pure (ETyInst (ETyAbs tv Nothing term) (InstApp goalTy))
+    pure (ETyInst (mkTestTyAbs tv Nothing term) (InstApp goalTy))
 
 -- | InstIntro + InstElim round-trip: ((term O) N)
-genInstIntroElim :: Int -> ElabTerm -> Gen ElabTerm
+genInstIntroElim :: Int -> XmlfTerm -> Gen XmlfTerm
 genInstIntroElim _fresh term =
     pure (ETyInst (ETyInst term InstIntro) InstElim)
 
 -- | InstUnder with trivial InstId: (Λα. body) ∀(β ⩾) 1
-genInstUnderTrivial :: Int -> ElabTerm -> Gen ElabTerm
+genInstUnderTrivial :: Int -> XmlfTerm -> Gen XmlfTerm
 genInstUnderTrivial fresh term = do
     let tv = "t" ++ show fresh
         tv2 = "t" ++ show (fresh + 1)
-    pure (ETyInst (ETyAbs tv Nothing term) (InstUnder tv2 InstId))
+    pure (ETyInst (mkTestTyAbs tv Nothing term) (instUnderWithRef (typeRef (fresh + 1) tv2) InstId))
 
 -- | Generate a ground BoundType (TBase is polymorphic in TopVar).
 genGroundBound :: Gen BoundType
 genGroundBound = elements [TBase (BaseTy "Int"), TBase (BaseTy "Bool")]
 
+typeRef :: Int -> String -> TypeBinderRef
+typeRef key name =
+    typeBinderRefFromIdentity (typeBinderIdentityFromNode (NodeId key)) name
+
 -- ---------------------------------------------------------------------------
 -- Helpers
 -- ---------------------------------------------------------------------------
 
-isClosedTerm :: ElabTerm -> Bool
+isClosedTerm :: XmlfTerm -> Bool
 isClosedTerm = Set.null . freeTermVars
 
-freeTermVars :: ElabTerm -> Set.Set String
+freeTermVars :: XmlfTerm -> Set.Set String
 freeTermVars term = case term of
-    EVar v -> Set.singleton v
+    EVarNode resolved -> Set.singleton (resolvedVarReferenceName resolved)
     ELit _ -> Set.empty
-    ELam v _ body -> Set.delete v (freeTermVars body)
+    ELam resolved body -> Set.delete (resolvedVarReferenceName resolved) (freeTermVars body)
     EApp f a -> Set.union (freeTermVars f) (freeTermVars a)
-    ELet v _ rhs body ->
-        Set.union (freeTermVars rhs) (Set.delete v (freeTermVars body))
-    ETyAbs _ _ body -> freeTermVars body
+    ELet resolved _ rhs body ->
+        Set.union (freeTermVars rhs) (Set.delete (resolvedVarReferenceName resolved) (freeTermVars body))
+    ETyAbsRef _ _ body -> freeTermVars body
     ETyInst e _ -> freeTermVars e
     ERoll _ body -> freeTermVars body
     EUnroll body -> freeTermVars body
 
 -- | Cover-label predicates for polymorphic constructor families.
-isETyAbsBounded :: ElabTerm -> Bool
-isETyAbsBounded (ETyAbs _ (Just _) _) = True
+isETyAbsBounded :: XmlfTerm -> Bool
+isETyAbsBounded (ETyAbsRef _ (Just _) _) = True
 isETyAbsBounded _ = False
 
-isETyInst :: ElabTerm -> Bool
+isETyInst :: XmlfTerm -> Bool
 isETyInst ETyInst{} = True
 isETyInst _ = False
 
-hasInstInside :: ElabTerm -> Bool
+hasInstInside :: XmlfTerm -> Bool
 hasInstInside (ETyInst _ (InstInside _)) = True
 hasInstInside _ = False
 
-hasInstUnder :: ElabTerm -> Bool
-hasInstUnder (ETyInst _ (InstUnder _ _)) = True
+hasInstUnder :: XmlfTerm -> Bool
+hasInstUnder (ETyInst _ (InstUnderRef _ _)) = True
 hasInstUnder _ = False
 
-hasInstElim :: ElabTerm -> Bool
+hasInstElim :: XmlfTerm -> Bool
 hasInstElim (ETyInst _ InstElim) = True
 hasInstElim _ = False
 
-isLitInt :: ElabTerm -> Bool
+isLitInt :: XmlfTerm -> Bool
 isLitInt (ELit (LInt _)) = True
 isLitInt _ = False
 
-isLitBool :: ElabTerm -> Bool
+isLitBool :: XmlfTerm -> Bool
 isLitBool (ELit (LBool _)) = True
 isLitBool _ = False

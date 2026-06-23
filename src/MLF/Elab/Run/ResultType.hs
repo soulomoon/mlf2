@@ -9,7 +9,8 @@ module MLF.Elab.Run.ResultType
     rtcEdgeTraces,
     rtcEdgeExpansions,
     generalizeWithPlan,
-    inferInstAppArgsFromScheme,
+    inferInstAppArgsFromSchemeRefs,
+    substTypeSelectiveRefs,
     mkResultTypeInputs,
     buildResultTypeView,
     computeResultTypeFromAnn,
@@ -28,7 +29,10 @@ import MLF.Constraint.Types.Graph
     NodeId (..),
   )
 import MLF.Elab.Generalize (GaBindParents)
-import MLF.Elab.Run.Instantiation (inferInstAppArgsFromScheme)
+import MLF.Elab.Run.Instantiation
+  ( inferInstAppArgsFromSchemeRefs,
+    substTypeSelectiveRefs,
+  )
 import qualified MLF.Elab.Run.ResultType.Ann as Ann
 import qualified MLF.Elab.Run.ResultType.Fallback as Fallback
 import MLF.Elab.Run.ResultType.Types

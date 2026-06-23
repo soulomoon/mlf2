@@ -8,14 +8,34 @@ module MLF.Frontend.Program.Types
     renderProgramDiagnostic,
     TypeView (..),
     ConstraintInfo (..),
+    constraintTypeView,
     typeViewFromResolved,
     displayConstraint,
+    mkTypeView,
     applyTypeViewSubst,
     applyConstraintInfoSubst,
     freeTypeVarsTypeView,
     freeTypeVarsTypeViews,
     typeViewsDisplay,
     typeViewsIdentity,
+    TypeViewSubstKey (..),
+    TypeViewSubst,
+    typeViewSubstKeyFor,
+    lookupTypeViewSubst,
+    insertTypeViewSubst,
+    typeViewSubstDisplayTypes,
+    typeViewSubstIdentityTypes,
+    typeViewSubstFromParamBinders,
+    typeViewSubstFromTypeParams,
+    typeParamBinderIdentity,
+    TypeBinderSubst,
+    emptyTypeBinderSubst,
+    typeBinderSubstFromTypeViewSubst,
+    typeBinderSubstToNameMap,
+    typeBinderSubstToTypeViewSubstWith,
+    lookupTypeBinderSubst,
+    insertTypeBinderSubst,
+    EvidenceMethod (..),
     EvidenceInfo (..),
     SymbolNamespace (..),
     SymbolOwnerIdentity (..),
@@ -34,6 +54,7 @@ module MLF.Frontend.Program.Types
     ResolvedProgram (..),
     resolvedProgramSemanticArtifact,
     resolvedModuleName,
+    resolvedModuleIdentity,
     resolvedModuleSyntax,
     resolvedModuleLocalValues,
     resolvedModuleLocalTypes,
@@ -45,21 +66,54 @@ module MLF.Frontend.Program.Types
     sameResolvedSymbol,
     unqualifiedSymbolName,
     valueInfoSymbolIdentity,
+    valueInfoIdentityName,
     dataInfoSymbolIdentity,
+    dataName,
+    dataInfoIdentityModule,
+    dataInfoIdentityName,
+    dataInfoIdentityQualifiedName,
+    dataInfoIdentityHeadName,
+    dataParams,
     constructorInfoSymbolIdentity,
+    constructorInfoIdentityName,
+    ctorName,
+    ctorOwningType,
     classInfoSymbolIdentity,
+    classInfoIdentityModule,
+    classInfoIdentityName,
+    classInfoIdentityQualifiedName,
+    className,
+    classParamNames,
+    classParamIdentityNames,
+    classParamBinderIdentities,
     methodInfoSymbolIdentity,
+    methodInfoIdentityName,
+    methodClassName,
+    methodName,
+    methodParamName,
+    methodParamIdentityName,
+    methodParamBinders,
+    lookupMethodParamViewSubst,
+    methodTypeView,
+    methodResultTypeView,
     methodInfoOwnerClassSymbolIdentity,
+    instanceClassName,
     instanceInfoClassSymbolIdentity,
+    instanceOriginModuleName,
+    moduleSymbolIdentity,
+    lookupClassMethod,
+    lookupInstanceMethod,
     resolvedValueInfoSymbol,
     resolvedDataInfoSymbol,
     resolvedConstructorInfoSymbol,
     resolvedClassInfoSymbol,
     resolvedMethodInfoSymbol,
     resolvedModuleSymbol,
+    resolvedModuleSymbolFromIdentity,
     ConstructorShape (..),
     ConstructorInfo (..),
     DataInfo (..),
+    FunctionalDependencyInfo (..),
     MethodInfo (..),
     ClassInfo (..),
     ValueInfo (..),
@@ -74,20 +128,37 @@ module MLF.Frontend.Program.Types
     constructorRefFromInfo,
     loweredBindingIdentityFromConstructorInfo,
     loweredBindingIdentityFromValueInfo,
+    resolvedVarFromValueInfo,
     resolvedVarFromLoweredBinding,
+    loweredBindingConstructorRef,
     checkedBindingConstructorRef,
     DeferredBindingMode (..),
     DeferredMethodEvidence (..),
     DeferredMethodCall (..),
+    deferredMethodPlaceholder,
+    deferredMethodName,
     DeferredConstructorCall (..),
+    deferredConstructorPlaceholder,
     DeferredCaseCall (..),
+    deferredCasePlaceholder,
     DeferredProgramObligation (..),
+    DeferredObligations,
+    deferredProgramObligationRef,
     ExportedTypeInfo (..),
+    mkExportedTypeInfo,
+    exportedTypeConstructorsForDisplay,
     ModuleExports (..),
+    moduleExportsFromMaps,
+    exportedValuesForDisplay,
+    exportedTypesForDisplay,
+    exportedClassesForDisplay,
     LoweredBinding (..),
+    loweredBindingName,
     CheckedBinding (..),
+    checkedBindingName,
     CheckedModule (..),
     CheckedProgram (..),
+    checkedProgramMain,
     splitForalls,
     splitArrows,
     applyTypeHead,
@@ -95,11 +166,13 @@ module MLF.Frontend.Program.Types
     constructorOwnerRuntimeTypeTrackable,
     constructorOwnerHasVariableHeadApplication,
     constructorOwnerShapes,
+    constructorShapeName,
     constructorShapeFromInfo,
     dataConstructorsRuntimeTypeTrackable,
     srcTypeHasVariableHeadApplication,
     specializeMethodType,
     specializeMethodTypes,
+    specializeMethodTypeView,
     constrainedVisibleType,
   )
 where
@@ -112,7 +185,7 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
-import MLF.Elab.Types (ElabTerm, ElabType)
+import MLF.Elab.Types (XmlfTerm, ElabType, ResolvedVar (..), resolvedVarConstructorRef)
 import MLF.Frontend.Symbol
   ( ResolvedReference (..),
     ResolvedReferenceKind (..),
@@ -128,15 +201,20 @@ import MLF.Frontend.Symbol
   )
 import MLF.Frontend.Syntax
   ( ResolvedSrcType,
+    ResolvedSrcTy (..),
+    ResolvedSrcBound (..),
+    ResolvedTypeBinderRef (..),
     SrcBound (..),
     SrcTy (..),
     SrcType,
     SurfaceExpr,
+    resolvedSrcTypeBinderIdentityName,
     resolvedSrcTypeIdentityType,
     resolvedSrcTypeToSrcType,
   )
 import qualified MLF.Frontend.Syntax.Program as P
 import MLF.Frontend.TypeLevel (TypeLevelKind (..), TypeLevelNormalizeError (..), TypeLevelTy (..))
+import MLF.Types.Identity
 
 data ProgramError
   = ProgramDuplicateModule P.ModuleName
@@ -585,6 +663,7 @@ data ResolvedLocalSymbols = ResolvedLocalSymbols
 
 data ResolvedSemanticModule = ResolvedSemanticModule
   { resolvedSemanticModuleName :: P.ModuleName,
+    resolvedSemanticModuleIdentity :: SymbolIdentity,
     resolvedSemanticModuleSyntax :: P.ResolvedModuleSyntax,
     resolvedSemanticModuleLocalSymbols :: ResolvedLocalSymbols,
     resolvedSemanticModuleScope :: ResolvedScope,
@@ -622,6 +701,9 @@ resolvedProgramSemanticArtifact resolvedProgram =
 
 resolvedModuleName :: ResolvedModule -> P.ModuleName
 resolvedModuleName = resolvedSemanticModuleName . resolvedModuleSemantic
+
+resolvedModuleIdentity :: ResolvedModule -> SymbolIdentity
+resolvedModuleIdentity = resolvedSemanticModuleIdentity . resolvedModuleSemantic
 
 resolvedModuleSyntax :: ResolvedModule -> P.ResolvedModuleSyntax
 resolvedModuleSyntax = resolvedSemanticModuleSyntax . resolvedModuleSemantic
@@ -661,11 +743,13 @@ audits, backend adapters, and tests, but checker policy should enter through
 -}
 
 {- Note [Resolved .mlfp symbol identities]
-`SymbolIdentity` is the semantic key. It uses the defining module plus the
-unqualified declaration name, and method/constructor identities carry their
-owning class/type identity. `SymbolSpelling` is the reference-side surface data:
-the source name, display name, and whether it came from a local declaration,
-unqualified import, qualified/aliased import, or builtin.
+`SymbolIdentity` is the semantic key. Local declarations carry a generated
+unique identity, and equality/ordering uses that identity. String module/name
+fields remain as stable display and compatibility metadata for boundary paths.
+Method/constructor identities carry their owning class/type identity.
+`SymbolSpelling` is the reference-side surface data: the source name, display
+name, and whether it came from a local declaration, unqualified import,
+qualified/aliased import, or builtin.
 
 The checker and elaborator keep visible maps keyed by surface spelling because
 source lookup and diagnostics need those names. Downstream metadata stores
@@ -676,14 +760,59 @@ names remain explicit generated names, not semantic identities.
 
 data TypeView = TypeView
   { typeViewDisplay :: SrcType,
-    typeViewIdentity :: SrcType
+    typeViewIdentity :: SrcType,
+    typeViewBinderIdentities :: Map String TypeBinderIdentity
   }
   deriving (Eq, Show)
+
+mkTypeView :: SrcType -> SrcType -> TypeView
+mkTypeView display identity =
+  TypeView
+    { typeViewDisplay = display,
+      typeViewIdentity = identity,
+      typeViewBinderIdentities = Map.empty
+    }
+
+data TypeViewSubstKey
+  = TypeViewSubstByIdentity TypeBinderIdentity String String
+  | TypeViewSubstByName String
+  deriving (Show)
+
+instance Eq TypeViewSubstKey where
+  left == right =
+    compare left right == EQ
+
+instance Ord TypeViewSubstKey where
+  compare left right =
+    case (left, right) of
+      (TypeViewSubstByIdentity leftIdentity _ _, TypeViewSubstByIdentity rightIdentity _ _) ->
+        compare leftIdentity rightIdentity
+      (TypeViewSubstByIdentity {}, TypeViewSubstByName {}) ->
+        LT
+      (TypeViewSubstByName {}, TypeViewSubstByIdentity {}) ->
+        GT
+      (TypeViewSubstByName leftName, TypeViewSubstByName rightName) ->
+        compare leftName rightName
+
+type TypeViewSubst = Map TypeViewSubstKey TypeView
+
+typeViewSubstKeyFor :: TypeView -> String -> String -> TypeViewSubstKey
+typeViewSubstKeyFor view displayName identityName =
+  case Map.lookup identityName (typeViewBinderIdentities view) of
+    Just identity -> TypeViewSubstByIdentity identity displayName identityName
+    Nothing -> TypeViewSubstByName identityName
+
+lookupTypeViewSubst :: TypeViewSubstKey -> TypeViewSubst -> Maybe TypeView
+lookupTypeViewSubst key subst =
+  Map.lookup key subst
+
+insertTypeViewSubst :: TypeViewSubstKey -> TypeView -> TypeViewSubst -> TypeViewSubst
+insertTypeViewSubst =
+  Map.insert
 
 data ConstraintInfo = ConstraintInfo
   { constraintDisplayClass :: P.ClassName,
     constraintClassSymbol :: SymbolIdentity,
-    constraintTypeView :: TypeView,
     constraintTypeViews :: NonEmpty TypeView
   }
   deriving (Eq, Show)
@@ -692,8 +821,31 @@ typeViewFromResolved :: ResolvedSrcType -> TypeView
 typeViewFromResolved ty =
   TypeView
     { typeViewDisplay = resolvedSrcTypeToSrcType ty,
-      typeViewIdentity = resolvedSrcTypeIdentityType ty
+      typeViewIdentity = resolvedSrcTypeIdentityType ty,
+      typeViewBinderIdentities = resolvedSrcTypeBinderIdentities ty
     }
+
+resolvedSrcTypeBinderIdentities :: ResolvedSrcTy n v -> Map String TypeBinderIdentity
+resolvedSrcTypeBinderIdentities ty =
+  case ty of
+    RSTVar ref -> binder ref
+    RSTArrow dom cod -> resolvedSrcTypeBinderIdentities dom <> resolvedSrcTypeBinderIdentities cod
+    RSTBase {} -> Map.empty
+    RSTCon _ args -> foldMap resolvedSrcTypeBinderIdentities args
+    RSTVarApp ref args -> binder ref <> foldMap resolvedSrcTypeBinderIdentities args
+    RSTTyLam ref body -> binder ref <> resolvedSrcTypeBinderIdentities body
+    RSTTyApp fun arg -> resolvedSrcTypeBinderIdentities fun <> resolvedSrcTypeBinderIdentities arg
+    RSTForall ref mb body ->
+      binder ref
+        <> maybe Map.empty (resolvedSrcTypeBinderIdentities . unResolvedSrcBound) mb
+        <> resolvedSrcTypeBinderIdentities body
+    RSTMu ref body -> binder ref <> resolvedSrcTypeBinderIdentities body
+    RSTBottom -> Map.empty
+  where
+    binder ref =
+      Map.singleton
+        (resolvedSrcTypeBinderIdentityName ref)
+        (typeBinderIdentityFromUnique (resolvedTypeBinderIdentity ref))
 
 displayConstraint :: ConstraintInfo -> P.ClassConstraint
 displayConstraint constraint =
@@ -702,23 +854,53 @@ displayConstraint constraint =
       P.constraintTypes = typeViewsDisplay (constraintTypeViews constraint)
     }
 
-applyTypeViewSubst :: Map String TypeView -> TypeView -> TypeView
+applyTypeViewSubst :: TypeViewSubst -> TypeView -> TypeView
 applyTypeViewSubst subst view =
   TypeView
     { typeViewDisplay = Map.foldrWithKey substituteTypeVar (typeViewDisplay view) displaySubst,
-      typeViewIdentity = Map.foldrWithKey substituteTypeVar (typeViewIdentity view) identitySubst
+      typeViewIdentity = Map.foldrWithKey substituteTypeVar (typeViewIdentity view) identitySubst,
+      typeViewBinderIdentities = Map.empty
     }
   where
-    displaySubst = fmap typeViewDisplay subst
-    identitySubst = fmap typeViewIdentity subst
+    displaySubst = typeViewSubstDisplayTypes subst
+    identitySubst = typeViewSubstIdentityTypes subst
 
-applyConstraintInfoSubst :: Map String TypeView -> ConstraintInfo -> ConstraintInfo
+typeViewSubstDisplayTypes :: TypeViewSubst -> Map String SrcType
+typeViewSubstDisplayTypes subst =
+  Map.fromList
+    [ (typeViewSubstKeyDisplayName key, typeViewDisplay substView)
+      | (key, substView) <- Map.toList subst
+    ]
+
+typeViewSubstIdentityTypes :: TypeViewSubst -> Map String SrcType
+typeViewSubstIdentityTypes subst =
+  Map.fromList
+    [ (typeViewSubstKeyIdentityName key, typeViewIdentity substView)
+      | (key, substView) <- Map.toList subst
+    ]
+
+typeViewSubstKeyDisplayName :: TypeViewSubstKey -> String
+typeViewSubstKeyDisplayName key =
+  case key of
+    TypeViewSubstByIdentity _ displayName _ -> displayName
+    TypeViewSubstByName name -> name
+
+typeViewSubstKeyIdentityName :: TypeViewSubstKey -> String
+typeViewSubstKeyIdentityName key =
+  case key of
+    TypeViewSubstByIdentity _ _ identityName -> identityName
+    TypeViewSubstByName name -> name
+
+applyConstraintInfoSubst :: TypeViewSubst -> ConstraintInfo -> ConstraintInfo
 applyConstraintInfoSubst subst constraint =
   let views = fmap (applyTypeViewSubst subst) (constraintTypeViews constraint)
    in constraint
-        { constraintTypeView = NE.head views,
-          constraintTypeViews = views
+        { constraintTypeViews = views
         }
+
+constraintTypeView :: ConstraintInfo -> TypeView
+constraintTypeView =
+  NE.head . constraintTypeViews
 
 freeTypeVarsTypeView :: TypeView -> Set String
 freeTypeVarsTypeView = freeTypeVarsSrcType . typeViewIdentity
@@ -732,38 +914,155 @@ typeViewsDisplay = fmap typeViewDisplay
 typeViewsIdentity :: NonEmpty TypeView -> NonEmpty SrcType
 typeViewsIdentity = fmap typeViewIdentity
 
+typeViewSubstFromParamBinders :: NonEmpty (String, String, Maybe TypeBinderIdentity) -> NonEmpty TypeView -> TypeViewSubst
+typeViewSubstFromParamBinders params views =
+  Map.fromList (concat (zipWith entries (NE.toList params) (NE.toList views)))
+  where
+    entries (displayName, identityName, mbIdentity) view =
+      let nameEntries =
+            [ (TypeViewSubstByName displayName, view),
+              (TypeViewSubstByName identityName, view)
+            ]
+       in case mbIdentity of
+            Just identity ->
+              [(TypeViewSubstByIdentity identity displayName identityName, view)]
+            Nothing -> nameEntries
+
+typeParamBinderIdentity :: P.TypeParam -> Maybe TypeBinderIdentity
+typeParamBinderIdentity param =
+  typeBinderIdentityFromUnique . resolvedTypeBinderIdentity <$> P.typeParamRef param
+
+typeViewSubstFromTypeParams :: NonEmpty P.TypeParam -> NonEmpty TypeView -> TypeViewSubst
+typeViewSubstFromTypeParams params views =
+  typeViewSubstFromParamBinders (fmap typeParamBinder params) views
+  where
+    typeParamBinder param =
+      (P.typeParamName param, P.typeParamIdentityName param, typeParamBinderIdentity param)
+
+data TypeBinderSubst = TypeBinderSubst
+  { typeBinderSubstByIdentity :: Map TypeBinderIdentity (Set String, SrcType),
+    typeBinderSubstByName :: Map String SrcType
+  }
+  deriving (Eq, Show)
+
+emptyTypeBinderSubst :: TypeBinderSubst
+emptyTypeBinderSubst =
+  TypeBinderSubst
+    { typeBinderSubstByIdentity = Map.empty,
+      typeBinderSubstByName = Map.empty
+    }
+
+typeBinderSubstFromTypeViewSubst :: [(String, Maybe TypeBinderIdentity)] -> TypeViewSubst -> TypeBinderSubst
+typeBinderSubstFromTypeViewSubst binders subst =
+  foldr insertView emptyTypeBinderSubst (Map.toList subst)
+  where
+    bindersByIdentity =
+      Map.fromList [(identity, name) | (name, Just identity) <- binders]
+    bindersByName =
+      Map.fromList binders
+
+    insertView (key, view) acc =
+      case key of
+        TypeViewSubstByIdentity identity displayName identityName ->
+          let name = Map.findWithDefault (identityNameOrDisplay displayName identityName) identity bindersByIdentity
+           in insertTypeBinderSubst (name, Just identity) (typeViewDisplay view) acc
+        TypeViewSubstByName name ->
+          case Map.lookup name bindersByName of
+            Just Nothing -> insertTypeBinderSubst (name, Nothing) (typeViewDisplay view) acc
+            Just (Just {}) -> acc
+            Nothing -> insertTypeBinderSubst (name, Nothing) (typeViewDisplay view) acc
+
+    identityNameOrDisplay displayName identityName
+      | null identityName = displayName
+      | otherwise = identityName
+
+typeBinderSubstToNameMap :: TypeBinderSubst -> Map String SrcType
+typeBinderSubstToNameMap subst =
+  identityMap `Map.union` typeBinderSubstByName subst
+  where
+    identityMap =
+      Map.fromList
+        [ (name, ty)
+        | (names, ty) <- Map.elems (typeBinderSubstByIdentity subst),
+          name <- Set.toList names
+        ]
+
+typeBinderSubstToTypeViewSubstWith :: (SrcType -> TypeView) -> TypeBinderSubst -> TypeViewSubst
+typeBinderSubstToTypeViewSubstWith mkView subst =
+  Map.fromList (identityEntries ++ nameEntries)
+  where
+    identityEntries =
+      [ (TypeViewSubstByIdentity identity name name, mkView ty)
+        | (identity, (names, ty)) <- Map.toList (typeBinderSubstByIdentity subst),
+          name <- Set.toList names
+      ]
+    nameEntries =
+      [ (TypeViewSubstByName name, mkView ty)
+        | (name, ty) <- Map.toList (typeBinderSubstByName subst)
+      ]
+
+lookupTypeBinderSubst :: (String, Maybe TypeBinderIdentity) -> TypeBinderSubst -> Maybe SrcType
+lookupTypeBinderSubst (name, mbIdentity) subst =
+  case mbIdentity of
+    Just identity -> snd <$> Map.lookup identity (typeBinderSubstByIdentity subst)
+    Nothing -> Map.lookup name (typeBinderSubstByName subst)
+
+insertTypeBinderSubst :: (String, Maybe TypeBinderIdentity) -> SrcType -> TypeBinderSubst -> TypeBinderSubst
+insertTypeBinderSubst (name, mbIdentity) ty subst =
+  case mbIdentity of
+    Just identity ->
+      subst
+        { typeBinderSubstByIdentity =
+            Map.insertWith
+              (\(newNames, newTy) (oldNames, _) -> (newNames <> oldNames, newTy))
+              identity
+              (Set.singleton name, ty)
+              (typeBinderSubstByIdentity subst)
+        }
+    Nothing ->
+      subst
+        { typeBinderSubstByName = Map.insert name ty (typeBinderSubstByName subst)
+        }
+
+data EvidenceMethod = EvidenceMethod
+  { evidenceMethodRuntimeName :: String,
+    evidenceMethodSymbol :: SymbolIdentity,
+    evidenceMethodResolvedVar :: Maybe ResolvedVar,
+    evidenceMethodTypeView :: TypeView
+  }
+  deriving (Eq, Show)
+
 data EvidenceInfo = EvidenceInfo
-  { evidenceClassName :: P.ClassName,
-    evidenceClassSymbol :: SymbolIdentity,
-    evidenceType :: SrcType,
-    evidenceTypeIdentity :: SrcType,
-    evidenceTypes :: NonEmpty SrcType,
-    evidenceTypeIdentities :: NonEmpty SrcType,
-    evidenceMethods :: Map P.MethodName (String, SrcType)
+  { evidenceClassSymbol :: SymbolIdentity,
+    evidenceTypeViews :: NonEmpty TypeView,
+    evidenceMethodsByIdentity :: Map SymbolIdentity EvidenceMethod
   }
   deriving (Eq, Show)
 
 data ConstructorShape = ConstructorShape
-  { constructorShapeName :: P.ConstructorName,
-    constructorShapeSymbol :: SymbolIdentity,
+  { constructorShapeSymbol :: SymbolIdentity,
     constructorShapeRuntimeName :: String,
     constructorShapeForalls :: [(String, Maybe SrcType)],
+    constructorShapeForallsIdentity :: [(String, Maybe SrcType)],
+    constructorShapeForallBinderIdentities :: [Maybe TypeBinderIdentity],
     constructorShapeArgs :: [SrcType],
+    constructorShapeArgsIdentity :: [SrcType],
     constructorShapeResult :: SrcType,
+    constructorShapeResultIdentity :: SrcType,
     constructorShapeIndex :: Int,
     constructorShapeOwnerTypeParams :: [P.TypeParam]
   }
   deriving (Eq, Show)
 
 data ConstructorInfo = ConstructorInfo
-  { ctorName :: P.ConstructorName,
-    ctorInfoSymbol :: SymbolIdentity,
+  { ctorInfoSymbol :: SymbolIdentity,
     ctorRuntimeName :: String,
     ctorType :: SrcType,
+    ctorTypeIdentity :: SrcType,
     ctorForalls :: [(String, Maybe SrcType)],
+    ctorForallBinderIdentities :: [Maybe TypeBinderIdentity],
     ctorArgs :: [SrcType],
     ctorResult :: SrcType,
-    ctorOwningType :: P.TypeName,
     ctorOwningTypeIdentity :: SymbolIdentity,
     ctorIndex :: Int,
     ctorOwnerConstructors :: [ConstructorShape]
@@ -771,158 +1070,94 @@ data ConstructorInfo = ConstructorInfo
   deriving (Eq, Show)
 
 data DataInfo = DataInfo
-  { dataName :: P.TypeName,
-    dataInfoSymbol :: SymbolIdentity,
-    dataModule :: P.ModuleName,
+  { dataInfoSymbol :: SymbolIdentity,
     dataTypeParams :: [P.TypeParam],
-    dataParams :: [String],
     dataConstructors :: [ConstructorInfo]
   }
   deriving (Eq, Show)
 
 data MethodInfo = MethodInfo
-  { methodClassName :: P.ClassName,
-    methodInfoSymbol :: SymbolIdentity,
-    methodClassModule :: P.ModuleName,
-    methodName :: P.MethodName,
-    methodRuntimeBase :: String,
+  { methodInfoSymbol :: SymbolIdentity,
     methodType :: SrcType,
     methodTypeIdentity :: SrcType,
+    methodTypeBinderIdentities :: Map String TypeBinderIdentity,
     methodConstraints :: [P.ClassConstraint],
     methodConstraintInfos :: [ConstraintInfo],
-    methodTypeParam :: P.TypeParam,
-    methodParamName :: String,
-    methodTypeParams :: NonEmpty P.TypeParam,
-    methodParamNames :: NonEmpty String
+    methodParamNames :: NonEmpty String,
+    methodParamIdentityNames :: NonEmpty String,
+    methodParamBinderIdentities :: NonEmpty (Maybe TypeBinderIdentity)
+  }
+  deriving (Eq, Show)
+
+data FunctionalDependencyInfo = FunctionalDependencyInfo
+  { functionalDependencyDeterminerRefs :: NonEmpty TypeBinderIdentity,
+    functionalDependencyDeterminedRefs :: NonEmpty TypeBinderIdentity
   }
   deriving (Eq, Show)
 
 data ClassInfo = ClassInfo
-  { className :: P.ClassName,
-    classInfoSymbol :: SymbolIdentity,
-    classModule :: P.ModuleName,
-    classTypeParam :: P.TypeParam,
-    classParamName :: String,
+  { classInfoSymbol :: SymbolIdentity,
     classTypeParams :: NonEmpty P.TypeParam,
-    classParamNames :: NonEmpty String,
     classSuperclasses :: [P.ClassConstraint],
     classSuperclassInfos :: [ConstraintInfo],
-    classFunctionalDependencies :: [P.FunctionalDependency],
-    classMethods :: Map P.MethodName MethodInfo
+    classFunctionalDependencies :: [FunctionalDependencyInfo],
+    classMethodsByIdentity :: Map SymbolIdentity MethodInfo
   }
   deriving (Eq, Show)
 
 data ValueInfo
   = OrdinaryValue
-      { valueDisplayName :: String,
-        valueInfoSymbol :: SymbolIdentity,
+      { valueInfoSymbol :: SymbolIdentity,
         valueRuntimeName :: String,
         valueType :: SrcType,
         valueIdentityType :: SrcType,
         valueConstraints :: [P.ClassConstraint],
-        valueConstraintInfos :: [ConstraintInfo],
-        valueOriginModule :: P.ModuleName
+        valueConstraintInfos :: [ConstraintInfo]
       }
   | ConstructorValue
-      { valueDisplayName :: String,
-        valueInfoSymbol :: SymbolIdentity,
+      { valueInfoSymbol :: SymbolIdentity,
         valueRuntimeName :: String,
         valueType :: SrcType,
-        valueCtorInfo :: ConstructorInfo,
-        valueOriginModule :: P.ModuleName
+        valueIdentityType :: SrcType,
+        valueCtorInfo :: ConstructorInfo
       }
   | OverloadedMethod
-      { valueDisplayName :: String,
-        valueInfoSymbol :: SymbolIdentity,
-        valueMethodInfo :: MethodInfo,
-        valueOriginModule :: P.ModuleName
+      { valueInfoSymbol :: SymbolIdentity,
+        valueMethodInfo :: MethodInfo
       }
   deriving (Eq, Show)
 
 data InstanceInfo = InstanceInfo
-  { instanceClassName :: P.ClassName,
-    instanceClassSymbol :: SymbolIdentity,
-    instanceClassModule :: P.ModuleName,
-    instanceOriginModule :: P.ModuleName,
+  { instanceClassSymbol :: SymbolIdentity,
+    instanceOriginModuleIdentity :: SymbolIdentity,
     instanceConstraints :: [P.ClassConstraint],
     instanceConstraintInfos :: [ConstraintInfo],
-    instanceHeadType :: SrcType,
-    instanceHeadIdentityType :: SrcType,
     instanceHeadTypes :: NonEmpty SrcType,
     instanceHeadIdentityTypes :: NonEmpty SrcType,
-    instanceMethods :: Map P.MethodName ValueInfo
+    instanceMethodsByIdentity :: Map SymbolIdentity ValueInfo
   }
-  deriving (Eq, Show)
-
-newtype LocalRef = LocalRef
-  { localRefName :: String
-  }
-  deriving (Eq, Ord, Show)
-
-newtype PrimitiveRef = PrimitiveRef
-  { primitiveRefName :: String
-  }
-  deriving (Eq, Ord, Show)
-
-newtype DeferredRef = DeferredRef
-  { deferredRefName :: String
-  }
-  deriving (Eq, Ord, Show)
-
-data ConstructorRef = ConstructorRef
-  { constructorRefSymbol :: SymbolIdentity,
-    constructorRefRuntimeName :: String,
-    constructorRefOwnerType :: SymbolIdentity,
-    constructorRefOwnerRuntimeName :: String,
-    constructorRefIndex :: Int,
-    constructorRefForalls :: [(String, Maybe SrcType)],
-    constructorRefArgs :: [SrcType],
-    constructorRefResult :: SrcType
-  }
-  deriving (Eq, Show)
-
-data IdDetails
-  = LocalId LocalRef
-  | TopLevelId SymbolIdentity
-  | ConstructorId ConstructorRef
-  | MethodId SymbolIdentity
-  | PrimitiveId PrimitiveRef
-  | DeferredId DeferredRef
   deriving (Eq, Show)
 
 data LoweredBindingIdentity = LoweredBindingIdentity
-  { loweredIdentityDisplayName :: String,
-    loweredIdentityRuntimeName :: String,
+  { loweredIdentityRuntimeName :: String,
     loweredIdentityDetails :: IdDetails
   }
-  deriving (Eq, Show)
+  deriving (Show)
 
-data ResolvedVar = ResolvedVar
-  { resolvedVarName :: String,
-    resolvedVarRuntimeName :: String,
-    resolvedVarType :: ElabType,
-    resolvedVarDetails :: IdDetails
-  }
-  deriving (Eq, Show)
+instance Eq LoweredBindingIdentity where
+  left == right =
+    idDetailsSameIdentity (loweredIdentityDetails left) (loweredIdentityDetails right)
 
 constructorRefFromInfo :: ConstructorInfo -> ConstructorRef
 constructorRefFromInfo ctor =
   ConstructorRef
-    { constructorRefSymbol = ctorInfoSymbol ctor,
-      constructorRefRuntimeName = ctorRuntimeName ctor,
-      constructorRefOwnerType = ctorOwningTypeIdentity ctor,
-      constructorRefOwnerRuntimeName = qualifiedNameForSymbol (ctorOwningTypeIdentity ctor),
-      constructorRefIndex = ctorIndex ctor,
-      constructorRefForalls = ctorForalls ctor,
-      constructorRefArgs = ctorArgs ctor,
-      constructorRefResult = ctorResult ctor
+    { constructorRefSymbol = ctorInfoSymbol ctor
     }
 
 loweredBindingIdentityFromConstructorInfo :: ConstructorInfo -> LoweredBindingIdentity
 loweredBindingIdentityFromConstructorInfo ctor =
   LoweredBindingIdentity
-    { loweredIdentityDisplayName = ctorName ctor,
-      loweredIdentityRuntimeName = ctorRuntimeName ctor,
+    { loweredIdentityRuntimeName = ctorRuntimeName ctor,
       loweredIdentityDetails = ConstructorId (constructorRefFromInfo ctor)
     }
 
@@ -930,41 +1165,42 @@ loweredBindingIdentityFromValueInfo :: ValueInfo -> LoweredBindingIdentity
 loweredBindingIdentityFromValueInfo valueInfo =
   case valueInfo of
     OrdinaryValue
-      { valueDisplayName = displayName,
-        valueRuntimeName = runtimeName,
+      { valueRuntimeName = runtimeName,
         valueInfoSymbol = symbol
       } ->
         LoweredBindingIdentity
-          { loweredIdentityDisplayName = displayName,
-            loweredIdentityRuntimeName = runtimeName,
+          { loweredIdentityRuntimeName = runtimeName,
             loweredIdentityDetails = TopLevelId symbol
           }
     ConstructorValue {valueCtorInfo = ctor} ->
       loweredBindingIdentityFromConstructorInfo ctor
     OverloadedMethod
-      { valueDisplayName = displayName,
-        valueInfoSymbol = symbol
+      { valueInfoSymbol = symbol
       } ->
       LoweredBindingIdentity
-        { loweredIdentityDisplayName = displayName,
-          loweredIdentityRuntimeName = displayName,
+        { loweredIdentityRuntimeName = symbolDefiningName symbol,
           loweredIdentityDetails = MethodId symbol
         }
 
 resolvedVarFromLoweredBinding :: LoweredBinding -> ElabType -> ResolvedVar
 resolvedVarFromLoweredBinding lowered ty =
   ResolvedVar
-    { resolvedVarName = loweredIdentityDisplayName identity,
-      resolvedVarRuntimeName = loweredIdentityRuntimeName identity,
+    { resolvedVarRuntimeName = loweredIdentityRuntimeName identity,
       resolvedVarType = ty,
       resolvedVarDetails = loweredIdentityDetails identity
     }
   where
     identity = loweredBindingIdentity lowered
 
-qualifiedNameForSymbol :: SymbolIdentity -> String
-qualifiedNameForSymbol identity =
-  symbolDefiningModule identity ++ "." ++ symbolDefiningName identity
+resolvedVarFromValueInfo :: ValueInfo -> ElabType -> ResolvedVar
+resolvedVarFromValueInfo valueInfo ty =
+  ResolvedVar
+    { resolvedVarRuntimeName = loweredIdentityRuntimeName identity,
+      resolvedVarType = ty,
+      resolvedVarDetails = loweredIdentityDetails identity
+    }
+  where
+    identity = loweredBindingIdentityFromValueInfo valueInfo
 
 data DeferredBindingMode
   = DeferredBindingScheme
@@ -974,44 +1210,57 @@ data DeferredBindingMode
 data DeferredMethodEvidence = DeferredMethodEvidence
   { deferredMethodEvidenceClassArg :: TypeView,
     deferredMethodEvidenceClassArgs :: NonEmpty TypeView,
-    deferredMethodEvidenceRuntimeName :: String,
-    deferredMethodEvidenceType :: SrcType
+    deferredMethodEvidenceMethod :: EvidenceMethod
   }
   deriving (Eq, Show)
 
 data DeferredMethodCall = DeferredMethodCall
-  { deferredMethodPlaceholder :: String,
+  { deferredMethodRef :: DeferredRef,
     deferredMethodInfo :: MethodInfo,
     deferredMethodArgCount :: Int,
     deferredMethodFullArity :: Int,
-    deferredMethodName :: P.MethodName,
     deferredMethodExpectedResult :: Maybe TypeView,
     deferredMethodEvidence :: Maybe DeferredMethodEvidence,
     deferredMethodLocalEvidence :: [EvidenceInfo]
   }
   deriving (Eq, Show)
 
+deferredMethodPlaceholder :: DeferredMethodCall -> String
+deferredMethodPlaceholder =
+  deferredRefName . deferredMethodRef
+
+deferredMethodName :: DeferredMethodCall -> P.MethodName
+deferredMethodName =
+  methodName . deferredMethodInfo
+
 data DeferredConstructorCall = DeferredConstructorCall
-  { deferredConstructorPlaceholder :: String,
+  { deferredConstructorRef :: DeferredRef,
     deferredConstructorInfo :: ConstructorInfo,
     deferredConstructorArgCount :: Int,
     deferredConstructorSourceType :: SrcType,
     deferredConstructorOccurrenceType :: SrcType,
-    deferredConstructorInstBinders :: [String],
-    deferredConstructorInitialSubst :: Map String SrcType,
+    deferredConstructorInstBinders :: [(String, Maybe TypeBinderIdentity)],
+    deferredConstructorInitialSubst :: TypeBinderSubst,
     deferredConstructorBindingMode :: DeferredBindingMode
   }
   deriving (Eq, Show)
 
+deferredConstructorPlaceholder :: DeferredConstructorCall -> String
+deferredConstructorPlaceholder =
+  deferredRefName . deferredConstructorRef
+
 data DeferredCaseCall = DeferredCaseCall
-  { deferredCasePlaceholder :: String,
+  { deferredCaseRef :: DeferredRef,
     deferredCaseDataInfo :: DataInfo,
     deferredCaseScrutineeType :: SrcType,
     deferredCaseResultType :: SrcType,
-    deferredCaseHandlerNames :: [String],
     deferredCaseExpectedArgCount :: Int
   }
   deriving (Eq, Show)
+
+deferredCasePlaceholder :: DeferredCaseCall -> String
+deferredCasePlaceholder =
+  deferredRefName . deferredCaseRef
 
 data DeferredProgramObligation
   = DeferredMethod DeferredMethodCall
@@ -1019,54 +1268,143 @@ data DeferredProgramObligation
   | DeferredCase DeferredCaseCall
   deriving (Eq, Show)
 
+type DeferredObligations = Map DeferredRef DeferredProgramObligation
+
+deferredProgramObligationRef :: DeferredProgramObligation -> DeferredRef
+deferredProgramObligationRef obligation =
+  case obligation of
+    DeferredMethod deferred -> deferredMethodRef deferred
+    DeferredConstructor deferred -> deferredConstructorRef deferred
+    DeferredCase deferred -> deferredCaseRef deferred
+
 data ExportedTypeInfo = ExportedTypeInfo
   { exportedTypeData :: DataInfo,
-    exportedTypeConstructors :: Map String ConstructorInfo
+    exportedTypeConstructorsByIdentity :: Map SymbolIdentity ConstructorInfo,
+    exportedTypeConstructorDisplaysByIdentity :: Map SymbolIdentity String
   }
   deriving (Eq, Show)
+
+mkExportedTypeInfo :: DataInfo -> [(String, ConstructorInfo)] -> ExportedTypeInfo
+mkExportedTypeInfo dataInfo constructors =
+  ExportedTypeInfo
+    { exportedTypeData = dataInfo,
+      exportedTypeConstructorsByIdentity =
+        Map.fromList [(ctorInfoSymbol ctorInfo, ctorInfo) | (_, ctorInfo) <- constructors],
+      exportedTypeConstructorDisplaysByIdentity =
+        Map.fromList [(ctorInfoSymbol ctorInfo, displayName) | (displayName, ctorInfo) <- constructors]
+    }
+
+exportedTypeConstructorsForDisplay :: ExportedTypeInfo -> Map String ConstructorInfo
+exportedTypeConstructorsForDisplay typeInfo =
+  Map.fromList
+    [ (displayName, ctorInfo)
+    | (identity, ctorInfo) <- Map.toList (exportedTypeConstructorsByIdentity typeInfo),
+      Just displayName <- [Map.lookup identity (exportedTypeConstructorDisplaysByIdentity typeInfo)]
+    ]
 
 data ModuleExports = ModuleExports
-  { exportedValues :: Map String ValueInfo,
-    exportedTypes :: Map String ExportedTypeInfo,
-    exportedClasses :: Map String ClassInfo
+  { exportedValuesByIdentity :: Map SymbolIdentity ValueInfo,
+    exportedValueDisplaysByIdentity :: Map SymbolIdentity String,
+    exportedTypesByIdentity :: Map SymbolIdentity ExportedTypeInfo,
+    exportedTypeDisplaysByIdentity :: Map SymbolIdentity String,
+    exportedClassesByIdentity :: Map SymbolIdentity ClassInfo,
+    exportedClassDisplaysByIdentity :: Map SymbolIdentity String
   }
   deriving (Eq, Show)
 
+moduleExportsFromMaps ::
+  Map String ValueInfo ->
+  Map String ExportedTypeInfo ->
+  Map String ClassInfo ->
+  ModuleExports
+moduleExportsFromMaps values0 types0 classes0 =
+  ModuleExports
+    { exportedValuesByIdentity = indexInfo valueInfoSymbolIdentity values0,
+      exportedValueDisplaysByIdentity = indexDisplay valueInfoSymbolIdentity values0,
+      exportedTypesByIdentity = indexInfo (dataInfoSymbolIdentity . exportedTypeData) types0,
+      exportedTypeDisplaysByIdentity = indexDisplay (dataInfoSymbolIdentity . exportedTypeData) types0,
+      exportedClassesByIdentity = indexInfo classInfoSymbolIdentity classes0,
+      exportedClassDisplaysByIdentity = indexDisplay classInfoSymbolIdentity classes0
+    }
+  where
+    indexInfo identityFor values =
+      Map.fromListWith
+        (flip const)
+        [ (identityFor info, info)
+        | (_, info) <- Map.toList values
+        ]
+
+    indexDisplay identityFor values =
+      Map.fromListWith
+        (flip const)
+        [ (identityFor info, name)
+        | (name, info) <- Map.toList values
+        ]
+
+exportedValuesForDisplay :: ModuleExports -> Map String ValueInfo
+exportedValuesForDisplay exports =
+  displayMap (exportedValuesByIdentity exports) (exportedValueDisplaysByIdentity exports)
+
+exportedTypesForDisplay :: ModuleExports -> Map String ExportedTypeInfo
+exportedTypesForDisplay exports =
+  displayMap (exportedTypesByIdentity exports) (exportedTypeDisplaysByIdentity exports)
+
+exportedClassesForDisplay :: ModuleExports -> Map String ClassInfo
+exportedClassesForDisplay exports =
+  displayMap (exportedClassesByIdentity exports) (exportedClassDisplaysByIdentity exports)
+
+displayMap :: Map SymbolIdentity a -> Map SymbolIdentity String -> Map String a
+displayMap values displays =
+  Map.fromList
+    [ (displayName, value)
+    | (identity, value) <- Map.toList values,
+      Just displayName <- [Map.lookup identity displays]
+    ]
+
 data LoweredBinding = LoweredBinding
-  { loweredBindingName :: String,
-    loweredBindingIdentity :: LoweredBindingIdentity,
+  { loweredBindingIdentity :: LoweredBindingIdentity,
     loweredBindingSourceType :: SrcType,
     loweredBindingExpectedType :: SrcType,
     loweredBindingSurfaceExpr :: SurfaceExpr,
-    loweredBindingDeferredObligations :: Map String DeferredProgramObligation,
+    loweredBindingDeferredObligations :: DeferredObligations,
     loweredBindingExternalTypes :: Map String SrcType,
+    loweredBindingEvidenceParamCount :: Int,
     loweredBindingExportedAsMain :: Bool
   }
   deriving (Eq, Show)
 
+loweredBindingName :: LoweredBinding -> String
+loweredBindingName =
+  loweredIdentityRuntimeName . loweredBindingIdentity
+
+loweredBindingConstructorRef :: LoweredBinding -> Maybe ConstructorRef
+loweredBindingConstructorRef =
+  idDetailsConstructorRef . loweredIdentityDetails . loweredBindingIdentity
+
 data CheckedBinding = CheckedBinding
-  { checkedBindingName :: String,
-    checkedBindingResolvedVar :: ResolvedVar,
+  { checkedBindingResolvedVar :: ResolvedVar,
     checkedBindingSourceType :: SrcType,
     checkedBindingSurfaceExpr :: SurfaceExpr,
-    checkedBindingDeferredObligations :: Map String DeferredProgramObligation,
-    checkedBindingTerm :: ElabTerm,
+    checkedBindingDeferredObligations :: DeferredObligations,
+    checkedBindingTerm :: XmlfTerm,
     checkedBindingType :: ElabType,
     checkedBindingExportedAsMain :: Bool
   }
   deriving (Eq, Show)
 
+checkedBindingName :: CheckedBinding -> String
+checkedBindingName =
+  resolvedVarRuntimeName . checkedBindingResolvedVar
+
 checkedBindingConstructorRef :: CheckedBinding -> Maybe ConstructorRef
-checkedBindingConstructorRef binding =
-  case resolvedVarDetails (checkedBindingResolvedVar binding) of
-    ConstructorId ref -> Just ref
-    _ -> Nothing
+checkedBindingConstructorRef = resolvedVarConstructorRef . checkedBindingResolvedVar
 
 data CheckedModule = CheckedModule
   { checkedModuleName :: P.ModuleName,
+    checkedModuleIdentity :: SymbolIdentity,
     checkedModuleBindings :: [CheckedBinding],
-    checkedModuleData :: Map String DataInfo,
-    checkedModuleClasses :: Map String ClassInfo,
+    checkedModuleData :: Map SymbolIdentity DataInfo,
+    checkedModuleClasses :: Map SymbolIdentity ClassInfo,
     checkedModuleInstances :: [InstanceInfo],
     checkedModuleExports :: ModuleExports
   }
@@ -1074,31 +1412,77 @@ data CheckedModule = CheckedModule
 
 data CheckedProgram = CheckedProgram
   { checkedProgramModules :: [CheckedModule],
-    checkedProgramMain :: String,
+    checkedProgramMainResolvedVar :: ResolvedVar,
     checkedProgramResolved :: ResolvedProgram
   }
   deriving (Eq, Show)
 
+checkedProgramMain :: CheckedProgram -> String
+checkedProgramMain =
+  resolvedVarRuntimeName . checkedProgramMainResolvedVar
+
 valueInfoSymbolIdentity :: ValueInfo -> SymbolIdentity
 valueInfoSymbolIdentity = valueInfoSymbol
+
+valueInfoIdentityName :: ValueInfo -> P.ValueName
+valueInfoIdentityName =
+  symbolDefiningName . valueInfoSymbolIdentity
 
 dataInfoSymbolIdentity :: DataInfo -> SymbolIdentity
 dataInfoSymbolIdentity = dataInfoSymbol
 
+dataInfoIdentityModule :: DataInfo -> P.ModuleName
+dataInfoIdentityModule =
+  symbolDefiningModule . dataInfoSymbolIdentity
+
+dataInfoIdentityName :: DataInfo -> P.TypeName
+dataInfoIdentityName =
+  symbolDefiningName . dataInfoSymbolIdentity
+
+dataName :: DataInfo -> P.TypeName
+dataName =
+  dataInfoIdentityName
+
+dataInfoIdentityQualifiedName :: DataInfo -> String
+dataInfoIdentityQualifiedName info =
+  dataInfoIdentityModule info ++ "." ++ dataInfoIdentityName info
+
+dataInfoIdentityHeadName :: DataInfo -> String
+dataInfoIdentityHeadName =
+  dataInfoIdentityQualifiedName
+
+dataParams :: DataInfo -> [String]
+dataParams =
+  map P.typeParamName . dataTypeParams
+
 constructorInfoSymbolIdentity :: DataInfo -> ConstructorInfo -> SymbolIdentity
 constructorInfoSymbolIdentity _ = ctorInfoSymbol
 
-constructorOwnerRuntimeTypeTrackable :: Map String DataInfo -> ConstructorInfo -> Bool
-constructorOwnerRuntimeTypeTrackable dataInfos ctor =
-  case [dataInfo | dataInfo <- Map.elems dataInfos, dataInfoSymbolIdentity dataInfo == ctorOwningTypeIdentity ctor] of
-    dataInfo : _ -> dataConstructorsRuntimeTypeTrackable dataInfo
-    [] -> all constructorShapeRuntimeTypeTrackable (constructorOwnerShapes ctor)
+constructorInfoIdentityName :: ConstructorInfo -> String
+constructorInfoIdentityName =
+  symbolDefiningName . ctorInfoSymbol
 
-constructorOwnerHasVariableHeadApplication :: Map String DataInfo -> ConstructorInfo -> Bool
-constructorOwnerHasVariableHeadApplication dataInfos ctor =
-  case [dataInfo | dataInfo <- Map.elems dataInfos, dataInfoSymbolIdentity dataInfo == ctorOwningTypeIdentity ctor] of
-    dataInfo : _ -> any constructorRuntimeTypeHasVariableHeadApplication (dataConstructors dataInfo)
-    [] -> any constructorShapeHasVariableHeadApplication (constructorOwnerShapes ctor)
+ctorName :: ConstructorInfo -> P.ConstructorName
+ctorName =
+  constructorInfoIdentityName
+
+ctorOwningType :: ConstructorInfo -> P.TypeName
+ctorOwningType =
+  symbolDefiningName . ctorOwningTypeIdentity
+
+constructorOwnerRuntimeTypeTrackable :: Map SymbolIdentity [DataInfo] -> ConstructorInfo -> Bool
+constructorOwnerRuntimeTypeTrackable dataInfosByIdentity ctor =
+  case Map.lookup (ctorOwningTypeIdentity ctor) dataInfosByIdentity of
+    Just (dataInfo : _) -> dataConstructorsRuntimeTypeTrackable dataInfo
+    Just [] -> all constructorShapeRuntimeTypeTrackable (constructorOwnerShapes ctor)
+    Nothing -> all constructorShapeRuntimeTypeTrackable (constructorOwnerShapes ctor)
+
+constructorOwnerHasVariableHeadApplication :: Map SymbolIdentity [DataInfo] -> ConstructorInfo -> Bool
+constructorOwnerHasVariableHeadApplication dataInfosByIdentity ctor =
+  case Map.lookup (ctorOwningTypeIdentity ctor) dataInfosByIdentity of
+    Just (dataInfo : _) -> any constructorRuntimeTypeHasVariableHeadApplication (dataConstructors dataInfo)
+    Just [] -> any constructorShapeHasVariableHeadApplication (constructorOwnerShapes ctor)
+    Nothing -> any constructorShapeHasVariableHeadApplication (constructorOwnerShapes ctor)
 
 dataConstructorsRuntimeTypeTrackable :: DataInfo -> Bool
 dataConstructorsRuntimeTypeTrackable =
@@ -1138,15 +1522,25 @@ constructorOwnerShapes ctor =
 constructorShapeFromInfo :: ConstructorInfo -> ConstructorShape
 constructorShapeFromInfo ctor =
   ConstructorShape
-    { constructorShapeName = ctorName ctor,
-      constructorShapeSymbol = ctorInfoSymbol ctor,
+    { constructorShapeSymbol = ctorInfoSymbol ctor,
       constructorShapeRuntimeName = ctorRuntimeName ctor,
       constructorShapeForalls = ctorForalls ctor,
+      constructorShapeForallsIdentity = identityForalls,
+      constructorShapeForallBinderIdentities = ctorForallBinderIdentities ctor,
       constructorShapeArgs = ctorArgs ctor,
+      constructorShapeArgsIdentity = identityArgs,
       constructorShapeResult = ctorResult ctor,
+      constructorShapeResultIdentity = identityResult,
       constructorShapeIndex = ctorIndex ctor,
       constructorShapeOwnerTypeParams = []
     }
+  where
+    (identityForalls, identityBody) = splitForalls (ctorTypeIdentity ctor)
+    (identityArgs, identityResult) = splitArrows identityBody
+
+constructorShapeName :: ConstructorShape -> P.ConstructorName
+constructorShapeName =
+  symbolDefiningName . constructorShapeSymbol
 
 srcTypeHasVariableHeadApplication :: SrcType -> Bool
 srcTypeHasVariableHeadApplication = hasVariableHeadApplication
@@ -1170,43 +1564,147 @@ hasVariableHeadApplication ty =
 classInfoSymbolIdentity :: ClassInfo -> SymbolIdentity
 classInfoSymbolIdentity = classInfoSymbol
 
+classInfoIdentityModule :: ClassInfo -> P.ModuleName
+classInfoIdentityModule =
+  symbolDefiningModule . classInfoSymbolIdentity
+
+classInfoIdentityName :: ClassInfo -> P.ClassName
+classInfoIdentityName =
+  symbolDefiningName . classInfoSymbolIdentity
+
+className :: ClassInfo -> P.ClassName
+className =
+  classInfoIdentityName
+
+classInfoIdentityQualifiedName :: ClassInfo -> String
+classInfoIdentityQualifiedName info =
+  classInfoIdentityModule info ++ "." ++ classInfoIdentityName info
+
+classParamNames :: ClassInfo -> NonEmpty String
+classParamNames =
+  fmap P.typeParamName . classTypeParams
+
+classParamIdentityNames :: ClassInfo -> NonEmpty String
+classParamIdentityNames =
+  fmap P.typeParamIdentityName . classTypeParams
+
+classParamBinderIdentities :: ClassInfo -> NonEmpty (Maybe TypeBinderIdentity)
+classParamBinderIdentities =
+  fmap typeParamBinderIdentity . classTypeParams
+
 methodInfoSymbolIdentity :: MethodInfo -> SymbolIdentity
 methodInfoSymbolIdentity = methodInfoSymbol
+
+methodInfoIdentityName :: MethodInfo -> P.MethodName
+methodInfoIdentityName =
+  symbolDefiningName . methodInfoSymbolIdentity
+
+methodClassName :: MethodInfo -> P.ClassName
+methodClassName =
+  symbolDefiningName . methodInfoOwnerClassSymbolIdentity
+
+methodName :: MethodInfo -> P.MethodName
+methodName =
+  methodInfoIdentityName
+
+methodParamName :: MethodInfo -> String
+methodParamName =
+  NE.head . methodParamNames
+
+methodParamIdentityName :: MethodInfo -> String
+methodParamIdentityName =
+  NE.head . methodParamIdentityNames
+
+methodParamBinders :: MethodInfo -> NonEmpty (String, String, Maybe TypeBinderIdentity)
+methodParamBinders methodInfo =
+  NE.fromList $
+    zipWith3
+      (\displayName identityName binderIdentity -> (displayName, identityName, binderIdentity))
+      (NE.toList (methodParamNames methodInfo))
+      (NE.toList (methodParamIdentityNames methodInfo))
+      (NE.toList (methodParamBinderIdentities methodInfo))
+
+lookupMethodParamViewSubst :: MethodInfo -> TypeViewSubst -> Maybe (NonEmpty TypeView)
+lookupMethodParamViewSubst methodInfo subst =
+  traverse lookupParam (methodParamBinders methodInfo)
+  where
+    lookupParam (displayName, identityName, mbIdentity) =
+      case mbIdentity of
+        Just identity -> lookupTypeViewSubst (TypeViewSubstByIdentity identity displayName identityName) subst
+        Nothing ->
+          lookupTypeViewSubst (TypeViewSubstByName identityName) subst
+            <|> lookupTypeViewSubst (TypeViewSubstByName displayName) subst
+
+methodTypeView :: MethodInfo -> TypeView
+methodTypeView methodInfo =
+  TypeView
+    { typeViewDisplay = methodType methodInfo,
+      typeViewIdentity = methodTypeIdentity methodInfo,
+      typeViewBinderIdentities =
+        methodTypeBinderIdentities methodInfo
+          <> Map.fromList
+            [ (identityName, identity)
+            | (_, identityName, Just identity) <- NE.toList (methodParamBinders methodInfo)
+            ]
+    }
+
+methodResultTypeView :: MethodInfo -> TypeView
+methodResultTypeView methodInfo =
+  TypeView
+    { typeViewDisplay = displayResult,
+      typeViewIdentity = identityResult,
+      typeViewBinderIdentities = typeViewBinderIdentities view
+    }
+  where
+    view = methodTypeView methodInfo
+    (_, displayBody) = splitForalls (typeViewDisplay view)
+    (_, identityBody) = splitForalls (typeViewIdentity view)
+    (_, displayResult) = splitArrows displayBody
+    (_, identityResult) = splitArrows identityBody
 
 methodInfoOwnerClassSymbolIdentity :: MethodInfo -> SymbolIdentity
 methodInfoOwnerClassSymbolIdentity methodInfo =
   case symbolOwnerIdentity (methodInfoSymbolIdentity methodInfo) of
-    Just (SymbolOwnerClass moduleName className0) ->
-      SymbolIdentity
-        { symbolNamespace = SymbolClass,
-          symbolDefiningModule = moduleName,
-          symbolDefiningName = className0,
-          symbolOwnerIdentity = Nothing
-        }
+    Just (SymbolOwnerClass classIdentity) ->
+      classIdentity
     _ ->
-      SymbolIdentity
-        { symbolNamespace = SymbolClass,
-          symbolDefiningModule = methodClassModule methodInfo,
-          symbolDefiningName = unqualifiedSymbolName (methodClassName methodInfo),
-          symbolOwnerIdentity = Nothing
-        }
+      error
+        ( "methodInfoOwnerClassSymbolIdentity: method symbol missing class owner identity: "
+            ++ show (methodInfoSymbolIdentity methodInfo)
+        )
 
 instanceInfoClassSymbolIdentity :: InstanceInfo -> SymbolIdentity
 instanceInfoClassSymbolIdentity = instanceClassSymbol
 
-resolvedValueInfoSymbol :: SymbolOrigin -> ValueInfo -> ResolvedSymbol
-resolvedValueInfoSymbol origin valueInfo =
+instanceClassName :: InstanceInfo -> P.ClassName
+instanceClassName =
+  symbolDefiningName . instanceInfoClassSymbolIdentity
+
+instanceOriginModuleName :: InstanceInfo -> P.ModuleName
+instanceOriginModuleName =
+  symbolDefiningModule . instanceOriginModuleIdentity
+
+lookupClassMethod :: ResolvedSymbol -> ClassInfo -> Maybe MethodInfo
+lookupClassMethod symbol classInfo =
+  Map.lookup (resolvedSymbolIdentity symbol) (classMethodsByIdentity classInfo)
+
+lookupInstanceMethod :: MethodInfo -> InstanceInfo -> Maybe ValueInfo
+lookupInstanceMethod methodInfo instanceInfo =
+  Map.lookup (methodInfoSymbolIdentity methodInfo) (instanceMethodsByIdentity instanceInfo)
+
+resolvedValueInfoSymbol :: SymbolOrigin -> String -> ValueInfo -> ResolvedSymbol
+resolvedValueInfoSymbol origin displayName valueInfo =
   mkResolvedSymbol
     (valueInfoSymbolIdentity valueInfo)
-    (unqualifiedSymbolName (valueDisplayName valueInfo))
-    (valueDisplayName valueInfo)
+    (valueInfoIdentityName valueInfo)
+    displayName
     origin
 
 resolvedDataInfoSymbol :: SymbolOrigin -> String -> DataInfo -> ResolvedSymbol
 resolvedDataInfoSymbol origin displayName dataInfo =
   mkResolvedSymbol
     (dataInfoSymbolIdentity dataInfo)
-    (dataName dataInfo)
+    (dataInfoIdentityName dataInfo)
     displayName
     origin
 
@@ -1214,39 +1712,47 @@ resolvedConstructorInfoSymbol :: SymbolOrigin -> String -> DataInfo -> Construct
 resolvedConstructorInfoSymbol origin displayName dataInfo ctorInfo =
   mkResolvedSymbol
     (constructorInfoSymbolIdentity dataInfo ctorInfo)
-    (unqualifiedSymbolName (ctorName ctorInfo))
+    (constructorInfoIdentityName ctorInfo)
     displayName
     origin
 
-resolvedClassInfoSymbol :: SymbolOrigin -> ClassInfo -> ResolvedSymbol
-resolvedClassInfoSymbol origin classInfo =
+resolvedClassInfoSymbol :: SymbolOrigin -> String -> ClassInfo -> ResolvedSymbol
+resolvedClassInfoSymbol origin displayName classInfo =
   mkResolvedSymbol
     (classInfoSymbolIdentity classInfo)
-    (unqualifiedSymbolName (className classInfo))
-    (className classInfo)
+    (classInfoIdentityName classInfo)
+    displayName
     origin
 
 resolvedMethodInfoSymbol :: SymbolOrigin -> String -> MethodInfo -> ResolvedSymbol
 resolvedMethodInfoSymbol origin displayName methodInfo =
   mkResolvedSymbol
     (methodInfoSymbolIdentity methodInfo)
-    (methodName methodInfo)
+    (methodInfoIdentityName methodInfo)
     displayName
     origin
 
-resolvedModuleSymbol :: SymbolOrigin -> P.ModuleName -> P.ModuleName -> ResolvedSymbol
-resolvedModuleSymbol origin definingModule displayName =
+resolvedModuleSymbol :: SymbolOrigin -> UniqueIdentity -> P.ModuleName -> P.ModuleName -> ResolvedSymbol
+resolvedModuleSymbol origin identity definingModule displayName =
+  resolvedModuleSymbolFromIdentity origin (moduleSymbolIdentity identity definingModule) displayName
+
+resolvedModuleSymbolFromIdentity :: SymbolOrigin -> SymbolIdentity -> P.ModuleName -> ResolvedSymbol
+resolvedModuleSymbolFromIdentity origin identity displayName =
   mkResolvedSymbol
-    ( SymbolIdentity
-        { symbolNamespace = SymbolModule,
-          symbolDefiningModule = definingModule,
-          symbolDefiningName = definingModule,
-          symbolOwnerIdentity = Nothing
-        }
-    )
-    definingModule
+    identity
+    (symbolDefiningName identity)
     displayName
     origin
+
+moduleSymbolIdentity :: UniqueIdentity -> P.ModuleName -> SymbolIdentity
+moduleSymbolIdentity identity moduleName =
+  SymbolIdentity
+    { symbolUniqueIdentity = identity,
+      symbolNamespace = SymbolModule,
+      symbolDefiningModule = moduleName,
+      symbolDefiningName = moduleName,
+      symbolOwnerIdentity = Nothing
+    }
 
 splitForalls :: SrcType -> ([(String, Maybe SrcType)], SrcType)
 splitForalls = go []
@@ -1343,6 +1849,22 @@ specializeMethodTypes methodTy paramNames headTys =
       subst = Map.fromList (zip (NE.toList paramNames) (NE.toList headTys))
       rebuilt = foldr (\(name, mb) acc -> STForall name (fmap SrcBound mb) acc) (Map.foldrWithKey substituteTypeVar body subst) foralls
    in rebuilt
+
+specializeMethodTypeView :: MethodInfo -> NonEmpty TypeView -> TypeView
+specializeMethodTypeView methodInfo classArgViews =
+  TypeView
+    { typeViewDisplay = specialize (typeViewDisplay view) (typeViewSubstDisplayTypes subst),
+      typeViewIdentity = specialize (typeViewIdentity view) (typeViewSubstIdentityTypes subst),
+      typeViewBinderIdentities = typeViewBinderIdentities view
+    }
+  where
+    view = methodTypeView methodInfo
+    subst = typeViewSubstFromParamBinders (methodParamBinders methodInfo) classArgViews
+
+    specialize ty substMap =
+      let (foralls, body) = splitForalls ty
+          rebuilt = Map.foldrWithKey substituteTypeVar body substMap
+       in foldr (\(name, mb) acc -> STForall name (fmap SrcBound mb) acc) rebuilt foralls
 
 constrainedVisibleType :: P.ConstrainedType -> SrcType
 constrainedVisibleType constrained

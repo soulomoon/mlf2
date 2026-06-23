@@ -526,7 +526,7 @@ emlfBoundaryMatrix =
                 , "}"
                 ]
         )
-        (ExpectCheckFailureContaining "ProgramNoMatchingInstance \"Eq\" (STBase \"Nat\")")
+        (ExpectCheckFailureContaining "ProgramNoMatchingInstance \"Eq\" (STBase \"Main.Nat\")")
     , ProgramMatrixCase
         "rejects duplicate instances before deferred overload resolution"
         ( InlineProgram $
@@ -1741,7 +1741,7 @@ emlfBoundaryMatrix =
                 , "}"
                 ]
         )
-        (ExpectCheckFailureContaining "ProgramNoMatchingInstance \"Eq\" (STCon \"Box\"")
+        (ExpectCheckFailureContaining "ProgramNoMatchingInstance \"Eq\" (STCon \"Main.Box\"")
     , ProgramMatrixCase
         "runs explicit constrained parameterized Eq instance"
         ( InlineProgram $
@@ -2477,7 +2477,7 @@ emlfBoundaryMatrix =
                 , "}"
                 ]
         )
-        (ExpectCheckFailureContaining "ProgramNoMatchingInstance \"Eq\" (STBase \"Token\")")
+        (ExpectCheckFailureContaining "ProgramNoMatchingInstance \"Eq\" (STBase \"Main.Token\")")
     , ProgramMatrixCase
         "keeps hidden same-named class instances across method-only imports"
         ( InlineProgram $

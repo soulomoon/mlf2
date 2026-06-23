@@ -5,6 +5,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Set as Set
 import Test.Hspec
 
+import ElabTermTestSupport (testTForall, testTVar)
 import qualified MLF.Constraint.Finalize.TestSupport as Finalize
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.Solved as Solved
@@ -70,7 +71,7 @@ spec =
             containsMu fallbackTy `shouldBe` False
 
         it "keeps the exact Int source packet recursive on both current pipeline entrypoints" $ do
-            let blocked = TForall "a" Nothing (TArrow (TVar "a") (TVar "a"))
+            let blocked = testTForall "a" Nothing (TArrow (testTVar "a") (testTVar "a"))
             (_uncheckedTerm, uncheckedTy) <-
                 requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr c1IntExpr))
             (_checkedTerm, checkedTy) <-
@@ -86,7 +87,7 @@ spec =
             containsMu fallbackTy `shouldBe` False
 
         it "keeps the exact Bool source packet recursive on both current pipeline entrypoints" $ do
-            let blocked = TForall "a" Nothing (TArrow (TVar "a") (TVar "a"))
+            let blocked = testTForall "a" Nothing (TArrow (testTVar "a") (testTVar "a"))
             (_uncheckedTerm, uncheckedTy) <-
                 requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr c1BoolExpr))
             (_checkedTerm, checkedTy) <-
@@ -242,10 +243,10 @@ resultTypeInputsForArtifacts
 
 containsMu :: ElabType -> Bool
 containsMu ty = case ty of
-    TMu _ _ -> True
+    TMuRef _ _ -> True
     TArrow dom cod -> containsMu dom || containsMu cod
     TCon _ args -> any containsMu args
-    TForall _ mb body -> maybe False containsMuBound mb || containsMu body
+    TForallRef _ mb body -> maybe False containsMuBound mb || containsMu body
     _ -> False
   where
     containsMuBound :: BoundType -> Bool
@@ -253,7 +254,7 @@ containsMu ty = case ty of
         TArrow dom cod -> containsMu dom || containsMu cod
         TBase _ -> False
         TCon _ args -> any containsMu args
-        TVarApp _ args -> any containsMu args
-        TForall _ mb body -> maybe False containsMuBound mb || containsMu body
-        TMu _ _ -> True
+        TVarAppRef _ args -> any containsMu args
+        TForallRef _ mb body -> maybe False containsMuBound mb || containsMu body
+        TMuRef _ _ -> True
         TBottom -> False

@@ -2,18 +2,18 @@
 
 module MLF.Reify.Type.Core
   ( ReifyRoot (..),
-    reifyWith,
-    reifyWithReadModel,
-    reifyWithAs,
+    reifyWithRefs,
+    reifyWithReadModelRefs,
+    reifyWithAsRefs,
   )
 where
 
-{- Note [Core reification algorithm — reifyWith]
+{- Note [Core reification algorithm — reifyWithRefs]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 This module contains the core graph-to-type reification algorithm, implementing
 the walk from constraint-graph nodes to elaborated 'ElabType' terms.
 
-'reifyWith' is the main entry point.  Given a 'ReifyRoot' mode, a set of named
+'reifyWithRefs' is the main entry point. Given a 'ReifyRoot' mode, a set of named
 nodes, and a starting node, it walks the solved/canonical constraint graph and
 produces an 'ElabType'.  The algorithm handles:
 
@@ -57,27 +57,27 @@ data ReifyRoot
   | RootTypeNoFallback
   | RootBound
 
-reifyWith ::
+reifyWithRefs ::
   String ->
   PresolutionView p ->
-  (NodeId -> String) ->
+  (NodeId -> TypeBinderRef) ->
   (NodeId -> Bool) ->
   ReifyRoot ->
   NodeId ->
   Either ElabError ElabType
-reifyWith contextLabel presolutionView nameForVar isNamed rootMode nid = do
+reifyWithRefs contextLabel presolutionView refForVar isNamed rootMode nid = do
   readModel <- buildElabReadModel presolutionView
-  reifyWithReadModel contextLabel readModel nameForVar isNamed rootMode nid
+  reifyWithReadModelRefs contextLabel readModel refForVar isNamed rootMode nid
 
-reifyWithReadModel ::
+reifyWithReadModelRefs ::
   String ->
   ElabReadModel p ->
-  (NodeId -> String) ->
+  (NodeId -> TypeBinderRef) ->
   (NodeId -> Bool) ->
   ReifyRoot ->
   NodeId ->
   Either ElabError ElabType
-reifyWithReadModel _contextLabel readModel nameForVar isNamed rootMode nid =
+reifyWithReadModelRefs _contextLabel readModel refForVar isNamed rootMode nid =
   let start = case rootMode of
         RootType -> goType
         RootTypeNoFallback -> goTypeNoFallback
@@ -195,8 +195,8 @@ reifyWithReadModel _contextLabel readModel nameForVar isNamed rootMode nid =
           | (childKey, flag) <- IntMap.findWithDefault [] (nodeRefKey binderC) softChildren
           ]
 
-    varName n = nameForVar (canonical n)
-    varFor n = TVar (varName n)
+    varRef n = refForVar (canonical n)
+    varFor n = TVarRef (varRef n)
 
     isNamedLocal namedExtra nodeId =
       let key = getNodeId (canonical nodeId)
@@ -356,7 +356,7 @@ reifyWithReadModel _contextLabel readModel nameForVar isNamed rootMode nid =
                               let binder = canonical bndr
                                   namedExtra' = IntSet.insert (getNodeId binder) namedExtra
                               (cache', bodyTy) <- vChild cache0 namedExtra' mode (canonical b)
-                              let t = TMu (varName binder) bodyTy
+                              let t = TMuRef (varRef binder) bodyTy
                                   cacheFinal = cacheInsertLocal mode key t cache' namedExtra
                               pure (markDone cacheFinal, t)
                             [] -> do
@@ -365,7 +365,7 @@ reifyWithReadModel _contextLabel readModel nameForVar isNamed rootMode nid =
                               let synthBinder = n
                                   namedExtra' = IntSet.insert (getNodeId synthBinder) namedExtra
                               (cache', bodyTy) <- vChild cache0 namedExtra' mode (canonical b)
-                              let t = TMu (varName synthBinder) bodyTy
+                              let t = TMuRef (varRef synthBinder) bodyTy
                                   cacheFinal = cacheInsertLocal mode key t cache' namedExtra
                               pure (markDone cacheFinal, t)
                             _ ->
@@ -410,11 +410,11 @@ reifyWithReadModel _contextLabel readModel nameForVar isNamed rootMode nid =
                                   (NE.toList args)
                               let argsNE = NE.fromList (reverse args')
                               case headTy of
-                                TVar name -> pure (cache', TVarApp name argsNE)
-                                TBase con -> pure (cache', TCon con argsNE)
-                                TCon con existingArgs -> pure (cache', TCon con (existingArgs <> argsNE))
-                                TVarApp name existingArgs -> pure (cache', TVarApp name (existingArgs <> argsNE))
-                                _ -> pure (cache', TVarApp (varName (canonical headNode)) argsNE)
+                                TVarRef ref -> pure (cache', TVarAppRef ref argsNE)
+                                TBaseWithIdentity identity con -> pure (cache', TConWithIdentity identity con argsNE)
+                                TConWithIdentity identity con existingArgs -> pure (cache', TConWithIdentity identity con (existingArgs <> argsNE))
+                                TVarAppRef ref existingArgs -> pure (cache', TVarAppRef ref (existingArgs <> argsNE))
+                                _ -> pure (cache', TVarAppRef (varRef (canonical headNode)) argsNE)
                             TyForall {tnBody = b} ->
                               let bodyC = canonical b
                                in vChild cache0 namedExtra' mode bodyC
@@ -547,16 +547,16 @@ reifyWithReadModel _contextLabel readModel nameForVar isNamed rootMode nid =
             (cache', boundTy) <- goBound cacheAcc namedExtra b
             let selfBound =
                   case boundTy of
-                    TVar v -> v == varName b
+                    TVarRef ref -> typeBinderRefsSameIdentity ref (varRef b)
                     _ -> False
                 mbBound =
                   case boundTy of
                     TBottom -> Nothing
-                    TVar {} -> Nothing
+                    TVarRef {} -> Nothing
                     _
                       | selfBound -> Nothing
                       | otherwise -> either (const Nothing) Just (elabToBound boundTy)
-            pure (cache', TForall (varName b) mbBound acc)
+            pure (cache', TForallRef (varRef b) mbBound acc)
         )
         (cache, inner)
         binders
@@ -676,17 +676,17 @@ reifyWithReadModel _contextLabel readModel nameForVar isNamed rootMode nid =
       z' <- foldrM f z xs
       f x z'
 
-reifyWithAs ::
+reifyWithAsRefs ::
   String ->
   PresolutionView p ->
-  (NodeId -> String) ->
+  (NodeId -> TypeBinderRef) ->
   (NodeId -> Bool) ->
   ReifyRoot ->
   (ElabType -> Either ElabError a) ->
   NodeId ->
   Either ElabError a
-reifyWithAs contextLabel presolutionView nameForVar isNamed rootMode convert nid =
-  convert =<< reifyWith contextLabel presolutionView nameForVar isNamed rootMode nid
+reifyWithAsRefs contextLabel presolutionView refForVar isNamed rootMode convert nid =
+  convert =<< reifyWithRefs contextLabel presolutionView refForVar isNamed rootMode nid
 
 freeVarsInView :: PresolutionView p -> NodeId -> IntSet.IntSet -> IntSet.IntSet
 freeVarsInView presolutionView nid visited

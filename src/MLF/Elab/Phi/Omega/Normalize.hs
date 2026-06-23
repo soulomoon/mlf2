@@ -7,7 +7,7 @@ module MLF.Elab.Phi.Omega.Normalize
     , collapseAdjacentPairs
     ) where
 
-import Data.Functor.Foldable (cata)
+import Data.Functor.Foldable (Recursive (project), cata)
 
 import MLF.Elab.Types
 import MLF.Reify.TypeOps (alphaEqType)
@@ -29,20 +29,16 @@ normalizeInst = cata alg
                 -- Rule 1: Thesis 14.2.1 identity — InstApp t ≡ InstSeq (InstInside (InstBot t)) InstElim
                 (InstInside (InstBot t), InstElim) -> InstApp t
                 -- Rule 1b: Context-wrapped graft+weaken — same collapse under matching InstUnder
-                (InstUnder v1 underA, InstUnder v2 underB)
-                    | v1 == v2 ->
+                _
+                    | Just (underRef, underA, underB) <- matchingUnderPair a b ->
                         let inner = case (underA, underB) of
                                 (InstInside (InstBot t), InstElim) -> InstApp t
                                 _ -> InstSeq underA underB
-                        in InstUnder v1 inner
-                -- Rule 2: Structural intro-elim cancellation with matching binder names.
-                -- The intro/under/abstr/elim sequence is an identity when the binder
-                -- names match, so the whole sequence collapses to InstApp t.
-                ( InstSeq InstIntro (InstSeq (InstInside (InstBot t)) (InstUnder beta (InstSeq (InstInside (InstAbstr beta')) InstElim)))
-                    , InstElim
-                    )
-                        | beta == beta' ->
-                            InstApp t
+                        in instUnderWithRef underRef inner
+                -- Rule 2: Structural intro-elim cancellation with matching binder identity.
+                (_, InstElim)
+                    | Just t <- introUnderAbstrElimArg a ->
+                        InstApp t
                 -- Rule 3: Prefix-arg collapse. When a prefix instantiation carries the
                 -- same arg type as the inner app, the prefix is redundant and the whole
                 -- sequence reduces to InstApp tArg.
@@ -51,12 +47,8 @@ normalizeInst = cata alg
                 -- from the same constraint-graph edge (guaranteed by Phi translation),
                 -- but could over-collapse if two independent instantiation paths happen
                 -- to share the same arg type. Audit if Phi translation changes.
-                ( InstSeq
-                    prefix
-                    (InstSeq InstIntro (InstSeq appArg (InstUnder beta (InstSeq (InstInside (InstAbstr beta')) InstElim))))
-                    , InstElim
-                    )
-                        | beta == beta'
+                (InstSeq prefix inner, InstElim)
+                        | Just appArg <- introUnderAbstrElimAppArg inner
                         , Just tPrefix <- instArgTy prefix
                         , Just tArg <- instArgTy appArg
                         , alphaEqType tPrefix tArg ->
@@ -65,10 +57,10 @@ normalizeInst = cata alg
                 (x, InstId) -> x
                 _ -> InstSeq a b
         InstInsideF a -> InstInside a
-        InstUnderF v a -> InstUnder v a
+        InstUnderFRef ref a -> instUnderWithRef ref a
         InstAppF t -> InstApp t
         InstBotF t -> InstBot t
-        InstAbstrF v -> InstAbstr v
+        InstAbstrFRef ref -> instAbstrWithRef ref
         InstIntroF -> InstIntro
         InstElimF -> InstElim
         InstIdF -> InstId
@@ -86,7 +78,47 @@ collapseAdjacentPairs (a : b : rest) =
         Nothing -> a : collapseAdjacentPairs (b : rest)
 
 tryCollapse :: Instantiation -> Instantiation -> Maybe Instantiation
-tryCollapse (InstInside (InstBot t)) InstElim = Just (InstApp t)
-tryCollapse (InstUnder v1 a) (InstUnder v2 b)
-    | v1 == v2 = InstUnder v1 <$> tryCollapse a b
-tryCollapse _ _ = Nothing
+tryCollapse a b = case (project a, project b) of
+    (InstInsideF (InstBot t), InstElimF) -> Just (InstApp t)
+    (InstUnderFRef ref1 innerA, InstUnderFRef ref2 innerB)
+        | sameBinderRef ref1 ref2 -> instUnderWithRef ref1 <$> tryCollapse innerA innerB
+    _ -> Nothing
+
+matchingUnderPair :: Instantiation -> Instantiation -> Maybe (TypeBinderRef, Instantiation, Instantiation)
+matchingUnderPair a b = case (project a, project b) of
+    (InstUnderFRef ref1 innerA, InstUnderFRef ref2 innerB)
+        | sameBinderRef ref1 ref2 -> Just (ref1, innerA, innerB)
+    _ -> Nothing
+
+sameBinderRef :: TypeBinderRef -> TypeBinderRef -> Bool
+sameBinderRef = typeBinderRefsSameIdentity
+
+introUnderAbstrElimArg :: Instantiation -> Maybe ElabType
+introUnderAbstrElimArg inst = do
+    appArg <- introUnderAbstrElimAppArg inst
+    case appArg of
+        InstInside (InstBot t) -> Just t
+        _ -> Nothing
+
+introUnderAbstrElimAppArg :: Instantiation -> Maybe Instantiation
+introUnderAbstrElimAppArg inst = case project inst of
+    InstSeqF InstIntro rest -> underAbstrElimAppArg rest
+    _ -> Nothing
+
+underAbstrElimAppArg :: Instantiation -> Maybe Instantiation
+underAbstrElimAppArg inst = case project inst of
+    InstSeqF appArg underElim
+        | Just () <- underAbstrElim underElim -> Just appArg
+    _ -> Nothing
+
+underAbstrElim :: Instantiation -> Maybe ()
+underAbstrElim inst = case project inst of
+    InstUnderFRef underRef inner ->
+        case project inner of
+            InstSeqF (InstInside abstr) InstElim ->
+                case project abstr of
+                    InstAbstrFRef abstrRef
+                        | sameBinderRef underRef abstrRef -> Just ()
+                    _ -> Nothing
+            _ -> Nothing
+    _ -> Nothing

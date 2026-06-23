@@ -19,7 +19,7 @@ where
 structure for a generalized scope.  Given a 'GeneralizePlan' (from
 'planGeneralizeAt'), it computes:
 
-  * 'rpSubst' — the binder name substitution map (NodeId → String)
+  * 'rpSubst' — the binder identity substitution map (NodeId → TypeBinderRef)
   * 'rpExtraBinders' — additional binder candidates beyond the plan's flex
     children (used for alias binders that must appear in the reified type)
   * 'rpTypeRoot' — the adjusted type root for reification (may differ from
@@ -52,6 +52,7 @@ import MLF.Constraint.Presolution.Plan.Target
     TypeRootPlan (..),
   )
 import MLF.Constraint.Types.Graph hiding (lookupNode)
+import MLF.Types.Elab (TypeBinderRef)
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Util.ElabError (ElabError (..))
 import qualified MLF.Util.IntMapUtils as IntMapUtils
@@ -59,7 +60,7 @@ import qualified MLF.Util.IntMapUtils as IntMapUtils
 data ReifyPlan = ReifyPlan
   { rpPlan :: Reify.ReifyPlan,
     rpTypeRootForReifyAdjusted :: NodeId,
-    rpSubstForReifyAdjusted :: IntMap.IntMap String
+    rpSubstForReifyAdjusted :: IntMap.IntMap TypeBinderRef
   }
 
 planReify :: PresolutionEnv p -> GeneralizePlan p -> Either ElabError ReifyPlan
@@ -150,7 +151,7 @@ planReify _ plan = do
               Reify.rpiTypeRoot = typeRoot
             }
   let Reify.ReifyPlan
-        { Reify.rpSubst = subst,
+        { Reify.rpSubst = substRefs,
           Reify.rpTypeRootForReify = typeRootForReify,
           Reify.rpSubstForReify = substForReify
         } = reifyPlan
@@ -160,7 +161,7 @@ planReify _ plan = do
             case VarStore.lookupVarBound constraint (canonical typeRootForReify) of
               Just bnd
                 | canonical bnd == canonical typeRoot ->
-                    (typeRoot, subst)
+                    (typeRoot, substRefs)
               _ -> (typeRootForReify, substForReify)
           _ -> (typeRootForReify, substForReify)
       (typeRootForReifyAdjusted, substForReifyAdjusted) =

@@ -197,7 +197,7 @@ computeResultTypeFallbackCoreWithRoots ctx viewBase (rootForTypeAnn, rootForType
                 InstAppF ty -> [ty]
                 InstSeqF a b -> a ++ b
                 InstInsideF phi -> phi
-                InstUnderF _ phi -> phi
+                InstUnderFRef _ phi -> phi
                 _ -> []
           baseNodeForTy ty =
             case ty of
@@ -825,6 +825,9 @@ computeResultTypeFallbackCoreWithRoots ctx viewBase (rootForTypeAnn, rootForType
             ++ " rootFinalInvolvesMu="
             ++ show rootFinalInvolvesMu
         )
-      let ty = case sch of
-            Forall binds body -> foldr (\(n, b) t -> TForall n b t) body binds
+      let ty =
+            foldr
+              (\(ref, b) t -> TForallRef ref b t)
+              (schemeBody sch)
+              (schemeBinderRefs sch)
       pure ty

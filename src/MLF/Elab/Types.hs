@@ -1,8 +1,8 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE ViewPatterns #-}
 {- |
 Module      : MLF.Elab.Types
 Description : Elaborated types, terms, and error types for MLF
@@ -16,7 +16,7 @@ into this form for type checking and code generation.
 = Key Types
 
 * 'ElabType' - Fully elaborated types with quantifiers and bounds
-* 'ElabTerm' - Typed terms with explicit type annotations
+* 'XmlfTerm' - Typed terms with explicit type annotations
 * 'ElabScheme' - Polymorphic type schemes with explicit binders
 * 'Instantiation' - Witnesses for type instantiation
 
@@ -27,10 +27,36 @@ into this form for type checking and code generation.
 -}
 module MLF.Elab.Types (
     ElabType,
-    Ty(..),
+    Ty
+        ( TVarRef,
+          TArrow,
+          TConWithIdentity,
+          TCon,
+          TVarAppRef,
+          TBaseWithIdentity,
+          TBase,
+          TForallRef,
+          TMuRef,
+          TBottom
+        ),
     TopVar(..),
     BoundType,
-    TyIF(..),
+    tVarWithRef,
+    tVarAppWithRef,
+    tForallWithRef,
+    tMuWithRef,
+    TyIF
+        ( TVarIFRef,
+          TArrowIF,
+          TConIFWithIdentity,
+          TConIF,
+          TVarAppIFRef,
+          TBaseIFWithIdentity,
+          TBaseIF,
+          TForallIFRef,
+          TMuIFRef,
+          TBottomIF
+        ),
     IxPair(..),
     cataIx,
     cataIxConst,
@@ -41,21 +67,97 @@ module MLF.Elab.Types (
     elabToBound,
     containsForallTy,
     containsArrowTy,
+    UniqueIdentity(..),
     ElabScheme,
-    pattern Forall,
-    SchemeInfo(..),
-    ElabTerm(..),
-    ElabTermF(..),
-    Instantiation(..),
-    InstantiationF(..),
+    mkElabSchemeWithRefs,
+    schemeBinderRefs,
+    schemeBody,
+    SchemeInfo(SchemeInfo, siScheme, siSubstRefs),
+    TypeBinderIdentity,
+    typeBinderIdentityFromNode,
+    typeBinderIdentityNode,
+    typeBinderIdentityKey,
+    typeBinderIdentityFromUnique,
+    TypeBinderRef,
+    typeBinderRefFromIdentity,
+    typeBinderRefIdentity,
+    typeBinderRefNode,
+    typeBinderRefName,
+    typeBinderRefsSameIdentity,
+    typeBinderRefsSameIdentityAndName,
+    renameTypeBinderRef,
+    freshTypeBinderRef,
+    freshTypeBinderRefFromNames,
+    instAbstrWithRef,
+    instUnderWithRef,
+    schemeInfoBinderIdentityKeys,
+    schemeInfoBinderIdentityKeySet,
+    schemeInfoFromRefSubst,
+    schemeInfoBinderRefSubst,
+    ResolvedVar(..),
+    deferredResolvedVarFromRef,
+    deferredResolvedVarRef,
+    localResolvedVarFromRef,
+    mkDeferredVarWithRef,
+    mkLocalLamWithRef,
+    mkLocalLetWithRef,
+    mkLocalRecursiveLetWithRef,
+    identityGeneratorAfterType,
+    generatedIdentitiesInType,
+    eTyAbsWithRef,
+    identityGeneratorAfterTerm,
+    generatedIdentitiesInTerm,
+    resolvedVarName,
+    resolvedVarReferenceName,
+    resolvedVarConstructorRef,
+    resolvedVarIsLocal,
+    resolvedVarIsEvidence,
+    resolvedVarSameIdentity,
+    resolvedVarBoundBy,
+    mapResolvedVarType,
+    renameResolvedLocalVar,
+    renameResolvedDeferredVar,
+    XmlfTerm(..),
+    XmlfTermF
+        ( EVarNodeF,
+          ELitF,
+          ELamF,
+          EAppF,
+          ELetF,
+          ETyAbsFRef,
+          ETyInstF,
+          ERollF,
+          EUnrollF
+        ),
+    Instantiation
+        ( InstId,
+          InstApp,
+          InstBot,
+          InstIntro,
+          InstElim,
+          InstInside,
+          InstSeq,
+          InstAbstrRef,
+          InstUnderRef
+        ),
+    InstantiationF
+        ( InstIdF,
+          InstAppF,
+          InstBotF,
+          InstIntroF,
+          InstElimF,
+          InstAbstrFRef,
+          InstUnderFRef,
+          InstInsideF,
+          InstSeqF
+        ),
     ElabError(..),
     TypeCheckError(..),
     bindingToElab,
     Pretty(..),
     PrettyDisplay(..),
-    ContextStep(..),
+    ContextStep(StepUnderRef, StepInside),
     applyContext,
-    buildForalls,
     schemeFromType,
     mapBoundType,
     selectMinPrecInsertionIndex,
@@ -71,7 +173,8 @@ import qualified MLF.Util.Order as Order
 import MLF.Constraint.Types.Graph (BaseTy(..), NodeId(..), getNodeId)
 import MLF.Util.ElabError (ElabError(..), bindingToElab)
 import MLF.Types.Elab
-import MLF.Reify.TypeOps (splitForalls, substTypeCapture, freeTypeVarsType)
+import MLF.Types.Unique (UniqueIdentity(..))
+import MLF.Reify.TypeOps (freeTypeVarRefsType, substTypeCaptureRef)
 import qualified MLF.XMLF.Pretty as XMLFPretty
 import qualified MLF.XMLF.Syntax as XMLF
 
@@ -87,54 +190,40 @@ instance Pretty ElabType where
     pretty = XMLFPretty.prettyXmlfType . toXmlfType
 
 instance Pretty ElabScheme where
-    pretty (Forall binds ty) = pretty (buildForalls binds ty)
+    pretty = pretty . schemeToTypeLocal
 
 instance Pretty Instantiation where
     pretty = XMLFPretty.prettyXmlfComp . toXmlfComp
 
-instance Pretty ElabTerm where
+instance Pretty XmlfTerm where
     pretty = prettyTermCanonical
 
-prettyTermCanonical :: ElabTerm -> String
-prettyTermCanonical term = case term of
-    ELet v sch rhs body ->
-        "let " ++ v
-            ++ " : "
-            ++ pretty sch
-            ++ " = "
-            ++ prettyTermCanonical rhs
-            ++ " in "
-            ++ prettyTermCanonical body
-    ERoll ty body ->
-        "ERoll[" ++ pretty ty ++ "](" ++ prettyTermCanonical body ++ ")"
-    EUnroll body ->
-        "EUnroll(" ++ prettyTermCanonical body ++ ")"
-    _ ->
-        XMLFPretty.prettyXmlfTerm (toXmlfTerm term)
+prettyTermCanonical :: XmlfTerm -> String
+prettyTermCanonical = XMLFPretty.prettyXmlfTerm
 
 toXmlfType :: ElabType -> XMLF.XmlfType
 toXmlfType ty = case ty of
-    TVar v -> XMLF.XTVar v
+    TVarRef ref -> XMLF.XTVar (typeBinderRefName ref)
     TArrow a b -> XMLF.XTArrow (toXmlfType a) (toXmlfType b)
     TCon (BaseTy c) args -> XMLF.XTCon c (fmap toXmlfType args)
-    TVarApp v args -> XMLF.XTVarApp v (fmap toXmlfType args)
+    TVarAppRef ref args -> XMLF.XTVarApp (typeBinderRefName ref) (fmap toXmlfType args)
     TBase (BaseTy b) -> XMLF.XTBase b
-    TForall v mb body ->
+    TForallRef ref mb body ->
         let bound = maybe XMLF.XTBottom toXmlfBound mb
-        in XMLF.XTForall v bound (toXmlfType body)
-    TMu v body -> XMLF.XTMu v (toXmlfType body)
+        in XMLF.XTForall (typeBinderRefName ref) bound (toXmlfType body)
+    TMuRef ref body -> XMLF.XTMu (typeBinderRefName ref) (toXmlfType body)
     TBottom -> XMLF.XTBottom
 
 toXmlfBound :: BoundType -> XMLF.XmlfType
 toXmlfBound bound = case bound of
     TArrow a b -> XMLF.XTArrow (toXmlfType a) (toXmlfType b)
     TCon (BaseTy c) args -> XMLF.XTCon c (fmap toXmlfType args)
-    TVarApp v args -> XMLF.XTVarApp v (fmap toXmlfType args)
+    TVarAppRef ref args -> XMLF.XTVarApp (typeBinderRefName ref) (fmap toXmlfType args)
     TBase (BaseTy b) -> XMLF.XTBase b
-    TForall v mb body ->
+    TForallRef ref mb body ->
         let boundTy = maybe XMLF.XTBottom toXmlfBound mb
-        in XMLF.XTForall v boundTy (toXmlfType body)
-    TMu v body -> XMLF.XTMu v (toXmlfType body)
+        in XMLF.XTForall (typeBinderRefName ref) boundTy (toXmlfType body)
+    TMuRef ref body -> XMLF.XTMu (typeBinderRefName ref) (toXmlfType body)
     TBottom -> XMLF.XTBottom
 
 toXmlfComp :: Instantiation -> XMLF.XmlfComp
@@ -144,8 +233,8 @@ toXmlfComp inst = case inst of
     InstBot ty -> XMLF.XCBot (toXmlfType ty)
     InstIntro -> XMLF.XCIntro
     InstElim -> XMLF.XCElim
-    InstAbstr v -> XMLF.XCHyp v
-    InstUnder v i -> XMLF.XCOuter v (toXmlfComp i)
+    InstAbstrRef ref -> XMLF.XCHyp (typeBinderRefName ref)
+    InstUnderRef ref i -> XMLF.XCOuter (typeBinderRefName ref) (toXmlfComp i)
     InstInside i -> XMLF.XCInner (toXmlfComp i)
     InstSeq i1 i2 -> XMLF.XCSeq (toXmlfComp i1) (toXmlfComp i2)
   where
@@ -154,23 +243,9 @@ toXmlfComp inst = case inst of
             (XMLF.XCInner (XMLF.XCBot (toXmlfType ty)))
             XMLF.XCElim
 
-toXmlfTerm :: ElabTerm -> XMLF.XmlfTerm
-toXmlfTerm term = case term of
-    EVar v -> XMLF.XVar v
-    ELit l -> XMLF.XLit l
-    ELam v ty body -> XMLF.XLam v (toXmlfType ty) (toXmlfTerm body)
-    EApp f a -> XMLF.XApp (toXmlfTerm f) (toXmlfTerm a)
-    ELet v _ rhs body -> XMLF.XLet v (toXmlfTerm rhs) (toXmlfTerm body)
-    ETyAbs v mb body ->
-        let bound = maybe XMLF.XTBottom toXmlfBound mb
-        in XMLF.XTyAbs v bound (toXmlfTerm body)
-    ETyInst e inst -> XMLF.XTyInst (toXmlfTerm e) (toXmlfComp inst)
-    ERoll ty body -> XMLF.XRoll (toXmlfType ty) (toXmlfTerm body)
-    EUnroll body -> XMLF.XUnroll (toXmlfTerm body)
-
 data OccInfo = OccInfo
-    { oiFreeVars :: Set.Set String
-    , oiOccMap :: Map.Map String (Int, Int)
+    { oiFreeVars :: Set.Set TypeBinderRef
+    , oiOccMap :: Map.Map TypeBinderRef (Int, Int)
     }
 
 -- | Display-only bound inlining for presentation (§8.3.1).
@@ -180,65 +255,65 @@ inlineBoundsForDisplay = go
     -- Conservative approximation: inline only single covariant occurrences with base/var bounds.
     go ty = case ty of
         TArrow d c -> TArrow (go d) (go c)
-        TCon c args -> TCon c (fmap go args)
-        TVarApp v args -> TVarApp v (fmap go args)
-        TForall v mb body ->
+        TConWithIdentity identity c args -> TConWithIdentity identity c (fmap go args)
+        TVarAppRef ref args -> TVarAppRef ref (fmap go args)
+        TForallRef ref mb body ->
             let mb' = fmap goBound mb
                 body' = go body
-            in simplifyForall v mb' body'
-        TMu v body -> TMu v (go body)
-        TVar v -> TVar v
-        TBase b -> TBase b
+            in simplifyForall ref mb' body'
+        TMuRef ref body -> TMuRef ref (go body)
+        TVarRef ref -> TVarRef ref
+        TBaseWithIdentity identity b -> TBaseWithIdentity identity b
         TBottom -> TBottom
 
-    simplifyForall v mb body =
+    simplifyForall ref mb body =
         case mb of
             Nothing ->
-                if Set.member v (freeVarsType body)
-                    then TForall v Nothing body
+                if Set.member ref (freeVarsType body)
+                    then TForallRef ref Nothing body
                     else body
             Just bound ->
                 let boundTy = tyToElab bound
-                    freeInBound = Set.member v (freeTypeVarsType bound)
+                    freeInBound = any (typeBinderRefsSameIdentity ref) (freeTypeVarRefsType bound)
                     (posCount, negCount) = occurrencesIn body
                     totalCount = posCount + negCount
                 in if freeInBound
-                    then TForall v (Just bound) body
+                    then TForallRef ref (Just bound) body
                     else if totalCount == 0
                         then body
                         else if inlineableBound boundTy
-                            then go (substTypeCapture v boundTy body)
-                            else TForall v (Just bound) body
+                            then go (substTypeCaptureRef ref boundTy body)
+                            else TForallRef ref (Just bound) body
       where
-        occurrencesIn = occurrencesVar v
+        occurrencesIn = occurrencesVar ref
 
     inlineableBound :: ElabType -> Bool
     inlineableBound ty = case ty of
         TBase{} -> True
         TBottom -> True
-        TVar{} -> True
+        TVarRef{} -> True
         TArrow{} -> True
         TCon{} -> True
-        TVarApp{} -> True
+        TVarAppRef{} -> True
         _ -> False
 
     goBound :: BoundType -> BoundType
     goBound bound = case bound of
         TArrow a b -> TArrow (go a) (go b)
-        TCon c args -> TCon c (fmap go args)
-        TVarApp v args -> TVarApp v (fmap go args)
-        TBase b -> TBase b
+        TConWithIdentity identity c args -> TConWithIdentity identity c (fmap go args)
+        TVarAppRef ref args -> TVarAppRef ref (fmap go args)
+        TBaseWithIdentity identity b -> TBaseWithIdentity identity b
         TBottom -> TBottom
-        TForall v mb body ->
+        TForallRef ref mb body ->
             let mb' = fmap goBound mb
                 body' = go body
-            in TForall v mb' body'
-        TMu v body -> TMu v (go body)
+            in TForallRef ref mb' body'
+        TMuRef ref body -> TMuRef ref (go body)
 
-    occurrencesVar :: String -> ElabType -> (Int, Int)
-    occurrencesVar name = Map.findWithDefault (0, 0) name . oiOccMap . occInfo
+    occurrencesVar :: TypeBinderRef -> ElabType -> (Int, Int)
+    occurrencesVar ref = Map.findWithDefault (0, 0) ref . oiOccMap . occInfo
 
-    freeVarsType :: ElabType -> Set.Set String
+    freeVarsType :: ElabType -> Set.Set TypeBinderRef
     freeVarsType = oiFreeVars . occInfo
 
     emptyOccInfo :: OccInfo
@@ -249,7 +324,8 @@ inlineBoundsForDisplay = go
       where
         occAlg :: TyIF i (IxPair Ty (K OccInfo)) -> K OccInfo i
         occAlg ty = case ty of
-            TVarIF v -> K (OccInfo (Set.singleton v) (Map.singleton v (1, 0)))
+            TVarIFRef ref ->
+                K (OccInfo (Set.singleton ref) (Map.singleton ref (1, 0)))
             TArrowIF d c ->
                 let occD = unK (snd (unIxPair d))
                     occC = unK (snd (unIxPair c))
@@ -265,28 +341,28 @@ inlineBoundsForDisplay = go
                     freeVars = Set.unions (map oiFreeVars occArgs)
                     occMaps = map oiOccMap occArgs
                 in K (OccInfo freeVars (foldr mergeOccMaps Map.empty occMaps))
-            TVarAppIF v args ->
+            TVarAppIFRef ref args ->
                 let occArg :: IxPair Ty (K OccInfo) 'AllowVar -> OccInfo
                     occArg ix = unK (snd (unIxPair ix))
                     occArgs = case args of
                         arg :| rest -> map occArg (arg : rest)
-                    freeVars = Set.insert v (Set.unions (map oiFreeVars occArgs))
-                    occMaps = Map.singleton v (1, 0) : map oiOccMap occArgs
+                    freeVars = Set.insert ref (Set.unions (map oiFreeVars occArgs))
+                    occMaps = Map.singleton ref (1, 0) : map oiOccMap occArgs
                 in K (OccInfo freeVars (foldr mergeOccMaps Map.empty occMaps))
             TBaseIF _ -> K emptyOccInfo
             TBottomIF -> K emptyOccInfo
-            TForallIF v mb body ->
+            TForallIFRef ref mb body ->
                 let occBody = unK (snd (unIxPair body))
                     occBound = maybe emptyOccInfo (occInfoBound . fst . unIxPair) mb
                     freeBound = oiFreeVars occBound
-                    freeVars = Set.union freeBound (Set.delete v (oiFreeVars occBody))
-                    occBody' = Map.delete v (oiOccMap occBody)
-                    occBound' = Map.delete v (oiOccMap occBound)
+                    freeVars = Set.union freeBound (Set.delete ref (oiFreeVars occBody))
+                    occBody' = Map.delete ref (oiOccMap occBody)
+                    occBound' = Map.delete ref (oiOccMap occBound)
                 in K (OccInfo freeVars (mergeOccMaps occBound' occBody'))
-            TMuIF v body ->
+            TMuIFRef ref body ->
                 let occBody = unK (snd (unIxPair body))
-                    freeVars = Set.delete v (oiFreeVars occBody)
-                    occBody' = Map.delete v (oiOccMap occBody)
+                    freeVars = Set.delete ref (oiFreeVars occBody)
+                    occBody' = Map.delete ref (oiOccMap occBody)
                 in K (OccInfo freeVars occBody')
 
     mergeOccMaps = Map.unionWith addCounts
@@ -307,26 +383,26 @@ inlineBoundsForDisplay = go
                 freeVars = Set.unions (map oiFreeVars occArgs)
                 occMaps = map oiOccMap occArgs
             in OccInfo freeVars (foldr mergeOccMaps Map.empty occMaps)
-        TVarApp v args ->
+        TVarAppRef ref args ->
             let occArgs = case args of
                     arg :| rest -> map occInfo (arg : rest)
-                freeVars = Set.insert v (Set.unions (map oiFreeVars occArgs))
-                occMaps = Map.singleton v (1, 0) : map oiOccMap occArgs
+                freeVars = Set.insert ref (Set.unions (map oiFreeVars occArgs))
+                occMaps = Map.singleton ref (1, 0) : map oiOccMap occArgs
             in OccInfo freeVars (foldr mergeOccMaps Map.empty occMaps)
         TBase _ -> emptyOccInfo
         TBottom -> emptyOccInfo
-        TForall v mb body ->
+        TForallRef ref mb body ->
             let occBody = occInfo body
                 occBound = maybe emptyOccInfo occInfoBound mb
                 freeBound = oiFreeVars occBound
-                freeVars = Set.union freeBound (Set.delete v (oiFreeVars occBody))
-                occBody' = Map.delete v (oiOccMap occBody)
-                occBound' = Map.delete v (oiOccMap occBound)
+                freeVars = Set.union freeBound (Set.delete ref (oiFreeVars occBody))
+                occBody' = Map.delete ref (oiOccMap occBody)
+                occBound' = Map.delete ref (oiOccMap occBound)
             in OccInfo freeVars (mergeOccMaps occBound' occBody')
-        TMu v body ->
+        TMuRef ref body ->
             let occBody = occInfo body
-                freeVars = Set.delete v (oiFreeVars occBody)
-                occBody' = Map.delete v (oiOccMap occBody)
+                freeVars = Set.delete ref (oiFreeVars occBody)
+                occBody' = Map.delete ref (oiOccMap occBody)
             in OccInfo freeVars occBody'
 
 -- | Pretty-printing with display-only bound inlining.
@@ -339,53 +415,62 @@ instance PrettyDisplay ElabScheme where
 instance PrettyDisplay Instantiation where
     prettyDisplay = pretty
 
-instance PrettyDisplay ElabTerm where
+instance PrettyDisplay XmlfTerm where
     prettyDisplay = pretty
 
 schemeToTypeLocal :: ElabScheme -> ElabType
-schemeToTypeLocal (Forall binds body) = buildForalls binds body
+schemeToTypeLocal scheme =
+    foldr
+        (\(ref, mbBound) body -> tForallWithRef ref mbBound body)
+        (schemeBody scheme)
+        (schemeBinderRefs scheme)
 
 mapBoundType :: (ElabType -> ElabType) -> BoundType -> BoundType
 mapBoundType f bound = case bound of
     TArrow a b -> TArrow (f a) (f b)
-    TCon c args -> TCon c (fmap f args)
-    TVarApp v args -> TVarApp v (fmap f args)
-    TBase b -> TBase b
+    TConWithIdentity identity c args -> TConWithIdentity identity c (fmap f args)
+    TVarAppRef ref args -> TVarAppRef ref (fmap f args)
+    TBaseWithIdentity identity b -> TBaseWithIdentity identity b
     TBottom -> TBottom
-    TForall v mb body ->
+    TForallRef ref mb body ->
         let mb' = fmap (mapBoundType f) mb
-        in TForall v mb' (f body)
-    TMu v body -> TMu v (f body)
-
-buildForalls :: [(String, Maybe BoundType)] -> ElabType -> ElabType
-buildForalls binds body = foldr (\(v, b) t -> TForall v b t) body binds
+        in TForallRef ref mb' (f body)
+    TMuRef ref body -> TMuRef ref (f body)
 
 schemeFromType :: ElabType -> ElabScheme
 schemeFromType ty =
-    let (binds0, body0) = splitForalls ty
-        binderNames = map fst binds0
-        bodyFvs = Set.toList (freeTypeVarsType body0)
-        bodyFvSet = Set.fromList bodyFvs
+    let (binds0, body0) = splitForallRefs ty
+        binderRefs = map fst binds0
+        bodyFvRefs = freeTypeVarRefsType body0
         externalFvs =
-            [ v
-            | v <- bodyFvs
-            , v `notElem` binderNames
+            [ ref
+            | ref <- bodyFvRefs
+            , not (any (typeBinderRefsSameIdentity ref) binderRefs)
             ]
         unusedBinders =
-            [ v
-            | v <- binderNames
-            , not (Set.member v bodyFvSet)
+            [ ref
+            | (ref, _) <- binds0
+            , not (any (typeBinderRefsSameIdentity ref) bodyFvRefs)
             ]
         ty' =
             if length externalFvs <= length unusedBinders && not (null externalFvs)
                 then
                     foldl
-                        (\acc (fromV, toV) -> substTypeCapture fromV (TVar toV) acc)
+                        (\acc (fromRef, toRef) -> substTypeCaptureRef fromRef (TVarRef toRef) acc)
                         ty
                         (zip externalFvs unusedBinders)
                 else ty
-        (binds, body) = splitForalls ty'
-    in mkElabScheme binds body
+        (binds, body) = splitForallRefs ty'
+    in mkElabSchemeWithRefs binds body
+
+splitForallRefs :: ElabType -> ([(TypeBinderRef, Maybe BoundType)], ElabType)
+splitForallRefs = go
+  where
+    go ty = case ty of
+        TForallRef ref mb body ->
+            let (binds, body') = go body
+            in ((ref, mb) : binds, body')
+        _ -> ([], ty)
 
 data TypeCheckError
     = TCUnboundVar String
@@ -398,6 +483,7 @@ data TypeCheckError
     | TCTypeAbsVarInScope String
     | TCTypeAbsBoundMentionsVar String
     | TCUnboundTypeVar String
+    | TCResolvedVarTypeMismatch String ElabType ElabType
     | TCLetTypeMismatch ElabType ElabType
     deriving (Eq, Show)
 
@@ -408,9 +494,14 @@ data TypeCheckError
 --   - StepUnder: go under a quantifier (∀(α ⩾) ·)
 --   - StepInside: go inside a bound (∀(⩾ ·))
 data ContextStep
-    = StepUnder String      -- ^ Go under quantifier with given binder name
-    | StepInside            -- ^ Go inside the bound of a quantifier
-    deriving (Eq, Show)
+    = StepUnderRef TypeBinderRef -- ^ Go under quantifier with given binder ref
+    | StepInside                 -- ^ Go inside the bound of a quantifier
+    deriving (Show)
+
+instance Eq ContextStep where
+    StepInside == StepInside = True
+    StepUnderRef left == StepUnderRef right = typeBinderRefsSameIdentity left right
+    _ == _ = False
 
 -- | Apply a paper-style instantiation context to an instantiation.
 --
@@ -420,7 +511,7 @@ applyContext :: [ContextStep] -> Instantiation -> Instantiation
 applyContext steps inner = foldr step inner steps
   where
     step cs inst = case cs of
-        StepUnder v -> InstUnder v inst
+        StepUnderRef ref -> instUnderWithRef ref inst
         StepInside -> InstInside inst
 
 -- | Select the insertion index for the paper’s @m = min≺{…}@ choice (Figure 10).

@@ -2,64 +2,66 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 module MLF.Elab.Run.Instantiation (
-    inferInstAppArgsFromScheme,
-    varsInType,
-    substTypeSelective,
-    instInsideFromArgsWithBounds,
+    inferInstAppArgsFromSchemeRefs,
+    varRefsInType,
+    substTypeSelectiveRefs,
+    instInsideFromArgsWithBoundsRefs,
     containsForallType
 ) where
 
 import Control.Applicative ((<|>))
 import qualified Data.Map.Strict as Map
-import qualified Data.Set as Set
 
-import MLF.Reify.TypeOps (alphaEqType, composeTypeHead, matchType, stripForallsType)
+import Data.List (find)
+
+import MLF.Reify.TypeOps (alphaEqType, composeTypeHeadRef, matchTypeRefs, stripForallsType)
 import MLF.Elab.Types
 
 newtype SubstFun (i :: TopVar) =
-    SubstFun { runSubstFun :: Set.Set String -> Ty i }
+    SubstFun { runSubstFun :: [TypeBinderRef] -> Ty i }
 
-inferInstAppArgsFromScheme :: [(String, Maybe BoundType)] -> ElabType -> ElabType -> Maybe [ElabType]
-inferInstAppArgsFromScheme binds body targetTy =
-    let binderNames = map fst binds
-        binderSet = Set.fromList binderNames
+inferInstAppArgsFromSchemeRefs :: [(TypeBinderRef, Maybe BoundType)] -> ElabType -> ElabType -> Maybe [ElabType]
+inferInstAppArgsFromSchemeRefs binds body targetTy =
+    let binderRefs = map fst binds
         targetCore = stripForallsType targetTy
-        targetForallNames =
+        targetForallRefs =
             let alg ty = case ty of
-                    TForallIF v _ body' -> v : unK body'
+                    TForallIFRef ref _ body' -> ref : unK body'
                     TConIF _ args -> concatMap unK args
                     _ -> []
             in cataIxConst alg targetTy
-        argsAreIdentity :: [String] -> [ElabType] -> Bool
-        argsAreIdentity names args =
+        argsAreIdentity :: [TypeBinderRef] -> [ElabType] -> Bool
+        argsAreIdentity refs args =
             and
                 [ case arg of
-                    TVar v -> v == name || elem v targetForallNames
+                    TVarRef argRef ->
+                        typeBinderRefsSameIdentity argRef ref
+                            || any (typeBinderRefsSameIdentity argRef) targetForallRefs
                     _ -> False
-                | (name, arg) <- zip names args
+                | (ref, arg) <- zip refs args
                 ]
         inferFromBody =
             let fromMatch =
-                    case matchType binderSet body targetCore of
+                    case matchTypeRefs binderRefs body targetCore of
                         Left _ -> Nothing
                         Right subst ->
-                            let present = map (\name -> Map.member name subst) binderNames
+                            let present = map (`Map.member` subst) binderRefs
                                 prefixLen = length (takeWhile id present)
                                 hasOutOfOrder = or (drop prefixLen present)
-                                prefixNames = take prefixLen binderNames
-                                args = [ty | name <- prefixNames, Just ty <- [Map.lookup name subst]]
+                                prefixRefs = take prefixLen binderRefs
+                                args = [ty | ref <- prefixRefs, Just ty <- [Map.lookup ref subst]]
                             in if hasOutOfOrder
                                 then Nothing
-                                else if argsAreIdentity prefixNames args
+                                else if argsAreIdentity prefixRefs args
                                     then Nothing
                                     else Just args
                 fromArrowPrefix =
                     let bindDomain substAcc bodyDom targetDom =
                             case bodyDom of
-                                TVar v
-                                    | v `elem` binderNames ->
-                                        case Map.lookup v substAcc of
-                                            Nothing -> Just (Map.insert v targetDom substAcc)
+                                TVarRef ref
+                                    | Just binderRef <- matchBinderRef ref ->
+                                        case Map.lookup binderRef substAcc of
+                                            Nothing -> Just (Map.insert binderRef targetDom substAcc)
                                             Just prev
                                                 | alphaEqType prev targetDom -> Just substAcc
                                                 | otherwise -> Nothing
@@ -74,121 +76,149 @@ inferInstAppArgsFromScheme binds body targetTy =
                                 _ -> Just substAcc
                     in do
                         subst <- go Map.empty body targetCore
-                        let present = map (\name -> Map.member name subst) binderNames
+                        let present = map (`Map.member` subst) binderRefs
                             prefixLen = length (takeWhile id present)
                             hasOutOfOrder = or (drop prefixLen present)
-                            prefixNames = take prefixLen binderNames
-                            args = [ty | name <- prefixNames, Just ty <- [Map.lookup name subst]]
+                            prefixRefs = take prefixLen binderRefs
+                            args = [ty | ref <- prefixRefs, Just ty <- [Map.lookup ref subst]]
                         if hasOutOfOrder
                             then Nothing
-                            else if argsAreIdentity prefixNames args
+                            else if argsAreIdentity prefixRefs args
                                 then Nothing
                                 else Just args
             in fromMatch <|> fromArrowPrefix
-        inferFromBound v bound =
+        inferFromBound binderRef bound =
             let boundCore = stripForallsType bound
-                matchVars = varsInType boundCore
-            in case matchType matchVars boundCore targetCore of
+                matchVars = map canonicalSchemeRef (varRefsInType boundCore)
+                canonicalSchemeRef ref =
+                    case find (typeBinderRefsSameIdentity ref) binderRefs of
+                        Just binderRef' -> binderRef'
+                        Nothing -> ref
+            in case matchTypeRefs matchVars boundCore targetCore of
                 Left _ -> Nothing
                 Right subst ->
-                    let innerVars = Set.difference matchVars binderSet
+                    let innerVars =
+                            filter
+                                (\ref -> not (any (typeBinderRefsSameIdentity ref) binderRefs))
+                                matchVars
                         pickInnerArg =
-                            case Set.toList innerVars of
+                            case innerVars of
                                 [inner] -> Map.lookup inner subst
                                 _ -> Nothing
-                        argFor name =
-                            if name == v
+                        argFor ref =
+                            if typeBinderRefsSameIdentity ref binderRef
                                 then
                                     case pickInnerArg of
                                         Just innerArg -> Just innerArg
-                                        Nothing -> Just (substTypeSelective binderSet subst boundCore)
-                                else Map.lookup name subst
-                        argsMaybe = map argFor binderNames
+                                        Nothing -> Just (substTypeSelectiveRefs binderRefs subst boundCore)
+                                else Map.lookup ref subst
+                        argsMaybe = map argFor binderRefs
                         present = map (\arg -> case arg of { Just _ -> True; Nothing -> False }) argsMaybe
                         prefixLen = length (takeWhile id present)
                         hasOutOfOrder = or (drop prefixLen present)
                         prefixArgs = take prefixLen argsMaybe
                         args = [ty | Just ty <- prefixArgs]
-                        prefixNames = take prefixLen binderNames
+                        prefixRefs = take prefixLen binderRefs
                     in if hasOutOfOrder
                         then Nothing
-                        else if argsAreIdentity prefixNames args
+                        else if argsAreIdentity prefixRefs args
                             then Nothing
                             else Just args
     in case body of
-        TVar v ->
-            case lookup v binds of
-                Just (Just bound) -> inferFromBound v (tyToElab bound)
-                Just Nothing -> inferFromBody
+        TVarRef ref ->
+            case find (typeBinderRefsSameIdentity ref . fst) binds of
+                Just (binderRef, Just bound) -> inferFromBound binderRef (tyToElab bound)
+                Just (_, Nothing) -> inferFromBody
                 Nothing -> Nothing
         _ -> inferFromBody
-
-varsInType :: ElabType -> Set.Set String
-varsInType = cataIxConst alg
   where
-    alg :: TyIF i (K (Set.Set String)) -> Set.Set String
-    alg ty = case ty of
-        TVarIF v -> Set.singleton v
-        TArrowIF a b -> Set.union (unK a) (unK b)
-        TConIF _ args -> foldr (Set.union . unK) Set.empty args
-        TVarAppIF v args -> Set.insert v (foldr (Set.union . unK) Set.empty args)
-        TBaseIF _ -> Set.empty
-        TBottomIF -> Set.empty
-        TForallIF _ mb body ->
-            let varsBound = maybe Set.empty unK mb
-            in Set.union varsBound (unK body)
-        TMuIF _ body -> unK body
+    matchBinderRef ref =
+        find (typeBinderRefsSameIdentity ref) (map fst binds)
 
-substTypeSelective :: Set.Set String -> Map.Map String ElabType -> ElabType -> ElabType
-substTypeSelective binderSet subst ty0 = runSubstFun (cataIx alg ty0) Set.empty
+varRefsInType :: ElabType -> [TypeBinderRef]
+varRefsInType = cataIxConst alg
+  where
+    alg :: TyIF i (K [TypeBinderRef]) -> [TypeBinderRef]
+    alg ty = case ty of
+        TVarIFRef ref -> [ref]
+        TArrowIF a b -> dedupeRefs (unK a ++ unK b)
+        TConIF _ args -> dedupeRefs (concatMap unK args)
+        TVarAppIFRef ref args -> dedupeRefs (ref : concatMap unK args)
+        TBaseIF _ -> []
+        TBottomIF -> []
+        TForallIFRef _ mb body ->
+            let varsBound = maybe [] unK mb
+            in dedupeRefs (varsBound ++ unK body)
+        TMuIFRef _ body -> unK body
+
+dedupeRefs :: [TypeBinderRef] -> [TypeBinderRef]
+dedupeRefs =
+    foldr insertRef []
+  where
+    insertRef ref refs
+        | any (typeBinderRefsSameIdentity ref) refs = refs
+        | otherwise = ref : refs
+
+substTypeSelectiveRefs :: [TypeBinderRef] -> Map.Map TypeBinderRef ElabType -> ElabType -> ElabType
+substTypeSelectiveRefs binderRefs subst ty0 = runSubstFun (cataIx alg ty0) []
   where
     alg :: TyIF i SubstFun -> SubstFun i
     alg ty = case ty of
-        TVarIF v ->
+        TVarIFRef ref ->
             SubstFun $ \bound ->
-                if Set.member v bound || Set.member v binderSet
-                    then TVar v
-                    else case Map.lookup v subst of
+                if refMember ref bound || refMember ref binderRefs
+                    then TVarRef ref
+                    else case lookupRef ref subst of
                         Just ty' -> ty'
-                        Nothing -> TVar v
+                        Nothing -> TVarRef ref
         TArrowIF a b ->
             SubstFun $ \bound -> TArrow (runSubstFun a bound) (runSubstFun b bound)
-        TConIF c args ->
-            SubstFun $ \bound -> TCon c (fmap (\f -> runSubstFun f bound) args)
-        TVarAppIF v args ->
+        TConIFWithIdentity identity c args ->
+            SubstFun $ \bound -> TConWithIdentity identity c (fmap (\f -> runSubstFun f bound) args)
+        TVarAppIFRef ref args ->
             SubstFun $ \bound ->
                 let args' = fmap (\f -> runSubstFun f bound) args
-                in if Set.member v bound || Set.member v binderSet
-                    then TVarApp v args'
-                    else case Map.lookup v subst of
-                        Just ty' -> composeTypeHead v ty' args'
-                        Nothing -> TVarApp v args'
-        TBaseIF b -> SubstFun (const (TBase b))
+                in if refMember ref bound || refMember ref binderRefs
+                    then TVarAppRef ref args'
+                    else case lookupRef ref subst of
+                        Just ty' -> composeTypeHeadRef ref ty' args'
+                        Nothing -> TVarAppRef ref args'
+        TBaseIFWithIdentity identity b -> SubstFun (const (TBaseWithIdentity identity b))
         TBottomIF -> SubstFun (const TBottom)
-        TForallIF v mb body ->
+        TForallIFRef ref mb body ->
             SubstFun $ \bound ->
-                let bound' = Set.insert v bound
+                let bound' = insertRef ref bound
                     mb' = fmap (\f -> runSubstFun f bound') mb
                     body' = runSubstFun body bound'
-                in TForall v mb' body'
-        TMuIF v body ->
+                in TForallRef ref mb' body'
+        TMuIFRef ref body ->
             SubstFun $ \bound ->
-                let bound' = Set.insert v bound
-                in TMu v (runSubstFun body bound')
+                let bound' = insertRef ref bound
+                in TMuRef ref (runSubstFun body bound')
 
-instInsideFromArgsWithBounds :: [(String, Maybe BoundType)] -> [ElabType] -> Maybe Instantiation
-instInsideFromArgsWithBounds binds args = go binds args
+    insertRef ref refs
+        | refMember ref refs = refs
+        | otherwise = ref : refs
+
+    refMember ref =
+        any (typeBinderRefsSameIdentity ref)
+
+    lookupRef ref substMap =
+        snd <$> find (typeBinderRefsSameIdentity ref . fst) (Map.toList substMap)
+
+instInsideFromArgsWithBoundsRefs :: [(TypeBinderRef, Maybe BoundType)] -> [ElabType] -> Maybe Instantiation
+instInsideFromArgsWithBoundsRefs binds args = go binds args
   where
     go [] _ = Just InstId
     go _ [] = Just InstId
-    go ((n, mbBound):ns) (t:ts) = do
+    go ((ref, mbBound):ns) (t:ts) = do
         rest <- go ns ts
         inst <- instFor mbBound t
         pure $ case (inst, rest) of
             (InstId, InstId) -> InstId
-            (InstId, _) -> InstUnder n rest
+            (InstId, _) -> instUnderWithRef ref rest
             (_, InstId) -> inst
-            _ -> InstSeq inst (InstUnder n rest)
+            _ -> InstSeq inst (instUnderWithRef ref rest)
 
     instFor :: Maybe BoundType -> ElabType -> Maybe Instantiation
     instFor mbBound t = case mbBound of
@@ -205,8 +235,8 @@ containsForallType :: ElabType -> Bool
 containsForallType = cataIxConst alg
   where
     alg ty = case ty of
-        TForallIF _ _ _ -> True
-        TMuIF _ body -> unK body
+        TForallIFRef _ _ _ -> True
+        TMuIFRef _ body -> unK body
         TArrowIF a b -> unK a || unK b
         TConIF _ args -> any unK args
         _ -> False

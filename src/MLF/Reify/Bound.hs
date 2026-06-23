@@ -1,9 +1,9 @@
 module MLF.Reify.Bound (
-    reifyBoundWithNames,
-    reifyBoundWithNamesReadModel,
-    reifyBoundWithNamesOnConstraint,
-    reifyBoundWithNamesBound,
-    reifyBoundWithNamesOnConstraintBound,
+    reifyBoundWithRefs,
+    reifyBoundWithRefsReadModel,
+    reifyBoundWithRefsOnConstraint,
+    reifyBoundWithRefsBound,
+    reifyBoundWithRefsOnConstraintBound,
     freeVars
 ) where
 
@@ -17,69 +17,62 @@ import MLF.Constraint.Solved (Solved)
 import MLF.Constraint.Types.Graph
 import MLF.Elab.ReadModel (ElabReadModel, ermPresolutionView)
 import qualified MLF.Reify.Type as ReifyType
-import MLF.Reify.Type.Core (reifyWithReadModel)
-import MLF.Reify.Type (ReifyRoot(..), reifyWith, reifyWithAs)
+import MLF.Reify.Type.Core (reifyWithReadModelRefs)
+import MLF.Reify.Type (ReifyRoot(..), reifyWithRefs, reifyWithAsRefs)
 import MLF.Types.Elab
 import MLF.Util.ElabError (ElabError(..))
 
-reifyBoundWithNames :: PresolutionView p -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
-reifyBoundWithNames presolutionView subst =
-    reifyWith "reifyBoundWithNames" presolutionView varNameFor isNamed RootBound
+reifyBoundWithRefs :: PresolutionView p -> IntMap.IntMap TypeBinderRef -> NodeId -> Either ElabError ElabType
+reifyBoundWithRefs presolutionView subst =
+    reifyWithRefs "reifyBoundWithRefs" presolutionView refForVar isNamed RootBound
   where
     canonical = pvCanonical presolutionView
 
-    nameFor (NodeId i) = "t" ++ show i
-
-    varNameFor :: NodeId -> String
-    varNameFor v =
-        let cv = canonical v
-        in fromMaybe (nameFor cv) (IntMap.lookup (getNodeId cv) subst)
+    refForVar =
+        refForSubstRefs canonical subst
 
     isNamed nodeId = IntMap.member (getNodeId (canonical nodeId)) subst
 
-reifyBoundWithNamesReadModel :: ElabReadModel p -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
-reifyBoundWithNamesReadModel readModel subst =
-    reifyWithReadModel "reifyBoundWithNames" readModel varNameFor isNamed RootBound
+reifyBoundWithRefsReadModel :: ElabReadModel p -> IntMap.IntMap TypeBinderRef -> NodeId -> Either ElabError ElabType
+reifyBoundWithRefsReadModel readModel subst =
+    reifyWithReadModelRefs "reifyBoundWithRefs" readModel refForVar isNamed RootBound
   where
     presolutionView = ermPresolutionView readModel
     canonical = pvCanonical presolutionView
 
-    nameFor (NodeId i) = "t" ++ show i
-
-    varNameFor :: NodeId -> String
-    varNameFor v =
-        let cv = canonical v
-        in fromMaybe (nameFor cv) (IntMap.lookup (getNodeId cv) subst)
+    refForVar =
+        refForSubstRefs canonical subst
 
     isNamed nodeId = IntMap.member (getNodeId (canonical nodeId)) subst
 
-
-reifyBoundWithNamesBound :: PresolutionView p -> IntMap.IntMap String -> NodeId -> Either ElabError BoundType
-reifyBoundWithNamesBound presolutionView subst =
-    reifyWithAs "reifyBoundWithNamesBound" presolutionView varNameFor isNamed RootBound
+reifyBoundWithRefsBound :: PresolutionView p -> IntMap.IntMap TypeBinderRef -> NodeId -> Either ElabError BoundType
+reifyBoundWithRefsBound presolutionView subst =
+    reifyWithAsRefs "reifyBoundWithNamesBound" presolutionView refForVar isNamed RootBound
         (\ty -> either (Left . InstantiationError) Right (elabToBound ty))
   where
     canonical = pvCanonical presolutionView
 
-    nameFor (NodeId i) = "t" ++ show i
-
-    varNameFor :: NodeId -> String
-    varNameFor v =
-        let cv = canonical v
-        in fromMaybe (nameFor cv) (IntMap.lookup (getNodeId cv) subst)
+    refForVar =
+        refForSubstRefs canonical subst
 
     isNamed nodeId = IntMap.member (getNodeId (canonical nodeId)) subst
 
--- | Reify a node for use as a binder bound on an explicit constraint (Schi_p on base graphs).
-reifyBoundWithNamesOnConstraint :: Constraint p -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
-reifyBoundWithNamesOnConstraint constraint subst nid =
+reifyBoundWithRefsOnConstraint :: Constraint p -> IntMap.IntMap TypeBinderRef -> NodeId -> Either ElabError ElabType
+reifyBoundWithRefsOnConstraint constraint subst nid =
     let presolutionView = Finalize.presolutionViewFromSnapshot constraint IntMap.empty
-    in reifyBoundWithNames presolutionView subst nid
+    in reifyBoundWithRefs presolutionView subst nid
 
-reifyBoundWithNamesOnConstraintBound :: Constraint p -> IntMap.IntMap String -> NodeId -> Either ElabError BoundType
-reifyBoundWithNamesOnConstraintBound constraint subst nid =
+reifyBoundWithRefsOnConstraintBound :: Constraint p -> IntMap.IntMap TypeBinderRef -> NodeId -> Either ElabError BoundType
+reifyBoundWithRefsOnConstraintBound constraint subst nid =
     let presolutionView = Finalize.presolutionViewFromSnapshot constraint IntMap.empty
-    in reifyBoundWithNamesBound presolutionView subst nid
+    in reifyBoundWithRefsBound presolutionView subst nid
 
 freeVars :: Solved -> NodeId -> IntSet.IntSet -> IntSet.IntSet
 freeVars = ReifyType.freeVars
+
+refForSubstRefs :: (NodeId -> NodeId) -> IntMap.IntMap TypeBinderRef -> NodeId -> TypeBinderRef
+refForSubstRefs canonical subst v =
+    let cv@(NodeId i) = canonical v
+    in fromMaybe
+        (typeBinderRefFromIdentity (typeBinderIdentityFromNode cv) ("t" ++ show i))
+        (IntMap.lookup i subst)

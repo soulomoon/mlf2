@@ -1,6 +1,5 @@
 module AlignmentInvariantSpec (spec) where
 
-import Data.List (isInfixOf)
 import Test.Hspec
 import Control.Monad (forM_)
 import qualified Data.IntMap.Strict as IntMap
@@ -12,7 +11,7 @@ import MLF.Constraint.Types.Graph
     ( TyNode(..) )
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.Solved as Solved
-import MLF.Elab.Pipeline (runPipelineElab)
+import MLF.Elab.Pipeline (runPipelineElab, typeCheck)
 import MLF.Frontend.Syntax (Expr(..), SrcTy(..))
 import SpecUtil
 
@@ -132,17 +131,11 @@ spec = describe "Thesis alignment invariants" $ do
                         show term `shouldNotBe` ""
                         show ty `shouldNotBe` ""
 
-        it "full pipeline fails fast post-boundary-enforcement for: nested-let" $ do
+        it "full pipeline succeeds post-boundary-enforcement for identity-backed nested-let" $ do
             let expr =
                     ELet "f" (ELam "x" (EVar "x"))
                         (ELet "g" (EVar "f")
                             (EApp (EVar "g") (EVar "g")))
             case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
-                Left err ->
-                    show err `shouldSatisfy`
-                        (\msg ->
-                            "PhiTranslatabilityError" `isInfixOf` msg
-                                || "ValidationFailed" `isInfixOf` msg
-                        )
-                Right (_, ty) ->
-                    expectationFailure ("Expected strict failure, got type: " ++ show ty)
+                Left err -> expectationFailure (show err)
+                Right (term, ty) -> typeCheck term `shouldBe` Right ty

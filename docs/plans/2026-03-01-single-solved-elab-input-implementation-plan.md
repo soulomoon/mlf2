@@ -61,7 +61,7 @@ elaborate
     -> IntMap.IntMap EdgeTrace
     -> IntMap.IntMap Expansion
     -> AnnExpr
-    -> Either ElabError ElabTerm
+    -> Either ElabError XmlfTerm
 
 elaborateWithScope ... solved gaParents ... =
     elaborateWithEnv cfg ElabEnv

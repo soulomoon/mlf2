@@ -38,14 +38,14 @@ import MLF.Elab.Run.Generalize.Types
 import MLF.Elab.Run.Util (chaseRedirects)
 import MLF.Util.Trace (TraceConfig)
 import MLF.Frontend.ConstraintGen (AnnExpr)
-import MLF.Elab.Types (ElabScheme)
+import MLF.Elab.Types (ElabScheme, TypeBinderRef)
 import MLF.Util.ElabError (ElabError)
 
 type GeneralizeAtView p =
     Maybe (GaBindParents p)
     -> NodeRef
     -> NodeId
-    -> Either ElabError (ElabScheme, IntMap.IntMap String)
+    -> Either ElabError (ElabScheme, IntMap.IntMap TypeBinderRef)
 
 {- Note [binding-parent projection — ga′ invariants]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -140,7 +140,7 @@ generalizeAtWithBuilder
     -> PresolutionView p
     -> NodeRef
     -> NodeId
-    -> Either ElabError (ElabScheme, IntMap.IntMap String)
+    -> Either ElabError (ElabScheme, IntMap.IntMap TypeBinderRef)
 generalizeAtWithBuilder planBuilder mbBindParentsGa presolutionView scopeRoot targetNode =
     let PresolutionPlanBuilder buildPlans = planBuilder
         go mbGa scope target = do

@@ -12,11 +12,13 @@ module MLF.Frontend.ConstraintGen
     ExternalEnv,
     ExternalBindingMode (..),
     ExternalBinding (..),
+    ExternalBindingIdentity (..),
     ExternalBindings,
     generateConstraints,
     generateConstraintsCore,
     generateConstraintsWithEnv,
     generateConstraintsWithExternalBindings,
+    generateModuleConstraintsKeyedWithExternalBindings,
     generateModuleConstraintsWithExternalBindings,
     generateConstraintsCoreWithEnv,
     generateConstraintsCoreWithExternalBindings,
@@ -28,7 +30,7 @@ import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
 import MLF.Constraint.Types.Graph (NodeId, PolySyms, cAnnEdges, getEdgeId)
 import MLF.Frontend.ConstraintGen.State
-import MLF.Frontend.ConstraintGen.Translate (buildModuleRootExprsWithExternalBindings, buildRootExprWithExternalBindings)
+import MLF.Frontend.ConstraintGen.Translate (buildModuleRootExprsKeyedWithExternalBindings, buildRootExprWithExternalBindings)
 import MLF.Frontend.ConstraintGen.Types
 import MLF.Frontend.Desugar (desugarSurface)
 import MLF.Frontend.Syntax
@@ -145,7 +147,8 @@ generateConstraintsCoreWithEnv polySyms extEnv expr = do
           ( \srcTy ->
               ExternalBinding
                 { externalBindingType = srcTy,
-                  externalBindingMode = ExternalBindingScheme
+                  externalBindingMode = ExternalBindingScheme,
+                  externalBindingIdentity = Nothing
                 }
           )
           extEnv
@@ -158,15 +161,22 @@ generateConstraintsCoreWithExternalBindings polySyms extBindings expr = do
     runConstraintM (buildRootExprWithExternalBindings extBindings expr) initialState
   constraintResultFromState initialEnv rootNode annRoot finalState
 
-generateModuleConstraintsWithExternalBindings :: PolySyms -> ExternalBindings -> [(VarName, NormSurfaceExpr)] -> Either ConstraintError (ModuleConstraintResult p)
-generateModuleConstraintsWithExternalBindings polySyms extBindings namedExprs = do
+generateModuleConstraintsWithExternalBindings :: PolySyms -> ExternalBindings -> [(VarName, NormSurfaceExpr)] -> Either ConstraintError (ModuleConstraintResult VarName p)
+generateModuleConstraintsWithExternalBindings polySyms extBindings namedExprs =
+  generateModuleConstraintsKeyedWithExternalBindings
+    polySyms
+    extBindings
+    [(name, name, expr) | (name, expr) <- namedExprs]
+
+generateModuleConstraintsKeyedWithExternalBindings :: (Ord key) => PolySyms -> ExternalBindings -> [(key, VarName, NormSurfaceExpr)] -> Either ConstraintError (ModuleConstraintResult key p)
+generateModuleConstraintsKeyedWithExternalBindings polySyms extBindings keyedExprs = do
   let initialState = mkInitialStateWithPolySyms polySyms
       namedCoreExprs =
-        [ (name, desugarSurface expr)
-        | (name, expr) <- namedExprs
+        [ (key, name, desugarSurface expr)
+        | (key, name, expr) <- keyedExprs
         ]
   ((_rootGen, initialEnv, roots), finalState) <-
-    runConstraintM (buildModuleRootExprsWithExternalBindings extBindings namedCoreExprs) initialState
+    runConstraintM (buildModuleRootExprsKeyedWithExternalBindings extBindings namedCoreExprs) initialState
   constraintModuleResultFromState initialEnv roots finalState
 
 constraintResultFromState :: Env -> NodeId -> AnnExpr -> BuildState -> Either ConstraintError (ConstraintResult p)
@@ -181,7 +191,7 @@ constraintResultFromState initialEnv rootNode annRoot finalState = do
         crInitialEnv = initialEnv
       }
 
-constraintModuleResultFromState :: Env -> Map.Map VarName (ModuleRootId, NodeId, AnnExpr) -> BuildState -> Either ConstraintError (ModuleConstraintResult p)
+constraintModuleResultFromState :: Env -> Map.Map key (ModuleRootId, NodeId, AnnExpr) -> BuildState -> Either ConstraintError (ModuleConstraintResult key p)
 constraintModuleResultFromState initialEnv roots finalState = do
   let annEdges = IntSet.unions [collectAnnEdges annRoot | (_, _rootNode, annRoot) <- Map.elems roots]
       constraint = (buildConstraint finalState) {cAnnEdges = annEdges}

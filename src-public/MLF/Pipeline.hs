@@ -1,5 +1,4 @@
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE PatternSynonyms #-}
 {- |
 Module      : MLF.Pipeline
 Description : Focused normalized-pipeline API for downstream callers
@@ -27,11 +26,40 @@ module MLF.Pipeline
     , inferConstraintGraph
     -- * Elaboration/runtime types
     , ElabType
-    , Ty (..)
+    , Ty
+        ( TVarRef
+        , TArrow
+        , TCon
+        , TVarAppRef
+        , TBase
+        , TForallRef
+        , TMuRef
+        , TBottom
+        )
+    , TypeBinderRef
+    , UniqueIdentity (..)
+    , TypeBinderIdentity
+    , typeBinderIdentityFromUnique
+    , typeBinderRefFromIdentity
+    , typeBinderRefIdentity
+    , typeBinderRefName
+    , typeBinderRefsSameIdentity
     , ElabScheme
-    , pattern Forall
-    , ElabTerm
-    , Instantiation (..)
+    , mkElabSchemeWithRefs
+    , schemeBinderRefs
+    , schemeBody
+    , XmlfTerm
+    , Instantiation
+        ( InstId
+        , InstApp
+        , InstBot
+        , InstIntro
+        , InstElim
+        , InstInside
+        , InstSeq
+        , InstAbstrRef
+        , InstUnderRef
+        )
     , ElabError (..)
     , TypeCheckError
     , Pretty (..)
@@ -59,6 +87,7 @@ module MLF.Pipeline
     , ProgramError(..)
     , ProgramDiagnostic(..)
     , CheckedProgram(..)
+    , checkedProgramMain
     , CheckedModule(..)
     , CheckedBinding(..)
     , SymbolNamespace(..)
@@ -114,6 +143,7 @@ import MLF.Frontend.Program.Types
     ( CheckedBinding(..)
     , CheckedModule(..)
     , CheckedProgram(..)
+    , checkedProgramMain
     , ResolvedModule(..)
     , ResolvedProgram(..)
     , ResolvedReference(..)
@@ -169,11 +199,40 @@ import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Elab.Pipeline
     ( ElabError (..)
     , ElabScheme
-    , pattern Forall
-    , ElabTerm
+    , XmlfTerm
     , ElabType
-    , Ty (..)
-    , Instantiation (..)
+    , Ty
+        ( TVarRef
+        , TArrow
+        , TCon
+        , TVarAppRef
+        , TBase
+        , TForallRef
+        , TMuRef
+        , TBottom
+        )
+    , TypeBinderRef
+    , UniqueIdentity (..)
+    , TypeBinderIdentity
+    , typeBinderIdentityFromUnique
+    , typeBinderRefFromIdentity
+    , typeBinderRefIdentity
+    , typeBinderRefName
+    , typeBinderRefsSameIdentity
+    , mkElabSchemeWithRefs
+    , schemeBinderRefs
+    , schemeBody
+    , Instantiation
+        ( InstId
+        , InstApp
+        , InstBot
+        , InstIntro
+        , InstElim
+        , InstInside
+        , InstSeq
+        , InstAbstrRef
+        , InstUnderRef
+        )
     , TypeCheckError
     , PipelineConfig(..)
     , PipelineError(..)

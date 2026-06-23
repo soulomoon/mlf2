@@ -66,7 +66,7 @@ CI reuses the same repo commands; there is no CI-only verification logic.
 
 - `MLF.API` — surface syntax plus eMLF / `.mlfp` parsing, pretty-printing, and normalization helpers
 - `MLF.Pipeline` — canonical public constraint-generation / elaboration / runtime API, including local `.mlfp` package discovery/checking/runtime on the shared eMLF/xMLF path
-- `MLF.XMLF` — xMLF syntax, parser, and pretty-printer
+- `MLF.XMLF` — diagnostic pretty-printer for checked xMLF terms and related type/computation dumps
 
 Raw frontend source types also accept Unicode type lambdas (`Λa. τ`) and
 explicit type-lambda applications when normalization can beta-reduce them away

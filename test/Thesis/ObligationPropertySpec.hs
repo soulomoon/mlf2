@@ -46,9 +46,12 @@ import MLF.Constraint.Types.Witness.TestSupport (EdgeWitness(..), InstanceWitnes
 import MLF.Constraint.Types.Presolution
 import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Constraint.Unify.Decompose (decomposeUnifyChildren)
+import ElabTermTestSupport (generatedResolvedLocal, mkTestDeferredVar, mkTestLocalLam, mkTestLocalLet, mkTestTyAbs, testTForall, testTVar)
 import MLF.Elab.Pipeline qualified as Elab
+import MLF.Elab.Types qualified as ElabTypes
 import MLF.Frontend.ConstraintGen (ConstraintResult (..))
 import MLF.Frontend.Syntax qualified as Surf
+import MLF.Reify.TypeOps qualified as TypeOps
 import Presolution.Util (mkNormalizeConstraint, mkNormalizeEnv)
 import SpecUtil
   ( PipelineArtifacts (..),
@@ -391,7 +394,7 @@ propWfEmpty _size =
 
 propWfTVar :: Int -> Property
 propWfTVar _size =
-  Elab.typeCheck polyId === Right polyIdTy
+  typeCheckShouldMatch (Elab.typeCheck polyId) polyIdTy
 
 propWfVar :: Int -> Property
 propWfVar _size =
@@ -411,15 +414,20 @@ propInstBot _size =
 
 propInstHyp :: Int -> Property
 propInstHyp _size =
-  applyShouldBe Elab.TBottom (Elab.InstAbstr "a") (Elab.TVar "a")
+  let refA = elabTypeRef 417 "a"
+   in applyShouldBe Elab.TBottom (ElabTypes.instAbstrWithRef refA) (ElabTypes.tVarWithRef refA)
 
 propInstInner :: Int -> Property
 propInstInner _size =
-  applyShouldBe forallA (Elab.InstInside (Elab.InstBot intTy)) (Elab.TForall "a" (Just (boundFromType intTy)) (Elab.TVar "a"))
+  applyShouldBe forallA (Elab.InstInside (Elab.InstBot intTy)) (testTForall "a" (Just (boundFromType intTy)) (testTVar "a"))
 
 propInstOuter :: Int -> Property
 propInstOuter _size =
-  applyShouldBe (Elab.TForall "a" Nothing (Elab.TVar "z")) (Elab.InstUnder "x" (Elab.InstAbstr "x")) (Elab.TForall "a" Nothing (Elab.TVar "a"))
+  let refX = elabTypeRef 425 "x"
+   in applyShouldBe
+        (testTForall "a" Nothing (testTVar "z"))
+        (ElabTypes.instUnderWithRef refX (ElabTypes.instAbstrWithRef refX))
+        (testTForall "a" Nothing (testTVar "a"))
 
 propInstQuantElim :: Int -> Property
 propInstQuantElim _size =
@@ -428,13 +436,14 @@ propInstQuantElim _size =
 propInstQuantIntro :: Int -> Property
 propInstQuantIntro _size =
   case Elab.applyInstantiation intTy Elab.InstIntro of
-    Right (Elab.TForall _ Nothing body) -> body === intTy
+    Right (Elab.TForallRef _ Nothing body) -> body === intTy
     other -> counterexample (show other) False
 
 propTypingVar :: Int -> Property
 propTypingVar _size =
-  let env = Elab.Env {Elab.termEnv = Map.fromList [("x", intTy)], Elab.typeEnv = Map.empty}
-   in Elab.typeCheckWithEnv env (Elab.EVar "x") === Right intTy
+  let resolved = generatedResolvedLocal 0 "x" "x" intTy
+      env = Elab.mkTypeCheckEnvWithResolvedTerms [(resolved, intTy)] Map.empty
+   in Elab.typeCheckWithEnv env (Elab.EVarNode resolved) === Right intTy
 
 propTypingAbs :: Int -> Property
 propTypingAbs _size =
@@ -446,7 +455,7 @@ propTypingApp _size =
 
 propTypingTAbs :: Int -> Property
 propTypingTAbs _size =
-  Elab.typeCheck polyId === Right polyIdTy
+  typeCheckShouldMatch (Elab.typeCheck polyId) polyIdTy
 
 propTypingTApp :: Int -> Property
 propTypingTApp _size =
@@ -454,7 +463,7 @@ propTypingTApp _size =
 
 propTypingLet :: Int -> Property
 propTypingLet _size =
-  Elab.typeCheck (Elab.ELet "x" (Elab.schemeFromType intTy) (Elab.ELit (Surf.LInt 1)) (Elab.EVar "x")) === Right intTy
+  Elab.typeCheck (mkTestLocalLet "x" (Elab.schemeFromType intTy) (Elab.ELit (Surf.LInt 1)) (mkTestDeferredVar "x")) === Right intTy
 
 propRedBeta :: Int -> Property
 propRedBeta _size =
@@ -462,7 +471,7 @@ propRedBeta _size =
 
 propRedBetaLet :: Int -> Property
 propRedBetaLet _size =
-  Elab.step (Elab.ELet "x" (Elab.schemeFromType intTy) (Elab.ELit (Surf.LInt 1)) (Elab.EVar "x")) === Just (Elab.ELit (Surf.LInt 1))
+  Elab.step (mkTestLocalLet "x" (Elab.schemeFromType intTy) (Elab.ELit (Surf.LInt 1)) (mkTestDeferredVar "x")) === Just (Elab.ELit (Surf.LInt 1))
 
 propRedReflex :: Int -> Property
 propRedReflex _size =
@@ -475,26 +484,28 @@ propRedTrans _size =
 
 propRedQuantIntro :: Int -> Property
 propRedQuantIntro _size =
-  Elab.step (Elab.ETyInst (Elab.ELit (Surf.LInt 1)) Elab.InstIntro) === Just (Elab.ETyAbs "u0" Nothing (Elab.ELit (Surf.LInt 1)))
+  case Elab.step (Elab.ETyInst (Elab.ELit (Surf.LInt 1)) Elab.InstIntro) of
+    Just (Elab.ETyAbsRef ref Nothing (Elab.ELit (Surf.LInt 1))) -> ElabTypes.typeBinderRefName ref === "u0"
+    other -> counterexample ("Expected generated InstIntro abstraction, got: " ++ show other) False
 
 propRedQuantElim :: Int -> Property
 propRedQuantElim _size =
-  Elab.step (Elab.ETyInst polyId Elab.InstElim) === Just (Elab.ELam "x" Elab.TBottom (Elab.EVar "x"))
+  Elab.step (Elab.ETyInst polyId Elab.InstElim) === Just (mkTestLocalLam "x" Elab.TBottom (mkTestDeferredVar "x"))
 
 propRedInner :: Int -> Property
 propRedInner _size =
-  let term = Elab.ETyInst (Elab.ETyAbs "a" Nothing (Elab.EVar "x")) (Elab.InstInside (Elab.InstBot intTy))
-   in Elab.step term === Just (Elab.ETyAbs "a" (Just (boundFromType intTy)) (Elab.EVar "x"))
+  let term = Elab.ETyInst (mkTestTyAbs "a" Nothing (mkTestDeferredVar "x")) (Elab.InstInside (Elab.InstBot intTy))
+   in Elab.step term === Just (mkTestTyAbs "a" (Just (boundFromType intTy)) (mkTestDeferredVar "x"))
 
 propRedOuter :: Int -> Property
 propRedOuter _size =
-  let body = Elab.ELam "x" (Elab.TVar "a") (Elab.EVar "x")
-      term = Elab.ETyInst (Elab.ETyAbs "a" Nothing body) (Elab.InstUnder "b" (Elab.InstApp intTy))
-   in Elab.step term === Just (Elab.ETyAbs "a" Nothing (Elab.ETyInst body (Elab.InstApp intTy)))
+  let body = mkTestLocalLam "x" (testTVar "a") (mkTestDeferredVar "x")
+      term = Elab.ETyInst (mkTestTyAbs "a" Nothing body) (ElabTypes.instUnderWithRef (elabTypeRef 501 "b") (Elab.InstApp intTy))
+   in Elab.step term === Just (mkTestTyAbs "a" Nothing (Elab.ETyInst body (Elab.InstApp intTy)))
 
 propRedContext :: Int -> Property
 propRedContext _size =
-  let arg = Elab.EApp (Elab.ELam "y" intTy (Elab.EVar "y")) (Elab.ELit (Surf.LInt 1))
+  let arg = Elab.EApp (mkTestLocalLam "y" intTy (mkTestDeferredVar "y")) (Elab.ELit (Surf.LInt 1))
    in Elab.step (Elab.EApp idLam arg) === Just (Elab.EApp idLam (Elab.ELit (Surf.LInt 1)))
 
 propApplyN :: Int -> Property
@@ -504,7 +515,7 @@ propApplyN _size =
 propApplyO :: Int -> Property
 propApplyO _size =
   case Elab.applyInstantiation intTy Elab.InstIntro of
-    Right (Elab.TForall _ Nothing body) -> body === intTy
+    Right (Elab.TForallRef _ Nothing body) -> body === intTy
     other -> counterexample (show other) False
 
 propApplySeq :: Int -> Property
@@ -528,7 +539,8 @@ propApplyOuter _size =
 
 propApplyHyp :: Int -> Property
 propApplyHyp _size =
-  applyShouldBe Elab.TBottom (Elab.InstAbstr "a") (Elab.TVar "a")
+  let refA = elabTypeRef 540 "a"
+   in applyShouldBe Elab.TBottom (ElabTypes.instAbstrWithRef refA) (ElabTypes.tVarWithRef refA)
 
 propApplyBot :: Int -> Property
 propApplyBot _size =
@@ -565,9 +577,9 @@ propTransNonInteriorRigid _size =
 
 propSigmaReorderRequired :: Int -> Property
 propSigmaReorderRequired _size =
-  let body = Elab.TArrow (Elab.TVar "a") (Elab.TVar "b")
-      src = Elab.TForall "a" Nothing (Elab.TForall "b" Nothing body)
-      tgt = Elab.TForall "b" Nothing (Elab.TForall "a" Nothing body)
+  let body = Elab.TArrow (testTVar "a") (testTVar "b")
+      src = testTForall "a" Nothing (testTForall "b" Nothing body)
+      tgt = testTForall "b" Nothing (testTForall "a" Nothing body)
    in case Elab.sigmaReorder src tgt of
         Right inst ->
           conjoin
@@ -578,7 +590,7 @@ propSigmaReorderRequired _size =
 
 propSigmaReorderIdentity :: Int -> Property
 propSigmaReorderIdentity _size =
-  let src = Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") intTy)
+  let src = testTForall "a" Nothing (Elab.TArrow (testTVar "a") intTy)
    in Elab.sigmaReorder src src === Right Elab.InstId
 
 propContextFind :: Int -> Property
@@ -616,7 +628,7 @@ propElabLetVar _size =
 propElabAbs :: Int -> Property
 propElabAbs _size =
   case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr (Surf.ELam "x" (Surf.EVar "x"))) of
-    Right (Elab.ETyAbs {}, ty) -> ty === polyIdTy
+    Right (Elab.ETyAbsRef {}, ty) -> typeShouldMatch ty polyIdTy
     other -> counterexample (show other) False
 
 propElabApp :: Int -> Property
@@ -633,7 +645,7 @@ propEnvLambda _size =
 
 propEnvLet :: Int -> Property
 propEnvLet _size =
-  Elab.typeCheck (Elab.ELet "x" (Elab.schemeFromType intTy) (Elab.ELit (Surf.LInt 1)) (Elab.EVar "x")) === Right intTy
+  Elab.typeCheck (mkTestLocalLet "x" (Elab.schemeFromType intTy) (Elab.ELit (Surf.LInt 1)) (mkTestDeferredVar "x")) === Right intTy
 
 propEnvWf :: Int -> Property
 propEnvWf _size =
@@ -756,7 +768,7 @@ propReifyType _size =
 propReifyNames :: Int -> Property
 propReifyNames _size =
   case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr (Surf.ELam "x" (Surf.EVar "x"))) of
-    Right (_term, Elab.TForall _ Nothing (Elab.TArrow dom cod)) -> counterexample (show (dom, cod)) (dom == cod)
+    Right (_term, Elab.TForallRef _ Nothing (Elab.TArrow dom cod)) -> counterexample (show (dom, cod)) (dom == cod)
     other -> counterexample (show other) False
 
 propBindMono :: Int -> Property
@@ -781,18 +793,18 @@ propInlinePred :: Int -> Property
 propInlinePred _size =
   let inlineable :: Elab.ElabType
       inlineable =
-        Elab.TForall
+        testTForall
           "a"
           (Just (boundFromType intTy))
-          (Elab.TArrow (Elab.TVar "a") boolTy)
+          (Elab.TArrow (testTVar "a") boolTy)
       inlined :: Elab.ElabType
       inlined = Elab.TArrow intTy boolTy
       selfBound :: Elab.ElabType
       selfBound =
-        Elab.TForall
+        testTForall
           "a"
-          (Just (Elab.TArrow (Elab.TVar "a") intTy))
-          (Elab.TArrow (Elab.TVar "a") boolTy)
+          (Just (Elab.TArrow (testTVar "a") intTy))
+          (Elab.TArrow (testTVar "a") boolTy)
    in conjoin
         [ counterexample (Elab.prettyDisplay inlineable) $
             Elab.prettyDisplay inlineable == Elab.prettyDisplay inlined,
@@ -1315,10 +1327,21 @@ elaboratesTo expr expected =
   case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
     Right (term, ty) ->
       conjoin
-        [ ty === expected,
-          Elab.typeCheck term === Right expected
+        [ typeShouldMatch ty expected,
+          typeCheckShouldMatch (Elab.typeCheck term) expected
         ]
     Left err -> counterexample (Elab.renderPipelineError err) False
+
+typeShouldMatch :: Elab.ElabType -> Elab.ElabType -> Property
+typeShouldMatch actual expected =
+  counterexample (show actual ++ " /= " ++ show expected) $
+    actual == expected || TypeOps.alphaEqType actual expected
+
+typeCheckShouldMatch :: Either Elab.TypeCheckError Elab.ElabType -> Elab.ElabType -> Property
+typeCheckShouldMatch actual expected =
+  case actual of
+    Right ty -> typeShouldMatch ty expected
+    Left err -> counterexample (show err) False
 
 propPresolutionClearsEdges :: Surf.SurfaceExpr -> Property
 propPresolutionClearsEdges expr =
@@ -1414,10 +1437,10 @@ flexibleNonInteriorConstraint =
         }
 
 forallA :: Elab.ElabType
-forallA = Elab.TForall "a" Nothing (Elab.TVar "a")
+forallA = testTForall "a" Nothing (testTVar "a")
 
 polyIdTy :: Elab.ElabType
-polyIdTy = Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+polyIdTy = testTForall "a" Nothing (Elab.TArrow (testTVar "a") (testTVar "a"))
 
 letIdAppExpr :: Surf.SurfaceExpr
 letIdAppExpr =
@@ -1426,14 +1449,14 @@ letIdAppExpr =
 boundFromType :: Elab.ElabType -> Elab.BoundType
 boundFromType ty =
   case ty of
-    Elab.TVar v -> error ("boundFromType: unexpected variable bound " ++ show v)
+    Elab.TVarRef ref -> error ("boundFromType: unexpected variable bound " ++ show ref)
     Elab.TArrow a b -> Elab.TArrow a b
     Elab.TCon c args -> Elab.TCon c args
-    Elab.TVarApp v args -> Elab.TVarApp v args
+    Elab.TVarAppRef ref args -> Elab.TVarAppRef ref args
     Elab.TBase b -> Elab.TBase b
     Elab.TBottom -> Elab.TBottom
-    Elab.TForall v mb body -> Elab.TForall v mb body
-    Elab.TMu v body -> Elab.TMu v body
+    Elab.TForallRef ref mb body -> Elab.TForallRef ref mb body
+    Elab.TMuRef ref body -> Elab.TMuRef ref body
 
 emptyPresolutionState :: Constraint 'Raw -> PresolutionState 'Raw
 emptyPresolutionState c =
@@ -1500,10 +1523,10 @@ assertNodeAliasTranslation size mkOp =
             ewWitness = InstanceWitness [mkOp binderB binderA]
           }
       expected =
-        Elab.TForall
+        testTForall
           "a"
           Nothing
-          (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+          (Elab.TArrow (testTVar "a") (testTVar "a"))
       generalizeAt _ _ _ =
         Left (Elab.InstantiationError "assertNodeAliasTranslation: unexpected generalization")
    in case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAt (identityPresolutionView c) Nothing (Just si) (Just tr) ew of
@@ -1544,12 +1567,15 @@ nodeAliasTranslationFixture size =
           }
     scheme =
       Elab.schemeFromType
-        (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
+        (testTForall "a" Nothing (testTForall "b" Nothing (Elab.TArrow (testTVar "a") (testTVar "b"))))
     si =
-      Elab.SchemeInfo
-        { Elab.siScheme = scheme,
-          Elab.siSubst = IntMap.fromList [(getNodeId binderA, "a"), (getNodeId binderB, "b")]
-        }
+      Elab.schemeInfoFromRefSubst
+        scheme
+        ( IntMap.fromList
+            [ (getNodeId binderA, elabTypeRef (getNodeId binderA) "a"),
+              (getNodeId binderB, elabTypeRef (getNodeId binderB) "b")
+            ]
+        )
     tr =
       EdgeTrace
         { etRoot = root,
@@ -1590,8 +1616,14 @@ orderedBinderFixture size =
 
 contextFindFixture :: Int -> (Constraint 'Raw, NodeId, NodeId, [Elab.ContextStep])
 contextFindFixture size =
-  (c, root, cN, [Elab.StepUnder ("t" ++ show (getNodeId aN)), Elab.StepInside])
+  (c, root, cN, [stepUnder aN, Elab.StepInside])
   where
+    stepUnder nid =
+      Elab.StepUnderRef
+        ( ElabTypes.typeBinderRefFromIdentity
+            (ElabTypes.typeBinderIdentityFromNode nid)
+            ("t" ++ show (getNodeId nid))
+        )
     base = max 3 size * 10
     root = NodeId (base + 100)
     body = NodeId (base + 101)
@@ -1739,8 +1771,12 @@ intTy = Elab.TBase (BaseTy "Int")
 boolTy :: Elab.ElabType
 boolTy = Elab.TBase (BaseTy "Bool")
 
-idLam :: Elab.ElabTerm
-idLam = Elab.ELam "x" intTy (Elab.EVar "x")
+elabTypeRef :: Int -> String -> ElabTypes.TypeBinderRef
+elabTypeRef key name =
+  ElabTypes.typeBinderRefFromIdentity (ElabTypes.typeBinderIdentityFromNode (NodeId key)) name
 
-polyId :: Elab.ElabTerm
-polyId = Elab.ETyAbs "a" Nothing (Elab.ELam "x" (Elab.TVar "a") (Elab.EVar "x"))
+idLam :: Elab.XmlfTerm
+idLam = mkTestLocalLam "x" intTy (mkTestDeferredVar "x")
+
+polyId :: Elab.XmlfTerm
+polyId = mkTestTyAbs "a" Nothing (mkTestLocalLam "x" (testTVar "a") (mkTestDeferredVar "x"))

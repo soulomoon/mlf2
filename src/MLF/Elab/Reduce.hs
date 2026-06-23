@@ -7,55 +7,60 @@ module MLF.Elab.Reduce
   )
 where
 
-import Data.Functor.Foldable (para)
+import Data.Functor.Foldable (Recursive (project), para)
 import qualified Data.Set as Set
-import MLF.Elab.Inst (applyInstantiation, renameInstBound, schemeToType)
+import MLF.Elab.Inst (applyInstantiation, renameInstBoundRef, schemeToType)
 import MLF.Elab.TypeCheck (typeCheck)
 import MLF.Elab.Types
+import MLF.Frontend.Program.Builtins (builtinValueIdentity)
 import MLF.Frontend.Syntax (Lit (..))
-import MLF.Reify.TypeOps (freeTypeVarsType, freshTypeName, substTypeCapture)
-import MLF.Util.RecursionSchemes (cataMaybe, foldElabTerm, foldInstantiation)
+import qualified MLF.Primitive.Inventory as PrimitiveInventory
+import MLF.Reify.TypeOps (freeTypeVarRefsType, substTypeCaptureRef)
+import MLF.Types.Identity (IdDetails (..), PrimitiveRef (..))
+import MLF.Util.RecursionSchemes (cataMaybe, foldXmlfTerm, foldInstantiation)
 
-isValue :: ElabTerm -> Bool
+isValue :: XmlfTerm -> Bool
 isValue term = case term of
   ELit {} -> True
   ELam {} -> True
-  ETyAbs {} -> True
+  ETyAbsRef {} -> True
   ERoll _ body -> isValue body
   _ -> False
 
-step :: ElabTerm -> Maybe ElabTerm
+step :: XmlfTerm -> Maybe XmlfTerm
 step term = case term of
-  EApp (EApp (EVar "__mlfp_and") (ELit (LBool left))) (ELit (LBool right)) ->
-    Just (ELit (LBool (left && right)))
-  EApp (EApp (EVar "__mlfp_and") left) right
-    | not (isValue left) ->
-        (\left' -> EApp (EApp (EVar "__mlfp_and") left') right) <$> step left
-    | not (isValue right) ->
-        EApp (EApp (EVar "__mlfp_and") left) <$> step right
-  EApp (ETyAbs v _ body) a
-    | v `Set.notMember` freeTypeVarsTerm body ->
+  EApp (EApp (EVarNode andVar) (ELit (LBool left))) (ELit (LBool right))
+    | isAndPrimitive andVar ->
+        Just (ELit (LBool (left && right)))
+  EApp (EApp (EVarNode andVar) left) right
+    | isAndPrimitive andVar
+        && not (isValue left) ->
+        (\left' -> EApp (EApp (EVarNode andVar) left') right) <$> step left
+    | isAndPrimitive andVar
+        && not (isValue right) ->
+        EApp (EApp (EVarNode andVar) left) <$> step right
+  EApp (ETyAbsRef ref _ body) a
+    | not (typeRefMember ref (freeTypeVarRefsTerm body)) ->
         Just (EApp body a)
   EApp f a
     | not (isValue f) -> (`EApp` a) <$> step f
     | not (isValue a || isNeutralValue a) -> EApp f <$> step a
     | otherwise ->
         case f of
-          ELam v _ body -> Just (substTermVar v a body)
+          ELam resolved body ->
+            Just (substResolvedTermVar resolved a body)
           ETyInst f' inst
             | instConsumesForall inst,
               not (termHasLeadingTyAbs f') ->
                 Just (EApp f' a)
           _ -> Nothing
-  ELet v sch rhs body
-    | not (isValue rhs) -> (\rhs' -> ELet v sch rhs' body) <$> step rhs
-    | v `Set.member` freeTermVars rhs ->
-        -- Recursive let: unfold one step.
-        -- See Note [Recursive let reduction]
-        let selfRef = ELet v sch rhs (EVar v)
-            rhs' = substTermVar v selfRef rhs
-         in Just (substTermVar v rhs' body)
-    | otherwise -> Just (substTermVar v rhs body)
+  ELet resolved sch rhs body
+    | not (isValue rhs) -> (\rhs' -> ELet resolved sch rhs' body) <$> step rhs
+    | termMentionsFreeResolvedVar resolved rhs ->
+        let selfRef = ELet resolved sch rhs (EVarNode resolved)
+            rhs' = substResolvedTermVar resolved selfRef rhs
+         in Just (substResolvedTermVar resolved rhs' body)
+    | otherwise -> Just (substResolvedTermVar resolved rhs body)
   ETyInst e inst
     | not (isValue e) ->
         case step e of
@@ -78,7 +83,7 @@ step term = case term of
     | otherwise -> Nothing
   EUnroll e
     | ELam {} <- e -> Just e
-    | ETyAbs {} <- e -> Just e
+    | ETyAbsRef {} <- e -> Just e
     | ETyInst e' inst <- e,
       instConsumesForall inst,
       termHasLeadingTyAbs e' ->
@@ -92,7 +97,7 @@ step term = case term of
           Just e' -> Just (EUnroll e')
           Nothing ->
             case typeCheck e of
-              Right TMu {} -> Nothing
+              Right TMuRef {} -> Nothing
               Right _ -> Just e
               Left _ -> Nothing
     | otherwise ->
@@ -100,17 +105,29 @@ step term = case term of
           ERoll _ body | isValue body -> Just body
           _ ->
             case typeCheck e of
-              Right TMu {} -> Nothing
+              Right TMuRef {} -> Nothing
               Right _ -> Just e
               Left _ -> Nothing
   _ -> Nothing
 
-isNeutralValue :: ElabTerm -> Bool
+isAndPrimitive :: ResolvedVar -> Bool
+isAndPrimitive resolved =
+  case resolvedVarDetails resolved of
+    PrimitiveId PrimitiveRef {primitiveRefSymbol = symbol} ->
+      symbol == andSymbol
+    TopLevelId symbol ->
+      symbol == andSymbol
+    _ -> False
+  where
+    andSymbol =
+      builtinValueIdentity PrimitiveInventory.nativeAndPrimitiveName
+
+isNeutralValue :: XmlfTerm -> Bool
 isNeutralValue term = case term of
-  EVar {} -> True
+  EVarNode {} -> True
   _ -> False
 
-normalize :: ElabTerm -> ElabTerm
+normalize :: XmlfTerm -> XmlfTerm
 normalize term = case step term of
   Nothing -> term
   Just term' -> normalize term'
@@ -140,7 +157,7 @@ without infinite expansion.
 Non-recursive lets (v not free in rhs) use the original direct substitution
 path and are completely unaffected. -}
 
-reduceInst :: ElabTerm -> Instantiation -> Maybe ElabTerm
+reduceInst :: XmlfTerm -> Instantiation -> Maybe XmlfTerm
 reduceInst v inst = do
   (_inst, applyTo) <- cataMaybe alg inst
   applyTo v
@@ -155,76 +172,94 @@ reduceInst v inst = do
         Just
           ( InstIntro,
             \term ->
-              let fresh = freshTypeName (freeTypeVarsTerm term)
-               in Just (ETyAbs fresh Nothing term)
+              let (ref, _) = freshTypeBinderRefFromNames (freeTypeVarsTerm term) (identityGeneratorAfterTerm term)
+               in Just (eTyAbsWithRef ref Nothing term)
           )
       InstElimF ->
         Just
           ( InstElim,
-            \term -> case term of
-              ETyAbs name mbBound body ->
+            \term -> case project term of
+              ETyAbsFRef ref mbBound body ->
                 let bound = boundType mbBound
-                    body' = replaceAbstrInTerm name InstId body
-                 in Just (substTypeVarTerm name bound body')
+                    body' = replaceAbstrInTermRef ref InstId body
+                 in Just (substTypeVarTermRef ref bound body')
               _ -> Nothing
           )
-      InstUnderF vParam (phi, _) ->
+      InstUnderFRef underRef (phi, _) ->
         Just
-          ( InstUnder vParam phi,
-            \term -> case term of
-              ETyAbs name mbBound body ->
-                let phi' = renameInstBound vParam name phi
-                 in Just (ETyAbs name mbBound (ETyInst body phi'))
+          ( instUnderWithRef underRef phi,
+            \term -> case project term of
+              ETyAbsFRef absRef mbBound body ->
+                let phi' = renameInstBoundRef underRef absRef phi
+                 in Just (eTyAbsWithRef absRef mbBound (ETyInst body phi'))
               _ -> Nothing
           )
       InstInsideF (phi, _) ->
         Just
           ( InstInside phi,
-            \term -> case term of
-              ETyAbs name mbBound body -> do
+            \term -> case project term of
+              ETyAbsFRef ref mbBound body -> do
                 let bound0 = boundType mbBound
                 bound1 <- either (const Nothing) Just (applyInstantiation bound0 phi)
                 let mb' = case bound1 of
                       TBottom -> Nothing
-                      TVar {} -> Nothing
+                      TVarRef {} -> Nothing
                       _ -> either (const Nothing) Just (elabToBound bound1)
-                    body' = replaceAbstrInTerm name (InstSeq phi (InstAbstr name)) body
-                Just (ETyAbs name mb' body')
+                    body' = replaceAbstrInTermRef ref (InstSeq phi (instAbstrWithRef ref)) body
+                Just (eTyAbsWithRef ref mb' body')
               _ -> Nothing
           )
       InstBotF ty -> Just (InstBot ty, const Nothing)
-      InstAbstrF vParam -> Just (InstAbstr vParam, const Nothing)
+      InstAbstrFRef ref -> Just (instAbstrWithRef ref, const Nothing)
 
 boundType :: Maybe BoundType -> ElabType
 boundType = maybe TBottom tyToElab
 
-freeTermVars :: ElabTerm -> Set.Set String
-freeTermVars = foldElabTerm alg
+freeResolvedTermVars :: XmlfTerm -> [ResolvedVar]
+freeResolvedTermVars =
+  go []
   where
-    alg term = case term of
-      EVarF v -> Set.singleton v
-      ELitF _ -> Set.empty
-      ELamF v _ body -> Set.delete v body
-      EAppF f a -> Set.union f a
-      ELetF v _ rhs body ->
-        Set.union rhs (Set.delete v body)
-      ETyAbsF _ _ body -> body
-      ETyInstF e _ -> e
-      ERollF _ body -> body
-      EUnrollF body -> body
+    go bound term =
+      case term of
+        EVarNode resolved
+          | resolvedVarBoundBy bound resolved -> []
+          | otherwise -> [resolved]
+        ELit {} -> []
+        ELam resolved body ->
+          go (resolved : bound) body
+        EApp fun arg ->
+          go bound fun ++ go bound arg
+        ELet resolved _ rhs body ->
+          go bound rhs ++ go (resolved : bound) body
+        ETyAbsRef _ _ body ->
+          go bound body
+        ETyInst inner _ ->
+          go bound inner
+        ERoll _ body ->
+          go bound body
+        EUnroll body ->
+          go bound body
 
-freeTypeVarsScheme :: ElabScheme -> Set.Set String
-freeTypeVarsScheme sch = freeTypeVarsType (schemeToType sch)
+freeResolvedTermReferenceNames :: XmlfTerm -> Set.Set String
+freeResolvedTermReferenceNames =
+  Set.fromList . map resolvedVarReferenceName . freeResolvedTermVars
 
-valueHasLeadingTyAbs :: ElabTerm -> Bool
+termMentionsFreeResolvedVar :: ResolvedVar -> XmlfTerm -> Bool
+termMentionsFreeResolvedVar expected =
+  any matches . freeResolvedTermVars
+  where
+    matches resolved =
+      resolvedVarSameIdentity expected resolved
+
+valueHasLeadingTyAbs :: XmlfTerm -> Bool
 valueHasLeadingTyAbs term = case term of
-  ETyAbs {} -> True
+  ETyAbsRef {} -> True
   ERoll _ body -> valueHasLeadingTyAbs body
   _ -> False
 
-termHasLeadingTyAbs :: ElabTerm -> Bool
+termHasLeadingTyAbs :: XmlfTerm -> Bool
 termHasLeadingTyAbs term = case term of
-  ETyAbs {} -> True
+  ETyAbsRef {} -> True
   ERoll _ body -> termHasLeadingTyAbs body
   EUnroll body -> termHasLeadingTyAbs body || valueHasLeadingTyAbs body
   ELet _ _ rhs body -> termHasLeadingTyAbs rhs || termHasLeadingTyAbs body
@@ -238,43 +273,59 @@ instConsumesForall inst = case inst of
   InstElim -> True
   InstInside inner -> instConsumesForall inner || True
   InstSeq i1 i2 -> instConsumesForall i1 || instConsumesForall i2
-  InstUnder _ inner -> instConsumesForall inner
+  InstUnderRef _ inner -> instConsumesForall inner
   InstBot _ -> False
-  InstAbstr _ -> False
+  InstAbstrRef _ -> False
 
-freeTypeVarsInst :: Instantiation -> Set.Set String
-freeTypeVarsInst = foldInstantiation alg
+freeTypeVarsTerm :: XmlfTerm -> Set.Set String
+freeTypeVarsTerm =
+  Set.fromList . map typeBinderRefName . freeTypeVarRefsTerm
+
+freeTypeVarRefsInst :: Instantiation -> [TypeBinderRef]
+freeTypeVarRefsInst = foldInstantiation alg
   where
     alg inst = case inst of
-      InstIdF -> Set.empty
-      InstAppF t -> freeTypeVarsType t
-      InstBotF t -> freeTypeVarsType t
-      InstIntroF -> Set.empty
-      InstElimF -> Set.empty
-      InstAbstrF v -> Set.singleton v
-      InstInsideF i -> i
-      InstSeqF a b -> Set.union a b
-      InstUnderF v i -> Set.delete v i
+      InstIdF -> []
+      InstAppF ty -> freeTypeVarRefsType ty
+      InstBotF ty -> freeTypeVarRefsType ty
+      InstIntroF -> []
+      InstElimF -> []
+      InstAbstrFRef ref -> [ref]
+      InstInsideF refs -> refs
+      InstSeqF left right -> unionRefs left right
+      InstUnderFRef ref refs -> filter (not . typeBinderRefsSameIdentity ref) refs
 
-freeTypeVarsTerm :: ElabTerm -> Set.Set String
-freeTypeVarsTerm = foldElabTerm alg
+freeTypeVarRefsTerm :: XmlfTerm -> [TypeBinderRef]
+freeTypeVarRefsTerm = foldXmlfTerm alg
   where
     alg term = case term of
-      EVarF _ -> Set.empty
-      ELitF _ -> Set.empty
-      ELamF _ ty body -> Set.union (freeTypeVarsType ty) body
-      EAppF f a -> Set.union f a
-      ELetF _ sch rhs body ->
-        Set.unions [freeTypeVarsScheme sch, rhs, body]
-      ETyAbsF v mb body ->
-        let boundFv = maybe Set.empty freeTypeVarsType mb
-            bodyFv = Set.delete v body
-         in Set.union boundFv bodyFv
-      ETyInstF e inst ->
-        Set.union e (freeTypeVarsInst inst)
-      ERollF ty body ->
-        Set.union (freeTypeVarsType ty) body
+      EVarNodeF resolved -> freeTypeVarRefsType (resolvedVarType resolved)
+      ELitF _ -> []
+      ELamF resolved body -> unionRefs (freeTypeVarRefsType (resolvedVarType resolved)) body
+      EAppF f a -> unionRefs f a
+      ELetF resolved sch rhs body ->
+        unionRefs
+          (freeTypeVarRefsType (resolvedVarType resolved))
+          (unionRefs (freeTypeVarRefsType (schemeToType sch)) (unionRefs rhs body))
+      ETyAbsFRef ref mb body ->
+        unionRefs
+          (maybe [] freeTypeVarRefsType mb)
+          (filter (not . typeBinderRefsSameIdentity ref) body)
+      ETyInstF e inst -> unionRefs e (freeTypeVarRefsInst inst)
+      ERollF ty body -> unionRefs (freeTypeVarRefsType ty) body
       EUnrollF body -> body
+
+unionRefs :: [TypeBinderRef] -> [TypeBinderRef] -> [TypeBinderRef]
+unionRefs left right =
+  foldr insertRef right left
+  where
+    insertRef ref refs
+      | typeRefMember ref refs = refs
+      | otherwise = ref : refs
+
+typeRefMember :: TypeBinderRef -> [TypeBinderRef] -> Bool
+typeRefMember ref =
+  any (typeBinderRefsSameIdentity ref)
 
 freshTermNameFrom :: String -> Set.Set String -> String
 freshTermNameFrom base used =
@@ -283,111 +334,142 @@ freshTermNameFrom base used =
         (x : _) -> x
         [] -> base
 
-substTermVar :: String -> ElabTerm -> ElabTerm -> ElabTerm
-substTermVar x s = goSub
+newtype TermVarKey = TermVarIdentity ResolvedVar
+
+substResolvedTermVar :: ResolvedVar -> XmlfTerm -> XmlfTerm -> XmlfTerm
+substResolvedTermVar resolved = substTermVarWithKey (TermVarIdentity resolved)
+
+substTermVarWithKey :: TermVarKey -> XmlfTerm -> XmlfTerm -> XmlfTerm
+substTermVarWithKey key s = goSub
   where
-    freeS = freeTermVars s
+    x = termVarKeyName key
+    freeSVars = freeResolvedTermVars s
+    freeSNames = Set.fromList (map resolvedVarReferenceName freeSVars)
+    termVarKeyName target =
+      case target of
+        TermVarIdentity resolved -> resolvedVarReferenceName resolved
+    resolvedMatches target resolved =
+      case target of
+        TermVarIdentity expected ->
+          resolvedVarSameIdentity expected resolved
     goSub = para alg
       where
         alg term = case term of
-          EVarF v
-            | v == x -> s
-            | otherwise -> EVar v
+          EVarNodeF resolved
+            | resolvedMatches key resolved -> s
+            | otherwise -> EVarNode resolved
           ELitF l -> ELit l
-          ELamF v ty body
-            | v == x -> ELam v ty (fst body)
-            | v `Set.member` freeS ->
-                let used = Set.unions [freeS, freeTermVars (fst body), Set.singleton x]
-                    v' = freshTermNameFrom v used
-                    body' = substTermVar v (EVar v') (fst body)
-                 in ELam v' ty (goSub body')
-            | otherwise -> ELam v ty (snd body)
+          ELamF resolved body
+            | resolvedMatches key resolved -> ELam resolved (fst body)
+            | any (resolvedVarSameIdentity resolved) freeSVars ->
+                let used = Set.unions [freeSNames, freeResolvedTermReferenceNames (fst body), Set.singleton x]
+                    v' = freshTermNameFrom binderName used
+                    resolved' = renameResolvedLocalVar v' resolved
+                    body' = substResolvedTermVar resolved (EVarNode resolved') (fst body)
+                 in ELam resolved' (goSub body')
+            | otherwise -> ELam resolved (snd body)
+            where
+              binderName = resolvedVarReferenceName resolved
           EAppF f a -> EApp (snd f) (snd a)
-          ELetF v sch rhs body
-            | v == x -> ELet v sch (snd rhs) (fst body)
-            | v `Set.member` freeS ->
-                let used = Set.unions [freeS, freeTermVars (fst body), Set.singleton x]
-                    v' = freshTermNameFrom v used
-                    body' = substTermVar v (EVar v') (fst body)
-                 in ELet v' sch (snd rhs) (goSub body')
-            | otherwise -> ELet v sch (snd rhs) (snd body)
-          ETyAbsF v b body -> ETyAbs v b (snd body)
+          ELetF resolved sch rhs body
+            | resolvedMatches key resolved -> ELet resolved sch (snd rhs) (fst body)
+            | any (resolvedVarSameIdentity resolved) freeSVars ->
+                let used = Set.unions [freeSNames, freeResolvedTermReferenceNames (fst body), Set.singleton x]
+                    v' = freshTermNameFrom binderName used
+                    resolved' = renameResolvedLocalVar v' resolved
+                    body' = substResolvedTermVar resolved (EVarNode resolved') (fst body)
+                 in ELet resolved' sch (snd rhs) (goSub body')
+            | otherwise -> ELet resolved sch (snd rhs) (snd body)
+            where
+              binderName = resolvedVarReferenceName resolved
+          ETyAbsFRef ref b body -> eTyAbsWithRef ref b (snd body)
           ETyInstF e i -> ETyInst (snd e) i
           ERollF ty body -> ERoll ty (snd body)
           EUnrollF body -> EUnroll (snd body)
 
-substTypeVarTerm :: String -> ElabType -> ElabTerm -> ElabTerm
-substTypeVarTerm x s = goSub
+substTypeVarTermRef :: TypeBinderRef -> ElabType -> XmlfTerm -> XmlfTerm
+substTypeVarTermRef target s = goSub
   where
-    freeS = freeTypeVarsType s
+    x = typeBinderRefName target
+    freeSRefs = freeTypeVarRefsType s
+    freeSNames = Set.fromList (map typeBinderRefName freeSRefs)
     substBoundVar mb = do
       bnd <- mb
-      let result = substTypeCapture x s (tyToElab bnd)
+      let result = substTypeCaptureRef target s (tyToElab bnd)
       case result of
-        TVar {} -> Nothing
+        TVarRef {} -> Nothing
         TBottom -> Nothing
         _ -> either (const Nothing) Just (elabToBound result)
     goSub = para alg
       where
         alg term = case term of
-          EVarF v -> EVar v
+          EVarNodeF resolved ->
+            EVarNode (mapResolvedVarType (substTypeCaptureRef target s) resolved)
           ELitF l -> ELit l
-          ELamF v ty body -> ELam v (substTypeCapture x s ty) (snd body)
+          ELamF resolved body ->
+            ELam (mapResolvedVarType (substTypeCaptureRef target s) resolved) (snd body)
           EAppF f a -> EApp (snd f) (snd a)
-          ELetF v sch rhs body ->
-            ELet v (substTypeVarScheme x s sch) (snd rhs) (snd body)
-          ETyAbsF v mb body
-            | v == x -> ETyAbs v (substBoundVar mb) (fst body)
-            | v `Set.member` freeS ->
-                let used = Set.unions [freeS, freeTypeVarsTerm (fst body), Set.singleton x]
+          ELetF resolved sch rhs body ->
+            ELet
+              (mapResolvedVarType (substTypeCaptureRef target s) resolved)
+              (substTypeVarSchemeRef target s sch)
+              (snd rhs)
+              (snd body)
+          ETyAbsFRef ref mb body
+            | typeBinderRefsSameIdentity ref target -> eTyAbsWithRef ref (substBoundVar mb) (fst body)
+            | typeRefMember ref freeSRefs ->
+                let used = Set.unions [freeSNames, freeTypeVarsTerm (fst body), Set.singleton x]
                     v' = freshTermNameFrom v used
-                    body' = substTypeVarTerm v (TVar v') (fst body)
-                 in ETyAbs v' (substBoundVar mb) (goSub body')
-            | otherwise -> ETyAbs v (substBoundVar mb) (snd body)
-          ETyInstF e i -> ETyInst (snd e) (substTypeVarInst x s i)
-          ERollF ty body -> ERoll (substTypeCapture x s ty) (snd body)
+                    ref' = renameTypeBinderRef v' ref
+                    body' = substTypeVarTermRef ref (tVarWithRef ref') (fst body)
+                 in eTyAbsWithRef ref' (substBoundVar mb) (goSub body')
+            | otherwise -> eTyAbsWithRef ref (substBoundVar mb) (snd body)
+            where
+              v = typeBinderRefName ref
+          ETyInstF e i -> ETyInst (snd e) (substTypeVarInstRef target s i)
+          ERollF ty body -> ERoll (substTypeCaptureRef target s ty) (snd body)
           EUnrollF body -> EUnroll (snd body)
 
-substTypeVarScheme :: String -> ElabType -> ElabScheme -> ElabScheme
-substTypeVarScheme x s sch =
+substTypeVarSchemeRef :: TypeBinderRef -> ElabType -> ElabScheme -> ElabScheme
+substTypeVarSchemeRef target s sch =
   let ty = schemeToType sch
-      ty' = substTypeCapture x s ty
+      ty' = substTypeCaptureRef target s ty
    in schemeFromType ty'
 
-substTypeVarInst :: String -> ElabType -> Instantiation -> Instantiation
-substTypeVarInst x s = para alg
+substTypeVarInstRef :: TypeBinderRef -> ElabType -> Instantiation -> Instantiation
+substTypeVarInstRef target s = para alg
   where
     alg inst = case inst of
       InstIdF -> InstId
-      InstAppF t -> InstApp (substTypeCapture x s t)
-      InstBotF t -> InstBot (substTypeCapture x s t)
+      InstAppF t -> InstApp (substTypeCaptureRef target s t)
+      InstBotF t -> InstBot (substTypeCaptureRef target s t)
       InstIntroF -> InstIntro
       InstElimF -> InstElim
-      InstAbstrF v -> InstAbstr v
+      InstAbstrFRef ref -> instAbstrWithRef ref
       InstInsideF i -> InstInside (snd i)
       InstSeqF a b -> InstSeq (snd a) (snd b)
-      InstUnderF v i
-        | v == x -> InstUnder v (fst i)
-        | otherwise -> InstUnder v (snd i)
+      InstUnderFRef ref i
+        | typeBinderRefsSameIdentity ref target -> instUnderWithRef ref (fst i)
+        | otherwise -> instUnderWithRef ref (snd i)
 
-replaceAbstrInTerm :: String -> Instantiation -> ElabTerm -> ElabTerm
-replaceAbstrInTerm target replacement = para alg
+replaceAbstrInTermRef :: TypeBinderRef -> Instantiation -> XmlfTerm -> XmlfTerm
+replaceAbstrInTermRef target replacement = para alg
   where
     alg term = case term of
-      EVarF v -> EVar v
+      EVarNodeF resolved -> EVarNode resolved
       ELitF l -> ELit l
-      ELamF v ty body -> ELam v ty (snd body)
+      ELamF resolved body -> ELam resolved (snd body)
       EAppF f a -> EApp (snd f) (snd a)
-      ELetF v sch rhs body -> ELet v sch (snd rhs) (snd body)
-      ETyAbsF v mb body
-        | v == target -> ETyAbs v mb (fst body)
-        | otherwise -> ETyAbs v mb (snd body)
-      ETyInstF e inst -> ETyInst (snd e) (replaceAbstrInInst target replacement inst)
+      ELetF resolved sch rhs body -> ELet resolved sch (snd rhs) (snd body)
+      ETyAbsFRef ref mb body
+        | typeBinderRefsSameIdentity ref target -> eTyAbsWithRef ref mb (fst body)
+        | otherwise -> eTyAbsWithRef ref mb (snd body)
+      ETyInstF e inst -> ETyInst (snd e) (replaceAbstrInInstRef target replacement inst)
       ERollF ty body -> ERoll ty (snd body)
       EUnrollF body -> EUnroll (snd body)
 
-replaceAbstrInInst :: String -> Instantiation -> Instantiation -> Instantiation
-replaceAbstrInInst target replacement = para alg
+replaceAbstrInInstRef :: TypeBinderRef -> Instantiation -> Instantiation -> Instantiation
+replaceAbstrInInstRef target replacement = para alg
   where
     alg inst = case inst of
       InstIdF -> InstId
@@ -395,11 +477,11 @@ replaceAbstrInInst target replacement = para alg
       InstBotF t -> InstBot t
       InstIntroF -> InstIntro
       InstElimF -> InstElim
-      InstAbstrF v
-        | v == target -> replacement
-        | otherwise -> InstAbstr v
+      InstAbstrFRef ref
+        | typeBinderRefsSameIdentity ref target -> replacement
+        | otherwise -> instAbstrWithRef ref
       InstInsideF i -> InstInside (snd i)
       InstSeqF a b -> InstSeq (snd a) (snd b)
-      InstUnderF v i
-        | v == target -> InstUnder v (fst i)
-        | otherwise -> InstUnder v (snd i)
+      InstUnderFRef ref i
+        | typeBinderRefsSameIdentity ref target -> instUnderWithRef ref (fst i)
+        | otherwise -> instUnderWithRef ref (snd i)

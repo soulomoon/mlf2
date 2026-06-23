@@ -22,6 +22,7 @@
 module MLF.Elab.Generalize
   ( GaBindParents (..),
     applyGeneralizePlan,
+    inlineRigidTypes,
     shadowCompareTypes,
     selectSolvedOrderWithShadow,
   )
@@ -29,6 +30,7 @@ where
 
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+import Data.List (find)
 import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -53,15 +55,15 @@ import MLF.Constraint.Presolution.Plan.SchemeRoots
     allowBoundTraversalFor,
   )
 import MLF.Constraint.Presolution.Plan.Target (TypeRootPlan (..))
-import MLF.Constraint.Presolution.View (pvCanonicalMap)
+import MLF.Constraint.Presolution.View (PresolutionView (..), pvCanonicalMap)
 import MLF.Constraint.Types.Graph
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Elab.Types
 import MLF.Reify.Core
-  ( reifyBoundWithNames,
-    reifyBoundWithNamesOnConstraint,
-    reifyTypeWithNamesNoFallback,
-    reifyTypeWithNamesNoFallbackOnConstraint,
+  ( reifyBoundWithRefs,
+    reifyBoundWithRefsOnConstraint,
+    reifyTypeWithRefsNoFallback,
+    reifyTypeWithRefsNoFallbackOnConstraint,
   )
 import MLF.Reify.TypeOps (alphaEqType, inlineAliasBoundsWithBy)
 import MLF.Util.Graph (reachableFromStop)
@@ -72,9 +74,17 @@ import MLF.Util.Names (alphaName)
 rigidNameFor :: Int -> String
 rigidNameFor key = "__rigid" ++ show key
 
--- | Build a forall type from a list of binders and a body type.
-buildForallType :: [(String, Maybe BoundType)] -> ElabType -> ElabType
-buildForallType binds body = foldr (\(n, b) t -> TForall n b t) body binds
+canonicalizeSubstRefs :: (NodeId -> NodeId) -> IntMap.IntMap TypeBinderRef -> IntMap.IntMap TypeBinderRef
+canonicalizeSubstRefs canonical =
+  IntMap.mapWithKey
+    ( \key ref ->
+        typeBinderRefFromIdentity
+          (typeBinderIdentityFromNode (canonical (NodeId key)))
+          (typeBinderRefName ref)
+    )
+
+buildForallTypeRefs :: [(TypeBinderRef, Maybe BoundType)] -> ElabType -> ElabType
+buildForallTypeRefs binds body = foldr (\(ref, b) t -> TForallRef ref b t) body binds
 
 -- | Validate that solved-order and base-path shadow reification are semantically equivalent.
 shadowCompareTypes :: String -> ElabType -> ElabType -> Either ElabError ()
@@ -97,20 +107,20 @@ shadowCompareTypesWithDetails context detailLines solvedTy baseTy
           )
 
 data RenameEnv = RenameEnv
-  { reForward :: Map.Map String String,
-    reBackward :: Map.Map String String
+  { reForward :: [(TypeBinderRef, TypeBinderRef)],
+    reBackward :: [(TypeBinderRef, TypeBinderRef)]
   }
 
 alphaEqTypeModuloVarRenaming :: ElabType -> ElabType -> Bool
 alphaEqTypeModuloVarRenaming tyL tyR =
-  case goType (RenameEnv Map.empty Map.empty) tyL tyR of
+  case goType (RenameEnv [] []) tyL tyR of
     Just _ -> True
     Nothing -> False
   where
     goType :: RenameEnv -> ElabType -> ElabType -> Maybe RenameEnv
     goType env t1 t2 = case (t1, t2) of
-      (TVar v1, TVar v2) ->
-        matchVar env v1 v2
+      (TVarRef ref1, TVarRef ref2) ->
+        matchVar env ref1 ref2
       (TArrow a1 b1, TArrow a2 b2) -> do
         env' <- goType env a1 a2
         goType env' b1 b2
@@ -122,9 +132,14 @@ alphaEqTypeModuloVarRenaming tyL tyR =
             Just env
       (TBottom, TBottom) ->
         Just env
-      (TForall v1 mb1 body1, TForall v2 mb2 body2) -> do
+      (TVarAppRef ref1 args1, TVarAppRef ref2 args2) -> do
+        env' <- matchVar env ref1 ref2
+        goTypes env' (NonEmpty.toList args1) (NonEmpty.toList args2)
+      (TForallRef ref1 mb1 body1, TForallRef ref2 mb2 body2) -> do
         env' <- goMaybeBound env mb1 mb2
-        withScopedVar env' v1 v2 (\scoped -> goType scoped body1 body2)
+        withScopedVar env' ref1 ref2 (\scoped -> goType scoped body1 body2)
+      (TMuRef ref1 body1, TMuRef ref2 body2) ->
+        withScopedVar env ref1 ref2 (\scoped -> goType scoped body1 body2)
       _ ->
         Nothing
 
@@ -141,9 +156,14 @@ alphaEqTypeModuloVarRenaming tyL tyR =
             Just env
       (TBottom, TBottom) ->
         Just env
-      (TForall v1 mb1 body1, TForall v2 mb2 body2) -> do
+      (TVarAppRef ref1 args1, TVarAppRef ref2 args2) -> do
+        env' <- matchVar env ref1 ref2
+        goTypes env' (NonEmpty.toList args1) (NonEmpty.toList args2)
+      (TForallRef ref1 mb1 body1, TForallRef ref2 mb2 body2) -> do
         env' <- goMaybeBound env mb1 mb2
-        withScopedVar env' v1 v2 (\scoped -> goType scoped body1 body2)
+        withScopedVar env' ref1 ref2 (\scoped -> goType scoped body1 body2)
+      (TMuRef ref1 body1, TMuRef ref2 body2) ->
+        withScopedVar env ref1 ref2 (\scoped -> goType scoped body1 body2)
       _ ->
         Nothing
 
@@ -161,50 +181,66 @@ alphaEqTypeModuloVarRenaming tyL tyR =
       (Just b1, Just b2) -> goBound env b1 b2
       _ -> Nothing
 
-    matchVar :: RenameEnv -> String -> String -> Maybe RenameEnv
+    matchVar :: RenameEnv -> TypeBinderRef -> TypeBinderRef -> Maybe RenameEnv
     matchVar env@RenameEnv {reForward = forward, reBackward = backward} v1 v2 =
-      case (Map.lookup v1 forward, Map.lookup v2 backward) of
+      case (lookupRef v1 forward, lookupRef v2 backward) of
         (Just mappedV2, Just mappedV1)
-          | mappedV2 == v2 && mappedV1 == v1 ->
+          | typeBinderRefsSameIdentity mappedV2 v2 && typeBinderRefsSameIdentity mappedV1 v1 ->
               Just env
         (Just mappedV2, Nothing)
-          | mappedV2 == v2 ->
-              Just env {reBackward = Map.insert v2 v1 backward}
+          | typeBinderRefsSameIdentity mappedV2 v2 ->
+              Just env {reBackward = insertPair v2 v1 backward}
         (Nothing, Just mappedV1)
-          | mappedV1 == v1 ->
-              Just env {reForward = Map.insert v1 v2 forward}
-        (Nothing, Nothing) ->
+          | typeBinderRefsSameIdentity mappedV1 v1 ->
+              Just env {reForward = insertPair v1 v2 forward}
+        (Nothing, Nothing)
+          | refsCanRename v1 v2 ->
           Just
             env
-              { reForward = Map.insert v1 v2 forward,
-                reBackward = Map.insert v2 v1 backward
+              { reForward = insertPair v1 v2 forward,
+                reBackward = insertPair v2 v1 backward
               }
         _ ->
           Nothing
 
     withScopedVar ::
       RenameEnv ->
-      String ->
-      String ->
+      TypeBinderRef ->
+      TypeBinderRef ->
       (RenameEnv -> Maybe RenameEnv) ->
       Maybe RenameEnv
     withScopedVar env@RenameEnv {reForward = forward, reBackward = backward} v1 v2 runScoped = do
-      let oldForward = Map.lookup v1 forward
-          oldBackward = Map.lookup v2 backward
+      let oldForward = lookupEntry v1 forward
+          oldBackward = lookupEntry v2 backward
           scopedEnv =
             env
-              { reForward = Map.insert v1 v2 forward,
-                reBackward = Map.insert v2 v1 backward
+              { reForward = insertPair v1 v2 forward,
+                reBackward = insertPair v2 v1 backward
               }
-          restore key oldValue m = case oldValue of
-            Just value -> Map.insert key value m
-            Nothing -> Map.delete key m
+          restore key oldValue pairs = case oldValue of
+            Just (_, value) -> insertPair key value pairs
+            Nothing -> deleteRef key pairs
       scopedResult <- runScoped scopedEnv
       pure
         scopedResult
           { reForward = restore v1 oldForward (reForward scopedResult),
             reBackward = restore v2 oldBackward (reBackward scopedResult)
           }
+
+    lookupRef ref =
+      fmap snd . find (typeBinderRefsSameIdentity ref . fst)
+
+    lookupEntry ref =
+      find (typeBinderRefsSameIdentity ref . fst)
+
+    insertPair key value pairs =
+      (key, value) : deleteRef key pairs
+
+    deleteRef key =
+      filter (not . typeBinderRefsSameIdentity key . fst)
+
+    refsCanRename left right =
+      typeBinderRefsSameIdentity left right
 
 selectSolvedOrderWithShadow :: String -> ElabType -> Maybe ElabType -> Either ElabError ElabType
 selectSolvedOrderWithShadow context solvedTy mbBaseTy =
@@ -232,37 +268,37 @@ defaultShadowDetails =
 
 -- | Inline rigid type variables by substituting them with their bounds.
 -- Uses cycle detection to prevent infinite loops when bounds reference each other.
-inlineRigidTypes :: Map.Map String ElabType -> ElabType -> ElabType
-inlineRigidTypes rigidBounds = go Set.empty
+inlineRigidTypes :: Map.Map TypeBinderRef ElabType -> ElabType -> ElabType
+inlineRigidTypes rigidBounds = go Set.empty Set.empty
   where
-    go seen ty = case ty of
-      TVar v ->
-        case Map.lookup v rigidBounds of
-          Just bound
-            | Set.member v seen -> TVar v
-            | otherwise -> go (Set.insert v seen) bound
-          Nothing -> TVar v
-      TCon c args -> TCon c (fmap (go seen) args)
-      TVarApp v args -> TVarApp v (fmap (go seen) args)
-      TBase b -> TBase b
+    go bound seen ty = case ty of
+      TVarRef ref ->
+        case Map.lookup ref rigidBounds of
+          Just rigidTy
+            | Set.notMember ref bound && Set.notMember ref seen ->
+                go bound (Set.insert ref seen) rigidTy
+          _ -> TVarRef ref
+      TConWithIdentity identity c args -> TConWithIdentity identity c (fmap (go bound seen) args)
+      TVarAppRef ref args -> TVarAppRef ref (fmap (go bound seen) args)
+      TBaseWithIdentity identity b -> TBaseWithIdentity identity b
       TBottom -> TBottom
-      TArrow a b -> TArrow (go seen a) (go seen b)
-      TForall v mb body ->
-        TForall v (fmap (goBound seen) mb) (go seen body)
-      TMu v body -> TMu v (go seen body)
-    goBound seen = \case
-      TArrow a b -> TArrow (go seen a) (go seen b)
-      TCon c args -> TCon c (fmap (go seen) args)
-      TVarApp v args -> TVarApp v (fmap (go seen) args)
-      TBase b -> TBase b
+      TArrow a b -> TArrow (go bound seen a) (go bound seen b)
+      TForallRef ref mb body ->
+        TForallRef ref (fmap (goBound bound seen) mb) (go (Set.insert ref bound) seen body)
+      TMuRef ref body -> TMuRef ref (go (Set.insert ref bound) seen body)
+    goBound bound seen = \case
+      TArrow a b -> TArrow (go bound seen a) (go bound seen b)
+      TConWithIdentity identity c args -> TConWithIdentity identity c (fmap (go bound seen) args)
+      TVarAppRef ref args -> TVarAppRef ref (fmap (go bound seen) args)
+      TBaseWithIdentity identity b -> TBaseWithIdentity identity b
       TBottom -> TBottom
-      TForall v mb body -> TForall v (fmap (goBound seen) mb) (go seen body)
-      TMu v body -> TMu v (go seen body)
+      TForallRef ref mb body -> TForallRef ref (fmap (goBound bound seen) mb) (go (Set.insert ref bound) seen body)
+      TMuRef ref body -> TMuRef ref (go (Set.insert ref bound) seen body)
 
 applyGeneralizePlan ::
   GeneralizePlan p ->
   ReifyPlan ->
-  Either ElabError (ElabScheme, IntMap.IntMap String)
+  Either ElabError (ElabScheme, IntMap.IntMap TypeBinderRef)
 applyGeneralizePlan plan reifyPlanWrapper = do
   let GeneralizePlan
         { gpEnv = env,
@@ -315,8 +351,7 @@ applyGeneralizePlan plan reifyPlanWrapper = do
           rpSubstForReifyAdjusted = substForReifyAdjusted
         } = reifyPlanWrapper
       Reify.ReifyPlan
-        { Reify.rpSubst = subst,
-          Reify.rpSubstBaseByKey = _,
+        { Reify.rpSubst = substRefs,
           Reify.rpSchemeTypeChoice = schemeTypeChoice,
           Reify.rpBindingScopeGen = bindingScopeGenPlan,
           Reify.rpHasExplicitBound = hasExplicitBoundPlan,
@@ -447,23 +482,29 @@ applyGeneralizePlan plan reifyPlanWrapper = do
           -- scheme types.
           reifyWithOrig origC substRoot substMap _constraintArg resArg
             | useConstraintReify =
-                case reifyTypeWithNamesNoFallbackOnConstraint origC substMap substRoot of
-                  Left (MissingNode _) ->
-                    case reifyTypeWithNamesNoFallback resArg substMap substRoot of
-                      Left (MissingNode _) -> reifyTypeWithNamesNoFallback resArg substMap typeRootC
+                let substOrigRefs = canonicalizeSubstRefs id substMap
+                    substResRefs = canonicalizeSubstRefs (pvCanonical resArg) substMap
+                 in case reifyTypeWithRefsNoFallbackOnConstraint origC substOrigRefs substRoot of
+                      Left (MissingNode _) ->
+                        case reifyTypeWithRefsNoFallback resArg substResRefs substRoot of
+                          Left (MissingNode _) -> reifyTypeWithRefsNoFallback resArg substResRefs typeRootC
+                          other -> other
                       other -> other
-                  other -> other
             | otherwise =
-                case reifyTypeWithNamesNoFallback resArg substMap substRoot of
-                  Left (MissingNode _) -> reifyTypeWithNamesNoFallback resArg substMap typeRootC
-                  other -> other
+                let substResRefs = canonicalizeSubstRefs (pvCanonical resArg) substMap
+                 in case reifyTypeWithRefsNoFallback resArg substResRefs substRoot of
+                      Left (MissingNode _) -> reifyTypeWithRefsNoFallback resArg substResRefs typeRootC
+                      other -> other
 
           reifyBoundWithOrig origC substMap _constraintArg resArg bndRoot
             | useConstraintReify =
-                case reifyBoundWithNamesOnConstraint origC substMap bndRoot of
-                  Left (MissingNode _) -> reifyBoundWithNames resArg substMap bndRoot
-                  other -> other
-            | otherwise = reifyBoundWithNames resArg substMap bndRoot
+                let substOrigRefs = canonicalizeSubstRefs id substMap
+                    substResRefs = canonicalizeSubstRefs (pvCanonical resArg) substMap
+                 in case reifyBoundWithRefsOnConstraint origC substOrigRefs bndRoot of
+                      Left (MissingNode _) -> reifyBoundWithRefs resArg substResRefs bndRoot
+                      other -> other
+            | otherwise =
+                reifyBoundWithRefs resArg (canonicalizeSubstRefs (pvCanonical resArg) substMap) bndRoot
 
           -- Convenience wrappers using the base original constraint
           reifyWith = reifyWithOrig originalConstraint
@@ -487,7 +528,7 @@ applyGeneralizePlan plan reifyPlanWrapper = do
 
           rigidSubstMap =
             IntMap.fromList
-              [ (key, rigidNameFor key)
+              [ (key, typeBinderRefFromIdentity (typeBinderIdentityFromNode (NodeId key)) (rigidNameFor key))
                 | key <- rigidNodeKeys
               ]
 
@@ -502,8 +543,8 @@ applyGeneralizePlan plan reifyPlanWrapper = do
                   bodyRoot
 
           aliasEntries =
-            [ (getNodeId (canonical bnd), name)
-              | (b, name) <- binderPairs,
+            [ (getNodeId (canonical bnd), ref)
+              | (b, ref) <- binderPairs,
                 Just bnd <- [lookupBound b],
                 canonical bnd /= bodyRootC,
                 canonicalKey b `IntSet.notMember` reachableWithoutBound bnd
@@ -524,17 +565,20 @@ applyGeneralizePlan plan reifyPlanWrapper = do
                 let computeRigidBound key = do
                       let nid = NodeId key
                           name = rigidNameFor key
-                          fallbackTy =
+                          rigidRef =
                             case IntMap.lookup key substMap of
-                              Just substName -> TVar substName
-                              Nothing -> TVar name
+                              Just substRef -> substRef
+                              Nothing ->
+                                typeBinderRefFromIdentity (typeBinderIdentityFromNode nid) name
+                          fallbackTy =
+                            TVarRef rigidRef
                       case lookupBound nid of
-                        Nothing -> pure (name, fallbackTy)
+                        Nothing -> pure (rigidRef, fallbackTy)
                         Just bnd -> do
                           case reifyBoundWithOrig origC substMap constraintArg resArg (canonical bnd) of
-                            Left (MissingNode _) -> pure (name, fallbackTy)
+                            Left (MissingNode _) -> pure (rigidRef, fallbackTy)
                             Left err -> Left err
-                            Right bndTy -> pure (name, bndTy)
+                            Right bndTy -> pure (rigidRef, bndTy)
                 rigidBounds <- mapM computeRigidBound rigidNodeKeys
                 let rigidMap = Map.fromList rigidBounds
                 pure (inlineRigidTypes rigidMap ty)
@@ -542,8 +586,12 @@ applyGeneralizePlan plan reifyPlanWrapper = do
   let adjustedTypeRootForReify = typeRootForReifyAdjusted
       adjustedSubstForReify = substForReifyAdjusted
       solvedTypeRootForReify = typeRoot
-      solvedSubstForReify = subst
-      orderedBinderPairs = zip (map NodeId orderedBinders) binderNames
+      solvedSubstForReify = substRefs
+      orderedBinderPairs =
+        [ (NodeId key, ref)
+          | key <- orderedBinders,
+            Just ref <- [IntMap.lookup key substRefs]
+        ]
       reifyTypeWithOrderedBinders =
         reifyTypeWithAliases
           adjustedTypeRootForReify
@@ -602,9 +650,9 @@ applyGeneralizePlan plan reifyPlanWrapper = do
               Just ty -> pure ty
               Nothing
                 | scopeHasStructuralScheme && null bindings ->
-                    reifyTypeWithNamesNoFallbackOnConstraint
+                    reifyTypeWithRefsNoFallbackOnConstraint
                       originalConstraint
-                      solvedSubstForReify
+                      (canonicalizeSubstRefs id solvedSubstForReify)
                       solvedTypeRootForReify
                 | otherwise ->
                     reifyTypeWithOrderedBinders
@@ -616,9 +664,14 @@ applyGeneralizePlan plan reifyPlanWrapper = do
                 case explicitSchemePlan explicitBinders0 of
                   Nothing -> pure Nothing
                   Just (binders, names, substExplicit, explicitBodyRoot) -> do
-                    bodyTy <- reifyTypeWithAliases explicitBodyRoot substExplicit (zip binders names)
+                    let binderRefs =
+                          [ ref
+                            | binder <- binders,
+                              Just ref <- [IntMap.lookup (getNodeId binder) substExplicit]
+                          ]
+                    bodyTy <- reifyTypeWithAliases explicitBodyRoot substExplicit (zip binders binderRefs)
                     bounds <- explicitBounds binders names substExplicit
-                    pure (Just (buildForallType bounds bodyTy))
+                    pure (Just (buildForallTypeRefs bounds bodyTy))
             | otherwise = pure Nothing
 
           explicitSchemePlan explicitBinders0 =
@@ -627,13 +680,17 @@ applyGeneralizePlan plan reifyPlanWrapper = do
                     IntSet.fromList
                       [getNodeId (canonical b) | b <- explicitBinders0]
                 names = zipWith alphaName [0 ..] binderKeysList
+                refs =
+                  [ typeBinderRefFromIdentity (typeBinderIdentityFromNode (NodeId key)) name
+                    | (key, name) <- zip binderKeysList names
+                  ]
              in case binderKeysList of
                   [] -> Nothing
                   _ ->
                     Just
                       ( map NodeId binderKeysList,
                         names,
-                        IntMap.fromList (zip binderKeysList names),
+                        IntMap.fromList (zip binderKeysList refs),
                         case IntMap.lookup (getNodeId typeRootC) nodes of
                           Just TyVar {}
                             | Just bnd <- lookupCanonicalBound typeRootC ->
@@ -652,22 +709,24 @@ applyGeneralizePlan plan reifyPlanWrapper = do
                   scopeHasStructuralScheme && null bindings
                 reifyBoundForExplicit bndRoot
                   | useConstraintBoundReify =
-                      reifyBoundWithNamesOnConstraint originalConstraint substExplicit bndRoot
+                      reifyBoundWithRefsOnConstraint originalConstraint (canonicalizeSubstRefs id substExplicit) bndRoot
                   | otherwise =
-                      reifyBoundWithNames resForReify substExplicit bndRoot
+                      reifyBoundWithRefs resForReify (canonicalizeSubstRefs (pvCanonical resForReify) substExplicit) bndRoot
                 inlineNamedBounds = inlineNamedBoundsFor substExplicit
                 computeBound (b, name) =
-                  case lookupBound b of
-                    Nothing -> pure (name, Nothing)
-                    Just bnd -> do
-                      bndTy <- reifyBoundForExplicit (canonical bnd)
-                      let bndTy' = inlineNamedBounds bndTy
-                          mbBound = case bndTy' of
-                            TBottom -> Nothing
-                            TVar v | v == name -> Nothing
-                            TVar {} -> Nothing
-                            _ -> either (const Nothing) Just (elabToBound bndTy')
-                      pure (name, mbBound)
+                  let ref = typeBinderRefFromIdentity (typeBinderIdentityFromNode b) name
+                   in case lookupBound b of
+                        Nothing -> pure (ref, Nothing)
+                        Just bnd -> do
+                          bndTy <- reifyBoundForExplicit (canonical bnd)
+                          let bndTy' = inlineNamedBounds bndTy
+                              mbBound = case bndTy' of
+                                TBottom -> Nothing
+                                TVarRef bndRef
+                                  | typeBinderRefsSameIdentity bndRef ref -> Nothing
+                                TVarRef {} -> Nothing
+                                _ -> either (const Nothing) Just (elabToBound bndTy')
+                          pure (ref, mbBound)
              in mapM computeBound (zip binders names)
 
           inlineNamedBoundsFor substExplicit =
@@ -677,9 +736,9 @@ applyGeneralizePlan plan reifyPlanWrapper = do
                   scopeHasStructuralScheme && null bindings
                 reifyBoundForInline bndRoot
                   | useConstraintBoundReify =
-                      reifyBoundWithNamesOnConstraint originalConstraint substExplicit bndRoot
+                      reifyBoundWithRefsOnConstraint originalConstraint (canonicalizeSubstRefs id substExplicit) bndRoot
                   | otherwise =
-                      reifyBoundWithNames resForReify substExplicit bndRoot
+                      reifyBoundWithRefs resForReify (canonicalizeSubstRefs (pvCanonical resForReify) substExplicit) bndRoot
              in inlineAliasBoundsWithBy
                   False
                   canonical
@@ -706,6 +765,6 @@ applyGeneralizePlan plan reifyPlanWrapper = do
         fiOrderedBinders = orderedBinders,
         fiBinderNames = binderNames,
         fiBindings = bindings,
-        fiSubst = subst,
+        fiSubst = substRefs,
         fiTyRaw = ty0Raw
       }

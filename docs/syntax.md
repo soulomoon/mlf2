@@ -1,12 +1,13 @@
-# Syntax Specification (eMLF + xMLF)
+# Syntax Specification (eMLF Source + xMLF Dumps)
 
-This document is the syntax source of truth for parser and pretty-printer behavior.
+This document is the syntax source of truth for source parsers and diagnostic
+pretty-printer behavior.
 
 ## Canonical Parser Syntax (Paper-Aligned)
 
-The raw eMLF and explicit xMLF parser APIs accept the canonical Unicode syntax
-below. Legacy grammar forms and ASCII aliases are rejected; compatibility
-spellings are not a standing parser contract.
+The raw eMLF parser API accepts the canonical Unicode syntax below. Legacy
+grammar forms and ASCII aliases are rejected; compatibility spellings are not a
+standing parser contract.
 
 ### eMLF (from `emlf_typeing_rules.md`)
 
@@ -28,7 +29,11 @@ SrcType     ::= α
 Binder      ::= α | "(" α "⩾" SrcType ")"
 ```
 
-### xMLF (from `xmlf_typeing_rules.md`)
+### xMLF Diagnostic Dumps (from `xmlf_typeing_rules.md`)
+
+xMLF terms are checked `XmlfTerm` values, not a source text format. `MLF.XMLF`
+pretty-prints diagnostic dumps from checked IR; there is no explicit xMLF term
+parser or parse/pretty roundtrip contract.
 
 ```ebnf
 Type        ::= α
@@ -57,13 +62,16 @@ Term        ::= x
 ## Retired Legacy Syntax
 
 These former compatibility forms are parse errors on the raw eMLF, explicit
-xMLF, and `.mlfp` parser APIs where the token or grammar family applies:
+`.mlfp`, or retired historical xMLF parser APIs where the token or grammar
+family applies:
 
 - ASCII token aliases: `\`, `forall`, `>=`, `_|_`, `bottom`, `Lambda`,
   `epsilon`, and `1`.
 - eMLF legacy lambdas such as `λx. t` and `λx:τ. t`.
-- xMLF legacy computations such as `!a`, `⟨τ⟩`, and bare `τ` as a computation.
-- xMLF legacy type and term forms such as `∀a. τ`, `Λa. t`, and `λx:τ. t`.
+- Historical xMLF legacy computations such as `!a`, `⟨τ⟩`, and bare `τ` as a
+  computation.
+- Historical xMLF legacy type and term forms such as `∀a. τ`, `Λa. t`, and
+  `λx:τ. t`.
 
 ## Normalization Rules
 
@@ -87,9 +95,10 @@ xMLF, and `.mlfp` parser APIs where the token or grammar family applies:
   type application in annotations. The source normalizer beta-reduces supported
   applications and rejects residual type lambdas or non-normalized general
   applications before the MLF core boundary.
-- xMLF term/type syntax includes base types as uppercase 0-ary constructors (e.g. `Int`, `Bool`).
-- xMLF parser accepts recursive term forms `roll[τ] t` and `unroll t`.
-- `ElabTerm` carries let schemes (`ELet String ElabScheme ...`); pretty output keeps `let x : scheme = ... in ...` as a repository-specific extension for debugging fidelity.
+- xMLF dump syntax includes base types as uppercase 0-ary constructors (e.g.
+  `Int`, `Bool`) and recursive term forms `roll[τ] t` / `unroll t`.
+- `XmlfTerm` is the checked xMLF term IR. It carries typing metadata such as
+  let schemes internally, but dump text is diagnostic output only.
 
 ## Unified `.mlfp` Program Surface
 

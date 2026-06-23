@@ -11,6 +11,7 @@ module MLF.Elab.Run.Generalize.Prepare.Internal (
     preparedResultTypeViewReady,
     preparedElaborationConfig,
     preparedElaborationEnv,
+    preparedElaborationEnvWithInitialEnv,
     stripPreparedWitnesslessAuthoritativeAnn,
     generalizePreparedRoot,
     generalizePreparedRootDetailed,
@@ -46,6 +47,7 @@ import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Phase (Phase(Acyclic, Presolved))
 import MLF.Constraint.Types.Presolution (PresolutionSnapshot(..))
 import MLF.Elab.Elaborate (ElabConfig(..), ElabEnv(..))
+import MLF.Elab.Elaborate.Algebra (Env, mkEnv)
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Elab.ReadModel (ElabReadModel, buildElabReadModel)
 import MLF.Elab.Run.Annotation (annNode, redirectAndCanonicalizeAnn)
@@ -81,6 +83,7 @@ import MLF.Elab.Types
     , ElabScheme
     , ElabType
     , SchemeInfo
+    , TypeBinderRef
     , bindingToElab
     )
 import MLF.Frontend.ConstraintGen (AnnExpr(..))
@@ -138,7 +141,7 @@ data PreparedRootGeneralization = PreparedRootGeneralization
     { prgScopeRoot :: NodeRef
     , prgTarget :: NodeId
     , prgScheme :: ElabScheme
-    , prgSubst :: IntMap.IntMap String
+    , prgSubst :: IntMap.IntMap TypeBinderRef
     }
 
 prepareGeneralizationArtifact
@@ -296,6 +299,14 @@ preparedElaborationEnv
     -> PreparedGeneralizationArtifact
     -> ElabEnv 'Presolved
 preparedElaborationEnv annSourceTypes initialTermEnv artifact =
+    preparedElaborationEnvWithInitialEnv annSourceTypes (mkEnv initialTermEnv) artifact
+
+preparedElaborationEnvWithInitialEnv
+    :: IntMap.IntMap NormSrcType
+    -> Env
+    -> PreparedGeneralizationArtifact
+    -> ElabEnv 'Presolved
+preparedElaborationEnvWithInitialEnv annSourceTypes initialTermEnv artifact =
     ElabEnv
         { eePresolutionView = pgaPresolutionView artifact
         , eeReadModel = pgaReadModel artifact
@@ -330,7 +341,7 @@ generalizePreparedRoot
     :: PreparedGeneralizationArtifact
     -> AnnExpr
     -> AnnExpr
-    -> Either ElabError (ElabScheme, IntMap.IntMap String)
+    -> Either ElabError (ElabScheme, IntMap.IntMap TypeBinderRef)
 generalizePreparedRoot artifact authoritativeAnnCanon authoritativeAnnPre = do
     detailed <- generalizePreparedRootDetailed artifact authoritativeAnnCanon authoritativeAnnPre
     pure (prgScheme detailed, prgSubst detailed)

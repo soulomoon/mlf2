@@ -34,8 +34,8 @@ import MLF.Util.Trace (TraceConfig)
 data OmegaContext (p :: Phase) = OmegaContext
     { ocTraceConfig :: TraceConfig
     , ocPresolutionView :: PresolutionView p
-    , ocReifyBoundWithNames :: IntMap.IntMap String -> NodeId -> Either ElabError ElabType
-    , ocReifyTypeWithNamedSetNoFallback :: IntMap.IntMap String -> IntSet.IntSet -> NodeId -> Either ElabError ElabType
+    , ocReifyBoundWithRefs :: IntMap.IntMap TypeBinderRef -> NodeId -> Either ElabError ElabType
+    , ocReifyTypeWithNamedSetRefsNoFallback :: IntMap.IntMap TypeBinderRef -> IntSet.IntSet -> NodeId -> Either ElabError ElabType
     , ocCopyMap :: IntMap.IntMap NodeId
     , ocGaParents :: Maybe (GaBindParents p)
     , ocTrace :: Maybe EdgeTrace

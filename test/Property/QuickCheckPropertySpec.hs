@@ -27,9 +27,19 @@ import MLF.Constraint.Types.Graph
   )
 import MLF.Constraint.Unify.Decompose (decomposeUnifyChildren)
 -- Reification type operations
-import MLF.Reify.TypeOps (alphaEqType, freeTypeVarsType, substTypeCapture)
+import MLF.Reify.TypeOps (alphaEqType, freeTypeVarsType, substTypeCaptureRef)
 -- Elaboration types
-import MLF.Types.Elab (BoundType, ElabType, Ty (..))
+import MLF.Types.Elab
+  ( BoundType,
+    ElabType,
+    Ty (..),
+    TypeBinderRef,
+    tForallWithRef,
+    tMuWithRef,
+    tVarWithRef,
+    typeBinderIdentityFromNode,
+    typeBinderRefFromIdentity,
+  )
 -- Test utilities
 import SpecUtil (bindParentsFromPairs, emptyConstraint, nodeMapFromList, rootedConstraint)
 import Test.Hspec
@@ -41,25 +51,44 @@ import MLF.Constraint.Types.Phase (Phase(Raw))
 -- ============================================================================
 
 -- | Sized generator for well-formed elaboration types (ElabType = Ty 'AllowVar).
+namedTypeRef :: String -> TypeBinderRef
+namedTypeRef name =
+  typeBinderRefFromIdentity (typeBinderIdentityFromNode (NodeId key)) name
+  where
+    key =
+      case name of
+        "a" -> 1001
+        "b" -> 1002
+        "c" -> 1003
+        "d" -> 1004
+        "e" -> 1005
+        "x" -> 1006
+        "y" -> 1007
+        "z" -> 1008
+        "r" -> 1009
+        "s" -> 1010
+        _ -> 1099
+
 genElabType :: Int -> Gen ElabType
 genElabType n
   | n <= 0 =
       oneof
-        [ TVar <$> elements ["a", "b", "c", "d", "e"],
+        [ tVarWithRef . namedTypeRef <$> elements ["a", "b", "c", "d", "e"],
           TBase . BaseTy <$> elements ["int", "bool"],
           pure TBottom
         ]
   | otherwise =
       oneof
-        [ TVar <$> elements ["a", "b", "c", "d", "e"],
+        [ tVarWithRef . namedTypeRef <$> elements ["a", "b", "c", "d", "e"],
           TBase . BaseTy <$> elements ["int", "bool"],
           pure TBottom,
           TArrow <$> genElabType half <*> genElabType half,
-          TForall
+          tForallWithRef
+            . namedTypeRef
             <$> elements ["x", "y", "z"]
             <*> oneof [pure Nothing, Just <$> genBoundType half]
             <*> genElabType half,
-          TMu <$> elements ["r", "s"] <*> genElabType half
+          tMuWithRef . namedTypeRef <$> elements ["r", "s"] <*> genElabType half
         ]
   where
     half = n `div` 2
@@ -78,11 +107,12 @@ genBoundType n
         [ TBase . BaseTy <$> elements ["int", "bool"],
           pure TBottom,
           TArrow <$> genElabType half <*> genElabType half,
-          TForall
+          tForallWithRef
+            . namedTypeRef
             <$> elements ["x", "y", "z"]
             <*> oneof [pure Nothing, Just <$> genBoundType half]
             <*> genElabType half,
-          TMu <$> elements ["r", "s"] <*> genElabType half
+          tMuWithRef . namedTypeRef <$> elements ["r", "s"] <*> genElabType half
         ]
   where
     half = n `div` 2
@@ -90,8 +120,8 @@ genBoundType n
 -- | Shrink ElabType by reducing to subterms.
 shrinkElabType :: ElabType -> [ElabType]
 shrinkElabType (TArrow a b) = [a, b]
-shrinkElabType (TForall _ _ body) = [body]
-shrinkElabType (TMu _ body) = [body]
+shrinkElabType (TForallRef _ _ body) = [body]
+shrinkElabType (TMuRef _ body) = [body]
 shrinkElabType _ = []
 
 -- ============================================================================
@@ -258,12 +288,13 @@ spec = describe "Property.QuickCheckProperty" $ do
 
 reificationProperties :: Spec
 reificationProperties = describe "Reification round-trip well-formedness" $ do
-  it "substTypeCapture preserves free-variable well-formedness" $
+  it "substTypeCaptureRef preserves free-variable well-formedness" $
     property $
       forAllShrink (sized genElabType) shrinkElabType $ \ty ->
         forAll (elements ["a", "b", "c", "d", "e"]) $ \v ->
           forAllShrink (sized genElabType) shrinkElabType $ \s ->
-            let result = substTypeCapture v s ty
+            let target = namedTypeRef v
+                result = substTypeCaptureRef target s ty
                 fvResult = freeTypeVarsType result
                 expected = Set.union (Set.delete v (freeTypeVarsType ty)) (freeTypeVarsType s)
              in fvResult `Set.isSubsetOf` expected
@@ -287,7 +318,7 @@ reificationProperties = describe "Reification round-trip well-formedness" $ do
               fresh = case filter (`Set.notMember` used) ["q0", "q1", "q2", "q3", "q4"] of
                 (v : _) -> v
                 [] -> "q99" -- unreachable: only 5 var names in genElabType
-           in substTypeCapture fresh s ty === ty
+           in substTypeCaptureRef (namedTypeRef fresh) s ty === ty
 
 -- ============================================================================
 -- Deliverable (b): Canonicalization idempotency

@@ -51,10 +51,10 @@ import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Constraint.BindingUtil (bindingPathToRootLocal)
 import MLF.Elab.ReadModel (ElabReadModel(..), buildElabReadModel)
 import MLF.Reify.Core
-    ( reifyBoundWithNamesReadModel
-    , reifyType
-    , reifyTypeWithNamedSetNoFallbackReadModel
+    ( reifyType
     )
+import MLF.Reify.Bound (reifyBoundWithRefsReadModel)
+import MLF.Reify.Type (reifyTypeWithNamedSetRefsNoFallbackReadModel)
 import MLF.Constraint.Presolution (EdgeTrace(..), PresolutionView(..))
 import MLF.Constraint.Presolution.Base (CopyMapping(..), InteriorNodes(..), copiedNodes)
 import qualified MLF.Constraint.NodeAccess as NodeAccess
@@ -74,7 +74,7 @@ type GeneralizeAtWith (p :: Phase) =
     Maybe (GaBindParents p)
     -> NodeRef
     -> NodeId
-    -> Either ElabError (ElabScheme, IntMap.IntMap String)
+    -> Either ElabError (ElabScheme, IntMap.IntMap TypeBinderRef)
 
 phiFromEdgeWitnessWithTrace
     :: TraceConfig
@@ -184,16 +184,14 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith readModel mbGaParents mSchemeIn
     let mSchemeInfoReplaySeed =
             case mSchemeInfo of
                 Just si ->
-                    let schemeArity =
-                            case siScheme si of
-                                Forall binds _ -> length binds
+                    let schemeArity = length (schemeBinderRefs (siScheme si))
                     in if schemeArity == 0 && maybe False (\tr -> traceBinderArity tr > 0) mTrace
                         then Nothing
                         else Just si
                 Nothing -> Nothing
     case debugPhi
         ("phi scheme replay-subst edge=" ++ show (ewEdgeId ew)
-            ++ " subst=" ++ show (fmap siSubst mSchemeInfoReplaySeed)
+            ++ " subst=" ++ show (fmap schemeInfoBinderRefSubst mSchemeInfoReplaySeed)
         )
         () of
         () -> pure ()
@@ -233,8 +231,8 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith readModel mbGaParents mSchemeIn
         OmegaContext
             { ocTraceConfig = traceCfg
             , ocPresolutionView = presolutionView
-            , ocReifyBoundWithNames = reifyBoundWithNamesAt
-            , ocReifyTypeWithNamedSetNoFallback = reifyTypeWithNamedSetNoFallbackAt
+            , ocReifyBoundWithRefs = reifyBoundWithRefsAt
+            , ocReifyTypeWithNamedSetRefsNoFallback = reifyTypeWithNamedSetRefsNoFallbackAt
             , ocCopyMap = copyMap
             , ocGaParents = mbGaParents
             , ocTrace = mTrace
@@ -261,18 +259,18 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith readModel mbGaParents mSchemeIn
     reifyDebugType :: NodeId -> Either ElabError ElabType
     reifyDebugType = reifyType presolutionView
 
-    reifyBoundWithNamesAt
-        :: IntMap.IntMap String
+    reifyBoundWithRefsAt
+        :: IntMap.IntMap TypeBinderRef
         -> NodeId
         -> Either ElabError ElabType
-    reifyBoundWithNamesAt = reifyBoundWithNamesReadModel readModel
+    reifyBoundWithRefsAt = reifyBoundWithRefsReadModel readModel
 
-    reifyTypeWithNamedSetNoFallbackAt
-        :: IntMap.IntMap String
+    reifyTypeWithNamedSetRefsNoFallbackAt
+        :: IntMap.IntMap TypeBinderRef
         -> IntSet.IntSet
         -> NodeId
         -> Either ElabError ElabType
-    reifyTypeWithNamedSetNoFallbackAt = reifyTypeWithNamedSetNoFallbackReadModel readModel
+    reifyTypeWithNamedSetRefsNoFallbackAt = reifyTypeWithNamedSetRefsNoFallbackReadModel readModel
 
     computeTraceBinderReplayBridge
         :: Maybe EdgeTrace
@@ -304,7 +302,7 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith readModel mbGaParents mSchemeIn
                             replayBinders@(_ : _) ->
                                 IntSet.fromList (map getNodeId replayBinders)
                             [] ->
-                                IntSet.fromAscList (IntMap.keys (siSubst siReplay))
+                                schemeInfoBinderIdentityKeySet siReplay
                     targetInReplayDomainRaw replayTarget =
                         IntSet.member (getNodeId replayTarget) replayBinderDomainRaw
                     missingSources =
@@ -394,7 +392,7 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith readModel mbGaParents mSchemeIn
             case mbGaParents of
                 Nothing -> generalizeAtWith Nothing scopeRoot targetNode
                 Just ga -> generalizeAtWith (Just ga) scopeRoot targetNode
-        pure SchemeInfo { siScheme = sch, siSubst = subst }
+        pure (schemeInfoFromRefSubst sch subst)
 
     instScopeRoot :: NodeId -> Either ElabError NodeRef
     instScopeRoot root0 =

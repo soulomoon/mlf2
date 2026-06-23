@@ -18,6 +18,7 @@ module MLF.Primitive.Inventory
     normalizeBuiltinTypeReference,
     matchesBuiltinTypeName,
     primitiveValueSpecs,
+    primitiveValueElabTypes,
     primitiveValueNames,
     primitiveNativeSupport,
     nativeAndPrimitiveName,
@@ -82,9 +83,10 @@ import qualified Data.Map.Strict as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
 import MLF.Constraint.Types.Graph (BaseTy (..))
-import MLF.Elab.Types (ElabType, Ty (..))
+import MLF.Elab.Types (ElabType, Ty (..), TypeBinderRef, freshTypeBinderRef)
 import MLF.Frontend.Syntax (SrcBound (..), SrcTy (..), SrcType)
 import qualified MLF.Frontend.Syntax.Program as P
+import MLF.Types.Identity (IdentityGenerator, initialIdentityGenerator)
 
 data BuiltinTypeSpec = BuiltinTypeSpec
   { builtinTypeSpecKind :: P.SrcKind,
@@ -619,6 +621,18 @@ primitiveValueSpecs =
 primitiveValueNames :: Set String
 primitiveValueNames = Map.keysSet primitiveValueSpecs
 
+primitiveValueElabTypes :: Map String ElabType
+primitiveValueElabTypes =
+  snd $
+    Map.mapAccumWithKey
+      ( \generator _name spec0 ->
+          let (ty, generator') =
+                primitiveTypeToElabTypeFrom generator (primitiveValueType spec0)
+           in (generator', ty)
+      )
+      initialIdentityGenerator
+      primitiveValueSpecs
+
 primitiveNativeSupport :: String -> Maybe PrimitiveNativeSupport
 primitiveNativeSupport name =
   primitiveValueNativeSupport <$> Map.lookup name primitiveValueSpecs
@@ -917,18 +931,83 @@ primitiveTypeToSourceType =
       STMu name (primitiveTypeToSourceType body)
 
 primitiveTypeToElabType :: PrimitiveType -> ElabType
-primitiveTypeToElabType =
-  \case
-    PrimitiveTypeVar name -> TVar name
-    PrimitiveTypeArrow dom cod ->
-      TArrow (primitiveTypeToElabType dom) (primitiveTypeToElabType cod)
-    PrimitiveTypeBase name -> TBase (BaseTy name)
-    PrimitiveTypeCon name args ->
-      TCon (BaseTy name) (fmap primitiveTypeToElabType args)
-    PrimitiveTypeForall name body ->
-      TForall name Nothing (primitiveTypeToElabType body)
-    PrimitiveTypeMu name body ->
-      TMu name (primitiveTypeToElabType body)
+primitiveTypeToElabType ty =
+  fst (primitiveTypeToElabTypeFrom initialIdentityGenerator ty)
+
+primitiveTypeToElabTypeFrom :: IdentityGenerator -> PrimitiveType -> (ElabType, IdentityGenerator)
+primitiveTypeToElabTypeFrom generator0 ty =
+  let (freeEnv, generator) =
+        foldl
+          ( \(env, gen) name ->
+              let (ref, gen') = freshTypeBinderRef name gen
+               in (Map.insert name ref env, gen')
+          )
+          (Map.empty, generator0)
+          (Set.toAscList (freePrimitiveTypeVars ty))
+      (ty', generator') = go freeEnv generator ty
+   in (ty', generator')
+  where
+    go :: Map String TypeBinderRef -> IdentityGenerator -> PrimitiveType -> (ElabType, IdentityGenerator)
+    go env generator =
+      \case
+        PrimitiveTypeVar name ->
+          case Map.lookup name env of
+            Just ref -> (TVarRef ref, generator)
+            Nothing ->
+              let (ref, generator') = freshTypeBinderRef name generator
+               in (TVarRef ref, generator')
+        PrimitiveTypeArrow dom cod ->
+          let (dom', generator1) = go env generator dom
+              (cod', generator2) = go env generator1 cod
+           in (TArrow dom' cod', generator2)
+        PrimitiveTypeBase name -> (TBase (BaseTy name), generator)
+        PrimitiveTypeCon name args ->
+          let (args', generator') = mapAccumPrimitiveTypes env generator args
+           in (TCon (BaseTy name) args', generator')
+        PrimitiveTypeForall name body ->
+          let (ref, generator1) = freshTypeBinderRef name generator
+              (body', generator2) = go (Map.insert name ref env) generator1 body
+           in (TForallRef ref Nothing body', generator2)
+        PrimitiveTypeMu name body ->
+          let (ref, generator1) = freshTypeBinderRef name generator
+              (body', generator2) = go (Map.insert name ref env) generator1 body
+           in (TMuRef ref body', generator2)
+
+    mapAccumPrimitiveTypes
+      :: Map String TypeBinderRef
+      -> IdentityGenerator
+      -> NonEmpty PrimitiveType
+      -> (NonEmpty ElabType, IdentityGenerator)
+    mapAccumPrimitiveTypes env generator (arg :| args) =
+      let (arg', generator1) = go env generator arg
+          (argsRev, generator') =
+            foldl
+              ( \(acc, gen) item ->
+                  let (item', gen') = go env gen item
+                   in (item' : acc, gen')
+              )
+              ([], generator1)
+              args
+       in (arg' :| reverse argsRev, generator')
+
+freePrimitiveTypeVars :: PrimitiveType -> Set String
+freePrimitiveTypeVars =
+  go Set.empty
+  where
+    go bound =
+      \case
+        PrimitiveTypeVar name
+          | Set.member name bound -> Set.empty
+          | otherwise -> Set.singleton name
+        PrimitiveTypeArrow dom cod ->
+          Set.union (go bound dom) (go bound cod)
+        PrimitiveTypeBase _ -> Set.empty
+        PrimitiveTypeCon _ args ->
+          Set.unions (fmap (go bound) args)
+        PrimitiveTypeForall name body ->
+          go (Set.insert name bound) body
+        PrimitiveTypeMu name body ->
+          go (Set.insert name bound) body
 
 canonicalizeBuiltinSourceType :: SrcType -> SrcType
 canonicalizeBuiltinSourceType =

@@ -6,18 +6,84 @@ import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
 import MLF.Frontend.Program.Elaborate (lowerType, mkElaborateScope)
 import MLF.Frontend.Program.Types
-import MLF.Frontend.Syntax (SrcBound (..), SrcTy (..), SrcType, firstOrderTypeParam)
+import MLF.Frontend.Syntax.Program (ResolvedExportTypeRef (..))
+import MLF.Frontend.Symbol (symbolIdentityStableName)
+import MLF.Frontend.Syntax
+  ( ResolvedSrcTy (..),
+    ResolvedTypeBinderRef (..),
+    SrcBound (..),
+    SrcTy (..),
+    SrcType,
+    firstOrderTypeParam,
+    resolvedSrcTypeIdentityType,
+  )
+import MLF.Types.Identity (UniqueIdentity (..))
 import Test.Hspec
+
+generatedSymbolIdentity ::
+  Int ->
+  SymbolNamespace ->
+  String ->
+  String ->
+  Maybe SymbolOwnerIdentity ->
+  SymbolIdentity
+generatedSymbolIdentity unique namespace moduleName name owner =
+  SymbolIdentity (UniqueIdentity unique) namespace moduleName name owner
+
+valueInfoIdentity :: SymbolIdentity
+valueInfoIdentity =
+  generatedSymbolIdentity 101 SymbolValue "Lib" "answer" Nothing
+
+mainValueIdentity :: SymbolIdentity
+mainValueIdentity =
+  generatedSymbolIdentity 102 SymbolValue "Main" "main" Nothing
+
+tokenTypeIdentity :: SymbolIdentity
+tokenTypeIdentity =
+  generatedSymbolIdentity 103 SymbolType "Lib" "Token" Nothing
+
+tokenOwnerIdentity :: SymbolOwnerIdentity
+tokenOwnerIdentity =
+  SymbolOwnerType tokenTypeIdentity
+
+someCtorIdentity :: SymbolIdentity
+someCtorIdentity =
+  generatedSymbolIdentity 104 SymbolConstructor "Lib" "Some" (Just tokenOwnerIdentity)
+
+higherTypeIdentity :: SymbolIdentity
+higherTypeIdentity =
+  generatedSymbolIdentity 105 SymbolType "Lib" "Higher" Nothing
+
+higherOwnerIdentity :: SymbolOwnerIdentity
+higherOwnerIdentity =
+  SymbolOwnerType higherTypeIdentity
+
+higherCtorIdentity :: SymbolIdentity
+higherCtorIdentity =
+  generatedSymbolIdentity 106 SymbolConstructor "Lib" "Higher" (Just higherOwnerIdentity)
+
+eqClassIdentity :: SymbolIdentity
+eqClassIdentity =
+  generatedSymbolIdentity 107 SymbolClass "Lib" "Eq" Nothing
+
+eqClassOwnerIdentity :: SymbolOwnerIdentity
+eqClassOwnerIdentity =
+  SymbolOwnerClass eqClassIdentity
+
+eqMethodIdentity :: SymbolIdentity
+eqMethodIdentity =
+  generatedSymbolIdentity 108 SymbolMethod "Lib" "eq" (Just eqClassOwnerIdentity)
 
 spec :: Spec
 spec = do
   describe "MLF.Program resolved symbol identities" $ do
     it "keeps imported value identity stable across unqualified and aliased spellings" $ do
-      let unqualified = resolvedValueInfoSymbol (SymbolUnqualifiedImport "Lib") valueInfo
+      let unqualified = resolvedValueInfoSymbol (SymbolUnqualifiedImport "Lib") "answer" valueInfo
           qualified =
             resolvedValueInfoSymbol
               (SymbolQualifiedImport "Lib" "L")
-              valueInfo {valueDisplayName = "L.answer"}
+              "L.answer"
+              valueInfo
 
       sameResolvedSymbol unqualified qualified `shouldBe` True
       resolvedSymbolIdentity unqualified `shouldBe` resolvedSymbolIdentity qualified
@@ -32,36 +98,131 @@ spec = do
               (SymbolQualifiedImport "Lib" "L")
               "L.Some"
               tokenDataInfo
-              someCtor {ctorName = "L.Some"}
+              someCtor
 
       sameResolvedSymbol typeUnqualified typeQualified `shouldBe` True
       sameResolvedSymbol ctorUnqualified ctorQualified `shouldBe` True
       symbolOwnerIdentity (resolvedSymbolIdentity ctorQualified)
-        `shouldBe` Just (SymbolOwnerType "Lib" "Token")
+        `shouldBe` Just tokenOwnerIdentity
 
     it "represents imported class and method aliases with the same semantic identities" $ do
-      let classUnqualified = resolvedClassInfoSymbol (SymbolUnqualifiedImport "Lib") eqClassInfo
-          classQualified = resolvedClassInfoSymbol (SymbolQualifiedImport "Lib" "L") qualifiedEqClassInfo
-          methodUnqualified = resolvedValueInfoSymbol (SymbolUnqualifiedImport "Lib") eqMethodValue
+      let classUnqualified = resolvedClassInfoSymbol (SymbolUnqualifiedImport "Lib") "Eq" eqClassInfo
+          classQualified = resolvedClassInfoSymbol (SymbolQualifiedImport "Lib" "L") "L.Eq" qualifiedEqClassInfo
+          methodUnqualified = resolvedValueInfoSymbol (SymbolUnqualifiedImport "Lib") "eq" eqMethodValue
           methodQualified =
             resolvedValueInfoSymbol
               (SymbolQualifiedImport "Lib" "L")
+              "L.eq"
               qualifiedEqMethodValue
 
       sameResolvedSymbol classUnqualified classQualified `shouldBe` True
       sameResolvedSymbol methodUnqualified methodQualified `shouldBe` True
       symbolOwnerIdentity (resolvedSymbolIdentity methodQualified)
-        `shouldBe` Just (SymbolOwnerClass "Lib" "Eq")
+        `shouldBe` Just eqClassOwnerIdentity
 
     it "can model local declarations and module/import identities without changing semantic keys" $ do
-      let local = resolvedValueInfoSymbol (SymbolLocal "Main") mainValueInfo
-          importedModule = resolvedModuleSymbol (SymbolQualifiedImport "Lib" "L") "Lib" "L"
+      let local = resolvedValueInfoSymbol (SymbolLocal "Main") "main" mainValueInfo
+          importedModule = resolvedModuleSymbol (SymbolQualifiedImport "Lib" "L") (UniqueIdentity 10) "Lib" "L"
 
       resolvedSymbolIdentity local
-        `shouldBe` SymbolIdentity SymbolValue "Main" "main" Nothing
+        `shouldBe` mainValueIdentity
       resolvedSymbolIdentity importedModule
-        `shouldBe` SymbolIdentity SymbolModule "Lib" "Lib" Nothing
+        `shouldBe` SymbolIdentity (UniqueIdentity 10) SymbolModule "Lib" "Lib" Nothing
       symbolDisplayName (resolvedSymbolSpelling importedModule) `shouldBe` "L"
+
+    it "compares symbol identities by generated identity" $ do
+      let first =
+            mkResolvedSymbol
+              (SymbolIdentity (UniqueIdentity 1) SymbolValue "Main" "x" Nothing)
+              "x"
+              "x"
+              (SymbolLocal "Main")
+          firstAlias =
+            mkResolvedSymbol
+              (SymbolIdentity (UniqueIdentity 1) SymbolValue "Other" "stale-x" Nothing)
+              "Main.x"
+              "Main.x"
+              (SymbolQualifiedImport "Main" "Main")
+          second =
+            mkResolvedSymbol
+              (SymbolIdentity (UniqueIdentity 2) SymbolValue "Main" "x" Nothing)
+              "x"
+              "x"
+              (SymbolLocal "Main")
+
+      sameResolvedSymbol first firstAlias `shouldBe` True
+      sameResolvedSymbol first second `shouldBe` False
+      Map.lookup (resolvedSymbolIdentity firstAlias) (Map.singleton (resolvedSymbolIdentity first) "hit")
+        `shouldBe` Just "hit"
+
+    it "uses semantic identity for resolved symbol and reference equality" $ do
+      let first =
+            mkResolvedSymbol
+              (SymbolIdentity (UniqueIdentity 901) SymbolValue "Main" "x" Nothing)
+              "x"
+              "x"
+              (SymbolLocal "Main")
+          firstAlias =
+            mkResolvedSymbol
+              (SymbolIdentity (UniqueIdentity 901) SymbolValue "Other" "stale-x" Nothing)
+              "Other.x"
+              "Other.x"
+              (SymbolQualifiedImport "Other" "Other")
+          firstRef = ResolvedReference ResolvedValueReference "x" first
+          firstAliasRef = ResolvedReference ResolvedValueReference "Other.x" firstAlias
+
+      firstAlias `shouldBe` first
+      Map.lookup firstAlias (Map.singleton first "hit") `shouldBe` Just "hit"
+      firstAliasRef `shouldBe` firstRef
+      Map.lookup firstAliasRef (Map.singleton firstRef "hit") `shouldBe` Just "hit"
+
+    it "uses semantic identity for resolved export type references" $ do
+      let typeUnqualified = resolvedDataInfoSymbol (SymbolUnqualifiedImport "Lib") "Token" tokenDataInfo
+          typeQualified = resolvedDataInfoSymbol (SymbolQualifiedImport "Lib" "L") "L.Token" tokenDataInfo
+          unqualifiedRef = ResolvedExportTypeRef "Token" [typeUnqualified]
+          qualifiedRef = ResolvedExportTypeRef "L.Token" [typeQualified]
+
+      qualifiedRef `shouldBe` unqualifiedRef
+
+    it "exposes generated stable names for identity aliases" $ do
+      let typeSymbol =
+            mkResolvedSymbol
+              (SymbolIdentity (UniqueIdentity 42) SymbolType "Lib" "Token" Nothing)
+              "Token"
+              "Token"
+              (SymbolLocal "Lib")
+
+      symbolIdentityStableName (resolvedSymbolIdentity typeSymbol) `shouldBe` "$identity#42"
+
+    it "keeps same-named type binders distinct in identity types" $ do
+      let outer = ResolvedTypeBinderRef (UniqueIdentity 201) "a"
+          inner = ResolvedTypeBinderRef (UniqueIdentity 202) "a"
+          ty =
+            RSTForall
+              outer
+              Nothing
+              (RSTForall inner Nothing (RSTArrow (RSTVar outer) (RSTVar inner)))
+
+      resolvedSrcTypeIdentityType ty
+        `shouldBe` STForall
+          "$typevar#201"
+          Nothing
+          ( STForall
+              "$typevar#202"
+              Nothing
+              (STArrow (STVar "$typevar#201") (STVar "$typevar#202"))
+          )
+
+    it "lowers value sidecars from semantic identity instead of imported spelling" $ do
+      let qualifiedValueIdentity = loweredBindingIdentityFromValueInfo valueInfo
+          qualifiedMethodIdentity = loweredBindingIdentityFromValueInfo qualifiedEqMethodValue
+
+      loweredIdentityRuntimeName qualifiedValueIdentity `shouldBe` "Lib__answer"
+      loweredIdentityDetails qualifiedValueIdentity
+        `shouldBe` TopLevelId valueInfoIdentity
+      loweredIdentityRuntimeName qualifiedMethodIdentity `shouldBe` "eq"
+      loweredIdentityDetails qualifiedMethodIdentity
+        `shouldBe` MethodId (methodInfoSymbolIdentity qualifiedEqMethodInfo)
 
   describe "substituteTypeVar" $ do
     it "composes variable-headed type application heads with partially applied constructors" $
@@ -116,46 +277,37 @@ toListNE (x :| xs) = x : xs
 valueInfo :: ValueInfo
 valueInfo =
   OrdinaryValue
-    { valueDisplayName = "answer",
-      valueInfoSymbol = SymbolIdentity SymbolValue "Lib" "answer" Nothing,
+    { valueInfoSymbol = valueInfoIdentity,
       valueRuntimeName = "Lib__answer",
       valueType = STBase "Int",
       valueIdentityType = STBase "Int",
       valueConstraints = [],
-      valueConstraintInfos = [],
-      valueOriginModule = "Lib"
+      valueConstraintInfos = []
     }
 
 mainValueInfo :: ValueInfo
 mainValueInfo =
   OrdinaryValue
-    { valueDisplayName = "main",
-      valueInfoSymbol = SymbolIdentity SymbolValue "Main" "main" Nothing,
+    { valueInfoSymbol = mainValueIdentity,
       valueRuntimeName = "Main__main",
       valueType = STBase "Int",
       valueIdentityType = STBase "Int",
       valueConstraints = [],
-      valueConstraintInfos = [],
-      valueOriginModule = "Main"
+      valueConstraintInfos = []
     }
 
 someCtor :: ConstructorInfo
 someCtor =
   ConstructorInfo
-    { ctorName = "Some",
-      ctorInfoSymbol =
-        SymbolIdentity
-          SymbolConstructor
-          "Lib"
-          "Some"
-          (Just (SymbolOwnerType "Lib" "Token")),
+    { ctorInfoSymbol = someCtorIdentity,
       ctorRuntimeName = "Lib__Some",
       ctorType = STBase "Token",
+      ctorTypeIdentity = STBase "Lib.Token",
       ctorForalls = [],
+      ctorForallBinderIdentities = [],
       ctorArgs = [],
       ctorResult = STBase "Token",
-      ctorOwningType = "Token",
-      ctorOwningTypeIdentity = SymbolIdentity SymbolType "Lib" "Token" Nothing,
+      ctorOwningTypeIdentity = tokenTypeIdentity,
       ctorIndex = 0,
       ctorOwnerConstructors = []
     }
@@ -163,34 +315,29 @@ someCtor =
 tokenDataInfo :: DataInfo
 tokenDataInfo =
   DataInfo
-    { dataName = "Token",
-      dataInfoSymbol = SymbolIdentity SymbolType "Lib" "Token" Nothing,
-      dataModule = "Lib",
+    { dataInfoSymbol = tokenTypeIdentity,
       dataTypeParams = [],
-      dataParams = [],
       dataConstructors = [someCtor]
     }
 
 higherCtor :: ConstructorInfo
 higherCtor =
   ConstructorInfo
-    { ctorName = "Higher",
-      ctorInfoSymbol =
-        SymbolIdentity
-          SymbolConstructor
-          "Lib"
-          "Higher"
-          (Just (SymbolOwnerType "Lib" "Higher")),
+    { ctorInfoSymbol = higherCtorIdentity,
       ctorRuntimeName = "Lib__Higher",
       ctorType =
         STArrow
           (STVarApp "f" (STVar "a" :| []))
           (STCon "Higher" (STVar "f" :| [STVar "a"])),
+      ctorTypeIdentity =
+        STArrow
+          (STVarApp "f" (STVar "a" :| []))
+          (STCon "Lib.Higher" (STVar "f" :| [STVar "a"])),
       ctorForalls = [],
+      ctorForallBinderIdentities = [],
       ctorArgs = [STVarApp "f" (STVar "a" :| [])],
       ctorResult = STCon "Higher" (STVar "f" :| [STVar "a"]),
-      ctorOwningType = "Higher",
-      ctorOwningTypeIdentity = SymbolIdentity SymbolType "Lib" "Higher" Nothing,
+      ctorOwningTypeIdentity = higherTypeIdentity,
       ctorIndex = 0,
       ctorOwnerConstructors = []
     }
@@ -198,87 +345,61 @@ higherCtor =
 higherDataInfo :: DataInfo
 higherDataInfo =
   DataInfo
-    { dataName = "Higher",
-      dataInfoSymbol = SymbolIdentity SymbolType "Lib" "Higher" Nothing,
-      dataModule = "Lib",
+    { dataInfoSymbol = higherTypeIdentity,
       dataTypeParams = [firstOrderTypeParam "f", firstOrderTypeParam "a"],
-      dataParams = ["f", "a"],
       dataConstructors = [higherCtor]
     }
 
 eqMethodInfo :: MethodInfo
 eqMethodInfo =
   MethodInfo
-    { methodClassName = "Eq",
-      methodInfoSymbol =
-        SymbolIdentity
-          SymbolMethod
-          "Lib"
-          "eq"
-          (Just (SymbolOwnerClass "Lib" "Eq")),
-      methodClassModule = "Lib",
-      methodName = "eq",
-      methodRuntimeBase = "Lib__Eq__eq",
+    { methodInfoSymbol = eqMethodIdentity,
       methodType = STArrow (STVar "a") (STArrow (STVar "a") (STBase "Bool")),
       methodTypeIdentity = STArrow (STVar "a") (STArrow (STVar "a") (STBase "Bool")),
+      methodTypeBinderIdentities = Map.empty,
       methodConstraints = [],
       methodConstraintInfos = [],
-      methodTypeParam = firstOrderTypeParam "a",
-      methodParamName = "a",
-      methodTypeParams = firstOrderTypeParam "a" :| [],
-      methodParamNames = "a" :| []
+      methodParamNames = "a" :| [],
+      methodParamIdentityNames = "a" :| [],
+      methodParamBinderIdentities = Nothing :| []
     }
 
 qualifiedEqMethodInfo :: MethodInfo
 qualifiedEqMethodInfo =
-  eqMethodInfo {methodClassName = "L.Eq"}
+  eqMethodInfo
 
 eqClassInfo :: ClassInfo
 eqClassInfo =
   ClassInfo
-    { className = "Eq",
-      classInfoSymbol = SymbolIdentity SymbolClass "Lib" "Eq" Nothing,
-      classModule = "Lib",
-      classTypeParam = firstOrderTypeParam "a",
-      classParamName = "a",
+    { classInfoSymbol = eqClassIdentity,
       classTypeParams = firstOrderTypeParam "a" :| [],
-      classParamNames = "a" :| [],
       classSuperclasses = [],
       classSuperclassInfos = [],
       classFunctionalDependencies = [],
-      classMethods = Map.singleton "eq" eqMethodInfo
+      classMethodsByIdentity = Map.singleton (methodInfoSymbolIdentity eqMethodInfo) eqMethodInfo
     }
 
 qualifiedEqClassInfo :: ClassInfo
 qualifiedEqClassInfo =
   ClassInfo
-    { className = "L.Eq",
-      classInfoSymbol = SymbolIdentity SymbolClass "Lib" "Eq" Nothing,
-      classModule = "Lib",
-      classTypeParam = firstOrderTypeParam "a",
-      classParamName = "a",
+    { classInfoSymbol = eqClassIdentity,
       classTypeParams = firstOrderTypeParam "a" :| [],
-      classParamNames = "a" :| [],
       classSuperclasses = [],
       classSuperclassInfos = [],
       classFunctionalDependencies = [],
-      classMethods = Map.singleton "eq" qualifiedEqMethodInfo
+      classMethodsByIdentity = Map.singleton (methodInfoSymbolIdentity qualifiedEqMethodInfo) qualifiedEqMethodInfo
     }
 
 eqMethodValue :: ValueInfo
 eqMethodValue =
   OverloadedMethod
-    { valueDisplayName = "eq",
-      valueInfoSymbol = methodInfoSymbolIdentity eqMethodInfo,
-      valueMethodInfo = eqMethodInfo,
-      valueOriginModule = "Lib"
+    { valueInfoSymbol = methodInfoSymbolIdentity eqMethodInfo,
+      valueMethodInfo = eqMethodInfo
     }
 
 qualifiedEqMethodValue :: ValueInfo
 qualifiedEqMethodValue =
   OverloadedMethod
-    { valueDisplayName = "L.eq",
-      valueInfoSymbol = methodInfoSymbolIdentity qualifiedEqMethodInfo,
-      valueMethodInfo = qualifiedEqMethodInfo,
-      valueOriginModule = "Lib"
+    { valueInfoSymbol = methodInfoSymbolIdentity qualifiedEqMethodInfo,
+      valueMethodInfo = qualifiedEqMethodInfo
     }

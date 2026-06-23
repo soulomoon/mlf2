@@ -86,7 +86,7 @@ generalizeWithPlan ::
   PresolutionView p ->
   NodeRef ->
   NodeId ->
-  Either ElabError (ElabScheme, IntMap.IntMap String)
+  Either ElabError (ElabScheme, IntMap.IntMap TypeBinderRef)
 generalizeWithPlan planBuilder bindParentsGa presolutionView scopeRoot targetNode =
   generalizeAtWithBuilder
     planBuilder
@@ -160,17 +160,17 @@ resultTypeRoots canonical sourceConstraint baseConstraint annCanon ann =
 containsBoundForall :: ElabType -> Bool
 containsBoundForall ty =
   let go t = case t of
-        TForall _ mb body ->
+        TForallRef _ mb body ->
           maybe False containsAnyForallBound mb || go body
         TArrow a b -> go a || go b
         TCon _ args -> any go args
-        TVarApp _ args -> any go args
+        TVarAppRef _ args -> any go args
         _ -> False
       containsAnyForallBound bound = case bound of
         TArrow a b -> go a || go b
         TCon _ args -> any go args
-        TVarApp _ args -> any go args
-        TForall _ _ _ -> True
+        TVarAppRef _ args -> any go args
+        TForallRef _ _ _ -> True
         _ -> False
    in go ty
 
@@ -184,37 +184,37 @@ instHasBoundForall inst = cata instAlg inst
       InstAppF ty -> containsForallTy ty
       InstBotF ty -> containsForallTy ty
       InstInsideF innerInst -> innerInst
-      InstUnderF _ innerInst -> innerInst
+      InstUnderFRef _ innerInst -> innerInst
       InstIntroF -> False
       InstElimF -> False
-      InstAbstrF _ -> False
+      InstAbstrFRef _ -> False
 
 -- | Instantiate implicit foralls (foralls with bounds)
 instantiateImplicitForalls :: ElabType -> ElabType
 instantiateImplicitForalls ty0 =
   let go ty = case ty of
-        TForall _ (Just _) _ ->
+        TForallRef _ (Just _) _ ->
           case applyInstantiation ty InstElim of
             Right ty' -> go ty'
             Left _ -> ty
-        TForall v mb body ->
-          TForall v (fmap goBound mb) (go body)
+        TForallRef ref mb body ->
+          TForallRef ref (fmap goBound mb) (go body)
         TArrow a b -> TArrow (go a) (go b)
-        TCon c args -> TCon c (fmap go args)
-        TVarApp v args -> TVarApp v (fmap go args)
-        TBase _ -> ty
+        TConWithIdentity identity c args -> TConWithIdentity identity c (fmap go args)
+        TVarAppRef ref args -> TVarAppRef ref (fmap go args)
+        TBaseWithIdentity _ _ -> ty
         TBottom -> ty
-        TVar _ -> ty
-        TMu v body -> TMu v (go body)
+        TVarRef _ -> ty
+        TMuRef ref body -> TMuRef ref (go body)
       goBound bound = case bound of
         TArrow a b -> TArrow (go a) (go b)
-        TCon c args -> TCon c (fmap go args)
-        TVarApp v args -> TVarApp v (fmap go args)
-        TBase b -> TBase b
+        TConWithIdentity identity c args -> TConWithIdentity identity c (fmap go args)
+        TVarAppRef ref args -> TVarAppRef ref (fmap go args)
+        TBaseWithIdentity identity b -> TBaseWithIdentity identity b
         TBottom -> TBottom
-        TForall v mb body ->
-          TForall v (fmap goBound mb) (go body)
-        TMu v body -> TMu v (go body)
+        TForallRef ref mb body ->
+          TForallRef ref (fmap goBound mb) (go body)
+        TMuRef ref body -> TMuRef ref (go body)
    in go ty0
 
 -- | Strip annotations from an AnnExpr

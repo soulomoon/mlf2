@@ -3,6 +3,7 @@ module Research.P2RepresentativeSupportSpec (spec) where
 import qualified Data.Set as Set
 import Test.Hspec
 
+import ElabTermTestSupport (testTForall, testTVar)
 import MLF.Elab.Pipeline
     ( runPipelineElab
     , runPipelineElab
@@ -95,7 +96,7 @@ spec =
 
 expectRecursiveAuthoritativeSupport :: SurfaceExpr -> IO ()
 expectRecursiveAuthoritativeSupport expr = do
-    let blocked = TForall "a" Nothing (TArrow (TVar "a") (TVar "a"))
+    let blocked = testTForall "a" Nothing (TArrow (testTVar "a") (testTVar "a"))
     (_uncheckedTerm, uncheckedTy) <-
         requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
     (_checkedTerm, checkedTy) <-
@@ -200,10 +201,10 @@ recursiveBoolAnn = STMu "a" (STArrow (STVar "a") (STBase "Bool"))
 
 containsMu :: ElabType -> Bool
 containsMu ty = case ty of
-    TMu _ _ -> True
+    TMuRef _ _ -> True
     TArrow dom cod -> containsMu dom || containsMu cod
     TCon _ args -> any containsMu args
-    TForall _ mb body -> maybe False containsMuBound mb || containsMu body
+    TForallRef _ mb body -> maybe False containsMuBound mb || containsMu body
     _ -> False
   where
     containsMuBound :: BoundType -> Bool
@@ -211,7 +212,7 @@ containsMu ty = case ty of
         TArrow dom cod -> containsMu dom || containsMu cod
         TBase _ -> False
         TCon _ args -> any containsMu args
-        TVarApp _ args -> any containsMu args
-        TForall _ mb body -> maybe False containsMuBound mb || containsMu body
-        TMu _ _ -> True
+        TVarAppRef _ args -> any containsMu args
+        TForallRef _ mb body -> maybe False containsMuBound mb || containsMu body
+        TMuRef _ _ -> True
         TBottom -> False

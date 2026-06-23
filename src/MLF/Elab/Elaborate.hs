@@ -13,7 +13,6 @@ where
 
 import Data.Functor.Foldable (para)
 import qualified Data.IntMap.Strict as IntMap
-import qualified Data.Map.Strict as Map
 import MLF.Constraint.Presolution (EdgeTrace, PresolutionView (..))
 import MLF.Constraint.Presolution.Base (EdgeArtifacts (..))
 import MLF.Constraint.Types.Graph (NodeRef)
@@ -21,9 +20,9 @@ import MLF.Constraint.Types.Phase (Phase)
 import MLF.Constraint.Types.Witness (EdgeWitness, Expansion)
 import MLF.Elab.Elaborate.Algebra
   ( AlgebraContext (..),
+    Env,
     ElabOut (..),
     elabAlg,
-    mkEnv,
     resolvedLambdaParamNode,
   )
 import MLF.Elab.Elaborate.Annotation (AnnotationContext (..))
@@ -31,9 +30,9 @@ import MLF.Elab.Elaborate.Scope (GeneralizeAtWith, ScopeContext (..))
 import MLF.Elab.Generalize (GaBindParents)
 import MLF.Elab.ReadModel (ElabReadModel (..))
 import MLF.Elab.Run.TypeOps (mkInlineBoundVarsContextWithReadModel)
-import MLF.Elab.Types (ElabError, ElabTerm, SchemeInfo)
+import MLF.Elab.Types (ElabError, XmlfTerm)
 import MLF.Frontend.ConstraintGen.Types (AnnExpr)
-import MLF.Frontend.Syntax (NormSrcType, VarName)
+import MLF.Frontend.Syntax (NormSrcType)
 import MLF.Util.Trace (TraceConfig)
 
 data ElabConfig (p :: Phase) = ElabConfig
@@ -48,7 +47,7 @@ data ElabEnv (p :: Phase) = ElabEnv
     eeEdgeArtifacts :: EdgeArtifacts,
     eeScopeOverrides :: IntMap.IntMap NodeRef,
     eeAnnSourceTypes :: IntMap.IntMap NormSrcType,
-    eeInitialTermEnv :: Map.Map VarName SchemeInfo
+    eeInitialTermEnv :: Env
   }
 
 eeEdgeWitnesses :: ElabEnv p -> IntMap.IntMap EdgeWitness
@@ -64,7 +63,7 @@ elaborateWithEnv ::
   ElabConfig p ->
   ElabEnv p ->
   AnnExpr ->
-  Either ElabError ElabTerm
+  Either ElabError XmlfTerm
 elaborateWithEnv config elabEnv ann = do
   readModel <- eeReadModel elabEnv
   elaborateWithEnvReadModel config elabEnv readModel ann
@@ -74,7 +73,7 @@ elaborateWithEnvReadModel ::
   ElabEnv p ->
   ElabReadModel p ->
   AnnExpr ->
-  Either ElabError ElabTerm
+  Either ElabError XmlfTerm
 elaborateWithEnvReadModel config elabEnv readModel ann = do
   let namedSet = ermNamedNodes readModel
       inlineBoundVarsContext = mkInlineBoundVarsContextWithReadModel readModel
@@ -109,7 +108,7 @@ elaborateWithEnvReadModel config elabEnv readModel ann = do
             algAnnSourceTypes = eeAnnSourceTypes elabEnv
           }
       ElabOut {elabTerm = runElab} = para (elabAlg algebraContext) ann
-  runElab (mkEnv (eeInitialTermEnv elabEnv))
+  runElab (eeInitialTermEnv elabEnv)
   where
     presolutionView = ermPresolutionView readModel
     canonical = pvCanonical presolutionView

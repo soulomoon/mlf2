@@ -8,10 +8,10 @@ import Test.Hspec
 import MLF.Constraint.Types.Graph (BaseTy(..))
 import MLF.Elab.Pipeline
     ( runPipelineElab
-    , runPipelineElab
     )
 import MLF.Frontend.Syntax
-import MLF.Types.Elab (ElabTerm, ElabType, Ty(..))
+import MLF.Types.Elab (ElabType, Ty(..), XmlfTerm)
+import ElabTermTestSupport (testTForall, testTMu, testTVar, testTVarApp)
 import SpecUtil (unsafeNormalizeExpr)
 
 spec :: Spec
@@ -241,7 +241,7 @@ spec =
 expectExactRetainedChildAuthoritativeOutput
     :: Show err
     => String
-    -> Either err (ElabTerm, ElabType)
+    -> Either err (XmlfTerm, ElabType)
     -> Expectation
 expectExactRetainedChildAuthoritativeOutput label result =
     case result of
@@ -254,12 +254,12 @@ expectExactRetainedChildAuthoritativeOutput label result =
 
 countLeadingUnboundedForalls :: ElabType -> Int
 countLeadingUnboundedForalls ty = case ty of
-    TForall _ Nothing body -> 1 + countLeadingUnboundedForalls body
+    TForallRef _ Nothing body -> 1 + countLeadingUnboundedForalls body
     _ -> 0
 
 stripLeadingUnboundedForalls :: ElabType -> ElabType
 stripLeadingUnboundedForalls ty = case ty of
-    TForall _ Nothing body -> stripLeadingUnboundedForalls body
+    TForallRef _ Nothing body -> stripLeadingUnboundedForalls body
     _ -> ty
 
 matchesRecursiveArrow :: ElabType -> ElabType -> Bool
@@ -269,31 +269,31 @@ matchesRecursiveArrow actual expected = case (actual, expected) of
     _ -> False
   where
     matchesRecursiveMu tyA tyE = case (tyA, tyE) of
-        (TMu _ bodyA, TMu _ bodyE) -> stripMuNames bodyA == stripMuNames bodyE
+        (TMuRef _ bodyA, TMuRef _ bodyE) -> stripMuRefs bodyA == stripMuRefs bodyE
         _ -> False
 
-    stripMuNames ty = case ty of
-        TVar _ -> TVar "_"
-        TArrow dom cod -> TArrow (stripMuNames dom) (stripMuNames cod)
+    stripMuRefs ty = case ty of
+        TVarRef _ -> testTVar "_"
+        TArrow dom cod -> TArrow (stripMuRefs dom) (stripMuRefs cod)
         TBase base -> TBase base
-        TCon con args -> TCon con (fmap stripMuNames args)
-        TVarApp _ args -> TVarApp "_" (fmap stripMuNames args)
-        TForall _ mb body -> TForall "_" (fmap stripBoundNames mb) (stripMuNames body)
-        TMu _ body -> TMu "_" (stripMuNames body)
+        TCon con args -> TCon con (fmap stripMuRefs args)
+        TVarAppRef _ args -> testTVarApp "_" (fmap stripMuRefs args)
+        TForallRef _ mb body -> testTForall "_" (fmap stripBoundRefs mb) (stripMuRefs body)
+        TMuRef _ body -> testTMu "_" (stripMuRefs body)
         TBottom -> TBottom
 
-    stripBoundNames bound = case bound of
-        TArrow dom cod -> TArrow (stripMuNames dom) (stripMuNames cod)
+    stripBoundRefs bound = case bound of
+        TArrow dom cod -> TArrow (stripMuRefs dom) (stripMuRefs cod)
         TBase base -> TBase base
-        TCon con args -> TCon con (fmap stripMuNames args)
-        TVarApp _ args -> TVarApp "_" (fmap stripMuNames args)
-        TForall _ mb body -> TForall "_" (fmap stripBoundNames mb) (stripMuNames body)
-        TMu _ body -> TMu "_" (stripMuNames body)
+        TCon con args -> TCon con (fmap stripMuRefs args)
+        TVarAppRef _ args -> testTVarApp "_" (fmap stripMuRefs args)
+        TForallRef _ mb body -> testTForall "_" (fmap stripBoundRefs mb) (stripMuRefs body)
+        TMuRef _ body -> testTMu "_" (stripMuRefs body)
         TBottom -> TBottom
 
 expectedRecursiveArrow :: ElabType
 expectedRecursiveArrow =
-    let recursiveTy = TMu "a" (TArrow (TVar "a") (TBase (BaseTy "Int")))
+    let recursiveTy = testTMu "a" (TArrow (testTVar "a") (TBase (BaseTy "Int")))
     in TArrow recursiveTy recursiveTy
 
 sameLaneAliasFrameClearBoundaryExpr :: SurfaceExpr

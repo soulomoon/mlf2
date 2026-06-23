@@ -98,8 +98,11 @@ computeResultTypeFallbackWithRoots recurse ctx view mbRoots annCanon ann = do
             let targetC = View.rtvSchemeBodyTarget view annNodeId
             (paramSch, _subst) <-
               View.rtvGeneralizeTarget view scopeRoot targetC
-            let paramTy = case paramSch of
-                  Forall binds body -> foldr (\(n, b) t -> TForall n b t) body binds
+            let paramTy =
+                  foldr
+                    (\(ref, b) t -> TForallRef ref b t)
+                    (schemeBody paramSch)
+                    (schemeBinderRefs paramSch)
             -- Compute the result type from the body.
             -- The body may be wrapped in AAnn (from alternative let scoping),
             -- so we need to handle that case.
@@ -126,11 +129,15 @@ computeResultTypeFallbackWithRoots recurse ctx view mbRoots annCanon ann = do
                 boundTy <- case elabToBound bodyBoundTy of
                   Left err -> Left (ValidationFailed ["elabToBound failed: " ++ err])
                   Right b -> Right b
-                let boundedResultTy =
-                      TForall
+                let (resultRef, _) =
+                      freshTypeBinderRef
                         resultVar
+                        (identityGeneratorAfterType (TArrow paramTy bodyTy))
+                    boundedResultTy =
+                      TForallRef
+                        resultRef
                         (Just boundTy)
-                        (TArrow paramTy (TVar resultVar))
+                        (TArrow paramTy (TVarRef resultRef))
                 pure boundedResultTy
               else -- For simple annotations, just return the arrow type.
                 pure (TArrow paramTy bodyTy)
@@ -157,9 +164,9 @@ computeBodyResultType recurse ctx view bodyAnn =
 forallBinderNames :: ElabType -> Set.Set String
 forallBinderNames ty =
   case ty of
-    TForall name mb body ->
-      Set.insert name (maybe Set.empty (forallBinderNames . tyToElab) mb `Set.union` forallBinderNames body)
+    TForallRef ref mb body ->
+      Set.insert (typeBinderRefName ref) (maybe Set.empty (forallBinderNames . tyToElab) mb `Set.union` forallBinderNames body)
     TArrow dom cod -> forallBinderNames dom `Set.union` forallBinderNames cod
     TCon _ args -> foldMap forallBinderNames args
-    TMu name body -> Set.insert name (forallBinderNames body)
+    TMuRef ref body -> Set.insert (typeBinderRefName ref) (forallBinderNames body)
     _ -> Set.empty

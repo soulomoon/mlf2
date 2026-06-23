@@ -12,7 +12,7 @@ import MLF.API
 import MLF.API qualified as API
 import MLF.Constraint.NodeAccess qualified as NodeAccess
 import MLF.Pipeline qualified as Pipeline
-import MLF.XMLF
+import MLF.XMLF qualified as XMLF
 import System.Directory
     ( createDirectory
     , createDirectoryIfMissing
@@ -197,20 +197,18 @@ spec = describe "Public surface contracts" $ do
             Just _ -> True
 
   describe "MLF.XMLF" $ do
-    it "roundtrips parsed xMLF terms through pretty printing" $ do
-      let src = "let id = λ(x : Int) x in id 1"
-      expectRight (parseXmlfTerm src) $ \term ->
-        parseXmlfTerm (prettyXmlfTerm term) `shouldBe` Right term
+    it "pretty-prints xMLF types for diagnostics" $ do
+      let ty = XMLF.XTForall "a" (XMLF.XTBase "Int") (XMLF.XTArrow (XMLF.XTVar "a") (XMLF.XTVar "a"))
+      XMLF.prettyXmlfType ty `shouldBe` "∀(a ⩾ Int) a -> a"
 
-    it "roundtrips parsed xMLF types through pretty printing" $ do
-      let src = "∀(a ⩾ Int) a -> a"
-      expectRight (parseXmlfType src) $ \ty ->
-        parseXmlfType (prettyXmlfType ty) `shouldBe` Right ty
-
-    it "exports explicit recursive XMLF term constructors" $ do
-      let term = XUnroll (XRoll (XTMu "self" (XTArrow (XTVar "self") (XTBase "Int"))) (XVar "x"))
-      prettyXmlfTerm term `shouldBe` "unroll (roll[μself. self -> Int] x)"
-      parseXmlfTerm (prettyXmlfTerm term) `shouldBe` Right term
+    it "pretty-prints checked recursive XMLF terms without a parser" $ do
+      let self =
+            Pipeline.typeBinderRefFromIdentity
+              (Pipeline.typeBinderIdentityFromUnique (Pipeline.UniqueIdentity 0))
+              "self"
+          recursiveTy = Pipeline.TMuRef self (Pipeline.TArrow (Pipeline.TVarRef self) (Pipeline.TBase (Pipeline.BaseTy "Int")))
+          term = XMLF.EUnroll (XMLF.ERoll recursiveTy (XMLF.ELit (LInt 1)))
+      XMLF.prettyXmlfTerm term `shouldBe` "unroll (roll[μself. self -> Int] 1)"
 
 expectRight :: (Show err) => Either err a -> (a -> Expectation) -> Expectation
 expectRight result k =
@@ -266,5 +264,5 @@ writePackageFile root relativePath contents = do
 
 hasRecursiveArrow :: Pipeline.ElabType -> Bool
 hasRecursiveArrow ty = case ty of
-  Pipeline.TArrow (Pipeline.TMu _ _) (Pipeline.TMu _ _) -> True
+  Pipeline.TArrow (Pipeline.TMuRef _ _) (Pipeline.TMuRef _ _) -> True
   _ -> False

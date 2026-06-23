@@ -1,16 +1,23 @@
 module XMLFPrettySpec (spec) where
 
-import Data.List.NonEmpty (NonEmpty (..))
 import Test.Hspec
 
+import ElabTermTestSupport
+    ( mkTestDeferredVar
+    , mkTestLocalLam
+    , mkTestLocalLet
+    , mkTestTyAbs
+    , testTForall
+    , testTMu
+    , testTVar
+    )
+import MLF.Constraint.Types.Graph (BaseTy (..))
+import MLF.Elab.Types (schemeFromType)
 import MLF.Frontend.Syntax (Lit (..))
+import MLF.Types.Elab qualified as Elab
 import MLF.XMLF
     ( XmlfComp (..)
-    , XmlfTerm (..)
     , XmlfType (..)
-    , parseXmlfComp
-    , parseXmlfTerm
-    , parseXmlfType
     , prettyXmlfComp
     , prettyXmlfTerm
     , prettyXmlfType
@@ -31,44 +38,30 @@ spec = describe "xMLF pretty printer" $ do
         prettyXmlfComp comp `shouldBe` "∀(⩾ ⊲Int); N"
 
     it "prints canonical term syntax" $ do
-        let tm =
-                XLet "id"
-                    (XTyAbs "a" XTBottom (XLam "x" (XTVar "a") (XVar "x")))
-                    (XTyInst (XVar "id") (XCSeq (XCInner (XCBot (XTBase "Int"))) XCElim))
+        let aTy = testTVar "a"
+            intTy = Elab.TBase (BaseTy "Int")
+            idTy = testTForall "a" Nothing (Elab.TArrow aTy aTy)
+            tm =
+                mkTestLocalLet "id" (schemeFromType idTy)
+                    (mkTestTyAbs "a" Nothing (mkTestLocalLam "x" aTy (mkTestDeferredVar "x")))
+                    (Elab.ETyInst (mkTestDeferredVar "id") (Elab.InstSeq (Elab.InstInside (Elab.InstBot intTy)) Elab.InstElim))
         prettyXmlfTerm tm
             `shouldBe` "let id = Λ(a ⩾ ⊥) λ(x : a) x in id[∀(⩾ ⊲Int); N]"
 
     it "prints canonical recursive roll syntax" $ do
-        let tm = XRoll (XTMu "self" (XTArrow (XTVar "self") (XTBase "Int"))) (XVar "x")
+        let recursiveTy = testTMu "self" (Elab.TArrow (testTVar "self") (Elab.TBase (BaseTy "Int")))
+            tm = Elab.ERoll recursiveTy (mkTestDeferredVar "x")
         prettyXmlfTerm tm `shouldBe` "roll[μself. self -> Int] x"
 
     it "prints canonical recursive unroll syntax" $ do
-        let tm = XUnroll (XRoll (XTMu "self" (XTArrow (XTVar "self") (XTBase "Int"))) (XVar "x"))
+        let recursiveTy = testTMu "self" (Elab.TArrow (testTVar "self") (Elab.TBase (BaseTy "Int")))
+            tm = Elab.EUnroll (Elab.ERoll recursiveTy (mkTestDeferredVar "x"))
         prettyXmlfTerm tm `shouldBe` "unroll (roll[μself. self -> Int] x)"
 
-    it "roundtrips type parse(pretty(type))" $ do
-        let ty = XTForall "a" (XTBase "Int") (XTCon "List" (XTVar "a" :| []))
-        parseXmlfType (prettyXmlfType ty) `shouldBe` Right ty
-
-    it "roundtrips μ type parse(pretty(type))" $ do
-        let ty = XTMu "a" (XTCon "List" (XTVar "a" :| []))
-        parseXmlfType (prettyXmlfType ty) `shouldBe` Right ty
-
-    it "roundtrips computation parse(pretty(comp))" $ do
-        let comp = XCOuter "a" (XCSeq XCIntro XCElim)
-        parseXmlfComp (prettyXmlfComp comp) `shouldBe` Right comp
-
-    it "roundtrips term parse(pretty(term))" $ do
+    it "prints type syntax without requiring a parser" $ do
         let tm =
-                XTyAbs "a" XTBottom
-                    (XApp
-                        (XTyInst (XVar "f") (XCInner (XCBot (XTVar "a"))))
-                        (XLit (LBool True)))
-        parseXmlfTerm (prettyXmlfTerm tm) `shouldBe` Right tm
-
-    it "roundtrips recursive terms through parse(pretty(term))" $ do
-        let tm =
-                XLet "wrap"
-                    (XRoll (XTMu "self" (XTArrow (XTVar "self") (XTBase "Int"))) (XVar "x"))
-                    (XUnroll (XVar "wrap"))
-        parseXmlfTerm (prettyXmlfTerm tm) `shouldBe` Right tm
+                mkTestTyAbs "a" Nothing
+                    (Elab.EApp
+                        (Elab.ETyInst (mkTestDeferredVar "f") (Elab.InstInside (Elab.InstBot (testTVar "a"))))
+                        (Elab.ELit (LBool True)))
+        prettyXmlfTerm tm `shouldBe` "Λ(a ⩾ ⊥) f[∀(⩾ ⊲a)] true"

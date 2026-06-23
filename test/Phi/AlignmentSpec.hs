@@ -1,7 +1,6 @@
 module Phi.AlignmentSpec (spec) where
 
 import Control.Monad (forM_, when)
-import Data.List (isInfixOf)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Set as Set
 import Test.Hspec
@@ -34,20 +33,14 @@ spec = describe "Phi alignment" $ do
                         show term `shouldNotBe` ""
                         show ty `shouldNotBe` ""
 
-        it "pipeline fails fast for nested-let when only expansion-derived instantiation remains" $ do
+        it "pipeline succeeds for nested-let when forall binders carry graph identities" $ do
             let expr =
                     ELet "f" (ELam "x" (EVar "x"))
                         (ELet "g" (EVar "f")
                             (EApp (EVar "g") (EVar "g")))
             case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
-                Left err ->
-                    show err `shouldSatisfy`
-                        (\msg ->
-                            "PhiTranslatabilityError" `isInfixOf` msg
-                                || "ValidationFailed" `isInfixOf` msg
-                        )
-                Right (_, ty) ->
-                    expectationFailure ("Expected strict failure, got type: " ++ show ty)
+                Left err -> expectationFailure (show err)
+                Right (term, ty) -> typeCheck term `shouldBe` Right ty
 
     describe "C2: replay contract fields are omitted when replay binder domain is empty" $ do
         it "let-poly traces with empty replay binder domains have empty binder args and replay-map" $ do

@@ -8,7 +8,7 @@ I have analyzed `test/ElaborationSpec.hs`.
 
    * It tests the *pretty printer* as much as the *elaboration logic*.
 
-   * It masks the actual structure of the returned `ElabTerm` and `ElabType`.
+   * It masks the actual structure of the returned `XmlfTerm` and `ElabType`.
 
 2. **Missing Structural Tests**: There are no tests that verify the actual algebraic data structure of the elaborated terms. For example, `ELet` should be checked to have the correct `ElabScheme` and body structure, not just a string representation.
 
@@ -24,7 +24,7 @@ I have analyzed `test/ElaborationSpec.hs`.
 
 **Improvement Suggestions:**
 
-1. **Structural Assertions**: Add helper functions or matchers to check the structure of `ElabTerm` and `ElabType` directly, ignoring exact variable names where appropriate (alpha-equivalence).
+1. **Structural Assertions**: Add helper functions or matchers to check the structure of `XmlfTerm` and `ElabType` directly, ignoring exact variable names where appropriate (alpha-equivalence).
 2. **Add Negative Tests**: Add test cases for programs that should fail elaboration (e.g., `\x. x x` if infinite types are disallowed, or scope errors).
 3. **Expand Integration Tests**: Add a "Complex Scenarios" section testing:
 

@@ -63,9 +63,11 @@ import MLF.Frontend.Program.Package
 import MLF.Frontend.Program.Types
     ( ProgramDiagnostic (..)
     , ProgramError (..)
+    , SymbolIdentity (..)
     , renderProgramDiagnostic
     )
 import MLF.Frontend.Syntax.Program qualified as P
+import MLF.Types.Identity (UniqueIdentity (..))
 
 spec :: Spec
 spec =
@@ -137,6 +139,15 @@ spec =
                 `shouldNotBe` packageBuildGraphNodeSourceMetadata mainNode
             packageBuildGraphNodeDependencyInterfaceMetadata mainNode
                 `shouldBe` [(libId, moduleInterfaceSummaryMetadata libInterface)]
+            moduleInterfaceSummaryMetadata libInterface
+                `shouldNotBe`
+                    moduleInterfaceSummaryMetadata
+                        libInterface
+                            { moduleInterfaceIdentity =
+                                (moduleInterfaceIdentity libInterface)
+                                    { symbolUniqueIdentity = UniqueIdentity 900004
+                                    }
+                            }
 
         it "accepts fresh cache entries derived from the current graph and interfaces" $ do
             (graph, packageInterface) <- requireCheckedBuildGraph interfacePackage

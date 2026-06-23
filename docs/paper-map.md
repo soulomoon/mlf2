@@ -34,7 +34,7 @@ This ledger is the canonical rule-to-code-to-test index for thesis Chapters 4–
 | `χp` | (principal) presolution | `MLF.Constraint.Presolution.PresolutionResult` |
 | `τ` | xMLF type | `MLF.Elab.Types.ElabType` |
 | `φ` | xMLF instantiation witness | `MLF.Elab.Types.Instantiation` |
-| `a` | xMLF term | `MLF.Elab.Types.ElabTerm` |
+| `a` | xMLF term | `MLF.Elab.Types.XmlfTerm` |
 
 ## Phase Mapping
 
@@ -64,7 +64,7 @@ This ledger is the canonical rule-to-code-to-test index for thesis Chapters 4–
 **Code**: `MLF.Elab.Types`
 
 - xMLF types: `ElabType` (ETyVar, ETyArrow, ETyForall, ETyBot)
-- xMLF terms: `ElabTerm` (ELam, EApp, ETyLam, ETyApp, ELet, EVar, EAnn)
+- xMLF terms: `XmlfTerm` (ELam, EApp, ETyAbs, ETyInst, ELet, EVarNode)
 - Instantiations: `Instantiation` (InstRefl, InstTrans, InstUnder, InstApp, InstBot, InstIntro)
 
 ### Figure 10: Instance Operations (Ω) and Φ Translation

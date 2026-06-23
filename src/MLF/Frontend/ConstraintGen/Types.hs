@@ -15,6 +15,7 @@ module MLF.Frontend.ConstraintGen.Types
     ExternalEnv,
     ExternalBindingMode (..),
     ExternalBinding (..),
+    ExternalBindingIdentity (..),
     ExternalBindings,
     replaceScopeRoot,
   )
@@ -26,6 +27,7 @@ import Data.Map.Strict (Map)
 import MLF.Constraint.RootOwnership (ModuleRootId (..), RootOwnershipIndex (..))
 import MLF.Constraint.Types.Graph
 import MLF.Frontend.Syntax (Lit, NormSrcType, VarName)
+import MLF.Types.Identity (IdDetails)
 
 -- | Errors that can surface during constraint generation.
 data ConstraintError
@@ -64,9 +66,9 @@ data ModuleConstraintRoot = ModuleConstraintRoot
   }
   deriving (Eq, Show)
 
-data ModuleConstraintResult p = ModuleConstraintResult
+data ModuleConstraintResult key p = ModuleConstraintResult
   { mcrConstraint :: Constraint p,
-    mcrRoots :: Map VarName ModuleConstraintRoot,
+    mcrRoots :: Map key ModuleConstraintRoot,
     mcrAnnSourceTypes :: IntMap.IntMap NormSrcType,
     mcrInitialEnv :: Env,
     mcrRootOwnership :: RootOwnershipIndex
@@ -149,7 +151,15 @@ data ExternalBindingMode
 
 data ExternalBinding = ExternalBinding
   { externalBindingType :: NormSrcType,
-    externalBindingMode :: ExternalBindingMode
+    externalBindingMode :: ExternalBindingMode,
+    externalBindingIdentity :: Maybe ExternalBindingIdentity
+  }
+  deriving (Eq, Show)
+
+data ExternalBindingIdentity = ExternalBindingIdentity
+  { externalBindingDisplayName :: String,
+    externalBindingRuntimeName :: String,
+    externalBindingDetails :: IdDetails
   }
   deriving (Eq, Show)
 

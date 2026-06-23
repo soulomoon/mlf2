@@ -7,9 +7,12 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Test.Hspec
 
+import ElabTermTestSupport (generatedResolvedLocalForName)
 import LLVMToolSupport (validateLLVMAssembly)
+import MLF.Constraint.Types.Graph (BaseTy (..))
 import MLF.Backend.Emission.Prepare
-    ( prepareBackendEmissionFromLocatedPackage
+    ( prepareCheckedProgramForBackendEmission
+    , prepareBackendEmissionFromLocatedPackage
     , prepareBackendEmissionFromSource
     )
 import MLF.Frontend.Parse.Program
@@ -23,12 +26,35 @@ import MLF.Frontend.Program.Package
     )
 import MLF.Frontend.Program.Prelude (withPreludeLocatedPackage)
 import MLF.Backend.LLVM (renderCheckedProgramLLVM)
+import qualified MLF.Types.Elab as Elab
+import qualified MLF.Frontend.Syntax as Surface
 import MLF.Frontend.Program.Types
     ( CheckedBinding (..)
     , CheckedModule (..)
     , CheckedProgram (..)
+    , ConstructorInfo (..)
+    , DataInfo (..)
+    , IdDetails (..)
+    , ResolvedLocalSymbols (..)
+    , ResolvedModule (..)
+    , ResolvedModuleDiagnosticAdapter (..)
+    , ResolvedProgram (..)
+    , ResolvedReference (..)
+    , ResolvedReferenceKind (..)
+    , ResolvedScope (..)
+    , ResolvedSemanticModule (..)
+    , ResolvedVar (..)
+    , SymbolIdentity (..)
+    , SymbolNamespace (..)
+    , SymbolOwnerIdentity (..)
+    , SymbolOrigin (..)
+    , checkedBindingName
+    , ctorName
+    , mkResolvedSymbol
+    , moduleExportsFromMaps
     )
 import qualified MLF.Frontend.Syntax.Program as ProgramSyntax
+import MLF.Types.Identity (UniqueIdentity (..))
 
 spec :: Spec
 spec =
@@ -66,8 +92,53 @@ spec =
             checked <- requireRight (prepareBackendEmissionFromSource "inline-unit.mlfp" unitProgram)
             preludeModule <- requirePreludeModule checked
 
-            Map.keysSet (checkedModuleData preludeModule) `shouldBe` Set.singleton "Unit"
+            Set.map identityHead (Map.keysSet (checkedModuleData preludeModule))
+                `shouldBe` Set.singleton (SymbolType, "Prelude", "Unit")
             map checkedBindingName (checkedModuleBindings preludeModule) `shouldBe` ["Prelude__Unit"]
+
+        it "keeps resolved globals when local binders reuse their runtime spelling" $ do
+            let checked = prepareCheckedProgramForBackendEmission resolvedShadowProgram
+            preludeModule <- requirePreludeModule checked
+
+            map checkedBindingName (checkedModuleBindings preludeModule) `shouldBe` ["Prelude__keep"]
+
+        it "retains Prelude bindings by resolved identity when binding names are stale" $ do
+            let checked = prepareCheckedProgramForBackendEmission stalePreludeBindingNameProgram
+            preludeModule <- requirePreludeModule checked
+
+            map checkedBindingName (checkedModuleBindings preludeModule) `shouldBe` ["$stale_keep"]
+
+        it "retains Prelude data by checked type identity when data names are stale" $ do
+            let checked = prepareCheckedProgramForBackendEmission stalePreludeDataNameProgram
+            preludeModule <- requirePreludeModule checked
+
+            Set.fromList (map dataInfoSymbol (Map.elems (checkedModuleData preludeModule)))
+                `shouldBe` Set.singleton (typeIdentity "Prelude" "Unit")
+
+        it "retains Prelude data by constructor identity when constructor owner names are stale" $ do
+            let checked = prepareCheckedProgramForBackendEmission stalePreludeConstructorOwnerProgram
+            preludeModule <- requirePreludeModule checked
+
+            Set.fromList (map dataInfoSymbol (Map.elems (checkedModuleData preludeModule)))
+                `shouldBe` Set.singleton (typeIdentity "Prelude" "Unit")
+
+        it "retains Prelude data by resolved module identity when module names are stale" $ do
+            let checked = prepareCheckedProgramForBackendEmission staleResolvedModuleNameProgram
+            preludeModule <- requirePreludeModule checked
+
+            Set.fromList (map dataInfoSymbol (Map.elems (checkedModuleData preludeModule)))
+                `shouldBe` Set.singleton (typeIdentity "Prelude" "Unit")
+
+        it "retains Prelude data dependencies by constructor identity type when source names are stale" $ do
+            let checked = prepareCheckedProgramForBackendEmission stalePreludeConstructorTypeProgram
+            preludeModule <- requirePreludeModule checked
+
+            Set.fromList (map dataInfoSymbol (Map.elems (checkedModuleData preludeModule)))
+                `shouldBe` Set.fromList [typeIdentity "Prelude" "Unit", boxTypeIdentity]
+
+identityHead :: SymbolIdentity -> (SymbolNamespace, String, String)
+identityHead identity =
+    (symbolNamespace identity, symbolDefiningModule identity, symbolDefiningName identity)
 
 simpleProgram :: String
 simpleProgram =
@@ -103,6 +174,310 @@ mainImportsLibProgram =
         , "}"
         ]
 
+resolvedShadowProgram :: CheckedProgram
+resolvedShadowProgram =
+    CheckedProgram
+        { checkedProgramModules =
+            [ checkedModule
+                "Prelude"
+                [ testBinding "Prelude__keep" preludeKeepVar (Elab.ELit (Surface.LInt 1))
+                , testBinding "Prelude__drop" preludeDropVar (Elab.ELit (Surface.LInt 0))
+                ]
+            , checkedModule "Main" [testBinding "Main__main" mainVar shadowedGlobalReferenceTerm]
+            ]
+        , checkedProgramMainResolvedVar = mainVar
+        , checkedProgramResolved = ResolvedProgram []
+        }
+  where
+    intTy = Elab.TBase (BaseTy "Int")
+    preludeKeepVar = topLevelVar 10 "Prelude__keep" "Prelude" "keep" intTy
+    preludeDropVar = topLevelVar 11 "Prelude__drop" "Prelude" "drop" intTy
+    mainVar = topLevelVar 12 "Main__main" "Main" "main" intTy
+    localShadow =
+        generatedResolvedLocalForName "Prelude__keep" "Prelude__keep" intTy
+    shadowedGlobalReferenceTerm =
+        Elab.ELam localShadow (Elab.EVarNode preludeKeepVar)
+
+stalePreludeBindingNameProgram :: CheckedProgram
+stalePreludeBindingNameProgram =
+    CheckedProgram
+        { checkedProgramModules =
+            [ checkedModule
+                "Prelude"
+                [ testBinding "$stale_keep" preludeKeepVar (Elab.ELit (Surface.LInt 1))
+                , testBinding "Prelude__drop" preludeDropVar (Elab.ELit (Surface.LInt 0))
+                ]
+            , checkedModule "Main" [testBinding "Main__main" mainVar (Elab.EVarNode preludeKeepVar)]
+            ]
+        , checkedProgramMainResolvedVar = mainVar
+        , checkedProgramResolved = ResolvedProgram []
+        }
+  where
+    intTy = Elab.TBase (BaseTy "Int")
+    preludeKeepVar = topLevelVar 20 "Prelude__keep" "Prelude" "keep" intTy
+    preludeDropVar = topLevelVar 21 "Prelude__drop" "Prelude" "drop" intTy
+    mainVar = topLevelVar 22 "Main__main" "Main" "main" intTy
+
+stalePreludeDataNameProgram :: CheckedProgram
+stalePreludeDataNameProgram =
+    CheckedProgram
+        { checkedProgramModules =
+            [ (checkedModule
+                "Prelude"
+                [ (testBinding "Prelude__keep" preludeKeepVar (Elab.ELit (Surface.LInt 1)))
+                    { checkedBindingSourceType =
+                        Surface.STArrow (Surface.STBase "$stale_source_name") (Surface.STBase "Int")
+                    , checkedBindingType =
+                        Elab.TArrow
+                            (Elab.TBaseWithIdentity (Just (typeIdentity "Prelude" "Unit")) (BaseTy "$stale_elab_name"))
+                            intTy
+                    }
+                ])
+                { checkedModuleData = Map.singleton (dataInfoSymbol staleUnitData) staleUnitData }
+            , checkedModule "Main" [testBinding "Main__main" mainVar (Elab.EVarNode preludeKeepVar)]
+            ]
+        , checkedProgramMainResolvedVar = mainVar
+        , checkedProgramResolved = ResolvedProgram []
+        }
+  where
+    intTy = Elab.TBase (BaseTy "Int")
+    preludeKeepVar = topLevelVar 30 "Prelude__keep" "Prelude" "keep" intTy
+    mainVar = topLevelVar 31 "Main__main" "Main" "main" intTy
+    staleUnitData =
+        DataInfo
+            { dataInfoSymbol = typeIdentity "Prelude" "Unit"
+            , dataTypeParams = []
+            , dataConstructors = []
+            }
+
+stalePreludeConstructorOwnerProgram :: CheckedProgram
+stalePreludeConstructorOwnerProgram =
+    CheckedProgram
+        { checkedProgramModules =
+            [ (checkedModule "Prelude" [])
+                { checkedModuleData = Map.singleton (dataInfoSymbol unitData) unitData }
+            , checkedModule "Main" [testBinding "Main__main" mainVar (Elab.ELit (Surface.LInt 1))]
+            ]
+        , checkedProgramMainResolvedVar = mainVar
+        , checkedProgramResolved =
+            ResolvedProgram
+                [ resolvedModuleWithReferences "Main" [constructorReference staleUnitConstructor]
+                ]
+        }
+  where
+    intTy = Elab.TBase (BaseTy "Int")
+    mainVar = topLevelVar 40 "Main__main" "Main" "main" intTy
+    unitData =
+        DataInfo
+            { dataInfoSymbol = typeIdentity "Prelude" "Unit"
+            , dataTypeParams = []
+            , dataConstructors = [staleUnitConstructor]
+            }
+    staleUnitConstructor =
+        ConstructorInfo
+            { ctorInfoSymbol = constructorIdentity "Prelude" "$stale_Unit_owner" "Unit"
+            , ctorRuntimeName = "Prelude__Unit"
+            , ctorType = Surface.STBase "Unit"
+            , ctorTypeIdentity = Surface.STBase "Prelude.Unit"
+            , ctorForalls = []
+            , ctorForallBinderIdentities = []
+            , ctorArgs = []
+            , ctorResult = Surface.STBase "Unit"
+            , ctorOwningTypeIdentity = typeIdentity "Prelude" "Unit"
+            , ctorIndex = 0
+            , ctorOwnerConstructors = []
+            }
+
+staleResolvedModuleNameProgram :: CheckedProgram
+staleResolvedModuleNameProgram =
+    CheckedProgram
+        { checkedProgramModules =
+            [ (checkedModule "Prelude" [])
+                { checkedModuleData = Map.singleton (dataInfoSymbol unitData) unitData }
+            , checkedModule "Main" [testBinding "Main__main" mainVar (Elab.ELit (Surface.LInt 1))]
+            ]
+        , checkedProgramMainResolvedVar = mainVar
+        , checkedProgramResolved =
+            ResolvedProgram
+                [ resolvedModuleWithIdentityAndReferences "Prelude" "Main" [constructorReference unitConstructor]
+                ]
+        }
+  where
+    intTy = Elab.TBase (BaseTy "Int")
+    mainVar = topLevelVar 50 "Main__main" "Main" "main" intTy
+    unitData =
+        DataInfo
+            { dataInfoSymbol = typeIdentity "Prelude" "Unit"
+            , dataTypeParams = []
+            , dataConstructors = [unitConstructor]
+            }
+    unitConstructor =
+        ConstructorInfo
+            { ctorInfoSymbol = constructorIdentity "Prelude" "Unit" "Unit"
+            , ctorRuntimeName = "Prelude__Unit"
+            , ctorType = Surface.STBase "Unit"
+            , ctorTypeIdentity = Surface.STBase "Prelude.Unit"
+            , ctorForalls = []
+            , ctorForallBinderIdentities = []
+            , ctorArgs = []
+            , ctorResult = Surface.STBase "Unit"
+            , ctorOwningTypeIdentity = typeIdentity "Prelude" "Unit"
+            , ctorIndex = 0
+            , ctorOwnerConstructors = []
+            }
+
+stalePreludeConstructorTypeProgram :: CheckedProgram
+stalePreludeConstructorTypeProgram =
+    CheckedProgram
+        { checkedProgramModules =
+            [ (checkedModule "Prelude" [])
+                { checkedModuleData =
+                    Map.fromList
+                        [ (dataInfoSymbol unitData, unitData)
+                        , (dataInfoSymbol boxData, boxData)
+                        ]
+                }
+            , checkedModule "Main" [testBinding "Main__main" mainVar (Elab.ELit (Surface.LInt 1))]
+            ]
+        , checkedProgramMainResolvedVar = mainVar
+        , checkedProgramResolved =
+            ResolvedProgram
+                [ resolvedModuleWithReferences "Main" [constructorReference boxConstructor]
+                ]
+        }
+  where
+    intTy = Elab.TBase (BaseTy "Int")
+    mainVar = topLevelVar 60 "Main__main" "Main" "main" intTy
+    unitData =
+        DataInfo
+            { dataInfoSymbol = typeIdentity "Prelude" "Unit"
+            , dataTypeParams = []
+            , dataConstructors = []
+            }
+    boxData =
+        DataInfo
+            { dataInfoSymbol = boxTypeIdentity
+            , dataTypeParams = []
+            , dataConstructors = [boxConstructor]
+            }
+    boxConstructor =
+        ConstructorInfo
+            { ctorInfoSymbol =
+                generatedSymbolIdentity
+                    301
+                    SymbolConstructor
+                    "Prelude"
+                    "Box"
+                    (Just (SymbolOwnerType boxTypeIdentity))
+            , ctorRuntimeName = "Prelude__Box"
+            , ctorType = Surface.STArrow (Surface.STBase "$stale_unit") (Surface.STBase "$stale_box")
+            , ctorTypeIdentity = Surface.STArrow (Surface.STBase "Prelude.Unit") (Surface.STBase "Prelude.Box")
+            , ctorForalls = []
+            , ctorForallBinderIdentities = []
+            , ctorArgs = [Surface.STBase "$stale_unit"]
+            , ctorResult = Surface.STBase "$stale_box"
+            , ctorOwningTypeIdentity = boxTypeIdentity
+            , ctorIndex = 0
+            , ctorOwnerConstructors = []
+            }
+
+checkedModule :: String -> [CheckedBinding] -> CheckedModule
+checkedModule name bindings =
+    CheckedModule
+        { checkedModuleName = name
+        , checkedModuleIdentity = moduleIdentity name
+        , checkedModuleBindings = bindings
+        , checkedModuleData = Map.empty
+        , checkedModuleClasses = Map.empty
+        , checkedModuleInstances = []
+        , checkedModuleExports = moduleExportsFromMaps Map.empty Map.empty Map.empty
+        }
+
+testBinding :: String -> ResolvedVar -> Elab.XmlfTerm -> CheckedBinding
+testBinding name resolved term =
+    CheckedBinding
+        { checkedBindingResolvedVar = resolved {Elab.resolvedVarRuntimeName = name}
+        , checkedBindingSourceType = Surface.STBase "Int"
+        , checkedBindingSurfaceExpr = Surface.ELit (Surface.LInt 0)
+        , checkedBindingDeferredObligations = Map.empty
+        , checkedBindingTerm = term
+        , checkedBindingType = Elab.TBase (BaseTy "Int")
+        , checkedBindingExportedAsMain = name == "Main__main"
+        }
+
+topLevelVar :: Int -> String -> String -> String -> Elab.ElabType -> ResolvedVar
+topLevelVar unique runtimeName moduleName sourceName ty =
+    ResolvedVar
+        { resolvedVarRuntimeName = runtimeName
+        , resolvedVarType = ty
+        , resolvedVarDetails =
+            TopLevelId (generatedSymbolIdentity unique SymbolValue moduleName sourceName Nothing)
+        }
+
+generatedSymbolIdentity :: Int -> SymbolNamespace -> String -> String -> Maybe SymbolOwnerIdentity -> SymbolIdentity
+generatedSymbolIdentity unique namespace moduleName sourceName owner =
+    SymbolIdentity
+        { symbolUniqueIdentity = UniqueIdentity unique
+        , symbolNamespace = namespace
+        , symbolDefiningModule = moduleName
+        , symbolDefiningName = sourceName
+        , symbolOwnerIdentity = owner
+        }
+
+typeIdentity :: String -> String -> SymbolIdentity
+typeIdentity moduleName sourceName =
+    generatedSymbolIdentity 100 SymbolType moduleName sourceName Nothing
+
+boxTypeIdentity :: SymbolIdentity
+boxTypeIdentity =
+    generatedSymbolIdentity 101 SymbolType "Prelude" "Box" Nothing
+
+moduleIdentity :: String -> SymbolIdentity
+moduleIdentity name =
+    generatedSymbolIdentity (moduleIdentityUnique name) SymbolModule name name Nothing
+  where
+    moduleIdentityUnique "Prelude" = 200
+    moduleIdentityUnique "Main" = 201
+    moduleIdentityUnique _ = 202
+
+constructorIdentity :: String -> String -> String -> SymbolIdentity
+constructorIdentity moduleName typeName sourceName =
+    generatedSymbolIdentity
+        300
+        SymbolConstructor
+        moduleName
+        sourceName
+        (Just (SymbolOwnerType (typeIdentity moduleName typeName)))
+
+constructorReference :: ConstructorInfo -> ResolvedReference
+constructorReference ctor =
+    ResolvedReference
+        ResolvedConstructorReference
+        (ctorName ctor)
+        (mkResolvedSymbol (ctorInfoSymbol ctor) (ctorName ctor) (ctorName ctor) (SymbolUnqualifiedImport "Prelude"))
+
+resolvedModuleWithReferences :: String -> [ResolvedReference] -> ResolvedModule
+resolvedModuleWithReferences name references =
+    resolvedModuleWithIdentityAndReferences name name references
+
+resolvedModuleWithIdentityAndReferences :: String -> String -> [ResolvedReference] -> ResolvedModule
+resolvedModuleWithIdentityAndReferences displayName identityName references =
+    ResolvedModule
+        { resolvedModuleSemantic =
+            ResolvedSemanticModule
+                { resolvedSemanticModuleName = displayName
+                , resolvedSemanticModuleIdentity = moduleIdentity identityName
+                , resolvedSemanticModuleSyntax = ProgramSyntax.Module displayName Nothing [] []
+                , resolvedSemanticModuleLocalSymbols = ResolvedLocalSymbols Map.empty Map.empty Map.empty
+                , resolvedSemanticModuleScope = emptyResolvedScope
+                , resolvedSemanticModuleExports = emptyResolvedScope
+                }
+        , resolvedModuleDiagnosticAdapter = ResolvedModuleDiagnosticAdapter references
+        }
+  where
+    emptyResolvedScope =
+        ResolvedScope Map.empty Map.empty Map.empty Map.empty
+
 requireLocated :: FilePath -> String -> IO ProgramSyntax.LocatedProgram
 requireLocated path source =
     case parseLocatedProgramWithFile path source of
@@ -111,7 +486,7 @@ requireLocated path source =
 
 requirePreludeModule :: CheckedProgram -> IO CheckedModule
 requirePreludeModule checked =
-    case [checkedModule | checkedModule <- checkedProgramModules checked, checkedModuleName checkedModule == "Prelude"] of
+    case [candidate | candidate <- checkedProgramModules checked, checkedModuleName candidate == "Prelude"] of
         [preludeModule] ->
             pure preludeModule
         [] ->

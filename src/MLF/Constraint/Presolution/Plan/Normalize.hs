@@ -1,74 +1,79 @@
 {-# LANGUAGE GADTs #-}
 module MLF.Constraint.Presolution.Plan.Normalize (
-    substType,
-    simplifySchemeBindings,
-    promoteArrowAlias,
+    substTypeRef,
+    simplifySchemeBindingsRefs,
+    promoteArrowAliasRefs,
     isBaseBound,
     isVarBound,
     containsForall,
     containsArrow
 ) where
 
-import qualified Data.Set as Set
-
-import MLF.Reify.TypeOps (composeTypeHead, freeTypeVarsFrom, freeTypeVarsType, substTypeSimple)
+import MLF.Reify.TypeOps
+    ( composeTypeHeadRef
+    , freeTypeVarRefsFrom
+    , freeTypeVarRefsType
+    , substTypeSimpleRef
+    )
 import MLF.Types.Elab
     ( BoundType
     , ElabType
+    , TypeBinderRef
     , Ty(..)
     , TyIF(..)
     , K(..)
     , cataIxConst
+    , typeBinderRefsSameIdentity
     , tyToElab
     )
 
-substType :: String -> ElabType -> ElabType -> ElabType
-substType = substTypeSimple
+substTypeRef :: TypeBinderRef -> ElabType -> ElabType -> ElabType
+substTypeRef = substTypeSimpleRef
 
-simplifySchemeBindings
+simplifySchemeBindingsRefs
     :: Bool
-    -> Set.Set String
-    -> [(String, Maybe BoundType)]
+    -> [TypeBinderRef]
+    -> [(TypeBinderRef, Maybe BoundType)]
     -> ElabType
-    -> ([(String, Maybe BoundType)], ElabType)
-simplifySchemeBindings inlineBaseBounds namedBinders binds ty =
-    let binders = Set.fromList (map fst binds)
+    -> ([(TypeBinderRef, Maybe BoundType)], ElabType)
+simplifySchemeBindingsRefs inlineBaseBounds namedBinders binds ty =
+    let binders = map fst binds
     in simplify binders binds ty
   where
     simplify
-        :: Set.Set String
-        -> [(String, Maybe BoundType)]
+        :: [TypeBinderRef]
+        -> [(TypeBinderRef, Maybe BoundType)]
         -> ElabType
-        -> ([(String, Maybe BoundType)], ElabType)
+        -> ([(TypeBinderRef, Maybe BoundType)], ElabType)
     simplify _ [] body = ([], body)
-    simplify binders ((v, mbBound):rest) body =
-        let isNamedBinder = Set.member v namedBinders
+    simplify binders ((ref, mbBound):rest) body =
+        let isNamedBinder = refMember ref namedBinders
         in case mbBound of
             Nothing ->
                 let (rest', body') = simplify binders rest body
-                in ((v, Nothing) : rest', body')
+                in ((ref, Nothing) : rest', body')
             Just bound ->
                 let boundElab = tyToElab bound
-                    bodyUsesV = Set.member v (freeTypeVarsFrom Set.empty body)
+                    bodyUsesV = refMember ref (freeTypeVarRefsFrom [] body)
                     restUsesV =
-                        Set.member v $
-                            Set.unions
-                                [ freeTypeVarsType b
+                        any
+                            (refMember ref)
+                                [ freeTypeVarRefsType b
                                 | (_, Just b) <- rest
                                 ]
                 in if not bodyUsesV && not restUsesV
-                    then simplify (Set.delete v binders) rest body
+                    then simplify (deleteRef ref binders) rest body
                     else case body of
-                    TVar v' | v' == v ->
-                        let freeBound = freeTypeVarsFrom Set.empty bound
-                            boundMentionsSelf = Set.member v freeBound
-                            boundDeps = Set.delete v freeBound
+                    TVarRef bodyRef | typeBinderRefsSameIdentity bodyRef ref ->
+                        let freeBound = freeTypeVarRefsFrom [] bound
+                            boundMentionsSelf = refMember ref freeBound
+                            boundDeps = deleteRef ref freeBound
                             boundIsBase = isBaseBound bound
                             boundIsVar = isVarBound bound
                             boundMentionsNamed =
-                                not (Set.null (Set.intersection freeBound namedBinders))
+                                any (`refMember` namedBinders) freeBound
                             canInlineAliasSimple =
-                                Set.null boundDeps
+                                null boundDeps
                                     && (not boundIsBase || inlineBaseBounds)
                                     && not isNamedBinder
                                     && not boundMentionsNamed
@@ -81,21 +86,22 @@ simplifySchemeBindings inlineBaseBounds namedBinders binds ty =
                             then
                                 let body' = boundElab
                                     restSub =
-                                        [ (name, fmap (substBound v boundElab) mb)
+                                        [ (name, fmap (substBoundRef ref boundElab) mb)
                                         | (name, mb) <- rest
                                         ]
-                                in simplify (Set.delete v binders) restSub body'
+                                in simplify (deleteRef ref binders) restSub body'
                             else
                                 let (rest', body') = simplify binders rest body
-                                in ((v, Just bound) : rest', body')
+                                in ((ref, Just bound) : rest', body')
                     _ ->
-                        let freeBound = freeTypeVarsFrom Set.empty bound
-                            boundMentionsSelf = Set.member v freeBound
-                            boundDeps = Set.delete v freeBound
+                        let freeBound = freeTypeVarRefsFrom [] bound
+                            boundMentionsSelf = refMember ref freeBound
+                            boundDeps = deleteRef ref freeBound
                             dependsOnBinders =
-                                not (Set.null (Set.intersection boundDeps (Set.delete v binders)))
+                                let remainingBinders = deleteRef ref binders
+                                in any (`refMember` remainingBinders) boundDeps
                             boundMentionsNamed =
-                                not (Set.null (Set.intersection freeBound namedBinders))
+                                any (`refMember` namedBinders) freeBound
                             canInlineBase =
                                 inlineBaseBounds
                                     && not dependsOnBinders
@@ -116,51 +122,51 @@ simplifySchemeBindings inlineBaseBounds namedBinders binds ty =
                             && (canInlineBase || canInlineNonBase || canInlineStructured)
                             then
                                 let replacement = boundElab
-                                    bodySub = substType v replacement body
+                                    bodySub = substTypeRef ref replacement body
                                     restSub =
-                                        [ (name, fmap (substBound v replacement) mb)
+                                        [ (name, fmap (substBoundRef ref replacement) mb)
                                         | (name, mb) <- rest
                                         ]
                                 in simplify binders restSub bodySub
                             else
                                 let (rest', body') = simplify binders rest body
-                                in ((v, Just bound) : rest', body')
+                                in ((ref, Just bound) : rest', body')
 
-promoteArrowAlias :: [(String, Maybe BoundType)] -> ElabType -> ([(String, Maybe BoundType)], ElabType)
-promoteArrowAlias binds ty = case ty of
-    TArrow (TVar v1) (TVar v2)
-        | v1 == v2 ->
-            case lookup v1 binds of
+promoteArrowAliasRefs :: [(TypeBinderRef, Maybe BoundType)] -> ElabType -> ([(TypeBinderRef, Maybe BoundType)], ElabType)
+promoteArrowAliasRefs binds ty = case ty of
+    TArrow (TVarRef ref1) (TVarRef ref2)
+        | typeBinderRefsSameIdentity ref1 ref2 ->
+            case lookupRef ref1 binds of
                 Just (Just bnd)
                     | isBaseBound bnd || bnd == TBottom ->
                         let bnd' = TArrow (tyToElab bnd) (tyToElab bnd)
-                            binds' = map (\(n, mb) -> if n == v1 then (n, Just bnd') else (n, mb)) binds
-                        in (binds', TVar v1)
+                            binds' = map (\(ref, mb) -> if typeBinderRefsSameIdentity ref ref1 then (ref, Just bnd') else (ref, mb)) binds
+                        in (binds', TVarRef ref1)
                 _ -> (binds, ty)
     _ -> (binds, ty)
 
-substBound :: String -> ElabType -> BoundType -> BoundType
-substBound v replacement bound = case bound of
+substBoundRef :: TypeBinderRef -> ElabType -> BoundType -> BoundType
+substBoundRef ref replacement bound = case bound of
     TArrow a b ->
-        TArrow (substType v replacement a) (substType v replacement b)
-    TCon c args -> TCon c (fmap (substType v replacement) args)
-    TVarApp name args ->
-        let args' = fmap (substType v replacement) args
-        in if name == v
-            then composeTypeHead name replacement args'
-            else TVarApp name args'
+        TArrow (substTypeRef ref replacement a) (substTypeRef ref replacement b)
+    TCon c args -> TCon c (fmap (substTypeRef ref replacement) args)
+    TVarAppRef headRef args ->
+        let args' = fmap (substTypeRef ref replacement) args
+        in if typeBinderRefsSameIdentity headRef ref
+            then composeTypeHeadRef headRef replacement args'
+            else TVarAppRef headRef args'
     TBase b -> TBase b
     TBottom -> TBottom
-    TForall name mb body
-        | name == v ->
-            let mb' = fmap (substBound v replacement) mb
-            in TForall name mb' body
+    TForallRef binderRef mb body
+        | typeBinderRefsSameIdentity binderRef ref ->
+            let mb' = fmap (substBoundRef ref replacement) mb
+            in TForallRef binderRef mb' body
         | otherwise ->
-            let mb' = fmap (substBound v replacement) mb
-            in TForall name mb' (substType v replacement body)
-    TMu name body
-        | name == v -> TMu name body
-        | otherwise -> TMu name (substType v replacement body)
+            let mb' = fmap (substBoundRef ref replacement) mb
+            in TForallRef binderRef mb' (substTypeRef ref replacement body)
+    TMuRef binderRef body
+        | typeBinderRefsSameIdentity binderRef ref -> TMuRef binderRef body
+        | otherwise -> TMuRef binderRef (substTypeRef ref replacement body)
 
 isBaseBound :: Ty v -> Bool
 isBaseBound ty = case ty of
@@ -170,15 +176,29 @@ isBaseBound ty = case ty of
 
 isVarBound :: Ty v -> Bool
 isVarBound ty = case ty of
-    TVar{} -> True
+    TVarRef{} -> True
     _ -> False
+
+refMember :: TypeBinderRef -> [TypeBinderRef] -> Bool
+refMember ref = any (typeBinderRefsSameIdentity ref)
+
+deleteRef :: TypeBinderRef -> [TypeBinderRef] -> [TypeBinderRef]
+deleteRef ref = filter (not . typeBinderRefsSameIdentity ref)
+
+lookupRef :: TypeBinderRef -> [(TypeBinderRef, a)] -> Maybe a
+lookupRef ref = fmap snd . findRef
+  where
+    findRef [] = Nothing
+    findRef (entry@(candidate, _) : rest)
+        | typeBinderRefsSameIdentity ref candidate = Just entry
+        | otherwise = findRef rest
 
 containsForall :: ElabType -> Bool
 containsForall = cataIxConst alg
   where
     alg ty = case ty of
-        TForallIF _ _ _ -> True
-        TMuIF _ body -> unK body
+        TForallIFRef _ _ _ -> True
+        TMuIFRef _ body -> unK body
         TArrowIF d c -> unK d || unK c
         TConIF _ args -> any unK args
         _ -> False
@@ -188,9 +208,9 @@ containsArrow = cataIxConst alg
   where
     alg ty = case ty of
         TArrowIF _ _ -> True
-        TForallIF _ mb body ->
+        TForallIFRef _ mb body ->
             let boundHasArrow = maybe False unK mb
             in boundHasArrow || unK body
-        TMuIF _ body -> unK body
+        TMuIFRef _ body -> unK body
         TConIF _ args -> any unK args
         _ -> False

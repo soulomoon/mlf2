@@ -10,12 +10,11 @@ module MLF.Backend.Emission.Prepare
     ) where
 
 import Data.Bifunctor (first)
-import Data.Maybe (mapMaybe)
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
 
-import MLF.Elab.Types (ElabTerm (..))
+import MLF.Elab.Types (ElabType, ResolvedVar (..), Ty (..), XmlfTerm (..), resolvedVarBoundBy)
 import MLF.Frontend.Parse.Program
     ( ProgramParseError
     , parseLocatedProgramWithFile
@@ -36,7 +35,9 @@ import MLF.Frontend.Program.Types
     , CheckedModule (..)
     , CheckedProgram (..)
     , ConstructorInfo (..)
+    , ConstructorRef (..)
     , DataInfo (..)
+    , IdDetails (..)
     , ProgramDiagnostic
     , ProgramError
     , ResolvedProgram (..)
@@ -44,13 +45,14 @@ import MLF.Frontend.Program.Types
     , ResolvedReferenceKind (..)
     , ResolvedSymbol (..)
     , SymbolIdentity (..)
-    , SymbolNamespace (..)
-    , SymbolOwnerIdentity (..)
-    , resolvedModuleName
+    , dataInfoIdentityName
+    , dataInfoIdentityQualifiedName
+    , resolvedModuleIdentity
     , resolvedModuleReferences
     , diagnosticForProgramError
     , renderProgramDiagnostic
     )
+import MLF.Frontend.Symbol (symbolIdentityStableName)
 import MLF.Frontend.Syntax (SrcBound (..), SrcType, SrcTy (..))
 
 data BackendEmissionPreparationError
@@ -92,19 +94,30 @@ prepareBackendEmissionFromLocatedPackage package =
 
 prepareCheckedProgramForBackendEmission :: CheckedProgram -> CheckedProgram
 prepareCheckedProgramForBackendEmission checked =
-    checked {checkedProgramModules = map (prepareModule retainedPreludeBindings retainedPreludeData) modules0}
+    checked {checkedProgramModules = map (prepareModule preludeIdentity retainedPreludeBindings retainedPreludeData) modules0}
   where
     modules0 = checkedProgramModules checked
-    retainedPreludeBindings = preludeBindingDependencyClosure modules0
-    retainedPreludeData = preludeDataDependencyClosure checked retainedPreludeBindings
+    preludeIdentity = preludeModuleIdentity modules0
+    retainedPreludeBindings = preludeBindingDependencyClosure preludeIdentity modules0
+    retainedPreludeData = preludeDataDependencyClosure preludeIdentity checked retainedPreludeBindings
 
-prepareModule :: Set String -> Set SymbolIdentity -> CheckedModule -> CheckedModule
-prepareModule retainedPreludeBindings retainedPreludeData checkedModule
-    | checkedModuleName checkedModule == "Prelude" =
+preludeModuleIdentity :: [CheckedModule] -> Maybe SymbolIdentity
+preludeModuleIdentity modules0 =
+    case [checkedModuleIdentity checkedModule | checkedModule <- modules0, checkedModuleName checkedModule == "Prelude"] of
+        identity : _ -> Just identity
+        [] -> Nothing
+
+isPreludeModule :: Maybe SymbolIdentity -> CheckedModule -> Bool
+isPreludeModule preludeIdentity checkedModule =
+    Just (checkedModuleIdentity checkedModule) == preludeIdentity
+
+prepareModule :: Maybe SymbolIdentity -> Set SymbolIdentity -> Set SymbolIdentity -> CheckedModule -> CheckedModule
+prepareModule preludeIdentity retainedPreludeBindings retainedPreludeData checkedModule
+    | isPreludeModule preludeIdentity checkedModule =
         checkedModule
             { checkedModuleBindings =
                 filter
-                    ((`Set.member` retainedPreludeBindings) . checkedBindingName)
+                    (retainedPreludeBinding retainedPreludeBindings)
                     (checkedModuleBindings checkedModule)
             , checkedModuleData =
                 Map.filter
@@ -113,85 +126,104 @@ prepareModule retainedPreludeBindings retainedPreludeData checkedModule
             }
     | otherwise = checkedModule
 
-preludeBindingDependencyClosure :: [CheckedModule] -> Set String
-preludeBindingDependencyClosure modules0 =
-    close (referencedBindingNames nonPreludeBindings) Set.empty
+retainedPreludeBinding :: Set SymbolIdentity -> CheckedBinding -> Bool
+retainedPreludeBinding retainedPreludeBindings binding =
+    case checkedBindingSymbolIdentity binding of
+        Just symbol -> symbol `Set.member` retainedPreludeBindings
+        Nothing -> False
+
+checkedBindingSymbolIdentity :: CheckedBinding -> Maybe SymbolIdentity
+checkedBindingSymbolIdentity =
+    resolvedVarSymbolIdentity . checkedBindingResolvedVar
+
+resolvedVarSymbolIdentity :: ResolvedVar -> Maybe SymbolIdentity
+resolvedVarSymbolIdentity resolved =
+    case resolvedVarDetails resolved of
+        TopLevelId symbol -> Just symbol
+        ConstructorId ref -> Just (constructorRefSymbol ref)
+        MethodId symbol -> Just symbol
+        _ -> Nothing
+
+preludeBindingDependencyClosure :: Maybe SymbolIdentity -> [CheckedModule] -> Set SymbolIdentity
+preludeBindingDependencyClosure preludeIdentity modules0 =
+    close (referencedBindingSymbols nonPreludeBindings) Set.empty
   where
-    preludeBindingsByName =
+    preludeBindingsByIdentity =
         Map.fromList
-            [ (checkedBindingName binding, binding)
+            [ (symbol, binding)
             | binding <- preludeBindings
+            , Just symbol <- [checkedBindingSymbolIdentity binding]
             ]
 
     preludeBindings =
         [ binding
         | checkedModule <- modules0
-        , checkedModuleName checkedModule == "Prelude"
+        , isPreludeModule preludeIdentity checkedModule
         , binding <- checkedModuleBindings checkedModule
         ]
 
     nonPreludeBindings =
         [ binding
         | checkedModule <- modules0
-        , checkedModuleName checkedModule /= "Prelude"
+        , not (isPreludeModule preludeIdentity checkedModule)
         , binding <- checkedModuleBindings checkedModule
         ]
 
     close pending retained =
         case Set.minView (pendingPreludeBindings pending retained) of
             Nothing -> retained
-            Just (name, pendingRest) ->
-                case Map.lookup name preludeBindingsByName of
+            Just (symbol, pendingRest) ->
+                case Map.lookup symbol preludeBindingsByIdentity of
                     Nothing -> close pendingRest retained
                     Just binding ->
                         close
-                            (Set.union pendingRest (referencedBindingNames [binding]))
-                            (Set.insert name retained)
+                            (Set.union pendingRest (referencedBindingSymbols [binding]))
+                            (Set.insert symbol retained)
 
     pendingPreludeBindings pending retained =
-        (pending `Set.intersection` Map.keysSet preludeBindingsByName)
+        (pending `Set.intersection` Map.keysSet preludeBindingsByIdentity)
             `Set.difference` retained
 
-preludeDataDependencyClosure :: CheckedProgram -> Set String -> Set SymbolIdentity
-preludeDataDependencyClosure checked retainedPreludeBindings =
+preludeDataDependencyClosure :: Maybe SymbolIdentity -> CheckedProgram -> Set SymbolIdentity -> Set SymbolIdentity
+preludeDataDependencyClosure preludeIdentity checked retainedPreludeBindings =
     close initialData Set.empty
   where
     modules0 = checkedProgramModules checked
     preludeData =
         [ dataInfo
         | checkedModule <- modules0
-        , checkedModuleName checkedModule == "Prelude"
+        , isPreludeModule preludeIdentity checkedModule
         , dataInfo <- Map.elems (checkedModuleData checkedModule)
         ]
 
     preludeBindings =
         [ binding
         | checkedModule <- modules0
-        , checkedModuleName checkedModule == "Prelude"
+        , isPreludeModule preludeIdentity checkedModule
         , binding <- checkedModuleBindings checkedModule
         ]
 
     preludeDataByIdentity =
         Map.fromList [(dataInfoSymbol dataInfo, dataInfo) | dataInfo <- preludeData]
 
-    preludeDataByName =
-        Map.fromList [(dataName dataInfo, dataInfoSymbol dataInfo) | dataInfo <- preludeData]
+    preludeDataBySourceHead =
+        preludeDataSourceHeadIndex preludeData
 
     preludeDataByConstructorBinding =
         Map.fromList
-            [ (ctorRuntimeName constructorInfo, dataInfoSymbol dataInfo)
+            [ (ctorInfoSymbol constructorInfo, dataInfoSymbol dataInfo)
             | dataInfo <- preludeData
             , constructorInfo <- dataConstructors dataInfo
             ]
 
     initialData =
         Set.unions
-            [ referencedPreludeData (checkedProgramResolved checked) preludeDataByName
-            , retainedPreludeBindingData preludeDataByName preludeBindings retainedPreludeBindings
+            [ referencedPreludeData preludeIdentity preludeDataByIdentity preludeDataByConstructorBinding (checkedProgramResolved checked)
+            , retainedPreludeBindingData (Map.keysSet preludeDataByIdentity) preludeBindings retainedPreludeBindings
             , Set.fromList
                 [ dataIdentity
-                | bindingName <- Set.toList retainedPreludeBindings
-                , Just dataIdentity <- [Map.lookup bindingName preludeDataByConstructorBinding]
+                | bindingSymbol <- Set.toList retainedPreludeBindings
+                , Just dataIdentity <- [Map.lookup bindingSymbol preludeDataByConstructorBinding]
                 ]
             ]
 
@@ -203,64 +235,116 @@ preludeDataDependencyClosure checked retainedPreludeBindings =
                     Nothing -> close pendingRest retained
                     Just dataInfo ->
                         close
-                            (Set.union pendingRest (preludeDataDependencies preludeDataByName dataInfo))
+                            (Set.union pendingRest (preludeDataDependencies preludeDataBySourceHead dataInfo))
                             (Set.insert dataIdentity retained)
 
     pendingPreludeData pending retained =
         (pending `Set.intersection` Map.keysSet preludeDataByIdentity)
             `Set.difference` retained
 
-referencedPreludeData :: ResolvedProgram -> Map.Map String SymbolIdentity -> Set SymbolIdentity
-referencedPreludeData resolvedProgram preludeDataByName =
+referencedPreludeData ::
+    Maybe SymbolIdentity ->
+    Map.Map SymbolIdentity DataInfo ->
+    Map.Map SymbolIdentity SymbolIdentity ->
+    ResolvedProgram ->
+    Set SymbolIdentity
+referencedPreludeData preludeIdentity preludeDataByIdentity preludeDataByConstructorBinding resolvedProgram =
     Set.fromList
         [ dataIdentity
         | resolvedModule <- resolvedProgramModules resolvedProgram
-        , resolvedModuleName resolvedModule /= "Prelude"
+        , Just (resolvedModuleIdentity resolvedModule) /= preludeIdentity
         , reference <- resolvedModuleReferences resolvedModule
-        , Just dataIdentity <- [preludeDataReference preludeDataByName reference]
+        , Just dataIdentity <- [preludeDataReference preludeDataByIdentity preludeDataByConstructorBinding reference]
         ]
 
-preludeDataReference :: Map.Map String SymbolIdentity -> ResolvedReference -> Maybe SymbolIdentity
-preludeDataReference preludeDataByName reference =
+preludeDataReference ::
+    Map.Map SymbolIdentity DataInfo ->
+    Map.Map SymbolIdentity SymbolIdentity ->
+    ResolvedReference ->
+    Maybe SymbolIdentity
+preludeDataReference preludeDataByIdentity preludeDataByConstructorBinding reference =
     case resolvedReferenceKind reference of
         ResolvedTypeReference
-            | symbolNamespace symbolIdentity == SymbolType
-            , symbolDefiningModule symbolIdentity == "Prelude" ->
+            | symbolIdentity `Map.member` preludeDataByIdentity ->
                 Just symbolIdentity
         ResolvedConstructorReference ->
-            case symbolOwnerIdentity symbolIdentity of
-                Just (SymbolOwnerType "Prelude" typeName) ->
-                    Map.lookup typeName preludeDataByName
-                _ -> Nothing
+            Map.lookup symbolIdentity preludeDataByConstructorBinding
         _ -> Nothing
   where
     symbolIdentity = resolvedSymbolIdentity (resolvedReferenceSymbol reference)
 
 retainedPreludeBindingData ::
-    Map.Map String SymbolIdentity -> [CheckedBinding] -> Set String -> Set SymbolIdentity
-retainedPreludeBindingData preludeDataByName preludeBindings retainedPreludeBindings =
+    Set SymbolIdentity ->
+    [CheckedBinding] -> Set SymbolIdentity -> Set SymbolIdentity
+retainedPreludeBindingData preludeDataIdentities preludeBindings retainedPreludeBindings =
     Set.unions
-        [ sourceTypePreludeData preludeDataByName (checkedBindingSourceType binding)
+        [ elabTypePreludeData preludeDataIdentities (checkedBindingType binding)
         | binding <- preludeBindings
-        , checkedBindingName binding `Set.member` retainedPreludeBindings
+        , Just bindingSymbol <- [checkedBindingSymbolIdentity binding]
+        , bindingSymbol `Set.member` retainedPreludeBindings
         ]
 
-preludeDataDependencies :: Map.Map String SymbolIdentity -> DataInfo -> Set SymbolIdentity
-preludeDataDependencies preludeDataByName dataInfo =
+elabTypePreludeData :: Set SymbolIdentity -> ElabType -> Set SymbolIdentity
+elabTypePreludeData preludeDataIdentities ty =
+    Set.filter (`Set.member` preludeDataIdentities) (elabTypeHeadIdentities ty)
+
+elabTypeHeadIdentities :: Ty v -> Set SymbolIdentity
+elabTypeHeadIdentities =
+    \case
+        TVarRef {} ->
+            Set.empty
+        TArrow dom cod ->
+            Set.union (elabTypeHeadIdentities dom) (elabTypeHeadIdentities cod)
+        TConWithIdentity identity _ args ->
+            maybe Set.empty Set.singleton identity
+                `Set.union` foldMap elabTypeHeadIdentities args
+        TVarAppRef _ args ->
+            foldMap elabTypeHeadIdentities args
+        TBaseWithIdentity identity _ ->
+            maybe Set.empty Set.singleton identity
+        TForallRef _ mbBound body ->
+            maybe Set.empty elabTypeHeadIdentities mbBound
+                `Set.union` elabTypeHeadIdentities body
+        TMuRef _ body ->
+            elabTypeHeadIdentities body
+        TBottom ->
+            Set.empty
+
+preludeDataDependencies :: Map.Map String (Set SymbolIdentity) -> DataInfo -> Set SymbolIdentity
+preludeDataDependencies preludeDataBySourceHead dataInfo =
     Set.unions
-        [ sourceTypePreludeData preludeDataByName sourceType
+        [ sourceTypePreludeData preludeDataBySourceHead sourceType
         | constructorInfo <- dataConstructors dataInfo
         , sourceType <- constructorTypes constructorInfo
         ]
   where
     constructorTypes constructorInfo =
-        ctorResult constructorInfo
-            : ctorArgs constructorInfo
-            ++ [bound | (_, Just bound) <- ctorForalls constructorInfo]
+        [ctorTypeIdentity constructorInfo]
 
-sourceTypePreludeData :: Map.Map String SymbolIdentity -> SrcType -> Set SymbolIdentity
-sourceTypePreludeData preludeDataByName =
-    Set.fromList . mapMaybe (`Map.lookup` preludeDataByName) . Set.toList . sourceTypeHeads
+sourceTypePreludeData :: Map.Map String (Set SymbolIdentity) -> SrcType -> Set SymbolIdentity
+sourceTypePreludeData preludeDataBySourceHead sourceType =
+    Set.unions
+        [ Map.findWithDefault Set.empty name preludeDataBySourceHead
+        | name <- Set.toList (sourceTypeHeads sourceType)
+        ]
+
+preludeDataSourceHeadIndex :: [DataInfo] -> Map.Map String (Set SymbolIdentity)
+preludeDataSourceHeadIndex =
+    Map.unionsWith Set.union . map dataInfoSourceHeadEntries
+  where
+    dataInfoSourceHeadEntries dataInfo =
+        Map.fromListWith
+            Set.union
+            [ (name, Set.singleton (dataInfoSymbol dataInfo))
+            | name <- dataInfoSourceHeadNames dataInfo
+            ]
+
+dataInfoSourceHeadNames :: DataInfo -> [String]
+dataInfoSourceHeadNames dataInfo =
+    [ symbolIdentityStableName (dataInfoSymbol dataInfo)
+    , dataInfoIdentityQualifiedName dataInfo
+    , dataInfoIdentityName dataInfo
+    ]
 
 sourceTypeHeads :: SrcType -> Set String
 sourceTypeHeads =
@@ -289,31 +373,38 @@ sourceTypeHeads =
             STBottom ->
                 Set.empty
 
-referencedBindingNames :: [CheckedBinding] -> Set String
-referencedBindingNames bindings =
-    Set.unions (map (freeElabTermVars . checkedBindingTerm) bindings)
+referencedBindingSymbols :: [CheckedBinding] -> Set SymbolIdentity
+referencedBindingSymbols bindings =
+    Set.unions (map (freeXmlfTermVarSymbols . checkedBindingTerm) bindings)
 
-freeElabTermVars :: ElabTerm -> Set String
-freeElabTermVars =
-    go
+freeXmlfTermVarSymbols :: XmlfTerm -> Set SymbolIdentity
+freeXmlfTermVarSymbols =
+    go []
   where
-    go term =
+    go bound term =
         case term of
-            EVar name ->
-                Set.singleton name
+            EVarNode resolved ->
+                freeResolvedVar bound resolved
             ELit {} ->
                 Set.empty
-            ELam name _ body ->
-                Set.delete name (go body)
+            ELam resolved body ->
+                go (resolved : bound) body
             EApp fun arg ->
-                Set.union (go fun) (go arg)
-            ELet name _ rhs body ->
-                Set.union (go rhs) (Set.delete name (go body))
-            ETyAbs _ _ body ->
-                go body
+                Set.union (go bound fun) (go bound arg)
+            ELet resolved _ rhs body ->
+                Set.union
+                    (go bound rhs)
+                    (go (resolved : bound) body)
+            ETyAbsRef _ _ body ->
+                go bound body
             ETyInst body _ ->
-                go body
+                go bound body
             ERoll _ body ->
-                go body
+                go bound body
             EUnroll body ->
-                go body
+                go bound body
+
+    freeResolvedVar bound resolved =
+        if resolvedVarBoundBy bound resolved
+            then Set.empty
+            else maybe Set.empty Set.singleton (resolvedVarSymbolIdentity resolved)

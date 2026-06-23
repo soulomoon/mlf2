@@ -14,6 +14,7 @@ module MLF.Elab.Phi.VSpine (
     BodyShape(..),
     mkVSpine,
     vSpineNames,
+    vSpineBinderRefs,
     vSpineBounds,
     vSpineIds,
     vSpineLength,
@@ -23,22 +24,27 @@ module MLF.Elab.Phi.VSpine (
     vSpineBoundAt,
     vSpineIdAt,
     vsDeleteAt,
-    vsPrepend,
     vsUpdateBound,
     vsInsertAt,
     assertSpineSync,
 ) where
 
 import MLF.Constraint.Types.Graph (NodeId(..))
-import MLF.Types.Elab (BoundType, ElabType, Ty(..))
-import MLF.Reify.TypeOps (alphaEqType, splitForalls)
+import MLF.Types.Elab
+    ( BoundType
+    , ElabType
+    , Ty(..)
+    , TypeBinderRef
+    , typeBinderRefName
+    )
+import MLF.Reify.TypeOps (alphaEqType, splitForallsRefs)
 import MLF.Util.ElabError (ElabError(..))
 
 -- | Virtual spine: symbolic representation of a type's quantifier prefix.
 -- Each binder carries its name, optional bound, and optional node identity.
 data VSpine = VSpine
-    { vsBinders :: [(String, Maybe BoundType, Maybe NodeId)]
-      -- ^ (name, bound, identity) per quantifier, outermost first
+    { vsBinders :: [(TypeBinderRef, Maybe BoundType, Maybe NodeId)]
+      -- ^ (binder ref, bound, identity) per quantifier, outermost first
     , vsBody    :: BodyShape
     } deriving (Show)
 
@@ -49,15 +55,22 @@ data BodyShape = BodyBottom | BodyNonBottom
 -- | Construct a VSpine from the current type and identity list.
 mkVSpine :: ElabType -> [Maybe NodeId] -> VSpine
 mkVSpine ty ids =
-    let (qs, body) = splitForalls ty
-        binders = zipWith (\(name, bound) mid -> (name, bound, mid)) qs ids
+    let (qs, body) = splitForallsRefs ty
+        binders = zipWith (\(ref, bound) mid -> (spineRef ref mid, bound, mid)) qs ids
         bodyShape = if alphaEqType body TBottom then BodyBottom else BodyNonBottom
     in VSpine binders bodyShape
+
+spineRef :: TypeBinderRef -> Maybe NodeId -> TypeBinderRef
+spineRef ref _mid =
+    ref
 
 -- Accessors
 
 vSpineNames :: VSpine -> [String]
-vSpineNames = map (\(n, _, _) -> n) . vsBinders
+vSpineNames = map (\(ref, _, _) -> typeBinderRefName ref) . vsBinders
+
+vSpineBinderRefs :: VSpine -> [TypeBinderRef]
+vSpineBinderRefs = map (\(ref, _, _) -> ref) . vsBinders
 
 vSpineBounds :: VSpine -> [Maybe BoundType]
 vSpineBounds = map (\(_, b, _) -> b) . vsBinders
@@ -71,7 +84,7 @@ vSpineLength = length . vsBinders
 vSpineNull :: VSpine -> Bool
 vSpineNull = null . vsBinders
 
-vSpineBinderAt :: VSpine -> Int -> Either ElabError (String, Maybe BoundType, Maybe NodeId)
+vSpineBinderAt :: VSpine -> Int -> Either ElabError (TypeBinderRef, Maybe BoundType, Maybe NodeId)
 vSpineBinderAt vs i
     | i < 0 || i >= len =
         Left $
@@ -79,7 +92,7 @@ vSpineBinderAt vs i
                 "VSpine: binder index " ++ show i ++ " out of range for spine length " ++ show len
     | otherwise =
         case drop i (vsBinders vs) of
-            binder : _ -> Right binder
+            entry : _ -> Right entry
             [] ->
                 Left $
                     PhiInvariantError $
@@ -89,8 +102,8 @@ vSpineBinderAt vs i
 
 vSpineNameAt :: VSpine -> Int -> Either ElabError String
 vSpineNameAt vs i = do
-    (n, _, _) <- vSpineBinderAt vs i
-    pure n
+    (ref, _, _) <- vSpineBinderAt vs i
+    pure (typeBinderRefName ref)
 
 vSpineBoundAt :: VSpine -> Int -> Either ElabError (Maybe BoundType)
 vSpineBoundAt vs i = do
@@ -110,21 +123,17 @@ vsDeleteAt i vs =
     let (pre, rest) = splitAt i (vsBinders vs)
     in vs { vsBinders = pre ++ drop 1 rest }
 
--- | Prepend a binder at the front.
-vsPrepend :: (String, Maybe BoundType, Maybe NodeId) -> VSpine -> VSpine
-vsPrepend b vs = vs { vsBinders = b : vsBinders vs }
-
 -- | Update the bound at index @i@.
 vsUpdateBound :: Int -> Maybe BoundType -> VSpine -> VSpine
 vsUpdateBound i newBound vs =
     let bs = vsBinders vs
         (pre, rest) = splitAt i bs
     in case rest of
-        ((n, _, mid) : rs) -> vs { vsBinders = pre ++ (n, newBound, mid) : rs }
+        ((ref, _, mid) : rs) -> vs { vsBinders = pre ++ (ref, newBound, mid) : rs }
         [] -> vs  -- out of range: no-op
 
 -- | Insert a binder at index @i@.
-vsInsertAt :: Int -> (String, Maybe BoundType, Maybe NodeId) -> VSpine -> VSpine
+vsInsertAt :: Int -> (TypeBinderRef, Maybe BoundType, Maybe NodeId) -> VSpine -> VSpine
 vsInsertAt i b vs =
     let (pre, rest) = splitAt i (vsBinders vs)
     in vs { vsBinders = pre ++ b : rest }
@@ -133,9 +142,9 @@ vsInsertAt i b vs =
 -- Returns Left with a diagnostic if they disagree.
 assertSpineSync :: VSpine -> ElabType -> [Maybe NodeId] -> Either ElabError ()
 assertSpineSync vs ty ids = do
-    let (qs, _) = splitForalls ty
+    let (qs, _) = splitForallsRefs ty
         vsNames = vSpineNames vs
-        tyNames = map fst qs
+        tyNames = map (typeBinderRefName . fst) qs
         vsIds = vSpineIds vs
     if vsNames /= tyNames
         then Left $ PhiInvariantError $

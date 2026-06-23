@@ -4,6 +4,7 @@ module Elab.ResultTypeUtilSpec (spec) where
 
 import Data.IntSet qualified as IntSet
 import Data.List.NonEmpty (NonEmpty (..))
+import ElabTermTestSupport (testTForall, testTVar, testTVarApp)
 import MLF.Constraint.Types.Graph
   ( BaseTy (..),
     Constraint (..),
@@ -15,7 +16,7 @@ import MLF.Constraint.Types.Graph
     fromListGen,
   )
 import MLF.Elab.Run.ResultType.Util
-import MLF.Elab.Types
+import MLF.Types.Elab
 import MLF.Frontend.ConstraintGen (AnnExpr (..))
 import MLF.Frontend.Syntax (Lit (..))
 import SpecUtil (emptyConstraint)
@@ -31,14 +32,18 @@ intBound :: BoundType
 intBound = TBase (BaseTy "Int")
 
 forallTy :: ElabType
-forallTy = TForall "a" Nothing (TVar "a")
+forallTy = testTForall "a" Nothing (testTVar "a")
+
+typeRef :: Int -> String -> TypeBinderRef
+typeRef key name =
+  typeBinderRefFromIdentity (typeBinderIdentityFromNode (NodeId key)) name
 
 boundedByForall :: ElabType
 boundedByForall =
-  TForall
+  testTForall
     "a"
-    (Just (TForall "b" Nothing (TVar "b")))
-    (TVar "a")
+    (Just (testTForall "b" Nothing (testTVar "b")))
+    (testTVar "a")
 
 spec :: Spec
 spec = describe "MLF.Elab.Run.ResultType.Util" $ do
@@ -65,28 +70,39 @@ spec = describe "MLF.Elab.Run.ResultType.Util" $ do
   describe "forall detection and implicit instantiation" $ do
     it "detects foralls that appear in explicit bounds" $ do
       containsBoundForall intTy `shouldBe` False
-      containsBoundForall (TForall "a" (Just intBound) (TVar "a"))
+      containsBoundForall (testTForall "a" (Just intBound) (testTVar "a"))
         `shouldBe` False
       containsBoundForall boundedByForall `shouldBe` True
       containsBoundForall (TArrow intTy boundedByForall) `shouldBe` True
       containsBoundForall (TCon (BaseTy "Box") (boundedByForall :| [boolTy]))
         `shouldBe` True
-      containsBoundForall (TVarApp "F" (boundedByForall :| []))
+      containsBoundForall (testTVarApp "F" (boundedByForall :| []))
         `shouldBe` True
 
     it "detects forall-bearing instantiation arguments through the whole inst tree" $ do
       instHasBoundForall InstId `shouldBe` False
       instHasBoundForall (InstApp forallTy) `shouldBe` True
       instHasBoundForall (InstBot intTy) `shouldBe` False
-      instHasBoundForall (InstSeq (InstInside (InstBot forallTy)) (InstUnder "a" InstElim))
+      instHasBoundForall (InstSeq (InstInside (InstBot forallTy)) (instUnderWithRef (typeRef 85 "a") InstElim))
         `shouldBe` True
-      instHasBoundForall (InstUnder "a" InstIntro) `shouldBe` False
+      instHasBoundForall (instUnderWithRef (typeRef 87 "a") InstIntro) `shouldBe` False
 
     it "eliminates implicit bounded foralls while preserving explicit unbounded binders" $ do
-      let implicit = TForall "a" (Just intBound) (TVar "a")
+      let implicit = testTForall "a" (Just intBound) (testTVar "a")
       instantiateImplicitForalls implicit `shouldBe` intTy
-      instantiateImplicitForalls (TArrow implicit (TForall "b" Nothing implicit))
-        `shouldBe` TArrow intTy (TForall "b" Nothing intTy)
+      instantiateImplicitForalls (TArrow implicit (testTForall "b" Nothing implicit))
+        `shouldBe` TArrow intTy (testTForall "b" Nothing intTy)
+
+    it "preserves refs while walking implicit forall helpers" $ do
+      let refA = typeRef 10 "a"
+          refB = typeRef 11 "b"
+          implicit = tForallWithRef refA (Just intBound) (tVarWithRef refA)
+          explicit = tForallWithRef refB Nothing implicit
+       in do
+            containsBoundForall (tVarAppWithRef refB (boundedByForall :| []))
+              `shouldBe` True
+            instantiateImplicitForalls explicit
+              `shouldBe` tForallWithRef refB Nothing intTy
 
   describe "annotation helpers" $ do
     it "strips only outer annotation and unfold wrappers" $ do

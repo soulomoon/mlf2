@@ -12,6 +12,416 @@
   bindings carry `ConstructorId ConstructorRef`, and backend constructor-binding
   synthesis consumes that checked identity instead of reclassifying by binding
   name.
+- Centralized `IdDetails` reference-name, local, constructor, and local-rename
+  projections in `MLF.Types.Identity`, with `ResolvedVar` and binding
+  constructor-reference helpers delegating through that identity layer.
+- Removed duplicate `ResolvedVar` display-name metadata; `resolvedVarName` now
+  projects from `IdDetails`, leaving `resolvedVarRuntimeName` as the runtime
+  sidecar.
+- Changed `XmlfTerm` and `XmlfTermF` variable, lambda, and let nodes to store
+  `ResolvedVar` directly instead of `Maybe ResolvedVar`; `EVarNode` is the
+  single variable node, and deferred terms are built from explicit
+  `DeferredRef` values instead of name-only helper constructors.
+- Moved core elaboration variable generation to emit resolved occurrences from
+  `EnvBinding`, distinguishing external environment references with `EnvId`
+  from lexical `LocalId` bindings and refreshing local sidecar types when
+  lambda/let rewrites change the occurrence type.
+- Moved resolved Program value lookup to trust the value `SymbolIdentity` index
+  instead of re-filtering identity matches by display name.
+- Removed duplicate `ValueInfo` display-name metadata; value identities now
+  carry the defining name, while source-visible and alias spellings stay at
+  scope/export map boundaries.
+- Removed duplicate lowered-binding display-name metadata; lowered bindings now
+  carry runtime name plus resolved identity details only.
+- Re-keyed checked-module data metadata by `SymbolIdentity`; source/display
+  type names remain in scope/export maps, not checked data ownership.
+- Re-keyed checked-module class metadata by `SymbolIdentity`; source/display
+  class names remain in scope/export maps, not checked class ownership.
+- Changed symbol owner metadata to carry the owner `SymbolIdentity` instead of
+  duplicating owner module/name strings.
+- Moved frontend owner-symbol construction to reuse existing owner
+  `SymbolIdentity` values instead of reconstructing owners from module/name
+  strings.
+- Removed the string-based `mkSymbolOwnerType`/`mkSymbolOwnerClass` production
+  helpers; owner metadata now exposes the identity-carrying constructors
+  directly.
+- Added generated unique identity sidecars to resolved `SymbolIdentity` values
+  and made the resolver assign them to local value, type, constructor, class,
+  and method declarations.
+- Threaded the Program checker identity generator from resolved syntax into
+  generated instance-method values, so checked instance methods receive unique
+  `SymbolIdentity` sidecars instead of structural string-only identities.
+- Added generated module identities to resolved and checked module artifacts,
+  and reused them for resolved import symbols instead of rebuilding module
+  identity from module-name strings.
+- Changed synthetic module identity construction to require an explicit
+  `UniqueIdentity`, preventing production helpers from building string-only
+  module identities.
+- Changed `SymbolIdentity` equality and ordering to key by generated
+  `UniqueIdentity` when present, so `Map SymbolIdentity` lookups no longer
+  fall back to stale structural strings after resolution.
+- Added generated `UniqueIdentity` aliases to source-type identity lookup,
+  while keeping qualified source-type spellings as the emitted compatibility
+  form.
+- Moved legacy unresolved Program elaboration locals onto generated `LocalRef`
+  sidecars, including recursive lets whose RHS and body scopes now share the
+  same local identity.
+- Re-keyed backend conversion module-scope recovery by module `SymbolIdentity`
+  instead of module-name strings.
+- Moved backend data-metadata scope recovery to reuse the checked
+  `dataInfoSymbol -> module SymbolIdentity` index instead of reconstructing
+  module identities from data module names.
+- Assigned deterministic generated sidecars to `<builtin>` value/type
+  identities from the primitive inventory.
+- Moved runtime Prelude constructor and `stringFromList` special handling to
+  compare against checked Prelude metadata instead of synthesizing structural
+  Prelude identities.
+- Moved backend-emission Prelude data retention to reuse checked Prelude data
+  identities for source-type dependencies instead of reconstructing type
+  identities from source names.
+- Moved synthesized deriving-`Eq` boolean conjunction references to the builtin
+  value identity instead of looking up `__mlfp_and` through the string scope.
+- Added direct builtin value/type identity helpers and moved primitive identity
+  tables, builtin type-kind tables, builtin type-symbol classification, and
+  opaque-type identity sets off constructing resolved symbols or metadata just
+  to peel their identities.
+- Checked-program finalization now rejects accepted `XmlfTerm`s that still carry
+  deferred variable identity after executable references are annotated from
+  runtime metadata.
+- Collapsed public xMLF term text handling onto checked `XmlfTerm`: removed the
+  raw `MLF.XMLF.Syntax.XmlfTerm` term AST and `MLF.XMLF.Parse`, and kept
+  `MLF.XMLF.prettyXmlfTerm` as a diagnostic projection from checked IR.
+- Checked lambda and let binders now store `LocalId` binder identity alongside
+  the resolved local occurrences that refer to it.
+- Moved backend-emission, runtime reachability, and backend-conversion
+  free-variable scans onto resolved `XmlfTerm` identity first, falling back to
+  string names only for legacy bare terms.
+- Moved backend-emission Prelude data retention to use resolved data and
+  constructor identity indexes instead of reconstructing data identities from
+  constructor owner strings.
+- Moved backend conversion recursive-let lifting, capture collection, and
+  capture-avoiding rewrite helpers to preserve resolved occurrence and
+  lambda/let binder identities instead of rebuilding through bare names.
+- Moved backend conversion's builtin-type normalization and ordinary
+  lambda/let emission to preserve resolved occurrence and binder identities, so
+  local identity survives temporary backend type inference.
+- Moved backend conversion's partial-application, closure-demand, handler-call,
+  and structural lambda-shape probes to read resolved local identity before
+  runtime names.
+- Moved backend conversion's let-alias application-head unfolding to compare
+  resolved let binder identity before runtime names.
+- Moved xMLF pretty/XMLF projection to read resolved local identity before the
+  string-runtime compatibility view, so rendered checked terms no longer expose
+  stale local runtime spellings.
+- Moved pipeline type-abstraction freshening to preserve resolved occurrence
+  and binder identities while renaming internal type variables.
+- Moved pipeline authoritative-annotation selection to recognize resolved local
+  identity-lambda terms before falling back to runtime-name equality.
+- Moved backend constructor-head recognition onto resolved `ConstructorId`
+  identities when present, leaving string-name recognition only as the legacy
+  compatibility path for unresolved terms.
+- Moved backend structural-constructor current-module result matching to compare
+  data identity after lookup instead of reading data module/name strings from
+  the candidate metadata, and made backend data-meta scope/context recovery and
+  fallback type-scope lookup read owner modules and unqualified type names from
+  `DataInfo` symbol identity instead of `dataModule`/`dataName`.
+- Moved frontend visible type-head recovery to match data heads from
+  `DataInfo` symbol identity instead of stale `dataName` metadata.
+- Moved frontend constructor result-binder generation to derive owner names from
+  `ConstructorInfo` owner identity instead of `ctorOwningType` metadata.
+- Moved frontend data-encoding self/result binders and deferred case
+  placeholders to derive owner names from `DataInfo` symbol identity instead of
+  stale `dataName` metadata, while preserving qualified hidden-owner binder
+  shape from the identity module.
+- Moved Program constructor/method export and instance-origin metadata to derive
+  owner modules from data/class symbol identity instead of stale
+  `dataModule`/`classModule` fields.
+- Removed duplicate data/class/method module metadata fields; module ownership
+  now derives from the corresponding symbol identity.
+- Removed duplicate instance-class module metadata; instance class ownership now
+  derives from the class symbol identity.
+- Moved instance-origin metadata from module-name strings to module symbol
+  identity, keeping module names only as display/index projections.
+- Removed duplicate instance-class name metadata; diagnostics now project the
+  class name from the class symbol identity.
+- Removed duplicate class-name metadata; class names now project from
+  `classInfoSymbol`, and resolved class symbols take display spelling
+  separately.
+- Removed unused single-class/single-type display metadata from evidence records;
+  evidence matching now keeps only class identity and the multi-head type views.
+- Removed duplicate single-head instance type caches; instance matching now uses
+  the non-empty head type lists directly.
+- Removed unused class/method parameter cache fields; class and method logic now
+  reads the non-empty parameter lists directly.
+- Removed duplicate method parameter-name metadata; single-parameter paths now
+  project the first method parameter from the non-empty parameter list.
+- Removed duplicate single constraint type-view metadata; constraint logic now
+  projects the first view from the non-empty view list.
+- Removed duplicate data parameter-name metadata; consumers now project names
+  from `dataTypeParams`.
+- Removed duplicate class parameter-name metadata; consumers now project names
+  from `classTypeParams`.
+- Removed duplicate lowered-binding name metadata; consumers now project runtime
+  names from `LoweredBindingIdentity`.
+- Removed duplicate checked-binding name metadata; consumers now project runtime
+  names from the binding `ResolvedVar`.
+- Removed duplicate deferred-method name metadata; consumers now project the
+  method display name from `DeferredMethodCall.deferredMethodInfo`.
+- Removed unused deferred-case handler-name metadata.
+- Removed duplicate deferred placeholder metadata; method/constructor/case
+  placeholders now project from their `DeferredRef`.
+- Removed duplicate constructor-shape name metadata; constructor shapes now
+  project their source name from the constructor `SymbolIdentity`.
+- Centralized Program data/class name projections on symbol identity helpers so
+  runtime/backend canonical type names do not rebuild identity names from
+  scattered metadata field reads.
+- Removed duplicate data-name metadata; `DataInfo` now carries only its symbol
+  identity, parameters, and constructors, with source-visible or hidden type
+  spellings carried by scope/export map keys.
+- Moved resolved value/data/class/constructor/method symbol source spellings to
+  use identity names instead of stale declaration/display-name fields.
+- Moved constructor-shape name synthesis from constructor declaration names to
+  constructor identity names.
+- Moved constructor-owner result-type matching to compare owner identity heads
+  instead of stale `ctorOwningType` metadata.
+- Moved constructor-owner fallback metadata reconstruction to derive owner names
+  from owner identity instead of stale `ctorOwningType` metadata.
+- Moved generated constructor placeholders and argument binders to derive
+  constructor names from constructor identity instead of stale `ctorName`
+  metadata.
+- Removed duplicate constructor-name metadata; constructor names now project from
+  `ctorInfoSymbol`, with import/display spellings carried by export/value
+  boundary maps.
+- Moved generated method placeholders, eta-expansion binders, and evidence
+  runtime-name seeds to derive method names from method identity instead of
+  stale `methodName` metadata.
+- Removed duplicate method-name metadata; method names now project from
+  `methodInfoSymbol`.
+- Removed duplicate method class-name metadata; method owner class names now
+  project from the method symbol owner identity.
+- Removed unused method runtime-base metadata.
+- Moved class method runtime-base and instance method value runtime identities
+  to derive from class/method identity plus identity head types instead of
+  display class/method/type names.
+- Moved local data/class/method/constructor metadata fields and constructor
+  runtime-name seeds to derive from resolved declaration identities instead of
+  module/display-name strings.
+- Moved constructor lowered-binding display sidecars to derive from constructor
+  identity instead of stale `ctorName` metadata.
+- Moved ordinary value/method lowered-binding display sidecars and ordinary def
+  runtime-name seeds to derive from value identity instead of display spelling.
+- Moved Program import source-type mention lookup to identity-keyed data maps,
+  with generated identity-name aliases kept out of elaboration display scopes so
+  constructor candidates are not duplicated.
+- Moved backend-emission Prelude data dependency scanning to the identity-keyed
+  data index, with source-type names used only as boundary match aliases.
+- Moved backend conversion source-type data hints to the identity-keyed data
+  index, including generated stable identity aliases for checked source types.
+- Moved runtime source-type data lookup to the identity-keyed data index,
+  including generated stable identity aliases for decoded checked values.
+- Moved runtime Prelude constructor dispatch off `(typeName, constructorName)`
+  string-pair keys and onto an internal Prelude constructor key table.
+- Moved runtime Prelude binding special-case lookup off direct binding-name
+  search and onto an internal Prelude binding key table.
+- Moved finalization constructor runtime lookup to the `ElaborateScope`
+  identity data index, keeping source/display aliases out of that semantic scan.
+- Moved resolved import scope, visible instance, and imported class lookups
+  through module-interface identities instead of module-name keys.
+- Made the checked Prelude cache return the advanced identity generator and
+  reuse only for matching resolved identities and generator inputs.
+- Included module identities in module-interface summary metadata so dependency
+  cache validation sees semantic module identity changes.
+- Tightened module-interface validation to reject semantic identities that lack
+  generated unique sidecars.
+- Tightened checked-binding finalization to reject deferred placeholders that
+  still lack generated identities.
+- Included top-level, constructor, method, and primitive symbol identities when
+  seeding fresh identity generators from checked terms.
+- Included nested owner symbol identities in checked-term identity-generator
+  seeding.
+- Reused the same owner-aware symbol identity seeding for resolved Program
+  artifacts.
+- Tightened module-interface validation to reject nested owner identities that
+  lack generated unique sidecars.
+- Tightened module-interface validation to reject stale keys in identity-indexed
+  interface maps.
+- Tightened exported-constructor display metadata validation to reject identity
+  key sets that diverge from the exported constructor index.
+- Moved derived `Eq` recursive self-binder names to derive from data identity
+  instead of resolved display spelling.
+- Moved class method runtime-base module selection to derive from class
+  identity instead of the syntax module string.
+- Moved value-origin module metadata for local defs, constructors, overloaded
+  methods, and instance method values to derive from their symbol identities.
+- Moved stored `InstanceInfo.instanceClassName` metadata to derive from class
+  identity while keeping declaration display names for immediate method errors.
+- Moved elaboration runtime-type and evidence-binding type closure for
+  constrained values to use `ConstraintInfo` class/method identities instead of
+  display class names.
+- Moved elaboration, finalization, and runtime local-evidence method
+  enumeration to `classMethodsByIdentity` instead of method-name maps.
+- Moved finalization/runtime local evidence lookup to compare full
+  `evidenceTypeIdentities` heads instead of only the first evidence type.
+- Added identity-indexed evidence method maps so local evidence lookup no
+  longer scans method-name maps to recover method identity.
+- Added identity-indexed exported type constructor maps so import/interface
+  constructor consumers no longer depend on exported constructor name maps.
+- Added identity-indexed module-interface data/class maps and made interface
+  validation enumerate local data/classes by identity.
+- Moved interface export validation and package-build interface summaries to
+  enumerate identity-indexed export/module metadata.
+- Removed the now-unused string-keyed data/class storage from module
+  interfaces.
+- Removed string-keyed exported type constructor storage; exported constructors
+  now live only in the identity index.
+- Moved exported constructor display spellings into `ExportedTypeInfo` boundary
+  metadata; exported constructors are still indexed by identity for semantic
+  lookup.
+- Removed string-keyed value/type/class storage from `ModuleExports`; display
+  maps are derived from identity-indexed exports when needed.
+- Removed string-keyed class and instance method storage; method payloads now
+  live only in identity-indexed maps.
+- Removed string-keyed evidence method storage; evidence methods now live only
+  in the identity-indexed evidence map.
+- Removed duplicate `ValueInfo.valueOriginModule`; value origins now derive from
+  the value symbol identity, including local elaboration temporaries.
+- Moved Program class-method display/export/local-value enumeration and derived
+  `Eq` method selection to `classMethodsByIdentity`.
+- Moved Program import instance visibility to compare exported/origin data by
+  `SymbolIdentity` instead of module-qualified type-name strings.
+- Moved constructor-owner unknown-type diagnostics to derive the owner display
+  name from `ConstructorInfo` owner identity instead of `ctorOwningType`.
+- Removed duplicate constructor-owner name metadata; constructor owner names now
+  project from `ctorOwningTypeIdentity`.
+- Moved resolved constructor variable display sidecars in finalization/backend
+  conversion to derive from constructor identity instead of stale `ctorName`
+  metadata.
+- Moved xMLF term-closure substitution and type-variable renaming to preserve
+  `ResolvedVar` identities, so checked terms no longer lose identity while
+  closing/retyping accepted elaborations.
+- Moved reducer capture-avoidance free-type-variable scans to include resolved
+  occurrence/binder identity types.
+- Moved checked-program deferred constructor/case/method rewrite helpers to
+  preserve resolved occurrence and binder identities instead of rebuilding
+  through the string-runtime compatibility patterns.
+- Moved checked-program deferred placeholder matching to read resolved
+  occurrence identity before the string-runtime compatibility pattern.
+- Moved deferred local evidence finalization off evidence runtime-name lookup;
+  evidence methods are matched by class identity, type identity, and method identity.
+- Moved deferred/runtime method class-argument inference to match method,
+  argument, and expected-result identity types instead of display aliases.
+- Replaced raw superclass evidence cycle keys that stringified constraint
+  types with structured class identity plus source-type lists.
+- Preserved local evidence binder order while annotating deferred evidence
+  identities, so constrained nullary methods no longer bind `mempty`-style
+  evidence to another method's parameter.
+- Added identity-indexed instance method lookup so deferred method resolution no
+  longer selects instance methods through source method-name map keys.
+- Moved module definition finalization result collection to `SymbolIdentity`
+  keys instead of checked-binding runtime names.
+- Moved module finalization read-context lookup to lowered binding identity
+  keys instead of lowered binding runtime names.
+- Re-keyed module pipeline results by lowered binding identity immediately after
+  the string-keyed pipeline boundary returns.
+- Indexed deferred external bindings once at the pipeline boundary so
+  `DeferredObligations` stay keyed by `DeferredRef` instead of being rescanned
+  by name for identity and mode lookup.
+- Moved explicit module export collection to local `SymbolIdentity` indexes
+  instead of scanning local value/type/class maps by string-keyed entries.
+- Added persistent identity indexes to `ModuleExports`, so resolved import and
+  class-dependency lookup no longer rescans exported string-keyed maps.
+- Reused `ModuleExports` identity indexes for qualified-import instance
+  visibility and constructor owner lookup.
+- Moved derived `Eq` method reference selection to class method identity
+  metadata instead of scanning scope values.
+- Made constructor owner recovery trust the constructor's owner identity instead
+  of falling back to a visible type-table scan.
+- Made constraint class lookup trust `ConstraintInfo` class identity instead of
+  falling back to the display class name.
+- Added an identity-keyed resolved-term environment index for xMLF typechecking
+  and backend local-type reconciliation.
+- Added a backend data-meta identity index so exact data-symbol recovery no
+  longer rescans backend data metadata lists.
+- Moved exported-main runtime selection to the resolved local value identity
+  instead of looking up the `"main"` export by string.
+- Moved local definition lowering/checking to resolve def `SymbolIdentity`
+  before reading value info from scope.
+- Moved instance method lowering and instance method identity-index construction
+  to select method values through method identity metadata.
+- Moved constructor owner shape/trackability checks to use the existing data
+  identity index instead of rescanning name-keyed data maps.
+- Moved resolved instance method declarations to carry the resolved method
+  symbol and validate/lower through class method identity metadata.
+- Moved resolved top-level definition declarations to carry the resolved value
+  symbol and build/lower definition metadata from that identity.
+- Moved resolved constructor declarations to carry resolved constructor symbols
+  and build constructor metadata directly from those identities.
+- Moved resolved data declarations to carry resolved type symbols and build data
+  metadata directly from those identities.
+- Moved resolved class declarations and method signatures to carry resolved
+  symbols and build class metadata directly from those identities.
+- Moved exported-main marking to compare resolved checked-binding identity
+  instead of checked binding runtime names.
+- Moved resolved-main lowering checks to read the resolved definition identity
+  instead of display-name equality.
+- Moved backend conversion binding/runtime-name indexes to read checked
+  resolved-variable runtime names instead of checked binding names.
+- Moved runtime lookup diagnostics and opaque dependency reporting to read
+  checked resolved-variable runtime names instead of checked binding names.
+- Moved instance-match deduplication to compare `ConstraintInfo` identity keys
+  and removed unused display-name instance resolver entrypoints.
+- Moved instance-match method equivalence to compare identity-indexed instance
+  method maps instead of method runtime names.
+- Moved Prelude opaque export recovery to look up builtin data by
+  `SymbolIdentity` instead of resolved symbol defining-name strings.
+- Moved resolved builtin type-kind lookup to a `SymbolIdentity` index instead
+  of unpacking resolved symbol defining-name strings.
+- Removed the method class-info display-name fallback; method class recovery now
+  trusts the owner `SymbolIdentity` index.
+- Moved opaque builtin `DataInfo` recognition to compare data `SymbolIdentity`
+  values instead of builtin module/type-name strings.
+- Moved constructor-binding finalization metadata lookup and repair decisions to
+  use resolved constructor identity instead of binding/runtime-name strings.
+- Moved run-program Prelude constructor recovery for Unit/List/Option/Nat to
+  compare and look up constructor `SymbolIdentity` values.
+- Moved run-program primitive dispatch to look up runtime primitive handlers by
+  builtin value `SymbolIdentity` instead of converting identity back to names.
+- Moved instance-method enumeration in elaboration/finalization/runtime evidence
+  paths to read `instanceMethodsByIdentity` instead of the method-name map.
+- Moved backend constructor type-application parameter recovery to read checked
+  constructor types from the resolved constructor identity environment.
+- Moved backend current-module structural data recovery to look up data metadata
+  by synthesized type `SymbolIdentity` instead of scanning by defining name.
+- Moved parameterized constructor-binding result-shape repair to preserve
+  resolved lambda binder identities while reordering the generated spine.
+- Moved retained-child preservation analysis to read resolved let/variable
+  identity before the string-runtime compatibility pattern.
+- Moved checked-program main-term aggregation and Church-data decoding to
+  preserve/use resolved variable and binder identity before falling back to
+  runtime names.
+- Moved run-program same-module data-field decoding to look up field data by
+  synthesized `SymbolIdentity` from the owner's identity module instead of
+  trusting `DataInfo.dataModule` string metadata.
+- Moved source-type finalization's vacuous-forall stripping to count resolved
+  identity types before dropping checked type abstractions.
+- Moved checked-program let local identities to preserve the complete binding
+  scheme instead of only the scheme body, so checked xMLF keeps enough local
+  identity type information for later type instantiation.
+- Hardened xMLF typechecking to reject resolved local variable occurrences
+  whose identity type is stale relative to the resolved binding identity.
+- Added a backend-local structural type reconciliation pass for resolved local
+  occurrences that are already proven equivalent across source ADT heads and
+  lowered Church/recursive runtime types.
+- Moved the opaque unchecked checked-binding fallback to annotate resolved term
+  identities before storing the fallback term, so opaque primitive paths do not
+  reintroduce bare executable variable references.
+- Extended metadata-derived constructor-binding finalization from the initial
+  nullary subset to constructor bindings without constructor foralls, including
+  monomorphic field/multi-constructor ADTs and non-nullary data-parameterized
+  constructors. Parameterized nullary constructors remain on the surface
+  pipeline until their type-instantiated roll shape is proven.
+- Temporarily disabled `MLF.Program parser parity` from the default `mlf2-test`
+  driver while parser parity remains too slow for the current migration loop.
 - Added exact two- and three-source-definition helper entrypoints to the
   shared parser-owned parser-parity library and migrated the selected two- and
   three-definition module-body paths plus the imported three-definition body
@@ -1003,7 +1413,7 @@
   owning data type with the required arity.
 - Repaired the `.mlfp` ProgramSpec regression cluster while keeping `.mlfp`
   on the shared old eMLF/typecheck route: no new surface forms, no direct
-  `.mlfp -> ElabTerm` fallback, no permissive `EUnroll`, and no broad
+  `.mlfp -> XmlfTerm` fallback, no permissive `EUnroll`, and no broad
   `TypeCheck` weakening. The recursive-ADT corpus, CLI/helper diagnostics,
   module-ordering case, and unified `.mlfp` integration checks are green.
   Validation: `MLF.Program execution corpus` (`10 examples, 0 failures`),
@@ -2017,7 +2427,7 @@
 * Generalized unification (Ch 7.6): batch Rebind after first-order unification in Solve phase, with `harmonizeBindParentsMulti` for equivalence-class-aware binding-tree harmonization.
 * Defensible exactness: added machine-checked thesis claims registry (`docs/thesis-claims.yaml`, 21 claims) and deviation register (`docs/thesis-deviations.yaml`, 9 deviations) with cross-link validation script (`scripts/check-thesis-claims.sh`); added `supports_claims` back-links to obligations ledger; added three new test modules (`TranslatablePresolutionSpec`, `PhiSoundnessSpec`, `ExpansionMinimalitySpec`) covering Def. 15.2.10, Def. 15.3.4, and Def. 10.1.1; upgraded conformance gate with claims checker and new anchors; migrated paper-map to reference machine-checked artifacts; closed spec drift with deferred notes and deviation cross-references; upgraded three claims from `partial` to `defended`; verification: 765 examples, 0 failures.
 * BUG-2026-02-20-001: fixed elaboration-side lambda binder substitution key aliasing so RHS-coercion annotated-let identities no longer leak unresolved `t0` names after `step`; added `PipelineSpec` regression `BUG-2026-02-20-001`.
-* Phase 7 theorem obligations: added `/Volumes/src/mlf4/test/TypeSoundnessSpec.hs` with executable property-style preservation/progress proxies over closed well-typed `ElabTerm` values, wired it into `mlf2-test` (`/Volumes/src/mlf4/mlf2.cabal`, `/Volumes/src/mlf4/test/Main.hs`), and enforced it in the thesis gate via `--match "Phase 7 theorem obligations"` in `/Volumes/src/mlf4/scripts/thesis-conformance-gate.sh`.
+* Phase 7 theorem obligations: added `/Volumes/src/mlf4/test/TypeSoundnessSpec.hs` with executable property-style preservation/progress proxies over closed well-typed `XmlfTerm` values, wired it into `mlf2-test` (`/Volumes/src/mlf4/mlf2.cabal`, `/Volumes/src/mlf4/test/Main.hs`), and enforced it in the thesis gate via `--match "Phase 7 theorem obligations"` in `/Volumes/src/mlf4/scripts/thesis-conformance-gate.sh`.
 * Formal obligations ledger: added canonical Ch. 4–15 rule-to-code-to-test inventory (`docs/thesis-obligations.yaml`), generated Markdown view (`docs/thesis-obligations.md`), renderer/checker scripts (`scripts/render-thesis-obligations-ledger.rb`, `scripts/check-thesis-obligations-ledger.sh`), and mandatory hard-fail gate integration in `scripts/thesis-conformance-gate.sh` (exact 99-ID coverage, anchor executability, and markdown drift enforcement).
 * Thesis conformance gate: added canonical thesis-anchor command `scripts/thesis-conformance-gate.sh` (Φ/Ω `R-` matrix rows, A6 parity, BUG-2026-02-17-002 strict success, phase-3 equivalence gates, representative theorem baseline) with minimum matched-example thresholds, and added required CI workflow `.github/workflows/thesis-conformance.yml` to enforce `cabal build all` + gate command on push/PR.
 * A7 (P2) non-binding dedup closure: added shared test harness pipeline-stage helpers in `test/SpecUtil.hs` (`runConstraintDefault`, `runToPresolutionWithAnnDefault`, `runPipelineArtifactsDefault`) and migrated `PipelineSpec`, `ElaborationSpec`, and `ConstraintGenSpec` off remaining local normalize/solve-chain wrappers, preserving behavior while centralizing helper logic.

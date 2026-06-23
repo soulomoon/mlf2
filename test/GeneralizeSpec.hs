@@ -3,52 +3,103 @@ module GeneralizeSpec (spec) where
 
 import Data.List.NonEmpty (NonEmpty(..))
 import Data.List (isInfixOf)
+import qualified Data.Map.Strict as Map
 import Test.Hspec
 
-import MLF.Constraint.Types.Graph (BaseTy(..))
+import ElabTermTestSupport (testTForall, testTVar)
+import MLF.Constraint.Types.Graph (BaseTy(..), NodeId(..))
 import MLF.Elab.Generalize
-    ( selectSolvedOrderWithShadow
+    ( inlineRigidTypes
+    , selectSolvedOrderWithShadow
     , shadowCompareTypes
     )
-import MLF.Elab.Run.ResultType (inferInstAppArgsFromScheme)
-import MLF.Elab.Pipeline (ElabError(..), Ty(..))
+import MLF.Elab.Run.ResultType
+    ( inferInstAppArgsFromSchemeRefs
+    , substTypeSelectiveRefs
+    )
+import MLF.Elab.Pipeline (ElabError(..))
+import MLF.Types.Elab
+    ( ElabType
+    , Ty(..)
+    , TypeBinderRef
+    , tForallWithRef
+    , tMuWithRef
+    , tVarAppWithRef
+    , tVarWithRef
+    , typeBinderIdentityFromNode
+    , typeBinderRefFromIdentity
+    )
+
+typeRef :: Int -> String -> TypeBinderRef
+typeRef key name =
+    typeBinderRefFromIdentity (typeBinderIdentityFromNode (NodeId key)) name
 
 spec :: Spec
 spec = do
     describe "Generalize shadow comparator" $ do
         it "accepts alpha-equivalent types" $ do
-            let solvedTy = TForall "a" Nothing (TVar "a")
-                baseTy = TForall "b" Nothing (TVar "b")
+            let solvedTy = testTForall "a" Nothing (testTVar "a")
+                baseTy = testTForall "b" Nothing (testTVar "b")
             shadowCompareTypes "ctx" solvedTy baseTy `shouldBe` Right ()
 
-        it "accepts same structure when solved/base free names differ" $ do
-            let solvedTy = TArrow (TVar "t14") (TVar "t14")
-                baseTy = TArrow (TVar "a") (TVar "a")
+        it "rejects same structure when solved/base free identities differ" $ do
+            let solvedTy = TArrow (testTVar "t14") (testTVar "t14")
+                baseTy = TArrow (testTVar "a") (testTVar "a")
+            case shadowCompareTypes "ctx" solvedTy baseTy of
+                Left (ValidationFailed msgs) ->
+                    msgs `shouldSatisfy` any (isInfixOf "shadow reify mismatch")
+                other ->
+                    expectationFailure ("Expected ValidationFailed identity mismatch, got: " ++ show other)
+
+        it "accepts same identity when display names differ" $ do
+            let solvedRef = typeRef 40 "t14"
+                baseRef = typeRef 40 "a"
+                solvedTy = TArrow (tVarWithRef solvedRef) (tVarWithRef solvedRef)
+                baseTy = TArrow (tVarWithRef baseRef) (tVarWithRef baseRef)
             shadowCompareTypes "ctx" solvedTy baseTy `shouldBe` Right ()
+
+        it "rejects same-named free variables with different identities" $ do
+            let solvedRef = typeRef 41 "a"
+                baseRef = typeRef 42 "a"
+                solvedTy = TArrow (tVarWithRef solvedRef) (tVarWithRef solvedRef)
+                baseTy = TArrow (tVarWithRef baseRef) (tVarWithRef baseRef)
+            case shadowCompareTypes "ctx" solvedTy baseTy of
+                Left (ValidationFailed msgs) ->
+                    msgs `shouldSatisfy` any (isInfixOf "shadow reify mismatch")
+                other ->
+                    expectationFailure ("Expected ValidationFailed identity mismatch, got: " ++ show other)
 
         it "accepts nested forall body renaming without bounds" $ do
             let solvedTy =
-                    TForall "a" Nothing
-                        (TForall "b" Nothing (TArrow (TVar "a") (TVar "b")))
+                    testTForall "a" Nothing
+                        (testTForall "b" Nothing (TArrow (testTVar "a") (testTVar "b")))
                 baseTy =
-                    TForall "x" Nothing
-                        (TForall "y" Nothing (TArrow (TVar "x") (TVar "y")))
+                    testTForall "x" Nothing
+                        (testTForall "y" Nothing (TArrow (testTVar "x") (testTVar "y")))
             shadowCompareTypes "ctx" solvedTy baseTy `shouldBe` Right ()
 
         it "accepts nested forall renaming through explicit bounds and body" $ do
-            let solvedTy =
-                    TForall "a" (Just (TArrow (TVar "a") (TVar "a")))
-                        (TForall "b" (Just (TCon (BaseTy "Box") (TVar "a" :| [TVar "b"])))
-                            (TArrow (TVar "b") (TVar "a")))
+            let solvedFreeA = typeRef 50 "a"
+                baseFreeX = typeRef 50 "x"
+                solvedFreeB = typeRef 51 "b"
+                baseFreeY = typeRef 51 "y"
+                solvedA = typeRef 52 "a"
+                baseX = typeRef 53 "x"
+                solvedB = typeRef 54 "b"
+                baseY = typeRef 55 "y"
+                solvedTy =
+                    tForallWithRef solvedA (Just (TArrow (tVarWithRef solvedFreeA) (tVarWithRef solvedFreeA)))
+                        (tForallWithRef solvedB (Just (TCon (BaseTy "Box") (tVarWithRef solvedFreeA :| [tVarWithRef solvedFreeB])))
+                            (TArrow (tVarWithRef solvedB) (tVarWithRef solvedA)))
                 baseTy =
-                    TForall "x" (Just (TArrow (TVar "x") (TVar "x")))
-                        (TForall "y" (Just (TCon (BaseTy "Box") (TVar "x" :| [TVar "y"])))
-                            (TArrow (TVar "y") (TVar "x")))
+                    tForallWithRef baseX (Just (TArrow (tVarWithRef baseFreeX) (tVarWithRef baseFreeX)))
+                        (tForallWithRef baseY (Just (TCon (BaseTy "Box") (tVarWithRef baseFreeX :| [tVarWithRef baseFreeY])))
+                            (TArrow (tVarWithRef baseY) (tVarWithRef baseX)))
             shadowCompareTypes "ctx" solvedTy baseTy `shouldBe` Right ()
 
         it "rejects inconsistent free-variable reuse under renaming" $ do
-            let solvedTy = TArrow (TVar "a") (TVar "b")
-                baseTy = TArrow (TVar "x") (TVar "x")
+            let solvedTy = TArrow (testTVar "a") (testTVar "b")
+                baseTy = TArrow (testTVar "x") (testTVar "x")
             case shadowCompareTypes "ctx" solvedTy baseTy of
                 Left (ValidationFailed msgs) ->
                     msgs `shouldSatisfy` any (isInfixOf "shadow reify mismatch")
@@ -57,11 +108,11 @@ spec = do
 
         it "rejects non-bijective mapping reused across bound and body" $ do
             let solvedTy =
-                    TForall "a" (Just (TArrow (TVar "a") (TVar "a")))
-                        (TArrow (TVar "a") (TVar "b"))
+                    testTForall "a" (Just (TArrow (testTVar "a") (testTVar "a")))
+                        (TArrow (testTVar "a") (testTVar "b"))
                 baseTy =
-                    TForall "x" (Just (TArrow (TVar "x") (TVar "x")))
-                        (TArrow (TVar "x") (TVar "x"))
+                    testTForall "x" (Just (TArrow (testTVar "x") (testTVar "x")))
+                        (TArrow (testTVar "x") (testTVar "x"))
             case shadowCompareTypes "ctx" solvedTy baseTy of
                 Left (ValidationFailed msgs) ->
                     msgs `shouldSatisfy` any (isInfixOf "shadow reify mismatch")
@@ -70,16 +121,16 @@ spec = do
 
         it "accepts renamed variables through constructor arguments" $ do
             let solvedTy =
-                    TForall "a" Nothing
-                        (TForall "b" Nothing (TCon (BaseTy "Pair") (TVar "a" :| [TVar "b"])))
+                    testTForall "a" Nothing
+                        (testTForall "b" Nothing (TCon (BaseTy "Pair") (testTVar "a" :| [testTVar "b"])))
                 baseTy =
-                    TForall "x" Nothing
-                        (TForall "y" Nothing (TCon (BaseTy "Pair") (TVar "x" :| [TVar "y"])))
+                    testTForall "x" Nothing
+                        (testTForall "y" Nothing (TCon (BaseTy "Pair") (testTVar "x" :| [testTVar "y"])))
             shadowCompareTypes "ctx" solvedTy baseTy `shouldBe` Right ()
 
         it "rejects semantic mismatch with shadow reify mismatch diagnostics" $ do
-            let solvedTy = TForall "a" Nothing (TArrow (TVar "a") (TVar "a"))
-                baseTy = TForall "a" Nothing (TArrow (TVar "a") (TBase (BaseTy "Int")))
+            let solvedTy = testTForall "a" Nothing (TArrow (testTVar "a") (testTVar "a"))
+                baseTy = testTForall "a" Nothing (TArrow (testTVar "a") (TBase (BaseTy "Int")))
             case shadowCompareTypes "ctx" solvedTy baseTy of
                 Left (ValidationFailed msgs) ->
                     msgs `shouldSatisfy` any (isInfixOf "shadow reify mismatch")
@@ -88,18 +139,18 @@ spec = do
 
     describe "selectSolvedOrderWithShadow" $ do
         it "returns solved type when solved/base shadow comparison succeeds" $ do
-            let solvedTy = TForall "a" Nothing (TVar "a")
-                baseTy = TForall "b" Nothing (TVar "b")
+            let solvedTy = testTForall "a" Nothing (testTVar "a")
+                baseTy = testTForall "b" Nothing (testTVar "b")
             selectSolvedOrderWithShadow "ctx" solvedTy (Just baseTy) `shouldBe` Right solvedTy
 
         it "returns solved output even when base output is alpha-equivalent but syntactically different" $ do
-            let solvedTy = TForall "a" Nothing (TVar "a")
-                baseTy = TForall "z" Nothing (TVar "z")
+            let solvedTy = testTForall "a" Nothing (testTVar "a")
+                baseTy = testTForall "z" Nothing (testTVar "z")
             selectSolvedOrderWithShadow "ctx" solvedTy (Just baseTy) `shouldBe` Right solvedTy
 
         it "fails hard on solved/base shadow mismatch when base shadow is present" $ do
-            let solvedTy = TForall "a" Nothing (TArrow (TVar "a") (TVar "a"))
-                baseTy = TForall "a" Nothing (TArrow (TVar "a") (TBase (BaseTy "Int")))
+            let solvedTy = testTForall "a" Nothing (TArrow (testTVar "a") (testTVar "a"))
+                baseTy = testTForall "a" Nothing (TArrow (testTVar "a") (TBase (BaseTy "Int")))
             case selectSolvedOrderWithShadow "ctx" solvedTy (Just baseTy) of
                 Left (ValidationFailed msgs) ->
                     msgs `shouldSatisfy` any (isInfixOf "shadow reify mismatch")
@@ -107,7 +158,7 @@ spec = do
                     expectationFailure ("Expected ValidationFailed shadow mismatch, got: " ++ show other)
 
         it "reports context and normalized type diagnostics on mismatch" $ do
-            let solvedTy = TVar "a"
+            let solvedTy = testTVar "a"
                 baseTy = TBase (BaseTy "Int")
             case selectSolvedOrderWithShadow "generalizeAt:caseX" solvedTy (Just baseTy) of
                 Left (ValidationFailed msgs) -> do
@@ -122,8 +173,62 @@ spec = do
 
     describe "Instantiation inference strictness" $ do
         it "returns Nothing when a bounded body variable only matches via fallback recovery" $ do
-            inferInstAppArgsFromScheme
-                [("a", Just (TBase (BaseTy "Bool")))]
-                (TVar "a")
+            let refA = typeRef 10 "a"
+            inferInstAppArgsFromSchemeRefs
+                [(refA, Just (TBase (BaseTy "Bool")))]
+                (tVarWithRef refA)
                 (TBase (BaseTy "Int"))
                 `shouldBe` Nothing
+
+        it "preserves identity refs during selective substitution walks" $ do
+            let refA = typeRef 20 "a"
+                refF = typeRef 21 "f"
+                refM = typeRef 22 "m"
+                ty :: ElabType
+                ty =
+                    tForallWithRef
+                        refA
+                        (Just (tVarAppWithRef refF (tVarWithRef refA :| [])))
+                        (tMuWithRef refM (tVarWithRef refA))
+            substTypeSelectiveRefs [] Map.empty ty `shouldBe` ty
+
+        it "infers instantiation args by type binder identity after display renames" $ do
+            let refA = typeRef 30 "a"
+                refA' = typeRef 30 "a1"
+            inferInstAppArgsFromSchemeRefs
+                [(refA, Nothing)]
+                (tVarWithRef refA')
+                (TBase (BaseTy "Int"))
+                `shouldBe` Just [TBase (BaseTy "Int")]
+
+        it "does not infer instantiation args for same-named different identities" $ do
+            let refA = typeRef 31 "a"
+                refB = typeRef 32 "a"
+            inferInstAppArgsFromSchemeRefs
+                [(refA, Nothing)]
+                (tVarWithRef refB)
+                (TBase (BaseTy "Int"))
+                `shouldBe` Nothing
+
+        it "does not selectively substitute same-named different identities" $ do
+            let refA = typeRef 33 "a"
+                refB = typeRef 34 "a"
+                subst = Map.singleton refA (TBase (BaseTy "Int"))
+            substTypeSelectiveRefs [] subst (tVarWithRef refB)
+                `shouldBe` tVarWithRef refB
+
+    describe "inlineRigidTypes" $ do
+        it "inlines rigid bounds by identity, not display name" $ do
+            let refA = typeRef 60 "a"
+                refARenamed = typeRef 60 "renamed"
+                refB = typeRef 61 "a"
+                rigidBounds = Map.singleton refA (TBase (BaseTy "Int"))
+                ty = TArrow (tVarWithRef refARenamed) (tVarWithRef refB)
+            inlineRigidTypes rigidBounds ty
+                `shouldBe` TArrow (TBase (BaseTy "Int")) (tVarWithRef refB)
+
+        it "does not inline under a binder with the same identity" $ do
+            let refA = typeRef 62 "a"
+                rigidBounds = Map.singleton refA (TBase (BaseTy "Int"))
+                ty = tForallWithRef refA Nothing (tVarWithRef refA)
+            inlineRigidTypes rigidBounds ty `shouldBe` ty

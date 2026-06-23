@@ -138,7 +138,7 @@ exportedFamilyDecls mod0 localFamilies =
           Just decl <- [Map.lookup name localFamilies]
         ]
 
-typeLevelConstructorKinds :: [P.ModuleF p] -> [TypeFamilyDecl] -> Map.Map String TypeLevelKind
+typeLevelConstructorKinds :: [P.Module] -> [TypeFamilyDecl] -> Map.Map String TypeLevelKind
 typeLevelConstructorKinds modules0 familyDecls =
   Map.fromList builtinKinds
     `Map.union` Map.fromList dataKinds
@@ -149,7 +149,7 @@ typeLevelConstructorKinds modules0 familyDecls =
         (\name -> (\kind0 -> (name, srcKindToTypeLevelKind kind0)) <$> Builtins.builtinTypeKind name)
         (Set.toList Builtins.builtinTypeNames)
     dataKinds =
-      [ (P.dataDeclName dataDecl, dataDeclKind dataDecl)
+      [ (P.dataDeclDisplayName dataDecl, dataDeclKind dataDecl)
       | dataDecl <- concatMap moduleDataDecls modules0
       ]
     familyKinds =

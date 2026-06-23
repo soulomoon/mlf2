@@ -14,7 +14,7 @@ bugExpr =
 
 assertPipelineStrictFailure
     :: String
-    -> (PolySyms -> NormSurfaceExpr -> Either PipelineError (ElabTerm, ElabType))
+    -> (PolySyms -> NormSurfaceExpr -> Either PipelineError (XmlfTerm, ElabType))
     -> Expectation
 assertPipelineStrictFailure label runPipeline =
     case runPipeline Set.empty bugExpr of

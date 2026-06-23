@@ -11,6 +11,10 @@ module MLF.Frontend.Syntax
     Lit (..),
     SrcKind (..),
     TypeParam (..),
+    typeParamName,
+    typeParamIdentityName,
+    typeParamKind,
+    typeParamRef,
     firstOrderTypeParam,
     typeParamNames,
     typeParamIsFirstOrder,
@@ -25,6 +29,7 @@ module MLF.Frontend.Syntax
 
     -- * Raw source types (parser output)
     SrcTy (..),
+    ResolvedTypeBinderRef (..),
     ResolvedSrcTy (..),
     SrcType,
     ResolvedSrcType,
@@ -38,6 +43,8 @@ module MLF.Frontend.Syntax
     BoundTopVar,
     mkSrcBound,
     mkResolvedSrcBound,
+    resolvedSrcTypeBinderName,
+    resolvedSrcTypeBinderIdentityName,
     resolvedSrcTypeToSrcType,
     resolvedSrcTypeIdentityType,
     mkNormBound,
@@ -55,14 +62,13 @@ import Data.Functor.Foldable (Base, Corecursive (..), Recursive (..))
 import Data.List.NonEmpty (NonEmpty)
 import MLF.Frontend.Symbol
   ( ResolvedSymbol (..),
-    SymbolIdentity (..),
     SymbolNamespace (..),
     resolvedSymbolSpelling,
-    symbolDefiningModule,
-    symbolDefiningName,
     symbolDisplayName,
+    symbolIdentityStableName,
     symbolNamespace,
   )
+import MLF.Types.Unique (UniqueIdentity (..))
 
 {- Note [Surface syntax and paper alignment]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -130,22 +136,6 @@ data SrcKind
   | KArrow SrcKind SrcKind
   deriving (Eq, Show)
 
--- | A source-level type parameter with its declared kind.
-data TypeParam = TypeParam
-  { typeParamName :: String,
-    typeParamKind :: SrcKind
-  }
-  deriving (Eq, Show)
-
-firstOrderTypeParam :: String -> TypeParam
-firstOrderTypeParam name = TypeParam name KType
-
-typeParamNames :: [TypeParam] -> [String]
-typeParamNames = map typeParamName
-
-typeParamIsFirstOrder :: TypeParam -> Bool
-typeParamIsFirstOrder param = typeParamKind param == KType
-
 {- Note [Staged frontend types]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Frontend types use one indexed AST ('SrcTy'), tracked by two indices:
@@ -184,10 +174,63 @@ type family BoundTopVar (n :: SrcNorm) :: SrcTopVar where
 newtype SrcBound (n :: SrcNorm) = SrcBound
   { unSrcBound :: SrcTy n (BoundTopVar n)
   }
-  deriving (Eq, Show)
+  deriving (Eq, Ord, Show)
 
 mkSrcBound :: SrcTy n (BoundTopVar n) -> SrcBound n
 mkSrcBound = SrcBound
+
+data ResolvedTypeBinderRef = ResolvedTypeBinderRef
+  { resolvedTypeBinderIdentity :: UniqueIdentity,
+    resolvedTypeBinderName :: String
+  }
+  deriving (Show)
+
+instance Eq ResolvedTypeBinderRef where
+  left == right =
+    resolvedTypeBinderIdentity left == resolvedTypeBinderIdentity right
+
+instance Ord ResolvedTypeBinderRef where
+  compare left right =
+    compare (resolvedTypeBinderIdentity left) (resolvedTypeBinderIdentity right)
+
+-- | A source-level type parameter with its declared kind.
+data TypeParam
+  = TypeParam String SrcKind
+  | ResolvedTypeParam ResolvedTypeBinderRef SrcKind
+  deriving (Eq, Show)
+
+typeParamName :: TypeParam -> String
+typeParamName param =
+  case param of
+    TypeParam name _ -> name
+    ResolvedTypeParam ref _ -> resolvedTypeBinderName ref
+
+typeParamIdentityName :: TypeParam -> String
+typeParamIdentityName param =
+  case param of
+    TypeParam name _ -> name
+    ResolvedTypeParam ref _ -> resolvedSrcTypeBinderIdentityName ref
+
+typeParamKind :: TypeParam -> SrcKind
+typeParamKind param =
+  case param of
+    TypeParam _ kind0 -> kind0
+    ResolvedTypeParam _ kind0 -> kind0
+
+typeParamRef :: TypeParam -> Maybe ResolvedTypeBinderRef
+typeParamRef param =
+  case param of
+    TypeParam {} -> Nothing
+    ResolvedTypeParam ref _ -> Just ref
+
+firstOrderTypeParam :: String -> TypeParam
+firstOrderTypeParam name = TypeParam name KType
+
+typeParamNames :: [TypeParam] -> [String]
+typeParamNames = map typeParamName
+
+typeParamIsFirstOrder :: TypeParam -> Bool
+typeParamIsFirstOrder param = typeParamKind param == KType
 
 -- | Source-level type syntax for annotations, indexed by stage and root policy.
 data SrcTy (n :: SrcNorm) (v :: SrcTopVar) where
@@ -204,6 +247,8 @@ data SrcTy (n :: SrcNorm) (v :: SrcTopVar) where
 
 deriving instance Eq (SrcTy n v)
 
+deriving instance Ord (SrcTy n v)
+
 deriving instance Show (SrcTy n v)
 
 type SrcType = SrcTy 'RawN 'TopVarAllowed
@@ -219,15 +264,15 @@ mkResolvedSrcBound = ResolvedSrcBound
 
 -- | Source-level type syntax after `.mlfp` symbol resolution.
 data ResolvedSrcTy (n :: SrcNorm) (v :: SrcTopVar) where
-  RSTVar :: String -> ResolvedSrcTy n 'TopVarAllowed
+  RSTVar :: ResolvedTypeBinderRef -> ResolvedSrcTy n 'TopVarAllowed
   RSTArrow :: ResolvedSrcTy n 'TopVarAllowed -> ResolvedSrcTy n 'TopVarAllowed -> ResolvedSrcTy n v
   RSTBase :: ResolvedSymbol -> ResolvedSrcTy n v
   RSTCon :: ResolvedSymbol -> NonEmpty (ResolvedSrcTy n 'TopVarAllowed) -> ResolvedSrcTy n v
-  RSTVarApp :: String -> NonEmpty (ResolvedSrcTy n 'TopVarAllowed) -> ResolvedSrcTy n v
-  RSTTyLam :: String -> ResolvedSrcTy n 'TopVarAllowed -> ResolvedSrcTy n v
+  RSTVarApp :: ResolvedTypeBinderRef -> NonEmpty (ResolvedSrcTy n 'TopVarAllowed) -> ResolvedSrcTy n v
+  RSTTyLam :: ResolvedTypeBinderRef -> ResolvedSrcTy n 'TopVarAllowed -> ResolvedSrcTy n v
   RSTTyApp :: ResolvedSrcTy n 'TopVarAllowed -> ResolvedSrcTy n 'TopVarAllowed -> ResolvedSrcTy n v
-  RSTForall :: String -> Maybe (ResolvedSrcBound n) -> ResolvedSrcTy n 'TopVarAllowed -> ResolvedSrcTy n v
-  RSTMu :: String -> ResolvedSrcTy n 'TopVarAllowed -> ResolvedSrcTy n v
+  RSTForall :: ResolvedTypeBinderRef -> Maybe (ResolvedSrcBound n) -> ResolvedSrcTy n 'TopVarAllowed -> ResolvedSrcTy n v
+  RSTMu :: ResolvedTypeBinderRef -> ResolvedSrcTy n 'TopVarAllowed -> ResolvedSrcTy n v
   RSTBottom :: ResolvedSrcTy n v
 
 deriving instance Eq (ResolvedSrcTy n v)
@@ -240,40 +285,48 @@ type NormSrcType = SrcTy 'NormN 'TopVarAllowed
 
 type StructBound = SrcTy 'NormN 'TopVarDisallowed
 
+resolvedSrcTypeBinderName :: ResolvedTypeBinderRef -> String
+resolvedSrcTypeBinderName =
+  resolvedTypeBinderName
+
+resolvedSrcTypeBinderIdentityName :: ResolvedTypeBinderRef -> String
+resolvedSrcTypeBinderIdentityName ref =
+  "$typevar#" ++ show (uniqueIdentityValue (resolvedTypeBinderIdentity ref))
+
 resolvedSrcTypeToSrcType :: ResolvedSrcTy n v -> SrcTy n v
 resolvedSrcTypeToSrcType ty =
   case ty of
-    RSTVar name -> STVar name
+    RSTVar ref -> STVar (resolvedSrcTypeBinderName ref)
     RSTArrow dom cod -> STArrow (resolvedSrcTypeToSrcType dom) (resolvedSrcTypeToSrcType cod)
     RSTBase symbol -> STBase (resolvedTypeHeadDisplay symbol)
     RSTCon symbol args -> STCon (resolvedTypeHeadDisplay symbol) (fmap resolvedSrcTypeToSrcType args)
-    RSTVarApp name args -> STVarApp name (fmap resolvedSrcTypeToSrcType args)
-    RSTTyLam name body -> STTyLam name (resolvedSrcTypeToSrcType body)
+    RSTVarApp ref args -> STVarApp (resolvedSrcTypeBinderName ref) (fmap resolvedSrcTypeToSrcType args)
+    RSTTyLam ref body -> STTyLam (resolvedSrcTypeBinderName ref) (resolvedSrcTypeToSrcType body)
     RSTTyApp fun arg -> STTyApp (resolvedSrcTypeToSrcType fun) (resolvedSrcTypeToSrcType arg)
-    RSTForall name mb body ->
+    RSTForall ref mb body ->
       STForall
-        name
+        (resolvedSrcTypeBinderName ref)
         (fmap (SrcBound . resolvedSrcTypeToSrcType . unResolvedSrcBound) mb)
         (resolvedSrcTypeToSrcType body)
-    RSTMu name body -> STMu name (resolvedSrcTypeToSrcType body)
+    RSTMu ref body -> STMu (resolvedSrcTypeBinderName ref) (resolvedSrcTypeToSrcType body)
     RSTBottom -> STBottom
 
 resolvedSrcTypeIdentityType :: ResolvedSrcTy n v -> SrcTy n v
 resolvedSrcTypeIdentityType ty =
   case ty of
-    RSTVar name -> STVar name
+    RSTVar ref -> STVar (resolvedSrcTypeBinderIdentityName ref)
     RSTArrow dom cod -> STArrow (resolvedSrcTypeIdentityType dom) (resolvedSrcTypeIdentityType cod)
     RSTBase symbol -> STBase (resolvedTypeHeadIdentityName symbol)
     RSTCon symbol args -> STCon (resolvedTypeHeadIdentityName symbol) (fmap resolvedSrcTypeIdentityType args)
-    RSTVarApp name args -> STVarApp name (fmap resolvedSrcTypeIdentityType args)
-    RSTTyLam name body -> STTyLam name (resolvedSrcTypeIdentityType body)
+    RSTVarApp ref args -> STVarApp (resolvedSrcTypeBinderIdentityName ref) (fmap resolvedSrcTypeIdentityType args)
+    RSTTyLam ref body -> STTyLam (resolvedSrcTypeBinderIdentityName ref) (resolvedSrcTypeIdentityType body)
     RSTTyApp fun arg -> STTyApp (resolvedSrcTypeIdentityType fun) (resolvedSrcTypeIdentityType arg)
-    RSTForall name mb body ->
+    RSTForall ref mb body ->
       STForall
-        name
+        (resolvedSrcTypeBinderIdentityName ref)
         (fmap (SrcBound . resolvedSrcTypeIdentityType . unResolvedSrcBound) mb)
         (resolvedSrcTypeIdentityType body)
-    RSTMu name body -> STMu name (resolvedSrcTypeIdentityType body)
+    RSTMu ref body -> STMu (resolvedSrcTypeBinderIdentityName ref) (resolvedSrcTypeIdentityType body)
     RSTBottom -> STBottom
 
 resolvedTypeHeadDisplay :: ResolvedSymbol -> String
@@ -284,7 +337,7 @@ resolvedTypeHeadIdentityName :: ResolvedSymbol -> String
 resolvedTypeHeadIdentityName symbol =
   let identity = resolvedSymbolIdentity symbol
    in case symbolNamespace identity of
-        SymbolType -> symbolDefiningModule identity ++ "." ++ symbolDefiningName identity
+        SymbolType -> symbolIdentityStableName identity
         _ -> symbolDisplayName (resolvedSymbolSpelling symbol)
 
 mkNormBound :: StructBound -> SrcBound 'NormN

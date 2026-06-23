@@ -40,8 +40,16 @@ import MLF.Frontend.Program.Types
     , SymbolIdentity (..)
     , SymbolNamespace (..)
     , ValueInfo (..)
+    , ctorName
+    , dataInfoSymbolIdentity
+    , exportedClassesForDisplay
+    , exportedTypesForDisplay
+    , exportedValuesForDisplay
+    , moduleExportsFromMaps
+    , valueInfoIdentityName
     )
 import MLF.Frontend.Syntax.Program qualified as P
+import MLF.Types.Identity (UniqueIdentity (..))
 
 spec :: Spec
 spec = do
@@ -57,19 +65,25 @@ spec = do
             moduleInterfaceDependencies libInterface `shouldBe` []
             moduleInterfaceSourcePath mainInterface `shouldBe` Just "app/Main.mlfp"
             moduleInterfaceDependencies mainInterface `shouldBe` [libId]
+            map moduleInterfaceIdentity (packageInterfaceModules packageInterface)
+                `shouldBe` map checkedModuleIdentity (checkedProgramModules checked)
 
-            Map.keys (exportedValues (moduleInterfaceExports libInterface))
+            Map.keys (exportedValuesForDisplay (moduleInterfaceExports libInterface))
                 `shouldSatisfy` containsAll ["eq", "token", "Zero"]
-            Map.keys (exportedClasses (moduleInterfaceExports libInterface)) `shouldBe` ["Eq"]
-            Map.keys (exportedTypes (moduleInterfaceExports libInterface)) `shouldBe` ["Nat", "Token"]
-            Map.keys
-                ( exportedTypeConstructors
-                    (exportedTypes (moduleInterfaceExports libInterface) Map.! "Token")
+            Map.keys (exportedClassesForDisplay (moduleInterfaceExports libInterface)) `shouldBe` ["Eq"]
+            Map.keys (exportedTypesForDisplay (moduleInterfaceExports libInterface)) `shouldBe` ["Nat", "Token"]
+            map ctorName
+                ( Map.elems
+                    ( exportedTypeConstructorsByIdentity
+                        (exportedTypesForDisplay (moduleInterfaceExports libInterface) Map.! "Token")
+                    )
                 )
                 `shouldBe` []
-            Map.keys
-                ( exportedTypeConstructors
-                    (exportedTypes (moduleInterfaceExports libInterface) Map.! "Nat")
+            map ctorName
+                ( Map.elems
+                    ( exportedTypeConstructorsByIdentity
+                        (exportedTypesForDisplay (moduleInterfaceExports libInterface) Map.! "Nat")
+                    )
                 )
                 `shouldBe` ["Zero"]
             length (moduleInterfaceInstances libInterface) `shouldBe` 1
@@ -187,6 +201,52 @@ spec = do
                 (PackageInterface [poisonExportOwner libInterface])
                 `shouldSatisfy` isLeft
 
+        it "requires identity-indexed interface maps to use payload identities" $ do
+            (_graph, _checked, packageInterface) <- requireCheckedPackageInterface interfacePackage
+            let libId = PackageModuleId testPackageId "Lib"
+            libInterface <- requireInterface libId packageInterface
+            case Map.toList (moduleInterfaceDataByIdentity libInterface) of
+                [] -> expectationFailure "expected interface data entries"
+                (actualKey, dataInfo) : _ -> do
+                    let staleKey = SymbolIdentity (UniqueIdentity 900001) SymbolType "Lib" "Stale" Nothing
+                        staleInterface =
+                            libInterface
+                                { moduleInterfaceDataByIdentity =
+                                    Map.insert staleKey dataInfo (Map.delete actualKey (moduleInterfaceDataByIdentity libInterface))
+                                }
+                    validatePackageInterface
+                        (singleInterfaceGraph libInterface)
+                        (PackageInterface [staleInterface])
+                        `shouldBe` Left (ProgramInterfaceIdentityKeyMismatch libId staleKey (dataInfoSymbolIdentity dataInfo))
+
+        it "requires constructor display identity keys to match exported constructors" $ do
+            (_graph, _checked, packageInterface) <- requireCheckedPackageInterface interfacePackage
+            let libId = PackageModuleId testPackageId "Lib"
+            libInterface <- requireInterface libId packageInterface
+            let exports = moduleInterfaceExports libInterface
+                typeInfo = exportedTypesForDisplay exports Map.! "Nat"
+                typeIdentity = dataInfoSymbolIdentity (exportedTypeData typeInfo)
+                staleKey = SymbolIdentity (UniqueIdentity 900002) SymbolConstructor "Lib" "Stale" Nothing
+                staleTypeInfo =
+                    typeInfo
+                        { exportedTypeConstructorDisplaysByIdentity =
+                            Map.insert staleKey "Stale" (exportedTypeConstructorDisplaysByIdentity typeInfo)
+                        }
+                staleExports =
+                    exports
+                        { exportedTypesByIdentity =
+                            Map.adjust
+                                (const staleTypeInfo)
+                                typeIdentity
+                                (exportedTypesByIdentity exports)
+                        }
+                expectedKeys = Map.keys (exportedTypeConstructorsByIdentity typeInfo)
+                actualKeys = Map.keys (exportedTypeConstructorDisplaysByIdentity staleTypeInfo)
+            validatePackageInterface
+                (singleInterfaceGraph libInterface)
+                (PackageInterface [libInterface {moduleInterfaceExports = staleExports}])
+                `shouldBe` Left (ProgramInterfaceIdentityKeySetMismatch libId expectedKeys actualKeys)
+
 interfacePackage :: ProgramPackage
 interfacePackage =
     packageFromSourceUnits
@@ -271,17 +331,16 @@ containsAll needles haystack =
 poisonExportOwner :: ModuleInterface -> ModuleInterface
 poisonExportOwner interface =
     interface
-        { moduleInterfaceExports =
-            (moduleInterfaceExports interface)
-                { exportedValues =
-                    Map.adjust poisonValueOwner "token" (exportedValues (moduleInterfaceExports interface))
-                }
+        { moduleInterfaceExports = moduleExportsFromMaps values (exportedTypesForDisplay exports) (exportedClassesForDisplay exports)
         }
   where
+    exports = moduleInterfaceExports interface
+    values = Map.adjust poisonValueOwner "token" (exportedValuesForDisplay exports)
+
     poisonValueOwner valueInfo@OrdinaryValue {} =
         valueInfo
             { valueInfoSymbol =
-                SymbolIdentity SymbolValue "Other" (valueDisplayName valueInfo) Nothing
+                SymbolIdentity (UniqueIdentity 900003) SymbolValue "Other" (valueInfoIdentityName valueInfo) Nothing
             }
     poisonValueOwner valueInfo = valueInfo
 

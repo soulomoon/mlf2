@@ -2,15 +2,14 @@
 
 module MLF.Reify.Type
     ( reifyType
-    , reifyTypeWithNames
-    , reifyTypeWithNamesNoFallback
-    , reifyTypeWithNamesNoFallbackOnConstraint
-    , reifyTypeWithNamedSet
-    , reifyTypeWithNamedSetNoFallback
-    , reifyTypeWithNamesNoFallbackReadModel
-    , reifyTypeWithNamedSetNoFallbackReadModel
-    , reifyWith
-    , reifyWithAs
+    , reifyTypeWithRefsNoFallback
+    , reifyTypeWithRefsNoFallbackOnConstraint
+    , reifyTypeWithNamedSetRefs
+    , reifyTypeWithNamedSetRefsNoFallback
+    , reifyTypeWithRefsNoFallbackReadModel
+    , reifyTypeWithNamedSetRefsNoFallbackReadModel
+    , reifyWithRefs
+    , reifyWithAsRefs
     , ReifyRoot (..)
     , freeVars
     ) where
@@ -28,8 +27,7 @@ import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types.Graph
 import MLF.Elab.ReadModel (ElabReadModel, ermPresolutionView)
 import qualified MLF.Constraint.VarStore as VarStore
-import MLF.Reify.Named (namedNodes)
-import MLF.Reify.Type.Core (ReifyRoot (..), reifyWith, reifyWithAs, reifyWithReadModel)
+import MLF.Reify.Type.Core (ReifyRoot (..), reifyWithAsRefs, reifyWithReadModelRefs, reifyWithRefs)
 import MLF.Types.Elab
 import MLF.Util.ElabError (ElabError (..))
 
@@ -37,118 +35,97 @@ import MLF.Util.ElabError (ElabError (..))
 -- This version doesn't compute instance bounds (all foralls are unbounded).
 reifyType :: PresolutionView p -> NodeId -> Either ElabError ElabType
 reifyType presolutionView =
-  reifyWith "reifyType" presolutionView nameFor (const False) RootType
+  reifyWithRefs "reifyType" presolutionView refFor (const False) RootType
   where
-    nameFor (NodeId i) = "t" ++ show i
+    refFor node@(NodeId i) =
+      typeBinderRefFromIdentity (typeBinderIdentityFromNode node) ("t" ++ show i)
 
--- | Reify with an explicit name substitution for vars (Schi': named nodes become variables).
-reifyTypeWithNames :: PresolutionView p -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
-reifyTypeWithNames presolutionView subst nid = do
-  namedSet <- namedNodes presolutionView
-  reifyTypeWithNamedSet presolutionView subst namedSet nid
-
--- | Reify with an explicit name substitution, but without ancestor fallback
--- quantifiers (used when an outer scheme already quantifies binders).
--- See Note [No-fallback reify preserves explicit bounds] in
--- docs/notes/2026-01-27-elab-changes.md.
-reifyTypeWithNamesNoFallback :: PresolutionView p -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
-reifyTypeWithNamesNoFallback presolutionView subst nid =
-  let canonical = pvCanonical presolutionView
-      nameFor (NodeId i) = "t" ++ show i
-
-      varNameFor v =
-        let cv = canonical v
-         in fromMaybe (nameFor cv) (IntMap.lookup (getNodeId cv) subst)
-
-      isNamed nodeId =
-        let key = getNodeId (canonical nodeId)
-         in IntMap.member key subst
-   in reifyWith "reifyTypeWithNamesNoFallback" presolutionView varNameFor isNamed RootTypeNoFallback nid
-
-reifyTypeWithNamesNoFallbackReadModel ::
-  ElabReadModel p ->
-  IntMap.IntMap String ->
-  NodeId ->
-  Either ElabError ElabType
-reifyTypeWithNamesNoFallbackReadModel readModel subst nid =
-  reifyWithReadModel "reifyTypeWithNamesNoFallback" readModel varNameFor isNamed RootTypeNoFallback nid
+reifyTypeWithRefsNoFallback :: PresolutionView p -> IntMap.IntMap TypeBinderRef -> NodeId -> Either ElabError ElabType
+reifyTypeWithRefsNoFallback presolutionView subst nid =
+  reifyWithRefs "reifyTypeWithNamesNoFallback" presolutionView refForVar isNamed RootTypeNoFallback nid
   where
-    presolutionView = ermPresolutionView readModel
     canonical = pvCanonical presolutionView
 
-    nameFor (NodeId i) = "t" ++ show i
-
-    varNameFor :: NodeId -> String
-    varNameFor v =
-      let cv = canonical v
-       in fromMaybe (nameFor cv) (IntMap.lookup (getNodeId cv) subst)
+    refForVar =
+      refForSubstRefs canonical subst
 
     isNamed nodeId =
       let key = getNodeId (canonical nodeId)
        in IntMap.member key subst
 
--- | Reify with an explicit constraint (Schi' on base graphs).
-reifyTypeWithNamesNoFallbackOnConstraint :: Constraint p -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
-reifyTypeWithNamesNoFallbackOnConstraint constraint subst nid =
-  let presolutionView = Finalize.presolutionViewFromSnapshot constraint IntMap.empty
-   in reifyTypeWithNamesNoFallback presolutionView subst nid
-
--- | Reify with an explicit named-node set (Schi').
-reifyTypeWithNamedSet :: PresolutionView p -> IntMap.IntMap String -> IntSet.IntSet -> NodeId -> Either ElabError ElabType
-reifyTypeWithNamedSet presolutionView subst namedSet =
-  reifyWith "reifyTypeWithNames" presolutionView varNameFor isNamed RootType
-  where
-    canonical = pvCanonical presolutionView
-
-    nameFor (NodeId i) = "t" ++ show i
-
-    varNameFor :: NodeId -> String
-    varNameFor v =
-      let cv = canonical v
-       in fromMaybe (nameFor cv) (IntMap.lookup (getNodeId cv) subst)
-
-    isNamed nodeId = IntSet.member (getNodeId (canonical nodeId)) namedSet
-
-reifyTypeWithNamedSetNoFallback ::
-  PresolutionView p ->
-  IntMap.IntMap String ->
-  IntSet.IntSet ->
-  NodeId ->
-  Either ElabError ElabType
-reifyTypeWithNamedSetNoFallback presolutionView subst namedSet nid =
-  reifyWith "reifyTypeWithNamedSetNoFallback" presolutionView varNameFor isNamed RootTypeNoFallback nid
-  where
-    canonical = pvCanonical presolutionView
-
-    nameFor (NodeId i) = "t" ++ show i
-
-    varNameFor :: NodeId -> String
-    varNameFor v =
-      let cv = canonical v
-       in fromMaybe (nameFor cv) (IntMap.lookup (getNodeId cv) subst)
-
-    isNamed nodeId = IntSet.member (getNodeId (canonical nodeId)) namedSet
-
-reifyTypeWithNamedSetNoFallbackReadModel ::
+reifyTypeWithRefsNoFallbackReadModel ::
   ElabReadModel p ->
-  IntMap.IntMap String ->
-  IntSet.IntSet ->
+  IntMap.IntMap TypeBinderRef ->
   NodeId ->
   Either ElabError ElabType
-reifyTypeWithNamedSetNoFallbackReadModel readModel subst namedSet nid =
-  reifyWithReadModel "reifyTypeWithNamedSetNoFallback" readModel varNameFor isNamed RootTypeNoFallback nid
+reifyTypeWithRefsNoFallbackReadModel readModel subst nid =
+  reifyWithReadModelRefs "reifyTypeWithNamesNoFallback" readModel refForVar isNamed RootTypeNoFallback nid
   where
     presolutionView = ermPresolutionView readModel
     canonical = pvCanonical presolutionView
 
-    nameFor (NodeId i) = "t" ++ show i
+    refForVar =
+      refForSubstRefs canonical subst
 
-    varNameFor :: NodeId -> String
-    varNameFor v =
-      let cv = canonical v
-       in fromMaybe (nameFor cv) (IntMap.lookup (getNodeId cv) subst)
+    isNamed nodeId =
+      let key = getNodeId (canonical nodeId)
+       in IntMap.member key subst
+
+reifyTypeWithRefsNoFallbackOnConstraint :: Constraint p -> IntMap.IntMap TypeBinderRef -> NodeId -> Either ElabError ElabType
+reifyTypeWithRefsNoFallbackOnConstraint constraint subst nid =
+  let presolutionView = Finalize.presolutionViewFromSnapshot constraint IntMap.empty
+   in reifyTypeWithRefsNoFallback presolutionView subst nid
+
+reifyTypeWithNamedSetRefs :: PresolutionView p -> IntMap.IntMap TypeBinderRef -> IntSet.IntSet -> NodeId -> Either ElabError ElabType
+reifyTypeWithNamedSetRefs presolutionView subst namedSet =
+  reifyWithRefs "reifyTypeWithNamedSetRefs" presolutionView refForVar isNamed RootType
+  where
+    canonical = pvCanonical presolutionView
+
+    refForVar =
+      refForSubstRefs canonical subst
 
     isNamed nodeId = IntSet.member (getNodeId (canonical nodeId)) namedSet
+
+reifyTypeWithNamedSetRefsNoFallback ::
+  PresolutionView p ->
+  IntMap.IntMap TypeBinderRef ->
+  IntSet.IntSet ->
+  NodeId ->
+  Either ElabError ElabType
+reifyTypeWithNamedSetRefsNoFallback presolutionView subst namedSet nid =
+  reifyWithRefs "reifyTypeWithNamedSetNoFallback" presolutionView refForVar isNamed RootTypeNoFallback nid
+  where
+    canonical = pvCanonical presolutionView
+
+    refForVar =
+      refForSubstRefs canonical subst
+
+    isNamed nodeId = IntSet.member (getNodeId (canonical nodeId)) namedSet
+
+reifyTypeWithNamedSetRefsNoFallbackReadModel ::
+  ElabReadModel p ->
+  IntMap.IntMap TypeBinderRef ->
+  IntSet.IntSet ->
+  NodeId ->
+  Either ElabError ElabType
+reifyTypeWithNamedSetRefsNoFallbackReadModel readModel subst namedSet nid =
+  reifyWithReadModelRefs "reifyTypeWithNamedSetNoFallback" readModel refForVar isNamed RootTypeNoFallback nid
+  where
+    presolutionView = ermPresolutionView readModel
+    canonical = pvCanonical presolutionView
+
+    refForVar =
+      refForSubstRefs canonical subst
+
+    isNamed nodeId = IntSet.member (getNodeId (canonical nodeId)) namedSet
+
+refForSubstRefs :: (NodeId -> NodeId) -> IntMap.IntMap TypeBinderRef -> NodeId -> TypeBinderRef
+refForSubstRefs canonical subst v =
+  let cv@(NodeId i) = canonical v
+   in fromMaybe
+        (typeBinderRefFromIdentity (typeBinderIdentityFromNode cv) ("t" ++ show i))
+        (IntMap.lookup i subst)
 
 -- | Collect free variables by NodeId, skipping vars under TyForall.
 freeVars :: Solved -> NodeId -> IntSet.IntSet -> IntSet.IntSet

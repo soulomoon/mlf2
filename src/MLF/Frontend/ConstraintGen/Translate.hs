@@ -4,6 +4,7 @@ module MLF.Frontend.ConstraintGen.Translate
   ( buildRootExpr,
     buildRootExprWithEnv,
     buildRootExprWithExternalBindings,
+    buildModuleRootExprsKeyedWithExternalBindings,
     buildModuleRootExprsWithExternalBindings,
   )
 where
@@ -35,7 +36,8 @@ schemeExternalBindings =
     ( \srcTy ->
         ExternalBinding
           { externalBindingType = srcTy,
-            externalBindingMode = ExternalBindingScheme
+            externalBindingMode = ExternalBindingScheme,
+            externalBindingIdentity = Nothing
           }
     )
 
@@ -55,10 +57,16 @@ buildRootExprWithExternalBindings extBindings expr = do
   pure (rootGen, referencedBindings, rootNode, annRoot)
 
 buildModuleRootExprsWithExternalBindings :: ExternalBindings -> [(VarName, NormCoreExpr)] -> ConstraintM (GenNodeId, Env, Map VarName (ModuleRootId, NodeId, AnnExpr))
-buildModuleRootExprsWithExternalBindings extBindings namedExprs = do
+buildModuleRootExprsWithExternalBindings extBindings namedExprs =
+  buildModuleRootExprsKeyedWithExternalBindings
+    extBindings
+    [(name, name, expr) | (name, expr) <- namedExprs]
+
+buildModuleRootExprsKeyedWithExternalBindings :: (Ord key) => ExternalBindings -> [(key, VarName, NormCoreExpr)] -> ConstraintM (GenNodeId, Env, Map key (ModuleRootId, NodeId, AnnExpr))
+buildModuleRootExprsKeyedWithExternalBindings extBindings keyedExprs = do
   moduleGen <- allocGenNode []
   builtRoots <-
-    forM (zip [0 ..] namedExprs) $ \(rootIndex, (name, expr)) -> do
+    forM (zip [0 ..] keyedExprs) $ \(rootIndex, (key, _name, expr)) -> do
       let referencedNames = Set.toAscList (freeCoreVars expr)
       let rootId = ModuleRootId rootIndex
       (referencedBindings, rootNode, annRoot) <-
@@ -69,11 +77,11 @@ buildModuleRootExprsWithExternalBindings extBindings namedExprs = do
             referencedBindings <- materializeExternalBindingNames referencedNames initialBindings
             (rootNode, annRoot) <- buildModuleRootExprFromInitialEnv rootGen referencedBindings expr
             pure (referencedBindings, rootNode, annRoot)
-      pure (name, rootId, referencedBindings, rootNode, annRoot)
+      pure (key, rootId, referencedBindings, rootNode, annRoot)
   let rootMap =
         Map.fromList
-          [ (name, (rootId, rootNode, annRoot))
-          | (name, rootId, _, rootNode, annRoot) <- builtRoots
+          [ (key, (rootId, rootNode, annRoot))
+          | (key, rootId, _, rootNode, annRoot) <- builtRoots
           ]
       mergedEnv =
         foldl'

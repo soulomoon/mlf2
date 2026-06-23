@@ -4,6 +4,7 @@
 module Reify.TypeSpec (spec) where
 
 import Data.IntSet qualified as IntSet
+import Data.IntMap.Strict qualified as IntMap
 import Data.List (isPrefixOf)
 import Data.Set qualified as Set
 import MLF.Constraint.Finalize.TestSupport qualified as Finalize
@@ -16,10 +17,19 @@ import MLF.Reify.Type
   ( ReifyRoot (..),
     freeVars,
     reifyType,
-    reifyWith,
-    reifyWithAs,
+    reifyTypeWithNamedSetRefs,
+    reifyWithRefs,
+    reifyWithAsRefs,
   )
-import MLF.Types.Elab (ElabType, Ty (..))
+import MLF.Types.Elab
+  ( ElabType
+  , Ty (..)
+  , typeBinderIdentityFromNode
+  , typeBinderIdentityKey
+  , typeBinderRefFromIdentity
+  , typeBinderRefIdentity
+  , typeBinderRefName
+  )
 import MLF.Util.ElabError (ElabError (..))
 import SpecUtil
   ( PipelineArtifacts (..),
@@ -56,6 +66,22 @@ spec = describe "MLF.Reify.Type" $ do
           root = paRoot artifacts
       expectRight (reifyType view root) $ \ty ->
         ty `shouldSatisfy` isVarType
+
+    it "attaches graph identity when reifying named variables" $ do
+      artifacts <- pipelineFor (ELam "x" (EVar "x"))
+      let solved = paSolved artifacts
+          view = viewFor solved
+          root = paRoot artifacts
+          rootC = pvCanonical view root
+          key = getNodeId rootC
+          alphaRef = typeBinderRefFromIdentity (typeBinderIdentityFromNode rootC) "alpha"
+      expectRight (reifyTypeWithNamedSetRefs view (IntMap.singleton key alphaRef) (IntSet.singleton key) root) $ \ty ->
+        case ty of
+          TVarRef ref -> do
+            typeBinderRefName ref `shouldBe` "alpha"
+            typeBinderIdentityKey (typeBinderRefIdentity ref) `shouldBe` key
+          other ->
+            expectationFailure ("Expected identity-bearing TVarRef, got " ++ show other)
 
     it "reifies let-polymorphism (let id = \\x.x in id 1)" $ do
       let expr =
@@ -131,18 +157,35 @@ spec = describe "MLF.Reify.Type" $ do
       let solved = paSolved artifacts
           view = viewFor solved
           root = paRoot artifacts
-          nameFor (NodeId i) = "v" ++ show i
+          refFor node@(NodeId i) =
+            typeBinderRefFromIdentity (typeBinderIdentityFromNode node) ("v" ++ show i)
           isNamed _ = False
-      expectRight (reifyWith "test" view nameFor isNamed RootType root) $ \ty ->
+      expectRight (reifyWithRefs "test" view refFor isNamed RootType root) $ \ty ->
         ty `shouldSatisfy` isPrefixedVarType "v"
+
+    it "reifies identity with custom var refs" $ do
+      artifacts <- pipelineFor (ELam "x" (EVar "x"))
+      let solved = paSolved artifacts
+          view = viewFor solved
+          root = paRoot artifacts
+          refFor node@(NodeId i) =
+            typeBinderRefFromIdentity (typeBinderIdentityFromNode node) ("v" ++ show i)
+          isNamed _ = False
+      expectRight (reifyWithRefs "test" view refFor isNamed RootType root) $ \ty ->
+        case ty of
+          TVarRef ref ->
+            typeBinderRefName ref `shouldSatisfy` isPrefixOf "v"
+          other ->
+            expectationFailure ("Expected identity-bearing TVarRef, got " ++ show other)
     it "reifies literal with RootType" $ do
       artifacts <- pipelineFor (ELit (LInt 7))
       let solved = paSolved artifacts
           view = viewFor solved
           root = paRoot artifacts
-          nameFor (NodeId i) = "n" ++ show i
+          refFor node@(NodeId i) =
+            typeBinderRefFromIdentity (typeBinderIdentityFromNode node) ("n" ++ show i)
           isNamed _ = False
-      expectRight (reifyWith "test" view nameFor isNamed RootType root) $ \ty ->
+      expectRight (reifyWithRefs "test" view refFor isNamed RootType root) $ \ty ->
         ty `shouldSatisfy` isBaseType
 
     it "reifies literal with RootBound" $ do
@@ -150,9 +193,10 @@ spec = describe "MLF.Reify.Type" $ do
       let solved = paSolved artifacts
           view = viewFor solved
           root = paRoot artifacts
-          nameFor (NodeId i) = "n" ++ show i
+          refFor node@(NodeId i) =
+            typeBinderRefFromIdentity (typeBinderIdentityFromNode node) ("n" ++ show i)
           isNamed _ = False
-      expectRight (reifyWith "test" view nameFor isNamed RootBound root) $ \ty ->
+      expectRight (reifyWithRefs "test" view refFor isNamed RootBound root) $ \ty ->
         ty `shouldSatisfy` isBaseType
 
   describe "reifyWithAs" $ do
@@ -161,11 +205,12 @@ spec = describe "MLF.Reify.Type" $ do
       let solved = paSolved artifacts
           view = viewFor solved
           root = paRoot artifacts
-          nameFor (NodeId i) = "t" ++ show i
+          refFor node@(NodeId i) =
+            typeBinderRefFromIdentity (typeBinderIdentityFromNode node) ("t" ++ show i)
           isNamed _ = False
           asString :: ElabType -> Either ElabError String
           asString ty = Right (show ty)
-      expectRight (reifyWithAs "test" view nameFor isNamed RootType asString root) $ \s ->
+      expectRight (reifyWithAsRefs "test" view refFor isNamed RootType asString root) $ \s ->
         s `shouldBe` show (TBase (BaseTy "Int"))
 
     it "propagates conversion failure" $ do
@@ -173,11 +218,12 @@ spec = describe "MLF.Reify.Type" $ do
       let solved = paSolved artifacts
           view = viewFor solved
           root = paRoot artifacts
-          nameFor (NodeId i) = "t" ++ show i
+          refFor node@(NodeId i) =
+            typeBinderRefFromIdentity (typeBinderIdentityFromNode node) ("t" ++ show i)
           isNamed _ = False
           failConvert :: ElabType -> Either ElabError String
           failConvert _ = Left (InstantiationError "test-fail")
-      case reifyWithAs "test" view nameFor isNamed RootType failConvert root of
+      case reifyWithAsRefs "test" view refFor isNamed RootType failConvert root of
         Left _ -> pure () -- expected
         Right _ -> expectationFailure "Expected conversion failure"
 
@@ -186,9 +232,10 @@ spec = describe "MLF.Reify.Type" $ do
       let solved = paSolved artifacts
           view = viewFor solved
           root = paRoot artifacts
-          nameFor (NodeId i) = "t" ++ show i
+          refFor node@(NodeId i) =
+            typeBinderRefFromIdentity (typeBinderIdentityFromNode node) ("t" ++ show i)
           isNamed _ = False
-      expectRight (reifyWithAs "test" view nameFor isNamed RootType Right root) $ \ty ->
+      expectRight (reifyWithAsRefs "test" view refFor isNamed RootType Right root) $ \ty ->
         ty `shouldSatisfy` isBaseType
 
 -- Predicates for structural assertions on ElabType
@@ -197,10 +244,10 @@ isBaseType (TBase _) = True
 isBaseType _ = False
 
 isVarType :: ElabType -> Bool
-isVarType (TVar _) = True
+isVarType (TVarRef _) = True
 isVarType _ = False
 
 isPrefixedVarType :: String -> ElabType -> Bool
 isPrefixedVarType prefix ty = case ty of
-  TVar name -> prefix `isPrefixOf` name
+  TVarRef ref -> prefix `isPrefixOf` typeBinderRefName ref
   _ -> False

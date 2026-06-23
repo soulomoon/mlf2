@@ -7,10 +7,10 @@ Status: Accepted
 
 The `.mlfp` resolver already assigns semantic `SymbolIdentity` values to
 global source references. The checker, elaborator, and backend then lose part of
-that provenance when executable terms become `ElabTerm`, because `EVar` and
-binders store plain `String` names. Later phases recover constructor, method,
-primitive, and ordinary binding meaning from side maps such as `ValueInfo`,
-`DataInfo`, `CheckedModule`, and `ConvertContext`.
+that provenance when executable terms become `XmlfTerm`, because older
+name-only variable and binder views stored plain `String` names. Later phases
+recover constructor, method, primitive, and ordinary binding meaning from side
+maps such as `ValueInfo`, `DataInfo`, `CheckedModule`, and `ConvertContext`.
 
 That recovery is workable but it makes checked xMLF less complete than the
 front end has already proved. It also forces backend conversion to rediscover
@@ -44,6 +44,7 @@ data ResolvedVar = ResolvedVar
 
 data IdDetails
   = LocalId LocalRef
+  | EnvId EnvRef
   | TopLevelId SymbolIdentity
   | ConstructorId ConstructorRef
   | MethodId SymbolIdentity
@@ -60,6 +61,11 @@ data ConstructorRef = ConstructorRef
     constructorRefArgs :: [SrcType],
     constructorRefResult :: SrcType
   }
+
+data PrimitiveRef = PrimitiveRef
+  { primitiveRefSymbol :: SymbolIdentity,
+    primitiveRefRuntimeName :: String
+  }
 ```
 
 The exact field names may change during implementation, but the invariant may
@@ -68,7 +74,7 @@ it is a constructor without consulting a string-keyed value environment, and
 must carry enough metadata to recover its owner, order, field types, result
 type, and backend constructor identity without shape guessing.
 
-`ElabTerm` should move from `EVar String` and string binders toward resolved
+`XmlfTerm` should move from name-only variable nodes and string binders toward resolved
 occurrences and typed binders. Local binders may remain compact, but local
 occurrences must identify the binder by a local reference rather than by an
 unqualified spelling when the term has crossed into checked xMLF. Source
@@ -80,7 +86,7 @@ The checked module remains the owner of declarations:
 - Resolved term occurrences point at that metadata by semantic identity or
   stable constructor reference.
 - Backend conversion may still build backend `DataMeta` and `ConstructorMeta`,
-  but it must use resolved term details instead of reclassifying `EVar String`
+  but it must use resolved term details instead of reclassifying name-only variables
   through `ccConstructors`.
 
 This is a single checked IR layer in the sense that executable identity is in
@@ -127,25 +133,121 @@ They should not become a second permanent IR.
 
 ## Implementation Status
 
-As of 2026-06-18, the first checked-binding slice is implemented:
+As of 2026-06-18, the first checked-binding, term-occurrence, and local-binder
+slices are implemented:
 
 - `LoweredBinding` carries `LoweredBindingIdentity`.
 - `CheckedBinding` carries `ResolvedVar`.
 - Constructor bindings carry `ConstructorId ConstructorRef`.
 - Backend constructor-binding synthesis consumes that checked constructor
   identity.
+- `MLF.Types.Identity` owns `IdDetails` reference-name, local, constructor, and
+  local-rename projections, and `ResolvedVar` plus binding constructor-reference
+  helpers delegate those projections through that identity layer.
+- `XmlfTerm` and `XmlfTermF` variable, lambda, and let nodes store
+  `ResolvedVar` directly instead of `Maybe ResolvedVar`; `EVarNode` is the
+  single variable node, deferred terms are built from explicit `DeferredRef`
+  values,
+  `ELam`/`ELet` are the only lambda/let term forms, and
+  `mkLocalLam`/`mkLocalLet` are local-binder construction helpers for tests and
+  fixture-like call sites.
+- Core elaboration emits `EVarNode` directly from `EnvBinding`; initial
+  external environments use `EnvId`, lexical lambda/let binders use `LocalId`,
+  and lambda/let rewrite helpers refresh local occurrence sidecar types when
+  binder types are aligned to the target type.
+- Checked-program finalization annotates accepted `XmlfTerm` variable
+  occurrences from runtime metadata, including constructor occurrences, and
+  rejects terms that still carry deferred variable identity.
+- Checked-program finalization annotates accepted lambda and let binders with
+  `LocalId` references, and local occurrences point at matching local
+  references after alpha-freshening.
+- Backend-emission preparation, checked-program runtime reachability, and
+  backend-conversion free-variable scans consume `ResolvedVar` / `IdDetails`
+  before falling back to the string-runtime compatibility view.
+- Backend conversion recursive-let lifting and capture-avoiding rewrite helpers
+  now preserve resolved occurrence and lambda/let binder identities while
+  generating helper bindings.
+- Backend conversion builtin-type normalization and ordinary lambda/let
+  emission now preserve resolved occurrence and binder identities while running
+  temporary backend type inference and emitting backend binders.
+- Backend conversion partial-application, closure-demand, handler-call, and
+  structural lambda-shape probes read resolved local identity before falling
+  back to runtime names.
+- Backend conversion let-alias application-head unfolding compares resolved let
+  binder identity before falling back to runtime names.
+- Backend conversion recognizes resolved constructor application heads through
+  `ConstructorId ConstructorRef` before falling back to string-runtime
+  compatibility for unresolved terms.
+- xMLF pretty/XMLF projection reads resolved local identity before the
+  string-runtime compatibility view, so rendered checked terms do not expose
+  stale local runtime spellings.
+- Pipeline type-abstraction freshening preserves resolved occurrence and binder
+  identities while renaming internal type variables.
+- Pipeline authoritative-annotation selection recognizes resolved local
+  identity-lambda terms before falling back to runtime-name equality.
+- `MLF.Elab.TermClosure` preserves resolved occurrence and binder identities while
+  substituting internal type names and aligning type-variable binders.
+- xMLF reducer capture-avoidance counts resolved occurrence/binder identity
+  types when freshening type binders.
+- Checked-program deferred constructor/case/method rewrite helpers preserve
+  resolved occurrence and binder identities.
+- Checked-program deferred placeholder matching reads resolved occurrence
+  identity before falling back to string-runtime compatibility names.
+- Checked-program deferred local evidence finalization matches evidence methods
+  by class identity, type identity, and method identity instead of evidence runtime
+  names.
+- Instance method resolution keeps an identity-indexed method map beside the
+  source-name map, so deferred method dispatch selects the concrete instance
+  method by `MethodInfo` identity.
+- Module definition finalization collects checked layer results by definition
+  `SymbolIdentity` instead of checked-binding runtime name.
+- Module finalization read contexts are keyed by lowered binding identity rather
+  than lowered binding runtime name.
+- Module pipeline results are re-keyed by lowered binding identity immediately
+  after the string-keyed pipeline boundary returns.
+- Parameterized constructor-binding result-shape repair preserves resolved
+  lambda binder identities while reordering the generated spine.
+- Retained-child preservation analysis reads resolved let-binder and variable
+  identity before falling back to the string-runtime compatibility view.
+- Checked-program runtime aggregation now builds the executable main term with
+  resolved binding identities, and Church-data decoding reads resolved handler
+  identity before falling back to runtime names.
+- Source-type finalization's vacuous-forall stripping counts resolved identity
+  types before dropping checked type abstractions.
+- Checked-program local `let` binder identities preserve the complete binding
+  scheme instead of only the scheme body, so type-instantiated local
+  occurrences keep enough checked-IR type information.
+- xMLF typechecking rejects resolved local variable occurrences whose identity
+  type is stale relative to the resolved binding identity.
+- Backend conversion reconciles resolved local identity types only at its own
+  boundary, and only when backend structural recovery proves the source ADT head
+  and lowered Church/recursive runtime type are equivalent.
+- Opaque unchecked checked-binding finalization annotates the fallback term with
+  resolved occurrence and binder identities before storing it.
+- Constructor bindings without constructor foralls now have a metadata-derived
+  checked finalization path that constructs monomorphic nullary,
+  monomorphic field/multi-constructor, and non-nullary data-parameterized
+  checked terms from `ConstructorInfo`; parameterized nullary constructors and
+  shapes outside that proven subset still fall back to the surface pipeline.
+- `EnvRef` and `PrimitiveRef` no longer use strings as semantic identity:
+  `EnvRef` compares generated `UniqueIdentity` values, `PrimitiveRef` compares
+  builtin `SymbolIdentity` values, and `DeferredId` is treated as an unresolved
+  marker rather than a semantic identity.
 
-This does not complete the ADR. `ElabTerm` occurrences and local binders remain
-string-based during the migration, and constructor applications still need to
-move to the same resolved identity path.
+This does not complete the ADR. Non-program eMLF producers can still construct
+bare string-compatible terms, and many consumers still use the compatibility
+runtime-name view while they migrate to inspecting `ResolvedVar` / `IdDetails`
+directly.
 
 ## Performance Expectation
 
 Resolved identity alone is not expected to make `.mlfp` checking much faster.
 The speedup comes from the simplifications it enables:
 
-- constructor bindings can be finalized from metadata plus a small checked-term
-  guard instead of always running through the full surface pipeline;
+- constructor binding subsets can be finalized from metadata plus a small
+  checked-term guard instead of always running through the full surface
+  pipeline, expanding only as each subset preserves the existing constructor
+  result-shape invariants;
 - backend conversion can lower constructor applications directly from
   `ConstructorId`, avoiding string recovery and structural shape guessing;
 - dependency and closure scans can compare resolved references instead of
@@ -153,12 +255,12 @@ The speedup comes from the simplifications it enables:
 
 The accepted performance claim for this design is not "resolved variables make
 everything fast." The measurable target is that constructor-heavy packages
-spend less time in `program.check.module.*.constructor-bindings` once the
-metadata-derived constructor path is implemented.
+spend less time in `program.check.module.*.constructor-bindings` as the
+metadata-derived constructor path grows beyond its initial nullary subset.
 
 ## Rejected Alternatives
 
-- Keep `EVar String` as the checked xMLF executable identity. This preserves
+- Keep name-only variables as the checked xMLF executable identity. This preserves
   the current recovery work and keeps constructor provenance outside the term.
 - Add a backend-only constructor annotation. That helps lowering but does not
   make checked xMLF a complete executable IR.
@@ -173,13 +275,13 @@ metadata-derived constructor path is implemented.
 
 ## Consequences
 
-- `MLF.Types.Elab` will no longer be the smallest string-based xMLF syntax once
-  the migration reaches checked programs. If a paper-facing minimal xMLF syntax
-  is still needed, it should be a separate parse/pretty surface or erasure view.
+- `MLF.Types.Elab` is no longer a string-based xMLF syntax layer for terms.
+  If a paper-facing minimal xMLF text is needed, it should be a diagnostic
+  pretty/erasure view from checked `XmlfTerm`, not a second parsed term IR.
 - Tests that inspect `show checkedBindingTerm` by spelling will need to assert
   semantic identity or rendered diagnostics instead.
-- Backend conversion should get smaller around constructor recovery but will
-  need an explicit bridge while old `ElabTerm` producers remain.
+- Backend conversion should get smaller around constructor recovery as remaining
+  deferred-name `XmlfTerm` producers disappear.
 - The resolved-symbol resolver remains authoritative; finalization must not
   invent identities after checking.
 - The implementation should prefer one resolved term representation over a

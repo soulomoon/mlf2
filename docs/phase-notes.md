@@ -152,7 +152,7 @@ Reify the solved constraint graph and witnesses into xMLF terms and types.
 
 ### Key Types
 - `ElabType` — xMLF type
-- `ElabTerm` — xMLF term
+- `XmlfTerm` — xMLF term
 - `Instantiation` — xMLF instantiation witness
 
 ### Key Functions

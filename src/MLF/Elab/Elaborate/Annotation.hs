@@ -17,8 +17,11 @@ module MLF.Elab.Elaborate.Annotation
 where
 
 import Control.Applicative ((<|>))
+import Control.Monad (foldM)
+import Data.Functor.Foldable (Recursive (project))
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, isJust)
 import qualified Data.Set as Set
@@ -37,17 +40,16 @@ import MLF.Elab.Elaborate.Scope
     reifyTargetType,
   )
 import MLF.Elab.Inst (applyInstantiation, schemeToType)
-import qualified MLF.Elab.Inst as Inst
 import MLF.Elab.Phi (phiFromEdgeWitnessWithTraceReadModel)
 import MLF.Elab.Phi.Omega.Normalize (normalizeInst)
 import MLF.Elab.Run.Annotation (adjustAnnotationInst)
-import MLF.Elab.Run.Instantiation (inferInstAppArgsFromScheme)
+import MLF.Elab.Run.Instantiation (inferInstAppArgsFromSchemeRefs)
 import MLF.Elab.Run.TypeOps (inlineBoundVarsTypeForBoundWithContext, inlineBoundVarsTypeWithContext)
 import MLF.Elab.TermClosure
   ( alignTermTypeVarsToScheme,
     alignTermTypeVarsToTopTyAbs,
     alignTopTyAbsToScheme,
-    closeTermWithSchemeSubstIfNeeded,
+    closeTermWithSchemeSubstRefsIfNeeded,
   )
 import MLF.Elab.TypeCheck (typeCheck)
 import qualified MLF.Elab.TypeCheck as TypeCheck
@@ -55,29 +57,50 @@ import MLF.Elab.Types
   ( BoundType,
     ElabError (..),
     ElabScheme,
-    ElabTerm (..),
+    XmlfTerm (..),
+    XmlfTermF (..),
     ElabType,
     Instantiation (..),
+    InstantiationF (..),
     SchemeInfo (..),
     Ty (..),
     elabToBound,
+    eTyAbsWithRef,
+    freshTypeBinderRef,
+    instAbstrWithRef,
+    instUnderWithRef,
+    mapResolvedVarType,
     mapBoundType,
+    mkElabSchemeWithRefs,
+    renameTypeBinderRef,
+    resolvedVarType,
+    schemeBinderRefs,
+    schemeBody,
     schemeFromType,
+    schemeInfoFromRefSubst,
+    schemeInfoBinderRefSubst,
+    TypeBinderRef,
+    typeBinderRefName,
+    typeBinderRefNode,
+    typeBinderRefsSameIdentity,
+    typeBinderRefsSameIdentityAndName,
     tyToElab,
-    pattern Forall,
   )
 import MLF.Frontend.ConstraintGen.Types (AnnExpr (..))
+import qualified MLF.Frontend.Program.Builtins as Builtins
 import MLF.Frontend.Syntax (NormSrcType, SrcBound (..), SrcNorm (NormN), SrcTy (..), StructBound, VarName)
-import MLF.Reify.Core (reifyTypeWithNamedSetNoFallbackReadModel)
+import MLF.Reify.Type (reifyTypeWithNamedSetRefsNoFallbackReadModel)
 import MLF.Reify.TypeOps
   ( alphaEqType,
     churchAwareEqType,
+    freeTypeVarRefsType,
     freeTypeVarsType,
     freshNameLike,
     parseNameId,
     resolveBaseBoundForInstConstraint,
-    substTypeCapture,
+    substTypeCaptureRef,
   )
+import MLF.Types.Identity (IdentityGenerator, initialIdentityGenerator)
 import MLF.Util.Trace (TraceConfig, traceGeneralize)
 
 data AnnotationContext (p :: Phase) = AnnotationContext
@@ -89,24 +112,24 @@ data AnnotationContext (p :: Phase) = AnnotationContext
     acEdgeExpansions :: IntMap.IntMap Expansion
   }
 
-closeTermForAnnotation :: ElabTerm -> ElabTerm
+closeTermForAnnotation :: XmlfTerm -> XmlfTerm
 closeTermForAnnotation term =
   case typeCheck term of
     Right ty ->
-      let freeVars = Set.toList (freeTypeVarsType ty)
-          scheme = Forall [(v, Nothing) | v <- freeVars] ty
-       in closeTermWithSchemeSubstIfNeeded IntMap.empty scheme term
+      let freeRefs = freeTypeVarRefsType ty
+          scheme = mkElabSchemeWithRefs [(ref, Nothing) | ref <- freeRefs] ty
+       in closeTermWithSchemeSubstRefsIfNeeded IntMap.empty scheme term
     Left _ -> term
 
-stripUnusedTopTyAbs :: ElabTerm -> ElabTerm
+stripUnusedTopTyAbs :: XmlfTerm -> XmlfTerm
 stripUnusedTopTyAbs term =
   case term of
-    ETyAbs v mbBound body ->
+    ETyAbsRef ref mbBound body ->
       let body' = stripUnusedTopTyAbs body
-          term' = ETyAbs v mbBound body'
+          term' = ETyAbsRef ref mbBound body'
        in case typeCheck term' of
-            Right (TForall _ _ bodyTy)
-              | v `notElem` freeTypeVarsType bodyTy -> body'
+            Right (TForallRef _ _ bodyTy)
+              | not (any (typeBinderRefsSameIdentity ref) (freeTypeVarRefsType bodyTy)) -> body'
             _ -> term'
     _ -> term
 
@@ -128,9 +151,9 @@ expInstantiateArgsToInstNoFallback scopeContext namedSet args = do
           readModel = scReadModel scopeContext
        in case resolveBaseBound argC of
             Just baseC ->
-              reifyTypeWithNamedSetNoFallbackReadModel readModel IntMap.empty namedSet baseC
+              reifyTypeWithNamedSetRefsNoFallbackReadModel readModel IntMap.empty namedSet baseC
             Nothing ->
-              reifyTypeWithNamedSetNoFallbackReadModel readModel IntMap.empty namedSet argC
+              reifyTypeWithNamedSetRefsNoFallbackReadModel readModel IntMap.empty namedSet argC
 
 instAppsFromTypes :: ScopeContext p -> [ElabType] -> Either ElabError Instantiation
 instAppsFromTypes scopeContext tys =
@@ -144,7 +167,7 @@ sourceAnnIsPolymorphic env sourceAnn =
   case sourceAnn of
     AVar v _ ->
       case Map.lookup v env of
-        Just SchemeInfo {siScheme = Forall binds _} -> not (null binds)
+        Just schemeInfo -> not (null (schemeBinderRefs (siScheme schemeInfo)))
         _ -> False
     AAnn inner _ _ -> sourceAnnIsPolymorphic env inner
     AUnfold inner _ _ -> sourceAnnIsPolymorphic env inner
@@ -182,35 +205,38 @@ elaborateAnnotationTerm ::
   AnnotationContext p ->
   IntSet.IntSet ->
   Map.Map VarName SchemeInfo ->
+  TypeCheck.Env ->
   AnnExpr ->
   NodeId ->
   EdgeId ->
-  ElabTerm ->
-  Either ElabError ElabTerm
-elaborateAnnotationTerm annotationContext namedSetReify env exprAnn annNodeId eid expr' = do
+  XmlfTerm ->
+  Either ElabError XmlfTerm
+elaborateAnnotationTerm annotationContext namedSetReify env tcEnv exprAnn annNodeId eid expr' = do
   expectedSchemeInfo <-
     case generalizeAtNode scopeContext annNodeId of
       Right pair -> pure (Just pair)
       Left _ -> pure Nothing
-  let tcEnv = TypeCheck.Env (Map.map (schemeToType . siScheme) env) Map.empty
-      exprFresh = freshenTermTypeAbsAgainstEnv tcEnv expr'
+  let exprFresh = freshenTermTypeAbsAgainstEnv tcEnv expr'
       freshenSchemeAgainstEnv scheme0 =
-        case scheme0 of
-          Forall binds body ->
-            let reserved =
-                  Set.unions
-                    ( map freeTypeVarsType (Map.elems (TypeCheck.termEnv tcEnv))
-                        ++ [Set.fromList (Map.keys (TypeCheck.typeEnv tcEnv))]
-                    )
-                go _ [] bodyAcc acc = (reverse acc, bodyAcc)
-                go used ((name, mb) : rest) bodyAcc acc =
-                  let name' = if Set.member name used then freshNameLike name used else name
-                      renameTy = TVar name'
-                      bodyAcc' = if name' == name then bodyAcc else substTypeCapture name renameTy bodyAcc
-                      acc' = (name', mb) : acc
-                   in go (Set.insert name' used) rest bodyAcc' acc'
-                (binds', body') = go reserved binds body []
-             in Forall binds' body'
+        let reserved =
+              Set.unions
+                ( map freeTypeVarsType (map snd (TypeCheck.resolvedTermEnvEntries (TypeCheck.resolvedTermEnv tcEnv)))
+                    ++ [Set.fromList (map typeBinderRefName (Map.keys (TypeCheck.typeEnv tcEnv)))]
+                )
+            go _ [] bodyAcc acc = (reverse acc, bodyAcc)
+            go used ((ref, mb) : rest) bodyAcc acc =
+              let name = typeBinderRefName ref
+                  ref' = if Set.member name used then renameTypeBinderRef (freshNameLike name used) ref else ref
+                  name' = typeBinderRefName ref'
+                  renameTy = TVarRef ref'
+                  bodyAcc' =
+                    if typeBinderRefsSameIdentityAndName ref' ref
+                      then bodyAcc
+                      else substTypeCaptureRef ref renameTy bodyAcc
+                  acc' = (ref', mb) : acc
+               in go (Set.insert name' used) rest bodyAcc' acc'
+            (binds', body') = go reserved (schemeBinderRefs scheme0) (schemeBody scheme0) []
+         in mkElabSchemeWithRefs binds' body'
       sourceSchemeInfo = sourceAnnSchemeInfo env exprAnn
       canReuseSourceScheme =
         case (sourceSchemeInfo, expectedSchemeInfo) of
@@ -219,16 +245,16 @@ elaborateAnnotationTerm annotationContext namedSetReify env exprAnn annNodeId ei
           _ -> False
       requiresExplicitAnnotationInst =
         case (sourceSchemeInfo, expectedSchemeInfo) of
-          (Just SchemeInfo {siScheme = srcScheme}, Just (schemeExpected, _substExpected)) ->
-            let sourcePoly = case srcScheme of
-                  Forall binds _ -> not (null binds)
+          (Just schemeInfo, Just (schemeExpected, _substExpected)) ->
+            let srcScheme = siScheme schemeInfo
+                sourcePoly = not (null (schemeBinderRefs srcScheme))
              in sourcePoly
                   && not (alphaEqType (schemeToType srcScheme) (schemeToType schemeExpected))
           _ -> False
   inst <-
     case (sourceVarName exprAnn, TypeCheck.typeCheckWithEnv tcEnv exprFresh) of
       (Nothing, Right ty)
-        | not (case ty of TForall {} -> True; _ -> False) ->
+        | not (case ty of TForallRef {} -> True; _ -> False) ->
             pure InstId
       _ ->
         case reifyInst annotationContext namedSetReify env exprAnn eid of
@@ -250,25 +276,32 @@ elaborateAnnotationTerm annotationContext namedSetReify env exprAnn annNodeId ei
           closeAnnotatedLambdaParam tcEnv (schemeToType schemeExpected) exprFresh
       mExpectedBound =
         case expectedSchemeResult of
-          Just (Forall ((_, Just bnd) : _) _) -> Just (tyToElab bnd)
+          Just schemeExpected ->
+            case schemeBinderRefs schemeExpected of
+              (_, Just bnd) : _ -> Just (tyToElab bnd)
+              _ -> Nothing
           _ -> Nothing
-      dropAnnotationElims inst0 = case inst0 of
-        InstElim -> InstId
-        InstSeq a b ->
+      dropAnnotationElims inst0 = case project inst0 of
+        InstElimF -> InstId
+        InstSeqF a b ->
           let a' = dropAnnotationElims a
               b' = dropAnnotationElims b
            in case (a', b') of
                 (InstId, x) -> x
                 (x, InstId) -> x
                 _ -> InstSeq a' b'
-        InstInside a -> InstInside (dropAnnotationElims a)
-        InstUnder v a -> InstUnder v (dropAnnotationElims a)
-        _ -> inst0
+        InstInsideF a -> InstInside (dropAnnotationElims a)
+        InstUnderFRef ref a -> instUnderWithRef ref (dropAnnotationElims a)
+        InstAbstrFRef ref -> instAbstrWithRef ref
+        InstIdF -> InstId
+        InstAppF ty -> InstApp ty
+        InstBotF ty -> InstBot ty
+        InstIntroF -> InstIntro
       preservesForalls =
         isJust mExpectedBound
           || isJust (alignTermTypeVarsToTopTyAbs exprFresh)
           || case exprFresh of
-            ETyAbs {} -> True
+            ETyAbsRef {} -> True
             _ -> False
       instAdjusted0 =
         if preservesForalls
@@ -310,16 +343,16 @@ elaborateAnnotationTerm annotationContext namedSetReify env exprAnn annNodeId ei
                                 || churchAwareEqType tyExpr (schemeToType schemeExpected)
                             Left _ -> False
                      in case exprFresh of
-                          ETyAbs {}
+                          ETyAbsRef {}
                             | alignedExprMatchesExpected ->
                                 pure alignedExpr
                             | otherwise ->
-                                pure (closeTermWithSchemeSubstIfNeeded substExpected (freshenSchemeAgainstEnv schemeExpected) alignedExpr)
-                          _ -> pure (closeTermWithSchemeSubstIfNeeded substExpected (freshenSchemeAgainstEnv schemeExpected) exprFresh)
+                                pure (closeTermWithSchemeSubstRefsIfNeeded substExpected (freshenSchemeAgainstEnv schemeExpected) alignedExpr)
+                          _ -> pure (closeTermWithSchemeSubstRefsIfNeeded substExpected (freshenSchemeAgainstEnv schemeExpected) exprFresh)
                   Nothing -> pure (fromMaybe exprFresh (alignTermTypeVarsToTopTyAbs exprFresh))
           else
             let instHasUnder inst0 = case inst0 of
-                  InstUnder {} -> True
+                  InstUnderRef {} -> True
                   InstSeq a b -> instHasUnder a || instHasUnder b
                   InstInside a -> instHasUnder a
                   _ -> False
@@ -335,11 +368,11 @@ elaborateAnnotationTerm annotationContext namedSetReify env exprAnn annNodeId ei
                   else
                     if instLooksLikeApp instAdjusted
                       then case (sourceVarName exprAnn, TypeCheck.typeCheckWithEnv tcEnv exprFresh) of
-                        (Nothing, Right TForall {}) ->
+                        (Nothing, Right TForallRef {}) ->
                           if instHasUnder instAdjusted
                             then case expectedSchemeInfoForClose of
                               Just (schemeExpected, substExpected) ->
-                                pure (closeTermWithSchemeSubstIfNeeded substExpected (freshenSchemeAgainstEnv schemeExpected) exprFresh)
+                                pure (closeTermWithSchemeSubstRefsIfNeeded substExpected (freshenSchemeAgainstEnv schemeExpected) exprFresh)
                               Nothing -> pure (closeTermForAnnotation exprFresh)
                             else pure (closeTermForAnnotation exprFresh)
                         (Nothing, Right _) -> pure exprFresh
@@ -347,14 +380,14 @@ elaborateAnnotationTerm annotationContext namedSetReify env exprAnn annNodeId ei
                           if instHasUnder instAdjusted
                             then case expectedSchemeInfoForClose of
                               Just (schemeExpected, substExpected) ->
-                                pure (closeTermWithSchemeSubstIfNeeded substExpected (freshenSchemeAgainstEnv schemeExpected) exprFresh)
+                                pure (closeTermWithSchemeSubstRefsIfNeeded substExpected (freshenSchemeAgainstEnv schemeExpected) exprFresh)
                               Nothing -> pure (closeTermForAnnotation exprFresh)
                             else pure (closeTermForAnnotation exprFresh)
                       else
                         if instHasUnder instAdjusted
                           then case expectedSchemeInfoForClose of
                             Just (schemeExpected, substExpected) ->
-                              pure (closeTermWithSchemeSubstIfNeeded substExpected (freshenSchemeAgainstEnv schemeExpected) exprFresh)
+                              pure (closeTermWithSchemeSubstRefsIfNeeded substExpected (freshenSchemeAgainstEnv schemeExpected) exprFresh)
                             Nothing -> pure (closeTermForAnnotation exprFresh)
                           else pure (closeTermForAnnotation exprFresh)
   let exprClosed =
@@ -392,7 +425,7 @@ elaborateAnnotationTerm annotationContext namedSetReify env exprAnn annNodeId ei
                               Right _ -> instCanon
                               Left _ -> InstId
                             else case tyExpr of
-                              TForall {} ->
+                              TForallRef {} ->
                                 case applyInstantiation tyExpr instCanon of
                                   Right tyApplied
                                     | alphaEqType tyApplied tyExpr -> InstId
@@ -405,16 +438,16 @@ elaborateAnnotationTerm annotationContext namedSetReify env exprAnn annNodeId ei
   where
     scopeContext = acScopeContext annotationContext
 
-    rollExplicitMuAnnotation :: TypeCheck.Env -> Maybe ElabScheme -> ElabTerm -> ElabTerm
-    rollExplicitMuAnnotation tcEnv mbExpected term =
+    rollExplicitMuAnnotation :: TypeCheck.Env -> Maybe ElabScheme -> XmlfTerm -> XmlfTerm
+    rollExplicitMuAnnotation checkEnv mbExpected term =
       case schemeToType <$> mbExpected of
-        Just muTy@TMu {} ->
-          case TypeCheck.typeCheckWithEnv tcEnv term of
+        Just muTy@TMuRef {} ->
+          case TypeCheck.typeCheckWithEnv checkEnv term of
             Right termTy
               | alphaEqType termTy muTy -> term
               | churchAwareEqType termTy muTy,
                 let rolled = ERoll muTy term,
-                Right _ <- TypeCheck.typeCheckWithEnv tcEnv rolled ->
+                Right _ <- TypeCheck.typeCheckWithEnv checkEnv rolled ->
                   rolled
               | Just unfoldedTy <- unfoldMuOnce muTy,
                 alphaEqType termTy unfoldedTy || churchAwareEqType termTy unfoldedTy ->
@@ -434,31 +467,41 @@ elaborateAnnotationTerm annotationContext namedSetReify env exprAnn annNodeId ei
     unfoldMuOnce :: ElabType -> Maybe ElabType
     unfoldMuOnce ty =
       case ty of
-        TMu name body -> Just (substTypeCapture name ty body)
+        TMuRef ref body -> Just (substTypeCaptureRef ref ty body)
         _ -> Nothing
 
-    alignTermAlongType :: ElabType -> ElabTerm -> ElabTerm
+    alignTermAlongType :: ElabType -> XmlfTerm -> XmlfTerm
     alignTermAlongType targetTy term =
       case (targetTy, term) of
-        (TForall targetName _mbBound targetBody, ETyAbs termName termBound body)
-          | targetName == termName ->
-              ETyAbs termName termBound (alignTermAlongType targetBody body)
-        (TForall targetName mbBound targetBody, _) ->
-          ETyAbs targetName mbBound (alignTermAlongType targetBody term)
-        (TArrow dom cod, ELam name _ body) ->
-          ELam name dom (alignTermAlongType cod body)
+        (TForallRef targetRef _mbBound targetBody, ETyAbsRef termRef termBound body)
+          | typeBinderRefsSameIdentity targetRef termRef ->
+              ETyAbsRef termRef termBound (alignTermAlongType targetBody body)
+        (TForallRef targetRef mbBound targetBody, _) ->
+          ETyAbsRef targetRef mbBound (alignTermAlongType targetBody term)
+        (TArrow dom cod, ELam resolved body) ->
+          ELam (mapResolvedVarType (const dom) resolved) (alignTermAlongType cod body)
         _ -> term
 
-closeAnnotatedLambdaParam :: TypeCheck.Env -> ElabType -> ElabTerm -> Maybe ElabTerm
-closeAnnotatedLambdaParam tcEnv annotationTy term =
-  case (annotationTy, term) of
-    (TArrow dom _, ELam name (TVar binder) body) -> do
-      bound <- either (const Nothing) Just (elabToBound dom)
-      let closed = ETyAbs binder (Just bound) (ELam name (TVar binder) body)
-      case TypeCheck.typeCheckWithEnv tcEnv closed of
-        Right _ -> Just closed
-        Left _ -> Nothing
-    _ -> Nothing
+    closeAnnotatedLambdaParam :: TypeCheck.Env -> ElabType -> XmlfTerm -> Maybe XmlfTerm
+    closeAnnotatedLambdaParam checkEnv annotationTy term =
+      case annotationTy of
+        TForallRef {} ->
+          let aligned = alignTermAlongType annotationTy term
+           in case TypeCheck.typeCheckWithEnv checkEnv aligned of
+                Right alignedTy
+                  | alphaEqType alignedTy annotationTy || churchAwareEqType alignedTy annotationTy ->
+                      Just aligned
+                _ -> Nothing
+        _ ->
+          case (annotationTy, term) of
+            (TArrow dom _, ELam resolved body)
+              | TVarRef binderRef <- resolvedVarType resolved -> do
+                  bound <- either (const Nothing) Just (elabToBound dom)
+                  let closed = eTyAbsWithRef binderRef (Just bound) (ELam resolved body)
+                  case TypeCheck.typeCheckWithEnv checkEnv closed of
+                    Right _ -> Just closed
+                    Left _ -> Nothing
+            _ -> Nothing
 
 reifyInst ::
   AnnotationContext p ->
@@ -493,7 +536,7 @@ reifyInst annotationContext namedSetReify env funAnn (EdgeId eid) =
           ( "reifyInst scheme edge="
               ++ show eid
               ++ " source="
-              ++ show (fmap siSubst mSchemeInfo)
+              ++ show (fmap schemeInfoBinderRefSubst mSchemeInfo)
           )
           () of
           () -> pure ()
@@ -510,17 +553,17 @@ reifyInst annotationContext namedSetReify env funAnn (EdgeId eid) =
             of
             Right phi0' -> pure phi0'
             Left err -> Left err
-        let substForPhi = maybe IntMap.empty siSubst mSchemeInfo
+        let substForPhi = maybe IntMap.empty schemeInfoBinderRefSubst mSchemeInfo
             resolvePhiVar v = do
               nid <- parseNameId v
               bnd <- pvLookupVarBound presolutionView (canonical (NodeId nid))
               either
                 (const Nothing)
                 Just
-                (reifyTypeWithNamedSetNoFallbackReadModel (scReadModel scopeContext) substForPhi namedSetReify bnd)
+                (reifyTypeWithNamedSetRefsNoFallbackReadModel (scReadModel scopeContext) substForPhi namedSetReify bnd)
             normalizePhiInst inst0 = case inst0 of
-              InstApp (TVar v) -> maybe inst0 InstApp (resolvePhiVar v)
-              InstBot (TVar v) -> maybe inst0 InstBot (resolvePhiVar v)
+              InstApp (TVarRef ref) -> maybe inst0 InstApp (resolvePhiVar (typeBinderRefName ref))
+              InstBot (TVarRef ref) -> maybe inst0 InstBot (resolvePhiVar (typeBinderRefName ref))
               _ -> inst0
             phi = normalizePhiInst phi0
         case debugGeneralize
@@ -531,8 +574,7 @@ reifyInst annotationContext namedSetReify env funAnn (EdgeId eid) =
           case (mExpansion, mSchemeInfo) of
             (Just (ExpInstantiate args), Just schemeInfo) -> do
               let schemeArity =
-                    case siScheme schemeInfo of
-                      Forall binds _ -> length binds
+                    length (schemeBinderRefs (siScheme schemeInfo))
                   targetTy = authoritativeTargetType namedSetReify edgeWitness schemeInfo
                   traceArgs =
                     case mTrace of
@@ -560,7 +602,7 @@ reifyInst annotationContext namedSetReify env funAnn (EdgeId eid) =
                     let go _ acc [] = acc
                         go cur acc (tyArg : rest) =
                           case cur of
-                            TForall {} ->
+                            TForallRef {} ->
                               case applyInstantiation cur (InstApp tyArg) of
                                 Right cur' -> go cur' (acc ++ [tyArg]) rest
                                 Left _ -> acc
@@ -666,7 +708,7 @@ reifyInst annotationContext namedSetReify env funAnn (EdgeId eid) =
                     (explicitSourceAnnotatedScheme annExpr)
                     ( pure
                         ( case generalizeAtNode scopeContext schemeRootId of
-                            Right (scheme, subst) -> Just SchemeInfo {siScheme = scheme, siSubst = subst}
+                            Right (scheme, subst) -> Just (schemeInfoFromRefSubst scheme subst)
                             Left _ -> Nothing
                         )
                     )
@@ -691,7 +733,7 @@ reifyInst annotationContext namedSetReify env funAnn (EdgeId eid) =
 
     sourceSchemeInfoFromType srcTy = do
       ty <- srcTypeToElabType srcTy
-      pure SchemeInfo {siScheme = schemeFromType ty, siSubst = IntMap.empty}
+      pure (schemeInfoFromRefSubst (schemeFromType ty) IntMap.empty)
 
     firstJustE left right = do
       result <- left
@@ -710,16 +752,19 @@ reifyInst annotationContext namedSetReify env funAnn (EdgeId eid) =
                     <|> either (const Nothing) Just (reifyTargetNodeType scopeContext namedSet schemeInfo nodeId)
                 )
         inferAgainstTarget targetTy =
-          let (binds, body) = Inst.splitForalls (schemeToType (siScheme schemeInfo))
+          let binds = schemeBinderRefs (siScheme schemeInfo)
+              body = schemeBody (siScheme schemeInfo)
               schemeTy = schemeToType (siScheme schemeInfo)
               targetHasVisibleForall = case targetTy of
-                TForall {} -> True
+                TForallRef {} -> True
                 _ -> False
+              isInternalTypeBinderRef ref =
+                isJust (typeBinderRefNode ref)
               inferIdentityLikeTarget =
                 case (binds, body) of
-                  ([(binderName, _)], TArrow (TVar dom) (TVar cod))
-                    | dom == binderName && cod == binderName ->
-                        let args = [TVar binderName]
+                  ([(binderRef, _)], TArrow (TVarRef domRef) (TVarRef codRef))
+                    | typeBinderRefsSameIdentity binderRef domRef && typeBinderRefsSameIdentity binderRef codRef ->
+                        let args = [TVarRef binderRef]
                          in case applyInstantiation schemeTy (instSeqApps args) of
                               Right tyApplied
                                 | alphaEqType tyApplied targetTy ->
@@ -729,17 +774,17 @@ reifyInst annotationContext namedSetReify env funAnn (EdgeId eid) =
               normalizeArgs inferred =
                 let rewrite prefix remainingBinds remainingArgs =
                       case (remainingBinds, remainingArgs) of
-                        ((binderName, _) : restBinds, argTy : restArgs) ->
+                        ((binderRef, _) : restBinds, argTy : restArgs) ->
                           let normalizedArg =
                                 case argTy of
-                                  TVar v
+                                  TVarRef argRef
                                     | targetHasVisibleForall,
-                                      isJust (parseNameId v) ->
-                                        let candidateArgs = prefix ++ [TVar binderName] ++ restArgs
+                                      isInternalTypeBinderRef argRef ->
+                                        let candidateArgs = prefix ++ [TVarRef binderRef] ++ restArgs
                                          in case applyInstantiation schemeTy (instSeqApps candidateArgs) of
                                               Right tyApplied
                                                 | alphaEqType tyApplied targetTy ->
-                                                    TVar binderName
+                                                    TVarRef binderRef
                                               _ -> argTy
                                   _ -> argTy
                            in normalizedArg : rewrite (prefix ++ [normalizedArg]) restBinds restArgs
@@ -747,7 +792,13 @@ reifyInst annotationContext namedSetReify env funAnn (EdgeId eid) =
                         ([], restArgs) -> restArgs
                  in rewrite [] binds inferred
               inferredArgs =
-                fmap normalizeArgs (inferInstAppArgsFromScheme binds body targetTy)
+                fmap
+                  normalizeArgs
+                  ( inferInstAppArgsFromSchemeRefs
+                      (schemeBinderRefs (siScheme schemeInfo))
+                      (schemeBody (siScheme schemeInfo))
+                      targetTy
+                  )
                   <|> inferIdentityLikeTarget
            in fmap ((,) binds) inferredArgs
 
@@ -760,16 +811,15 @@ reifyInst annotationContext namedSetReify env funAnn (EdgeId eid) =
             Left _ -> Nothing
 
     reifyTraceBinderInstArgs namedSet schemeInfo nodes0 =
-      let (binds, _) = Inst.splitForalls (schemeToType (siScheme schemeInfo))
-       in fmap ((,) binds) (mapM reifyArg nodes0)
+      fmap ((,) (schemeBinderRefs (siScheme schemeInfo))) (mapM reifyArg nodes0)
       where
-        subst = siSubst schemeInfo
+        subst = schemeInfoBinderRefSubst schemeInfo
         reifyArg nodeId =
           let nodeC = canonical nodeId
               tyE =
                 case pvLookupVarBound presolutionView nodeC of
-                  Just bnd -> reifyTypeWithNamedSetNoFallbackReadModel (scReadModel scopeContext) subst namedSet bnd
-                  Nothing -> reifyTypeWithNamedSetNoFallbackReadModel (scReadModel scopeContext) subst namedSet nodeC
+                  Just bnd -> reifyTypeWithNamedSetRefsNoFallbackReadModel (scReadModel scopeContext) subst namedSet bnd
+                  Nothing -> reifyTypeWithNamedSetRefsNoFallbackReadModel (scReadModel scopeContext) subst namedSet nodeC
            in either (const Nothing) Just tyE
 
     instNeedsAuthoritativeRefinement inst =
@@ -778,7 +828,7 @@ reifyInst annotationContext namedSetReify env funAnn (EdgeId eid) =
         Nothing -> False
 
     isPlaceholderTy ty = case ty of
-      TVar _ -> True
+      TVarRef _ -> True
       _ -> False
 
     collectApps inner = case inner of
@@ -802,105 +852,222 @@ annRefersToVar name exprAnn =
     AUnfold inner _ _ -> annRefersToVar name inner
     _ -> False
 
-freshenTermTypeAbsAgainstEnv :: TypeCheck.Env -> ElabTerm -> ElabTerm
+freshenTermTypeAbsAgainstEnv :: TypeCheck.Env -> XmlfTerm -> XmlfTerm
 freshenTermTypeAbsAgainstEnv env = go reserved
   where
     reserved =
       Set.unions
-        ( map freeTypeVarsType (Map.elems (TypeCheck.termEnv env))
-            ++ [Set.fromList (Map.keys (TypeCheck.typeEnv env))]
+        ( map freeTypeVarsType (map snd (TypeCheck.resolvedTermEnvEntries (TypeCheck.resolvedTermEnv env)))
+            ++ [Set.fromList (map typeBinderRefName (Map.keys (TypeCheck.typeEnv env)))]
         )
 
     go used term = case term of
-      ETyAbs name mb body ->
-        let usedForBinder = Set.union used (maybe Set.empty freeTypeVarsType mb)
-            (name', body') =
+      ETyAbsRef ref mb body ->
+        let name = typeBinderRefName ref
+            usedForBinder = Set.union used (maybe Set.empty freeTypeVarsType mb)
+            (ref', body') =
               if Set.member name usedForBinder
                 then
                   let fresh = freshNameLike name usedForBinder
-                   in (fresh, renameTypeVarInTerm name fresh body)
-                else (name, body)
-            used' = Set.insert name' usedForBinder
-         in ETyAbs name' mb (go used' body')
-      ELam v ty body -> ELam v ty (go (Set.union used (freeTypeVarsType ty)) body)
+                      freshRef = renameTypeBinderRef fresh ref
+                   in (freshRef, renameTypeVarInTerm ref freshRef body)
+                else (ref, body)
+            used' = Set.insert (typeBinderRefName ref') usedForBinder
+         in ETyAbsRef ref' mb (go used' body')
+      ELam resolved body ->
+        ELam resolved (go (Set.union used (freeTypeVarsType (resolvedVarType resolved))) body)
       EApp f a -> EApp (go used f) (go used a)
-      ELet v sch rhs body ->
+      ELet resolved sch rhs body ->
         let used' = Set.union used (freeTypeVarsType (schemeToType sch))
-         in ELet v sch (go used' rhs) (go used' body)
+         in ELet resolved sch (go used' rhs) (go used' body)
       ETyInst t inst -> ETyInst (go used t) inst
       ERoll ty body -> ERoll ty (go used body)
       EUnroll body -> EUnroll (go used body)
       _ -> term
 
-renameTypeVarInTerm :: String -> String -> ElabTerm -> ElabTerm
-renameTypeVarInTerm old new term =
-  let ty' = TVar new
-      renameTy = substTypeCapture old ty'
+renameTypeVarInTerm :: TypeBinderRef -> TypeBinderRef -> XmlfTerm -> XmlfTerm
+renameTypeVarInTerm oldRef newRef term =
+  let renameTy = substTypeCaptureRef oldRef (TVarRef newRef)
       renameBound = mapBoundType renameTy
       renameScheme sch = schemeFromType (renameTy (schemeToType sch))
-      renameName v
-        | v == old = new
-        | otherwise = v
-      renameInst inst = case inst of
-        InstId -> InstId
-        InstApp ty -> InstApp (renameTy ty)
-        InstIntro -> InstIntro
-        InstElim -> InstElim
-        InstInside inner -> InstInside (renameInst inner)
-        InstSeq a b -> InstSeq (renameInst a) (renameInst b)
-        InstUnder v inner -> InstUnder (renameName v) (renameInst inner)
-        InstBot ty -> InstBot (renameTy ty)
-        InstAbstr v -> InstAbstr (renameName v)
-   in case term of
-        EVar _ -> term
-        ELit _ -> term
-        ELam v ty body -> ELam v (renameTy ty) (renameTypeVarInTerm old new body)
-        EApp f a -> EApp (renameTypeVarInTerm old new f) (renameTypeVarInTerm old new a)
-        ELet v sch rhs body -> ELet v (renameScheme sch) (renameTypeVarInTerm old new rhs) (renameTypeVarInTerm old new body)
-        ETyAbs v mb body
-          | v == old -> ETyAbs v (fmap renameBound mb) body
-          | otherwise -> ETyAbs v (fmap renameBound mb) (renameTypeVarInTerm old new body)
-        ETyInst t inst -> ETyInst (renameTypeVarInTerm old new t) (renameInst inst)
-        ERoll ty body -> ERoll (renameTy ty) (renameTypeVarInTerm old new body)
-        EUnroll body -> EUnroll (renameTypeVarInTerm old new body)
+      renameRef ref
+        | typeBinderRefsSameIdentity ref oldRef = newRef
+        | otherwise = ref
+      renameInst inst = case project inst of
+        InstIdF -> InstId
+        InstAppF ty -> InstApp (renameTy ty)
+        InstIntroF -> InstIntro
+        InstElimF -> InstElim
+        InstInsideF inner -> InstInside (renameInst inner)
+        InstSeqF a b -> InstSeq (renameInst a) (renameInst b)
+        InstUnderFRef ref inner -> instUnderWithRef (renameRef ref) (renameInst inner)
+        InstBotF ty -> InstBot (renameTy ty)
+        InstAbstrFRef ref -> instAbstrWithRef (renameRef ref)
+   in case project term of
+        EVarNodeF resolved -> EVarNode (mapResolvedVarType renameTy resolved)
+        ELitF lit -> ELit lit
+        ELamF resolved body ->
+          ELam (mapResolvedVarType renameTy resolved) (renameTypeVarInTerm oldRef newRef body)
+        EAppF f a -> EApp (renameTypeVarInTerm oldRef newRef f) (renameTypeVarInTerm oldRef newRef a)
+        ELetF resolved sch rhs body ->
+          ELet
+            (mapResolvedVarType renameTy resolved)
+            (renameScheme sch)
+            (renameTypeVarInTerm oldRef newRef rhs)
+            (renameTypeVarInTerm oldRef newRef body)
+        ETyAbsFRef ref mb body
+          | typeBinderRefsSameIdentity ref oldRef -> eTyAbsWithRef ref (fmap renameBound mb) body
+          | otherwise -> eTyAbsWithRef ref (fmap renameBound mb) (renameTypeVarInTerm oldRef newRef body)
+        ETyInstF t inst -> ETyInst (renameTypeVarInTerm oldRef newRef t) (renameInst inst)
+        ERollF ty body -> ERoll (renameTy ty) (renameTypeVarInTerm oldRef newRef body)
+        EUnrollF body -> EUnroll (renameTypeVarInTerm oldRef newRef body)
 
 srcTypeToElabType :: NormSrcType -> Either ElabError ElabType
-srcTypeToElabType ty = case ty of
-  STVar name -> Right (TVar name)
-  STArrow dom cod -> TArrow <$> srcTypeToElabType dom <*> srcTypeToElabType cod
-  STCon name args -> TCon (BaseTy name) <$> traverse srcTypeToElabType args
-  STVarApp name args -> TVarApp name <$> traverse srcTypeToElabType args
+srcTypeToElabType ty =
+  let (refs, generator) = freshSourceTypeBinderRefs (Set.toList (freeSrcTypeVars ty)) initialIdentityGenerator
+   in fmap fst (srcTypeToElabTypeWith refs generator ty)
+
+freeSrcTypeVars :: SrcTy n v -> Set.Set String
+freeSrcTypeVars ty =
+  go Set.empty ty
+  where
+    go :: Set.Set String -> SrcTy n0 v0 -> Set.Set String
+    go bound srcTy =
+      case srcTy of
+        STVar name
+          | name `Set.member` bound -> Set.empty
+          | otherwise -> Set.singleton name
+        STArrow dom cod -> go bound dom `Set.union` go bound cod
+        STBase {} -> Set.empty
+        STCon _ args -> foldMap (go bound) args
+        STVarApp name args ->
+          let headVars =
+                if name `Set.member` bound
+                  then Set.empty
+                  else Set.singleton name
+           in headVars `Set.union` foldMap (go bound) args
+        STTyLam name body -> go (Set.insert name bound) body
+        STTyApp fun arg -> go bound fun `Set.union` go bound arg
+        STForall name mb body ->
+          maybe Set.empty (go bound . unSrcBound) mb
+            `Set.union` go (Set.insert name bound) body
+        STMu name body -> go (Set.insert name bound) body
+        STBottom -> Set.empty
+
+freshSourceTypeBinderRefs :: [String] -> IdentityGenerator -> (Map.Map String TypeBinderRef, IdentityGenerator)
+freshSourceTypeBinderRefs names generator0 =
+  go names Map.empty generator0
+  where
+    go [] refs generator = (refs, generator)
+    go (name : rest) refs generator =
+      let (ref, generator1) = freshTypeBinderRef name generator
+       in go rest (Map.insert name ref refs) generator1
+
+srcTypeToElabTypeWith :: Map.Map String TypeBinderRef -> IdentityGenerator -> NormSrcType -> Either ElabError (ElabType, IdentityGenerator)
+srcTypeToElabTypeWith refs generator ty = case ty of
+  STVar name -> do
+    ref <- sourceTypeBinderRef refs name
+    Right (TVarRef ref, generator)
+  STArrow dom cod -> do
+    (dom', generator1) <- srcTypeToElabTypeWith refs generator dom
+    (cod', generator2) <- srcTypeToElabTypeWith refs generator1 cod
+    Right (TArrow dom' cod', generator2)
+  STCon name args -> do
+    (args', generator') <- srcTypesToElabTypesWith refs generator args
+    Right (TConWithIdentity (Builtins.builtinTypeHeadIdentity name) (builtinBaseTy name) args', generator')
+  STVarApp name args -> do
+    (args', generator') <- srcTypesToElabTypesWith refs generator args
+    ref <- sourceTypeBinderRef refs name
+    Right (TVarAppRef ref args', generator')
   STTyLam {} ->
     Left (InstantiationError "residual type lambda reached elaboration")
   STTyApp {} ->
     Left (InstantiationError "residual type application reached elaboration")
   STForall name mb body ->
-    TForall name
-      <$> maybe (Right Nothing) srcBoundToElabBound mb
-      <*> srcTypeToElabType body
-  STMu name body -> TMu name <$> srcTypeToElabType body
-  STBase name -> Right (TBase (BaseTy name))
-  STBottom -> Right TBottom
+    let (ref, generator1) = freshTypeBinderRef name generator
+        refs' = Map.insert name ref refs
+     in do
+          (mb', generator2) <- maybe (Right (Nothing, generator1)) (srcBoundToElabBoundWith refs generator1) mb
+          (body', generator3) <- srcTypeToElabTypeWith refs' generator2 body
+          Right (TForallRef ref mb' body', generator3)
+  STMu name body ->
+    let (ref, generator1) = freshTypeBinderRef name generator
+     in do
+          (body', generator2) <- srcTypeToElabTypeWith (Map.insert name ref refs) generator1 body
+          Right (TMuRef ref body', generator2)
+  STBase name -> Right (TBaseWithIdentity (Builtins.builtinTypeHeadIdentity name) (builtinBaseTy name), generator)
+  STBottom -> Right (TBottom, generator)
+  where
+    sourceTypeBinderRef env name =
+      case Map.lookup name env of
+        Just ref -> Right ref
+        Nothing -> Left (InstantiationError ("unresolved source type binder `" ++ name ++ "` reached annotation elaboration"))
 
-srcBoundToElabBound :: SrcBound 'NormN -> Either ElabError (Maybe BoundType)
-srcBoundToElabBound bound = case bound of
-  SrcBound ty -> structBoundToElabBound ty
-
-structBoundToElabBound :: StructBound -> Either ElabError (Maybe BoundType)
-structBoundToElabBound bTy = case bTy of
-  STArrow dom cod -> Just <$> (TArrow <$> srcTypeToElabType dom <*> srcTypeToElabType cod)
-  STBase name -> Right (Just (TBase (BaseTy name)))
-  STCon name args -> Just . TCon (BaseTy name) <$> traverse srcTypeToElabType args
-  STVarApp name args -> Just . TVarApp name <$> traverse srcTypeToElabType args
-  STTyLam {} ->
-    Left (InstantiationError "residual type lambda reached elaboration")
-  STTyApp {} ->
-    Left (InstantiationError "residual type application reached elaboration")
-  STForall name mb body ->
-    Just
-      <$> ( TForall name
-              <$> maybe (Right Nothing) srcBoundToElabBound mb
-              <*> srcTypeToElabType body
+    srcTypesToElabTypesWith refs0 generator0 (arg :| args) = do
+      (arg', generator1) <- srcTypeToElabTypeWith refs0 generator0 arg
+      (argsRev, generator') <-
+        foldM
+          ( \(acc, gen) next -> do
+              (next', gen') <- srcTypeToElabTypeWith refs0 gen next
+              Right (next' : acc, gen')
           )
-  STMu name body -> Just . TMu name <$> srcTypeToElabType body
-  STBottom -> Right Nothing
+          ([], generator1)
+          args
+      Right (arg' :| reverse argsRev, generator')
+
+srcBoundToElabBoundWith :: Map.Map String TypeBinderRef -> IdentityGenerator -> SrcBound 'NormN -> Either ElabError (Maybe BoundType, IdentityGenerator)
+srcBoundToElabBoundWith refs generator bound = case bound of
+  SrcBound ty -> structBoundToElabBoundWith refs generator ty
+
+structBoundToElabBoundWith :: Map.Map String TypeBinderRef -> IdentityGenerator -> StructBound -> Either ElabError (Maybe BoundType, IdentityGenerator)
+structBoundToElabBoundWith refs generator bTy = case bTy of
+  STArrow dom cod -> do
+    (dom', generator1) <- srcTypeToElabTypeWith refs generator dom
+    (cod', generator2) <- srcTypeToElabTypeWith refs generator1 cod
+    Right (Just (TArrow dom' cod'), generator2)
+  STBase name -> Right (Just (TBaseWithIdentity (Builtins.builtinTypeHeadIdentity name) (builtinBaseTy name)), generator)
+  STCon name args -> do
+    (args', generator1) <- srcTypesToElabTypesWith refs generator args
+    Right (Just (TConWithIdentity (Builtins.builtinTypeHeadIdentity name) (builtinBaseTy name) args'), generator1)
+  STVarApp name args -> do
+    (args', generator1) <- srcTypesToElabTypesWith refs generator args
+    ref <- sourceTypeBinderRef refs name
+    Right (Just (TVarAppRef ref args'), generator1)
+  STTyLam {} ->
+    Left (InstantiationError "residual type lambda reached elaboration")
+  STTyApp {} ->
+    Left (InstantiationError "residual type application reached elaboration")
+  STForall name mb body ->
+    let (ref, generator1) = freshTypeBinderRef name generator
+        refs' = Map.insert name ref refs
+     in do
+          (mb', generator2) <- maybe (Right (Nothing, generator1)) (srcBoundToElabBoundWith refs generator1) mb
+          (body', generator3) <- srcTypeToElabTypeWith refs' generator2 body
+          Right (Just (TForallRef ref mb' body'), generator3)
+  STMu name body ->
+    let (ref, generator1) = freshTypeBinderRef name generator
+     in do
+      (body', generator2) <- srcTypeToElabTypeWith (Map.insert name ref refs) generator1 body
+      Right (Just (TMuRef ref body'), generator2)
+  STBottom -> Right (Nothing, generator)
+  where
+    sourceTypeBinderRef env name =
+      case Map.lookup name env of
+        Just ref -> Right ref
+        Nothing -> Left (InstantiationError ("unresolved source type binder `" ++ name ++ "` reached annotation elaboration"))
+
+    srcTypesToElabTypesWith refs0 generator0 (arg :| args) = do
+      (arg', generator1) <- srcTypeToElabTypeWith refs0 generator0 arg
+      (argsRev, generator') <-
+        foldM
+          ( \(acc, gen) next -> do
+              (next', gen') <- srcTypeToElabTypeWith refs0 gen next
+              Right (next' : acc, gen')
+          )
+          ([], generator1)
+          args
+      Right (arg' :| reverse argsRev, generator')
+
+builtinBaseTy :: String -> BaseTy
+builtinBaseTy =
+  BaseTy . Builtins.normalizeBuiltinTypeReference

@@ -109,7 +109,7 @@ Add recursive-type structure to the explicit/core side without touching inferenc
 Make recursive types usable in the elaborated language with explicit runtime forms.
 
 **Changes:**
-- Add `ERoll ElabType ElabTerm` and `EUnroll ElabTerm` (or equivalent explicit forms).
+- Add `ERoll ElabType XmlfTerm` and `EUnroll XmlfTerm` (or equivalent explicit forms).
 - Typechecking rules:
   - `roll[μa. τ] e : μa. τ` when `e : τ[μa.τ/a]`
   - `unroll e : τ[μa.τ/a]` when `e : μa. τ`

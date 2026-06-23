@@ -10,6 +10,7 @@ import Data.IntMap.Strict qualified as IntMap
 import Data.IntSet qualified as IntSet
 import Data.List (isInfixOf, stripPrefix)
 import Data.List.NonEmpty qualified as NE
+import Data.Map.Strict qualified as Map
 import Data.Set qualified as Set
 import MLF.Binding.Canonicalization qualified as BindCanon
 import MLF.Binding.Tree qualified as Binding
@@ -69,8 +70,23 @@ import MLF.Constraint.Types.Witness
   )
 import MLF.Constraint.Types.Witness.TestSupport (EdgeWitness (..), InstanceWitness (..))
 import MLF.Constraint.Types.Phase (Phase(Raw))
+import MLF.Elab.Elaborate.Algebra qualified as Algebra
 import MLF.Elab.Pipeline qualified as Elab
+import MLF.Elab.Types (ResolvedVar (..))
+import MLF.Elab.Types qualified as ElabTypes
 import MLF.Elab.Phi.TestSupport qualified as PhiTestSupport
+import ElabTermTestSupport
+  ( generatedLocalRef,
+    generatedLocalRefForName,
+    mkTestDeferredVar,
+    mkTestLocalLam,
+    mkTestLocalLet,
+    mkTestTyAbs,
+    testTForall,
+    testTMu,
+    testTVar,
+    testTVarApp,
+  )
 import MLF.Elab.Run.ResultType
   ( ResultTypeInputs (..),
     computeResultTypeFallback,
@@ -90,8 +106,15 @@ import MLF.Elab.Run.Util
   )
 import MLF.Frontend.ConstraintGen (AnnExpr (..))
 import MLF.Frontend.Parse (parseRawEmlfExpr, parseRawEmlfType, renderEmlfParseError)
+import MLF.Frontend.Program.Builtins qualified as ProgramBuiltins
+import MLF.Frontend.Program.Elaborate qualified as ProgramElaborate
+import MLF.Frontend.Program.Finalize qualified as ProgramFinalize
+import MLF.Frontend.Program.Types qualified as ProgramTypes
+import MLF.Frontend.Symbol (SymbolIdentity (..), SymbolNamespace (..))
 import MLF.Frontend.Syntax (Expr (..), Lit (..), NormSrcType, SrcTy (..), SrcType, SurfaceExpr, mkSrcBound)
-import MLF.Reify.Core qualified as Reify
+import MLF.Types.Identity (EnvRef (..), IdDetails (..), UniqueIdentity (..))
+import MLF.Reify.Type qualified as ReifyType
+import MLF.Reify.TypeOps qualified as TypeOps
 import MLF.Util.Order qualified as Order
 import Phi.WitnessDomainUtil qualified as WitnessDomain
 import SolvedFacadeTestUtil qualified as SolvedTest
@@ -118,28 +141,37 @@ boundToType bound = case bound of
   Elab.TCon c args -> Elab.TCon c args
   Elab.TBase b -> Elab.TBase b
   Elab.TBottom -> Elab.TBottom
-  Elab.TVarApp v args -> Elab.TVarApp v args
-  Elab.TForall v mb body -> Elab.TForall v mb body
-  Elab.TMu v body -> Elab.TMu v body
+  Elab.TVarAppRef ref args -> Elab.TVarAppRef ref args
+  Elab.TForallRef ref mb body -> Elab.TForallRef ref mb body
+  Elab.TMuRef ref body -> Elab.TMuRef ref body
 
 boundFromType :: Elab.ElabType -> Elab.BoundType
 boundFromType ty = case ty of
-  Elab.TVar v ->
-    error ("boundFromType: unexpected variable bound " ++ show v)
+  Elab.TVarRef ref ->
+    error ("boundFromType: unexpected variable bound " ++ show (ElabTypes.typeBinderRefName ref))
   Elab.TArrow a b -> Elab.TArrow a b
   Elab.TCon c args -> Elab.TCon c args
   Elab.TBase b -> Elab.TBase b
   Elab.TBottom -> Elab.TBottom
-  Elab.TVarApp v args -> Elab.TVarApp v args
-  Elab.TForall v mb body -> Elab.TForall v mb body
-  Elab.TMu v body -> Elab.TMu v body
+  Elab.TVarAppRef ref args -> Elab.TVarAppRef ref args
+  Elab.TForallRef ref mb body -> Elab.TForallRef ref mb body
+  Elab.TMuRef ref body -> Elab.TMuRef ref body
+
+graphTypeBinderRef :: Int -> String -> ElabTypes.TypeBinderRef
+graphTypeBinderRef node =
+  ElabTypes.typeBinderRefFromIdentity
+    (ElabTypes.typeBinderIdentityFromNode (NodeId node))
+
+graphTVar :: Int -> Elab.ElabType
+graphTVar node =
+  ElabTypes.tVarWithRef (graphTypeBinderRef node ("t" ++ show node))
 
 generalizeAtWith ::
   Maybe (GaBindParents 'Raw) ->
   Solved.Solved ->
   NodeRef ->
   NodeId ->
-  Either Elab.ElabError (Elab.ElabScheme, IntMap.IntMap String)
+  Either Elab.ElabError (Elab.ElabScheme, IntMap.IntMap ElabTypes.TypeBinderRef)
 generalizeAtWith mbGa s =
   Elab.generalizeAtWithBuilder
     (defaultPlanBuilder defaultTraceConfig)
@@ -150,15 +182,26 @@ generalizeAt ::
   Solved.Solved ->
   NodeRef ->
   NodeId ->
-  Either Elab.ElabError (Elab.ElabScheme, IntMap.IntMap String)
+  Either Elab.ElabError (Elab.ElabScheme, IntMap.IntMap ElabTypes.TypeBinderRef)
 generalizeAt = generalizeAtWith Nothing
+
+mkSchemeInfoFromNodeNames :: Elab.ElabScheme -> IntMap.IntMap String -> Elab.SchemeInfo
+mkSchemeInfoFromNodeNames scheme =
+  Elab.schemeInfoFromRefSubst scheme . IntMap.mapWithKey refFromName
+  where
+    refFromName key =
+      ElabTypes.typeBinderRefFromIdentity (ElabTypes.typeBinderIdentityFromNode (NodeId key))
+
+schemeInfoNameSubst :: Elab.SchemeInfo -> IntMap.IntMap String
+schemeInfoNameSubst =
+  IntMap.map ElabTypes.typeBinderRefName . ElabTypes.schemeInfoBinderRefSubst
 
 generalizeAtWithActive ::
   Solved.Solved ->
   Maybe (GaBindParents 'Raw) ->
   NodeRef ->
   NodeId ->
-  Either Elab.ElabError (Elab.ElabScheme, IntMap.IntMap String)
+  Either Elab.ElabError (Elab.ElabScheme, IntMap.IntMap ElabTypes.TypeBinderRef)
 generalizeAtWithActive solved mbGa scopeRoot targetNode =
   generalizeAtWith mbGa solved scopeRoot targetNode
 
@@ -175,10 +218,11 @@ recoverLiveSchemeAt artifacts nodeId = do
   pure scheme
 
 expectWellFormedScheme :: Elab.ElabScheme -> Expectation
-expectWellFormedScheme (Elab.Forall binds _body0) = go Set.empty binds
+expectWellFormedScheme scheme = go Set.empty (ElabTypes.schemeBinderRefs scheme)
   where
     go _ [] = pure ()
-    go inScope ((name, mbBound) : rest) = do
+    go inScope ((ref, mbBound) : rest) = do
+      let name = ElabTypes.typeBinderRefName ref
       case mbBound of
         Nothing -> pure ()
         Just boundTy ->
@@ -188,17 +232,17 @@ expectWellFormedScheme (Elab.Forall binds _body0) = go Set.empty binds
 
 isMonomorphicVar :: Elab.ElabType -> Bool
 isMonomorphicVar ty = case ty of
-  Elab.TVar _ -> True
+  Elab.TVarRef _ -> True
   _ -> False
 
 isMonomorphicArrow :: Elab.ElabType -> Bool
 isMonomorphicArrow ty = case ty of
-  Elab.TArrow (Elab.TVar _) (Elab.TVar _) -> True
+  Elab.TArrow (Elab.TVarRef _) (Elab.TVarRef _) -> True
   _ -> False
 
-dropLeadingTyAbs :: Elab.ElabTerm -> Elab.ElabTerm
+dropLeadingTyAbs :: Elab.XmlfTerm -> Elab.XmlfTerm
 dropLeadingTyAbs term = case term of
-  Elab.ETyAbs _ _ body -> dropLeadingTyAbs body
+  Elab.ETyAbsRef _ _ body -> dropLeadingTyAbs body
   _ -> term
 
 mkSolved :: Constraint 'Raw -> IntMap.IntMap NodeId -> Solved.Solved
@@ -349,7 +393,7 @@ uriR2C1ReplayFixture = do
   namedSet <- requireRight (Elab.namedNodes (rtcPresolutionView inputs))
   noFallbackTy <-
     requireRight
-      ( Reify.reifyTypeWithNamedSetNoFallback
+      ( ReifyType.reifyTypeWithNamedSetRefsNoFallback
           (rtcPresolutionView inputs)
           IntMap.empty
           namedSet
@@ -368,7 +412,7 @@ uriR2C1ReplayFixture = do
           (generalizeAtWithActive solved)
           (rtcPresolutionView inputs)
           (Just (rtcBindParentsGa inputs))
-          (Just (Elab.SchemeInfo scheme subst))
+          (Just (Elab.schemeInfoFromRefSubst scheme subst))
           (IntMap.lookup (getEdgeId edgeId) (rtcEdgeTraces inputs))
           witness
       )
@@ -380,7 +424,7 @@ uriR2C1ReplayFixture = do
         uriR2C1ReplayPhi = phi
       }
 
-requirePipeline :: SurfaceExpr -> IO (Elab.ElabTerm, Elab.ElabType)
+requirePipeline :: SurfaceExpr -> IO (Elab.XmlfTerm, Elab.ElabType)
 requirePipeline expr =
   requireRight (Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr))
 
@@ -410,38 +454,46 @@ annExprNode ann = case ann of
   AUnfold _ nid _ -> nid
 
 stripBoundWrapper :: Elab.ElabType -> Elab.ElabType
-stripBoundWrapper (Elab.TForall v (Just bound) (Elab.TVar v'))
-  | v == v' = stripBoundWrapper (boundToType bound)
+stripBoundWrapper (Elab.TForallRef ref (Just bound) (Elab.TVarRef bodyRef))
+  | ElabTypes.typeBinderRefsSameIdentity ref bodyRef = stripBoundWrapper (boundToType bound)
 stripBoundWrapper t = t
 
 -- | Canonicalize binder names in a type to compare up to α-equivalence.
 canonType :: Elab.ElabType -> Elab.ElabType
 canonType = go [] (0 :: Int)
   where
-    go :: [(String, String)] -> Int -> Elab.ElabType -> Elab.ElabType
+    lookupRef :: ElabTypes.TypeBinderRef -> [(ElabTypes.TypeBinderRef, String)] -> Maybe String
+    lookupRef ref = fmap snd . findRef
+      where
+        findRef [] = Nothing
+        findRef ((candidate, name) : rest)
+          | ElabTypes.typeBinderRefsSameIdentity ref candidate = Just (candidate, name)
+          | otherwise = findRef rest
+
+    go :: [(ElabTypes.TypeBinderRef, String)] -> Int -> Elab.ElabType -> Elab.ElabType
     go env n ty = case ty of
-      Elab.TVar v ->
-        case lookup v env of
-          Just v' -> Elab.TVar v'
-          Nothing -> Elab.TVar v
+      Elab.TVarRef ref ->
+        case lookupRef ref env of
+          Just name -> testTVar name
+          Nothing -> testTVar (ElabTypes.typeBinderRefName ref)
       Elab.TCon c args -> Elab.TCon c (fmap (go env n) args)
-      Elab.TVarApp v args ->
-        let v' = maybe v id (lookup v env)
-         in Elab.TVarApp v' (fmap (go env n) args)
+      Elab.TVarAppRef ref args ->
+        let name = maybe (ElabTypes.typeBinderRefName ref) id (lookupRef ref env)
+         in testTVarApp name (fmap (go env n) args)
       Elab.TBase b -> Elab.TBase b
       Elab.TBottom -> Elab.TBottom
       Elab.TArrow a b -> Elab.TArrow (go env n a) (go env n b)
-      Elab.TForall v mb body ->
-        let v' = "a" ++ show n
-            env' = (v, v') : env
+      Elab.TForallRef ref mb body ->
+        let name = "a" ++ show n
+            env' = (ref, name) : env
             -- binder is not in scope for its bound
             mb' = fmap (boundFromType . go env n . boundToType) mb
             body' = go env' (n + 1) body
-         in Elab.TForall v' mb' body'
-      Elab.TMu v body ->
-        let v' = "a" ++ show n
-            env' = (v, v') : env
-         in Elab.TMu v' (go env' (n + 1) body)
+         in testTForall name mb' body'
+      Elab.TMuRef ref body ->
+        let name = "a" ++ show n
+            env' = (ref, name) : env
+         in testTMu name (go env' (n + 1) body)
 
 shouldAlphaEqType :: Elab.ElabType -> Elab.ElabType -> Expectation
 shouldAlphaEqType actual expected =
@@ -454,52 +506,60 @@ shouldEqUpToTypeVarRenaming actual expected =
     canonAllTypeVars :: Elab.ElabType -> Elab.ElabType
     canonAllTypeVars ty = let (_, _, ty') = go [] (0 :: Int) ty in ty'
 
-    allocName :: [(String, String)] -> Int -> String -> ([(String, String)], Int, String)
-    allocName env n v = case lookup v env of
-      Just v' -> (env, n, v')
+    allocName :: [(ElabTypes.TypeBinderRef, String)] -> Int -> ElabTypes.TypeBinderRef -> ([(ElabTypes.TypeBinderRef, String)], Int, String)
+    allocName env n ref = case lookupRef ref env of
+      Just name -> (env, n, name)
       Nothing ->
-        let v' = "a" ++ show n
-         in ((v, v') : env, n + 1, v')
+        let name = "a" ++ show n
+         in ((ref, name) : env, n + 1, name)
 
-    go :: [(String, String)] -> Int -> Elab.ElabType -> ([(String, String)], Int, Elab.ElabType)
+    lookupRef :: ElabTypes.TypeBinderRef -> [(ElabTypes.TypeBinderRef, String)] -> Maybe String
+    lookupRef ref = fmap snd . findRef
+      where
+        findRef [] = Nothing
+        findRef ((candidate, name) : rest)
+          | ElabTypes.typeBinderRefsSameIdentity ref candidate = Just (candidate, name)
+          | otherwise = findRef rest
+
+    go :: [(ElabTypes.TypeBinderRef, String)] -> Int -> Elab.ElabType -> ([(ElabTypes.TypeBinderRef, String)], Int, Elab.ElabType)
     go env n ty = case ty of
-      Elab.TVar v ->
-        let (env', n', v') = allocName env n v
-         in (env', n', Elab.TVar v')
+      Elab.TVarRef ref ->
+        let (env', n', name) = allocName env n ref
+         in (env', n', testTVar name)
       Elab.TCon c args ->
         let (env', n', args') = goList env n (NE.toList args)
          in (env', n', Elab.TCon c (NE.fromList args'))
-      Elab.TVarApp v args ->
-        let (env1, n1, v') = allocName env n v
+      Elab.TVarAppRef ref args ->
+        let (env1, n1, name) = allocName env n ref
             (env2, n2, args') = goList env1 n1 (NE.toList args)
-         in (env2, n2, Elab.TVarApp v' (NE.fromList args'))
+         in (env2, n2, testTVarApp name (NE.fromList args'))
       Elab.TBase b -> (env, n, Elab.TBase b)
       Elab.TBottom -> (env, n, Elab.TBottom)
       Elab.TArrow a b ->
         let (env1, n1, a') = go env n a
             (env2, n2, b') = go env1 n1 b
          in (env2, n2, Elab.TArrow a' b')
-      Elab.TForall v mb body ->
+      Elab.TForallRef ref mb body ->
         let (env1, n1, mb') = case mb of
               Nothing -> (env, n, Nothing)
               Just bound ->
                 let (env', n', bound') = go env n (boundToType bound)
                  in (env', n', Just (boundFromType bound'))
-            v' = "a" ++ show n1
-            envBody = (v, v') : env1
+            name = "a" ++ show n1
+            envBody = (ref, name) : env1
             (_, n2, body') = go envBody (n1 + 1) body
-         in (env1, n2, Elab.TForall v' mb' body')
-      Elab.TMu v body ->
-        let v' = "a" ++ show n
-            envBody = (v, v') : env
+         in (env1, n2, testTForall name mb' body')
+      Elab.TMuRef ref body ->
+        let name = "a" ++ show n
+            envBody = (ref, name) : env
             (_, n', body') = go envBody (n + 1) body
-         in (env, n', Elab.TMu v' body')
+         in (env, n', testTMu name body')
 
     goList ::
-      [(String, String)] ->
+      [(ElabTypes.TypeBinderRef, String)] ->
       Int ->
       [Elab.ElabType] ->
-      ([(String, String)], Int, [Elab.ElabType])
+      ([(ElabTypes.TypeBinderRef, String)], Int, [Elab.ElabType])
     goList env n tys = case tys of
       [] -> (env, n, [])
       ty : rest ->
@@ -512,48 +572,48 @@ shouldEqUpToTypeVarRenaming actual expected =
 stripUnusedTopForalls :: Elab.ElabType -> Elab.ElabType
 stripUnusedTopForalls ty =
   case ty of
-    Elab.TForall v Nothing body
-      | not (occursInType v body) -> stripUnusedTopForalls body
+    Elab.TForallRef ref Nothing body
+      | not (occursInType ref body) -> stripUnusedTopForalls body
     _ -> ty
   where
     occursInType needle = go False
       where
         go shadowed t = case t of
-          Elab.TVar v -> not shadowed && v == needle
+          Elab.TVarRef ref -> not shadowed && ElabTypes.typeBinderRefsSameIdentity ref needle
           Elab.TCon _ args -> any (go shadowed) args
-          Elab.TVarApp v args -> (not shadowed && v == needle) || any (go shadowed) args
+          Elab.TVarAppRef ref args -> (not shadowed && ElabTypes.typeBinderRefsSameIdentity ref needle) || any (go shadowed) args
           Elab.TBase _ -> False
           Elab.TBottom -> False
           Elab.TArrow a b -> go shadowed a || go shadowed b
-          Elab.TForall v mb body ->
+          Elab.TForallRef ref mb body ->
             let inBound = maybe False (occursInBound shadowed) mb
-                bodyShadowed = shadowed || v == needle
+                bodyShadowed = shadowed || ElabTypes.typeBinderRefsSameIdentity ref needle
              in inBound || go bodyShadowed body
-          Elab.TMu v body ->
-            go (shadowed || v == needle) body
+          Elab.TMuRef ref body ->
+            go (shadowed || ElabTypes.typeBinderRefsSameIdentity ref needle) body
 
         occursInBound shadowed b = case b of
           Elab.TArrow a c -> go shadowed a || go shadowed c
           Elab.TCon _ args -> any (go shadowed) args
-          Elab.TVarApp v args -> (not shadowed && v == needle) || any (go shadowed) args
+          Elab.TVarAppRef ref args -> (not shadowed && ElabTypes.typeBinderRefsSameIdentity ref needle) || any (go shadowed) args
           Elab.TBase _ -> False
           Elab.TBottom -> False
-          Elab.TForall v mb body ->
+          Elab.TForallRef ref mb body ->
             let inBound = maybe False (occursInBound shadowed) mb
-                bodyShadowed = shadowed || v == needle
+                bodyShadowed = shadowed || ElabTypes.typeBinderRefsSameIdentity ref needle
              in inBound || go bodyShadowed body
-          Elab.TMu v body ->
-            go (shadowed || v == needle) body
+          Elab.TMuRef ref body ->
+            go (shadowed || ElabTypes.typeBinderRefsSameIdentity ref needle) body
 
 spec :: Spec
 spec = describe "Phase 6 — Elaborate (xMLF)" $ do
   describe "Recursive structural types" $ do
     let recursiveInt :: Elab.ElabType
-        recursiveInt = Elab.TMu "a" (Elab.TArrow (Elab.TVar "a") (Elab.TBase (BaseTy "Int")))
+        recursiveInt = testTMu "a" (Elab.TArrow (testTVar "a") (Elab.TBase (BaseTy "Int")))
         recursiveList :: Elab.ElabType
-        recursiveList = Elab.TMu "a" (Elab.TCon (BaseTy "List") (NE.singleton (Elab.TVar "a")))
+        recursiveList = testTMu "a" (Elab.TCon (BaseTy "List") (NE.singleton (testTVar "a")))
         forallRecursive :: Elab.ElabType
-        forallRecursive = Elab.TMu "a" (Elab.TForall "b" Nothing (Elab.TVar "a"))
+        forallRecursive = testTMu "a" (testTForall "b" Nothing (testTVar "a"))
 
     it "prints μ types through the elaborated pretty path" $ do
       Elab.pretty recursiveInt `shouldBe` "μa. a -> Int"
@@ -563,16 +623,16 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
       recursiveInt `shouldNotBe` unfolded
 
     it "tracks only free variables outside μ binders" $ do
-      let ty = Elab.TMu "a" (Elab.TArrow (Elab.TVar "a") (Elab.TVar "x"))
+      let ty = testTMu "a" (Elab.TArrow (testTVar "a") (testTVar "x"))
       Elab.freeTypeVarsType ty `shouldBe` Set.singleton "x"
 
     it "roundtrips μ through bound conversion helpers" $ do
       boundToType (boundFromType recursiveInt) `shouldBe` recursiveInt
 
     it "keeps the v1 contractiveness policy conservative around forall" $ do
-      Elab.typeCheck (Elab.ELam "x" recursiveList (Elab.EVar "x"))
+      Elab.typeCheck (mkTestLocalLam "x" recursiveList (mkTestDeferredVar "x"))
         `shouldBe` Right (Elab.TArrow recursiveList recursiveList)
-      case Elab.typeCheck (Elab.ELam "x" forallRecursive (Elab.EVar "x")) of
+      case Elab.typeCheck (mkTestLocalLam "x" forallRecursive (mkTestDeferredVar "x")) of
         Left (Elab.TCNonContractiveRecursiveType ty) | ty == forallRecursive -> pure ()
         other ->
           expectationFailure
@@ -683,33 +743,38 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
       let expr = ELet "id" (ELam "x" (EVar "x")) (EVar "id")
       (term, ty) <- requirePipeline expr
 
-      -- Canonical syntax printer uses explicit bounds and parenthesized binders.
-      Elab.prettyDisplay term `shouldBe` "let id : ∀(a ⩾ ⊥) a -> a = Λ(a ⩾ ⊥) λ(x : a) x in id"
+      -- Canonical dump printer uses explicit bounds and parenthesized binders.
+      Elab.prettyDisplay term `shouldBe` "let id = Λ(a ⩾ ⊥) λ(x : a) x in id"
 
       -- Type is polymorphic (compare up to α-equivalence).
       let expected =
-            Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+            testTForall "a" Nothing (Elab.TArrow (testTVar "a") (testTVar "a"))
       ty `shouldAlphaEqType` expected
 
     it "O15-ELAB-LET-VAR: elaborates monomorphic let without extra instantiation" $ do
       -- let x = 1 in x
       let expr = ELet "x" (ELit (LInt 1)) (EVar "x")
       (term, ty) <- requirePipeline expr
-      Elab.prettyDisplay term `shouldBe` "let x : Int = 1 in x"
+      Elab.prettyDisplay term `shouldBe` "let x = 1 in x"
       Elab.prettyDisplay ty `shouldBe` "Int"
 
     it "row5 typing-environment O15-ENV-LAMBDA O15-ENV-WF: lambda body inherits the enclosing binder on the live path" $ do
       let expr = ELam "x" (ELam "y" (EVar "x"))
       (term, _ty) <- requirePipeline expr
       case dropLeadingTyAbs term of
-        Elab.ELam "x" xTy (Elab.ELam "y" yTy (Elab.EVar "x")) -> do
+        Elab.ELam xResolved (Elab.ELam yResolved (Elab.EVarNode bodyVar))
+          | ElabTypes.resolvedVarReferenceName xResolved == "x"
+              && ElabTypes.resolvedVarReferenceName yResolved == "y"
+              && ElabTypes.resolvedVarReferenceName bodyVar == "x" -> do
+          let xTy = ElabTypes.resolvedVarType xResolved
+              yTy = ElabTypes.resolvedVarType yResolved
           xTy `shouldSatisfy` isMonomorphicVar
           yTy `shouldSatisfy` isMonomorphicVar
         other -> expectationFailure ("Expected nested lambda elaboration, got " ++ show other)
 
     it "row5 typing-environment O15-ENV-LET O15-ENV-WF: let body receives x : Typ(b) on the live path" $ do
       let expr = ELet "id" (ELam "x" (EVar "x")) (EVar "id")
-          expectedTy = Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+          expectedTy = testTForall "a" Nothing (Elab.TArrow (testTVar "a") (testTVar "a"))
       artifacts@PipelineArtifacts {paAnnotated = ann} <-
         requireRight (runPipelineArtifactsDefault Set.empty expr)
       bodyNode <-
@@ -721,7 +786,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
       Elab.schemeToType scheme `shouldSatisfy` isMonomorphicArrow
       (term, ty) <- requirePipeline expr
       case term of
-        Elab.ELet "id" sch _ (Elab.EVar "id") ->
+        Elab.ELet idResolved sch _ (Elab.EVarNode bodyVar)
+          | ElabTypes.resolvedVarReferenceName idResolved == "id"
+              && ElabTypes.resolvedVarReferenceName bodyVar == "id" ->
           Elab.schemeToType sch `shouldAlphaEqType` expectedTy
         other -> expectationFailure ("Expected elaborated let, got " ++ show other)
       ty `shouldAlphaEqType` expectedTy
@@ -731,7 +798,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
       let expr = ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (ELit (LInt 1)))
       (term, ty) <- requirePipeline expr
       Elab.prettyDisplay ty `shouldBe` "Int"
-      Elab.prettyDisplay term `shouldBe` "let id : ∀(a ⩾ ⊥) a -> a = Λ(a ⩾ ⊥) λ(x : a) x in id[∀(⩾ ⊲Int); N] 1"
+      Elab.prettyDisplay term `shouldBe` "let id = Λ(a ⩾ ⊥) λ(x : a) x in id[∀(⩾ ⊲Int); N] 1"
 
     it "generalizeAt quantifies vars bound under the scope root" $ do
       let rootGen = GenNodeId 0
@@ -758,13 +825,20 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               }
           solved = mkSolved constraint IntMap.empty
 
-      (Elab.Forall binds ty, _subst) <- requireRight (generalizeAt solved (genRef rootGen) root)
-      case binds of
-        [("a", Nothing), ("b", Just boundTy)] -> do
-          boundToType boundTy `shouldAlphaEqType` (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+      (scheme, _subst) <- requireRight (generalizeAt solved (genRef rootGen) root)
+      let ty = ElabTypes.schemeBody scheme
+      case ElabTypes.schemeBinderRefs scheme of
+        [(aRef, Nothing), (bRef, Just boundTy)] -> do
+          ElabTypes.typeBinderRefName aRef `shouldBe` "a"
+          ElabTypes.typeBinderRefName bRef `shouldBe` "b"
+          boundToType boundTy `shouldAlphaEqType` (Elab.TArrow (testTVar "a") (testTVar "a"))
         other ->
           expectationFailure $ "Expected two binders, got " ++ show other
-      ty `shouldBe` Elab.TVar "b"
+      let rootRef =
+            ElabTypes.typeBinderRefFromIdentity
+              (ElabTypes.typeBinderIdentityFromNode root)
+              "b"
+      ty `shouldBe` ElabTypes.tVarWithRef rootRef
 
     it "generalizeAt uses direct gen-node binders (Q(g))" $ do
       let rootGen = GenNodeId 0
@@ -794,13 +868,22 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               }
           solved = mkSolved constraint IntMap.empty
 
-      (Elab.Forall binds ty, _subst) <- requireRight (generalizeAt solved (genRef rootGen) root)
-      binds `shouldBe` [("a", Nothing)]
+      (scheme, _subst) <- requireRight (generalizeAt solved (genRef rootGen) root)
+      let directRef =
+            ElabTypes.typeBinderRefFromIdentity
+              (ElabTypes.typeBinderIdentityFromNode direct)
+              "a"
+          interiorRef =
+            ElabTypes.typeBinderRefFromIdentity
+              (ElabTypes.typeBinderIdentityFromNode interior)
+              "t13"
+          ty = ElabTypes.schemeBody scheme
+      ElabTypes.schemeBinderRefs scheme `shouldBe` [(directRef, Nothing)]
       ty
-        `shouldBe` Elab.TForall
-          "t13"
+        `shouldBe` Elab.TForallRef
+          interiorRef
           Nothing
-          (Elab.TArrow (Elab.TVar "a") (Elab.TVar "t13"))
+          (Elab.TArrow (ElabTypes.tVarWithRef directRef) (ElabTypes.tVarWithRef interiorRef))
 
     it "generalizeAt fallback reifies from solved root even when base mapping points elsewhere" $ do
       let rootGen = GenNodeId 0
@@ -834,24 +917,26 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 gaSolvedToBase = IntMap.singleton (getNodeId solvedRoot) baseMappedRoot
               }
 
-      (Elab.Forall binds ty, _subst) <-
+      (scheme, _subst) <-
         requireRight (generalizeAtWith (Just gaParents) solved (genRef rootGen) solvedRoot)
-      binds `shouldBe` []
-      ty `shouldBe` Elab.TBase (BaseTy "Int")
+      ElabTypes.schemeBinderRefs scheme `shouldBe` []
+      ElabTypes.schemeBody scheme `shouldBe` Elab.TBase (BaseTy "Int")
 
     it "elaborates dual instantiation in application" $ do
       -- let id = \x. x in id id
       let expr = ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (EVar "id"))
       (term, _ty) <- requirePipeline expr
       let stripTyAbs t = case t of
-            Elab.ETyAbs _ _ inner -> stripTyAbs inner
+            Elab.ETyAbsRef _ _ inner -> stripTyAbs inner
             _ -> t
       case stripTyAbs term of
         Elab.ELet _ _ _ body ->
           case body of
             Elab.EApp fun arg ->
               case (fun, arg) of
-                (Elab.ETyInst (Elab.EVar "id") instF, Elab.ETyInst (Elab.EVar "id") instA) -> do
+                (Elab.ETyInst (Elab.EVarNode funVar) instF, Elab.ETyInst (Elab.EVarNode argVar) instA)
+                  | ElabTypes.resolvedVarReferenceName funVar == "id"
+                      && ElabTypes.resolvedVarReferenceName argVar == "id" -> do
                   instF `shouldNotBe` Elab.InstId
                   instA `shouldNotBe` Elab.InstId
                 _ ->
@@ -898,7 +983,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               (ELam "y" (EVar "y"))
       (_term, ty) <- requirePipeline expr
       let expected =
-            Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+            testTForall "a" Nothing (Elab.TArrow (testTVar "a") (testTVar "a"))
       ty `shouldAlphaEqType` expected
 
     it "elaborates term annotations" $ do
@@ -907,11 +992,12 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
           expr = EAnn (ELam "x" (EVar "x")) ann
       (_term, ty) <- requirePipeline expr
       case ty of
-        Elab.TForall v (Just bound) body ->
+        Elab.TForallRef ref (Just bound) body ->
           case boundToType bound of
             Elab.TBase (BaseTy "Int") ->
               case body of
-                Elab.TArrow (Elab.TVar _) (Elab.TVar v') | v == v' -> pure ()
+                Elab.TArrow (Elab.TVarRef _) (Elab.TVarRef bodyRef)
+                  | ElabTypes.typeBinderRefsSameIdentity ref bodyRef -> pure ()
                 _ ->
                   expectationFailure ("Expected arrow with binder codomain, got " ++ show ty)
             _ ->
@@ -1209,7 +1295,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
       (term, ty) <- requirePipeline expr
       let termStr = Elab.prettyDisplay term
-      termStr `shouldSatisfy` ("let f :" `isInfixOf`)
+      termStr `shouldSatisfy` ("let f =" `isInfixOf`)
       termStr `shouldSatisfy` ("λ(" `isInfixOf`)
 
       Elab.prettyDisplay ty `shouldBe` "(Int -> Int) -> Int -> Int"
@@ -1223,10 +1309,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
       (_term, ty) <- requirePipeline expr
       let expected =
-            Elab.TForall
-              "a"
-              (Just (boundFromType (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "b") (Elab.TVar "b")))))
-              (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+            testTForall "a"
+              (Just (boundFromType (testTForall "b" Nothing (Elab.TArrow (testTVar "b") (testTVar "b")))))
+              (Elab.TArrow (testTVar "a") (testTVar "a"))
       ty `shouldAlphaEqType` expected
 
     it "elaborates lambda with rank-2 argument (US-004)" $ do
@@ -1238,7 +1323,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
       (_term, ty) <- requirePipeline expr
       let expected =
             Elab.TArrow
-              (Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
+              (testTForall "a" Nothing (Elab.TArrow (testTVar "a") (testTVar "a")))
               (Elab.TBase (BaseTy "Int"))
       ty `shouldAlphaEqType` expected
       (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr))
@@ -1257,7 +1342,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
       (_term, ty) <- requirePipeline expr
       let expected =
             Elab.TArrow
-              (Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
+              (testTForall "a" Nothing (Elab.TArrow (testTVar "a") (testTVar "a")))
               (Elab.TBase (BaseTy "Bool"))
       ty `shouldAlphaEqType` expected
       (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr))
@@ -1405,24 +1490,103 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
   describe "xMLF types (instance bounds)" $ do
     it "pretty prints unbounded forall" $ do
       let ty :: Elab.ElabType
-          ty = Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+          ty = testTForall "a" Nothing (Elab.TArrow (testTVar "a") (testTVar "a"))
       Elab.pretty ty `shouldBe` "∀(a ⩾ ⊥) a -> a"
 
     it "pretty prints bounded forall" $ do
       let bound = Elab.TArrow (Elab.TBase (BaseTy "Int")) (Elab.TBase (BaseTy "Int"))
           ty :: Elab.ElabType
-          ty = Elab.TForall "a" (Just (boundFromType bound)) (Elab.TVar "a")
+          ty = testTForall "a" (Just (boundFromType bound)) (testTVar "a")
       Elab.pretty ty `shouldBe` "∀(a ⩾ Int -> Int) a"
 
     it "pretty prints nested bounded forall" $ do
-      let innerBound = Elab.TArrow (Elab.TVar "b") (Elab.TVar "b")
-          inner = Elab.TForall "b" Nothing innerBound
+      let innerBound = Elab.TArrow (testTVar "b") (testTVar "b")
+          inner = testTForall "b" Nothing innerBound
           outer :: Elab.ElabType
-          outer = Elab.TForall "a" (Just (boundFromType inner)) (Elab.TVar "a")
+          outer = testTForall "a" (Just (boundFromType inner)) (testTVar "a")
       Elab.pretty outer `shouldBe` "∀(a ⩾ ∀(b ⩾ ⊥) b -> b) a"
 
     it "pretty prints bottom type" $ do
       Elab.pretty (Elab.TBottom :: Elab.ElabType) `shouldBe` "⊥"
+
+    it "keeps type binder refs identity-sensitive in types" $ do
+      let refA =
+            ElabTypes.typeBinderRefFromIdentity
+              (ElabTypes.typeBinderIdentityFromNode (NodeId 1))
+              "a"
+          refB =
+            ElabTypes.typeBinderRefFromIdentity
+              (ElabTypes.typeBinderIdentityFromNode (NodeId 2))
+              "a"
+          intTy = Elab.TBase (BaseTy "Int")
+          varA = ElabTypes.tVarWithRef refA
+          varB = ElabTypes.tVarWithRef refB
+          forallA :: Elab.ElabType
+          forallA = ElabTypes.tForallWithRef refA Nothing varA
+          forallB :: Elab.ElabType
+          forallB = ElabTypes.tForallWithRef refB Nothing varB
+          muA :: Elab.ElabType
+          muA = ElabTypes.tMuWithRef refA varA
+          muB :: Elab.ElabType
+          muB = ElabTypes.tMuWithRef refB varB
+          appA :: Elab.ElabType
+          appA = ElabTypes.tVarAppWithRef refA (intTy NE.:| [])
+          appB :: Elab.ElabType
+          appB = ElabTypes.tVarAppWithRef refB (intTy NE.:| [])
+          appBoundA :: Elab.BoundType
+          appBoundA = ElabTypes.tVarAppWithRef refA (intTy NE.:| [])
+          schemeInfo =
+            mkSchemeInfoFromNodeNames
+              (ElabTypes.mkElabSchemeWithRefs [(refA, Nothing)] varA)
+              (IntMap.singleton 1 "a")
+          schemeTy =
+            ElabTypes.tForallWithRef
+              refA
+              Nothing
+              varA
+      Elab.pretty forallA `shouldBe` "∀(a ⩾ ⊥) a"
+      varA == varB `shouldBe` False
+      forallA == forallB `shouldBe` False
+      muA == muB `shouldBe` False
+      appA == appB `shouldBe` False
+      ElabTypes.tyToElab appBoundA `shouldBe` appA
+      ElabTypes.elabToBound appA `shouldBe` Right appBoundA
+      Elab.schemeToType (Elab.siScheme schemeInfo) `shouldBe` schemeTy
+      case forallA of
+        Elab.TForallRef ref Nothing _ ->
+          ElabTypes.typeBinderRefName ref `shouldBe` "a"
+        other ->
+          expectationFailure ("Expected TForall pattern, got: " ++ show other)
+
+    it "preserves resolved type-head identities in ElabType transforms" $ do
+      let boxIdentity =
+            SymbolIdentity
+              { symbolUniqueIdentity = UniqueIdentity 90901
+              , symbolNamespace = SymbolType
+              , symbolDefiningModule = "Main"
+              , symbolDefiningName = "Box"
+              , symbolOwnerIdentity = Nothing
+              }
+          boxArg :: Elab.ElabType
+          boxArg = ElabTypes.TBaseWithIdentity (Just boxIdentity) (BaseTy "stale.Box")
+          boxElab :: Elab.ElabType
+          boxElab = ElabTypes.TConWithIdentity (Just boxIdentity) (BaseTy "stale.Box") (boxArg NE.:| [])
+          boxBound :: Elab.BoundType
+          boxBound = ElabTypes.TConWithIdentity (Just boxIdentity) (BaseTy "stale.Box") (boxArg NE.:| [])
+      ElabTypes.tyToElab boxBound `shouldBe` boxElab
+      ElabTypes.elabToBound boxElab `shouldBe` Right boxBound
+      ElabTypes.generatedIdentitiesInType boxElab `shouldSatisfy` elem (UniqueIdentity 90901)
+
+    it "resolves finalize TypeView heads to carried identities" $ do
+      let scope = ProgramElaborate.mkElaborateScope Map.empty Map.empty Map.empty []
+          view =
+            ProgramTypes.mkTypeView (STBase "Int") (STBase "Int")
+      ProgramFinalize.typeViewToElabType scope view
+        `shouldBe` Right
+          ( ElabTypes.TBaseWithIdentity
+              (Just (ProgramBuiltins.builtinTypeIdentity "Int"))
+              (BaseTy "Int")
+          )
 
   describe "xMLF instantiation witnesses" $ do
     it "pretty prints identity instantiation" $ do
@@ -1439,10 +1603,31 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
       Elab.pretty Elab.InstElim `shouldBe` "N"
 
     it "pretty prints abstract bound" $ do
-      Elab.pretty (Elab.InstAbstr "a") `shouldBe` "a⊳"
+      let refA =
+            ElabTypes.typeBinderRefFromIdentity
+              (ElabTypes.typeBinderIdentityFromNode (NodeId 1520))
+              "a"
+      Elab.pretty (ElabTypes.instAbstrWithRef refA) `shouldBe` "a⊳"
+
+    it "keeps instantiation binder refs identity-sensitive" $ do
+      let refA =
+            ElabTypes.typeBinderRefFromIdentity
+              (ElabTypes.typeBinderIdentityFromNode (NodeId 1))
+              "a"
+          refB =
+            ElabTypes.typeBinderRefFromIdentity
+              (ElabTypes.typeBinderIdentityFromNode (NodeId 2))
+              "a"
+      Elab.pretty (ElabTypes.instAbstrWithRef refA) `shouldBe` "a⊳"
+      (ElabTypes.instAbstrWithRef refA == ElabTypes.instAbstrWithRef refB) `shouldBe` False
+      (ElabTypes.instUnderWithRef refA Elab.InstId == ElabTypes.instUnderWithRef refB Elab.InstId) `shouldBe` False
 
     it "pretty prints under instantiation" $ do
-      let inst = Elab.InstUnder "a" (Elab.InstApp (Elab.TBase (BaseTy "Int")))
+      let refA =
+            ElabTypes.typeBinderRefFromIdentity
+              (ElabTypes.typeBinderIdentityFromNode (NodeId 1536))
+              "a"
+          inst = ElabTypes.instUnderWithRef refA (Elab.InstApp (Elab.TBase (BaseTy "Int")))
       Elab.pretty inst `shouldBe` "∀(a ⩾) (∀(⩾ ⊲Int); N)"
 
     it "pretty prints inside instantiation" $ do
@@ -1459,39 +1644,87 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
   describe "xMLF instantiation semantics (applyInstantiation)" $ do
     it "O14-APPLY-N: InstElim substitutes the binder with its bound (default ⊥)" $ do
-      let ty = Elab.TForall "a" Nothing (Elab.TVar "a")
+      let ty = testTForall "a" Nothing (testTVar "a")
       out <- requireRight (Elab.applyInstantiation ty Elab.InstElim)
       out `shouldBe` Elab.TBottom
 
     it "InstElim substitutes the binder with an explicit bound" $ do
-      let ty = Elab.TForall "a" (Just (boundFromType (Elab.TBase (BaseTy "Int")))) (Elab.TVar "a")
+      let ty = testTForall "a" (Just (boundFromType (Elab.TBase (BaseTy "Int")))) (testTVar "a")
       out <- requireRight (Elab.applyInstantiation ty Elab.InstElim)
       out `shouldBe` Elab.TBase (BaseTy "Int")
 
     it "O14-APPLY-INNER: InstInside can update a ⊥ bound to a concrete bound" $ do
-      let ty = Elab.TForall "a" Nothing (Elab.TVar "a")
+      let ty = testTForall "a" Nothing (testTVar "a")
           inst = Elab.InstInside (Elab.InstBot (Elab.TBase (BaseTy "Int")))
       out <- requireRight (Elab.applyInstantiation ty inst)
-      out `shouldBe` Elab.TForall "a" (Just (boundFromType (Elab.TBase (BaseTy "Int")))) (Elab.TVar "a")
+      out `shouldBe` testTForall "a" (Just (boundFromType (Elab.TBase (BaseTy "Int")))) (testTVar "a")
 
     it "O14-APPLY-OUTER O14-APPLY-HYP: InstUnder applies to the body and renames the instantiation binder" $ do
-      let ty = Elab.TForall "a" Nothing (Elab.TVar "zzz")
-          inst = Elab.InstUnder "x" (Elab.InstAbstr "x")
+      let ty = testTForall "a" Nothing (testTVar "zzz")
+          refX =
+            ElabTypes.typeBinderRefFromIdentity
+              (ElabTypes.typeBinderIdentityFromNode (NodeId 1570))
+              "x"
+          inst = ElabTypes.instUnderWithRef refX (ElabTypes.instAbstrWithRef refX)
       out <- requireRight (Elab.applyInstantiation ty inst)
-      out `shouldBe` Elab.TForall "a" Nothing (Elab.TVar "a")
+      out `shouldBe` testTForall "a" Nothing (testTVar "a")
+
+    it "applyInstantiation preserves forall binder refs when rewriting bounds and bodies" $ do
+      let intTy = Elab.TBase (BaseTy "Int")
+          refA =
+            ElabTypes.typeBinderRefFromIdentity
+              (ElabTypes.typeBinderIdentityFromNode (NodeId 1554))
+              "a"
+          refB =
+            ElabTypes.typeBinderRefFromIdentity
+              (ElabTypes.typeBinderIdentityFromNode (NodeId 1555))
+              "b"
+          ty = ElabTypes.tForallWithRef refA Nothing (ElabTypes.tVarWithRef refA)
+      inside <- requireRight (Elab.applyInstantiation ty (Elab.InstInside (Elab.InstBot intTy)))
+      inside `shouldBe` ElabTypes.tForallWithRef refA (Just (boundFromType intTy)) (ElabTypes.tVarWithRef refA)
+      under <- requireRight (Elab.applyInstantiation ty (ElabTypes.instUnderWithRef refB Elab.InstId))
+      under `shouldBe` ty
+
+    it "applyInstantiation preserves InstAbstr refs during abstract elimination" $ do
+      let refA =
+            ElabTypes.typeBinderRefFromIdentity
+              (ElabTypes.typeBinderIdentityFromNode (NodeId 1556))
+              "a"
+          refB =
+            ElabTypes.typeBinderRefFromIdentity
+              (ElabTypes.typeBinderIdentityFromNode (NodeId 1557))
+              "b"
+          ty = ElabTypes.tForallWithRef refA Nothing (ElabTypes.tVarWithRef refA)
+          inst = Elab.InstSeq (Elab.InstInside (ElabTypes.instAbstrWithRef refB)) Elab.InstElim
+      out <- requireRight (Elab.applyInstantiation ty inst)
+      out `shouldBe` ElabTypes.tVarWithRef refB
+
+    it "applyInstantiation renames InstUnder refs to the target forall identity" $ do
+      let refA =
+            ElabTypes.typeBinderRefFromIdentity
+              (ElabTypes.typeBinderIdentityFromNode (NodeId 1558))
+              "a"
+          refB =
+            ElabTypes.typeBinderRefFromIdentity
+              (ElabTypes.typeBinderIdentityFromNode (NodeId 1559))
+              "b"
+          ty = ElabTypes.tForallWithRef refA Nothing (testTVar "zzz")
+          inst = ElabTypes.instUnderWithRef refB (ElabTypes.instAbstrWithRef refB)
+      out <- requireRight (Elab.applyInstantiation ty inst)
+      out `shouldBe` ElabTypes.tForallWithRef refA Nothing (ElabTypes.tVarWithRef refA)
 
     it "O14-APPLY-SEQ: InstApp behaves like (∀(⩾ τ); N) on the outermost quantifier" $ do
-      let ty = Elab.TForall "a" Nothing (Elab.TVar "a")
+      let ty = testTForall "a" Nothing (testTVar "a")
       out <- requireRight (Elab.applyInstantiation ty (Elab.InstApp (Elab.TBase (BaseTy "Int"))))
       out `shouldBe` Elab.TBase (BaseTy "Int")
 
     it "InstApp accepts arg matching explicit bound on ∀(a ≥ Int). a" $ do
-      let ty = Elab.TForall "a" (Just (boundFromType (Elab.TBase (BaseTy "Int")))) (Elab.TVar "a")
+      let ty = testTForall "a" (Just (boundFromType (Elab.TBase (BaseTy "Int")))) (testTVar "a")
       out <- requireRight (Elab.applyInstantiation ty (Elab.InstApp (Elab.TBase (BaseTy "Int"))))
       out `shouldBe` Elab.TBase (BaseTy "Int")
 
     it "InstApp rejects arg not matching explicit bound on ∀(a ≥ Int). a" $ do
-      let ty = Elab.TForall "a" (Just (boundFromType (Elab.TBase (BaseTy "Int")))) (Elab.TVar "a")
+      let ty = testTForall "a" (Just (boundFromType (Elab.TBase (BaseTy "Int")))) (testTVar "a")
       case Elab.applyInstantiation ty (Elab.InstApp (Elab.TBase (BaseTy "Bool"))) of
         Left (Elab.InstantiationError _) -> pure ()
         Left err -> expectationFailure ("Expected InstantiationError, got: " ++ show err)
@@ -1505,13 +1738,13 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
     it "O14-APPLY-O: InstIntro introduces a trivial quantification" $ do
       out <- requireRight (Elab.applyInstantiation (Elab.TBase (BaseTy "Int")) Elab.InstIntro)
       case out of
-        Elab.TForall _ Nothing body ->
+        Elab.TForallRef _ Nothing body ->
           body `shouldBe` Elab.TBase (BaseTy "Int")
         other ->
           expectationFailure ("Expected forall-introduced type, got: " ++ show other)
 
     it "14.2.1/14.2.7 determinism proxy: InstApp equals InstInside;InstElim application" $ do
-      let src = Elab.TForall "a" Nothing (Elab.TVar "a")
+      let src = testTForall "a" Nothing (testTVar "a")
           tgt = Elab.TBase (BaseTy "Int")
       lhs <- requireRight (Elab.applyInstantiation src (Elab.InstApp tgt))
       rhs <- requireRight (Elab.applyInstantiation src (Elab.InstSeq (Elab.InstInside (Elab.InstBot tgt)) Elab.InstElim))
@@ -1531,7 +1764,11 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
         Right t -> expectationFailure ("Expected failure, got: " ++ show t)
 
     it "fails InstUnder on a non-∀ type" $ do
-      case Elab.applyInstantiation (Elab.TBase (BaseTy "Int")) (Elab.InstUnder "a" Elab.InstId) of
+      let refA =
+            ElabTypes.typeBinderRefFromIdentity
+              (ElabTypes.typeBinderIdentityFromNode (NodeId 1669))
+              "a"
+      case Elab.applyInstantiation (Elab.TBase (BaseTy "Int")) (ElabTypes.instUnderWithRef refA Elab.InstId) of
         Left (Elab.InstantiationError _) -> pure ()
         Left err -> expectationFailure ("Expected InstantiationError, got: " ++ show err)
         Right t -> expectationFailure ("Expected failure, got: " ++ show t)
@@ -1560,7 +1797,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
       shouldEqUpToTypeVarRenaming replayedTy (uriR2C1ReplayNoFallbackType fixture)
 
     it "InstInside(InstBot) still rejects explicit non-bottom bounds without replay variables" $ do
-      let ty = Elab.TForall "a" (Just (boundFromType (Elab.TBase (BaseTy "Int")))) (Elab.TVar "a")
+      let ty = testTForall "a" (Just (boundFromType (Elab.TBase (BaseTy "Int")))) (testTVar "a")
           inst = Elab.InstInside (Elab.InstBot (Elab.TBase (BaseTy "Int")))
       case Elab.applyInstantiation ty inst of
         Left (Elab.InstantiationError msg) ->
@@ -1573,10 +1810,10 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
     it "InstInside(InstBot (TVar _)) still rejects explicit non-bottom bounds outside the replay lane" $ do
       let bound =
             Elab.TArrow
-              (Elab.TVar "u")
-              (Elab.TVar "u")
-          ty = Elab.TForall "a" (Just (boundFromType bound)) (Elab.TVar "a")
-          inst = Elab.InstInside (Elab.InstBot (Elab.TVar "x"))
+              (testTVar "u")
+              (testTVar "u")
+          ty = testTForall "a" (Just (boundFromType bound)) (testTVar "a")
+          inst = Elab.InstInside (Elab.InstBot (testTVar "x"))
       case Elab.applyInstantiation ty inst of
         Left (Elab.InstantiationError msg) ->
           msg `shouldBe` "InstBot expects ⊥, got: u -> u"
@@ -1603,25 +1840,27 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
       -- allowReplayBoundMatch accepts it. Without that fix, this would
       -- fail with "InstBot expects ⊥, got: t9 -> t9".
       let ty =
-            Elab.TForall
-              "a"
+            testTForall "a"
               (Just (boundFromType Elab.TBottom))
-              ( Elab.TForall
-                  "b"
-                  (Just (boundFromType (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))))
-                  (Elab.TVar "b")
+              ( testTForall "b"
+                  (Just (boundFromType (Elab.TArrow (testTVar "a") (testTVar "a"))))
+                  (testTVar "b")
               )
           phi =
             Elab.InstSeq
-              (Elab.InstApp (Elab.TVar "t9"))
-              (Elab.InstApp (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
+              (Elab.InstApp (graphTVar 9))
+              (Elab.InstApp (Elab.TArrow (testTVar "a") (testTVar "a")))
       result <- requireRight (Elab.applyInstantiation ty phi)
       -- The result should be alpha-equivalent to t9 -> t9
-      shouldEqUpToTypeVarRenaming result (Elab.TArrow (Elab.TVar "t9") (Elab.TVar "t9"))
+      shouldEqUpToTypeVarRenaming result (Elab.TArrow (testTVar "t9") (testTVar "t9"))
 
     it "normalizeInst roundtrip: rule 3 prefix-arg collapse preserves applyInstantiation" $ do
       -- Build an instantiation that matches rule 3: prefix ; intro ; app ; under beta (abstr beta ; elim) ; elim
       let tArg = Elab.TBase (BaseTy "Int")
+          refB =
+            ElabTypes.typeBinderRefFromIdentity
+              (ElabTypes.typeBinderIdentityFromNode (NodeId 1772))
+              "b"
           prefix = Elab.InstInside (Elab.InstBot tArg)
           appArg = Elab.InstInside (Elab.InstBot tArg)
           original =
@@ -1632,51 +1871,242 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                       Elab.InstIntro
                       ( Elab.InstSeq
                           appArg
-                          ( Elab.InstUnder
-                              "b"
-                              (Elab.InstSeq (Elab.InstInside (Elab.InstAbstr "b")) Elab.InstElim)
+                          ( ElabTypes.instUnderWithRef
+                              refB
+                              (Elab.InstSeq (Elab.InstInside (ElabTypes.instAbstrWithRef refB)) Elab.InstElim)
                           )
                       )
                   )
               )
               Elab.InstElim
           normalized = Elab.InstApp tArg
-          ty = Elab.TForall "a" Nothing (Elab.TVar "a")
+          ty = testTForall "a" Nothing (testTVar "a")
       lhs <- requireRight (Elab.applyInstantiation ty original)
       rhs <- requireRight (Elab.applyInstantiation ty normalized)
       lhs `shouldBe` rhs
 
     it "normalizeInst collapses context-wrapped graft+weaken to InstApp (Rule 1b)" $ do
       let tArg = Elab.TBase (BaseTy "Int")
+          refA =
+            ElabTypes.typeBinderRefFromIdentity
+              (ElabTypes.typeBinderIdentityFromNode (NodeId 1790))
+              "a"
           original =
             Elab.InstSeq
-              (Elab.InstUnder "a" (Elab.InstInside (Elab.InstBot tArg)))
-              (Elab.InstUnder "a" Elab.InstElim)
-          normalized = Elab.InstUnder "a" (Elab.InstApp tArg)
-          ty = Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TVar "b"))
+              (ElabTypes.instUnderWithRef refA (Elab.InstInside (Elab.InstBot tArg)))
+              (ElabTypes.instUnderWithRef refA Elab.InstElim)
+          normalized = ElabTypes.instUnderWithRef refA (Elab.InstApp tArg)
+          ty = testTForall "a" Nothing (testTForall "b" Nothing (testTVar "b"))
       lhs <- requireRight (Elab.applyInstantiation ty original)
       rhs <- requireRight (Elab.applyInstantiation ty normalized)
       lhs `shouldBe` rhs
 
+    it "normalizeInst preserves binder refs when collapsing context-wrapped graft+weaken" $ do
+      let tArg = Elab.TBase (BaseTy "Int")
+          ref =
+            ElabTypes.typeBinderRefFromIdentity
+              (ElabTypes.typeBinderIdentityFromNode (NodeId 1700))
+              "a"
+          renamedRef = ElabTypes.renameTypeBinderRef "renamed-a" ref
+          original =
+            Elab.InstSeq
+              (ElabTypes.instUnderWithRef ref (Elab.InstInside (Elab.InstBot tArg)))
+              (ElabTypes.instUnderWithRef renamedRef Elab.InstElim)
+          expected = ElabTypes.instUnderWithRef ref (Elab.InstApp tArg)
+      PhiTestSupport.normalizeInst original `shouldBe` expected
+
   describe "xMLF terms" $ do
     it "pretty prints type abstraction with bound" $ do
-      let bound = Elab.TArrow (Elab.TVar "b") (Elab.TVar "b")
-          term = Elab.ETyAbs "a" (Just (boundFromType bound)) (Elab.EVar "x")
+      let bound = Elab.TArrow (testTVar "b") (testTVar "b")
+          term = mkTestTyAbs "a" (Just (boundFromType bound)) (mkTestDeferredVar "x")
       Elab.pretty term `shouldBe` "Λ(a ⩾ b -> b) x"
 
     it "pretty prints unbounded type abstraction" $ do
-      let term = Elab.ETyAbs "a" Nothing (Elab.EVar "x")
+      let term = mkTestTyAbs "a" Nothing (mkTestDeferredVar "x")
       Elab.pretty term `shouldBe` "Λ(a ⩾ ⊥) x"
+
+    it "keeps type abstraction binder refs identity-sensitive" $ do
+      let refA =
+            ElabTypes.typeBinderRefFromIdentity
+              (ElabTypes.typeBinderIdentityFromNode (NodeId 1))
+              "a"
+          refB =
+            ElabTypes.typeBinderRefFromIdentity
+              (ElabTypes.typeBinderIdentityFromNode (NodeId 2))
+              "a"
+          termA = ElabTypes.eTyAbsWithRef refA Nothing (Elab.ELit (LInt 1))
+          termB = ElabTypes.eTyAbsWithRef refB Nothing (Elab.ELit (LInt 1))
+      Elab.pretty termA `shouldBe` "Λ(a ⩾ ⊥) 1"
+      termA == termB `shouldBe` False
+      case termA of
+        Elab.ETyAbsRef ref Nothing _ ->
+          ElabTypes.typeBinderRefName ref `shouldBe` "a"
+        other ->
+          expectationFailure ("Expected ETyAbs pattern, got: " ++ show other)
+
+    it "prettyDisplay drops unused same-named forall binders by identity" $ do
+      let outerRef = graphTypeBinderRef 1892 "a"
+          freeRef = graphTypeBinderRef 1893 "a"
+          ty :: Elab.ElabType
+          ty = ElabTypes.tForallWithRef outerRef Nothing (ElabTypes.tVarWithRef freeRef)
+      Elab.prettyDisplay ty `shouldBe` "a"
 
     it "pretty prints type instantiation" $ do
       let inst = Elab.InstApp (Elab.TBase (BaseTy "Int"))
-          term = Elab.ETyInst (Elab.EVar "f") inst
+          term = Elab.ETyInst (mkTestDeferredVar "f") inst
       Elab.pretty term `shouldBe` "f[∀(⩾ ⊲Int); N]"
 
-    it "pretty prints let with scheme" $ do
-      let scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
-          term = Elab.ELet "id" scheme (Elab.ETyAbs "a" Nothing (Elab.ELam "x" (Elab.TVar "a") (Elab.EVar "x"))) (Elab.EVar "id")
-      Elab.pretty term `shouldBe` "let id : ∀(a ⩾ ⊥) a -> a = Λ(a ⩾ ⊥) λ(x : a) x in id"
+    it "pretty prints let as a checked diagnostic dump" $ do
+      let scheme = Elab.schemeFromType (testTForall "a" Nothing (Elab.TArrow (testTVar "a") (testTVar "a")))
+          term = mkTestLocalLet "id" scheme (mkTestTyAbs "a" Nothing (mkTestLocalLam "x" (testTVar "a") (mkTestDeferredVar "x"))) (mkTestDeferredVar "id")
+      Elab.pretty term `shouldBe` "let id = Λ(a ⩾ ⊥) λ(x : a) x in id"
+
+    it "pretty prints resolved locals by identity instead of runtime spelling" $ do
+      let intTy = Elab.TBase (BaseTy "Int")
+          resolved ref runtime =
+            ResolvedVar
+              { resolvedVarRuntimeName = runtime,
+                resolvedVarType = intTy,
+                resolvedVarDetails = LocalId (generatedLocalRefForName ref)
+              }
+          term =
+            Elab.ELam
+              (resolved "$x#0" "runtime-x")
+              (Elab.EVarNode (resolved "$x#0" "different-runtime"))
+      Elab.pretty term `shouldBe` "λ($x#0 : Int) $x#0"
+
+    it "freshens type abstractions without dropping resolved local sidecars" $ do
+      let envRef =
+            ElabTypes.typeBinderRefFromIdentity
+              (ElabTypes.typeBinderIdentityFromNode (NodeId 1864))
+              "a"
+          absRef =
+            ElabTypes.typeBinderRefFromIdentity
+              (ElabTypes.typeBinderIdentityFromNode (NodeId 1865))
+              "a"
+          captured =
+            ResolvedVar
+              { resolvedVarRuntimeName = "captured",
+                resolvedVarType = ElabTypes.tVarWithRef envRef,
+                resolvedVarDetails =
+                  EnvId
+                    EnvRef
+                      { envRefIdentity = UniqueIdentity 1866,
+                        envRefName = "captured"
+                      }
+              }
+          env = Elab.mkTypeCheckEnvWithResolvedTerms [(captured, ElabTypes.tVarWithRef envRef)] Map.empty
+          resolved ref runtime ty =
+            ResolvedVar
+              { resolvedVarRuntimeName = runtime,
+                resolvedVarType = ty,
+                resolvedVarDetails = LocalId (generatedLocalRefForName ref)
+              }
+          term =
+            ElabTypes.eTyAbsWithRef absRef Nothing $
+              Elab.ELam
+                (resolved "$x#0" "runtime-x" (ElabTypes.tVarWithRef absRef))
+                (Elab.EVarNode (resolved "$x#0" "different-runtime" (ElabTypes.tVarWithRef absRef)))
+      case Elab.freshenTypeAbsAgainstEnv env term of
+        Elab.ETyAbsRef freshRef Nothing (Elab.ELam binder (Elab.EVarNode occurrence)) -> do
+          ElabTypes.typeBinderRefIdentity freshRef `shouldBe` ElabTypes.typeBinderRefIdentity absRef
+          ElabTypes.typeBinderRefName freshRef `shouldBe` "a1"
+          resolvedVarType binder `shouldBe` ElabTypes.tVarWithRef freshRef
+          resolvedVarType occurrence `shouldBe` ElabTypes.tVarWithRef freshRef
+          resolvedVarDetails binder `shouldBe` LocalId (generatedLocalRefForName "$x#0")
+          resolvedVarRuntimeName occurrence `shouldBe` "different-runtime"
+        other -> expectationFailure ("Expected resolved freshened term, got: " ++ show other)
+
+    it "uses resolved local identity when selecting authoritative app annotations" $ do
+      let intTy = Elab.TBase (BaseTy "Int")
+          resolved ref runtime =
+            ResolvedVar
+              { resolvedVarRuntimeName = runtime,
+                resolvedVarType = intTy,
+                resolvedVarDetails = LocalId (generatedLocalRefForName ref)
+              }
+          argAnn = ALit (LInt 1) (NodeId 1)
+          appAnn =
+            AApp
+              (AVar "runtime-x" (NodeId 2))
+              argAnn
+              (EdgeId 0)
+              (EdgeId 1)
+              (NodeId 3)
+          term =
+            Elab.EApp
+              ( Elab.ELam
+                  (resolved "$x#0" "runtime-x")
+                  (Elab.EVarNode (resolved "$x#0" "different-runtime"))
+              )
+              (Elab.ELit (LInt 1))
+      Elab.authoritativeRootAnn term appAnn `shouldBe` argAnn
+
+    it "uses annotation node identity instead of local names for authoritative var annotations" $ do
+      let intTy = Elab.TBase (BaseTy "Int")
+          resolvedAt (NodeId node) ref runtime =
+            ResolvedVar
+              { resolvedVarRuntimeName = runtime,
+                resolvedVarType = intTy,
+                resolvedVarDetails = LocalId (generatedLocalRef (negate (node + 1)) ref)
+              }
+          matchingArg = AVar "stale-name" (NodeId 7)
+          matchingApp =
+            AApp
+              (AVar "runtime-x" (NodeId 2))
+              matchingArg
+              (EdgeId 0)
+              (EdgeId 1)
+              (NodeId 3)
+          staleArg = AVar "$x#0" (NodeId 8)
+          staleApp =
+            AApp
+              (AVar "runtime-x" (NodeId 4))
+              staleArg
+              (EdgeId 2)
+              (EdgeId 3)
+              (NodeId 5)
+          term = Elab.EVarNode (resolvedAt (NodeId 7) "$x#0" "runtime-x")
+      Elab.authoritativeRootAnn term matchingApp `shouldBe` matchingArg
+      Elab.authoritativeRootAnn term staleApp `shouldBe` staleApp
+
+    it "uses let scheme-root identity instead of local names for authoritative let annotations" $ do
+      let intTy = Elab.TBase (BaseTy "Int")
+          resolvedAt (NodeId node) ref runtime =
+            ResolvedVar
+              { resolvedVarRuntimeName = runtime,
+                resolvedVarType = intTy,
+                resolvedVarDetails = LocalId (generatedLocalRef (negate (node + 1)) ref)
+              }
+          bodyAnn = AVar "body" (NodeId 20)
+          matchingAnn =
+            ALet
+              "$x#0"
+              (GenNodeId 0)
+              (NodeId 7)
+              (ExpVarId 0)
+              (GenNodeId 1)
+              (ALit (LInt 1) (NodeId 9))
+              bodyAnn
+              (NodeId 10)
+          staleAnn =
+            ALet
+              "$x#0"
+              (GenNodeId 2)
+              (NodeId 8)
+              (ExpVarId 0)
+              (GenNodeId 3)
+              (ALit (LInt 1) (NodeId 11))
+              bodyAnn
+              (NodeId 12)
+          term =
+            Elab.ELet
+              (resolvedAt (NodeId 7) "$x#0" "runtime-x")
+              (Elab.schemeFromType intTy)
+              (Elab.ELit (LInt 1))
+              (Elab.EVarNode (resolvedAt (NodeId 20) "body" "body"))
+      Elab.authoritativeRootAnn term matchingAnn `shouldBe` bodyAnn
+      Elab.authoritativeRootAnn term staleAnn `shouldBe` staleAnn
 
   describe "eMLF source annotations" $ do
     it "parses and represents STVar" $ do
@@ -1765,7 +2195,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               scopeRoot
               targetNode
           )
-      let schemeInfo = Elab.SchemeInfo scheme subst
+      let schemeInfo = Elab.schemeInfoFromRefSubst scheme subst
           witness = rtcEdgeWitnesses inputs IntMap.! getEdgeId argEdgeId
           trace = IntMap.lookup (getEdgeId argEdgeId) (rtcEdgeTraces inputs)
       phi <-
@@ -1779,7 +2209,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               trace
               witness
           )
-      phi `shouldBe` Elab.InstApp (Elab.TVar "t32")
+      phi `shouldBe` Elab.InstApp (graphTVar 32)
       case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneClearBoundaryExpr) of
         Left err -> expectationFailure (Elab.renderPipelineError err)
         Right (_, ty) -> Elab.pretty ty `shouldSatisfy` (not . null)
@@ -1842,7 +2272,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               scopeRoot
               targetNode
           )
-      let schemeInfo = Elab.SchemeInfo scheme subst
+      let schemeInfo = Elab.schemeInfoFromRefSubst scheme subst
           witness = rtcEdgeWitnesses inputs IntMap.! getEdgeId argEdgeId
           trace = IntMap.lookup (getEdgeId argEdgeId) (rtcEdgeTraces inputs)
       phi <-
@@ -1856,7 +2286,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               trace
               witness
           )
-      phi `shouldBe` Elab.InstSeq (Elab.InstApp (Elab.TVar "t38")) (Elab.InstApp (Elab.TVar "t44"))
+      phi `shouldBe` Elab.InstSeq (Elab.InstApp (graphTVar 38)) (Elab.InstApp (graphTVar 44))
       case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneDoubleAliasFrameClearBoundaryExpr) of
         Left err -> expectationFailure (Elab.renderPipelineError err)
         Right (_, ty) -> Elab.pretty ty `shouldSatisfy` (not . null)
@@ -1927,7 +2357,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               scopeRoot
               targetNode
           )
-      let schemeInfo = Elab.SchemeInfo scheme subst
+      let schemeInfo = Elab.schemeInfoFromRefSubst scheme subst
           witness = rtcEdgeWitnesses inputs IntMap.! getEdgeId argEdgeId
           trace = IntMap.lookup (getEdgeId argEdgeId) (rtcEdgeTraces inputs)
       phi <-
@@ -1942,7 +2372,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               witness
           )
       rtcEdgeExpansions inputs IntMap.! getEdgeId argEdgeId `shouldBe` ExpInstantiate [NodeId 40]
-      phi `shouldBe` Elab.InstSeq (Elab.InstApp (Elab.TVar "t41")) (Elab.InstApp (Elab.TVar "t47"))
+      phi `shouldBe` Elab.InstSeq (Elab.InstApp (graphTVar 41)) (Elab.InstApp (graphTVar 47))
       case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneTripleAliasFrameClearBoundaryExpr) of
         Left err -> expectationFailure (Elab.renderPipelineError err)
         Right (_, ty) -> Elab.pretty ty `shouldSatisfy` (not . null)
@@ -2022,7 +2452,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               scopeRoot
               targetNode
           )
-      let schemeInfo = Elab.SchemeInfo scheme subst
+      let schemeInfo = Elab.schemeInfoFromRefSubst scheme subst
           witness = rtcEdgeWitnesses inputs IntMap.! getEdgeId argEdgeId
           trace = IntMap.lookup (getEdgeId argEdgeId) (rtcEdgeTraces inputs)
       phi <-
@@ -2037,7 +2467,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               witness
           )
       rtcEdgeExpansions inputs IntMap.! getEdgeId argEdgeId `shouldBe` ExpInstantiate [NodeId 43]
-      phi `shouldBe` Elab.InstSeq (Elab.InstApp (Elab.TVar "t44")) (Elab.InstApp (Elab.TVar "t50"))
+      phi `shouldBe` Elab.InstSeq (Elab.InstApp (graphTVar 44)) (Elab.InstApp (graphTVar 50))
       case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneQuadrupleAliasFrameClearBoundaryExpr) of
         Left err -> expectationFailure (Elab.renderPipelineError err)
         Right (_, ty) -> Elab.pretty ty `shouldSatisfy` (not . null)
@@ -2126,7 +2556,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               scopeRoot
               targetNode
           )
-      let schemeInfo = Elab.SchemeInfo scheme subst
+      let schemeInfo = Elab.schemeInfoFromRefSubst scheme subst
           witness = rtcEdgeWitnesses inputs IntMap.! getEdgeId argEdgeId
           trace = IntMap.lookup (getEdgeId argEdgeId) (rtcEdgeTraces inputs)
       phi <-
@@ -2141,7 +2571,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               witness
           )
       rtcEdgeExpansions inputs IntMap.! getEdgeId argEdgeId `shouldBe` ExpInstantiate [NodeId 46]
-      phi `shouldBe` Elab.InstSeq (Elab.InstApp (Elab.TVar "t47")) (Elab.InstApp (Elab.TVar "t53"))
+      phi `shouldBe` Elab.InstSeq (Elab.InstApp (graphTVar 47)) (Elab.InstApp (graphTVar 53))
       case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneQuintupleAliasFrameClearBoundaryExpr) of
         Left err -> expectationFailure (Elab.renderPipelineError err)
         Right (_, ty) -> Elab.pretty ty `shouldSatisfy` (not . null)
@@ -2239,7 +2669,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               scopeRoot
               targetNode
           )
-      let schemeInfo = Elab.SchemeInfo scheme subst
+      let schemeInfo = Elab.schemeInfoFromRefSubst scheme subst
           witness = rtcEdgeWitnesses inputs IntMap.! getEdgeId argEdgeId
           trace = IntMap.lookup (getEdgeId argEdgeId) (rtcEdgeTraces inputs)
       phi <-
@@ -2254,7 +2684,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               witness
           )
       rtcEdgeExpansions inputs IntMap.! getEdgeId argEdgeId `shouldBe` ExpInstantiate [NodeId 49]
-      phi `shouldBe` Elab.InstSeq (Elab.InstApp (Elab.TVar "t50")) (Elab.InstApp (Elab.TVar "t56"))
+      phi `shouldBe` Elab.InstSeq (Elab.InstApp (graphTVar 50)) (Elab.InstApp (graphTVar 56))
       case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneSextupleAliasFrameClearBoundaryExpr) of
         Left err -> expectationFailure (Elab.renderPipelineError err)
         Right (_, ty) -> Elab.pretty ty `shouldSatisfy` (not . null)
@@ -2361,7 +2791,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               scopeRoot
               targetNode
           )
-      let schemeInfo = Elab.SchemeInfo scheme subst
+      let schemeInfo = Elab.schemeInfoFromRefSubst scheme subst
           witness = rtcEdgeWitnesses inputs IntMap.! getEdgeId argEdgeId
           trace = IntMap.lookup (getEdgeId argEdgeId) (rtcEdgeTraces inputs)
       phi <-
@@ -2376,7 +2806,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               witness
           )
       rtcEdgeExpansions inputs IntMap.! getEdgeId argEdgeId `shouldBe` ExpInstantiate [NodeId 52]
-      phi `shouldBe` Elab.InstSeq (Elab.InstApp (Elab.TVar "t53")) (Elab.InstApp (Elab.TVar "t59"))
+      phi `shouldBe` Elab.InstSeq (Elab.InstApp (graphTVar 53)) (Elab.InstApp (graphTVar 59))
       case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneSeptupleAliasFrameClearBoundaryExpr) of
         Left err -> expectationFailure (Elab.renderPipelineError err)
         Right (_, ty) -> Elab.pretty ty `shouldSatisfy` (not . null)
@@ -2492,7 +2922,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               scopeRoot
               targetNode
           )
-      let schemeInfo = Elab.SchemeInfo scheme subst
+      let schemeInfo = Elab.schemeInfoFromRefSubst scheme subst
           witness = rtcEdgeWitnesses inputs IntMap.! getEdgeId argEdgeId
           trace = IntMap.lookup (getEdgeId argEdgeId) (rtcEdgeTraces inputs)
       phi <-
@@ -2507,7 +2937,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               witness
           )
       rtcEdgeExpansions inputs IntMap.! getEdgeId argEdgeId `shouldBe` ExpInstantiate [NodeId 55]
-      phi `shouldBe` Elab.InstSeq (Elab.InstApp (Elab.TVar "t56")) (Elab.InstApp (Elab.TVar "t62"))
+      phi `shouldBe` Elab.InstSeq (Elab.InstApp (graphTVar 56)) (Elab.InstApp (graphTVar 62))
       case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneOctupleAliasFrameClearBoundaryExpr) of
         Left err -> expectationFailure (Elab.renderPipelineError err)
         Right (_, ty) -> Elab.pretty ty `shouldSatisfy` (not . null)
@@ -2632,7 +3062,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               scopeRoot
               targetNode
           )
-      let schemeInfo = Elab.SchemeInfo scheme subst
+      let schemeInfo = Elab.schemeInfoFromRefSubst scheme subst
           witness = rtcEdgeWitnesses inputs IntMap.! getEdgeId argEdgeId
           trace = IntMap.lookup (getEdgeId argEdgeId) (rtcEdgeTraces inputs)
       phi <-
@@ -2647,7 +3077,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               witness
           )
       rtcEdgeExpansions inputs IntMap.! getEdgeId argEdgeId `shouldBe` ExpInstantiate [NodeId 58]
-      phi `shouldBe` Elab.InstSeq (Elab.InstApp (Elab.TVar "t59")) (Elab.InstApp (Elab.TVar "t65"))
+      phi `shouldBe` Elab.InstSeq (Elab.InstApp (graphTVar 59)) (Elab.InstApp (graphTVar 65))
       case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneNonupleAliasFrameClearBoundaryExpr) of
         Left err -> expectationFailure (Elab.renderPipelineError err)
         Right (_, ty) -> Elab.pretty ty `shouldSatisfy` (not . null)
@@ -2704,7 +3134,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               (generalizeAtWithActive (paSolved artifacts))
               (rtcPresolutionView inputs)
               (Just (rtcBindParentsGa inputs))
-              (Just (Elab.SchemeInfo scheme subst))
+              (Just (Elab.schemeInfoFromRefSubst scheme subst))
               trace
               witness
           )
@@ -2725,19 +3155,19 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   (EApp (ELam "y" (EVar "y")) (EVar "k"))
               )
           containsMuTy ty0 = case ty0 of
-            Elab.TMu _ _ -> True
+            Elab.TMuRef _ _ -> True
             Elab.TArrow dom cod -> containsMuTy dom || containsMuTy cod
             Elab.TCon _ args -> any containsMuTy args
-            Elab.TVarApp _ args -> any containsMuTy args
-            Elab.TForall _ mb body -> maybe False containsMuBound mb || containsMuTy body
+            Elab.TVarAppRef _ args -> any containsMuTy args
+            Elab.TForallRef _ mb body -> maybe False containsMuBound mb || containsMuTy body
             _ -> False
           containsMuBound bound = case bound of
             Elab.TArrow dom cod -> containsMuTy dom || containsMuTy cod
             Elab.TBase _ -> False
             Elab.TCon _ args -> any containsMuTy args
-            Elab.TVarApp _ args -> any containsMuTy args
-            Elab.TForall _ mb body -> maybe False containsMuBound mb || containsMuTy body
-            Elab.TMu _ _ -> True
+            Elab.TVarAppRef _ args -> any containsMuTy args
+            Elab.TForallRef _ mb body -> maybe False containsMuBound mb || containsMuTy body
+            Elab.TMuRef _ _ -> True
             Elab.TBottom -> False
           assertPipeline label runPipeline =
             case runPipeline Set.empty (unsafeNormalizeExpr expr) of
@@ -2852,15 +3282,13 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
     describe "Σ(g) quantifier reordering" $ do
       it "O15-REORDER-IDENTITY: commutes two adjacent quantifiers" $ do
         let src =
-              Elab.TForall
-                "a"
+              testTForall "a"
                 Nothing
-                (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b")))
+                (testTForall "b" Nothing (Elab.TArrow (testTVar "a") (testTVar "b")))
             tgt =
-              Elab.TForall
-                "b"
+              testTForall "b"
                 Nothing
-                (Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b")))
+                (testTForall "a" Nothing (Elab.TArrow (testTVar "a") (testTVar "b")))
 
         case Elab.sigmaReorder src tgt of
           Left err -> expectationFailure (show err)
@@ -2871,33 +3299,72 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
       it "O15-REORDER-IDENTITY: returns ε when source and target already match" $ do
         let src =
-              Elab.TForall
-                "a"
+              testTForall "a"
                 Nothing
-                (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b")))
+                (testTForall "b" Nothing (Elab.TArrow (testTVar "a") (testTVar "b")))
         sig <- requireRight (Elab.sigmaReorder src src)
         sig `shouldBe` Elab.InstId
+
+      it "reorders same-named binders by identity" $ do
+        let refA =
+              ElabTypes.typeBinderRefFromIdentity
+                (ElabTypes.typeBinderIdentityFromNode (NodeId 3079))
+                "a"
+            refB =
+              ElabTypes.typeBinderRefFromIdentity
+                (ElabTypes.typeBinderIdentityFromNode (NodeId 3080))
+                "a"
+            body = Elab.TArrow (ElabTypes.tVarWithRef refA) (ElabTypes.tVarWithRef refB)
+            src = ElabTypes.tForallWithRef refA Nothing (ElabTypes.tForallWithRef refB Nothing body)
+            tgt = ElabTypes.tForallWithRef refB Nothing (ElabTypes.tForallWithRef refA Nothing body)
+        sig <- requireRight (Elab.sigmaReorder src tgt)
+        sig `shouldNotBe` Elab.InstId
+        out <- requireRight (Elab.applyInstantiation src sig)
+        TypeOps.alphaEqType out tgt `shouldBe` True
+
+      it "reorders same-named spine binders by identity" $ do
+        let refA =
+              ElabTypes.typeBinderRefFromIdentity
+                (ElabTypes.typeBinderIdentityFromNode (NodeId 3081))
+                "a"
+            refB =
+              ElabTypes.typeBinderRefFromIdentity
+                (ElabTypes.typeBinderIdentityFromNode (NodeId 3082))
+                "a"
+            body = Elab.TArrow (ElabTypes.tVarWithRef refA) (ElabTypes.tVarWithRef refB)
+            src = ElabTypes.tForallWithRef refA Nothing (ElabTypes.tForallWithRef refB Nothing body)
+            tgt = ElabTypes.tForallWithRef refB Nothing (ElabTypes.tForallWithRef refA Nothing body)
+        (sig, binders, ids) <-
+          requireRight
+            ( PhiTestSupport.reorderSpineRefsTo
+                "spineReorder"
+                [(refA, Nothing), (refB, Nothing)]
+                [1 :: Int, 2]
+                [2, 1]
+            )
+        sig `shouldNotBe` Elab.InstId
+        map (ElabTypes.typeBinderRefIdentity . fst) binders
+          `shouldBe` [ElabTypes.typeBinderRefIdentity refB, ElabTypes.typeBinderRefIdentity refA]
+        ids `shouldBe` [2, 1]
+        out <- requireRight (Elab.applyInstantiation src sig)
+        TypeOps.alphaEqType out tgt `shouldBe` True
 
       it "commutes two adjacent bounded quantifiers (bounds preserved)" $ do
         let intTy = Elab.TBase (BaseTy "Int")
             boolTy = Elab.TBase (BaseTy "Bool")
             src =
-              Elab.TForall
-                "a"
+              testTForall "a"
                 (Just (boundFromType intTy))
-                ( Elab.TForall
-                    "b"
+                ( testTForall "b"
                     (Just (boundFromType boolTy))
-                    (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))
+                    (Elab.TArrow (testTVar "a") (testTVar "b"))
                 )
             tgt =
-              Elab.TForall
-                "b"
+              testTForall "b"
                 (Just (boundFromType boolTy))
-                ( Elab.TForall
-                    "a"
+                ( testTForall "a"
                     (Just (boundFromType intTy))
-                    (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))
+                    (Elab.TArrow (testTVar "a") (testTVar "b"))
                 )
         sig <- requireRight (Elab.sigmaReorder src tgt)
         out <- requireRight (Elab.applyInstantiation src sig)
@@ -2905,34 +3372,28 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
       it "permutes three quantifiers" $ do
         let src =
-              Elab.TForall
-                "a"
+              testTForall "a"
                 Nothing
-                ( Elab.TForall
-                    "b"
+                ( testTForall "b"
                     Nothing
-                    ( Elab.TForall
-                        "c"
+                    ( testTForall "c"
                         Nothing
                         ( Elab.TArrow
-                            (Elab.TVar "a")
-                            (Elab.TArrow (Elab.TVar "b") (Elab.TVar "c"))
+                            (testTVar "a")
+                            (Elab.TArrow (testTVar "b") (testTVar "c"))
                         )
                     )
                 )
             tgt =
-              Elab.TForall
-                "c"
+              testTForall "c"
                 Nothing
-                ( Elab.TForall
-                    "a"
+                ( testTForall "a"
                     Nothing
-                    ( Elab.TForall
-                        "b"
+                    ( testTForall "b"
                         Nothing
                         ( Elab.TArrow
-                            (Elab.TVar "a")
-                            (Elab.TArrow (Elab.TVar "b") (Elab.TVar "c"))
+                            (testTVar "a")
+                            (Elab.TArrow (testTVar "b") (testTVar "c"))
                         )
                     )
                 )
@@ -2945,8 +3406,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               Right out -> canonType out `shouldBe` canonType tgt
 
       it "reports missing target binder identities through InstantiationError" $ do
-        let src = Elab.TForall "a" Nothing (Elab.TVar "a")
-            tgt = Elab.TForall "b" Nothing (Elab.TVar "b")
+        let src = testTForall "a" Nothing (testTVar "a")
+            tgt = testTForall "b" Nothing (testTVar "b")
         case Elab.sigmaReorder src tgt of
           Left (Elab.InstantiationError msg) ->
             msg `shouldBe` "sigmaReorder: desired binder not found in source"
@@ -2955,9 +3416,17 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
           Right sig -> expectationFailure ("Expected failure, got: " ++ show sig)
 
       it "reports missing target binder identities through the spine reorder helper" $ do
-        let binders = [("a", Nothing), ("b", Nothing)]
-            ids = ["a", "b"]
-        case PhiTestSupport.reorderSpineTo "spineReorder" binders ids ["c", "a"] of
+        let refA =
+              ElabTypes.typeBinderRefFromIdentity
+                (ElabTypes.typeBinderIdentityFromNode (NodeId 3231))
+                "a"
+            refB =
+              ElabTypes.typeBinderRefFromIdentity
+                (ElabTypes.typeBinderIdentityFromNode (NodeId 3232))
+                "b"
+            binders = [(refA, Nothing), (refB, Nothing)]
+            ids = [1 :: Int, 2]
+        case PhiTestSupport.reorderSpineRefsTo "spineReorder" binders ids [3, 1] of
           Left (Elab.InstantiationError msg) ->
             msg `shouldBe` "spineReorder: desired binder not found in source"
           Left err ->
@@ -2971,9 +3440,13 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               )
 
       it "fails closed when the desired binder order is longer than the source spine" $ do
-        let binders = [("a", Nothing)]
-            ids = ["a"]
-        case PhiTestSupport.reorderSpineTo "spineReorder" binders ids ["a", "b"] of
+        let refA =
+              ElabTypes.typeBinderRefFromIdentity
+                (ElabTypes.typeBinderIdentityFromNode (NodeId 3247))
+                "a"
+            binders = [(refA, Nothing)]
+            ids = [1 :: Int]
+        case PhiTestSupport.reorderSpineRefsTo "spineReorder" binders ids [1, 2] of
           Left (Elab.InstantiationError msg) ->
             msg `shouldBe` "spineReorder: type has only 1 binders"
           Left err ->
@@ -3023,13 +3496,11 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             -- Typ has binders in the opposite order of <P for the expansion root.
             scheme =
               Elab.schemeFromType
-                ( Elab.TForall
-                    "b"
+                ( testTForall "b"
                     Nothing
-                    ( Elab.TForall
-                        "a"
+                    ( testTForall "a"
                         Nothing
-                        (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))
+                        (Elab.TArrow (testTVar "a") (testTVar "b"))
                     )
                 )
             subst =
@@ -3037,7 +3508,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 [ (getNodeId vA, "a"),
                   (getNodeId vB, "b")
                 ]
-            si = Elab.SchemeInfo {Elab.siScheme = scheme, Elab.siSubst = subst}
+            si = mkSchemeInfoFromNodeNames scheme subst
 
             ew =
               EdgeWitness
@@ -3056,13 +3527,11 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
         -- Apply and verify the result has binders in <P order (a before b)
         out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
         let expected =
-              Elab.TForall
-                "a"
+              testTForall "a"
                 Nothing
-                ( Elab.TForall
-                    "b"
+                ( testTForall "b"
                     Nothing
-                    (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))
+                    (Elab.TArrow (testTVar "a") (testTVar "b"))
                 )
         canonType out `shouldBe` canonType expected
 
@@ -3100,13 +3569,13 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             solved = mkSolved constraint IntMap.empty
             scheme =
               Elab.schemeFromType
-                (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
+                (testTForall "a" Nothing (testTForall "b" Nothing (Elab.TArrow (testTVar "a") (testTVar "b"))))
             subst =
               IntMap.fromList
                 [ (getNodeId binderA, "a"),
                   (getNodeId binderB, "b")
                 ]
-            si = Elab.SchemeInfo {Elab.siScheme = scheme, Elab.siSubst = subst}
+            si = mkSchemeInfoFromNodeNames scheme subst
             ops =
               [ OpGraft intNode binderB,
                 OpWeaken binderB,
@@ -3162,13 +3631,13 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             solved = mkSolved constraint IntMap.empty
             scheme =
               Elab.schemeFromType
-                (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
+                (testTForall "a" Nothing (testTForall "b" Nothing (Elab.TArrow (testTVar "a") (testTVar "b"))))
             subst =
               IntMap.fromList
                 [ (getNodeId binderA, "a"),
                   (getNodeId binderB, "b")
                 ]
-            si = Elab.SchemeInfo {Elab.siScheme = scheme, Elab.siSubst = subst}
+            si = mkSchemeInfoFromNodeNames scheme subst
             ops = [OpGraft intNode root, OpGraft boolNode binderB, OpWeaken binderB]
             ew =
               EdgeWitness
@@ -3225,18 +3694,15 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             -- Scheme has binders in reverse order: c, b, a
             scheme =
               Elab.schemeFromType
-                ( Elab.TForall
-                    "c"
+                ( testTForall "c"
                     Nothing
-                    ( Elab.TForall
-                        "b"
+                    ( testTForall "b"
                         Nothing
-                        ( Elab.TForall
-                            "a"
+                        ( testTForall "a"
                             Nothing
                             ( Elab.TArrow
-                                (Elab.TVar "a")
-                                (Elab.TArrow (Elab.TVar "b") (Elab.TVar "c"))
+                                (testTVar "a")
+                                (Elab.TArrow (testTVar "b") (testTVar "c"))
                             )
                         )
                     )
@@ -3247,7 +3713,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   (getNodeId vB, "b"),
                   (getNodeId vC, "c")
                 ]
-            si = Elab.SchemeInfo {Elab.siScheme = scheme, Elab.siSubst = subst}
+            si = mkSchemeInfoFromNodeNames scheme subst
 
             -- Empty witness ops
             ew =
@@ -3264,18 +3730,15 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
         phi `shouldNotBe` Elab.InstId
         out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
         let expected =
-              Elab.TForall
-                "a"
+              testTForall "a"
                 Nothing
-                ( Elab.TForall
-                    "b"
+                ( testTForall "b"
                     Nothing
-                    ( Elab.TForall
-                        "c"
+                    ( testTForall "c"
                         Nothing
                         ( Elab.TArrow
-                            (Elab.TVar "a")
-                            (Elab.TArrow (Elab.TVar "b") (Elab.TVar "c"))
+                            (testTVar "a")
+                            (Elab.TArrow (testTVar "b") (testTVar "c"))
                         )
                     )
                 )
@@ -3322,18 +3785,15 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             -- Already in <P order: a, b, c
             scheme =
               Elab.schemeFromType
-                ( Elab.TForall
-                    "a"
+                ( testTForall "a"
                     Nothing
-                    ( Elab.TForall
-                        "b"
+                    ( testTForall "b"
                         Nothing
-                        ( Elab.TForall
-                            "c"
+                        ( testTForall "c"
                             Nothing
                             ( Elab.TArrow
-                                (Elab.TVar "a")
-                                (Elab.TArrow (Elab.TVar "b") (Elab.TVar "c"))
+                                (testTVar "a")
+                                (Elab.TArrow (testTVar "b") (testTVar "c"))
                             )
                         )
                     )
@@ -3344,7 +3804,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   (getNodeId vB, "b"),
                   (getNodeId vC, "c")
                 ]
-            si = Elab.SchemeInfo {Elab.siScheme = scheme, Elab.siSubst = subst}
+            si = mkSchemeInfoFromNodeNames scheme subst
             ew =
               EdgeWitness
                 { ewEdgeId = EdgeId 0,
@@ -3406,13 +3866,11 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             -- Scheme references both a and b
             scheme =
               Elab.schemeFromType
-                ( Elab.TForall
-                    "a"
+                ( testTForall "a"
                     Nothing
-                    ( Elab.TForall
-                        "b"
+                    ( testTForall "b"
                         Nothing
-                        (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))
+                        (Elab.TArrow (testTVar "a") (testTVar "b"))
                     )
                 )
             subst =
@@ -3420,7 +3878,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 [ (getNodeId vA, "a"),
                   (getNodeId vB, "b")
                 ]
-            si = Elab.SchemeInfo {Elab.siScheme = scheme, Elab.siSubst = subst}
+            si = mkSchemeInfoFromNodeNames scheme subst
 
             ew =
               EdgeWitness
@@ -3490,8 +3948,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         ]
                   }
             solved = mkSolved c IntMap.empty
-            scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TVar "a"))
-            si = Elab.SchemeInfo {Elab.siScheme = scheme, Elab.siSubst = IntMap.fromList [(getNodeId binder, "a")]}
+            scheme = Elab.schemeFromType (testTForall "a" Nothing (testTVar "a"))
+            si = mkSchemeInfoFromNodeNames scheme (IntMap.fromList [(getNodeId binder, "a")])
             ew =
               EdgeWitness
                 { ewEdgeId = EdgeId 77,
@@ -3523,8 +3981,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         ]
                   }
             solved = mkSolved c IntMap.empty
-            scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
-            si = Elab.SchemeInfo {Elab.siScheme = scheme, Elab.siSubst = IntMap.fromList [(getNodeId rigidN, "a")]}
+            scheme = Elab.schemeFromType (testTForall "a" Nothing (Elab.TArrow (testTVar "a") (testTVar "a")))
+            si = mkSchemeInfoFromNodeNames scheme (IntMap.fromList [(getNodeId rigidN, "a")])
             tr =
               EdgeTrace
                 { etRoot = root,
@@ -3567,8 +4025,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         ]
                   }
             solved = mkSolved c IntMap.empty
-            scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
-            si = Elab.SchemeInfo {Elab.siScheme = scheme, Elab.siSubst = IntMap.fromList [(getNodeId binderN, "a")]}
+            scheme = Elab.schemeFromType (testTForall "a" Nothing (Elab.TArrow (testTVar "a") (testTVar "a")))
+            si = mkSchemeInfoFromNodeNames scheme (IntMap.fromList [(getNodeId binderN, "a")])
             tr =
               EdgeTrace
                 { etRoot = root,
@@ -3619,12 +4077,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   }
             solved = mkSolved c IntMap.empty
             -- Scheme now includes the solved-away binder b (original constraint preserves all binders)
-            scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))))
+            scheme = Elab.schemeFromType (testTForall "a" Nothing (testTForall "b" Nothing (Elab.TArrow (testTVar "a") (testTVar "a"))))
             si =
-              Elab.SchemeInfo
-                { Elab.siScheme = scheme,
-                  Elab.siSubst = IntMap.fromList [(getNodeId binderA, "a"), (getNodeId binderB, "b")]
-                }
+              mkSchemeInfoFromNodeNames scheme (IntMap.fromList [(getNodeId binderA, "a"), (getNodeId binderB, "b")])
             tr =
               EdgeTrace
                 { etRoot = root,
@@ -3679,16 +4134,12 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             solved = mkSolved c IntMap.empty
             scheme =
               Elab.schemeFromType
-                ( Elab.TForall
-                    "a"
+                ( testTForall "a"
                     Nothing
-                    (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+                    (Elab.TArrow (testTVar "a") (testTVar "a"))
                 )
             si =
-              Elab.SchemeInfo
-                { Elab.siScheme = scheme,
-                  Elab.siSubst = IntMap.fromList [(getNodeId binderA, "a")]
-                }
+              mkSchemeInfoFromNodeNames scheme (IntMap.fromList [(getNodeId binderA, "a")])
             tr =
               EdgeTrace
                 { etRoot = root,
@@ -3738,23 +4189,19 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             solved = mkSolved c IntMap.empty
             scheme =
               Elab.schemeFromType
-                ( Elab.TForall
-                    "a"
+                ( testTForall "a"
                     Nothing
-                    (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+                    (Elab.TArrow (testTVar "a") (testTVar "a"))
                 )
             si =
-              Elab.SchemeInfo
-                { Elab.siScheme = scheme,
-                  Elab.siSubst = IntMap.fromList [(getNodeId binderA, "a")]
-                }
+              mkSchemeInfoFromNodeNames scheme (IntMap.fromList [(getNodeId binderA, "a")])
             tr =
               EdgeTrace
                 { etRoot = root,
                   etBinderArgs = [(binderA, binderA)],
                   etInterior = fromListInterior [root, binderA, bogusTarget],
                   -- Domain is correct (binderA -> bogusTarget), but bogusTarget
-                  -- is not in the replay binder domain (siSubst siReplay).
+                  -- is not in the replay binder domain.
                   etBinderReplayMap = IntMap.fromList [(getNodeId binderA, bogusTarget)],
                   etReplayDomainBinders = [],
                   etCopyMap = mempty,
@@ -3805,16 +4252,12 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             solved = mkSolved c (IntMap.singleton (getNodeId replayAlias) replayBinder)
             scheme =
               Elab.schemeFromType
-                ( Elab.TForall
-                    "t2"
+                ( testTForall "t2"
                     Nothing
-                    (Elab.TArrow (Elab.TVar "t2") (Elab.TVar "t2"))
+                    (Elab.TArrow (testTVar "t2") (testTVar "t2"))
                 )
             si =
-              Elab.SchemeInfo
-                { Elab.siScheme = scheme,
-                  Elab.siSubst = IntMap.singleton (getNodeId replayBinder) "t2"
-                }
+              mkSchemeInfoFromNodeNames scheme (IntMap.singleton (getNodeId replayBinder) "t2")
             tr =
               EdgeTrace
                 { etRoot = root,
@@ -3865,16 +4308,12 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             solved = mkSolved c IntMap.empty
             scheme =
               Elab.schemeFromType
-                ( Elab.TForall
-                    "a"
+                ( testTForall "a"
                     Nothing
-                    (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+                    (Elab.TArrow (testTVar "a") (testTVar "a"))
                 )
             si =
-              Elab.SchemeInfo
-                { Elab.siScheme = scheme,
-                  Elab.siSubst = IntMap.fromList [(getNodeId sourceKey, "a")]
-                }
+              mkSchemeInfoFromNodeNames scheme (IntMap.fromList [(getNodeId sourceKey, "a")])
             tr =
               EdgeTrace
                 { etRoot = root,
@@ -3926,16 +4365,12 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             solved = mkSolved c IntMap.empty
             scheme =
               Elab.schemeFromType
-                ( Elab.TForall
-                    "t2"
+                ( testTForall "t2"
                     Nothing
-                    (Elab.TArrow (Elab.TVar "t2") (Elab.TVar "t2"))
+                    (Elab.TArrow (testTVar "t2") (testTVar "t2"))
                 )
             si =
-              Elab.SchemeInfo
-                { Elab.siScheme = scheme,
-                  Elab.siSubst = IntMap.singleton (getNodeId replayBinder) "t2"
-                }
+              mkSchemeInfoFromNodeNames scheme (IntMap.singleton (getNodeId replayBinder) "t2")
             tr =
               EdgeTrace
                 { etRoot = root,
@@ -3991,16 +4426,12 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             solved = mkSolved c IntMap.empty
             scheme =
               Elab.schemeFromType
-                ( Elab.TForall
-                    "t77"
+                ( testTForall "t77"
                     Nothing
-                    (Elab.TArrow (Elab.TVar "t77") (Elab.TVar "t77"))
+                    (Elab.TArrow (testTVar "t77") (testTVar "t77"))
                 )
             si =
-              Elab.SchemeInfo
-                { Elab.siScheme = scheme,
-                  Elab.siSubst = IntMap.singleton (getNodeId replayGhost) "t77"
-                }
+              mkSchemeInfoFromNodeNames scheme (IntMap.singleton (getNodeId replayGhost) "t77")
             tr =
               EdgeTrace
                 { etRoot = root,
@@ -4051,16 +4482,12 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             solved = mkSolved c IntMap.empty
             scheme =
               Elab.schemeFromType
-                ( Elab.TForall
-                    "t1"
+                ( testTForall "t1"
                     Nothing
-                    (Elab.TArrow (Elab.TVar "t1") (Elab.TVar "t1"))
+                    (Elab.TArrow (testTVar "t1") (testTVar "t1"))
                 )
             si =
-              Elab.SchemeInfo
-                { Elab.siScheme = scheme,
-                  Elab.siSubst = IntMap.singleton (getNodeId binderA) "t1"
-                }
+              mkSchemeInfoFromNodeNames scheme (IntMap.singleton (getNodeId binderA) "t1")
             tr =
               EdgeTrace
                 { etRoot = root,
@@ -4113,12 +4540,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             solved = mkSolved c IntMap.empty
             scheme =
               Elab.schemeFromType
-                (Elab.TForall "a" Nothing (Elab.TVar "a"))
+                (testTForall "a" Nothing (testTVar "a"))
             si =
-              Elab.SchemeInfo
-                { Elab.siScheme = scheme,
-                  Elab.siSubst = IntMap.fromList [(getNodeId replayBinder, "a")]
-                }
+              mkSchemeInfoFromNodeNames scheme (IntMap.fromList [(getNodeId replayBinder, "a")])
             tr =
               EdgeTrace
                 { etRoot = root,
@@ -4146,7 +4570,168 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
           Right inst ->
             expectationFailure ("Expected fail-fast non-binder OpGraft, got " ++ Elab.pretty inst)
 
-      it "accepts replay targets from siSubst key-space when replay scheme binders are mixed parseable/non-parseable" $ do
+      it "stores SchemeInfo binder refs from ref-subst identity keys" $ do
+        let sourceKey = NodeId 1
+            replayTarget = NodeId 2
+            sourceRef = graphTypeBinderRef (getNodeId sourceKey) "t1"
+            replayRef = graphTypeBinderRef (getNodeId replayTarget) "a"
+            scheme =
+              ElabTypes.mkElabSchemeWithRefs
+                [(sourceRef, Nothing), (replayRef, Nothing)]
+                (Elab.TArrow (ElabTypes.tVarWithRef sourceRef) (ElabTypes.tVarWithRef replayRef))
+            subst =
+              IntMap.fromList
+                [ (getNodeId sourceKey, "t1"),
+                  (getNodeId replayTarget, "a")
+                ]
+            si =
+              mkSchemeInfoFromNodeNames scheme subst
+            binderIdentities =
+              map
+                (ElabTypes.typeBinderIdentityKey . ElabTypes.typeBinderRefIdentity . fst)
+                (ElabTypes.schemeBinderRefs (Elab.siScheme si))
+        binderIdentities `shouldBe` [getNodeId sourceKey, getNodeId replayTarget]
+        case ElabTypes.schemeBody (Elab.siScheme si) of
+          Elab.TArrow (Elab.TVarRef sourceBodyRef) (Elab.TVarRef replayBodyRef) ->
+            map (ElabTypes.typeBinderIdentityKey . ElabTypes.typeBinderRefIdentity) [sourceBodyRef, replayBodyRef]
+              `shouldBe` [getNodeId sourceKey, getNodeId replayTarget]
+          other ->
+            expectationFailure ("Expected SchemeInfo body refs, got: " ++ show other)
+        schemeInfoNameSubst si `shouldBe` subst
+
+      it "does not equate schemes by binder display names alone" $ do
+        let refA = graphTypeBinderRef 1 "a"
+            refB = graphTypeBinderRef 2 "a"
+            siA =
+              Elab.schemeInfoFromRefSubst
+                (ElabTypes.mkElabSchemeWithRefs [(refA, Nothing)] (ElabTypes.tVarWithRef refA))
+                (IntMap.singleton 1 refA)
+            siB =
+              Elab.schemeInfoFromRefSubst
+                (ElabTypes.mkElabSchemeWithRefs [(refB, Nothing)] (ElabTypes.tVarWithRef refB))
+                (IntMap.singleton 2 refB)
+            binderDisplayNames =
+              map (ElabTypes.typeBinderRefName . fst) . ElabTypes.schemeBinderRefs
+        binderDisplayNames (Elab.siScheme siA) `shouldBe` binderDisplayNames (Elab.siScheme siB)
+        (Elab.siScheme siA == Elab.siScheme siB) `shouldBe` False
+
+      it "keeps same-named SchemeInfo binder refs distinct from ref subst" $ do
+        let refA =
+              ElabTypes.typeBinderRefFromIdentity
+                (ElabTypes.typeBinderIdentityFromNode (NodeId 71))
+                "a"
+            refB =
+              ElabTypes.typeBinderRefFromIdentity
+                (ElabTypes.typeBinderIdentityFromNode (NodeId 72))
+                "a"
+            scheme =
+              ElabTypes.mkElabSchemeWithRefs
+                [(refA, Nothing), (refB, Nothing)]
+                (Elab.TArrow (ElabTypes.tVarWithRef refA) (ElabTypes.tVarWithRef refB))
+            si =
+              Elab.schemeInfoFromRefSubst
+                scheme
+                (IntMap.fromList [(71, refA), (72, refB)])
+        map (ElabTypes.typeBinderRefIdentity . fst) (ElabTypes.schemeBinderRefs (Elab.siScheme si))
+          `shouldBe` [ElabTypes.typeBinderRefIdentity refA, ElabTypes.typeBinderRefIdentity refB]
+
+      it "keeps same-named SchemeInfo binder refs distinct from name subst" $ do
+        let refA = graphTypeBinderRef 81 "a"
+            refB = graphTypeBinderRef 82 "a"
+            scheme =
+              ElabTypes.mkElabSchemeWithRefs
+                [(refA, Nothing), (refB, Nothing)]
+                (Elab.TArrow (ElabTypes.tVarWithRef refB) (ElabTypes.tVarWithRef refB))
+            si =
+              mkSchemeInfoFromNodeNames scheme (IntMap.fromList [(81, "a"), (82, "a")])
+            binderIdentityKeys =
+              map
+                (ElabTypes.typeBinderIdentityKey . ElabTypes.typeBinderRefIdentity . fst)
+                (ElabTypes.schemeBinderRefs (Elab.siScheme si))
+        binderIdentityKeys `shouldBe` [81, 82]
+        case ElabTypes.schemeBody (Elab.siScheme si) of
+          Elab.TArrow (Elab.TVarRef leftRef) (Elab.TVarRef rightRef) ->
+            map (ElabTypes.typeBinderIdentityKey . ElabTypes.typeBinderRefIdentity) [leftRef, rightRef]
+              `shouldBe` [82, 82]
+          other ->
+            expectationFailure ("Expected duplicate-name SchemeInfo body refs, got: " ++ show other)
+
+      it "freshens later SchemeInfo binders by identity when only later names collide" $ do
+        let refA =
+              ElabTypes.typeBinderRefFromIdentity
+                (ElabTypes.typeBinderIdentityFromNode (NodeId 61))
+                "a"
+            refB =
+              ElabTypes.typeBinderRefFromIdentity
+                (ElabTypes.typeBinderIdentityFromNode (NodeId 62))
+                "b"
+            scheme =
+              ElabTypes.mkElabSchemeWithRefs
+                [ (refA, Nothing),
+                  (refB, Just (boundFromType (Elab.TArrow (ElabTypes.tVarWithRef refA) (Elab.TBase (BaseTy "Int")))))
+                ]
+                (Elab.TArrow (ElabTypes.tVarWithRef refA) (ElabTypes.tVarWithRef refB))
+            schemeInfo =
+              Elab.schemeInfoFromRefSubst
+                scheme
+                (IntMap.fromList [(61, refA), (62, refB)])
+            reserved =
+              Algebra.mkEnv
+                ( Map.singleton
+                    "captured"
+                    (Elab.schemeInfoFromRefSubst (Elab.schemeFromType (ElabTypes.tVarWithRef refB)) IntMap.empty)
+                )
+            freshened = Algebra.freshenSchemeInfoAgainstEnv reserved schemeInfo
+        case ElabTypes.schemeBinderRefs (Elab.siScheme freshened) of
+          [(refA', Nothing), (refB', Just bound)] -> do
+            ElabTypes.typeBinderRefIdentity refA' `shouldBe` ElabTypes.typeBinderRefIdentity refA
+            ElabTypes.typeBinderRefName refA' `shouldBe` "a"
+            ElabTypes.typeBinderRefIdentity refB' `shouldBe` ElabTypes.typeBinderRefIdentity refB
+            ElabTypes.typeBinderRefName refB' `shouldBe` "b1"
+            ElabTypes.tyToElab bound `shouldBe` Elab.TArrow (ElabTypes.tVarWithRef refA') (Elab.TBase (BaseTy "Int"))
+            ElabTypes.schemeInfoBinderRefSubst freshened `shouldBe` IntMap.fromList [(61, refA'), (62, refB')]
+            ElabTypes.schemeBody (Elab.siScheme freshened)
+              `shouldBe` Elab.TArrow (ElabTypes.tVarWithRef refA') (ElabTypes.tVarWithRef refB')
+          other ->
+            expectationFailure ("Expected two freshened SchemeInfo binders, got: " ++ show other)
+
+      it "freshens same-named SchemeInfo binders independently by identity" $ do
+        let refA =
+              ElabTypes.typeBinderRefFromIdentity
+                (ElabTypes.typeBinderIdentityFromNode (NodeId 63))
+                "a"
+            refB =
+              ElabTypes.typeBinderRefFromIdentity
+                (ElabTypes.typeBinderIdentityFromNode (NodeId 64))
+                "a"
+            scheme =
+              ElabTypes.mkElabSchemeWithRefs
+                [(refA, Nothing), (refB, Nothing)]
+                (Elab.TArrow (ElabTypes.tVarWithRef refA) (ElabTypes.tVarWithRef refB))
+            schemeInfo =
+              Elab.schemeInfoFromRefSubst
+                scheme
+                (IntMap.fromList [(63, refA), (64, refB)])
+            reserved =
+              Algebra.mkEnv
+                ( Map.singleton
+                    "captured"
+                    (Elab.schemeInfoFromRefSubst (Elab.schemeFromType (ElabTypes.tVarWithRef refA)) IntMap.empty)
+                )
+            freshened = Algebra.freshenSchemeInfoAgainstEnv reserved schemeInfo
+        case ElabTypes.schemeBinderRefs (Elab.siScheme freshened) of
+          [(refA', Nothing), (refB', Nothing)] -> do
+            ElabTypes.typeBinderRefIdentity refA' `shouldBe` ElabTypes.typeBinderRefIdentity refA
+            ElabTypes.typeBinderRefName refA' `shouldBe` "a1"
+            ElabTypes.typeBinderRefIdentity refB' `shouldBe` ElabTypes.typeBinderRefIdentity refB
+            ElabTypes.typeBinderRefName refB' `shouldBe` "a2"
+            ElabTypes.schemeInfoBinderRefSubst freshened `shouldBe` IntMap.fromList [(63, refA'), (64, refB')]
+            ElabTypes.schemeBody (Elab.siScheme freshened)
+              `shouldBe` Elab.TArrow (ElabTypes.tVarWithRef refA') (ElabTypes.tVarWithRef refB')
+          other ->
+            expectationFailure ("Expected same-named SchemeInfo binders to freshen independently, got: " ++ show other)
+
+      it "accepts replay targets from ref-subst key-space when replay scheme binders are mixed parseable/non-parseable" $ do
         let root = NodeId 100
             sourceKey = NodeId 1
             replayTarget = NodeId 2
@@ -4171,30 +4756,23 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             -- Mixed binder names: "t1" parses as binder id, "a" does not.
             scheme =
               Elab.schemeFromType
-                ( Elab.TForall
-                    "t1"
+                ( testTForall "t1"
                     Nothing
-                    ( Elab.TForall
-                        "a"
+                    ( testTForall "a"
                         Nothing
-                        (Elab.TArrow (Elab.TVar "t1") (Elab.TVar "t1"))
+                        (Elab.TArrow (testTVar "t1") (testTVar "t1"))
                     )
                 )
             si =
-              Elab.SchemeInfo
-                { Elab.siScheme = scheme,
-                  Elab.siSubst =
-                    IntMap.fromList
-                      [ (getNodeId sourceKey, "t1"),
+              mkSchemeInfoFromNodeNames scheme (IntMap.fromList [ (getNodeId sourceKey, "t1"),
                         (getNodeId replayTarget, "a")
-                      ]
-                }
+                      ])
             tr =
               EdgeTrace
                 { etRoot = root,
                   etBinderArgs = [(sourceKey, argNode)],
                   etInterior = fromListInterior [root, sourceKey, replayTarget, argNode],
-                  -- Target comes from siSubst key-space, not parseable binder-name extraction.
+                  -- Target comes from ref-subst key-space, not parseable binder-name extraction.
                   etBinderReplayMap = IntMap.fromList [(getNodeId sourceKey, replayTarget)],
                   etReplayDomainBinders = [],
                   etCopyMap = mempty,
@@ -4212,7 +4790,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
         case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) Nothing (Just si) (Just tr) ew of
           Left (Elab.PhiInvariantError msg)
             | "trace binder replay-map target outside replay binder domain" `isInfixOf` msg ->
-                expectationFailure ("Expected mixed-name replay domain to include siSubst key-space, got: " ++ msg)
+                expectationFailure ("Expected mixed-name replay domain to include ref-subst key-space, got: " ++ msg)
           Left err ->
             expectationFailure ("Expected successful translation, got " ++ show err)
           Right _ ->
@@ -4243,20 +4821,15 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             solved = mkSolved c (IntMap.fromList [(getNodeId binderB, aliasB)])
             scheme =
               Elab.schemeFromType
-                ( Elab.TForall
-                    "a"
+                ( testTForall "a"
                     Nothing
-                    ( Elab.TForall
-                        "b"
+                    ( testTForall "b"
                         Nothing
-                        (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+                        (Elab.TArrow (testTVar "a") (testTVar "a"))
                     )
                 )
             si =
-              Elab.SchemeInfo
-                { Elab.siScheme = scheme,
-                  Elab.siSubst = IntMap.fromList [(getNodeId binderA, "a"), (getNodeId binderB, "b")]
-                }
+              mkSchemeInfoFromNodeNames scheme (IntMap.fromList [(getNodeId binderA, "a"), (getNodeId binderB, "b")])
             ew =
               EdgeWitness
                 { ewEdgeId = EdgeId 0,
@@ -4299,20 +4872,15 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             solved = mkSolved c (IntMap.fromList [(getNodeId binderA, alias), (getNodeId binderB, alias)])
             scheme =
               Elab.schemeFromType
-                ( Elab.TForall
-                    "a"
+                ( testTForall "a"
                     Nothing
-                    ( Elab.TForall
-                        "b"
+                    ( testTForall "b"
                         Nothing
-                        (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+                        (Elab.TArrow (testTVar "a") (testTVar "a"))
                     )
                 )
             si =
-              Elab.SchemeInfo
-                { Elab.siScheme = scheme,
-                  Elab.siSubst = IntMap.fromList [(getNodeId binderA, "a"), (getNodeId binderB, "b")]
-                }
+              mkSchemeInfoFromNodeNames scheme (IntMap.fromList [(getNodeId binderA, "a"), (getNodeId binderB, "b")])
             ew =
               EdgeWitness
                 { ewEdgeId = EdgeId 0,
@@ -4351,16 +4919,12 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             solved = mkSolved c IntMap.empty
             scheme =
               Elab.schemeFromType
-                ( Elab.TForall
-                    "a"
+                ( testTForall "a"
                     Nothing
-                    (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+                    (Elab.TArrow (testTVar "a") (testTVar "a"))
                 )
             si =
-              Elab.SchemeInfo
-                { Elab.siScheme = scheme,
-                  Elab.siSubst = IntMap.fromList [(getNodeId binderA, "a")]
-                }
+              mkSchemeInfoFromNodeNames scheme (IntMap.fromList [(getNodeId binderA, "a")])
             ew =
               EdgeWitness
                 { ewEdgeId = EdgeId 0,
@@ -4402,12 +4966,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             solved = mkSolved c IntMap.empty
             scheme =
               Elab.schemeFromType
-                (Elab.TForall "a" Nothing (Elab.TVar "a"))
+                (testTForall "a" Nothing (testTVar "a"))
             si =
-              Elab.SchemeInfo
-                { Elab.siScheme = scheme,
-                  Elab.siSubst = IntMap.fromList [(getNodeId binderA, "a")]
-                }
+              mkSchemeInfoFromNodeNames scheme (IntMap.fromList [(getNodeId binderA, "a")])
             tr =
               EdgeTrace
                 { etRoot = root,
@@ -4457,24 +5018,18 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         ]
                   }
             solved = mkSolved c IntMap.empty
-            -- Deliberately inconsistent fixture: binderB is in siSubst/binder key-space
+            -- Deliberately inconsistent fixture: binderB is in ref-subst/binder key-space
             -- but absent from the scheme's quantifier spine.
             scheme =
               Elab.schemeFromType
-                ( Elab.TForall
-                    "a"
+                ( testTForall "a"
                     Nothing
-                    (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+                    (Elab.TArrow (testTVar "a") (testTVar "a"))
                 )
             si =
-              Elab.SchemeInfo
-                { Elab.siScheme = scheme,
-                  Elab.siSubst =
-                    IntMap.fromList
-                      [ (getNodeId binderA, "a"),
+              mkSchemeInfoFromNodeNames scheme (IntMap.fromList [ (getNodeId binderA, "a"),
                         (getNodeId binderB, "b")
-                      ]
-                }
+                      ])
             ew =
               EdgeWitness
                 { ewEdgeId = EdgeId 0,
@@ -4516,20 +5071,14 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             solved = mkSolved c IntMap.empty
             scheme =
               Elab.schemeFromType
-                ( Elab.TForall
-                    "a"
+                ( testTForall "a"
                     Nothing
-                    (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+                    (Elab.TArrow (testTVar "a") (testTVar "a"))
                 )
             si =
-              Elab.SchemeInfo
-                { Elab.siScheme = scheme,
-                  Elab.siSubst =
-                    IntMap.fromList
-                      [ (getNodeId binderA, "a"),
+              mkSchemeInfoFromNodeNames scheme (IntMap.fromList [ (getNodeId binderA, "a"),
                         (getNodeId binderB, "b")
-                      ]
-                }
+                      ])
             tr =
               EdgeTrace
                 { etRoot = root,
@@ -4585,8 +5134,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         ]
                   }
             solved = mkSolved c IntMap.empty
-            scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
-            si = Elab.SchemeInfo {Elab.siScheme = scheme, Elab.siSubst = IntMap.fromList [(getNodeId n, "a"), (getNodeId m, "b")]}
+            scheme = Elab.schemeFromType (testTForall "a" Nothing (testTForall "b" Nothing (Elab.TArrow (testTVar "a") (testTVar "b"))))
+            si = mkSchemeInfoFromNodeNames scheme (IntMap.fromList [(getNodeId n, "a"), (getNodeId m, "b")])
             tr =
               EdgeTrace
                 { etRoot = root,
@@ -4630,8 +5179,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         ]
                   }
             solved = mkSolved c IntMap.empty
-            scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
-            si = Elab.SchemeInfo {Elab.siScheme = scheme, Elab.siSubst = IntMap.fromList [(getNodeId n, "a"), (getNodeId m, "b")]}
+            scheme = Elab.schemeFromType (testTForall "a" Nothing (testTForall "b" Nothing (Elab.TArrow (testTVar "a") (testTVar "b"))))
+            si = mkSchemeInfoFromNodeNames scheme (IntMap.fromList [(getNodeId n, "a"), (getNodeId m, "b")])
             tr =
               EdgeTrace
                 { etRoot = root,
@@ -4675,8 +5224,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         ]
                   }
             solved = mkSolved c IntMap.empty
-            scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
-            si = Elab.SchemeInfo {Elab.siScheme = scheme, Elab.siSubst = IntMap.fromList [(getNodeId n, "a"), (getNodeId m, "b")]}
+            scheme = Elab.schemeFromType (testTForall "a" Nothing (testTForall "b" Nothing (Elab.TArrow (testTVar "a") (testTVar "b"))))
+            si = mkSchemeInfoFromNodeNames scheme (IntMap.fromList [(getNodeId n, "a"), (getNodeId m, "b")])
             tr =
               EdgeTrace
                 { etRoot = root,
@@ -4725,8 +5274,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         ]
                   }
             solved = mkSolved c IntMap.empty
-            scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
-            si = Elab.SchemeInfo {Elab.siScheme = scheme, Elab.siSubst = IntMap.fromList [(getNodeId n, "a"), (getNodeId m, "b")]}
+            scheme = Elab.schemeFromType (testTForall "a" Nothing (testTForall "b" Nothing (Elab.TArrow (testTVar "a") (testTVar "b"))))
+            si = mkSchemeInfoFromNodeNames scheme (IntMap.fromList [(getNodeId n, "a"), (getNodeId m, "b")])
             tr =
               EdgeTrace
                 { etRoot = root,
@@ -4787,13 +5336,13 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             solved = mkSolved constraint IntMap.empty
             scheme =
               Elab.schemeFromType
-                (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
+                (testTForall "a" Nothing (testTForall "b" Nothing (Elab.TArrow (testTVar "a") (testTVar "b"))))
             subst =
               IntMap.fromList
                 [ (getNodeId binderA, "a"),
                   (getNodeId binderB, "b")
                 ]
-            si = Elab.SchemeInfo {Elab.siScheme = scheme, Elab.siSubst = subst}
+            si = mkSchemeInfoFromNodeNames scheme subst
             -- Root graft uses InstApp (eliminates one ∀); a later binder-indexed
             -- op must see the updated identity spine.
             ops = [OpGraft intNode root, OpRaise binderB]
@@ -4815,10 +5364,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
       describe "binder-spine safety" $ do
         it "detects quantified-type and identity-spine mismatches before reorder reads binders" $ do
           let ty =
-                Elab.TForall
-                  "a"
+                testTForall "a"
                   Nothing
-                  (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b")))
+                  (testTForall "b" Nothing (Elab.TArrow (testTVar "a") (testTVar "b")))
               ids = [Just (NodeId 1)]
               vs = PhiTestSupport.mkVSpine ty ids
           case PhiTestSupport.assertSpineSync vs ty ids of
@@ -4832,10 +5380,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
         it "reports out-of-range binder reads through PhiInvariantError" $ do
           let ty =
-                Elab.TForall
-                  "a"
+                testTForall "a"
                   Nothing
-                  (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b")))
+                  (testTForall "b" Nothing (Elab.TArrow (testTVar "a") (testTVar "b")))
               vs = PhiTestSupport.mkVSpine ty [Just (NodeId 1), Just (NodeId 2)]
           case PhiTestSupport.vSpineNameAt vs 2 of
             Left (Elab.PhiInvariantError msg) -> do
@@ -4848,13 +5395,46 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
         it "preserves valid binder names, bounds, and identities through checked access" $ do
           let boundA = boundFromType (Elab.TBase (BaseTy "Int"))
-              ty =
-                Elab.TForall
+              refA =
+                ElabTypes.typeBinderRefFromIdentity
+                  (ElabTypes.typeBinderIdentityFromNode (NodeId 1))
                   "a"
+              refB =
+                ElabTypes.typeBinderRefFromIdentity
+                  (ElabTypes.typeBinderIdentityFromNode (NodeId 2))
+                  "b"
+              ty =
+                ElabTypes.tForallWithRef
+                  refA
                   Nothing
-                  (Elab.TForall "b" (Just boundA) (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b")))
+                  (ElabTypes.tForallWithRef refB (Just boundA) (Elab.TArrow (ElabTypes.tVarWithRef refA) (ElabTypes.tVarWithRef refB)))
               vs = PhiTestSupport.mkVSpine ty [Just (NodeId 1), Just (NodeId 2)]
-          PhiTestSupport.vSpineBinderAt vs 1 `shouldBe` Right ("b", Just boundA, Just (NodeId 2))
+          PhiTestSupport.vSpineBinderAt vs 1 `shouldBe` Right (refB, Just boundA, Just (NodeId 2))
+
+        it "preserves same-named binder identities in the virtual spine" $ do
+          let refA =
+                ElabTypes.typeBinderRefFromIdentity
+                  (ElabTypes.typeBinderIdentityFromNode (NodeId 1))
+                  "a"
+              refB =
+                ElabTypes.typeBinderRefFromIdentity
+                  (ElabTypes.typeBinderIdentityFromNode (NodeId 2))
+                  "a"
+              ty =
+                ElabTypes.tForallWithRef
+                  refA
+                  Nothing
+                  (ElabTypes.tForallWithRef
+                    refB
+                    Nothing
+                    (Elab.TArrow (ElabTypes.tVarWithRef refA) (ElabTypes.tVarWithRef refB)))
+              ids = [Just (NodeId 1), Just (NodeId 2)]
+              vs = PhiTestSupport.mkVSpine ty ids
+          PhiTestSupport.assertSpineSync vs ty ids `shouldBe` Right ()
+          map ElabTypes.typeBinderRefIdentity (PhiTestSupport.vSpineBinderRefs vs)
+            `shouldBe` [ElabTypes.typeBinderRefIdentity refA, ElabTypes.typeBinderRefIdentity refB]
+          PhiTestSupport.vSpineBinderAt vs 0 `shouldBe` Right (refA, Nothing, Just (NodeId 1))
+          PhiTestSupport.vSpineBinderAt vs 1 `shouldBe` Right (refB, Nothing, Just (NodeId 2))
 
       it "scheme-aware Φ can target a non-front binder (reordering before instantiation)" $ do
         -- Build a constraint graph with proper nested TyForall structure for ∀a. ∀b. a -> b
@@ -4892,13 +5472,13 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
             scheme =
               Elab.schemeFromType
-                (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
+                (testTForall "a" Nothing (testTForall "b" Nothing (Elab.TArrow (testTVar "a") (testTVar "b"))))
             subst =
               IntMap.fromList
                 [ (getNodeId binderA, "a"),
                   (getNodeId binderB, "b")
                 ]
-            si = Elab.SchemeInfo {Elab.siScheme = scheme, Elab.siSubst = subst}
+            si = mkSchemeInfoFromNodeNames scheme subst
 
             -- Witness says: graft Int into binder "b", then weaken it.
             ops = [OpGraft intNode binderB, OpWeaken binderB]
@@ -4919,10 +5499,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
         out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
         let expected =
-              Elab.TForall
-                "a"
+              testTForall "a"
                 Nothing
-                (Elab.TArrow (Elab.TVar "a") (Elab.TBase (BaseTy "Int")))
+                (Elab.TArrow (testTVar "a") (Elab.TBase (BaseTy "Int")))
         canonType out `shouldBe` canonType expected
 
       it "bounded bound-match graft-weaken emits InstElim (thesis-exact individual ops)" $ do
@@ -4955,12 +5534,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             solved = mkSolved constraint IntMap.empty
             scheme =
               Elab.schemeFromType
-                (Elab.TForall "a" (Just (Elab.TBase (BaseTy "Int"))) (Elab.TVar "a"))
+                (testTForall "a" (Just (Elab.TBase (BaseTy "Int"))) (testTVar "a"))
             si =
-              Elab.SchemeInfo
-                { Elab.siScheme = scheme,
-                  Elab.siSubst = IntMap.fromList [(getNodeId binder, "a")]
-                }
+              mkSchemeInfoFromNodeNames scheme (IntMap.fromList [(getNodeId binder, "a")])
             ops = [OpGraft argInt binder, OpWeaken binder]
             ew =
               EdgeWitness
@@ -5005,26 +5581,16 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                     cBindParents = bindParents
                   }
             solved = mkSolved constraint IntMap.empty
+            refA = graphTypeBinderRef (getNodeId binderA) "a"
+            refB = graphTypeBinderRef (getNodeId binderB) "b"
             scheme =
-              Elab.schemeFromType
-                ( Elab.TForall
-                    "a"
-                    Nothing
-                    ( Elab.TForall
-                        "b"
-                        Nothing
-                        (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))
-                    )
-                )
+              ElabTypes.mkElabSchemeWithRefs
+                [(refA, Nothing), (refB, Nothing)]
+                (Elab.TArrow (ElabTypes.tVarWithRef refA) (ElabTypes.tVarWithRef refB))
             si =
-              Elab.SchemeInfo
-                { Elab.siScheme = scheme,
-                  Elab.siSubst =
-                    IntMap.fromList
-                      [ (getNodeId binderA, "a"),
+              mkSchemeInfoFromNodeNames scheme (IntMap.fromList [ (getNodeId binderA, "a"),
                         (getNodeId binderB, "b")
-                      ]
-                }
+                      ])
             ewGW =
               EdgeWitness
                 { ewEdgeId = EdgeId 0,
@@ -5047,10 +5613,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
         _phiGW <- requireRight (phiFromEdgeWitnessFixtureTrace solved (Just si) ewGW)
         out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phiGRW)
         let expected =
-              Elab.TForall
-                "a"
+              testTForall "a"
                 Nothing
-                (Elab.TArrow (Elab.TVar "a") (Elab.TBase (BaseTy "Int")))
+                (Elab.TArrow (testTVar "a") (Elab.TBase (BaseTy "Int")))
         canonType out `shouldBe` canonType expected
 
       it "non-root graft-weaken with a bottom argument does not collapse codomain to bottom" $ do
@@ -5085,24 +5650,17 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             solved = mkSolved constraint IntMap.empty
             scheme =
               Elab.schemeFromType
-                ( Elab.TForall
-                    "a"
+                ( testTForall "a"
                     Nothing
-                    ( Elab.TForall
-                        "b"
+                    ( testTForall "b"
                         Nothing
-                        (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))
+                        (Elab.TArrow (testTVar "a") (testTVar "b"))
                     )
                 )
             si =
-              Elab.SchemeInfo
-                { Elab.siScheme = scheme,
-                  Elab.siSubst =
-                    IntMap.fromList
-                      [ (getNodeId binderA, "a"),
+              mkSchemeInfoFromNodeNames scheme (IntMap.fromList [ (getNodeId binderA, "a"),
                         (getNodeId binderB, "b")
-                      ]
-                }
+                      ])
             ew =
               EdgeWitness
                 { ewEdgeId = EdgeId 0,
@@ -5136,9 +5694,13 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   }
             solved = mkSolved constraint IntMap.empty
 
-            scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TVar "a"))
+            refA = graphTypeBinderRef (getNodeId binder) "a"
+            scheme =
+              ElabTypes.mkElabSchemeWithRefs
+                [(refA, Nothing)]
+                (ElabTypes.tVarWithRef refA)
             subst = IntMap.fromList [(getNodeId binder, "a")]
-            si = Elab.SchemeInfo {Elab.siScheme = scheme, Elab.siSubst = subst}
+            si = mkSchemeInfoFromNodeNames scheme subst
 
             ops = [OpWeaken binder]
             ew =
@@ -5187,9 +5749,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
             scheme =
               Elab.schemeFromType
-                (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
+                (testTForall "a" Nothing (testTForall "b" Nothing (Elab.TArrow (testTVar "a") (testTVar "b"))))
             subst = IntMap.fromList [(getNodeId binderA, "a"), (getNodeId binderB, "b")]
-            si = Elab.SchemeInfo {Elab.siScheme = scheme, Elab.siSubst = subst}
+            si = mkSchemeInfoFromNodeNames scheme subst
 
             -- Merge binder "b" into binder "a", i.e. ∀a. ∀b. a -> b  ~~>  ∀a. a -> a
             ops = [OpMerge binderB binderA]
@@ -5206,10 +5768,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
         phi <- requireRight (phiFromEdgeWitnessFixtureTrace solved (Just si) ew)
         out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
         let expected =
-              Elab.TForall
-                "a"
+              testTForall "a"
                 Nothing
-                (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+                (Elab.TArrow (testTVar "a") (testTVar "a"))
         canonType out `shouldBe` canonType expected
 
       it "scheme-aware Φ can translate RaiseMerge (alias one binder to another)" $ do
@@ -5245,9 +5806,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
             scheme =
               Elab.schemeFromType
-                (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
+                (testTForall "a" Nothing (testTForall "b" Nothing (Elab.TArrow (testTVar "a") (testTVar "b"))))
             subst = IntMap.fromList [(getNodeId binderA, "a"), (getNodeId binderB, "b")]
-            si = Elab.SchemeInfo {Elab.siScheme = scheme, Elab.siSubst = subst}
+            si = mkSchemeInfoFromNodeNames scheme subst
 
             ops = [OpRaiseMerge binderB binderA]
             ew =
@@ -5263,18 +5824,17 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
         phi <- requireRight (phiFromEdgeWitnessFixtureTrace solved (Just si) ew)
         out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
         let expected =
-              Elab.TForall
-                "a"
+              testTForall "a"
                 Nothing
-                (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+                (Elab.TArrow (testTVar "a") (testTVar "a"))
         canonType out `shouldBe` canonType expected
 
       it "scheme-aware Φ can translate Raise (raise a binder to the front)" $ do
         let scheme =
               Elab.schemeFromType
-                (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
+                (testTForall "a" Nothing (testTForall "b" Nothing (Elab.TArrow (testTVar "a") (testTVar "b"))))
             subst = IntMap.fromList [(1, "a"), (2, "b")]
-            si = Elab.SchemeInfo {Elab.siScheme = scheme, Elab.siSubst = subst}
+            si = mkSchemeInfoFromNodeNames scheme subst
             root = NodeId 100
             aN = NodeId 1
             bN = NodeId 2
@@ -5312,34 +5872,29 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
         phi <- requireRight (phiFromEdgeWitnessFixtureTrace solved (Just si) ew)
         out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
         let expected =
-              Elab.TForall
-                "u0"
+              testTForall "u0"
                 Nothing
-                ( Elab.TForall
-                    "a"
+                ( testTForall "a"
                     Nothing
-                    (Elab.TArrow (Elab.TVar "a") (Elab.TVar "u0"))
+                    (Elab.TArrow (testTVar "a") (testTVar "u0"))
                 )
         canonType out `shouldBe` canonType expected
 
       it "scheme-aware Φ places Raise after bound dependencies (well-scoped bound)" $ do
         let scheme =
               Elab.schemeFromType
-                ( Elab.TForall
-                    "a"
+                ( testTForall "a"
                     Nothing
-                    ( Elab.TForall
-                        "b"
+                    ( testTForall "b"
                         Nothing
-                        ( Elab.TForall
-                            "c"
-                            (Just (boundFromType (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))))
-                            (Elab.TArrow (Elab.TVar "a") (Elab.TArrow (Elab.TVar "c") (Elab.TVar "b")))
+                        ( testTForall "c"
+                            (Just (boundFromType (Elab.TArrow (testTVar "a") (testTVar "a"))))
+                            (Elab.TArrow (testTVar "a") (Elab.TArrow (testTVar "c") (testTVar "b")))
                         )
                     )
                 )
             subst = IntMap.fromList [(1, "a"), (2, "b"), (3, "c")]
-            si = Elab.SchemeInfo {Elab.siScheme = scheme, Elab.siSubst = subst}
+            si = mkSchemeInfoFromNodeNames scheme subst
             root = NodeId 100
             aN = NodeId 1
             bN = NodeId 2
@@ -5382,16 +5937,13 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
         out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
 
         let expected =
-              Elab.TForall
-                "a"
+              testTForall "a"
                 Nothing
-                ( Elab.TForall
-                    "u0"
-                    (Just (boundFromType (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))))
-                    ( Elab.TForall
-                        "b"
+                ( testTForall "u0"
+                    (Just (boundFromType (Elab.TArrow (testTVar "a") (testTVar "a"))))
+                    ( testTForall "b"
                         Nothing
-                        (Elab.TArrow (Elab.TVar "a") (Elab.TArrow (Elab.TVar "u0") (Elab.TVar "b")))
+                        (Elab.TArrow (testTVar "a") (Elab.TArrow (testTVar "u0") (testTVar "b")))
                     )
                 )
         canonType out `shouldBe` canonType expected
@@ -5427,21 +5979,18 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
             scheme =
               Elab.schemeFromType
-                ( Elab.TForall
-                    "a"
+                ( testTForall "a"
                     Nothing
-                    ( Elab.TForall
-                        "b"
+                    ( testTForall "b"
                         Nothing
-                        ( Elab.TForall
-                            "c"
-                            (Just (boundFromType (Elab.TArrow (Elab.TVar "b") (Elab.TVar "b"))))
-                            (Elab.TArrow (Elab.TVar "b") (Elab.TArrow (Elab.TVar "c") (Elab.TVar "a")))
+                        ( testTForall "c"
+                            (Just (boundFromType (Elab.TArrow (testTVar "b") (testTVar "b"))))
+                            (Elab.TArrow (testTVar "b") (Elab.TArrow (testTVar "c") (testTVar "a")))
                         )
                     )
                 )
             subst = IntMap.fromList [(1, "a"), (2, "b"), (3, "c")]
-            si = Elab.SchemeInfo {Elab.siScheme = scheme, Elab.siSubst = subst}
+            si = mkSchemeInfoFromNodeNames scheme subst
 
             tr =
               EdgeTrace
@@ -5469,16 +6018,13 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
         out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
 
         let expected =
-              Elab.TForall
-                "b"
+              testTForall "b"
                 Nothing
-                ( Elab.TForall
-                    "u0"
-                    (Just (boundFromType (Elab.TArrow (Elab.TVar "b") (Elab.TVar "b"))))
-                    ( Elab.TForall
-                        "a"
+                ( testTForall "u0"
+                    (Just (boundFromType (Elab.TArrow (testTVar "b") (testTVar "b"))))
+                    ( testTForall "a"
                         Nothing
-                        (Elab.TArrow (Elab.TVar "b") (Elab.TArrow (Elab.TVar "u0") (Elab.TVar "a")))
+                        (Elab.TArrow (testTVar "b") (Elab.TArrow (testTVar "u0") (testTVar "a")))
                     )
                 )
         canonType out `shouldBe` canonType expected
@@ -5611,8 +6157,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         ]
                   }
             solved = mkSolved c IntMap.empty
-            scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TVar "a"))
-            si = Elab.SchemeInfo {Elab.siScheme = scheme, Elab.siSubst = IntMap.fromList [(getNodeId binderN, "a")]}
+            scheme = Elab.schemeFromType (testTForall "a" Nothing (testTVar "a"))
+            si = mkSchemeInfoFromNodeNames scheme (IntMap.fromList [(getNodeId binderN, "a")])
             tr =
               EdgeTrace
                 { etRoot = root,
@@ -5666,8 +6212,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         ]
                   }
             solved = mkSolved c IntMap.empty
-            scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TVar "a"))
-            si = Elab.SchemeInfo {Elab.siScheme = scheme, Elab.siSubst = IntMap.fromList [(getNodeId binderN, "a")]}
+            scheme = Elab.schemeFromType (testTForall "a" Nothing (testTVar "a"))
+            si = mkSchemeInfoFromNodeNames scheme (IntMap.fromList [(getNodeId binderN, "a")])
             tr =
               EdgeTrace
                 { etRoot = root,
@@ -5722,8 +6268,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                         ]
                   }
             solved = mkSolved c IntMap.empty
-            scheme = Elab.schemeFromType (Elab.TForall "a" Nothing (Elab.TVar "a"))
-            si = Elab.SchemeInfo {Elab.siScheme = scheme, Elab.siSubst = IntMap.fromList [(getNodeId binderN, "a")]}
+            scheme = Elab.schemeFromType (testTForall "a" Nothing (testTVar "a"))
+            si = mkSchemeInfoFromNodeNames scheme (IntMap.fromList [(getNodeId binderN, "a")])
             tr =
               EdgeTrace
                 { etRoot = root,
@@ -5783,7 +6329,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             solved = mkSolved c IntMap.empty
 
         steps <- requireRight (Elab.contextToNodeBound (presolutionViewFromSolved solved) root cN)
-        steps `shouldBe` Just [Elab.StepUnder "t1", Elab.StepInside]
+        steps `shouldBe` Just [Elab.StepUnderRef (ElabTypes.typeBinderRefFromIdentity (ElabTypes.typeBinderIdentityFromNode aN) "t1"), Elab.StepInside]
 
       it "contextToNodeBound computes under-quantifier contexts (context)" $ do
         -- Same graph as above: binder b is after a at the root.
@@ -5815,7 +6361,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             solved = mkSolved c IntMap.empty
 
         steps <- requireRight (Elab.contextToNodeBound (presolutionViewFromSolved solved) root bN)
-        steps `shouldBe` Just [Elab.StepUnder "t1"]
+        steps `shouldBe` Just [Elab.StepUnderRef (ElabTypes.typeBinderRefFromIdentity (ElabTypes.typeBinderIdentityFromNode aN) "t1")]
 
       it "contextToNodeBound handles shared bound subgraphs (context dag)" $ do
         -- The bound of b is the same node that also appears in the body.
@@ -6070,20 +6616,18 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   }
             solved = mkSolved c IntMap.empty
 
-            nTy = Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")
+            nTy = Elab.TArrow (testTVar "a") (testTVar "a")
             scheme =
               Elab.schemeFromType
-                ( Elab.TForall
-                    "a"
+                ( testTForall "a"
                     Nothing
-                    ( Elab.TForall
-                        "m"
-                        (Just (boundFromType (Elab.TForall "c" (Just (boundFromType nTy)) (Elab.TVar "c"))))
-                        (Elab.TVar "m")
+                    ( testTForall "m"
+                        (Just (boundFromType (testTForall "c" (Just (boundFromType nTy)) (testTVar "c"))))
+                        (testTVar "m")
                     )
                 )
             subst = IntMap.fromList [(getNodeId aN, "a"), (getNodeId mN, "m")]
-            si = Elab.SchemeInfo {Elab.siScheme = scheme, Elab.siSubst = subst}
+            si = mkSchemeInfoFromNodeNames scheme subst
 
             tr =
               EdgeTrace
@@ -6111,16 +6655,13 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
         out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
 
         let expected =
-              Elab.TForall
-                "a"
+              testTForall "a"
                 Nothing
-                ( Elab.TForall
-                    "u0"
+                ( testTForall "u0"
                     (Just (boundFromType nTy))
-                    ( Elab.TForall
-                        "m"
+                    ( testTForall "m"
                         (Just (boundFromType nTy))
-                        (Elab.TVar "m")
+                        (testTVar "m")
                     )
                 )
         out `shouldAlphaEqType` expected
@@ -6228,10 +6769,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               (EApp (EVar "id") (EVar "id"))
       (_term, ty) <- requirePipeline expr
       let expected =
-            Elab.TForall
-              "a"
+            testTForall "a"
               Nothing
-              (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+              (Elab.TArrow (testTVar "a") (testTVar "a"))
       ty `shouldAlphaEqType` expected
 
     it "let-use sites are redirected for polymorphic instantiation" $ do
@@ -6306,12 +6846,11 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
       (sch, _subst) <- requireRight (generalizeAt solved (genRef rootGen) arrow)
       let ty = Elab.schemeToType sch
           expected =
-            Elab.TForall
-              "a"
+            testTForall "a"
               Nothing
               ( Elab.TArrow
-                  (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
-                  (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+                  (Elab.TArrow (testTVar "a") (testTVar "a"))
+                  (Elab.TArrow (testTVar "a") (testTVar "a"))
               )
       ty `shouldAlphaEqType` expected
 
@@ -6326,10 +6865,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               )
       (_term, ty) <- requirePipeline expr
       let expected =
-            Elab.TForall
-              "a"
+            testTForall "a"
               Nothing
-              (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+              (Elab.TArrow (testTVar "a") (testTVar "a"))
       ty `shouldAlphaEqType` expected
 
     it "bounded aliasing (b ⩾ a) elaborates to ∀a. a -> a -> a in the canonical pipeline" $ do
@@ -6350,12 +6888,11 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
           expr =
             ELet "c" (EAnn rhs schemeTy) (EAnn (EVar "c") ann)
           expected =
-            Elab.TForall
-              "a"
+            testTForall "a"
               Nothing
               ( Elab.TArrow
-                  (Elab.TVar "a")
-                  (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+                  (testTVar "a")
+                  (Elab.TArrow (testTVar "a") (testTVar "a"))
               )
 
       (_term, ty) <- requireRight (Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr))
@@ -6382,12 +6919,11 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
       (_term, ty) <- requirePipeline expr
       let expected =
-            Elab.TForall
-              "a"
+            testTForall "a"
               (Just (boundFromType (Elab.TBase (BaseTy "Int"))))
               ( Elab.TArrow
-                  (Elab.TVar "a")
-                  (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "b") (Elab.TVar "b")))
+                  (testTVar "a")
+                  (testTForall "b" Nothing (Elab.TArrow (testTVar "b") (testTVar "b")))
               )
       ty `shouldAlphaEqType` expected
 
@@ -6526,7 +7062,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 )
         assertBothPipelinesAlphaEq
           expr
-          (Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
+          (testTForall "a" Nothing (Elab.TArrow (testTVar "a") (testTVar "a")))
 
       it "BUG-004-V1: bool analog of annotated-lambda consumer accepts polymorphic id" $ do
         let expr =
@@ -6660,14 +7196,13 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               expr =
                 ELet "c" (EAnn rhs schemeTy) (EAnn (EVar "c") ann)
               expected =
-                Elab.TForall
-                  "a"
+                testTForall "a"
                   Nothing
                   ( Elab.TArrow
-                      (Elab.TVar "a")
+                      (testTVar "a")
                       ( Elab.TArrow
-                          (Elab.TVar "a")
-                          (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+                          (testTVar "a")
+                          (Elab.TArrow (testTVar "a") (testTVar "a"))
                       )
                   )
           assertBothPipelinesAlphaEq expr expected
@@ -6770,14 +7305,13 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             expr =
               ELet "c" (EAnn rhs schemeTy) (EAnn (EVar "c") ann)
             expected =
-              Elab.TForall
-                "a"
+              testTForall "a"
                 Nothing
                 ( Elab.TArrow
-                    (Elab.TVar "a")
+                    (testTVar "a")
                     ( Elab.TArrow
-                        (Elab.TVar "a")
-                        (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+                        (testTVar "a")
+                        (Elab.TArrow (testTVar "a") (testTVar "a"))
                     )
                 )
         assertBothPipelinesAlphaEq expr expected
@@ -6811,14 +7345,13 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             expr =
               ELet "c" (EAnn rhs schemeTy) (EAnn (EVar "c") ann)
             expected =
-              Elab.TForall
-                "a"
+              testTForall "a"
                 Nothing
                 ( Elab.TArrow
-                    (Elab.TVar "a")
+                    (testTVar "a")
                     ( Elab.TArrow
-                        (Elab.TVar "a")
-                        (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+                        (testTVar "a")
+                        (Elab.TArrow (testTVar "a") (testTVar "a"))
                     )
                 )
         assertBothPipelinesAlphaEq expr expected
@@ -6834,10 +7367,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
         (_term, ty) <- requirePipeline expr
         let expected =
-              Elab.TForall
-                "a"
+              testTForall "a"
                 Nothing
-                (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+                (Elab.TArrow (testTVar "a") (testTVar "a"))
         stripUnusedTopForalls ty
           `shouldAlphaEqType` stripUnusedTopForalls expected
 
@@ -6866,10 +7398,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
       (_term, ty) <- requirePipeline expr
       let expected =
-            Elab.TForall
-              "a"
-              (Just (boundFromType (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "b") (Elab.TVar "b")))))
-              (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+            testTForall "a"
+              (Just (boundFromType (testTForall "b" Nothing (Elab.TArrow (testTVar "b") (testTVar "b")))))
+              (Elab.TArrow (testTVar "a") (testTVar "a"))
       ty `shouldAlphaEqType` expected
 
   -- See Note [ga′ scope selection — Def. 15.3.2 alignment] in Scope.hs

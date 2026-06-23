@@ -30,7 +30,6 @@ import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Phase (Phase)
 import MLF.Elab.Generalize (GaBindParents (..))
 import MLF.Elab.Inst (schemeToType)
-import qualified MLF.Elab.Inst as Inst
 import MLF.Elab.ReadModel (ElabReadModel)
 import MLF.Elab.Run.Scope (generalizeTargetNode, schemeBodyTarget)
 import MLF.Elab.Run.TypeOps (InlineBoundVarsContext, inlineBoundVarsTypeWithContext)
@@ -39,16 +38,21 @@ import MLF.Elab.Types
     ElabScheme,
     ElabType,
     SchemeInfo (..),
+    TypeBinderRef,
+    schemeBinderRefs,
+    schemeInfoBinderRefSubst,
     schemeFromType,
+    typeBinderRefNode,
+    typeBinderRefsSameIdentity,
   )
-import MLF.Reify.Core (reifyTypeWithNamedSetNoFallbackReadModel)
-import MLF.Reify.TypeOps (inlineBaseBoundsType, parseNameId)
+import MLF.Reify.Type (reifyTypeWithNamedSetRefsNoFallbackReadModel)
+import MLF.Reify.TypeOps (inlineBaseBoundsType)
 
 type GeneralizeAtWith (p :: Phase) =
   Maybe (GaBindParents p) ->
   NodeRef ->
   NodeId ->
-  Either ElabError (ElabScheme, IntMap.IntMap String)
+  Either ElabError (ElabScheme, IntMap.IntMap TypeBinderRef)
 
 data ScopeContext (p :: Phase) = ScopeContext
   { scPresolutionView :: PresolutionView p,
@@ -83,7 +87,7 @@ scopeRootFromBase scopeContext root =
     gaParents = scGaParents scopeContext
     canonical = pvCanonical presolutionView
 
-generalizeAtNode :: ScopeContext p -> NodeId -> Either ElabError (ElabScheme, IntMap.IntMap String)
+generalizeAtNode :: ScopeContext p -> NodeId -> Either ElabError (ElabScheme, IntMap.IntMap TypeBinderRef)
 generalizeAtNode scopeContext nodeId = do
   scopeRoot <- scopeRootForNode scopeContext nodeId
   let targetC = generalizeTargetNode presolutionView nodeId
@@ -91,25 +95,28 @@ generalizeAtNode scopeContext nodeId = do
   where
     presolutionView = scPresolutionView scopeContext
 
-normalizeSchemeSubstPair :: (ElabScheme, IntMap.IntMap String) -> (ElabScheme, IntMap.IntMap String)
+normalizeSchemeSubstPair :: (ElabScheme, IntMap.IntMap TypeBinderRef) -> (ElabScheme, IntMap.IntMap TypeBinderRef)
 normalizeSchemeSubstPair (schemeRaw, substRaw) =
   let scheme = schemeFromType (schemeToType schemeRaw)
       subst = normalizeSubstForScheme scheme substRaw
    in (scheme, subst)
 
-normalizeSubstForScheme :: ElabScheme -> IntMap.IntMap String -> IntMap.IntMap String
+normalizeSubstForScheme :: ElabScheme -> IntMap.IntMap TypeBinderRef -> IntMap.IntMap TypeBinderRef
 normalizeSubstForScheme scheme substRaw =
-  let (binds, _) = Inst.splitForalls (schemeToType scheme)
+  let refKey ref =
+        case typeBinderRefNode ref of
+          Just node -> Just (getNodeId node)
+          Nothing -> Nothing
    in foldl'
-        ( \acc (name, _) ->
-            if name `elem` IntMap.elems acc
+        ( \acc ref ->
+            if any (typeBinderRefsSameIdentity ref) (IntMap.elems acc)
               then acc
-              else case parseNameId name of
-                Just nid -> IntMap.insertWith (\_ old -> old) nid name acc
+              else case refKey ref of
+                Just nid -> IntMap.insertWith (\_ old -> old) nid ref acc
                 Nothing -> acc
         )
         substRaw
-        binds
+        (map fst (schemeBinderRefs scheme))
 
 reifyNodeTypeDirect :: ScopeContext p -> NodeId -> Either ElabError ElabType
 reifyNodeTypeDirect scopeContext nodeId = do
@@ -131,21 +138,21 @@ reifyNodeTypePreferringBound scopeContext nodeId = do
 reifyTargetType :: ScopeContext p -> IntSet.IntSet -> SchemeInfo -> NodeId -> Either ElabError ElabType
 reifyTargetType scopeContext namedSetReify schemeInfo nodeId =
   let presolutionView = scPresolutionView scopeContext
-      subst = siSubst schemeInfo
+      subst = schemeInfoBinderRefSubst schemeInfo
       targetNode = schemeBodyTarget presolutionView nodeId
-   in reifyTypeWithNamedSetNoFallbackReadModel (scReadModel scopeContext) subst namedSetReify targetNode
+   in reifyTypeWithNamedSetRefsNoFallbackReadModel (scReadModel scopeContext) subst namedSetReify targetNode
 
 reifyTargetNodeType :: ScopeContext p -> IntSet.IntSet -> SchemeInfo -> NodeId -> Either ElabError ElabType
 reifyTargetNodeType scopeContext namedSetReify schemeInfo nodeId =
   let presolutionView = scPresolutionView scopeContext
       canonical = pvCanonical presolutionView
-      subst = siSubst schemeInfo
+      subst = schemeInfoBinderRefSubst schemeInfo
       targetNode = canonical nodeId
-   in reifyTypeWithNamedSetNoFallbackReadModel (scReadModel scopeContext) subst namedSetReify targetNode
+   in reifyTypeWithNamedSetRefsNoFallbackReadModel (scReadModel scopeContext) subst namedSetReify targetNode
 
 reifyTypeForParam :: ScopeContext p -> NodeId -> Either ElabError ElabType
 reifyTypeForParam scopeContext nodeId = do
-  ty <- reifyTypeWithNamedSetNoFallbackReadModel (scReadModel scopeContext) IntMap.empty namedSet nodeId
+  ty <- reifyTypeWithNamedSetRefsNoFallbackReadModel (scReadModel scopeContext) IntMap.empty namedSet nodeId
   let ty' = inlineBaseBounds presolutionView ty
   pure (inlineBoundVarsTypeWithContext (scInlineBoundVarsContext scopeContext) ty')
   where

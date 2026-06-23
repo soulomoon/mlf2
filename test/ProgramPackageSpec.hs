@@ -42,6 +42,7 @@ import MLF.Frontend.Program.Prelude (withPreludeLocatedPackage)
 import MLF.Frontend.Program.Types
     ( CheckedModule (..)
     , CheckedProgram (..)
+    , checkedProgramMain
     )
 import MLF.Frontend.Syntax
     ( Expr (..)
@@ -137,6 +138,7 @@ spec =
                             ExternalBinding
                                 { externalBindingType = intSourceType
                                 , externalBindingMode = ExternalBindingScheme
+                                , externalBindingIdentity = Nothing
                                 }
                         )
                         [ ("value1", externalOneExpr)

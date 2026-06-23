@@ -1,41 +1,40 @@
 module MLF.Elab.Sigma (
     bubbleReorderTo,
-    bubbleReorderToFromSpine,
+    bubbleReorderToFromSpineRefs,
     sigmaReorder
 ) where
 
 import Data.List (elemIndex)
 
 import MLF.Elab.Types
-import MLF.Elab.Inst (applyInstantiation, composeInst, instMany, splitForalls)
+import MLF.Elab.Inst (applyInstantiation, composeInst, instMany)
+import MLF.Reify.TypeOps (splitForallsRefs)
 
--- | Generate the (paper) commutation instantiation that swaps the first two
--- quantifiers of a type ∀(α ⩾ τα). ∀(β ⩾ τβ). τ.
-swapFront :: (String, Maybe BoundType) -> (String, Maybe BoundType) -> Instantiation
-swapFront (_a, mbTa) (_b, mbTb) =
+swapFrontRefs :: (TypeBinderRef, Maybe BoundType) -> (TypeBinderRef, Maybe BoundType) -> Instantiation
+swapFrontRefs (a, mbTa) (b, mbTb) =
     -- xmlf §3.4 “Reordering quantifiers”:
     --   O; ∀(⩾ τα); O; ∀(⩾ τβ); ∀(β ⩾) ∀(α ⩾) h!αi; h!βi
     --
-    -- We keep binder names symbolic; `applyInstantiation` α-renames under-binders.
+    -- We keep binder refs symbolic; `applyInstantiation` α-renames under-binders.
     let ta = maybe TBottom tyToElab mbTa
         tb = maybe TBottom tyToElab mbTb
-        hAbs v = InstSeq (InstInside (InstAbstr v)) InstElim
+        hAbs ref = InstSeq (InstInside (instAbstrWithRef ref)) InstElim
     in instMany
         [ InstIntro
         , InstInside (InstBot ta)
         , InstIntro
         , InstInside (InstBot tb)
-        , InstUnder "β" (InstUnder "α" (InstSeq (hAbs "α") (hAbs "β")))
+        , instUnderWithRef b (instUnderWithRef a (InstSeq (hAbs a) (hAbs b)))
         ]
 
 -- | Swap quantifiers at depth i and i+1 (0-based) by applying `swapFront`
 -- under the first i binders.
 swapAt :: Int -> ElabType -> Either ElabError Instantiation
 swapAt i ty = case (i, ty) of
-    (0, TForall _a ta (TForall _b tb _)) ->
-        Right (swapFront (_a, ta) (_b, tb))
-    (n, TForall v _ body) | n > 0 ->
-        InstUnder v <$> swapAt (n - 1) body
+    (0, TForallRef a ta (TForallRef b tb _)) ->
+        Right (swapFrontRefs (a, ta) (b, tb))
+    (n, TForallRef ref _ body) | n > 0 ->
+        instUnderWithRef ref <$> swapAt (n - 1) body
     _ ->
         Left (InstantiationError ("swapAt: cannot swap at depth " ++ show i ++ " in type " ++ pretty ty))
 
@@ -91,16 +90,14 @@ bubbleReorderTo context ty0 ids0 desired0 = go InstId ty0 ids0 0
             let ids' = swapAdjacent (k - 1) ids
             bubbleLeft (composeInst acc sw) ty' ids' (k - 1) idx
 
--- | Spine-based variant of 'bubbleReorderTo' that works on binder lists
--- instead of 'ElabType'. Does not require 'applyInstantiation'.
-bubbleReorderToFromSpine
+bubbleReorderToFromSpineRefs
     :: Eq a
     => String
-    -> [(String, Maybe BoundType)]
+    -> [(TypeBinderRef, Maybe BoundType)]
     -> [a]
     -> [a]
-    -> Either ElabError (Instantiation, [(String, Maybe BoundType)], [a])
-bubbleReorderToFromSpine context binders0 ids0 desired0 = go InstId binders0 ids0 0
+    -> Either ElabError (Instantiation, [(TypeBinderRef, Maybe BoundType)], [a])
+bubbleReorderToFromSpineRefs context binders0 ids0 desired0 = go InstId binders0 ids0 0
   where
     go acc binders ids idx = do
         step <- checkedReorderBinderPair context ids desired0 idx
@@ -120,28 +117,27 @@ bubbleReorderToFromSpine context binders0 ids0 desired0 = go InstId binders0 ids
     bubbleLeft acc binders ids k idx
         | k <= idx = Right (acc, binders, ids)
         | otherwise = do
-            sw <- swapAtFromSpine (k - 1) binders
+            sw <- swapAtFromSpineRefs (k - 1) binders
             let binders' = swapAdjacent (k - 1) binders
                 ids' = swapAdjacent (k - 1) ids
             bubbleLeft (composeInst acc sw) binders' ids' (k - 1) idx
 
--- | Generate a swap instantiation at depth @i@ from a binder list.
-swapAtFromSpine :: Int -> [(String, Maybe BoundType)] -> Either ElabError Instantiation
-swapAtFromSpine i binders = case drop i binders of
-    (a : b : _) -> Right (underPrefix (take i binders) (swapFront a b))
+swapAtFromSpineRefs :: Int -> [(TypeBinderRef, Maybe BoundType)] -> Either ElabError Instantiation
+swapAtFromSpineRefs i binders = case drop i binders of
+    (a : b : _) -> Right (underPrefix (take i binders) (swapFrontRefs a b))
     _ -> Left (InstantiationError ("swapAtFromSpine: cannot swap at depth " ++ show i))
   where
     underPrefix [] inst = inst
-    underPrefix ((v, _) : rest) inst = InstUnder v (underPrefix rest inst)
+    underPrefix ((ref, _) : rest) inst = instUnderWithRef ref (underPrefix rest inst)
 
 -- | Reorder the leading quantifier spine of `src` so its binder order matches `tgt`.
 -- Returns the instantiation Σ that performs the reordering.
 sigmaReorder :: ElabType -> ElabType -> Either ElabError Instantiation
 sigmaReorder src tgt =
-    let (srcQs, _) = splitForalls src
-        (tgtQs, _) = splitForalls tgt
-        srcIds = map fst srcQs
-        desired = map fst tgtQs
+    let (srcQs, _) = splitForallsRefs src
+        (tgtQs, _) = splitForallsRefs tgt
+        srcIds = map (binderOrderKey . fst) srcQs
+        desired = map (binderOrderKey . fst) tgtQs
     in sigmaReorderTo src srcIds desired
 
 -- | Reorder the leading quantifiers of a type to a desired binder *identity* order
@@ -150,7 +146,11 @@ sigmaReorder src tgt =
 -- Important: applying the commutation instantiations introduces fresh binder names,
 -- so we must *not* use the post-swap binder names for bookkeeping. Instead we track
 -- the intended binder identities in a separate list (`ids`) and update it as we swap.
-sigmaReorderTo :: ElabType -> [String] -> [String] -> Either ElabError Instantiation
+sigmaReorderTo :: Eq a => ElabType -> [a] -> [a] -> Either ElabError Instantiation
 sigmaReorderTo ty0 ids0 desired = do
     (sig, _ty1, _ids1) <- bubbleReorderTo "sigmaReorder" ty0 ids0 desired
     pure sig
+
+binderOrderKey :: TypeBinderRef -> TypeBinderIdentity
+binderOrderKey =
+    typeBinderRefIdentity

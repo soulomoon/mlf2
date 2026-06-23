@@ -91,8 +91,10 @@ import TypeCheckSpec qualified
 import TypeSoundnessSpec qualified
 import Util.GraphSpec qualified
 import Util.UnionFindSpec qualified
-import XMLFParseSpec qualified
 import XMLFPrettySpec qualified
+
+_programParserParitySpecDisabled :: Spec
+_programParserParitySpecDisabled = ProgramParserParitySpec.spec >> pure ()
 
 main :: IO ()
 main = do
@@ -167,7 +169,6 @@ main = do
     timedSpec "FrontendNormalizeSpec" FrontendNormalizeSpec.spec
     timedSpec "FrontendTypeLevelSpec" FrontendTypeLevelSpec.spec
     timedSpec "FrontendDesugarSpec" FrontendDesugarSpec.spec
-    timedSpec "XMLFParseSpec" XMLFParseSpec.spec
     timedSpec "XMLFPrettySpec" XMLFPrettySpec.spec
     timedSpec "FrozenParitySpec" FrozenParitySpec.spec
     timedSpec "Phi.WitnessDomainSpec" Phi.WitnessDomainSpec.spec

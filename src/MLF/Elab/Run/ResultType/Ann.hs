@@ -32,7 +32,7 @@ import MLF.Reify.TypeOps
     )
 import MLF.Elab.Run.Annotation (adjustAnnotationInst, annNode)
 import MLF.Elab.Run.Debug (debugWhenCondM, debugWhenM)
-import MLF.Elab.Run.Instantiation (inferInstAppArgsFromScheme, instInsideFromArgsWithBounds)
+import MLF.Elab.Run.Instantiation (inferInstAppArgsFromSchemeRefs, instInsideFromArgsWithBoundsRefs)
 import MLF.Elab.Run.Scope
     ( bindingScopeRef
     , canonicalizeScopeRef
@@ -109,7 +109,7 @@ computeResultTypeFromAnnWithView ctx view inner innerPre annNodeId eid = do
     let sch = sch0
         subst = subst0
         srcTy = schemeToType sch
-        schemeInfo = SchemeInfo { siScheme = sch, siSubst = subst }
+        schemeInfo = schemeInfoFromRefSubst sch subst
         generalizeTargetCached scopeRoot' target'
             | scopeRoot' == scopeRoot && target' == targetC = Right (sch0, subst0)
             | otherwise = View.rtvGeneralizeTarget view scopeRoot' target'
@@ -122,7 +122,7 @@ computeResultTypeFromAnnWithView ctx view inner innerPre annNodeId eid = do
                 Just bnd -> bnd
                 Nothing -> annNodeId
         reifyMaybe nid =
-            case View.rtvReifyWithNamedSetNoFallback view IntMap.empty namedSetSolved nid of
+            case View.rtvReifyWithNamedSetNoFallback view namedSetSolved nid of
                 Left _ -> Nothing
                 Right ty0 -> Just ty0
         targetTyRawFullM =
@@ -149,7 +149,7 @@ computeResultTypeFromAnnWithView ctx view inner innerPre annNodeId eid = do
                 toBase
                 baseNodesVarOnly
                 (VarStore.lookupVarBound baseConstraint)
-                (View.rtvReifyBaseWithNamesNoFallback view IntMap.empty)
+                (View.rtvReifyBaseNoFallback view)
         targetTyBaseInlineM =
             fmap inlineAllBoundsType targetTyRawM
         annTargetBase =
@@ -183,7 +183,7 @@ computeResultTypeFromAnnWithView ctx view inner innerPre annNodeId eid = do
                 Just baseN ->
                     let baseRoot =
                             resolveBoundBodyConstraint id baseConstraint IntSet.empty baseN
-                    in case View.rtvReifyBaseWithNamesNoFallback view IntMap.empty baseRoot of
+                    in case View.rtvReifyBaseNoFallback view baseRoot of
                         Right ty0 ->
                             let ty1 = inlineBaseBoundsType baseConstraint id ty0
                             in Just (inlineAllBoundsType ty1)
@@ -222,15 +222,17 @@ computeResultTypeFromAnnWithView ctx view inner innerPre annNodeId eid = do
                         else False
             in matchHasForall || rawHasForall || (annotationExplicit && phiHasBoundForall)
     let phiFromTargetArgs =
-            case (sch, targetTyForMatchM) of
-                (Forall binds body, Just targetTy)
+            case targetTyForMatchM of
+                Just targetTy
                     | not targetHasBoundForall ->
-                        inferInstAppArgsFromScheme binds body targetTy
+                        inferInstAppArgsFromSchemeRefs (schemeBinderRefs sch) (schemeBody sch) targetTy
                 _ -> Nothing
         phiFromTarget =
-            case (sch, phiFromTargetArgs) of
-                (Forall binds _, Just args) ->
-                    instInsideFromArgsWithBounds binds (map (inlineBoundVarsTypeForBound presolutionViewForGen) args)
+            case phiFromTargetArgs of
+                Just args ->
+                    instInsideFromArgsWithBoundsRefs
+                        (schemeBinderRefs sch)
+                        (map (inlineBoundVarsTypeForBound presolutionViewForGen) args)
                 _ -> Nothing
         phi =
             if annotationExplicit

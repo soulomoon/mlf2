@@ -5,20 +5,26 @@
 
 module MLF.Elab.Elaborate.Algebra
   ( Env,
+    EnvBinding (..),
     ElabOut (..),
     AlgebraContext (..),
     elabAlg,
     mkEnv,
     mkEnvBinding,
+    mkEnvFromBindings,
+    mkEnvWithBindingDetails,
+    freshenSchemeInfoAgainstEnv,
     resolvedLambdaParamNode,
   )
 where
 
 import Control.Applicative ((<|>))
+import Control.Monad (foldM)
 import Data.Functor.Foldable (para)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.List (find)
+import Data.List (find, mapAccumL)
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, isJust, isNothing)
 import qualified Data.Set as Set
@@ -49,9 +55,8 @@ import MLF.Elab.Elaborate.Scope
     scopeRootForNode,
   )
 import MLF.Elab.Inst (applyInstantiation, schemeToType)
-import qualified MLF.Elab.Inst as Inst
 import MLF.Elab.Reduce (normalize)
-import MLF.Elab.Run.Instantiation (inferInstAppArgsFromScheme)
+import MLF.Elab.Run.Instantiation (inferInstAppArgsFromSchemeRefs)
 import MLF.Elab.Run.ResultType.Util
   ( CandidateSelection (..),
     selectUniqueCandidateBy,
@@ -61,30 +66,69 @@ import MLF.Elab.Run.TypeOps
     inlineBoundVarsTypeWithContext,
     simplifyAnnotationType,
   )
-import MLF.Elab.TermClosure (closeTermWithSchemeSubstIfNeeded)
-import qualified MLF.Elab.TypeCheck as TypeCheck (Env (..), typeCheckWithEnv)
+import MLF.Elab.TermClosure (closeTermWithSchemeSubstRefsIfNeeded)
+import qualified MLF.Elab.TypeCheck as TypeCheck (Env (..), insertResolvedTermBinding, mkTypeCheckEnvWithResolvedTerms, resolvedTermEnvEntries, typeCheckWithEnv)
 import MLF.Elab.Types
   ( BoundType,
     ElabScheme,
     ElabError (..),
-    ElabTerm (..),
+    XmlfTerm (..),
     ElabType,
     Instantiation (..),
+    ResolvedVar (..),
     SchemeInfo (..),
     Ty (..),
+    freshTypeBinderRef,
+    identityGeneratorAfterType,
     mapBoundType,
+    mapResolvedVarType,
+    mkElabSchemeWithRefs,
+    schemeBinderRefs,
+    schemeBody,
+    schemeInfoFromRefSubst,
+    schemeInfoBinderRefSubst,
+    renameTypeBinderRef,
+    TypeBinderRef,
+    typeBinderRefName,
+    typeBinderRefNode,
+    typeBinderRefsSameIdentity,
+    typeBinderRefsSameIdentityAndName,
+    localResolvedVarFromRef,
+    resolvedVarReferenceName,
+    resolvedVarSameIdentity,
+    resolvedVarType,
     schemeFromType,
     tyToElab,
-    pattern Forall,
   )
 import MLF.Frontend.ConstraintGen.Types (AnnExpr (..), AnnExprF (..))
+import qualified MLF.Frontend.Program.Builtins as Builtins
 import MLF.Frontend.Syntax (NormSrcType, SrcBound (..), SrcNorm (..), SrcTy (..), StructBound, VarName)
-import MLF.Reify.TypeOps (alphaEqType, churchAwareEqType, firstNonContractiveRecursiveType, freeTypeVarsType, freshNameLike, parseNameId, substTypeCapture)
+import MLF.Reify.TypeOps
+  ( alphaEqType,
+    churchAwareEqType,
+    firstNonContractiveRecursiveType,
+    freeTypeVarRefsType,
+    freeTypeVarsType,
+    freshNameLike,
+    splitForallsRefs,
+    substTypeCaptureRef,
+  )
+import MLF.Types.Identity
+  ( EnvRef (..),
+    IdDetails (..),
+    IdentityGenerator,
+    LocalRef,
+    freshEnvRef,
+    freshLocalRef,
+    initialIdentityGenerator,
+    identityGeneratorFromNext,
+  )
 import MLF.Util.Trace (TraceConfig, traceGeneralize)
 
 data EnvBinding = EnvBinding
   { ebSchemeInfo :: SchemeInfo,
     ebSchemeType :: ElabType,
+    ebIdentityDetails :: IdDetails,
     ebTransparentMediator :: Bool,
     ebAliasTarget :: Maybe VarName,
     ebExplicitRecursiveParam :: Bool
@@ -117,12 +161,12 @@ data Env = Env
   }
 
 data ElabOut = ElabOut
-  { elabTerm :: Env -> Either ElabError ElabTerm,
-    elabStripped :: Env -> Either ElabError ElabTerm
+  { elabTerm :: Env -> Either ElabError XmlfTerm,
+    elabStripped :: Env -> Either ElabError XmlfTerm
   }
 
 data TypedTerm = TypedTerm
-  { ttTerm :: !ElabTerm,
+  { ttTerm :: !XmlfTerm,
     ttType :: !ElabType
   }
 
@@ -143,19 +187,19 @@ data AlgebraContext (p :: Phase) = AlgebraContext
 containsMuType :: ElabType -> Bool
 containsMuType ty =
   case ty of
-    TMu {} -> True
+    TMuRef {} -> True
     TArrow dom cod -> containsMuType dom || containsMuType cod
     TCon _ args -> any containsMuType args
-    TVarApp _ args -> any containsMuType args
-    TForall _ mb body -> maybe False containsMuBound mb || containsMuType body
+    TVarAppRef _ args -> any containsMuType args
+    TForallRef _ mb body -> maybe False containsMuBound mb || containsMuType body
     _ -> False
   where
     containsMuBound bound = case bound of
       TArrow dom cod -> containsMuType dom || containsMuType cod
       TCon _ args -> any containsMuType args
-      TVarApp _ args -> any containsMuType args
-      TForall _ mb body -> maybe False containsMuBound mb || containsMuType body
-      TMu {} -> True
+      TVarAppRef _ args -> any containsMuType args
+      TForallRef _ mb body -> maybe False containsMuBound mb || containsMuType body
+      TMuRef {} -> True
       _ -> False
 
 hasContractiveRecursiveWitness :: ElabType -> Bool
@@ -164,59 +208,114 @@ hasContractiveRecursiveWitness ty =
 
 isSingleBinderIdentityScheme :: SchemeInfo -> Bool
 isSingleBinderIdentityScheme schemeInfo =
-  case Inst.splitForalls (schemeToType (siScheme schemeInfo)) of
-    ([(binderName, Nothing)], TArrow (TVar dom) (TVar cod)) ->
-      dom == binderName && cod == binderName
+  case (schemeBinderRefs (siScheme schemeInfo), schemeBody (siScheme schemeInfo)) of
+    ([(binderRef, Nothing)], TArrow (TVarRef domRef) (TVarRef codRef)) ->
+      typeBinderRefsSameIdentity binderRef domRef && typeBinderRefsSameIdentity binderRef codRef
     _ -> False
 
 containsInternalTypeVar :: ElabType -> Bool
 containsInternalTypeVar ty =
   case ty of
-    TVar name -> isJust (parseNameId name)
+    TVarRef ref -> isInternalTypeBinderRef ref
     TArrow dom cod -> containsInternalTypeVar dom || containsInternalTypeVar cod
     TCon _ args -> any containsInternalTypeVar args
-    TVarApp name args -> isJust (parseNameId name) || any containsInternalTypeVar args
-    TForall _ mb body -> maybe False containsInternalBoundVar mb || containsInternalTypeVar body
-    TMu _ body -> containsInternalTypeVar body
+    TVarAppRef ref args -> isInternalTypeBinderRef ref || any containsInternalTypeVar args
+    TForallRef _ mb body -> maybe False containsInternalBoundVar mb || containsInternalTypeVar body
+    TMuRef _ body -> containsInternalTypeVar body
     _ -> False
   where
     containsInternalBoundVar bound =
       case bound of
         TArrow dom cod -> containsInternalTypeVar dom || containsInternalTypeVar cod
         TCon _ args -> any containsInternalTypeVar args
-        TVarApp name args -> isJust (parseNameId name) || any containsInternalTypeVar args
-        TForall _ mb body -> maybe False containsInternalBoundVar mb || containsInternalTypeVar body
-        TMu _ body -> containsInternalTypeVar body
+        TVarAppRef ref args -> isInternalTypeBinderRef ref || any containsInternalTypeVar args
+        TForallRef _ mb body -> maybe False containsInternalBoundVar mb || containsInternalTypeVar body
+        TMuRef _ body -> containsInternalTypeVar body
         _ -> False
 
-mkEnvBinding :: SchemeInfo -> Bool -> EnvBinding
-mkEnvBinding schemeInfo transparentMediator =
+isInternalTypeBinderRef :: TypeBinderRef -> Bool
+isInternalTypeBinderRef ref =
+  isJust (typeBinderRefNode ref)
+
+mkEnvBinding :: VarName -> IdDetails -> SchemeInfo -> Bool -> EnvBinding
+mkEnvBinding _ details schemeInfo transparentMediator =
   EnvBinding
     { ebSchemeInfo = schemeInfo,
       ebSchemeType = schemeToType (siScheme schemeInfo),
+      ebIdentityDetails = details,
       ebTransparentMediator = transparentMediator,
       ebAliasTarget = Nothing,
       ebExplicitRecursiveParam = False
     }
 
+mkEnvValueBinding :: VarName -> EnvRef -> SchemeInfo -> Bool -> EnvBinding
+mkEnvValueBinding name envRef =
+  mkEnvBinding name (EnvId envRef)
+
+mkLocalEnvBinding :: VarName -> NodeId -> SchemeInfo -> Bool -> EnvBinding
+mkLocalEnvBinding name nodeId =
+  mkEnvBinding name (LocalId (localRefFromNodeId name nodeId))
+
+localRefFromNodeId :: VarName -> NodeId -> LocalRef
+localRefFromNodeId name nodeId =
+  fst (freshLocalRef name (identityGeneratorFromNext (negate (getNodeId nodeId + 1))))
+
+resolvedLocalBinderFromNode :: VarName -> NodeId -> ElabType -> ResolvedVar
+resolvedLocalBinderFromNode name nodeId ty =
+  ResolvedVar
+    { resolvedVarRuntimeName = name,
+      resolvedVarType = ty,
+      resolvedVarDetails = LocalId (localRefFromNodeId name nodeId)
+    }
+
+mkLocalLamFromNode :: VarName -> NodeId -> ElabType -> XmlfTerm -> XmlfTerm
+mkLocalLamFromNode name nodeId ty =
+  ELam (resolvedLocalBinderFromNode name nodeId ty)
+
+mkLocalLetFromNode :: VarName -> NodeId -> ElabScheme -> XmlfTerm -> XmlfTerm -> XmlfTerm
+mkLocalLetFromNode name nodeId scheme =
+  ELet (resolvedLocalBinderFromNode name nodeId (schemeToType scheme)) scheme
+
 mkEnv :: Map.Map VarName SchemeInfo -> Env
 mkEnv schemeInfos =
+  mkEnvFromBindings (Map.fromList bindings)
+  where
+    (_, bindings) =
+      mapAccumL mkBinding initialIdentityGenerator (Map.toList schemeInfos)
+
+    mkBinding generator (name, schemeInfo) =
+      let (envRef, generator') = freshEnvRef name generator
+       in (generator', (name, mkEnvValueBinding name envRef schemeInfo False))
+
+mkEnvWithBindingDetails :: Map.Map VarName (SchemeInfo, IdDetails) -> Env
+mkEnvWithBindingDetails schemeInfos =
+  mkEnvFromBindings bindings
+  where
+    bindings =
+      Map.mapWithKey
+        (\name (schemeInfo, details) -> mkEnvBinding name details schemeInfo False)
+        schemeInfos
+
+mkEnvFromBindings :: Map.Map VarName EnvBinding -> Env
+mkEnvFromBindings bindings =
   Env
     { envBindings = bindings,
-      envTypeCheck =
-        TypeCheck.Env
-          { TypeCheck.termEnv = Map.map ebSchemeType bindings,
-            TypeCheck.typeEnv = Map.empty
-          }
+      envTypeCheck = typeCheckEnvFromBindings bindings
     }
-  where
-    bindings = Map.map (`mkEnvBinding` False) schemeInfos
+
+typeCheckEnvFromBindings :: Map.Map VarName EnvBinding -> TypeCheck.Env
+typeCheckEnvFromBindings bindings =
+  TypeCheck.mkTypeCheckEnvWithResolvedTerms
+    [ (resolvedEnvBindingVar name binding, ebSchemeType binding)
+    | (name, binding) <- Map.toList bindings
+    ]
+    Map.empty
 
 envSchemeInfos :: Env -> Map.Map VarName SchemeInfo
 envSchemeInfos = Map.map ebSchemeInfo . envBindings
 
 envSchemeTypes :: Env -> Map.Map VarName ElabType
-envSchemeTypes = TypeCheck.termEnv . envTypeCheck
+envSchemeTypes = Map.map ebSchemeType . envBindings
 
 typeCheckEnvFrom :: Env -> TypeCheck.Env
 typeCheckEnvFrom = envTypeCheck
@@ -229,10 +328,10 @@ insertEnvBinding name binding env =
   env
     { envBindings = Map.insert name binding (envBindings env),
       envTypeCheck =
-        (envTypeCheck env)
-          { TypeCheck.termEnv =
-              Map.insert name (ebSchemeType binding) (TypeCheck.termEnv (envTypeCheck env))
-          }
+        TypeCheck.insertResolvedTermBinding
+          (resolvedEnvBindingVar name binding)
+          (ebSchemeType binding)
+          (envTypeCheck env)
     }
 
 adjustEnvBinding :: (EnvBinding -> EnvBinding) -> VarName -> Env -> Env
@@ -247,6 +346,55 @@ lookupSchemeInfo name env = ebSchemeInfo <$> lookupEnvBinding name env
 lookupSchemeType :: VarName -> Env -> Maybe ElabType
 lookupSchemeType name env = ebSchemeType <$> lookupEnvBinding name env
 
+resolvedEnvBindingVar :: VarName -> EnvBinding -> ResolvedVar
+resolvedEnvBindingVar name binding =
+  ResolvedVar
+    { resolvedVarRuntimeName = name,
+      resolvedVarType = ebSchemeType binding,
+      resolvedVarDetails = ebIdentityDetails binding
+    }
+
+newtype LocalVarKey
+  = LocalVarResolved ResolvedVar
+
+localVarKeyMatchesReference :: LocalVarKey -> ResolvedVar -> Bool
+localVarKeyMatchesReference key resolved =
+  case key of
+    LocalVarResolved expected ->
+      resolvedVarSameIdentity expected resolved
+
+localVarKeyMatchesLocalOccurrence :: LocalVarKey -> ResolvedVar -> Bool
+localVarKeyMatchesLocalOccurrence key resolved =
+  case key of
+    LocalVarResolved expected ->
+      resolvedVarSameIdentity expected resolved
+
+refreshLocalResolvedVarType :: LocalVarKey -> ElabType -> XmlfTerm -> XmlfTerm
+refreshLocalResolvedVarType target ty =
+  go
+  where
+    matches resolved =
+      localVarKeyMatchesLocalOccurrence target resolved
+
+    go term =
+      case term of
+        EVarNode resolved
+          | matches resolved ->
+              EVarNode (mapResolvedVarType (const ty) resolved)
+          | otherwise -> term
+        ELit {} -> term
+        ELam resolved body
+          | localVarKeyMatchesReference target resolved -> ELam resolved body
+          | otherwise -> ELam resolved (go body)
+        EApp fun arg -> EApp (go fun) (go arg)
+        ELet resolved scheme rhs body
+          | localVarKeyMatchesReference target resolved -> ELet resolved scheme rhs body
+          | otherwise -> ELet resolved scheme (go rhs) (go body)
+        ETyAbsRef ref mb body -> ETyAbsRef ref mb (go body)
+        ETyInst inner inst -> ETyInst (go inner) inst
+        ERoll rollTy body -> ERoll rollTy (go body)
+        EUnroll body -> EUnroll (go body)
+
 sourceAnnotatedTypeFrom :: AlgebraContext p -> Env -> AnnExpr -> Either ElabError (Maybe ElabType)
 sourceAnnotatedTypeFrom algebraContext env ann =
   case ann of
@@ -258,30 +406,30 @@ sourceAnnotatedTypeFrom algebraContext env ann =
     AUnfold inner _ _ -> sourceAnnotatedTypeFrom algebraContext env inner
     _ -> pure Nothing
 
-sourceSchemePairFromType :: NormSrcType -> Either ElabError (ElabScheme, IntMap.IntMap String)
+sourceSchemePairFromType :: NormSrcType -> Either ElabError (ElabScheme, IntMap.IntMap TypeBinderRef)
 sourceSchemePairFromType srcTy = do
   ty <- srcTypeToElabType srcTy
   pure (schemeFromType ty, IntMap.empty)
 
-sourceSchemePairForNode :: AlgebraContext p -> ScopeContext p -> NodeId -> Either ElabError (Maybe (ElabScheme, IntMap.IntMap String))
+sourceSchemePairForNode :: AlgebraContext p -> ScopeContext p -> NodeId -> Either ElabError (Maybe (ElabScheme, IntMap.IntMap TypeBinderRef))
 sourceSchemePairForNode algebraContext scopeContext nodeId =
   case IntMap.lookup (getNodeId nodeId) (algAnnSourceTypes algebraContext) of
     Just srcTy -> do
       fallback <- sourceSchemePairFromType srcTy
       pure $
         case reifyNodeTypePreferringBound scopeContext nodeId of
-          Right ty@TMu {} -> Just (schemeFromType ty, IntMap.empty)
+          Right ty@TMuRef {} -> Just (schemeFromType ty, IntMap.empty)
           _ -> Just fallback
     Nothing -> pure Nothing
 
-sourceSchemePairForOuterAnnotation :: AlgebraContext p -> ScopeContext p -> AnnExpr -> Either ElabError (Maybe (ElabScheme, IntMap.IntMap String))
+sourceSchemePairForOuterAnnotation :: AlgebraContext p -> ScopeContext p -> AnnExpr -> Either ElabError (Maybe (ElabScheme, IntMap.IntMap TypeBinderRef))
 sourceSchemePairForOuterAnnotation algebraContext scopeContext annExpr =
   case annExpr of
     AAnn _ annNodeId _ -> sourceSchemePairForNode algebraContext scopeContext annNodeId
     AUnfold (AAnn _ annNodeId _) _ _ -> sourceSchemePairForNode algebraContext scopeContext annNodeId
     _ -> pure Nothing
 
-sourceSchemePairForAnnotation :: AlgebraContext p -> ScopeContext p -> AnnExpr -> Either ElabError (Maybe (ElabScheme, IntMap.IntMap String))
+sourceSchemePairForAnnotation :: AlgebraContext p -> ScopeContext p -> AnnExpr -> Either ElabError (Maybe (ElabScheme, IntMap.IntMap TypeBinderRef))
 sourceSchemePairForAnnotation algebraContext scopeContext annExpr =
   case annExpr of
     AAnn inner annNodeId _ -> do
@@ -327,83 +475,93 @@ freeTypeVarsEnvSchemes env =
       | schemeTy <- Map.elems (envSchemeTypes env)
     ]
 
-applyTypeVarRenames :: [(String, String)] -> ElabType -> ElabType
-applyTypeVarRenames renames ty0 =
-  foldl'
-    ( \ty (old, new) ->
-        if old == new
-          then ty
-          else substTypeCapture old (TVar new) ty
-    )
-    ty0
-    renames
-
-freeTypeVarsInOccurrenceOrder :: ElabType -> [String]
-freeTypeVarsInOccurrenceOrder ty0 = reverse (snd (goType Set.empty Set.empty [] ty0))
+freeTypeVarRefsInOccurrenceOrder :: ElabType -> [TypeBinderRef]
+freeTypeVarRefsInOccurrenceOrder ty0 = reverse (snd (goType [] [] [] ty0))
   where
-    addName bound seen acc name
-      | name `Set.member` bound = (seen, acc)
-      | name `Set.member` seen = (seen, acc)
-      | otherwise = (Set.insert name seen, name : acc)
+    refMember ref =
+      any (typeBinderRefsSameIdentity ref)
+
+    addRef bound seen acc ref
+      | refMember ref bound = (seen, acc)
+      | refMember ref seen = (seen, acc)
+      | otherwise = (ref : seen, ref : acc)
 
     goType bound seen acc ty =
       case ty of
-        TVar name -> addName bound seen acc name
+        TVarRef ref -> addRef bound seen acc ref
         TArrow dom cod ->
           let (seen', acc') = goType bound seen acc dom
            in goType bound seen' acc' cod
         TCon _ args ->
           foldl' (\(seen', acc') arg -> goType bound seen' acc' arg) (seen, acc) args
-        TVarApp name args ->
-          let (seen', acc') = addName bound seen acc name
+        TVarAppRef ref args ->
+          let (seen', acc') = addRef bound seen acc ref
            in foldl' (\(seen'', acc'') arg -> goType bound seen'' acc'' arg) (seen', acc') args
-        TForall name mb body ->
+        TForallRef ref mb body ->
           let (seen', acc') =
                 maybe (seen, acc) (\boundTy -> goType bound seen acc (tyToElab boundTy)) mb
-           in goType (Set.insert name bound) seen' acc' body
-        TMu name body -> goType (Set.insert name bound) seen acc body
+           in goType (ref : bound) seen' acc' body
+        TMuRef ref body -> goType (ref : bound) seen acc body
         TBase _ -> (seen, acc)
         TBottom -> (seen, acc)
 
 freshenSchemeInfoAgainstEnv :: Env -> SchemeInfo -> SchemeInfo
 freshenSchemeInfoAgainstEnv env schemeInfo =
   let reservedNames = freeTypeVarsEnvSchemes env
-      schemeTy = schemeToType (siScheme schemeInfo)
-      (binds, body0) = Inst.splitForalls schemeTy
-      binderNames = map fst binds
+      scheme0 = siScheme schemeInfo
+      binds = schemeBinderRefs scheme0
+      body0 = schemeBody scheme0
+      binderNames = map (typeBinderRefName . fst) binds
       binderDomain = Set.fromList binderNames
-      renames = reverse (snd (foldl' (chooseFreshBinder binderDomain) (reservedNames, []) binderNames))
-      actualRenames = filter (\(old, new) -> old /= new) renames
-      renameMap = Map.fromList actualRenames
-   in if null actualRenames
+      renames = reverse (snd (foldl' (chooseFreshBinder binderDomain) (reservedNames, []) (map fst binds)))
+      refRenames =
+        [ (oldRef, renameTypeBinderRef newName oldRef)
+          | (oldRef, newName) <- renames,
+            typeBinderRefName oldRef /= newName
+        ]
+   in if null refRenames
         then schemeInfo
         else
-          let binds' = renameSchemeBinds [] renames binds
-              body' = applyTypeVarRenames actualRenames body0
-              subst' =
-                IntMap.map
-                  (\name -> Map.findWithDefault name name renameMap)
-                  (siSubst schemeInfo)
-           in SchemeInfo
-                { siScheme = Forall binds' body',
-                  siSubst = subst'
-                }
+          let binds' = renameSchemeBinds refRenames binds
+              body' = applyTypeVarRefRenames refRenames body0
+              scheme' = mkElabSchemeWithRefs binds' body'
+              subst' = IntMap.map (applyRefRenames refRenames) (schemeInfoBinderRefSubst schemeInfo)
+           in schemeInfoFromRefSubst scheme' subst'
   where
     chooseFreshBinder binderDomain (used, acc) binder =
-      let binder' =
-            if Set.member binder used
-              then freshNameLike binder (Set.union used binderDomain)
-              else binder
-       in (Set.insert binder' used, (binder, binder') : acc)
+      let name = typeBinderRefName binder
+          name' =
+            if Set.member name used
+              then freshNameLike name (Set.union used binderDomain)
+              else name
+       in (Set.insert name' used, (binder, name') : acc)
 
-    renameSchemeBinds _ [] [] = []
-    renameSchemeBinds prev ((old, new) : restRenames) ((_, mbBound) : restBinds) =
-      let mbBound' = fmap (mapBoundType (applyTypeVarRenames prev)) mbBound
-          prev'
-            | old == new = prev
-            | otherwise = prev ++ [(old, new)]
-       in (new, mbBound') : renameSchemeBinds prev' restRenames restBinds
-    renameSchemeBinds _ _ binds = binds
+    renameSchemeBinds renames0 = go []
+      where
+        go _ [] = []
+        go prev ((ref, mbBound) : restBinds) =
+          let ref' = applyRefRenames renames0 ref
+              mbBound' = fmap (mapBoundType (applyTypeVarRefRenames prev)) mbBound
+              prev'
+                | typeBinderRefsSameIdentityAndName ref ref' = prev
+                | otherwise = prev ++ [(ref, ref')]
+           in (ref', mbBound') : go prev' restBinds
+
+    applyRefRenames [] ref = ref
+    applyRefRenames ((oldRef, newRef) : rest) ref
+      | typeBinderRefsSameIdentity oldRef ref = newRef
+      | otherwise = applyRefRenames rest ref
+
+    applyTypeVarRefRenames :: [(TypeBinderRef, TypeBinderRef)] -> ElabType -> ElabType
+    applyTypeVarRefRenames renames0 ty0 =
+      foldl'
+        ( \ty (oldRef, newRef) ->
+            if typeBinderRefsSameIdentityAndName oldRef newRef
+              then ty
+              else substTypeCaptureRef oldRef (TVarRef newRef) ty
+        )
+        ty0
+        renames0
 
 structuralRecursiveCandidateType :: StructuralRecursiveCandidate -> ElabType
 structuralRecursiveCandidateType candidate =
@@ -422,24 +580,23 @@ selectStructuralRecursiveCandidate =
 
 schemeHasForwardBoundReference :: ElabType -> Bool
 schemeHasForwardBoundReference schemeTy =
-  let (binds, _) = Inst.splitForalls schemeTy
+  let (binds, _) = splitForallsRefs schemeTy
       go [] = False
       go ((_, mbBound) : rest) =
-        let laterNames = Set.fromList (map fst rest)
+        let laterRefs = map fst rest
             boundMentionsLater =
               case mbBound of
                 Just bound ->
-                  not
-                    ( Set.null
-                        (Set.intersection laterNames (freeTypeVarsType (tyToElab bound)))
-                    )
+                  any
+                    (\laterRef -> any (typeBinderRefsSameIdentity laterRef) (freeTypeVarRefsType bound))
+                    laterRefs
                 Nothing -> False
          in boundMentionsLater || go rest
    in go binds
 
 schemeTypeHasExplicitBound :: ElabType -> Bool
 schemeTypeHasExplicitBound schemeTy =
-  let (binds, _) = Inst.splitForalls schemeTy
+  let (binds, _) = splitForallsRefs schemeTy
    in any (isJust . snd) binds
 
 stripAnnExpr :: AnnExpr -> AnnExpr
@@ -449,10 +606,10 @@ stripAnnExpr annExpr =
     AUnfold inner _ _ -> stripAnnExpr inner
     _ -> annExpr
 
-stripLeadingTyAbs :: ElabTerm -> ElabTerm
+stripLeadingTyAbs :: XmlfTerm -> XmlfTerm
 stripLeadingTyAbs term =
   case term of
-    ETyAbs _ _ body -> stripLeadingTyAbs body
+    ETyAbsRef _ _ body -> stripLeadingTyAbs body
     _ -> term
 
 annAppSpine :: AnnExpr -> (AnnExpr, [AnnExpr])
@@ -527,7 +684,7 @@ elabAlg :: AlgebraContext p -> AnnExprF (AnnExpr, ElabOut) -> ElabOut
 elabAlg algebraContext layer =
   case layer of
     AVarF v _ -> mkOut $ \env ->
-      maybe (Left (EnvLookup v)) (const (Right (EVar v))) (lookupEnvBinding v env)
+      maybe (Left (EnvLookup v)) (Right . EVarNode . resolvedEnvBindingVar v) (lookupEnvBinding v env)
     ALitF lit _ -> mkOut $ \_ -> Right (ELit lit)
     ALamF v paramNode _ (bodyAnn, bodyOut) lamNodeId ->
       let f env = do
@@ -535,7 +692,7 @@ elabAlg algebraContext layer =
                 resolvedParam = algResolvedLambdaParamNode algebraContext lamNodeId
                 isBareInternalTyVar ty =
                   case ty of
-                    TVar name -> isJust (parseNameId name)
+                    TVarRef ref -> isInternalTypeBinderRef ref
                     _ -> False
                 recursiveParamTyFromEnv annExpr =
                   let mediatedVarUse expr =
@@ -556,9 +713,9 @@ elabAlg algebraContext layer =
                             | mediatedVarUse arg,
                               Just schemeTy <- lookupSchemeType recurName env ->
                                 case schemeTy of
-                                  muTy@(TMu muName muBody)
+                                  muTy@(TMuRef muRef muBody)
                                     | hasContractiveRecursiveWitness muTy ->
-                                        case substTypeCapture muName muTy muBody of
+                                        case substTypeCaptureRef muRef muTy muBody of
                                           TArrow dom _ -> Just dom
                                           _ -> Nothing
                                   _ -> Nothing
@@ -626,17 +783,14 @@ elabAlg algebraContext layer =
                       preservedTy <- srcTypeToElabType srcTy
                       pure
                         ( preservedTy,
-                          SchemeInfo
-                            { siScheme = schemeFromType preservedTy,
-                              siSubst = IntMap.empty
-                            }
+                          schemeInfoFromRefSubst (schemeFromType preservedTy) IntMap.empty
                         )
                     Nothing ->
                       case generalizeAtNode scopeContext annNodeId of
                         Right (paramScheme, _subst) ->
-                          let paramTy0 = case paramScheme of
-                                Forall [(name, Just bnd)] bodyTy
-                                  | bodyTy == TVar name -> tyToElab bnd
+                          let paramTy0 = case (schemeBinderRefs paramScheme, schemeBody paramScheme) of
+                                ([(ref, Just bnd)], TVarRef bodyRef)
+                                  | typeBinderRefsSameIdentity ref bodyRef -> tyToElab bnd
                                 _ -> schemeToType paramScheme
                               -- If generalizeAtNode returned a bare TVar (over-generalized)
                               -- or a base type that disagrees with the constraint graph's
@@ -645,45 +799,36 @@ elabAlg algebraContext layer =
                               -- annotation-let picks up the body's result type (e.g. Bool)
                               -- instead of the actual annotation type (e.g. μ Nat).
                               paramTyResolved = case paramTy0 of
-                                TVar {} ->
+                                TVarRef {} ->
                                   case reifyNodeTypePreferringBound scopeContext annNodeId of
-                                    Right ty@TMu {} -> ty
+                                    Right ty@TMuRef {} -> ty
                                     _ -> paramTy0
                                 TBase {} ->
                                   case reifyNodeTypePreferringBound scopeContext annNodeId of
-                                    Right ty@TMu {} -> ty
+                                    Right ty@TMuRef {} -> ty
                                     _ -> paramTy0
                                 _
-                                  | TMu {} <- paramTySurface,
+                                  | TMuRef {} <- paramTySurface,
                                     Just unfoldedSurface <- unfoldMuOnce paramTySurface,
                                     (alphaEqType unfoldedSurface paramTy0 || churchAwareEqType unfoldedSurface paramTy0) ->
                                       paramTySurface
                                 _ -> paramTy0
                            in pure
                                 ( paramTyResolved,
-                                  SchemeInfo
-                                    { siScheme = schemeFromType paramTyResolved,
-                                      siSubst = IntMap.empty
-                                    }
+                                  schemeInfoFromRefSubst (schemeFromType paramTyResolved) IntMap.empty
                                 )
                         Left (SchemeFreeVars _ _) ->
                           pure
                             ( paramTySurface,
-                              SchemeInfo
-                                { siScheme = schemeFromType paramTySurface,
-                                  siSubst = IntMap.empty
-                                }
+                              schemeInfoFromRefSubst (schemeFromType paramTySurface) IntMap.empty
                             )
                         Left err -> Left err
                 Nothing ->
                   pure
                     ( paramTySurface,
-                      SchemeInfo
-                        { siScheme = schemeFromType paramTySurface,
-                          siSubst = IntMap.empty
-                        }
+                      schemeInfoFromRefSubst (schemeFromType paramTySurface) IntMap.empty
                     )
-            let env' = insertEnvBinding v (mkEnvBinding paramSchemeInfo False) env
+            let env' = insertEnvBinding v (mkLocalEnvBinding v paramNode paramSchemeInfo False) env
                 env'' =
                   adjustEnvBinding
                     ( \binding ->
@@ -697,7 +842,7 @@ elabAlg algebraContext layer =
             bodyRaw <- elabTerm bodyElabOut env''
             let bodyTcEnv = typeCheckEnvFrom env''
                 body' = stripUnusedTopTyAbsWithEnv bodyTcEnv bodyRaw
-            pure (ELam v paramTy body')
+            pure (mkLocalLamFromNode v paramNode paramTy body')
        in mkOut f
     AAppF (fAnn, fOut) (aAnn, aOut) funEid argEid appNodeId ->
       let f env = do
@@ -715,10 +860,10 @@ elabAlg algebraContext layer =
                   let directTy = either (const Nothing) Just (reifyNodeTypeDirect scopeContext appNodeId)
                       boundTy = either (const Nothing) Just (reifyNodeTypePreferringBound scopeContext appNodeId)
                    in case directTy of
-                        Just TVar {} -> boundTy <|> directTy
+                        Just TVarRef {} -> boundTy <|> directTy
                         Just TBottom -> boundTy <|> directTy
                         Just directTy'
-                          | Just boundMu@TMu {} <- boundTy,
+                          | Just boundMu@TMuRef {} <- boundTy,
                             Just unfoldedBound <- unfoldMuOnce boundMu,
                             let directNorm = stripVacuousForallsDeep directTy',
                             let unfoldedNorm = stripVacuousForallsDeep unfoldedBound,
@@ -729,7 +874,7 @@ elabAlg algebraContext layer =
                   case sourceVarName ann >>= (`lookupSchemeType` env) of
                     Just schemeTy ->
                       case schemeTy of
-                        TMu {} -> True
+                        TMuRef {} -> True
                         _ -> False
                     Nothing -> False
                 argIsExplicitRecursiveParam ann =
@@ -740,7 +885,7 @@ elabAlg algebraContext layer =
                   alphaEqType sourceTy actualTy
                     || churchAwareEqType sourceTy actualTy
                     || case sourceTy of
-                      TMu {} ->
+                      TMuRef {} ->
                         case unfoldMuOnce sourceTy of
                           Just unfoldedTy ->
                             let unfoldedTy' = stripVacuousForallsDeep unfoldedTy
@@ -750,7 +895,7 @@ elabAlg algebraContext layer =
                       _ -> False
                 preferSourceMuArgTy actualTy =
                   case argSourceSchemeTy of
-                    Just sourceTy@TMu {}
+                    Just sourceTy@TMuRef {}
                       | sourceMuMatchesActualType sourceTy actualTy -> sourceTy
                     _ -> actualTy
                 recoverIdentityLikeRecursiveFunInst ann =
@@ -770,7 +915,7 @@ elabAlg algebraContext layer =
                 reifyInstWithRecovery ann eid _term termTy
                   | Nothing <- sourceVarName ann,
                     Right ty <- termTy,
-                    not (case ty of TForall {} -> True; _ -> False) =
+                    not (case ty of TForallRef {} -> True; _ -> False) =
                       Right InstId
                   | otherwise =
                       case reifyInst annotationContext namedSetReify schemeEnv ann eid of
@@ -819,7 +964,7 @@ elabAlg algebraContext layer =
                 fHeadTy = either (const Nothing) Just fHeadTyChecked
                 fIsMuHead =
                   case fTyChecked of
-                    Right TMu {} -> True
+                    Right TMuRef {} -> True
                     _ -> False
                 recoveredArgTy =
                   either
@@ -836,27 +981,27 @@ elabAlg algebraContext layer =
                   case funInst of
                     inst0@(InstApp _) ->
                       case fHeadTy of
-                        Just TForall {} -> inst0
+                        Just TForallRef {} -> inst0
                         Just _ -> InstId
                         Nothing -> inst0
                     inst0@(InstInside (InstBot _)) ->
                       case fHeadTy of
-                        Just TForall {} -> inst0
+                        Just TForallRef {} -> inst0
                         Just _ -> InstId
                         Nothing -> inst0
                     inst0@(InstInside (InstApp _)) ->
                       case fHeadTy of
-                        Just TForall {} -> inst0
+                        Just TForallRef {} -> inst0
                         Just _ -> InstId
                         Nothing -> inst0
                     inst0@(InstSeq (InstInside (InstBot _)) InstElim) ->
                       case fHeadTy of
-                        Just TForall {} -> inst0
+                        Just TForallRef {} -> inst0
                         Just _ -> InstId
                         Nothing -> inst0
                     inst0@(InstSeq (InstInside (InstApp _)) InstElim) ->
                       case fHeadTy of
-                        Just TForall {} -> inst0
+                        Just TForallRef {} -> inst0
                         Just _ -> InstId
                         Nothing -> inst0
                     _ -> funInst
@@ -866,18 +1011,18 @@ elabAlg algebraContext layer =
                       case funInstByFunType of
                         inst0@(InstApp ty0) ->
                           case ty0 of
-                            TVar {} -> maybe inst0 InstApp recoveredArg
-                            TForall {} -> maybe inst0 InstApp recoveredArg
+                            TVarRef {} -> maybe inst0 InstApp recoveredArg
+                            TForallRef {} -> maybe inst0 InstApp recoveredArg
                             _ -> inst0
                         inst0@(InstSeq (InstInside (InstBot ty0)) InstElim) ->
                           case ty0 of
-                            TVar {} -> maybe inst0 InstApp recoveredArg
-                            TForall {} -> maybe inst0 InstApp recoveredArg
+                            TVarRef {} -> maybe inst0 InstApp recoveredArg
+                            TForallRef {} -> maybe inst0 InstApp recoveredArg
                             _ -> inst0
                         inst0@(InstSeq (InstInside (InstApp ty0)) InstElim) ->
                           case ty0 of
-                            TVar {} -> maybe inst0 InstApp recoveredArg
-                            TForall {} -> maybe inst0 InstApp recoveredArg
+                            TVarRef {} -> maybe inst0 InstApp recoveredArg
+                            TForallRef {} -> maybe inst0 InstApp recoveredArg
                             _ -> inst0
                         _ -> funInstByFunType
                 normalizeFunInst inst0 =
@@ -900,11 +1045,11 @@ elabAlg algebraContext layer =
                           | n >= (8 :: Int) = instN
                           | otherwise =
                               case applyInstantiation fTy instN of
-                                Right (TForall _ (Just _) _) ->
+                                Right (TForallRef _ (Just _) _) ->
                                   if isAppLikeInst instN
                                     then canonicalizeAppLikeInst instN
                                     else go (n + 1) (InstSeq instN InstElim)
-                                Right (TForall _ Nothing _) ->
+                                Right (TForallRef _ Nothing _) ->
                                   case (instN, recoveredArgTy) of
                                     (InstId, Just argTy) -> InstApp argTy
                                     _ -> instN
@@ -913,7 +1058,7 @@ elabAlg algebraContext layer =
                     Nothing -> inst0
                 targetResultInstCandidates =
                   case (fIsMuHead, fHeadTy) of
-                    (True, Just TForall {}) ->
+                    (True, Just TForallRef {}) ->
                       [ InstApp (finalCodomain argTy)
                       | Just argTy <- [recoveredArgTy]
                       ]
@@ -946,16 +1091,16 @@ elabAlg algebraContext layer =
                               let argTyPreferred =
                                     case mArgName >>= (`lookupSchemeType` env) of
                                       Just argSchemeTy ->
-                                        case Inst.splitForalls argSchemeTy of
+                                        case splitForallsRefs argSchemeTy of
                                           ([], monoTy) -> monoTy
                                           _ -> argTy
                                       Nothing -> argTy
-                                  (fBinds, fBodyTy) = Inst.splitForalls fSchemeTy
-                                  fBinderNames = map fst fBinds
+                                  (fBinds, fBodyTy) = splitForallsRefs fSchemeTy
+                                  fBinderRefs = map fst fBinds
                                in case fBodyTy of
-                                    TArrow (TVar headBinder) retTy
-                                      | headBinder `elem` fBinderNames
-                                          && Set.member headBinder (freeTypeVarsType retTy) ->
+                                    TArrow (TVarRef headRef) retTy
+                                      | any (typeBinderRefsSameIdentity headRef) fBinderRefs
+                                          && any (typeBinderRefsSameIdentity headRef) (freeTypeVarRefsType retTy) ->
                                           normalizeFunInst (InstApp argTyPreferred)
                                     _ -> funInstNorm
                             Nothing -> funInstNorm
@@ -991,7 +1136,7 @@ elabAlg algebraContext layer =
                           fCandidateTy = typeCheckLocal fCandidate
                           keepCandidate =
                             case (isAppLikeInst instCandidate, fHeadTy, fSourceName) of
-                              (True, Just TForall {}, _) ->
+                              (True, Just TForallRef {}, _) ->
                                 case fCandidateTy of
                                   Right _ -> True
                                   Left _ -> False
@@ -1037,8 +1182,9 @@ elabAlg algebraContext layer =
                    in if not shouldInferArgInst
                         then Nothing
                         else case (aSourceName, f') of
-                          (Just vName, ELam _ paramTy _) -> do
+                          (Just vName, ELam resolved _) -> do
                             schemeInfo <- lookupSchemeInfo vName env
+                            let paramTy = resolvedVarType resolved
                             let paramTy' =
                                   if shouldInlineParamTy
                                     then inlineBoundVarsTypeWithContext inlineBoundVarsContext paramTy
@@ -1061,50 +1207,50 @@ elabAlg algebraContext layer =
                   case (fSourceName, aSourceName, fAppForArgInferenceTy, argInst) of
                     (Just fName, Just argName, Right (TArrow paramTy _), InstApp argTy)
                       | fName == argName,
-                        Just schemeInfo <- lookupSchemeInfo fName env,
-                        case siScheme schemeInfo of
-                          Forall [(_, Nothing)] _ -> True
-                          _ -> False,
+                                Just schemeInfo <- lookupSchemeInfo fName env,
+                                case schemeBinderRefs (siScheme schemeInfo) of
+                                  [(_, Nothing)] -> True
+                                  _ -> False,
                         let instCandidate = InstApp argTy,
                         Right argTy' <- typeCheckLocal (ETyInst a' instCandidate),
                         alphaEqType argTy' paramTy ->
                           instCandidate
                     (Just fName, Just argName, Right (TArrow paramTy _), InstInside (InstBot argTy))
                       | fName == argName,
-                        Just schemeInfo <- lookupSchemeInfo fName env,
-                        case siScheme schemeInfo of
-                          Forall [(_, Nothing)] _ -> True
-                          _ -> False,
+                                Just schemeInfo <- lookupSchemeInfo fName env,
+                                case schemeBinderRefs (siScheme schemeInfo) of
+                                  [(_, Nothing)] -> True
+                                  _ -> False,
                         let instCandidate = InstApp argTy,
                         Right argTy' <- typeCheckLocal (ETyInst a' instCandidate),
                         alphaEqType argTy' paramTy ->
                           instCandidate
                     (Just fName, Just argName, Right (TArrow paramTy _), InstInside (InstApp argTy))
                       | fName == argName,
-                        Just schemeInfo <- lookupSchemeInfo fName env,
-                        case siScheme schemeInfo of
-                          Forall [(_, Nothing)] _ -> True
-                          _ -> False,
+                                Just schemeInfo <- lookupSchemeInfo fName env,
+                                case schemeBinderRefs (siScheme schemeInfo) of
+                                  [(_, Nothing)] -> True
+                                  _ -> False,
                         let instCandidate = InstApp argTy,
                         Right argTy' <- typeCheckLocal (ETyInst a' instCandidate),
                         alphaEqType argTy' paramTy ->
                           instCandidate
                     (Just fName, Just argName, Right (TArrow paramTy _), InstSeq (InstInside (InstBot argTy)) InstElim)
                       | fName == argName,
-                        Just schemeInfo <- lookupSchemeInfo fName env,
-                        case siScheme schemeInfo of
-                          Forall [(_, Nothing)] _ -> True
-                          _ -> False,
+                                Just schemeInfo <- lookupSchemeInfo fName env,
+                                case schemeBinderRefs (siScheme schemeInfo) of
+                                  [(_, Nothing)] -> True
+                                  _ -> False,
                         let instCandidate = InstApp argTy,
                         Right argTy' <- typeCheckLocal (ETyInst a' instCandidate),
                         alphaEqType argTy' paramTy ->
                           instCandidate
                     (Just fName, Just argName, Right (TArrow paramTy _), InstSeq (InstInside (InstApp argTy)) InstElim)
                       | fName == argName,
-                        Just schemeInfo <- lookupSchemeInfo fName env,
-                        case siScheme schemeInfo of
-                          Forall [(_, Nothing)] _ -> True
-                          _ -> False,
+                                Just schemeInfo <- lookupSchemeInfo fName env,
+                                case schemeBinderRefs (siScheme schemeInfo) of
+                                  [(_, Nothing)] -> True
+                                  _ -> False,
                         let instCandidate = InstApp argTy,
                         Right argTy' <- typeCheckLocal (ETyInst a' instCandidate),
                         alphaEqType argTy' paramTy ->
@@ -1134,15 +1280,15 @@ elabAlg algebraContext layer =
                        in case argInst' of
                             InstId -> InstId
                             _
-                              | isAppLikeInst argInst' ->
-                                  case argTyChecked of
-                                    Right TForall {} -> canonicalizeAppLikeInst argInst'
-                                    _ -> InstId
-                              | otherwise ->
-                                  case argTyChecked of
-                                    Right (TForall _ (Just _) _) -> InstElim
-                                    Right TForall {} -> argInst'
-                                    _ -> InstId
+                                      | isAppLikeInst argInst' ->
+                                          case argTyChecked of
+                                            Right TForallRef {} -> canonicalizeAppLikeInst argInst'
+                                            _ -> InstId
+                                      | otherwise ->
+                                          case argTyChecked of
+                                            Right (TForallRef _ (Just _) _) -> InstElim
+                                            Right TForallRef {} -> argInst'
+                                            _ -> InstId
                 aApp =
                   case transparentOrIdentityBypassTerm of
                     Just bypassTerm -> bypassTerm
@@ -1157,34 +1303,39 @@ elabAlg algebraContext layer =
                         _ -> ETyInst fHead funInstValidated
                       containsInternalTyVar ty =
                         case ty of
-                          TVar name -> isJust (parseNameId name)
+                          TVarRef ref -> isInternalTypeBinderRef ref
                           TArrow dom cod -> containsInternalTyVar dom || containsInternalTyVar cod
                           TCon _ args -> any containsInternalTyVar args
-                          TForall _ mb body ->
+                          TForallRef _ mb body ->
                             maybe False containsInternalBoundTy mb || containsInternalTyVar body
-                          TMu _ body -> containsInternalTyVar body
+                          TMuRef _ body -> containsInternalTyVar body
                           _ -> False
                       containsInternalBoundTy bound =
                         case bound of
                           TArrow dom cod -> containsInternalTyVar dom || containsInternalTyVar cod
                           TCon _ args -> any containsInternalTyVar args
-                          TForall _ mb body ->
+                          TForallRef _ mb body ->
                             maybe False containsInternalBoundTy mb || containsInternalTyVar body
-                          TMu _ body -> containsInternalTyVar body
+                          TMuRef _ body -> containsInternalTyVar body
                           _ -> False
-                      isIdentityLambdaBody paramName body =
+                      isIdentityLambdaBody param body =
                         case body of
-                          EVar bodyName -> bodyName == paramName
+                          EVarNode bodyVar -> localVarKeyMatchesReference (LocalVarResolved param) bodyVar
                           _ -> False
                    in case (fApp0, aSourceName, aAppTyChecked) of
-                        (ELam paramName paramTy body, Just argName, Right argTy)
+                        (ELam resolved body, Just argName, Right argTy)
                           | containsInternalTyVar paramTy
-                              && isIdentityLambdaBody paramName body
+                              && isIdentityLambdaBody resolved body
                               && hasContractiveRecursiveWitness argTy
                               && maybe False hasContractiveRecursiveWitness (lookupSchemeType argName env) ->
                               case typeCheckLocal (EApp fApp0 aApp) of
-                                Left _ -> ELam paramName argTy body
+                                Left _ ->
+                                  ELam
+                                    (mapResolvedVarType (const argTy) resolved)
+                                    (refreshLocalResolvedVarType (LocalVarResolved resolved) argTy body)
                                 Right _ -> fApp0
+                          where
+                            paramTy = resolvedVarType resolved
                         _ -> fApp0
                 bypassApp = transparentOrIdentityBypassTerm
             let fAppTyChecked = typeCheckLocal fApp
@@ -1227,9 +1378,9 @@ elabAlg algebraContext layer =
                    )
                      ( let go ty =
                              case ty of
-                               TVar name -> isJust (parseNameId name)
+                               TVarRef ref -> isInternalTypeBinderRef ref
                                TArrow dom cod -> go dom && go cod
-                               TForall _ _ body -> go body
+                               TForallRef _ _ body -> go body
                                _ -> False
                         in go
                      ),
@@ -1320,7 +1471,8 @@ elabAlg algebraContext layer =
                               then pickFreshMuName (idx + 1)
                               else candidate
                       muName = pickFreshMuName 0
-                   in TMu muName (TArrow (TVar muName) codTy)
+                      (muRef, _) = freshTypeBinderRef muName (identityGeneratorAfterType codTy)
+                   in TMuRef muRef (TArrow (TVarRef muRef) codTy)
                 recursiveFixedPointCarrier extraUsedNames =
                   let pickFreshMuName idx =
                         let candidate =
@@ -1331,7 +1483,8 @@ elabAlg algebraContext layer =
                               then pickFreshMuName (idx + 1)
                               else candidate
                       muName = pickFreshMuName 0
-                   in TMu muName (TArrow (TVar muName) (TVar muName))
+                      (muRef, _) = freshTypeBinderRef muName initialIdentityGenerator
+                   in TMuRef muRef (TArrow (TVarRef muRef) (TVarRef muRef))
                 previewRecursiveCarrierTy selfName annExpr =
                   case annExpr of
                     ALam lamParam _ _ lamBody _
@@ -1361,7 +1514,7 @@ elabAlg algebraContext layer =
                       | Just schemePair <- explicitRhsSourceScheme ->
                           Right schemePair
                       | Just aliasInfo <- aliasSourceSchemeInfo ->
-                          Right (siScheme aliasInfo, siSubst aliasInfo)
+                          Right (siScheme aliasInfo, schemeInfoBinderRefSubst aliasInfo)
                       | Just carrierTy <- previewRecursiveCarrierTy v (peelTransparentMediatorSubject rhsAnn),
                         hasContractiveRecursiveWitness carrierTy ->
                           Right (schemeFromType carrierTy, IntMap.empty)
@@ -1382,7 +1535,7 @@ elabAlg algebraContext layer =
                 Just schemePair -> Right schemePair
                 Nothing ->
                   case generalizeAtNode scopeContext schemeRootId of
-                    Right schemePair -> Right schemePair
+                    Right (scheme, substRefs) -> Right (scheme, substRefs)
                     Left err -> recoverGeneralizeAtNode err
             let lambdaParamNodes annExpr =
                   case annExpr of
@@ -1391,20 +1544,21 @@ elabAlg algebraContext layer =
                     AUnfold inner _ _ -> lambdaParamNodes inner
                     _ -> []
                 deriveLambdaBinderSubst scheme0 subst0' =
-                  let (binds, _) = Inst.splitForalls (schemeToType scheme0)
-                      binderNames = map fst binds
+                  let (binds, _) = splitForallsRefs (schemeToType scheme0)
+                      binderRefs = map fst (schemeBinderRefs scheme0)
+                      binderNames = map typeBinderRefName binderRefs
                       binderBounds = map snd binds
                       paramNodes = lambdaParamNodes rhsAnn
-                      binderPairs = zip binderNames paramNodes
+                      binderPairs = zip binderRefs paramNodes
                       canAugment =
                         length binderNames == length paramNodes
                           && all (== Nothing) binderBounds
                    in if canAugment
                         then
                           foldl'
-                            ( \acc (name, paramNode) ->
+                            ( \acc (ref, paramNode) ->
                                 let key = getNodeId (canonical paramNode)
-                                 in IntMap.insertWith (\_ old -> old) key name acc
+                                 in IntMap.insertWith (\_ old -> old) key ref acc
                             )
                             subst0'
                             binderPairs
@@ -1450,7 +1604,7 @@ elabAlg algebraContext layer =
                         case desugaredAnnLambdaInfo lamParam lamBody of
                           Just (annNodeId, _, _) ->
                             case reifyNodeTypePreferringBound scopeContext annNodeId of
-                              Right annTy@TMu {}
+                              Right annTy@TMuRef {}
                                 | hasContractiveRecursiveWitness annTy -> Just annTy
                               _ -> Nothing
                           Nothing -> Nothing
@@ -1469,13 +1623,14 @@ elabAlg algebraContext layer =
                   overrideMuAnnotatedCodomain muTy =
                     let stripForalls ty =
                           case ty of
-                            TForall _ _ inner -> stripForalls inner
+                            TForallRef _ _ inner -> stripForalls inner
                             other -> other
-                        schemeBody = stripForalls (schemeToType schemeBase)
-                        quantVars = Set.fromList [n | (n, _) <- fst (Inst.splitForalls (schemeToType schemeBase))]
-                        isUnquantifiedTVar (TVar v') = not (Set.member v' quantVars)
+                        strippedSchemeBody = stripForalls (schemeToType schemeBase)
+                        quantRefs = map fst (fst (splitForallsRefs (schemeToType schemeBase)))
+                        isUnquantifiedTVar (TVarRef ref) =
+                          not (any (typeBinderRefsSameIdentity ref) quantRefs)
                         isUnquantifiedTVar _ = False
-                     in case schemeBody of
+                     in case strippedSchemeBody of
                           TArrow _dom cod
                             | isUnquantifiedTVar cod ->
                                 -- Codomain is an unquantified internal variable:
@@ -1512,34 +1667,34 @@ elabAlg algebraContext layer =
                       || hasInternalRecursiveCodomain carrierTy && not (hasInternalRecursiveCodomain inferredTy)
                   isBottomRecursiveCarrier carrierTy =
                     case carrierTy of
-                      TMu _ (TArrow _ TBottom) -> True
+                      TMuRef _ (TArrow _ TBottom) -> True
                       _ -> False
                   isFixedPointRecursiveCarrier carrierTy =
                     case carrierTy of
-                      TMu muName (TArrow (TVar domName) (TVar codName)) ->
-                        muName == domName && muName == codName
+                      TMuRef muRef (TArrow (TVarRef domRef) (TVarRef codRef)) ->
+                        typeBinderRefsSameIdentity muRef domRef && typeBinderRefsSameIdentity muRef codRef
                       _ -> False
                   hasInternalRecursiveCodomain carrierTy =
                     case carrierTy of
-                      TMu muName (TArrow (TVar domName) codTy) ->
-                        muName == domName && internalOnlyType codTy
+                      TMuRef muRef (TArrow (TVarRef domRef) codTy) ->
+                        typeBinderRefsSameIdentity muRef domRef && internalOnlyType codTy
                       _ -> False
                   internalOnlyType ty =
                     case ty of
-                      TVar name -> isJust (parseNameId name)
+                      TVarRef ref -> isInternalTypeBinderRef ref
                       TArrow dom cod -> internalOnlyType dom && internalOnlyType cod
                       TCon _ args -> not (null args) && all internalOnlyType args
-                      TForall _ mb body ->
+                      TForallRef _ mb body ->
                         maybe True internalOnlyBound mb && internalOnlyType body
-                      TMu _ body -> internalOnlyType body
+                      TMuRef _ body -> internalOnlyType body
                       _ -> False
                   internalOnlyBound bound =
                     case bound of
                       TArrow dom cod -> internalOnlyType dom && internalOnlyType cod
                       TCon _ args -> not (null args) && all internalOnlyType args
-                      TForall _ mb body ->
+                      TForallRef _ mb body ->
                         maybe True internalOnlyBound mb && internalOnlyType body
-                      TMu _ body -> internalOnlyType body
+                      TMuRef _ body -> internalOnlyType body
                       _ -> False
                   returnedRecursiveHelperArrowTy annExpr =
                     case annExpr of
@@ -1603,9 +1758,9 @@ elabAlg algebraContext layer =
                       _ -> False
                   recursiveSelfAppResultTy helperTy =
                     case helperTy of
-                      TForall _ _ bodyTy -> recursiveSelfAppResultTy bodyTy
+                      TForallRef _ _ bodyTy -> recursiveSelfAppResultTy bodyTy
                       TArrow _ codTy -> Just codTy
-                      muTy@TMu {} ->
+                      muTy@TMuRef {} ->
                         case unfoldMuOnce muTy of
                           Just (TArrow _ codTy) -> Just codTy
                           _ -> Nothing
@@ -1672,27 +1827,24 @@ elabAlg algebraContext layer =
             let subst0 = normalizeSubstForScheme scheme (deriveLambdaBinderSubst scheme0Norm subst0Norm)
                 subst =
                   case aliasSourceSchemeInfo of
-                    Just aliasInfo -> siSubst aliasInfo
+                    Just aliasInfo -> schemeInfoBinderRefSubst aliasInfo
                     Nothing ->
-                      let (binds, _) = Inst.splitForalls (schemeToType scheme)
+                      let (binds, _) = splitForallsRefs (schemeToType scheme)
                        in if null binds then IntMap.empty else subst0
                 schemeInfo =
                   freshenSchemeInfoAgainstEnv
                     env
-                    SchemeInfo
-                      { siScheme = scheme,
-                        siSubst = subst
-                      }
+                    (schemeInfoFromRefSubst scheme subst)
                 transparentMediator =
                   isTransparentMediatorAnn rhsAnn
                     || maybe False (`isTransparentMediatorVar` env) aliasSourceName
                 envBindingFor bindingSchemeInfo =
                   case aliasSourceName of
                     Just sourceName ->
-                      (mkEnvBinding bindingSchemeInfo transparentMediator)
+                      (mkLocalEnvBinding v schemeRootId bindingSchemeInfo transparentMediator)
                         { ebAliasTarget = Just (resolveAliasVar env sourceName)
                         }
-                    Nothing -> mkEnvBinding bindingSchemeInfo transparentMediator
+                    Nothing -> mkLocalEnvBinding v schemeRootId bindingSchemeInfo transparentMediator
                 tcEnvBase = typeCheckEnvFrom env
                 typeCheckBase = TypeCheck.typeCheckWithEnv tcEnvBase
                 authoritativeSourceSchemeInfo =
@@ -1701,10 +1853,7 @@ elabAlg algebraContext layer =
                       Just
                         ( freshenSchemeInfoAgainstEnv
                             env
-                            SchemeInfo
-                              { siScheme = schemeSrc,
-                                siSubst = substSrc
-                              }
+                            (schemeInfoFromRefSubst schemeSrc substSrc)
                         )
                     Nothing -> Nothing
                 envSchemeInfoForRhs = fromMaybe schemeInfo authoritativeSourceSchemeInfo
@@ -1713,14 +1862,14 @@ elabAlg algebraContext layer =
                 typeCheckLet = TypeCheck.typeCheckWithEnv tcEnv
             rhs' <- elabTerm rhsOut env'
             let closeFreeVarsToScheme ty =
-                  let (binds, body) = Inst.splitForalls ty
-                      boundNames = Set.fromList (map fst binds)
+                  let (binds, body) = splitForallsRefs ty
+                      boundRefs = map fst binds
                       extraBinds =
-                        [ (name, Nothing)
-                          | name <- freeTypeVarsInOccurrenceOrder body,
-                            Set.notMember name boundNames
+                        [ (ref, Nothing)
+                          | ref <- freeTypeVarRefsInOccurrenceOrder body,
+                            not (any (typeBinderRefsSameIdentity ref) boundRefs)
                         ]
-                   in Forall (binds ++ extraBinds) body
+                   in mkElabSchemeWithRefs (binds ++ extraBinds) body
                 splitArrowN n ty
                   | n <= (0 :: Int) = Just ([], ty)
                   | otherwise =
@@ -1731,25 +1880,31 @@ elabAlg algebraContext layer =
                         _ -> Nothing
                 collectLeadingLambdaParams term =
                   case term of
-                    ELam paramName paramTy body ->
+                    ELam resolved body ->
                       let (params, core) = collectLeadingLambdaParams body
-                       in ((paramName, paramTy) : params, core)
-                    ELet _ (Forall [] _) (EVar _) body ->
-                      collectLeadingLambdaParams body
+                       in (resolved : params, core)
+                    ELet _ sch (EVarNode _) body
+                      | null (schemeBinderRefs sch) ->
+                          collectLeadingLambdaParams body
                     _ -> ([], term)
                 collapsedIdentityWrapperScheme ty =
-                  case Inst.splitForalls ty of
+                  case splitForallsRefs ty of
                     (_, TArrow _ codTy) ->
                       codTy == TBottom || containsInternalTypeVar codTy
                     _ -> False
                 rebuildTransparentMediatorTerm rootName etaParams resultTy =
-                  let rootParamTy = foldr TArrow resultTy (map snd etaParams)
+                  let rootParamTy = foldr TArrow resultTy (map resolvedVarType etaParams)
+                      (rootRef, _) =
+                        freshLocalRef
+                          rootName
+                          (identityGeneratorFromNext ((getNodeId schemeRootId + 1) * 1000000))
+                      rootResolved = localResolvedVarFromRef rootRef rootParamTy
                       mediatorBody =
                         foldr
-                          (\(paramName, paramTy) acc -> ELam paramName paramTy acc)
-                          (foldl' EApp (EVar rootName) (map (EVar . fst) etaParams))
+                          ELam
+                          (foldl' EApp (EVarNode rootResolved) (map EVarNode etaParams))
                           etaParams
-                   in (rootParamTy, ELam rootName rootParamTy mediatorBody)
+                   in (rootParamTy, ELam rootResolved mediatorBody)
                 rhsAliasTerm = stripUnusedTopTyAbsWithEnv tcEnvBase rhs'
                 rhsTransparentMediatorTerm = stripLeadingTyAbs rhsAliasTerm
                 identityWrapperMediatorExpr aliases expr =
@@ -1819,9 +1974,10 @@ elabAlg algebraContext layer =
                 rhsTransparentMediatorOverride =
                   if transparentMediator
                     then case rhsTransparentMediatorTerm of
-                      ELam _ rootParamTy body ->
-                        let (etaParams, _core) = collectLeadingLambdaParams body
-                            etaParamTys = map snd etaParams
+                      ELam rootResolved body ->
+                        let rootParamTy = resolvedVarType rootResolved
+                            (etaParams, _core) = collectLeadingLambdaParams body
+                            etaParamTys = map resolvedVarType etaParams
                          in case splitArrowN (length etaParams) rootParamTy of
                               Just (_expectedEtaParamTys, resultTy)
                                 | not (null etaParams),
@@ -1831,13 +1987,15 @@ elabAlg algebraContext layer =
                                         closeFreeVarsToScheme
                                           (TArrow structuralRootParamTy (foldr TArrow resultTy etaParamTys)),
                                   let candidateSubst =
-                                        case Inst.splitForalls (schemeToType rhsScheme) of
+                                        case splitForallsRefs (schemeToType rhsScheme) of
                                           ([], _) -> IntMap.empty
                                           _ -> normalizeSubstForScheme rhsScheme subst,
+                                  let candidateSchemeInfo =
+                                        schemeInfoFromRefSubst rhsScheme candidateSubst,
                                   let rhsClosed =
-                                        closeTermWithSchemeSubstIfNeeded
-                                          candidateSubst
-                                          rhsScheme
+                                        closeTermWithSchemeSubstRefsIfNeeded
+                                          (schemeInfoBinderRefSubst candidateSchemeInfo)
+                                          (siScheme candidateSchemeInfo)
                                           structuralMediatorTerm,
                                   let candidateSchemeAdmitsRhs =
                                         case typeCheckBase rhsClosed of
@@ -1849,27 +2007,32 @@ elabAlg algebraContext layer =
                                     || not (alphaEqType (schemeToType scheme) (schemeToType rhsScheme)) ->
                                     Just
                                       ( structuralMediatorTerm,
-                                        SchemeInfo
-                                          { siScheme = rhsScheme,
-                                            siSubst = candidateSubst
-                                          }
+                                        candidateSchemeInfo
                                       )
                               _ -> Nothing
                       _ -> Nothing
                     else Nothing
                 rhsIdentityWrapperOverride =
                   case (stripAnnExpr rhsAnn, rhsTransparentMediatorTerm) of
-                    (ALam rootParam _ _ body _, ELam rootName rootParamTy _)
-                      | rootParam == rootName,
+                    (ALam rootParam _ _ body _, ELam rootResolved _)
+                      | let rootName = resolvedVarReferenceName rootResolved,
+                        rootParam == rootName,
                         identityWrapperBody rootParam Map.empty body ->
-                          let rhsTerm = ELam rootName rootParamTy (EVar rootName)
+                          let rootParamTy = resolvedVarType rootResolved
+                              rootResolved' = mapResolvedVarType (const rootParamTy) rootResolved
+                              rhsTerm = ELam rootResolved' (EVarNode rootResolved')
                               rhsScheme = closeFreeVarsToScheme (TArrow rootParamTy rootParamTy)
                               candidateSubst =
-                                case Inst.splitForalls (schemeToType rhsScheme) of
+                                case splitForallsRefs (schemeToType rhsScheme) of
                                   ([], _) -> IntMap.empty
                                   _ -> normalizeSubstForScheme rhsScheme subst
+                              candidateSchemeInfo =
+                                schemeInfoFromRefSubst rhsScheme candidateSubst
                               rhsClosed =
-                                closeTermWithSchemeSubstIfNeeded candidateSubst rhsScheme rhsTerm
+                                closeTermWithSchemeSubstRefsIfNeeded
+                                  (schemeInfoBinderRefSubst candidateSchemeInfo)
+                                  (siScheme candidateSchemeInfo)
+                                  rhsTerm
                               candidateSchemeAdmitsRhs =
                                 case typeCheckBase rhsClosed of
                                   Right rhsTy -> alphaEqType rhsTy (schemeToType rhsScheme)
@@ -1882,23 +2045,20 @@ elabAlg algebraContext layer =
                                 then
                                   Just
                                     ( rhsTerm,
-                                      SchemeInfo
-                                        { siScheme = rhsScheme,
-                                          siSubst = candidateSubst
-                                        }
+                                      candidateSchemeInfo
                                     )
                                 else Nothing
                     _ -> Nothing
                 rhsAliasOverride =
                   case (rhsAliasTerm, rhsAliasTy) of
-                    (EVar _, Right rhsTy)
+                    (EVarNode _, Right rhsTy)
                       | not (alphaEqType rhsTy (schemeToType scheme)) ->
                           let rhsScheme = closeFreeVarsToScheme rhsTy
                               rhsSubst =
-                                case Inst.splitForalls rhsTy of
+                                case splitForallsRefs rhsTy of
                                   ([], _) -> IntMap.empty
                                   _ -> subst
-                           in Just (rhsAliasTerm, SchemeInfo {siScheme = rhsScheme, siSubst = rhsSubst})
+                           in Just (rhsAliasTerm, schemeInfoFromRefSubst rhsScheme rhsSubst)
                     _ -> Nothing
                 effectiveRhsOverride =
                   case rhsTransparentMediatorOverride of
@@ -1924,7 +2084,8 @@ elabAlg algebraContext layer =
                     (freshenSchemeInfoAgainstEnv env schemeInfo)
                     authoritativeSourceSchemeInfo
                 effectiveScheme = siScheme effectiveSchemeInfo
-                effectiveSubst = siSubst effectiveSchemeInfo
+                effectiveSubstRefs = schemeInfoBinderRefSubst effectiveSchemeInfo
+                effectiveSubst = effectiveSubstRefs
                 envSchemeInfoForBody =
                   if isJust rhsOuterSourceScheme
                     || isJust explicitRhsSourceScheme
@@ -1941,29 +2102,28 @@ elabAlg algebraContext layer =
                       rhsMatchesScheme rhsTy =
                         alphaEqType rhsTy schemeTy
                           || case schemeTy of
-                            muTy@(TMu muName muBody) ->
-                              let expectedBodyTy = substTypeCapture muName muTy muBody
+                            muTy@(TMuRef muRef muBody) ->
+                              let expectedBodyTy = substTypeCaptureRef muRef muTy muBody
                                in alphaEqType rhsTy expectedBodyTy
                             _ -> False
                    in case (effectiveRhsTerm, effectiveRhsTy) of
-                        (EVar _, _) ->
-                          closeTermWithSchemeSubstIfNeeded effectiveSubst effectiveScheme effectiveRhsTerm
+                        (EVarNode _, _) ->
+                          closeTermWithSchemeSubstRefsIfNeeded effectiveSubstRefs effectiveScheme effectiveRhsTerm
                         (_, Right rhsTy)
                           | rhsMatchesScheme rhsTy -> effectiveRhsTerm
-                        _ -> closeTermWithSchemeSubstIfNeeded effectiveSubst effectiveScheme effectiveRhsTerm
+                        _ -> closeTermWithSchemeSubstRefsIfNeeded effectiveSubstRefs effectiveScheme effectiveRhsTerm
                 rhsAbs =
                   let schemeTy = schemeToType effectiveScheme
                       rhsAbs0Ty = typeCheckLet rhsAbs0
                       rhsAbsBase =
-                        case effectiveScheme of
-                          Forall binds _
-                            | not (null binds),
-                              Right rhsTy <- rhsAbs0Ty,
-                              alphaEqType rhsTy schemeTy ->
-                                rhsAbs0
-                            | not (null binds) ->
+                        if not (null (schemeBinderRefs effectiveScheme))
+                          then
+                            case rhsAbs0Ty of
+                              Right rhsTy
+                                | alphaEqType rhsTy schemeTy -> rhsAbs0
+                              _ ->
                                 case case (rhsAbs0, rhsAbs0Ty) of
-                                  (ETyAbs _ _ body, Right (TForall _ _ bodyTy))
+                                  (ETyAbsRef _ _ body, Right (TForallRef _ _ bodyTy))
                                     | alphaEqType bodyTy schemeTy ->
                                         body
                                   _ -> stripUnusedTopTyAbsWithEnv tcEnv rhsAbs0 of
@@ -1976,14 +2136,15 @@ elabAlg algebraContext layer =
                                         case rhsAbs0Ty of
                                           Left _ -> rhsAbsCandidate
                                           _ -> rhsAbs0
-                          _ ->
+                          else
                             case (rhsAbs0, rhsAbs0Ty) of
-                              (ETyAbs _ _ body, Right (TForall _ _ bodyTy))
+                              (ETyAbsRef _ _ body, Right (TForallRef _ _ bodyTy))
                                 | alphaEqType bodyTy schemeTy ->
                                     body
                               _ -> stripUnusedTopTyAbsWithEnv tcEnv rhsAbs0
                       rhsAbsAligned =
-                        let aligned = alignLeadingLambdasToType schemeTy rhsAbsBase
+                        let withTyAbs = addMissingLeadingTyAbsAlongType tcEnv schemeTy rhsAbsBase
+                            aligned = alignLeadingLambdasToType schemeTy withTyAbs
                          in if v == "_"
                               then
                                 let stripped = stripUnusedTopTyAbsWithEnv tcEnv aligned
@@ -2020,8 +2181,8 @@ elabAlg algebraContext layer =
                 rhsAbsTyForBody = typeCheckForBody rhsAbs
                 rhsForRoll =
                   case schemeToType effectiveScheme of
-                    muTy@(TMu muName muBody) ->
-                      let expectedBodyTy = substTypeCapture muName muTy muBody
+                    muTy@(TMuRef muRef muBody) ->
+                      let expectedBodyTy = substTypeCaptureRef muRef muTy muBody
                           rhsRollAligned = alignLeadingLambdasToType expectedBodyTy rhsAbs
                           rhsRollAlignedTy = typeCheckForBody rhsRollAligned
                        in case effectiveRhsTyForBody of
@@ -2051,12 +2212,9 @@ elabAlg algebraContext layer =
                         v
                         ( envBindingFor
                             ( case (effectiveRhsTerm, effectiveRhsTy) of
-                                (EVar _, Right rhsTy)
+                                (EVarNode _, Right rhsTy)
                                   | not (alphaEqType rhsTy (schemeToType effectiveScheme)) ->
-                                      SchemeInfo
-                                        { siScheme = schemeFromType rhsTy,
-                                          siSubst = effectiveSubst
-                                        }
+                                      schemeInfoFromRefSubst (schemeFromType rhsTy) effectiveSubst
                                 _ -> effectiveSchemeInfo
                             )
                         )
@@ -2067,7 +2225,7 @@ elabAlg algebraContext layer =
                     Just (aliasTerm, _) -> aliasTerm
                     Nothing ->
                       case schemeToType effectiveScheme of
-                        muTy@TMu {} ->
+                        muTy@TMuRef {} ->
                           case effectiveRhsTyForBody of
                             Right rhsTy
                               | alphaEqType rhsTy muTy -> effectiveRhsTerm
@@ -2095,7 +2253,11 @@ elabAlg algebraContext layer =
                       case rhsAliasOverride of
                         Just (_, aliasInfo) -> siScheme aliasInfo
                         Nothing -> effectiveScheme
-            pure (schemeFinal, rhsFinal, body')
+                finalTy = schemeToType schemeFinal
+                finalResolved = resolvedLocalBinderFromNode v schemeRootId finalTy
+                rhsFinal' = refreshLocalResolvedVarType (LocalVarResolved finalResolved) finalTy rhsFinal
+                body'' = refreshLocalResolvedVarType (LocalVarResolved finalResolved) finalTy body'
+            pure (schemeFinal, rhsFinal', body'')
           unusedIdentityWrapperBinding =
             not (annContainsVar v bodyAnn) && identityWrapperAnn rhsAnn
           f env =
@@ -2103,19 +2265,21 @@ elabAlg algebraContext layer =
               then elabTerm bodyOut env
               else do
                 (scheme, rhsFinal, body') <- elaborateLet env
-                if isJust (sourceVarName rhsAnn) && not (containsFreeVar v body')
+                let finalResolved = resolvedLocalBinderFromNode v schemeRootId (schemeToType scheme)
+                if isJust (sourceVarName rhsAnn) && not (containsFreeVar (LocalVarResolved finalResolved) body')
                   then pure body'
-                  else pure (ELet v scheme rhsFinal body')
+                  else pure (mkLocalLetFromNode v schemeRootId scheme rhsFinal body')
           fStripped env =
             if unusedIdentityWrapperBinding
               then elabTerm bodyOut env
               else do
                 (scheme, rhsFinal, body') <- elaborateLet env
-                if isJust (sourceVarName rhsAnn) && not (containsFreeVar v body')
+                let finalResolved = resolvedLocalBinderFromNode v schemeRootId (schemeToType scheme)
+                if isJust (sourceVarName rhsAnn) && not (containsFreeVar (LocalVarResolved finalResolved) body')
                   then pure body'
                   else
-                    if containsFreeVar v rhsFinal
-                      then pure (ELet v scheme rhsFinal body')
+                    if containsFreeVar (LocalVarResolved finalResolved) rhsFinal
+                      then pure (mkLocalLetFromNode v schemeRootId scheme rhsFinal body')
                       else pure body'
        in ElabOut
             { elabTerm = f,
@@ -2125,7 +2289,7 @@ elabAlg algebraContext layer =
       ElabOut
         { elabTerm = \env -> do
             expr' <- elabTerm exprOut env
-            elaborateAnnotationTerm annotationContext namedSetReify (envSchemeInfos env) exprAnn annNodeId eid expr',
+            elaborateAnnotationTerm annotationContext namedSetReify (envSchemeInfos env) (typeCheckEnvFrom env) exprAnn annNodeId eid expr',
           elabStripped = \env -> elabTerm exprOut env
         }
     AUnfoldF (_exprAnn, exprOut) _unfoldNodeId _eid ->
@@ -2145,8 +2309,7 @@ elabAlg algebraContext layer =
     inlineBoundVarsContext = algInlineBoundVarsContext algebraContext
 
     inferInstAppArgs scheme targetTy =
-      let (binds, body) = Inst.splitForalls (schemeToType scheme)
-       in inferInstAppArgsFromScheme binds body targetTy
+      inferInstAppArgsFromSchemeRefs (schemeBinderRefs scheme) (schemeBody scheme) targetTy
 
     sourceVarName annExpr =
       case annExpr of
@@ -2180,10 +2343,10 @@ elabAlg algebraContext layer =
        These helpers allow the existing InstApp/InstElim machinery in AAppF to
        work transparently on Church-encoded eliminators without duplicating
        instantiation logic inside insertMuUseSiteCoercions. -}
-    appHeadTermFromType :: Either err ElabType -> ElabTerm -> ElabTerm
+    appHeadTermFromType :: Either err ElabType -> XmlfTerm -> XmlfTerm
     appHeadTermFromType termTy term =
       case termTy of
-        Right TMu {} -> EUnroll term
+        Right TMuRef {} -> EUnroll term
         _ -> term
 
     finalCodomain :: ElabType -> ElabType
@@ -2191,14 +2354,14 @@ elabAlg algebraContext layer =
       where
         peelLeadingForalls ty =
           case ty of
-            TForall _ _ body -> peelLeadingForalls body
+            TForallRef _ _ body -> peelLeadingForalls body
             _ -> ty
         go ty =
           case ty of
             TArrow _ cod -> go cod
             _ -> ty
 
-    insertMuUseSiteCoercions :: TypeCheck.Env -> Bool -> Bool -> Maybe ElabType -> Maybe ElabType -> Maybe ElabType -> ElabTerm -> ElabTerm -> Either ElabError (ElabTerm, Maybe ElabType)
+    insertMuUseSiteCoercions :: TypeCheck.Env -> Bool -> Bool -> Maybe ElabType -> Maybe ElabType -> Maybe ElabType -> XmlfTerm -> XmlfTerm -> Either ElabError (XmlfTerm, Maybe ElabType)
     insertMuUseSiteCoercions tcEnv preserveRecursiveArg sourceArgIsVar mbArgSourceTy mbFTy mbArgTy fTerm aTerm = do
       let fTermTy =
             maybe (TypeCheck.typeCheckWithEnv tcEnv fTerm) Right mbFTy
@@ -2206,10 +2369,10 @@ elabAlg algebraContext layer =
             maybe (TypeCheck.typeCheckWithEnv tcEnv aTerm) Right mbArgTy
       let (fUnrolled, unfoldedFromMu) =
             case fTermTy of
-              Right muTy@TMu {} ->
+              Right muTy@TMuRef {} ->
                 case unfoldMuOnce muTy of
                   Just TArrow {} -> (EUnroll fTerm, True)
-                  Just TForall {} -> (EUnroll fTerm, True)
+                  Just TForallRef {} -> (EUnroll fTerm, True)
                   _ -> (fTerm, False)
               _ -> (fTerm, False)
           fUnrolledTy =
@@ -2234,7 +2397,7 @@ elabAlg algebraContext layer =
                   | n >= (8 :: Int) = candidate
                   | otherwise =
                       case snd candidate of
-                        Right (TForall _ Nothing _) -> candidate
+                        Right (TForallRef _ Nothing _) -> candidate
                         _ -> candidate
              in go 0 (checkFunctionCandidate inst0)
           validatedForVarArg candidate =
@@ -2246,14 +2409,14 @@ elabAlg algebraContext layer =
                   else candidate
           fInstantiatedChecked =
             case (unfoldedFromMu, fUnrolledTy) of
-              (True, Right (TForall _v Nothing _arrowBody)) ->
+              (True, Right (TForallRef _v Nothing _arrowBody)) ->
                 case argTermTy of
                   Right argTy ->
                     let sourceMuMatchesActual sourceTy =
                           alphaEqType sourceTy argTy
                             || churchAwareEqType sourceTy argTy
                             || case sourceTy of
-                              TMu {} ->
+                              TMuRef {} ->
                                 case unfoldMuOnce sourceTy of
                                   Just unfoldedTy ->
                                     let unfoldedTy' = stripVacuousForallsDeep unfoldedTy
@@ -2264,7 +2427,7 @@ elabAlg algebraContext layer =
                         instArgTy =
                           case (sourceArgIsVar, mbArgSourceTy) of
                             (True, Just sourceTy) -> sourceTy
-                            (_, Just sourceTy@TMu {})
+                            (_, Just sourceTy@TMuRef {})
                               | sourceMuMatchesActual sourceTy -> sourceTy
                             _ -> argTy
                         inst0 = InstApp instArgTy
@@ -2285,7 +2448,7 @@ elabAlg algebraContext layer =
         case fInstantiatedTy of
           Right (TArrow paramTy resTy)
             | preserveRecursiveArg,
-              TMu {} <- paramTy,
+              TMuRef {} <- paramTy,
               Right argTy <- argTermTy,
               (alphaEqType argTy paramTy || churchAwareEqType argTy paramTy) ->
                 Right (aTerm, Just resTy)
@@ -2311,23 +2474,23 @@ elabAlg algebraContext layer =
     unfoldMuOnce :: ElabType -> Maybe ElabType
     unfoldMuOnce muTy =
       case muTy of
-        TMu name body -> Just (substTypeCapture name muTy body)
+        TMuRef ref body -> Just (substTypeCaptureRef ref muTy body)
         _ -> Nothing
 
     peelLeadingUnboundedForallsType :: ElabType -> ElabType
     peelLeadingUnboundedForallsType ty =
       case ty of
-        TForall _ Nothing body -> peelLeadingUnboundedForallsType body
+        TForallRef _ Nothing body -> peelLeadingUnboundedForallsType body
         _ -> ty
 
-    coerceArgForParam :: TypeCheck.Env -> Bool -> Maybe ElabType -> Maybe ElabType -> ElabType -> ElabTerm -> Either ElabError TypedTerm
+    coerceArgForParam :: TypeCheck.Env -> Bool -> Maybe ElabType -> Maybe ElabType -> ElabType -> XmlfTerm -> Either ElabError TypedTerm
     coerceArgForParam tcEnv sourceArgIsVar mbArgSourceTy mbArgTy paramTy argTerm =
       case maybe (TypeCheck.typeCheckWithEnv tcEnv argTerm) Right mbArgTy of
         Left _ -> Right (TypedTerm argTerm TBottom)
         Right argTy ->
           case paramTy of
-            TVar _
-              | Just muTy@TMu {} <- mbArgSourceTy ->
+            TVarRef _
+              | Just muTy@TMuRef {} <- mbArgSourceTy ->
                   case unfoldMuOnce muTy of
                     Just unfoldedTy
                       | alphaEqType unfoldedTy argTy || churchAwareEqType unfoldedTy argTy -> Right (TypedTerm (ERoll muTy argTerm) muTy)
@@ -2344,7 +2507,7 @@ elabAlg algebraContext layer =
                                       | alphaEqType unfoldedTy argTy' || churchAwareEqType unfoldedTy argTy' -> Right (TypedTerm (ERoll muTy argRebuilt) muTy)
                                     _ -> Right (TypedTerm argTerm argTy)
                     _ -> Right (TypedTerm argTerm argTy)
-            muTy@TMu {} ->
+            muTy@TMuRef {} ->
               let sourceMatchesMu =
                     maybe
                       False
@@ -2376,7 +2539,7 @@ elabAlg algebraContext layer =
                     else
                       if sourceMatchesMu
                         then case argTy of
-                          TMu {} -> Right (TypedTerm (ERoll muTy (EUnroll argTerm)) muTy)
+                          TMuRef {} -> Right (TypedTerm (ERoll muTy (EUnroll argTerm)) muTy)
                           _
                             | Just unfoldedTy <- unfoldMuOnce muTy,
                               let unfoldedTyPeeled = peelLeadingUnboundedForallsType unfoldedTy,
@@ -2388,7 +2551,7 @@ elabAlg algebraContext layer =
                                       _ -> coerceMuFromUnfolded muTy argTy
                           _ -> coerceMuFromUnfolded muTy argTy
                         else case argTy of
-                          argMu@TMu {}
+                          argMu@TMuRef {}
                             | alphaEqType argMu muTy || churchAwareEqType argMu muTy ->
                                 Right (TypedTerm argTerm argTy)
                             | otherwise ->
@@ -2415,7 +2578,7 @@ elabAlg algebraContext layer =
                           _ -> coerceMuFromUnfolded muTy argTy
             _ ->
               case argTy of
-                muTy@TMu {} ->
+                muTy@TMuRef {} ->
                   case unfoldMuOnce muTy of
                     Just unfoldedTy
                       | alphaEqType paramTy unfoldedTy || churchAwareEqType paramTy unfoldedTy -> Right (TypedTerm (EUnroll argTerm) unfoldedTy)
@@ -2425,18 +2588,18 @@ elabAlg algebraContext layer =
     rollResultToExpectedMu :: TypeCheck.Env -> Maybe ElabType -> TypedTerm -> TypedTerm
     rollResultToExpectedMu tcEnv mbTargetTy typedTerm =
       case mbTargetTy of
-        Just muTy@TMu {} ->
+        Just muTy@TMuRef {} ->
           let term = ttTerm typedTerm
               termTy = ttType typedTerm
            in if alphaEqType termTy muTy
                 then typedTerm
                 else
                   case termTy of
-                    actualMu@(TMu actualName actualBody)
+                    actualMu@(TMuRef actualRef actualBody)
                       | churchAwareEqType termTy muTy ->
                           case unfoldMuOnce muTy of
                             Just expectedBodyTy ->
-                              let actualBodyTy = stripVacuousForallsDeep (substTypeCapture actualName actualMu actualBody)
+                              let actualBodyTy = stripVacuousForallsDeep (substTypeCaptureRef actualRef actualMu actualBody)
                                in if alphaEqType actualBodyTy expectedBodyTy || churchAwareEqType actualBodyTy expectedBodyTy
                                     then TypedTerm (ERoll muTy (EUnroll term)) muTy
                                     else typedTerm
@@ -2465,139 +2628,146 @@ elabAlg algebraContext layer =
 
     stripVacuousForallsDeep :: ElabType -> ElabType
     stripVacuousForallsDeep ty = case ty of
-      TForall name Nothing body
-        | not (Set.member name (freeTypeVarsType body)) ->
+      TForallRef ref Nothing body
+        | not (any (typeBinderRefsSameIdentity ref) (freeTypeVarRefsType body)) ->
             stripVacuousForallsDeep body
-      TForall name mb body ->
-        TForall name (fmap stripVacuousForallsDeepBound mb) (stripVacuousForallsDeep body)
+      TForallRef ref mb body ->
+        TForallRef ref (fmap stripVacuousForallsDeepBound mb) (stripVacuousForallsDeep body)
       TArrow dom cod -> TArrow (stripVacuousForallsDeep dom) (stripVacuousForallsDeep cod)
-      TCon con args -> TCon con (fmap stripVacuousForallsDeep args)
-      TVarApp name args -> TVarApp name (fmap stripVacuousForallsDeep args)
-      TMu name body -> TMu name (stripVacuousForallsDeep body)
+      TConWithIdentity identity con args -> TConWithIdentity identity con (fmap stripVacuousForallsDeep args)
+      TVarAppRef ref args -> TVarAppRef ref (fmap stripVacuousForallsDeep args)
+      TMuRef ref body -> TMuRef ref (stripVacuousForallsDeep body)
       _ -> ty
 
     stripVacuousForallsDeepBound :: BoundType -> BoundType
     stripVacuousForallsDeepBound bound = case bound of
       TArrow dom cod -> TArrow (stripVacuousForallsDeep dom) (stripVacuousForallsDeep cod)
-      TBase _ -> bound
-      TCon con args -> TCon con (fmap stripVacuousForallsDeep args)
-      TVarApp name args -> TVarApp name (fmap stripVacuousForallsDeep args)
-      TForall name mb body -> TForall name (fmap stripVacuousForallsDeepBound mb) (stripVacuousForallsDeep body)
-      TMu name body -> TMu name (stripVacuousForallsDeep body)
+      TBaseWithIdentity _ _ -> bound
+      TConWithIdentity identity con args -> TConWithIdentity identity con (fmap stripVacuousForallsDeep args)
+      TVarAppRef ref args -> TVarAppRef ref (fmap stripVacuousForallsDeep args)
+      TForallRef ref mb body -> TForallRef ref (fmap stripVacuousForallsDeepBound mb) (stripVacuousForallsDeep body)
+      TMuRef ref body -> TMuRef ref (stripVacuousForallsDeep body)
       TBottom -> TBottom
 
-    containsFreeVar :: VarName -> ElabTerm -> Bool
+    containsFreeVar :: LocalVarKey -> XmlfTerm -> Bool
     containsFreeVar v term =
       case term of
-        EVar x -> x == v
+        EVarNode resolved -> localVarKeyMatchesReference v resolved
         ELit _ -> False
-        ELam x _ body
-          | x == v -> False
+        ELam resolved body
+          | localVarKeyMatchesReference v resolved -> False
           | otherwise -> containsFreeVar v body
         EApp f a -> containsFreeVar v f || containsFreeVar v a
-        ELet x _ rhs body
-          | x == v -> containsFreeVar v rhs
+        ELet resolved _ rhs body
+          | localVarKeyMatchesReference v resolved -> containsFreeVar v rhs
           | otherwise -> containsFreeVar v rhs || containsFreeVar v body
-        ETyAbs _ _ body -> containsFreeVar v body
+        ETyAbsRef _ _ body -> containsFreeVar v body
         ETyInst e _ -> containsFreeVar v e
         ERoll _ body -> containsFreeVar v body
         EUnroll e -> containsFreeVar v e
 
-    alignLeadingLambdasToType :: ElabType -> ElabTerm -> ElabTerm
+    alignLeadingLambdasToType :: ElabType -> XmlfTerm -> XmlfTerm
     alignLeadingLambdasToType ty term =
       case (ty, term) of
-        (TForall targetName _ bodyTy, ETyAbs v mb body) ->
-          let bodyTy' = substTypeCapture targetName (TVar v) bodyTy
-           in ETyAbs v mb (alignLeadingLambdasToType bodyTy' body)
-        (TArrow dom cod, ELam v _ body) ->
-          ELam v dom (alignLeadingLambdasToType cod body)
+        (TForallRef targetRef _ bodyTy, ETyAbsRef termRef mb body) ->
+          let bodyTy' = substTypeCaptureRef targetRef (TVarRef termRef) bodyTy
+           in ETyAbsRef termRef mb (alignLeadingLambdasToType bodyTy' body)
+        (TArrow dom cod, ELam resolved body) ->
+          let body' = alignLeadingLambdasToType cod body
+           in ELam (mapResolvedVarType (const dom) resolved) (refreshLocalResolvedVarType (LocalVarResolved resolved) dom body')
         _ -> term
 
-    stripUnusedTopTyAbsWithEnv :: TypeCheck.Env -> ElabTerm -> ElabTerm
+    stripUnusedTopTyAbsWithEnv :: TypeCheck.Env -> XmlfTerm -> XmlfTerm
     stripUnusedTopTyAbsWithEnv tcEnv term =
       case term of
-        ETyAbs v mbBound body ->
+        ETyAbsRef ref mbBound body ->
           let body' = stripUnusedTopTyAbsWithEnv tcEnv body
-              term' = ETyAbs v mbBound body'
+              term' = ETyAbsRef ref mbBound body'
            in case TypeCheck.typeCheckWithEnv tcEnv term' of
-                Right (TForall _ _ bodyTy)
-                  | v `notElem` freeTypeVarsType bodyTy -> body'
+                Right (TForallRef _ _ bodyTy)
+                  | not (any (typeBinderRefsSameIdentity ref) (freeTypeVarRefsType bodyTy)) -> body'
                 _ -> term'
         _ -> term
 
-    stripUnusedTyAbsAlongType :: TypeCheck.Env -> ElabType -> ElabTerm -> ElabTerm
+    stripUnusedTyAbsAlongType :: TypeCheck.Env -> ElabType -> XmlfTerm -> XmlfTerm
     stripUnusedTyAbsAlongType tcEnv targetTy term =
       let term' = stripUnusedTopTyAbsWithEnv tcEnv term
        in case (targetTy, term') of
-            (TForall targetName _ targetBody, ETyAbs termName mbBound body)
-              | targetName == termName ->
-                  ETyAbs termName mbBound (stripUnusedTyAbsAlongType tcEnv targetBody body)
-            (TArrow dom cod, ELam name _ body) ->
-              ELam name dom (stripUnusedTyAbsAlongType tcEnv cod body)
+            (TForallRef targetRef _ targetBody, ETyAbsRef termRef mbBound body)
+              | typeBinderRefsSameIdentity targetRef termRef ->
+                  ETyAbsRef termRef mbBound (stripUnusedTyAbsAlongType tcEnv targetBody body)
+            (TArrow dom cod, ELam resolved body) ->
+              let body' = stripUnusedTyAbsAlongType tcEnv cod body
+               in ELam (mapResolvedVarType (const dom) resolved) (refreshLocalResolvedVarType (LocalVarResolved resolved) dom body')
             _ -> term'
 
-    hoistFloatingTyAbsThroughLambdas :: ElabTerm -> ElabTerm
+    hoistFloatingTyAbsThroughLambdas :: XmlfTerm -> XmlfTerm
     hoistFloatingTyAbsThroughLambdas term =
       case term of
-        ELam name ty body ->
+        ELam resolved body ->
           let body' = hoistFloatingTyAbsThroughLambdas body
+              ty = resolvedVarType resolved
            in case body' of
-                ETyAbs tyName mbBound inner
-                  | tyName `Set.notMember` freeTypeVarsType ty ->
-                      ETyAbs tyName mbBound (hoistFloatingTyAbsThroughLambdas (ELam name ty inner))
-                _ -> ELam name ty body'
+                ETyAbsRef tyRef mbBound inner
+                  | not (any (typeBinderRefsSameIdentity tyRef) (freeTypeVarRefsType ty)) ->
+                      ETyAbsRef tyRef mbBound (hoistFloatingTyAbsThroughLambdas (ELam resolved inner))
+                _ -> ELam resolved body'
         EApp fun arg -> EApp (hoistFloatingTyAbsThroughLambdas fun) (hoistFloatingTyAbsThroughLambdas arg)
-        ELet name sch rhs body ->
-          ELet name sch (hoistFloatingTyAbsThroughLambdas rhs) (hoistFloatingTyAbsThroughLambdas body)
-        ETyAbs name mbBound body -> ETyAbs name mbBound (hoistFloatingTyAbsThroughLambdas body)
+        ELet resolved sch rhs body ->
+          ELet resolved sch (hoistFloatingTyAbsThroughLambdas rhs) (hoistFloatingTyAbsThroughLambdas body)
+        ETyAbsRef ref mbBound body -> ETyAbsRef ref mbBound (hoistFloatingTyAbsThroughLambdas body)
         ETyInst body inst -> ETyInst (hoistFloatingTyAbsThroughLambdas body) inst
         ERoll ty body -> ERoll ty (hoistFloatingTyAbsThroughLambdas body)
         EUnroll body -> EUnroll (hoistFloatingTyAbsThroughLambdas body)
         _ -> term
 
-    addMissingLeadingTyAbsAlongType :: TypeCheck.Env -> ElabType -> ElabTerm -> ElabTerm
+    addMissingLeadingTyAbsAlongType :: TypeCheck.Env -> ElabType -> XmlfTerm -> XmlfTerm
     addMissingLeadingTyAbsAlongType tcEnv targetTy term =
       let initialReserved =
             Set.unions
               ( Set.union (typeAbsNamesInTerm term) (typeVarNamesInTerm term)
-                  : map freeTypeVarsType (Map.elems (TypeCheck.termEnv tcEnv))
-                  ++ [Set.fromList (Map.keys (TypeCheck.typeEnv tcEnv)), forallBinderNames targetTy]
+                  : map freeTypeVarsType (map snd (TypeCheck.resolvedTermEnvEntries (TypeCheck.resolvedTermEnv tcEnv)))
+                  ++ [Set.fromList (map typeBinderRefName (Map.keys (TypeCheck.typeEnv tcEnv))), forallBinderNames targetTy]
               )
        in go initialReserved targetTy term
       where
         go reserved targetTy' term' =
           case targetTy' of
-            TForall targetName mbBound targetBody ->
+            TForallRef targetRef mbBound targetBody ->
               case stripUnusedTopTyAbsWithEnv tcEnv term' of
-                ETyAbs termName termBound body
-                  | targetName == termName ->
-                      ETyAbs termName termBound (go (Set.insert termName reserved) targetBody body)
+                ETyAbsRef termRef termBound body
+                  | typeBinderRefsSameIdentity targetRef termRef ->
+                      ETyAbsRef termRef termBound (go (Set.insert (typeBinderRefName termRef) reserved) targetBody body)
                 term'' ->
-                  let (targetName', targetBody') =
+                  let targetName = typeBinderRefName targetRef
+                      (targetRef', targetBody') =
                         if Set.member targetName reserved
                           then
                             let fresh = freshNameLike targetName reserved
-                             in (fresh, substTypeCapture targetName (TVar fresh) targetBody)
-                          else (targetName, targetBody)
-                      reserved' = Set.insert targetName' reserved
+                                freshTargetRef = renameTypeBinderRef fresh targetRef
+                             in (freshTargetRef, substTypeCaptureRef targetRef (TVarRef freshTargetRef) targetBody)
+                          else (targetRef, targetBody)
+                      reserved' = Set.insert (typeBinderRefName targetRef') reserved
                       body' = go reserved' targetBody' term''
-                   in ETyAbs targetName' mbBound body'
+                   in ETyAbsRef targetRef' mbBound body'
             TArrow dom cod ->
               case term' of
-                ELam name _ body -> ELam name dom (go reserved cod body)
+                ELam resolved body ->
+                  let body' = go reserved cod body
+                   in ELam (mapResolvedVarType (const dom) resolved) (refreshLocalResolvedVarType (LocalVarResolved resolved) dom body')
                 _ -> term'
             _ -> term'
 
         forallBinderNames ty =
           case ty of
-            TForall name _ body -> Set.insert name (forallBinderNames body)
+            TForallRef ref _ body -> Set.insert (typeBinderRefName ref) (forallBinderNames body)
             _ -> Set.empty
 
-    typeAbsNamesInTerm :: ElabTerm -> Set.Set String
+    typeAbsNamesInTerm :: XmlfTerm -> Set.Set String
     typeAbsNamesInTerm term =
       case term of
-        ETyAbs name _ body -> Set.insert name (typeAbsNamesInTerm body)
-        ELam _ _ body -> typeAbsNamesInTerm body
+        ETyAbsRef ref _ body -> Set.insert (typeBinderRefName ref) (typeAbsNamesInTerm body)
+        ELam _ body -> typeAbsNamesInTerm body
         EApp f a -> Set.union (typeAbsNamesInTerm f) (typeAbsNamesInTerm a)
         ELet _ _ rhs body -> Set.union (typeAbsNamesInTerm rhs) (typeAbsNamesInTerm body)
         ETyInst body _ -> typeAbsNamesInTerm body
@@ -2605,12 +2775,12 @@ elabAlg algebraContext layer =
         EUnroll body -> typeAbsNamesInTerm body
         _ -> Set.empty
 
-    typeVarNamesInTerm :: ElabTerm -> Set.Set String
+    typeVarNamesInTerm :: XmlfTerm -> Set.Set String
     typeVarNamesInTerm term =
       case term of
-        ETyAbs name mb body ->
-          Set.insert name (maybe Set.empty freeTypeVarsType mb `Set.union` typeVarNamesInTerm body)
-        ELam _ ty body -> Set.union (freeTypeVarsType ty) (typeVarNamesInTerm body)
+        ETyAbsRef ref mb body ->
+          Set.insert (typeBinderRefName ref) (maybe Set.empty freeTypeVarsType mb `Set.union` typeVarNamesInTerm body)
+        ELam resolved body -> Set.union (freeTypeVarsType (resolvedVarType resolved)) (typeVarNamesInTerm body)
         EApp f a -> Set.union (typeVarNamesInTerm f) (typeVarNamesInTerm a)
         ELet _ sch rhs body -> Set.unions [freeTypeVarsType (schemeToType sch), typeVarNamesInTerm rhs, typeVarNamesInTerm body]
         ETyInst body inst -> Set.union (typeVarNamesInTerm body) (goInst inst)
@@ -2626,11 +2796,11 @@ elabAlg algebraContext layer =
             InstElim -> Set.empty
             InstInside inner -> goInst inner
             InstSeq a b -> Set.union (goInst a) (goInst b)
-            InstUnder _ inner -> goInst inner
+            InstUnderRef _ inner -> goInst inner
             InstBot ty -> freeTypeVarsType ty
-            InstAbstr _ -> Set.empty
+            InstAbstrRef _ -> Set.empty
 
-    rebuildRecursiveArgAlongType :: TypeCheck.Env -> ElabType -> ElabTerm -> ElabTerm
+    rebuildRecursiveArgAlongType :: TypeCheck.Env -> ElabType -> XmlfTerm -> XmlfTerm
     rebuildRecursiveArgAlongType tcEnv targetTy term =
       let normalized = normalize term
           hoisted = hoistFloatingTyAbsThroughLambdas normalized
@@ -2656,17 +2826,17 @@ elabAlg algebraContext layer =
     blockedAliasMuType :: ElabType -> Maybe ElabType
     blockedAliasMuType ty =
       case ty of
-        TForall a Nothing (TArrow (TVar b) cod)
-          | a == b -> Just (TMu a (TArrow (TVar a) cod))
+        TForallRef ref Nothing (TArrow (TVarRef domRef) cod)
+          | typeBinderRefsSameIdentity ref domRef -> Just (TMuRef ref (TArrow (TVarRef ref) cod))
         _ -> Nothing
 
     shouldRollMuVar :: ElabType -> ElabType -> Bool
     shouldRollMuVar muTy argTy =
       case (muTy, argTy) of
-        (TMu _ _, TVar _) -> True
+        (TMuRef _ _, TVarRef _) -> True
         _ -> False
 
-mkOut :: (Env -> Either ElabError ElabTerm) -> ElabOut
+mkOut :: (Env -> Either ElabError XmlfTerm) -> ElabOut
 mkOut f = ElabOut f f
 
 resolvedLambdaParamNode :: (NodeId -> NodeId) -> (NodeId -> Maybe TyNode) -> NodeId -> Maybe NodeId
@@ -2692,44 +2862,136 @@ internal consumer.
 
 -- | Convert a normalized source type to its elaboration-level equivalent.
 srcTypeToElabType :: NormSrcType -> Either ElabError ElabType
-srcTypeToElabType ty = case ty of
-  STVar name -> Right (TVar name)
-  STArrow dom cod -> TArrow <$> srcTypeToElabType dom <*> srcTypeToElabType cod
-  STBase name -> Right (TBase (BaseTy name))
-  STCon name args -> TCon (BaseTy name) <$> traverse srcTypeToElabType args
-  STVarApp name args -> TVarApp name <$> traverse srcTypeToElabType args
+srcTypeToElabType ty =
+  let (refs, generator) = freshSourceTypeBinderRefs (Set.toList (freeSrcTypeVars ty)) initialIdentityGenerator
+   in fmap fst (srcTypeToElabTypeWith refs generator ty)
+
+freeSrcTypeVars :: SrcTy n v -> Set.Set String
+freeSrcTypeVars ty =
+  go Set.empty ty
+  where
+    go :: Set.Set String -> SrcTy n0 v0 -> Set.Set String
+    go bound srcTy =
+      case srcTy of
+        STVar name
+          | name `Set.member` bound -> Set.empty
+          | otherwise -> Set.singleton name
+        STArrow dom cod -> go bound dom `Set.union` go bound cod
+        STBase {} -> Set.empty
+        STCon _ args -> foldMap (go bound) args
+        STVarApp name args ->
+          let headVars =
+                if name `Set.member` bound
+                  then Set.empty
+                  else Set.singleton name
+           in headVars `Set.union` foldMap (go bound) args
+        STTyLam name body -> go (Set.insert name bound) body
+        STTyApp fun arg -> go bound fun `Set.union` go bound arg
+        STForall name mb body ->
+          maybe Set.empty (go bound . unSrcBound) mb
+            `Set.union` go (Set.insert name bound) body
+        STMu name body -> go (Set.insert name bound) body
+        STBottom -> Set.empty
+
+freshSourceTypeBinderRefs :: [String] -> IdentityGenerator -> (Map.Map String TypeBinderRef, IdentityGenerator)
+freshSourceTypeBinderRefs names generator0 =
+  go names Map.empty generator0
+  where
+    go [] refs generator = (refs, generator)
+    go (name : rest) refs generator =
+      let (ref, generator1) = freshTypeBinderRef name generator
+       in go rest (Map.insert name ref refs) generator1
+
+srcTypeToElabTypeWith :: Map.Map String TypeBinderRef -> IdentityGenerator -> NormSrcType -> Either ElabError (ElabType, IdentityGenerator)
+srcTypeToElabTypeWith refs generator ty = case ty of
+  STVar name -> do
+    ref <- sourceTypeBinderRef refs name
+    Right (TVarRef ref, generator)
+  STArrow dom cod -> do
+    (dom', generator1) <- srcTypeToElabTypeWith refs generator dom
+    (cod', generator2) <- srcTypeToElabTypeWith refs generator1 cod
+    Right (TArrow dom' cod', generator2)
+  STBase name -> Right (TBaseWithIdentity (Builtins.builtinTypeHeadIdentity name) (builtinBaseTy name), generator)
+  STCon name args -> do
+    (args', generator') <- srcTypesToElabTypesWith refs generator args
+    Right (TConWithIdentity (Builtins.builtinTypeHeadIdentity name) (builtinBaseTy name) args', generator')
+  STVarApp name args -> do
+    (args', generator') <- srcTypesToElabTypesWith refs generator args
+    ref <- sourceTypeBinderRef refs name
+    Right (TVarAppRef ref args', generator')
   STTyLam {} ->
     Left (InstantiationError "residual type lambda reached elaboration")
   STTyApp {} ->
     Left (InstantiationError "residual type application reached elaboration")
   STForall name mb body ->
-    TForall name
-      <$> maybe (Right Nothing) srcBoundToElabBound mb
-      <*> srcTypeToElabType body
-  STMu name body -> TMu name <$> srcTypeToElabType body
-  STBottom -> Right TBottom
+    let (ref, generator1) = freshTypeBinderRef name generator
+        refs' = Map.insert name ref refs
+     in do
+          (mb', generator2) <- maybe (Right (Nothing, generator1)) (srcBoundToElabBoundWith refs generator1) mb
+          (body', generator3) <- srcTypeToElabTypeWith refs' generator2 body
+          Right (TForallRef ref mb' body', generator3)
+  STMu name body ->
+    let (ref, generator1) = freshTypeBinderRef name generator
+     in do
+          (body', generator2) <- srcTypeToElabTypeWith (Map.insert name ref refs) generator1 body
+          Right (TMuRef ref body', generator2)
+  STBottom -> Right (TBottom, generator)
   where
-    srcBoundToElabBound :: SrcBound 'NormN -> Either ElabError (Maybe BoundType)
-    srcBoundToElabBound (SrcBound boundTy) = structBoundToElabBound boundTy
+    sourceTypeBinderRef env name =
+      case Map.lookup name env of
+        Just ref -> Right ref
+        Nothing -> Left (InstantiationError ("unresolved source type binder `" ++ name ++ "` reached algebra elaboration"))
 
-    structBoundToElabBound :: StructBound -> Either ElabError (Maybe BoundType)
-    structBoundToElabBound bTy = case bTy of
-      STArrow dom cod -> Just <$> (TArrow <$> srcTypeToElabType dom <*> srcTypeToElabType cod)
-      STBase name -> Right (Just (TBase (BaseTy name)))
-      STCon name args -> Just . TCon (BaseTy name) <$> traverse srcTypeToElabType args
-      STVarApp name args -> Just . TVarApp name <$> traverse srcTypeToElabType args
+    srcTypesToElabTypesWith refs0 generator0 (arg :| args) = do
+      (arg', generator1) <- srcTypeToElabTypeWith refs0 generator0 arg
+      (argsRev, generator') <-
+        foldM
+          ( \(acc, gen) next -> do
+              (next', gen') <- srcTypeToElabTypeWith refs0 gen next
+              Right (next' : acc, gen')
+          )
+          ([], generator1)
+          args
+      Right (arg' :| reverse argsRev, generator')
+
+    srcBoundToElabBoundWith :: Map.Map String TypeBinderRef -> IdentityGenerator -> SrcBound 'NormN -> Either ElabError (Maybe BoundType, IdentityGenerator)
+    srcBoundToElabBoundWith refs' generator0 (SrcBound boundTy) = structBoundToElabBoundWith refs' generator0 boundTy
+
+    structBoundToElabBoundWith :: Map.Map String TypeBinderRef -> IdentityGenerator -> StructBound -> Either ElabError (Maybe BoundType, IdentityGenerator)
+    structBoundToElabBoundWith refs' generator0 bTy = case bTy of
+      STArrow dom cod -> do
+        (dom', generator1) <- srcTypeToElabTypeWith refs' generator0 dom
+        (cod', generator2) <- srcTypeToElabTypeWith refs' generator1 cod
+        Right (Just (TArrow dom' cod'), generator2)
+      STBase name -> Right (Just (TBaseWithIdentity (Builtins.builtinTypeHeadIdentity name) (builtinBaseTy name)), generator0)
+      STCon name args -> do
+        (args', generator1) <- srcTypesToElabTypesWith refs' generator0 args
+        Right (Just (TConWithIdentity (Builtins.builtinTypeHeadIdentity name) (builtinBaseTy name) args'), generator1)
+      STVarApp name args -> do
+        (args', generator1) <- srcTypesToElabTypesWith refs' generator0 args
+        ref <- sourceTypeBinderRef refs' name
+        Right (Just (TVarAppRef ref args'), generator1)
       STTyLam {} ->
         Left (InstantiationError "residual type lambda reached elaboration")
       STTyApp {} ->
         Left (InstantiationError "residual type application reached elaboration")
       STForall name mb body ->
-        Just
-          <$> ( TForall name
-                  <$> maybe (Right Nothing) srcBoundToElabBound mb
-                  <*> srcTypeToElabType body
-              )
-      STMu name body -> Just . TMu name <$> srcTypeToElabType body
-      STBottom -> Right Nothing
+        let (ref, generator1) = freshTypeBinderRef name generator0
+            refs'' = Map.insert name ref refs'
+         in do
+              (mb', generator2) <- maybe (Right (Nothing, generator1)) (srcBoundToElabBoundWith refs' generator1) mb
+              (body', generator3) <- srcTypeToElabTypeWith refs'' generator2 body
+              Right (Just (TForallRef ref mb' body'), generator3)
+      STMu name body ->
+        let (ref, generator1) = freshTypeBinderRef name generator0
+         in do
+              (body', generator2) <- srcTypeToElabTypeWith (Map.insert name ref refs') generator1 body
+              Right (Just (TMuRef ref body'), generator2)
+      STBottom -> Right (Nothing, generator0)
+
+builtinBaseTy :: String -> BaseTy
+builtinBaseTy =
+  BaseTy . Builtins.normalizeBuiltinTypeReference
 
 annNode :: AnnExpr -> NodeId
 annNode ann =

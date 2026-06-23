@@ -103,6 +103,9 @@ contextToNodeBoundWithOrderKeys canonicalNode keys c root target = do
                     else res
   where
     nameFor nid = "t" ++ show (getNodeId nid)
+    refFor nid =
+        let nidC = canonicalNode nid
+        in typeBinderRefFromIdentity (typeBinderIdentityFromNode nidC) (nameFor nidC)
 
     reachableFromStructural :: NodeId -> IntSet.IntSet
     reachableFromStructural root0 =
@@ -220,7 +223,7 @@ contextToNodeBoundWithOrderKeys canonicalNode keys c root target = do
         case elemIndex targetC binders of
             Just i -> do
                 let before = take i binders
-                    steps = map (StepUnder . nameFor) before
+                    steps = map (StepUnderRef . refFor) before
                 pure (memo, Just steps)
             Nothing -> do
                 let tryBound memoAcc [] = Right (memoAcc, Nothing)
@@ -232,7 +235,7 @@ contextToNodeBoundWithOrderKeys canonicalNode keys c root target = do
                                 case res of
                                     Just ctx ->
                                         let before = takeWhile (/= b) binders
-                                            steps = map (StepUnder . nameFor) before ++ [StepInside] ++ ctx
+                                            steps = map (StepUnderRef . refFor) before ++ [StepInside] ++ ctx
                                         in pure (memo', Just steps)
                                     Nothing -> tryBound memo' bs
                             Just TyVar{} -> tryBound memoAcc bs

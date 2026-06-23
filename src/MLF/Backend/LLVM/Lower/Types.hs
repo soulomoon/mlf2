@@ -1,3 +1,5 @@
+{-# LANGUAGE LambdaCase #-}
+
 module MLF.Backend.LLVM.Lower.Types
   ( BackendLLVMError (..),
     BindingInfo (..),
@@ -11,6 +13,7 @@ module MLF.Backend.LLVM.Lower.Types
     FunctionState (..),
     LocalFunction (..),
     LowerM,
+    LowerLocalKey (..),
     LowerValue (..),
     LowerValueKind (..),
     LoweredProgram (..),
@@ -29,7 +32,7 @@ module MLF.Backend.LLVM.Lower.Types
     constructorObjectBytes,
     constructorTagOffset,
     constructorWordBytes,
-    exprEnvValueKinds,
+    lowerLocalKey,
     mergeConstructedValues,
   )
 where
@@ -42,6 +45,8 @@ import qualified Data.Map.Strict as Map
 import Data.Set (Set)
 import MLF.Backend.IR
 import MLF.Backend.LLVM.Syntax (LLVMBasicBlock, LLVMFunction, LLVMInstruction, LLVMOperand, LLVMType)
+import MLF.Frontend.Symbol (SymbolIdentity)
+import MLF.Types.Identity (DeferredRef, EnvRef, IdDetails (..), LocalRef)
 
 data BackendLLVMError
   = BackendLLVMValidationFailed BackendValidationError
@@ -58,9 +63,12 @@ data BackendLLVMError
 
 data ProgramBase = ProgramBase
   { pbBindings :: Map String BindingInfo,
+    pbBindingsByIdentity :: Map SymbolIdentity BindingInfo,
     pbBindingOrder :: [String],
     pbConstructors :: Map String ConstructorRuntime,
+    pbConstructorsByIdentity :: Map SymbolIdentity ConstructorRuntime,
     pbData :: Map String DataRuntime,
+    pbDataByIdentity :: Map SymbolIdentity DataRuntime,
     pbDataNames :: Set String
   }
 
@@ -79,15 +87,18 @@ data ProgramEnv = ProgramEnv
   }
 
 data BindingInfo = BindingInfo
-  { biName :: String,
+  { biIdentity :: Maybe SymbolIdentity,
+    biName :: String,
     biForm :: FunctionForm,
     biExportedAsMain :: Bool
   }
   deriving (Eq, Show)
 
 data FunctionForm = FunctionForm
-  { ffTypeBinders :: [(String, Maybe BackendType)],
+  { ffTypeBinders :: [BackendTypeBinder],
     ffParams :: [(String, BackendType)],
+    ffParamIdentities :: [Maybe IdDetails],
+    ffEvidenceParams :: Set Int,
     ffBody :: BackendExpr,
     ffReturnType :: BackendType
   }
@@ -145,12 +156,15 @@ data ClosureEntry = ClosureEntry
     ceEntryName :: String,
     ceCaptures :: [ClosureCaptureSlot],
     ceParams :: [(String, BackendType)],
+    ceParamIdentities :: [Maybe IdDetails],
+    ceEvidenceParams :: Set Int,
     ceBody :: BackendExpr
   }
   deriving (Eq, Show)
 
 data ClosureCaptureSlot = ClosureCaptureSlot
-  { ccsName :: String,
+  { ccsIdentity :: Maybe IdDetails,
+    ccsName :: String,
     ccsType :: BackendType,
     ccsValueKind :: LowerValueKind
   }
@@ -274,7 +288,8 @@ combineValueKinds resultTy kinds =
         _ -> False
 
 data LocalFunction = LocalFunction
-  { lfForm :: FunctionForm,
+  { lfName :: String,
+    lfForm :: FunctionForm,
     lfCapturedEnv :: ExprEnv,
     lfStoredReference :: Maybe (BackendType, BackendExpr)
   }
@@ -282,14 +297,30 @@ data LocalFunction = LocalFunction
 
 data ExprEnv = ExprEnv
   { eeValues :: Map String LowerValue,
+    eeValuesByIdentity :: Map LowerLocalKey LowerValue,
     eeLocalFunctions :: Map String LocalFunction,
+    eeLocalFunctionsByIdentity :: Map LowerLocalKey LocalFunction,
     eeActiveGlobalInlines :: Set String
   }
   deriving (Eq, Show)
 
-exprEnvValueKinds :: ExprEnv -> Map String LowerValueKind
-exprEnvValueKinds =
-  Map.map lvValueKind . eeValues
+data LowerLocalKey
+  = LowerLocalRef LocalRef
+  | LowerEnvRef EnvRef
+  | LowerDeferredRef DeferredRef
+  deriving (Eq, Ord, Show)
+
+lowerLocalKey :: IdDetails -> Maybe LowerLocalKey
+lowerLocalKey =
+  \case
+    LocalId ref -> Just (LowerLocalRef ref)
+    EvidenceId ref -> Just (LowerLocalRef ref)
+    EnvId ref -> Just (LowerEnvRef ref)
+    DeferredId ref -> Just (LowerDeferredRef ref)
+    TopLevelId {} -> Nothing
+    ConstructorId {} -> Nothing
+    MethodId {} -> Nothing
+    PrimitiveId {} -> Nothing
 
 data FunctionState = FunctionState
   { fsNextLocal :: Int,

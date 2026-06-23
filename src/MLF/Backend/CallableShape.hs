@@ -12,6 +12,8 @@ backend-expression destructuring stays in the IR-owned adapter instance.
 -}
 module MLF.Backend.CallableShape
   ( BackendCallableBindingKind (..),
+    BackendCallableRef,
+    backendCallableRefName,
     BackendCallableHead (..),
     BackendCallableAlternative (..),
     BackendCallableExpr (..),
@@ -20,7 +22,7 @@ module MLF.Backend.CallableShape
   )
 where
 
-import qualified Data.Set as Set
+import MLF.Types.Identity (IdDetails, idDetailsSameIdentity)
 
 data BackendCallableBindingKind
   = BackendCallableBindingDirect
@@ -28,55 +30,60 @@ data BackendCallableBindingKind
   | BackendCallableBindingUnknown
   deriving (Eq, Show)
 
+type BackendCallableRef = (Maybe IdDetails, String)
+
+backendCallableRefName :: BackendCallableRef -> String
+backendCallableRefName = snd
+
 data BackendCallableHead
-  = BackendDirectCallableHead (Maybe String)
-  | BackendClosureCallableHead String
+  = BackendDirectCallableHead (Maybe BackendCallableRef)
+  | BackendClosureCallableHead BackendCallableRef
   | BackendUnknownCallableHead
   deriving (Eq, Show)
 
 data BackendCallableAlternative expr = BackendCallableAlternative
-  { backendCallableAltBinders :: Set.Set String,
-    backendCallableAltClosureBinders :: Set.Set String,
+  { backendCallableAltBinders :: [BackendCallableRef],
+    backendCallableAltClosureBinders :: [BackendCallableRef],
     backendCallableAltBody :: expr
   }
 
 data BackendCallableExprView expr
-  = BackendCallableVar String
+  = BackendCallableVar (Maybe IdDetails) String
   | BackendCallableLam
   | BackendCallableClosure String
   | BackendCallableTyAbs expr
   | BackendCallableTyApp expr
-  | BackendCallableLet String expr expr
+  | BackendCallableLet (Maybe IdDetails) String expr expr
   | BackendCallableCase [BackendCallableAlternative expr]
   | BackendCallableOpaque
 
 class BackendCallableExpr expr where
   backendCallableExprView :: expr -> BackendCallableExprView expr
 
-backendCallableHead :: BackendCallableExpr expr => (String -> BackendCallableBindingKind) -> expr -> BackendCallableHead
+backendCallableHead :: BackendCallableExpr expr => (Maybe IdDetails -> String -> BackendCallableBindingKind) -> expr -> BackendCallableHead
 backendCallableHead resolve0 =
   go resolve0
   where
     go resolve expr =
       case backendCallableExprView expr of
-        BackendCallableVar name ->
-          case resolve name of
+        BackendCallableVar mbIdentity name ->
+          case resolve mbIdentity name of
             BackendCallableBindingDirect ->
-              BackendDirectCallableHead (Just name)
+              BackendDirectCallableHead (Just (mbIdentity, name))
             BackendCallableBindingClosure ->
-              BackendClosureCallableHead name
+              BackendClosureCallableHead (mbIdentity, name)
             BackendCallableBindingUnknown ->
               BackendUnknownCallableHead
         BackendCallableLam ->
           BackendDirectCallableHead Nothing
         BackendCallableClosure entryName ->
-          BackendClosureCallableHead entryName
+          BackendClosureCallableHead (Nothing, entryName)
         BackendCallableTyAbs body ->
           go resolve body
         BackendCallableTyApp fun ->
           go resolve fun
-        BackendCallableLet name rhs body ->
-          go (extendBindingKind resolve name (go resolve rhs)) body
+        BackendCallableLet mbIdentity name rhs body ->
+          go (extendBindingKind resolve mbIdentity name (go resolve rhs)) body
         BackendCallableCase alternatives ->
           collapseCallableHeads
             [ go (extendPatternBindingKinds binders closureBinders resolve) body
@@ -85,19 +92,31 @@ backendCallableHead resolve0 =
         BackendCallableOpaque ->
           BackendUnknownCallableHead
 
-    extendBindingKind resolve name headShape localName
-      | localName == name =
+    extendBindingKind resolve mbIdentity name headShape localIdentity localName
+      | callableNameMatches mbIdentity name localIdentity localName =
           callableBindingKindForHead headShape
       | otherwise =
-          resolve localName
+          resolve localIdentity localName
 
-    extendPatternBindingKinds binders closureBinders resolve name
-      | Set.member name closureBinders =
+    extendPatternBindingKinds binders closureBinders resolve localIdentity name
+      | any (callableBinderMatches localIdentity name) closureBinders =
           BackendCallableBindingClosure
-      | Set.member name binders =
+      | any (callableBinderMatches localIdentity name) binders =
           BackendCallableBindingDirect
       | otherwise =
-          resolve name
+          resolve localIdentity name
+
+callableBinderMatches :: Maybe IdDetails -> String -> BackendCallableRef -> Bool
+callableBinderMatches localIdentity localName (binderIdentity, binderName) =
+  callableNameMatches binderIdentity binderName localIdentity localName
+
+callableNameMatches :: Maybe IdDetails -> String -> Maybe IdDetails -> String -> Bool
+callableNameMatches (Just left) _ (Just right) _ =
+  idDetailsSameIdentity left right
+callableNameMatches Nothing leftName Nothing rightName =
+  leftName == rightName
+callableNameMatches _ _ _ _ =
+  False
 
 callableBindingKindForHead :: BackendCallableHead -> BackendCallableBindingKind
 callableBindingKindForHead =
@@ -112,9 +131,9 @@ callableBindingKindForHead =
 collapseCallableHeads :: [BackendCallableHead] -> BackendCallableHead
 collapseCallableHeads heads
   | all isClosureHead heads =
-      BackendClosureCallableHead (firstClosureHeadName heads)
+      BackendClosureCallableHead (firstClosureHeadRef heads)
   | all isDirectHead heads =
-      BackendDirectCallableHead (firstDirectHeadName heads)
+      BackendDirectCallableHead (firstDirectHeadRef heads)
   | otherwise =
       BackendUnknownCallableHead
   where
@@ -128,24 +147,24 @@ collapseCallableHeads heads
         BackendDirectCallableHead _ -> True
         _ -> False
 
-firstClosureHeadName :: [BackendCallableHead] -> String
-firstClosureHeadName =
+firstClosureHeadRef :: [BackendCallableHead] -> BackendCallableRef
+firstClosureHeadRef =
   go
   where
     go [] =
-      "__mlfp_unknown_closure_head"
-    go (BackendClosureCallableHead name : _) =
-      name
+      (Nothing, "__mlfp_unknown_closure_head")
+    go (BackendClosureCallableHead ref : _) =
+      ref
     go (_ : rest) =
       go rest
 
-firstDirectHeadName :: [BackendCallableHead] -> Maybe String
-firstDirectHeadName =
+firstDirectHeadRef :: [BackendCallableHead] -> Maybe BackendCallableRef
+firstDirectHeadRef =
   go
   where
     go [] =
       Nothing
-    go (BackendDirectCallableHead (Just name) : _) =
-      Just name
+    go (BackendDirectCallableHead (Just ref) : _) =
+      Just ref
     go (_ : rest) =
       go rest

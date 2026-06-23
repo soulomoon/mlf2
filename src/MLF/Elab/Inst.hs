@@ -6,21 +6,23 @@ module MLF.Elab.Inst
     composeInst,
     evalInstantiationWith,
     instMany,
-    renameInstBound,
+    renameInstBoundRef,
     schemeToType,
-    splitForalls,
   )
 where
 
-import Data.Functor.Foldable (para)
-import qualified Data.Map.Strict as Map
+import Data.Functor.Foldable (Recursive (project), para)
 import MLF.Elab.Types
-import MLF.Reify.TypeOps (alphaEqType, freeTypeVarsType, freshTypeNameFromCounter, splitForalls, substTypeCapture)
+import MLF.Reify.TypeOps (alphaEqType, freeTypeVarsType, substTypeCaptureRef)
+import MLF.Types.Identity (IdentityGenerator)
 
 -- | Turn a scheme into its corresponding type (nested `∀`).
 schemeToType :: ElabScheme -> ElabType
-schemeToType (Forall binds body) =
-  buildForalls binds body
+schemeToType scheme =
+  foldr
+    (\(ref, mbBound) body -> tForallWithRef ref mbBound body)
+    (schemeBody scheme)
+    (schemeBinderRefs scheme)
 
 composeInst :: Instantiation -> Instantiation -> Instantiation
 composeInst InstId i = i
@@ -31,41 +33,41 @@ instMany :: [Instantiation] -> Instantiation
 instMany = foldr composeInst InstId
 
 data InstEvalSpec env err = InstEvalSpec
-  { instBot :: ElabType -> (Int, env, ElabType) -> Either err (Int, env, ElabType),
-    instAbstr :: String -> (Int, env, ElabType) -> Either err (Int, env, ElabType),
+  { instBot :: ElabType -> (IdentityGenerator, env, ElabType) -> Either err (IdentityGenerator, env, ElabType),
+    instAbstr :: TypeBinderRef -> (IdentityGenerator, env, ElabType) -> Either err (IdentityGenerator, env, ElabType),
     instElimError :: Instantiation -> ElabType -> err,
     instInsideError :: Instantiation -> ElabType -> err,
     instUnderError :: Instantiation -> ElabType -> err,
-    instElimEnv :: String -> ElabType -> env -> env,
-    instUnderEnv :: String -> ElabType -> env -> env,
-    renameBound :: String -> String -> Instantiation -> Instantiation
+    instElimEnv :: TypeBinderRef -> ElabType -> env -> env,
+    instUnderEnv :: TypeBinderRef -> ElabType -> env -> env,
+    renameBound :: TypeBinderRef -> TypeBinderRef -> Instantiation -> Instantiation
   }
 
 evalInstantiationWith ::
   InstEvalSpec env err ->
   Instantiation ->
-  (Int, env, ElabType) ->
-  Either err (Int, env, ElabType)
+  (IdentityGenerator, env, ElabType) ->
+  Either err (IdentityGenerator, env, ElabType)
 evalInstantiationWith spec inst = eval inst
   where
     eval = para instAlg
 
     instElimFn errInst (k, env', t) = case t of
-      TForall v mbBound body -> do
+      TForallRef ref mbBound body -> do
         let bTy = maybe TBottom tyToElab mbBound
-            env'' = instElimEnv spec v bTy env'
-        Right (k, env'', substTypeCapture v bTy body)
+            env'' = instElimEnv spec ref bTy env'
+        Right (k, env'', substTypeCaptureRef ref bTy body)
       _ -> Left (instElimError spec errInst t)
 
     instInsideFn errInst phiFn (k, env', t) = case t of
-      TForall v mbBound body -> do
+      TForallRef ref mbBound body -> do
         let b0 = maybe TBottom tyToElab mbBound
         (k1, _env'', b1) <- phiFn (k, env', b0)
         let mb' = case b1 of
               TBottom -> Nothing
-              TVar {} -> Nothing
+              TVarRef {} -> Nothing
               _ -> either (const Nothing) Just (elabToBound b1)
-        Right (k1, env', TForall v mb' body)
+        Right (k1, env', TForallRef ref mb' body)
       _ -> Left (instInsideError spec errInst t)
 
     -- InstApp applies a concrete type argument directly to the front forall,
@@ -73,7 +75,7 @@ evalInstantiationWith spec inst = eval inst
     -- For explicit non-bottom bounds, a bound-matching InstApp is accepted
     -- directly and substitutes the binder with that bound type.
     instAppFn argTy (k, env', t) = case t of
-      TForall v mbBound body -> do
+      TForallRef ref mbBound body -> do
         let b0 = maybe TBottom tyToElab mbBound
         (k1, env'', checkedArg) <-
           case mbBound of
@@ -82,11 +84,22 @@ evalInstantiationWith spec inst = eval inst
                   Right (k, env', b0)
             _ ->
               instBot spec argTy (k, env', b0)
-        let env''' = instElimEnv spec v checkedArg env''
-        Right (k1, env''', substTypeCapture v checkedArg body)
+        let env''' = instElimEnv spec ref checkedArg env''
+        Right (k1, env''', substTypeCaptureRef ref checkedArg body)
       _ ->
         Left
           (instElimError spec (InstSeq (InstInside (InstBot argTy)) InstElim) t)
+
+    instAbstrRefArg instArg = case project instArg of
+      InstAbstrFRef ref -> Just ref
+      _ -> Nothing
+
+    instElimAbstr ref k env' t = case t of
+      TForallRef forallRef _mbBound body ->
+        let replacement = TVarRef ref
+            env'' = instElimEnv spec forallRef replacement env'
+         in Right (k, env'', substTypeCaptureRef forallRef replacement body)
+      _ -> Left (instElimError spec InstElim t)
 
     instAlg inst0 = case inst0 of
       InstIdF -> \(k, env', t) -> Right (k, env', t)
@@ -97,33 +110,30 @@ evalInstantiationWith spec inst = eval inst
               instAppFn tyArg (k, env', t)
             (InstInside (InstApp tyArg), InstElim) ->
               instAppFn tyArg (k, env', t)
-            (InstInside (InstAbstr v), InstElim) ->
-              case t of
-                TForall name _mbBound body ->
-                  let env'' = instElimEnv spec name (TVar v) env'
-                   in Right (k, env'', substTypeCapture name (TVar v) body)
-                _ -> Left (instElimError spec InstElim t)
+            (InstInside abstr, InstElim)
+              | Just ref <- instAbstrRefArg abstr ->
+                  instElimAbstr ref k env' t
             _ -> do
               (k1, env'', t1) <- i1 (k, env', t)
               i2 (k1, env'', t1)
       InstAppF argTy -> instAppFn argTy
       InstBotF tArg -> instBot spec tArg
-      InstAbstrF v -> instAbstr spec v
+      InstAbstrFRef ref -> instAbstr spec ref
       InstIntroF ->
-        \(k, env', t) -> do
+        \(generator, env', t) -> do
           let used = freeTypeVarsType t
-              (fresh, k') = freshTypeNameFromCounter k used
-          Right (k', env', TForall fresh Nothing t)
+              (ref, generator') = freshTypeBinderRefFromNames used generator
+          Right (generator', env', tForallWithRef ref Nothing t)
       InstElimF -> instElimFn InstElim
       InstInsideF (_, phiFn) -> instInsideFn InstId phiFn
-      InstUnderF vParam (phiInst, _phiFn) ->
+      InstUnderFRef paramRef (phiInst, _phiFn) ->
         \(k, env', t) -> case t of
-          TForall v mbBound body -> do
+          TForallRef ref mbBound body -> do
             let b0 = maybe TBottom tyToElab mbBound
-                env'' = instUnderEnv spec v b0 env'
-                phi' = renameBound spec vParam v phiInst
+                env'' = instUnderEnv spec ref b0 env'
+                phi' = renameBound spec paramRef ref phiInst
             (k1, _env''', body') <- eval phi' (k, env'', body)
-            Right (k1, env', TForall v mbBound body')
+            Right (k1, env', TForallRef ref mbBound body')
           _ -> Left (instUnderError spec phiInst t)
 
 -- | Apply an xMLF instantiation to an xMLF type (xmlf Fig. 3).
@@ -131,12 +141,13 @@ evalInstantiationWith spec inst = eval inst
 -- This is a *partial* function: it fails if the instantiation expects a certain
 -- type form (e.g. ∀ for `N`) but the type does not match.
 applyInstantiation :: ElabType -> Instantiation -> Either ElabError ElabType
-applyInstantiation ty inst = (\(_, _, ty') -> ty') <$> evalInstantiationWith spec inst (0, Map.empty, ty)
+applyInstantiation ty inst =
+  (\(_, _, ty') -> ty') <$> evalInstantiationWith spec inst (identityGeneratorAfterType ty, [], ty)
   where
-    resolveReplayVars :: Map.Map String ElabType -> ElabType -> ElabType
+    resolveReplayVars :: [(TypeBinderRef, ElabType)] -> ElabType -> ElabType
     resolveReplayVars replayEnv ty0 =
-      Map.foldlWithKey'
-        (\tyAcc var replacement -> substTypeCapture var replacement tyAcc)
+      foldl
+        (\tyAcc (ref, replacement) -> substTypeCaptureRef ref replacement tyAcc)
         ty0
         replayEnv
 
@@ -158,7 +169,7 @@ applyInstantiation ty inst = (\(_, _, ty') -> ty') <$> evalInstantiationWith spe
        See: BUG-2026-03-16-001, test "BUG-2026-03-16-001 regression" in
        ElaborationSpec.hs.
     -}
-    allowReplayBoundMatch :: Map.Map String ElabType -> ElabType -> ElabType -> Bool
+    allowReplayBoundMatch :: [(TypeBinderRef, ElabType)] -> ElabType -> ElabType -> Bool
     allowReplayBoundMatch replayEnv tArg t =
       let resolvedArg = resolveReplayVars replayEnv tArg
        in not (alphaEqType resolvedArg tArg)
@@ -172,23 +183,20 @@ applyInstantiation ty inst = (\(_, _, ty') -> ty') <$> evalInstantiationWith spe
               | allowReplayBoundMatch replayEnv tArg t ->
                   Right (k, replayEnv, t)
             _ -> Left (InstantiationError ("InstBot expects ⊥, got: " ++ pretty t)),
-          instAbstr = \v (k, replayEnv, _t) -> Right (k, replayEnv, TVar v),
+          instAbstr = \ref (k, replayEnv, _t) -> Right (k, replayEnv, TVarRef ref),
           instElimError = \_inst0 t ->
             InstantiationError ("InstElim expects ∀, got: " ++ pretty t),
           instInsideError = \_inst0 t ->
             InstantiationError ("InstInside expects ∀, got: " ++ pretty t),
           instUnderError = \_inst0 t ->
             InstantiationError ("InstUnder expects ∀, got: " ++ pretty t),
-          instElimEnv = \v replacement replayEnv -> Map.insert v replacement replayEnv,
+          instElimEnv = \ref replacement replayEnv -> (ref, replacement) : replayEnv,
           instUnderEnv = \_v _bound replayEnv -> replayEnv,
-          renameBound = renameInstBound
+          renameBound = renameInstBoundRef
         }
 
--- Rename bound variable occurrences inside an instantiation body.
--- This is α-renaming of the instantiation’s binder: occurrences of `old`
--- are renamed to `new`, except under a nested `∀(old ⩾)` which re-binds it.
-renameInstBound :: String -> String -> Instantiation -> Instantiation
-renameInstBound old new = para alg
+renameInstBoundRef :: TypeBinderRef -> TypeBinderRef -> Instantiation -> Instantiation
+renameInstBoundRef oldRef newRef = para alg
   where
     alg inst0 = case inst0 of
       InstIdF -> InstId
@@ -196,9 +204,13 @@ renameInstBound old new = para alg
       InstBotF t -> InstBot t
       InstIntroF -> InstIntro
       InstElimF -> InstElim
-      InstAbstrF v -> InstAbstr (if v == old then new else v)
+      InstAbstrFRef ref ->
+        instAbstrWithRef $
+          if typeBinderRefsSameIdentity ref oldRef
+            then newRef
+            else ref
       InstInsideF i -> InstInside (snd i)
       InstSeqF a b -> InstSeq (snd a) (snd b)
-      InstUnderF v i
-        | v == old -> InstUnder v (fst i) -- shadowing: stop renaming under this binder
-        | otherwise -> InstUnder v (snd i)
+      InstUnderFRef ref i
+        | typeBinderRefsSameIdentity ref oldRef -> instUnderWithRef ref (fst i) -- shadowing: stop renaming under this binder
+        | otherwise -> instUnderWithRef ref (snd i)

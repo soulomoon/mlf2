@@ -8,10 +8,14 @@ module MLF.Frontend.Symbol
     ResolvedReferenceKind (..),
     ResolvedReference (..),
     mkResolvedSymbol,
+    sameSymbolIdentity,
     sameResolvedSymbol,
+    symbolIdentityStableName,
     unqualifiedSymbolName,
   )
 where
+
+import MLF.Types.Unique (UniqueIdentity (..))
 
 data SymbolNamespace
   = SymbolValue
@@ -23,17 +27,26 @@ data SymbolNamespace
   deriving (Eq, Ord, Show)
 
 data SymbolOwnerIdentity
-  = SymbolOwnerType String String
-  | SymbolOwnerClass String String
+  = SymbolOwnerType SymbolIdentity
+  | SymbolOwnerClass SymbolIdentity
   deriving (Eq, Ord, Show)
 
 data SymbolIdentity = SymbolIdentity
-  { symbolNamespace :: SymbolNamespace,
+  { symbolUniqueIdentity :: UniqueIdentity,
+    symbolNamespace :: SymbolNamespace,
     symbolDefiningModule :: String,
     symbolDefiningName :: String,
     symbolOwnerIdentity :: Maybe SymbolOwnerIdentity
   }
-  deriving (Eq, Ord, Show)
+  deriving (Show)
+
+instance Eq SymbolIdentity where
+  left == right =
+    symbolUniqueIdentity left == symbolUniqueIdentity right
+
+instance Ord SymbolIdentity where
+  compare left right =
+    compare (symbolUniqueIdentity left) (symbolUniqueIdentity right)
 
 data SymbolOrigin
   = SymbolLocal String
@@ -53,7 +66,15 @@ data ResolvedSymbol = ResolvedSymbol
   { resolvedSymbolIdentity :: SymbolIdentity,
     resolvedSymbolSpelling :: SymbolSpelling
   }
-  deriving (Eq, Ord, Show)
+  deriving (Show)
+
+instance Eq ResolvedSymbol where
+  left == right =
+    sameResolvedSymbol left right
+
+instance Ord ResolvedSymbol where
+  compare left right =
+    compare (resolvedSymbolIdentity left) (resolvedSymbolIdentity right)
 
 data ResolvedReferenceKind
   = ResolvedValueReference
@@ -69,7 +90,18 @@ data ResolvedReference = ResolvedReference
     resolvedReferenceName :: String,
     resolvedReferenceSymbol :: ResolvedSymbol
   }
-  deriving (Eq, Ord, Show)
+  deriving (Show)
+
+instance Eq ResolvedReference where
+  left == right =
+    resolvedReferenceKind left == resolvedReferenceKind right
+      && resolvedReferenceSymbol left == resolvedReferenceSymbol right
+
+instance Ord ResolvedReference where
+  compare left right =
+    compare
+      (resolvedReferenceKind left, resolvedSymbolIdentity (resolvedReferenceSymbol left))
+      (resolvedReferenceKind right, resolvedSymbolIdentity (resolvedReferenceSymbol right))
 
 mkResolvedSymbol :: SymbolIdentity -> String -> String -> SymbolOrigin -> ResolvedSymbol
 mkResolvedSymbol identity sourceName displayName origin =
@@ -83,9 +115,17 @@ mkResolvedSymbol identity sourceName displayName origin =
           }
     }
 
+sameSymbolIdentity :: SymbolIdentity -> SymbolIdentity -> Bool
+sameSymbolIdentity left right =
+  symbolUniqueIdentity left == symbolUniqueIdentity right
+
 sameResolvedSymbol :: ResolvedSymbol -> ResolvedSymbol -> Bool
 sameResolvedSymbol left right =
-  resolvedSymbolIdentity left == resolvedSymbolIdentity right
+  sameSymbolIdentity (resolvedSymbolIdentity left) (resolvedSymbolIdentity right)
+
+symbolIdentityStableName :: SymbolIdentity -> String
+symbolIdentityStableName identity =
+  "$identity#" ++ show (uniqueIdentityValue (symbolUniqueIdentity identity))
 
 unqualifiedSymbolName :: String -> String
 unqualifiedSymbolName =

@@ -6,6 +6,7 @@ import Control.Exception (bracket, evaluate)
 import Control.Monad (forM_, replicateM, when)
 import Data.List (isInfixOf)
 import Data.List.NonEmpty (NonEmpty (..))
+import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import System.Directory
   ( createDirectory,
@@ -48,10 +49,13 @@ import MLF.Backend.LLVM.Ppr (renderLLVMModule)
 import MLF.Constraint.Types.Graph (BaseTy (..))
 import MLF.API (parseRawProgram, renderProgramParseError)
 import MLF.Frontend.Program.Types (CheckedProgram)
+import MLF.Frontend.Symbol (SymbolIdentity (..), SymbolNamespace (..), symbolIdentityStableName)
 import MLF.Frontend.Syntax (Lit (..))
 import MLF.Pipeline (checkProgram)
 import qualified MLF.Program.CLI as CLI
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
+import MLF.Types.Identity (IdDetails (..), LocalIdentity (..), LocalRef (..), TypeBinderIdentity (..))
+import MLF.Types.Unique (UniqueIdentity (..))
 import Parity.ProgramMatrix
   ( ProgramMatrixCase (..),
     ProgramMatrixExpectation (..),
@@ -1563,6 +1567,14 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldNotSatisfy` isInfixOf "Unsupported backend LLVM type"
     validateLLVMAssembly output
 
+  it "collects local function forms by identity when type-app head names are stale" $ do
+    output <- requireRight (renderBackendProgramLLVM localFunctionFormIdentityTypeAppProgram)
+
+    output `shouldSatisfy` isInfixOf "$__mlfp_closure$local_poly_identity"
+    output `shouldNotSatisfy` isInfixOf "$stale_polyLocal"
+    output `shouldNotSatisfy` isInfixOf "Unsupported backend LLVM type"
+    validateLLVMAssembly output
+
   it "uses qualified closure entries for directly called type applications" $ do
     output <- requireRight (renderBackendProgramLLVM directPolymorphicClosureCallProgram)
 
@@ -1609,6 +1621,21 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldNotSatisfy` isInfixOf "missing specialization"
     validateLLVMAssembly output
 
+  it "collects global specializations by resolved identity when type-app head names are stale" $ do
+    output <- requireRight (renderBackendProgramLLVM staleGlobalPolymorphicZeroArityProgram)
+
+    output `shouldSatisfy` isInfixOf "define private ptr @\"none$t"
+    output `shouldNotSatisfy` isInfixOf "$stale_none"
+    output `shouldNotSatisfy` isInfixOf "missing specialization"
+    validateLLVMAssembly output
+
+  it "collects global specializations by identity through same-named local shadowing" $ do
+    output <- requireRight (renderBackendProgramLLVM shadowedNameGlobalPolymorphicZeroArityProgram)
+
+    output `shouldSatisfy` isInfixOf "define private ptr @\"none$t"
+    output `shouldNotSatisfy` isInfixOf "missing specialization"
+    validateLLVMAssembly output
+
   it "collects global specializations after direct head type instantiation" $ do
     output <- requireRight (renderBackendProgramLLVM directHeadGlobalPolymorphicZeroArityProgram)
 
@@ -1644,7 +1671,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     case
       Lower.inferTypeArguments
         "rigid application head"
-        ["a"]
+        [BackendTypeBinder "a" Nothing]
         [("value", BTVarApp "f" (BTVar "a" :| []))]
         [BackendVar (BTVarApp "g" (intTy :| [])) "value"]
       of
@@ -1653,11 +1680,38 @@ spec = describe "MLF.Backend.LLVM" $ do
         Right substitution ->
           expectationFailure ("expected rigid head mismatch, got substitution: " ++ show substitution)
 
+    let headIdentity = GeneratedTypeBinderIdentity (UniqueIdentity 991210)
+    case
+      Lower.inferTypeArguments
+        "identity-less application head"
+        [BackendTypeBinder "a" Nothing]
+        [("value", BTVarAppWithIdentity (Just headIdentity) "f" (BTVar "a" :| []))]
+        [BackendVar (BTVarApp "f" (intTy :| [])) "value"]
+      of
+        Left err ->
+          Lower.renderBackendLLVMError err `shouldSatisfy` isInfixOf "rigid type application head mismatch"
+        Right substitution ->
+          expectationFailure ("expected mixed identity head mismatch, got substitution: " ++ show substitution)
+
+  it "matches rigid applied type heads by identity during type-argument inference" $ do
+    let headIdentity = GeneratedTypeBinderIdentity (UniqueIdentity 991211)
+    case
+      Lower.inferTypeArguments
+        "identity application head"
+        [BackendTypeBinder "a" Nothing]
+        [("value", BTVarAppWithIdentity (Just headIdentity) "f" (BTVar "a" :| []))]
+        [BackendVar (BTVarAppWithIdentity (Just headIdentity) "renamed" (intTy :| [])) "value"]
+      of
+        Right substitution ->
+          Map.lookup (BackendTypeSubstitutionByName "a") substitution `shouldBe` Just intTy
+        Left err ->
+          expectationFailure ("expected identity head match, got error: " ++ Lower.renderBackendLLVMError err)
+
   it "rejects mismatched applied type arguments during type-argument inference" $ do
     case
       Lower.inferTypeArguments
         "applied argument mismatch"
-        ["f"]
+        [BackendTypeBinder "f" Nothing]
         [("value", BTVarApp "f" (intTy :| []))]
         [BackendVar (BTCon (BaseTy "Box") (boolTy :| [])) "value"]
       of
@@ -1701,6 +1755,54 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldNotSatisfy` isInfixOf "Unsupported backend LLVM type"
     validateLLVMAssembly output
 
+  it "statically lowers stale-named top-level function arguments by resolved identity" $ do
+    output <- requireRight (renderBackendProgramLLVM staleStaticFunctionArgumentProgram)
+
+    output `shouldNotSatisfy` isInfixOf "$stale_id"
+    validateLLVMAssembly output
+
+  it "follows stale-named eta alias targets by resolved identity" $ do
+    output <- requireRight (renderBackendProgramLLVM staleEtaAliasStaticFunctionArgumentProgram)
+
+    output `shouldNotSatisfy` isInfixOf "$stale_id"
+    validateLLVMAssembly output
+
+  it "follows eta alias arguments by local identity when parameter names are stale" $ do
+    output <- requireRight (renderBackendProgramLLVM staleEtaAliasParamIdentityProgram)
+
+    output `shouldNotSatisfy` isInfixOf "$stale_id"
+    output `shouldNotSatisfy` isInfixOf "$stale_y"
+    validateLLVMAssembly output
+
+  it "does not lower global binding uses by stale name when identities differ" $ do
+    renderBackendProgramLLVM mismatchedGlobalBindingIdentityProgram
+      `shouldSatisfyLeft` isInfixOf "BackendUnknownVariable \"id\""
+
+  it "keeps same-named top-level identity references reachable through local shadowing" $ do
+    output <- requireRight (renderBackendProgramLLVM shadowedNameGlobalReachabilityProgram)
+
+    output `shouldSatisfy` isInfixOf "define i64 @\"helper\""
+    output `shouldSatisfy` isInfixOf "call i64 @\"helper\""
+    validateLLVMAssembly output
+
+  it "lowers data type heads named by data identity" $ do
+    output <- requireRight (renderBackendProgramLLVM dataIdentityTypeHeadProgram)
+
+    output `shouldSatisfy` isInfixOf "define ptr @\"main\"(ptr %\"x\")"
+    output `shouldNotSatisfy` isInfixOf "Unsupported backend LLVM type"
+    validateLLVMAssembly output
+
+  it "lowers stale data type heads by carried data identity" $ do
+    output <- requireRight (renderBackendProgramLLVM dataIdentityStaleTypeHeadProgram)
+
+    output `shouldSatisfy` isInfixOf "define ptr @\"main\"(ptr %\"x\")"
+    output `shouldNotSatisfy` isInfixOf "stale.IdentityBox"
+    validateLLVMAssembly output
+
+  it "does not lower data type heads by stale name when identities differ" $ do
+    renderBackendProgramLLVM dataIdentityMismatchedTypeHeadProgram
+      `shouldSatisfyLeft` isInfixOf "Unsupported backend LLVM type"
+
   it "rejects unsupported static function arguments instead of erasing them" $ do
     renderBackendProgramLLVM staticPartialApplicationArgumentProgram
       `shouldSatisfyLeft` isInfixOf "unsupported static function argument \"f\""
@@ -1739,6 +1841,54 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldSatisfy` isInfixOf "ret i64 7"
     output `shouldNotSatisfy` isInfixOf "Unknown backend LLVM function"
     validateLLVMAssembly output
+
+  it "resolves same-named local lets by identity before name fallback" $ do
+    output <- requireRight (renderBackendProgramLLVM localIdentityShadowedLetProgram)
+
+    output `shouldSatisfy` isInfixOf "define i64 @\"main\"()"
+    output `shouldSatisfy` isInfixOf "ret i64 41"
+    output `shouldNotSatisfy` isInfixOf "ret i64 99"
+    validateLLVMAssembly output
+
+  it "resolves same-named lambda parameters by identity before name fallback" $ do
+    output <- requireRight (renderBackendProgramLLVM lambdaIdentityShadowedParamProgram)
+
+    output `shouldSatisfy` isInfixOf "define i64 @\"shadow\"(i64 %\"x\", i64 %\"x1\")"
+    output `shouldSatisfy` isInfixOf "ret i64 %\"x\""
+    output `shouldNotSatisfy` isInfixOf "ret i64 %\"x1\""
+    validateLLVMAssembly output
+
+  it "resolves same-named top-level values by identity before local fallback" $ do
+    output <- requireRight (renderBackendProgramLLVM shadowedNameGlobalValueIdentityProgram)
+
+    output `shouldSatisfy` isInfixOf "define i64 @\"x\"()"
+    output `shouldSatisfy` isInfixOf "call i64 @\"x\"()"
+    output `shouldNotSatisfy` isInfixOf "ret i64 1"
+    validateLLVMAssembly output
+
+  it "resolves stale-named case binders by identity before name fallback" $ do
+    output <- requireRight (renderBackendProgramNativeLLVM casePatternIdentityStaleBinderProgram)
+
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    runLLVMNativeExecutable output
+      `shouldReturn` NativeRunResult ExitSuccess "99\n" ""
+
+  it "resolves stale-named closure parameters by identity before name fallback" $ do
+    output <- requireRight (renderBackendProgramNativeLLVM closureParamIdentityStaleNameProgram)
+
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    runLLVMNativeExecutable output
+      `shouldReturn` NativeRunResult ExitSuccess "99\n" ""
+
+  it "classifies stale-named closure captures by identity before name fallback" $ do
+    output <- requireRight (renderBackendProgramLLVM closureCaptureValueKindIdentityProgram)
+
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.env.field"
+    output `shouldNotSatisfy` isInfixOf "closure.code.ptr\" %\"__llvm.closure.env.field"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
 
   it "preserves top-level function aliases as function forms" $ do
     output <- requireRight (renderBackendProgramLLVM topLevelFunctionAliasProgram)
@@ -1885,6 +2035,14 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldNotSatisfy` isInfixOf "no matching immediate constructor alternative"
     validateLLVMAssembly output
 
+  it "does not match immediate constructor alternatives by stale name when identities differ" $ do
+    renderBackendProgramLLVM mismatchedImmediateConstructorIdentityCaseProgram
+      `shouldSatisfyLeft` isInfixOf "BackendUnknownConstructor \"WithStatic\""
+
+  it "does not lower constructor uses by stale name when identities differ" $ do
+    renderBackendProgramLLVM mismatchedConstructorUseIdentityProgram
+      `shouldSatisfyLeft` isInfixOf "BackendUnknownConstructor \"WithStatic\""
+
   it "evaluates immediate constructor fields before unmatched alternatives" $ do
     renderBackendProgramLLVM strictImmediateUnmatchedProgram
       `shouldSatisfyLeft` isInfixOf "representation-changing roll"
@@ -1892,6 +2050,10 @@ spec = describe "MLF.Backend.LLVM" $ do
   it "rejects duplicate constructor case alternatives before emitting switch" $ do
     renderBackendProgramLLVM duplicateConstructorCaseProgram
       `shouldSatisfyLeft` isInfixOf "duplicate constructor case tag"
+
+  it "rejects duplicate immediate constructor alternatives by identity" $ do
+    renderBackendProgramLLVM duplicateImmediateConstructorIdentityCaseProgram
+      `shouldSatisfyLeft` isInfixOf "duplicate constructor case alternative"
 
   it "rejects non-tail default case alternatives before emitting switch" $ do
     renderBackendProgramLLVM nonTailDefaultCaseProgram
@@ -1977,6 +2139,13 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldNotSatisfy` isInfixOf "define i64 @\"shadowedCalleeWithEvidenceCall\""
     validateLLVMAssembly output
 
+  it "collects referenced callees by identity through same-named local shadowing" $ do
+    output <- requireRight (renderBackendProgramLLVM shadowedNameReferencedCalleeIdentityProgram)
+
+    output `shouldSatisfy` isInfixOf "define i64 @\"calleeWithEvidenceCall\"(ptr %\"$evidence_apply\")"
+    output `shouldSatisfy` isInfixOf "ptr @\"calleeWithEvidenceCall\""
+    validateLLVMAssembly output
+
   it "lowers nested evidence wrapper parameters as pointers" $ do
     output <- requireRight (renderBackendProgramLLVM nestedEvidenceWrapperParameterProgram)
 
@@ -1994,6 +2163,26 @@ spec = describe "MLF.Backend.LLVM" $ do
     Lower.evidenceFunctionTypesCompatible
       (BTArrow (BTArrow unaryIntTy intTy) intTy)
       (BTArrow (BTArrow unaryIntTy intTy) intTy)
+      `shouldBe` True
+
+  it "accepts identity-renamed forall evidence parameters" $ do
+    let leftIdentity = GeneratedTypeBinderIdentity (UniqueIdentity 2069001)
+        rightIdentity = GeneratedTypeBinderIdentity (UniqueIdentity 2069002)
+        leftForall =
+          BTForallWithIdentity
+            (Just leftIdentity)
+            "a"
+            Nothing
+            (BTArrow (BTVarWithIdentity (Just leftIdentity) "a") intTy)
+        rightForall =
+          BTForallWithIdentity
+            (Just rightIdentity)
+            "b"
+            Nothing
+            (BTArrow (BTVarWithIdentity (Just rightIdentity) "b") intTy)
+    Lower.evidenceFunctionTypesCompatible
+      (BTArrow leftForall intTy)
+      (BTArrow rightForall intTy)
       `shouldBe` True
 
   it "emits self-recursive higher-order calls instead of expanding them inline" $ do
@@ -2027,6 +2216,17 @@ spec = describe "MLF.Backend.LLVM" $ do
   it "rejects evidence wrappers that capture local term bindings" $ do
     renderBackendProgramLLVM capturingEvidenceWrapperProgram
       `shouldSatisfyLeft` isInfixOf "unsupported evidence function argument"
+
+  it "rejects evidence wrappers that capture stale-named locals by identity" $ do
+    renderBackendProgramLLVM staleLocalIdentityEvidenceWrapperProgram
+      `shouldSatisfyLeft` isInfixOf "unsupported evidence function argument"
+
+  it "allows evidence wrappers that reference same-named globals by identity" $ do
+    output <- requireRight (renderBackendProgramLLVM globalIdentityEvidenceWrapperProgram)
+
+    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_evidence_wrapper$"
+    output `shouldNotSatisfy` isInfixOf "unsupported evidence function argument"
+    validateLLVMAssembly output
 
   it "collects evidence wrappers only after polymorphic forms are specialized" $ do
     output <- requireRight (renderBackendProgramLLVM polymorphicEvidenceWrapperProgram)
@@ -2586,6 +2786,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     output <- requireRight (renderBackendProgramLLVM capturedNullaryGlobalFunctionAliasProgram)
 
     output `shouldSatisfy` isInfixOf "call ptr @\"get\"()"
+    output `shouldNotSatisfy` isInfixOf "$stale_get"
     output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.env.field"
     output `shouldNotSatisfy` isInfixOf "closure.code.ptr\" %\"__llvm.closure.env.field"
     validateLLVMAssembly output
@@ -4283,6 +4484,331 @@ typeAppliedGlobalStaticAliasProgram =
       "}"
     ]
 
+staleStaticFunctionArgumentProgram :: BackendProgram
+staleStaticFunctionArgumentProgram =
+  programWithBindings
+    [ BackendBindingWithMetadata
+        { backendBindingIdentity = Just staleStaticFunctionIdentity,
+          backendBindingNameWithMetadata = "id",
+          backendBindingTypeWithMetadata = unaryIntTy,
+          backendBindingExprWithMetadata =
+            BackendLam unaryIntTy "x" intTy (BackendVar intTy "x"),
+          backendBindingExportedAsMainWithMetadata = False,
+          backendBindingEvidenceParamIndices = Set.empty
+        },
+      BackendBinding
+        { backendBindingName = "use",
+          backendBindingType = BTArrow unaryIntTy intTy,
+          backendBindingExpr =
+            BackendLam
+              (BTArrow unaryIntTy intTy)
+              "f"
+              unaryIntTy
+              (BackendApp intTy (BackendVar unaryIntTy "f") (intLit 1)),
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "main",
+          backendBindingType = intTy,
+          backendBindingExpr =
+            BackendApp
+              intTy
+              (BackendVar (BTArrow unaryIntTy intTy) "use")
+              (BackendVarWithIdentity unaryIntTy (Just (TopLevelId staleStaticFunctionIdentity)) "$stale_id"),
+          backendBindingExportedAsMain = True
+        }
+    ]
+
+staleEtaAliasStaticFunctionArgumentProgram :: BackendProgram
+staleEtaAliasStaticFunctionArgumentProgram =
+  programWithBindings
+    [ BackendBindingWithMetadata
+        { backendBindingIdentity = Just staleStaticFunctionIdentity,
+          backendBindingNameWithMetadata = "id",
+          backendBindingTypeWithMetadata = unaryIntTy,
+          backendBindingExprWithMetadata =
+            BackendLam unaryIntTy "x" intTy (BackendVar intTy "x"),
+          backendBindingExportedAsMainWithMetadata = False,
+          backendBindingEvidenceParamIndices = Set.empty
+        },
+      BackendBinding
+        { backendBindingName = "use",
+          backendBindingType = BTArrow unaryIntTy intTy,
+          backendBindingExpr =
+            BackendLam
+              (BTArrow unaryIntTy intTy)
+              "f"
+              unaryIntTy
+              (BackendApp intTy (BackendVar unaryIntTy "f") (intLit 1)),
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "main",
+          backendBindingType = intTy,
+          backendBindingExpr =
+            BackendApp
+              intTy
+              (BackendVar (BTArrow unaryIntTy intTy) "use")
+              ( BackendLam
+                  unaryIntTy
+                  "y"
+                  intTy
+                  ( BackendApp
+                      intTy
+                      (BackendVarWithIdentity unaryIntTy (Just (TopLevelId staleStaticFunctionIdentity)) "$stale_id")
+                      (BackendVar intTy "y")
+                  )
+              ),
+          backendBindingExportedAsMain = True
+        }
+    ]
+
+staleEtaAliasParamIdentityProgram :: BackendProgram
+staleEtaAliasParamIdentityProgram =
+  programWithBindings
+    [ BackendBindingWithMetadata
+        { backendBindingIdentity = Just staleStaticFunctionIdentity,
+          backendBindingNameWithMetadata = "id",
+          backendBindingTypeWithMetadata = unaryIntTy,
+          backendBindingExprWithMetadata =
+            BackendLam unaryIntTy "x" intTy (BackendVar intTy "x"),
+          backendBindingExportedAsMainWithMetadata = False,
+          backendBindingEvidenceParamIndices = Set.empty
+        },
+      BackendBinding
+        { backendBindingName = "use",
+          backendBindingType = BTArrow unaryIntTy intTy,
+          backendBindingExpr =
+            BackendLam
+              (BTArrow unaryIntTy intTy)
+              "f"
+              unaryIntTy
+              (BackendApp intTy (BackendVar unaryIntTy "f") (intLit 1)),
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "main",
+          backendBindingType = intTy,
+          backendBindingExpr =
+            BackendApp
+              intTy
+              (BackendVar (BTArrow unaryIntTy intTy) "use")
+              ( BackendLamWithIdentity
+                  unaryIntTy
+                  (Just localYIdentity)
+                  "$stale_y"
+                  intTy
+                  ( BackendApp
+                      intTy
+                      (BackendVarWithIdentity unaryIntTy (Just (TopLevelId staleStaticFunctionIdentity)) "$stale_id")
+                      (BackendVarWithIdentity intTy (Just localYIdentity) "y")
+                  )
+              ),
+          backendBindingExportedAsMain = True
+        }
+    ]
+  where
+    localYIdentity = localIdentity 2069119 "$stale_y"
+
+mismatchedGlobalBindingIdentityProgram :: BackendProgram
+mismatchedGlobalBindingIdentityProgram =
+  programWithBindings
+    [ BackendBindingWithMetadata
+        { backendBindingIdentity = Just staleStaticFunctionIdentity,
+          backendBindingNameWithMetadata = "id",
+          backendBindingTypeWithMetadata = intTy,
+          backendBindingExprWithMetadata = intLit 1,
+          backendBindingExportedAsMainWithMetadata = False,
+          backendBindingEvidenceParamIndices = Set.empty
+        },
+      BackendBinding
+        { backendBindingName = "main",
+          backendBindingType = intTy,
+          backendBindingExpr =
+            BackendVarWithIdentity intTy (Just (TopLevelId otherStaticFunctionIdentity)) "id",
+          backendBindingExportedAsMain = True
+        }
+    ]
+
+staleStaticFunctionIdentity :: SymbolIdentity
+staleStaticFunctionIdentity =
+  SymbolIdentity
+    { symbolUniqueIdentity = UniqueIdentity 990001,
+      symbolNamespace = SymbolValue,
+      symbolDefiningModule = "Main",
+      symbolDefiningName = "id",
+      symbolOwnerIdentity = Nothing
+    }
+
+otherStaticFunctionIdentity :: SymbolIdentity
+otherStaticFunctionIdentity =
+  SymbolIdentity
+    { symbolUniqueIdentity = UniqueIdentity 990008,
+      symbolNamespace = SymbolValue,
+      symbolDefiningModule = "Other",
+      symbolDefiningName = "id",
+      symbolOwnerIdentity = Nothing
+    }
+
+shadowedNameGlobalReachabilityProgram :: BackendProgram
+shadowedNameGlobalReachabilityProgram =
+  programWithBindings
+    [ BackendBindingWithMetadata
+        { backendBindingIdentity = Just helperIdentity,
+          backendBindingNameWithMetadata = "helper",
+          backendBindingTypeWithMetadata = unaryIntTy,
+          backendBindingExprWithMetadata = intIdentityExpr,
+          backendBindingExportedAsMainWithMetadata = False,
+          backendBindingEvidenceParamIndices = Set.empty
+        },
+      BackendBinding
+        { backendBindingName = "main",
+          backendBindingType = intTy,
+          backendBindingExpr =
+            BackendLetWithIdentity
+              intTy
+              (Just localHelperIdentity)
+              "helper"
+              intTy
+              (intLit 0)
+              ( BackendApp
+                  intTy
+                  (BackendVarWithIdentity unaryIntTy (Just (TopLevelId helperIdentity)) "helper")
+                  (intLit 7)
+              ),
+          backendBindingExportedAsMain = True
+        }
+    ]
+  where
+    localHelperIdentity = localIdentity 2069114 "helper"
+
+helperIdentity :: SymbolIdentity
+helperIdentity =
+  SymbolIdentity
+    { symbolUniqueIdentity = UniqueIdentity 990003,
+      symbolNamespace = SymbolValue,
+      symbolDefiningModule = "Main",
+      symbolDefiningName = "helper",
+      symbolOwnerIdentity = Nothing
+    }
+
+shadowedNameGlobalValueIdentityProgram :: BackendProgram
+shadowedNameGlobalValueIdentityProgram =
+  programWithBindings
+    [ BackendBindingWithMetadata
+        { backendBindingIdentity = Just shadowedGlobalValueIdentity,
+          backendBindingNameWithMetadata = "x",
+          backendBindingTypeWithMetadata = intTy,
+          backendBindingExprWithMetadata = intLit 41,
+          backendBindingExportedAsMainWithMetadata = False,
+          backendBindingEvidenceParamIndices = Set.empty
+        },
+      BackendBinding
+        { backendBindingName = "main",
+          backendBindingType = intTy,
+          backendBindingExpr =
+            BackendLetWithIdentity
+              intTy
+              (Just localXIdentity)
+              "x"
+              intTy
+              (intLit 1)
+              (BackendVarWithIdentity intTy (Just (TopLevelId shadowedGlobalValueIdentity)) "x"),
+          backendBindingExportedAsMain = True
+        }
+    ]
+  where
+    localXIdentity = localIdentity 2069118 "x"
+
+shadowedGlobalValueIdentity :: SymbolIdentity
+shadowedGlobalValueIdentity =
+  SymbolIdentity
+    { symbolUniqueIdentity = UniqueIdentity 990010,
+      symbolNamespace = SymbolValue,
+      symbolDefiningModule = "Main",
+      symbolDefiningName = "x",
+      symbolOwnerIdentity = Nothing
+    }
+
+dataIdentityTypeHeadProgram :: BackendProgram
+dataIdentityTypeHeadProgram =
+  dataIdentityTypeHeadProgramWith dataIdentityBoxStableTy
+
+dataIdentityStaleTypeHeadProgram :: BackendProgram
+dataIdentityStaleTypeHeadProgram =
+  dataIdentityTypeHeadProgramWith dataIdentityBoxStaleTy
+
+dataIdentityMismatchedTypeHeadProgram :: BackendProgram
+dataIdentityMismatchedTypeHeadProgram =
+  dataIdentityTypeHeadProgramWith dataIdentityBoxMismatchedTy
+
+dataIdentityTypeHeadProgramWith :: BackendType -> BackendProgram
+dataIdentityTypeHeadProgramWith identityBoxTy =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [dataIdentityBoxData],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = BTArrow identityBoxTy identityBoxTy,
+                      backendBindingExpr =
+                        BackendLam
+                          (BTArrow identityBoxTy identityBoxTy)
+                          "x"
+                          identityBoxTy
+                          (BackendVar identityBoxTy "x"),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+dataIdentityBoxData :: BackendData
+dataIdentityBoxData =
+  BackendDataWithIdentity
+    { backendDataIdentity = Just dataIdentityBoxIdentity,
+      backendDataNameWithIdentity = "IdentityBox",
+      backendDataParametersWithIdentity = [],
+      backendDataParameterIdentities = [],
+      backendDataConstructorsWithIdentity = []
+    }
+
+dataIdentityBoxStableTy :: BackendType
+dataIdentityBoxStableTy =
+  BTBase (BaseTy (symbolIdentityStableName dataIdentityBoxIdentity))
+
+dataIdentityBoxStaleTy :: BackendType
+dataIdentityBoxStaleTy =
+  BTBaseWithIdentity (Just dataIdentityBoxIdentity) (BaseTy "stale.IdentityBox")
+
+dataIdentityBoxMismatchedTy :: BackendType
+dataIdentityBoxMismatchedTy =
+  BTBaseWithIdentity (Just otherDataIdentityBoxIdentity) (BaseTy "IdentityBox")
+
+dataIdentityBoxIdentity :: SymbolIdentity
+dataIdentityBoxIdentity =
+  SymbolIdentity
+    { symbolUniqueIdentity = UniqueIdentity 990004,
+      symbolNamespace = SymbolType,
+      symbolDefiningModule = "Main",
+      symbolDefiningName = "IdentityBox",
+      symbolOwnerIdentity = Nothing
+    }
+
+otherDataIdentityBoxIdentity :: SymbolIdentity
+otherDataIdentityBoxIdentity =
+  SymbolIdentity
+    { symbolUniqueIdentity = UniqueIdentity 990009,
+      symbolNamespace = SymbolType,
+      symbolDefiningModule = "Other",
+      symbolDefiningName = "IdentityBox",
+      symbolOwnerIdentity = Nothing
+    }
+
 constructorFirstClassPolymorphismProgram :: String
 constructorFirstClassPolymorphismProgram =
   unlines
@@ -4452,7 +4978,8 @@ selfRecursiveHigherOrderProgram =
 
 inlineOnlyEvidenceCalleeProgram :: BackendProgram
 inlineOnlyEvidenceCalleeProgram =
-  programWithBindings
+  programWithEvidenceParamIndices
+    [("$evidence_C", [0]), ("caller", [0])]
     [ BackendBinding
         { backendBindingName = "id",
           backendBindingType = unaryIntTy,
@@ -4514,7 +5041,8 @@ inlineOnlyEvidenceCalleeProgram =
 
 inlineOnlyEvidenceParameterCallCalleeProgram :: BackendProgram
 inlineOnlyEvidenceParameterCallCalleeProgram =
-  programWithBindings
+  programWithEvidenceParamIndices
+    [("calleeWithEvidenceCall", [0]), ("$evidence_C", [0]), ("caller", [0])]
     [ BackendBinding
         { backendBindingName = "id",
           backendBindingType = unaryIntTy,
@@ -4606,7 +5134,8 @@ inlineOnlyEvidenceParameterCallCalleeProgram =
 
 aliasedInlineOnlyEvidenceCalleeProgram :: BackendProgram
 aliasedInlineOnlyEvidenceCalleeProgram =
-  programWithBindings
+  programWithEvidenceParamIndices
+    [("calleeWithEvidenceCall", [0]), ("$evidence_C", [0]), ("caller", [0])]
     [ BackendBinding
         { backendBindingName = "id",
           backendBindingType = unaryIntTy,
@@ -4704,7 +5233,8 @@ aliasedInlineOnlyEvidenceCalleeProgram =
 
 shadowedLocalAliasReferenceCollectorProgram :: BackendProgram
 shadowedLocalAliasReferenceCollectorProgram =
-  programWithBindings
+  programWithEvidenceParamIndices
+    [("actualCalleeWithEvidenceCall", [0]), ("shadowedCalleeWithEvidenceCall", [0]), ("$evidence_C", [0])]
     [ BackendBinding
         { backendBindingName = "id",
           backendBindingType = unaryIntTy,
@@ -4819,15 +5349,99 @@ shadowedLocalAliasReferenceCollectorProgram =
         }
     ]
 
+shadowedNameReferencedCalleeIdentityProgram :: BackendProgram
+shadowedNameReferencedCalleeIdentityProgram =
+  programWithEvidenceParamIndices
+    [("calleeWithEvidenceCall", [0]), ("$evidence_C", [0])]
+    [ BackendBindingWithMetadata
+        { backendBindingIdentity = Just calleeWithEvidenceCallIdentity,
+          backendBindingNameWithMetadata = "calleeWithEvidenceCall",
+          backendBindingTypeWithMetadata = BTArrow higherOrderEvidenceTy intTy,
+          backendBindingExprWithMetadata =
+            BackendLam
+              (BTArrow higherOrderEvidenceTy intTy)
+              "$evidence_apply"
+              higherOrderEvidenceTy
+              (intLit 0),
+          backendBindingExportedAsMainWithMetadata = False,
+          backendBindingEvidenceParamIndices = Set.empty
+        },
+      BackendBinding
+        { backendBindingName = "$evidence_apply",
+          backendBindingType = higherOrderEvidenceTy,
+          backendBindingExpr =
+            BackendLam
+              higherOrderEvidenceTy
+              "f"
+              unaryIntTy
+              ( BackendLam
+                  unaryIntTy
+                  "x"
+                  intTy
+                  (BackendApp intTy (BackendVar unaryIntTy "f") (BackendVar intTy "x"))
+              ),
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "$evidence_C",
+          backendBindingType = BTArrow (BTArrow higherOrderEvidenceTy intTy) intTy,
+          backendBindingExpr =
+            BackendLam
+              (BTArrow (BTArrow higherOrderEvidenceTy intTy) intTy)
+              "$evidence_method"
+              (BTArrow higherOrderEvidenceTy intTy)
+              ( BackendApp
+                  intTy
+                  (BackendVar (BTArrow higherOrderEvidenceTy intTy) "$evidence_method")
+                  (BackendVar higherOrderEvidenceTy "$evidence_apply")
+              ),
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "main",
+          backendBindingType = intTy,
+          backendBindingExpr =
+            BackendLetWithIdentity
+              intTy
+              (Just localCalleeIdentity)
+              "calleeWithEvidenceCall"
+              intTy
+              (intLit 0)
+              ( BackendApp
+                  intTy
+                  (BackendVar (BTArrow (BTArrow higherOrderEvidenceTy intTy) intTy) "$evidence_C")
+                  ( BackendVarWithIdentity
+                      (BTArrow higherOrderEvidenceTy intTy)
+                      (Just (TopLevelId calleeWithEvidenceCallIdentity))
+                      "calleeWithEvidenceCall"
+                  )
+              ),
+          backendBindingExportedAsMain = True
+        }
+    ]
+  where
+    localCalleeIdentity = localIdentity 2069115 "calleeWithEvidenceCall"
+
+calleeWithEvidenceCallIdentity :: SymbolIdentity
+calleeWithEvidenceCallIdentity =
+  SymbolIdentity
+    { symbolUniqueIdentity = UniqueIdentity 990004,
+      symbolNamespace = SymbolValue,
+      symbolDefiningModule = "Main",
+      symbolDefiningName = "calleeWithEvidenceCall",
+      symbolOwnerIdentity = Nothing
+    }
+
 capturingEvidenceWrapperProgram :: BackendProgram
 capturingEvidenceWrapperProgram =
-  programWithBindings
+  programWithEvidenceParamIndices
+    [("$evidence_C", [0])]
     [ BackendBinding
         { backendBindingName = "$evidence_C",
           backendBindingType = BTArrow unaryIntTy intTy,
           backendBindingExpr =
-            BackendLam
-              { backendExprType = BTArrow unaryIntTy intTy,
+            BackendLamWithIdentity
+              { backendParamIdentity = Nothing, backendExprType = BTArrow unaryIntTy intTy,
                 backendParamName = "$evidence_apply",
                 backendParamType = unaryIntTy,
                 backendBody =
@@ -4861,15 +5475,132 @@ capturingEvidenceWrapperProgram =
         }
     ]
 
+staleLocalIdentityEvidenceWrapperProgram :: BackendProgram
+staleLocalIdentityEvidenceWrapperProgram =
+  programWithEvidenceParamIndices
+    [("$evidence_C", [0])]
+    [ BackendBinding
+        { backendBindingName = "$evidence_C",
+          backendBindingType = BTArrow unaryIntTy intTy,
+          backendBindingExpr =
+            BackendLamWithIdentity
+              { backendParamIdentity = Nothing, backendExprType = BTArrow unaryIntTy intTy,
+                backendParamName = "$evidence_apply",
+                backendParamType = unaryIntTy,
+                backendBody =
+                  BackendApp
+                    intTy
+                    (BackendVar unaryIntTy "$evidence_apply")
+                    (intLit 0)
+              },
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "$stale_x",
+          backendBindingType = intTy,
+          backendBindingExpr = intLit 41,
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "main",
+          backendBindingType = intTy,
+          backendBindingExpr =
+            BackendLetWithIdentity
+              intTy
+              (Just localXIdentity)
+              "x"
+              intTy
+              (intLit 1)
+              ( BackendApp
+                  intTy
+                  (BackendVar (BTArrow unaryIntTy intTy) "$evidence_C")
+                  ( BackendLam
+                      unaryIntTy
+                      "y"
+                      intTy
+                      (BackendVarWithIdentity intTy (Just localXIdentity) "$stale_x")
+                  )
+              ),
+          backendBindingExportedAsMain = True
+        }
+    ]
+  where
+    localXIdentity = localIdentity 2069117 "x"
+
+globalIdentityEvidenceWrapperProgram :: BackendProgram
+globalIdentityEvidenceWrapperProgram =
+  programWithEvidenceParamIndices
+    [("$evidence_C", [0])]
+    [ BackendBinding
+        { backendBindingName = "$evidence_C",
+          backendBindingType = BTArrow unaryIntTy intTy,
+          backendBindingExpr =
+            BackendLamWithIdentity
+              { backendParamIdentity = Nothing, backendExprType = BTArrow unaryIntTy intTy,
+                backendParamName = "$evidence_apply",
+                backendParamType = unaryIntTy,
+                backendBody =
+                  BackendApp
+                    intTy
+                    (BackendVar unaryIntTy "$evidence_apply")
+                    (intLit 0)
+              },
+          backendBindingExportedAsMain = False
+        },
+      BackendBindingWithMetadata
+        { backendBindingIdentity = Just globalEvidenceXIdentity,
+          backendBindingNameWithMetadata = "x",
+          backendBindingTypeWithMetadata = intTy,
+          backendBindingExprWithMetadata = intLit 41,
+          backendBindingExportedAsMainWithMetadata = False,
+          backendBindingEvidenceParamIndices = Set.empty
+        },
+      BackendBinding
+        { backendBindingName = "main",
+          backendBindingType = intTy,
+          backendBindingExpr =
+            BackendLetWithIdentity
+              intTy
+              (Just localEvidenceXIdentity)
+              "x"
+              intTy
+              (intLit 1)
+              ( BackendApp
+                  intTy
+                  (BackendVar (BTArrow unaryIntTy intTy) "$evidence_C")
+                  ( BackendLam
+                      unaryIntTy
+                      "y"
+                      intTy
+                      (BackendVarWithIdentity intTy (Just (TopLevelId globalEvidenceXIdentity)) "x")
+                  )
+              ),
+          backendBindingExportedAsMain = True
+        }
+    ]
+  where
+    localEvidenceXIdentity = localIdentity 2069116 "x"
+
+globalEvidenceXIdentity :: SymbolIdentity
+globalEvidenceXIdentity =
+  SymbolIdentity
+    { symbolUniqueIdentity = UniqueIdentity 990009,
+      symbolNamespace = SymbolValue,
+      symbolDefiningModule = "Main",
+      symbolDefiningName = "x",
+      symbolOwnerIdentity = Nothing
+    }
+
 nestedEvidenceWrapperParameterProgram :: BackendProgram
 nestedEvidenceWrapperParameterProgram =
-  programWithBindings
+  programWithEvidenceParamIndices
+    [("$evidence_C", [0])]
     [ BackendBinding
         { backendBindingName = "$evidence_C",
           backendBindingType = BTArrow higherOrderEvidenceTy intTy,
           backendBindingExpr =
-            BackendLam
-              { backendExprType = BTArrow higherOrderEvidenceTy intTy,
+            BackendLamWithIdentity
+              { backendParamIdentity = Nothing, backendExprType = BTArrow higherOrderEvidenceTy intTy,
                 backendParamName = "$evidence_apply",
                 backendParamType = higherOrderEvidenceTy,
                 backendBody =
@@ -4908,7 +5639,8 @@ nestedEvidenceWrapperParameterProgram =
 
 polymorphicEvidenceWrapperProgram :: BackendProgram
 polymorphicEvidenceWrapperProgram =
-  programWithBindings
+  programWithEvidenceParamIndices
+    [("$evidence_C", [0])]
     [ BackendBinding
         { backendBindingName = "$evidence_C",
           backendBindingType = polyEvidenceConsumerTy,
@@ -4935,7 +5667,8 @@ polymorphicEvidenceWrapperProgram =
 
 localPolymorphicEvidenceWrapperProgram :: BackendProgram
 localPolymorphicEvidenceWrapperProgram =
-  programWithBindings
+  programWithEvidenceParamIndices
+    [("$evidence_C", [0])]
     [ BackendBinding
         { backendBindingName = "$evidence_C",
           backendBindingType = polyEvidenceConsumerTy,
@@ -5294,6 +6027,89 @@ polymorphicZeroArityProgram =
       backendProgramMain = "main"
     }
 
+staleGlobalPolymorphicZeroArityProgram :: BackendProgram
+staleGlobalPolymorphicZeroArityProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [optionData],
+              backendModuleBindings =
+                [ BackendBindingWithMetadata
+                    { backendBindingIdentity = Just staleNoneIdentity,
+                      backendBindingNameWithMetadata = "none",
+                      backendBindingTypeWithMetadata = nonePolyTy,
+                      backendBindingExprWithMetadata = nonePolyExpr,
+                      backendBindingExportedAsMainWithMetadata = False,
+                      backendBindingEvidenceParamIndices = Set.empty
+                    },
+                  BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = optionTy intTy,
+                      backendBindingExpr =
+                        BackendTyApp
+                          (optionTy intTy)
+                          (BackendVarWithIdentity nonePolyTy (Just (TopLevelId staleNoneIdentity)) "$stale_none")
+                          intTy,
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+staleNoneIdentity :: SymbolIdentity
+staleNoneIdentity =
+  SymbolIdentity
+    { symbolUniqueIdentity = UniqueIdentity 990002,
+      symbolNamespace = SymbolValue,
+      symbolDefiningModule = "Main",
+      symbolDefiningName = "none",
+      symbolOwnerIdentity = Nothing
+    }
+
+shadowedNameGlobalPolymorphicZeroArityProgram :: BackendProgram
+shadowedNameGlobalPolymorphicZeroArityProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [optionData],
+              backendModuleBindings =
+                [ BackendBindingWithMetadata
+                    { backendBindingIdentity = Just staleNoneIdentity,
+                      backendBindingNameWithMetadata = "none",
+                      backendBindingTypeWithMetadata = nonePolyTy,
+                      backendBindingExprWithMetadata = nonePolyExpr,
+                      backendBindingExportedAsMainWithMetadata = False,
+                      backendBindingEvidenceParamIndices = Set.empty
+                    },
+                  BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = optionTy intTy,
+                      backendBindingExpr =
+                        BackendLetWithIdentity
+                          (optionTy intTy)
+                          (Just localNoneIdentity)
+                          "none"
+                          intTy
+                          (intLit 0)
+                          ( BackendTyApp
+                              (optionTy intTy)
+                              (BackendVarWithIdentity nonePolyTy (Just (TopLevelId staleNoneIdentity)) "none")
+                              intTy
+                          ),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+  where
+    localNoneIdentity = localIdentity 2069113 "none"
+
 localPolymorphicZeroArityProgram :: BackendProgram
 localPolymorphicZeroArityProgram =
   BackendProgram
@@ -5376,17 +6192,78 @@ localPolymorphicClosureEntryExpr =
             (BTVar "a")
             "f"
             (BTArrow (BTVar "a") (BTVar "a"))
-            ( BackendClosure
+            ( BackendClosureWithParamIdentities
                 { backendExprType = BTArrow (BTVar "a") (BTVar "a"),
                   backendClosureEntryName = "__mlfp_closure$local_poly",
                   backendClosureCaptures = [],
-                  backendClosureParams = [("y", BTVar "a")],
+                  backendClosureParamsWithIdentities = backendClosureParams [("y", BTVar "a")],
                   backendClosureBody = BackendVar (BTVar "a") "y"
                 }
             )
             (BackendClosureCall (BTVar "a") (BackendVar (BTArrow (BTVar "a") (BTVar "a")) "f") [BackendVar (BTVar "a") "x"])
         )
     )
+
+localFunctionFormIdentityTypeAppProgram :: BackendProgram
+localFunctionFormIdentityTypeAppProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendLetWithIdentity
+                          intTy
+                          (Just polyLocalIdentity)
+                          "polyLocal"
+                          localPolymorphicClosureEntryTy
+                          localPolyExpr
+                          ( BackendApp
+                              intTy
+                              ( BackendTyApp
+                                  (BTArrow intTy intTy)
+                                  (BackendVarWithIdentity localPolymorphicClosureEntryTy (Just polyLocalIdentity) "$stale_polyLocal")
+                                  intTy
+                              )
+                              (intLit 3)
+                          ),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+  where
+    polyLocalIdentity = localIdentity 2069112 "polyLocal"
+    localPolyExpr =
+      BackendTyAbs
+        localPolymorphicClosureEntryTy
+        "a"
+        Nothing
+        ( BackendLam
+            (BTArrow (BTVar "a") (BTVar "a"))
+            "x"
+            (BTVar "a")
+            ( BackendLet
+                (BTVar "a")
+                "f"
+                (BTArrow (BTVar "a") (BTVar "a"))
+                ( BackendClosureWithParamIdentities
+                    { backendExprType = BTArrow (BTVar "a") (BTVar "a"),
+                      backendClosureEntryName = "__mlfp_closure$local_poly_identity",
+                      backendClosureCaptures = [],
+                      backendClosureParamsWithIdentities = backendClosureParams [("y", BTVar "a")],
+                      backendClosureBody = BackendVar (BTVar "a") "y"
+                    }
+                )
+                (BackendClosureCall (BTVar "a") (BackendVar (BTArrow (BTVar "a") (BTVar "a")) "f") [BackendVar (BTVar "a") "x"])
+            )
+        )
 
 directPolymorphicClosureCallProgram :: BackendProgram
 directPolymorphicClosureCallProgram =
@@ -5426,11 +6303,11 @@ directPolymorphicClosureCallExpr =
             (BTVar "a")
             "f"
             (BTArrow (BTVar "a") (BTVar "a"))
-            ( BackendClosure
+            ( BackendClosureWithParamIdentities
                 { backendExprType = BTArrow (BTVar "a") (BTVar "a"),
                   backendClosureEntryName = "__mlfp_closure$direct_call_poly",
                   backendClosureCaptures = [],
-                  backendClosureParams = [("y", BTVar "a")],
+                  backendClosureParamsWithIdentities = backendClosureParams [("y", BTVar "a")],
                   backendClosureBody = BackendVar (BTVar "a") "y"
                 }
             )
@@ -5486,11 +6363,11 @@ structuralClosureResultProgram =
                       backendBindingExpr =
                         BackendClosureCall
                           resultBoxStructuralTy
-                          ( BackendClosure
+                          ( BackendClosureWithParamIdentities
                               { backendExprType = BTArrow intTy resultBoxTy,
                                 backendClosureEntryName = "__mlfp_closure$result_structural",
                                 backendClosureCaptures = [],
-                                backendClosureParams = [("x", intTy)],
+                                backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
                                 backendClosureBody =
                                   BackendConstruct resultBoxTy "ResultBox" [BackendVar intTy "x"]
                               }
@@ -5727,6 +6604,241 @@ localFunctionAliasProgram =
           (BackendVar unaryIntTy "f")
           (BackendApp intTy (BackendVar unaryIntTy "g") (intLit 7))
       )
+
+localIdentityShadowedLetProgram :: BackendProgram
+localIdentityShadowedLetProgram =
+  programWithMainExpr intTy $
+    BackendLetWithIdentity
+      intTy
+      (Just outerIdentity)
+      "x"
+      intTy
+      (intLit 41)
+      ( BackendLetWithIdentity
+          intTy
+          (Just innerIdentity)
+          "x"
+          intTy
+          (intLit 99)
+          (BackendVarWithIdentity intTy (Just outerIdentity) "x")
+      )
+  where
+    outerIdentity = localIdentity 2069101 "x"
+    innerIdentity = localIdentity 2069102 "x"
+
+lambdaIdentityShadowedParamProgram :: BackendProgram
+lambdaIdentityShadowedParamProgram =
+  programWithBindings
+    [ BackendBinding
+        { backendBindingName = "shadow",
+          backendBindingType = binaryIntTy,
+          backendBindingExpr =
+            BackendLamWithIdentity
+              binaryIntTy
+              (Just outerIdentity)
+              "x"
+              intTy
+              ( BackendLamWithIdentity
+                  unaryIntTy
+                  (Just innerIdentity)
+                  "x"
+                  intTy
+                  (BackendVarWithIdentity intTy (Just outerIdentity) "x")
+              ),
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "main",
+          backendBindingType = intTy,
+          backendBindingExpr =
+            BackendApp
+              intTy
+              (BackendApp unaryIntTy (BackendVar binaryIntTy "shadow") (intLit 41))
+              (intLit 99),
+          backendBindingExportedAsMain = True
+        }
+    ]
+  where
+    outerIdentity = localIdentity 2069103 "x"
+    innerIdentity = localIdentity 2069104 "x"
+
+casePatternIdentityStaleBinderProgram :: BackendProgram
+casePatternIdentityStaleBinderProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [optionData],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "entry",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendLetWithIdentity
+                          intTy
+                          (Just outerIdentity)
+                          "x"
+                          intTy
+                          (intLit 41)
+                          ( BackendCase
+                              intTy
+                              (BackendConstruct (optionTy intTy) "Some" [intLit 99])
+                              ( BackendAlternative
+                                  ( BackendConstructorPatternWithBinderIdentities
+                                      Nothing
+                                      "Some"
+                                      [BackendPatternBinder (Just fieldIdentity) "$stale_x"]
+                                  )
+                                  (BackendVarWithIdentity intTy (Just fieldIdentity) "x")
+                                  :| []
+                              )
+                          ),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "entry"
+    }
+  where
+    outerIdentity = localIdentity 2069105 "x"
+    fieldIdentity = localIdentity 2069106 "$stale_x"
+
+closureParamIdentityStaleNameProgram :: BackendProgram
+closureParamIdentityStaleNameProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "entry",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendLetWithIdentity
+                          intTy
+                          (Just outerIdentity)
+                          "x"
+                          intTy
+                          (intLit 41)
+                          ( BackendClosureCall
+                              intTy
+                              ( BackendClosureWithParamIdentities
+                                  { backendExprType = unaryIntTy,
+                                    backendClosureEntryName = "__mlfp_closure$stale_param_identity",
+                                    backendClosureCaptures =
+                                      [ BackendClosureCapture
+                                          (Just outerIdentity)
+                                          "x"
+                                          intTy
+                                          (BackendVarWithIdentity intTy (Just outerIdentity) "x")
+                                      ],
+                                    backendClosureParamsWithIdentities =
+                                      [BackendClosureParam (Just paramIdentity) "$stale_x" intTy],
+                                    backendClosureBody =
+                                      BackendVarWithIdentity intTy (Just paramIdentity) "x"
+                                  }
+                              )
+                              [intLit 99]
+                          ),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "entry"
+    }
+  where
+    outerIdentity = localIdentity 2069107 "x"
+    paramIdentity = localIdentity 2069108 "$stale_x"
+
+closureCaptureValueKindIdentityProgram :: BackendProgram
+closureCaptureValueKindIdentityProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "idRaw",
+                      backendBindingType = unaryIntTy,
+                      backendBindingExpr = intIdentityExpr,
+                      backendBindingExportedAsMain = False
+                    },
+                  BackendBinding
+                    { backendBindingName = "makeCaller",
+                      backendBindingType = BTArrow unaryIntTy unaryIntTy,
+                      backendBindingExpr =
+                        BackendLamWithIdentity
+                          (BTArrow unaryIntTy unaryIntTy)
+                          (Just functionParamIdentity)
+                          "$stale_f"
+                          unaryIntTy
+                          ( BackendLetWithIdentity
+                              unaryIntTy
+                              (Just shadowClosureIdentity)
+                              "f"
+                              unaryIntTy
+                              shadowClosure
+                              capturedParamClosure
+                          ),
+                      backendBindingExportedAsMain = False
+                    },
+                  BackendBinding
+                    { backendBindingName = "entry",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendApp
+                          intTy
+                          ( BackendApp
+                              unaryIntTy
+                              (BackendVar (BTArrow unaryIntTy unaryIntTy) "makeCaller")
+                              (BackendVar unaryIntTy "idRaw")
+                          )
+                          (intLit 99),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "entry"
+    }
+  where
+    functionParamIdentity = localIdentity 2069109 "$stale_f"
+    shadowClosureIdentity = localIdentity 2069110 "f"
+    argumentIdentity = localIdentity 2069111 "x"
+    shadowClosure =
+      BackendClosureWithParamIdentities
+        { backendExprType = unaryIntTy,
+          backendClosureEntryName = "__mlfp_closure$shadow_f",
+          backendClosureCaptures = [],
+          backendClosureParamsWithIdentities = [BackendClosureParam (Just argumentIdentity) "x" intTy],
+          backendClosureBody = intLit 0
+        }
+    capturedParamClosure =
+      BackendClosureWithParamIdentities
+        { backendExprType = unaryIntTy,
+          backendClosureEntryName = "__mlfp_closure$capture_stale_f",
+          backendClosureCaptures =
+            [ BackendClosureCapture
+                (Just functionParamIdentity)
+                "f"
+                unaryIntTy
+                (BackendVarWithIdentity unaryIntTy (Just functionParamIdentity) "f")
+            ],
+          backendClosureParamsWithIdentities = [BackendClosureParam (Just argumentIdentity) "x" intTy],
+          backendClosureBody =
+            BackendApp
+              intTy
+              (BackendVarWithIdentity unaryIntTy (Just functionParamIdentity) "f")
+              (BackendVarWithIdentity intTy (Just argumentIdentity) "x")
+        }
+
+localIdentity :: Int -> String -> IdDetails
+localIdentity unique name =
+  LocalId (LocalRef (GeneratedLocalId (UniqueIdentity unique)) name)
 
 topLevelFunctionAliasProgram :: BackendProgram
 topLevelFunctionAliasProgram =
@@ -6009,6 +7121,64 @@ unmatchedImmediateConstructorProgram =
       backendProgramMain = "main"
     }
 
+mismatchedImmediateConstructorIdentityCaseProgram :: BackendProgram
+mismatchedImmediateConstructorIdentityCaseProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [immediateChoiceDataWithConstructorIdentity],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendCase
+                          intTy
+                          ( BackendConstructWithIdentity
+                              immediateChoiceTy
+                              (Just immediateChoiceConstructorIdentity)
+                              "WithStatic"
+                              [polyIdExpr, intLit 1]
+                          )
+                          ( BackendAlternative
+                              (BackendConstructorPatternWithIdentity (Just otherImmediateChoiceConstructorIdentity) "WithStatic" ["poly", "value"])
+                              (intLit 7)
+                              :| []
+                          ),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+mismatchedConstructorUseIdentityProgram :: BackendProgram
+mismatchedConstructorUseIdentityProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [immediateChoiceDataWithConstructorIdentity],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = immediateChoiceTy,
+                      backendBindingExpr =
+                        BackendConstructWithIdentity
+                          immediateChoiceTy
+                          (Just otherImmediateChoiceConstructorIdentity)
+                          "WithStatic"
+                          [polyIdExpr, intLit 1],
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
 strictImmediateUnmatchedProgram :: BackendProgram
 strictImmediateUnmatchedProgram =
   BackendProgram
@@ -6054,6 +7224,42 @@ duplicateConstructorCaseProgram =
                           (BackendConstruct (optionTy intTy) "None" [])
                           ( BackendAlternative (BackendConstructorPattern "None" []) (intLit 0)
                               :| [BackendAlternative (BackendConstructorPattern "None" []) (intLit 1)]
+                          ),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+duplicateImmediateConstructorIdentityCaseProgram :: BackendProgram
+duplicateImmediateConstructorIdentityCaseProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [strictBoxDataWithConstructorIdentity],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendCase
+                          intTy
+                          ( BackendConstructWithIdentity
+                              strictBoxTy
+                              (Just strictBoxConstructorIdentity)
+                              "$stale_StrictBox"
+                              [polyIdExpr, BackendRoll recIntTy (intLit 1)]
+                          )
+                          ( BackendAlternative
+                              (BackendConstructorPatternWithIdentity (Just strictBoxConstructorIdentity) "$stale_StrictBox" ["poly", "unused"])
+                              (intLit 0)
+                              :| [ BackendAlternative
+                                    (BackendConstructorPatternWithIdentity (Just strictBoxConstructorIdentity) "$stale_StrictBox_again" ["poly2", "unused2"])
+                                    (intLit 1)
+                                 ]
                           ),
                       backendBindingExportedAsMain = True
                     }
@@ -6335,16 +7541,16 @@ partialApplicationProgram =
         { backendBindingName = "main",
           backendBindingType = intTy,
           backendBindingExpr =
-            BackendLet
-              { backendExprType = intTy,
+            BackendLetWithIdentity
+              { backendLetIdentity = Nothing, backendExprType = intTy,
                 backendLetName = "addOne",
                 backendLetType = unaryIntTy,
                 backendLetRhs =
-                  BackendClosure
+                  BackendClosureWithParamIdentities
                     { backendExprType = unaryIntTy,
                       backendClosureEntryName = "__mlfp_closure$addOne",
-                      backendClosureCaptures = [BackendClosureCapture "__mlfp_partial_capture0" intTy (intLit 1)],
-                      backendClosureParams = [("__mlfp_partial_arg0", intTy)],
+                      backendClosureCaptures = [BackendClosureCapture Nothing "__mlfp_partial_capture0" intTy (intLit 1)],
+                      backendClosureParamsWithIdentities = backendClosureParams [("__mlfp_partial_arg0", intTy)],
                       backendClosureBody =
                         BackendApp
                           { backendExprType = intTy,
@@ -6376,8 +7582,8 @@ staticPartialApplicationArgumentProgram =
         { backendBindingName = "use",
           backendBindingType = BTArrow unaryIntTy intTy,
           backendBindingExpr =
-            BackendLam
-              { backendExprType = BTArrow unaryIntTy intTy,
+            BackendLamWithIdentity
+              { backendParamIdentity = Nothing, backendExprType = BTArrow unaryIntTy intTy,
                 backendParamName = "f",
                 backendParamType = unaryIntTy,
                 backendBody = intLit 0
@@ -6405,8 +7611,8 @@ staticPartialApplicationArgumentProgram =
 escapingLambdaProgram :: BackendProgram
 escapingLambdaProgram =
   programWithMainExpr unaryIntTy $
-    BackendLet
-      { backendExprType = unaryIntTy,
+    BackendLetWithIdentity
+      { backendLetIdentity = Nothing, backendExprType = unaryIntTy,
         backendLetName = "f",
         backendLetType = unaryIntTy,
         backendLetRhs = intIdentityExpr,
@@ -6853,16 +8059,16 @@ sourceCaseParameterClosureFieldProgram =
 zeroCaptureClosureProgram :: BackendProgram
 zeroCaptureClosureProgram =
   programWithMainExpr intTy $
-    BackendLet
-      { backendExprType = intTy,
+    BackendLetWithIdentity
+      { backendLetIdentity = Nothing, backendExprType = intTy,
         backendLetName = "f",
         backendLetType = unaryIntTy,
         backendLetRhs =
-          BackendClosure
+          BackendClosureWithParamIdentities
             { backendExprType = unaryIntTy,
               backendClosureEntryName = "__mlfp_closure$identity",
               backendClosureCaptures = [],
-              backendClosureParams = [("x", intTy)],
+              backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
               backendClosureBody = BackendVar intTy "x"
             },
         backendLetBody = BackendClosureCall intTy (BackendVar unaryIntTy "f") [intLit 7]
@@ -6871,22 +8077,22 @@ zeroCaptureClosureProgram =
 capturedClosureProgram :: BackendProgram
 capturedClosureProgram =
   programWithMainExpr intTy $
-    BackendLet
-      { backendExprType = intTy,
+    BackendLetWithIdentity
+      { backendLetIdentity = Nothing, backendExprType = intTy,
         backendLetName = "captured",
         backendLetType = intTy,
         backendLetRhs = intLit 41,
         backendLetBody =
-          BackendLet
-            { backendExprType = intTy,
+          BackendLetWithIdentity
+            { backendLetIdentity = Nothing, backendExprType = intTy,
               backendLetName = "f",
               backendLetType = unaryIntTy,
               backendLetRhs =
-                BackendClosure
+                BackendClosureWithParamIdentities
                   { backendExprType = unaryIntTy,
                     backendClosureEntryName = "__mlfp_closure$constCaptured",
-                    backendClosureCaptures = [BackendClosureCapture "captured" intTy (BackendVar intTy "captured")],
-                    backendClosureParams = [("x", intTy)],
+                    backendClosureCaptures = [BackendClosureCapture Nothing "captured" intTy (BackendVar intTy "captured")],
+                    backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
                     backendClosureBody = BackendVar intTy "captured"
                   },
               backendLetBody = BackendClosureCall intTy (BackendVar unaryIntTy "f") [intLit 0]
@@ -6929,11 +8135,11 @@ caseSelectedClosureCalleeProgram =
     }
   where
     caseClosure entryName body =
-      BackendClosure
+      BackendClosureWithParamIdentities
         { backendExprType = unaryIntTy,
           backendClosureEntryName = entryName,
           backendClosureCaptures = [],
-          backendClosureParams = [("x", intTy)],
+          backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
           backendClosureBody = body
         }
 
@@ -6946,11 +8152,11 @@ letSelectedClosureCalleeProgram =
           unaryIntTy
           "f"
           unaryIntTy
-          ( BackendClosure
+          ( BackendClosureWithParamIdentities
               { backendExprType = unaryIntTy,
                 backendClosureEntryName = "__mlfp_closure$let_callee",
                 backendClosureCaptures = [],
-                backendClosureParams = [("x", intTy)],
+                backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
                 backendClosureBody = BackendVar intTy "x"
               }
           )
@@ -7014,11 +8220,11 @@ polymorphicClosureSpecializationExpr =
             intTy
             "f"
             unaryIntTy
-            ( BackendClosure
+            ( BackendClosureWithParamIdentities
                 { backendExprType = unaryIntTy,
                   backendClosureEntryName = "__mlfp_closure$poly",
                   backendClosureCaptures = [],
-                  backendClosureParams = [("x", intTy)],
+                  backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
                   backendClosureBody = BackendVar intTy "x"
                 }
             )
@@ -7147,11 +8353,11 @@ inlinePolymorphicClosureExpr =
                 intTy
                 "closure"
                 unaryIntTy
-                ( BackendClosure
+                ( BackendClosureWithParamIdentities
                     { backendExprType = unaryIntTy,
                       backendClosureEntryName = "__mlfp_closure$inline",
                       backendClosureCaptures = [],
-                      backendClosureParams = [("x", intTy)],
+                      backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
                       backendClosureBody = BackendVar intTy "x"
                     }
                 )
@@ -7184,11 +8390,11 @@ closureEntryRuntimeDeclarationCollisionProgram =
 
 closureWithEntry :: String -> BackendExpr
 closureWithEntry entryName =
-  BackendClosure
+  BackendClosureWithParamIdentities
     { backendExprType = unaryIntTy,
       backendClosureEntryName = entryName,
       backendClosureCaptures = [],
-      backendClosureParams = [("x", intTy)],
+      backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
       backendClosureBody = BackendVar intTy "x"
     }
 
@@ -7236,8 +8442,8 @@ directFunctionFieldProgram =
 localFunctionFieldProgram :: BackendProgram
 localFunctionFieldProgram =
   programWithFnBoxMainExpr $
-    BackendLet
-      { backendExprType = fnBoxTy,
+    BackendLetWithIdentity
+      { backendLetIdentity = Nothing, backendExprType = fnBoxTy,
         backendLetName = "f",
         backendLetType = unaryIntTy,
         backendLetRhs = closureWithEntry "__mlfp_closure$field_local",
@@ -7247,14 +8453,14 @@ localFunctionFieldProgram =
 transitiveLocalFunctionFieldProgram :: BackendProgram
 transitiveLocalFunctionFieldProgram =
   programWithFnBoxMainExpr $
-    BackendLet
-      { backendExprType = fnBoxTy,
+    BackendLetWithIdentity
+      { backendLetIdentity = Nothing, backendExprType = fnBoxTy,
         backendLetName = "f",
         backendLetType = unaryIntTy,
         backendLetRhs = closureWithEntry "__mlfp_closure$field_transitive",
         backendLetBody =
-          BackendLet
-            { backendExprType = fnBoxTy,
+          BackendLetWithIdentity
+            { backendLetIdentity = Nothing, backendExprType = fnBoxTy,
               backendLetName = "g",
               backendLetType = unaryIntTy,
               backendLetRhs = BackendVar unaryIntTy "f",
@@ -7310,11 +8516,11 @@ capturedFunctionFieldProgram =
                           ( BackendConstruct
                               fnBoxTy
                               "FnBox"
-                              [ BackendClosure
+                              [ BackendClosureWithParamIdentities
                                   { backendExprType = unaryIntTy,
                                     backendClosureEntryName = "__mlfp_closure$field_captured",
-                                    backendClosureCaptures = [BackendClosureCapture "captured" intTy (BackendVar intTy "captured")],
-                                    backendClosureParams = [("x", intTy)],
+                                    backendClosureCaptures = [BackendClosureCapture Nothing "captured" intTy (BackendVar intTy "captured")],
+                                    backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
                                     backendClosureBody = BackendVar intTy "captured"
                                   }
                               ]
@@ -7339,8 +8545,8 @@ capturedFunctionPointerCallProgram =
                     { backendBindingName = "inc",
                       backendBindingType = unaryIntTy,
                       backendBindingExpr =
-                        BackendLam
-                          { backendExprType = unaryIntTy,
+                        BackendLamWithIdentity
+                          { backendParamIdentity = Nothing, backendExprType = unaryIntTy,
                             backendParamName = "x",
                             backendParamType = intTy,
                             backendBody = BackendVar intTy "x"
@@ -7353,11 +8559,11 @@ capturedFunctionPointerCallProgram =
                       backendBindingExpr =
                         BackendClosureCall
                           intTy
-                          ( BackendClosure
+                          ( BackendClosureWithParamIdentities
                               { backendExprType = unaryIntTy,
                                 backendClosureEntryName = "__mlfp_closure$call_captured_function",
-                                backendClosureCaptures = [BackendClosureCapture "f" unaryIntTy (BackendVar unaryIntTy "inc")],
-                                backendClosureParams = [("x", intTy)],
+                                backendClosureCaptures = [BackendClosureCapture Nothing "f" unaryIntTy (BackendVar unaryIntTy "inc")],
+                                backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
                                 backendClosureBody = BackendApp intTy (BackendVar unaryIntTy "f") (BackendVar intTy "x")
                               }
                           )
@@ -7382,25 +8588,27 @@ capturedNullaryGlobalFunctionAliasProgram =
                     { backendBindingName = "helper",
                       backendBindingType = unaryIntTy,
                       backendBindingExpr =
-                        BackendLam
-                          { backendExprType = unaryIntTy,
+                        BackendLamWithIdentity
+                          { backendParamIdentity = Nothing, backendExprType = unaryIntTy,
                             backendParamName = "x",
                             backendParamType = intTy,
                             backendBody = BackendVar intTy "x"
                           },
                       backendBindingExportedAsMain = False
                     },
-                  BackendBinding
-                    { backendBindingName = "get",
-                      backendBindingType = unaryIntTy,
-                      backendBindingExpr =
+                  BackendBindingWithMetadata
+                    { backendBindingIdentity = Just capturedNullaryGlobalAliasIdentity,
+                      backendBindingNameWithMetadata = "get",
+                      backendBindingTypeWithMetadata = unaryIntTy,
+                      backendBindingExprWithMetadata =
                         BackendLet
                           unaryIntTy
                           "ignored"
                           intTy
                           (intLit 0)
                           (BackendVar unaryIntTy "helper"),
-                      backendBindingExportedAsMain = False
+                      backendBindingExportedAsMainWithMetadata = False,
+                      backendBindingEvidenceParamIndices = Set.empty
                     },
                   BackendBinding
                     { backendBindingName = "entry",
@@ -7408,11 +8616,17 @@ capturedNullaryGlobalFunctionAliasProgram =
                       backendBindingExpr =
                         BackendClosureCall
                           intTy
-                          ( BackendClosure
+                          ( BackendClosureWithParamIdentities
                               { backendExprType = unaryIntTy,
                                 backendClosureEntryName = "__mlfp_closure$call_captured_nullary_global_alias",
-                                backendClosureCaptures = [BackendClosureCapture "f" unaryIntTy (BackendVar unaryIntTy "get")],
-                                backendClosureParams = [("x", intTy)],
+                                backendClosureCaptures =
+                                  [ BackendClosureCapture
+                                      Nothing
+                                      "f"
+                                      unaryIntTy
+                                      (BackendVarWithIdentity unaryIntTy (Just (TopLevelId capturedNullaryGlobalAliasIdentity)) "$stale_get")
+                                  ],
+                                backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
                                 backendClosureBody = BackendApp intTy (BackendVar unaryIntTy "f") (BackendVar intTy "x")
                               }
                           )
@@ -7423,6 +8637,16 @@ capturedNullaryGlobalFunctionAliasProgram =
             }
         ],
       backendProgramMain = "entry"
+    }
+
+capturedNullaryGlobalAliasIdentity :: SymbolIdentity
+capturedNullaryGlobalAliasIdentity =
+  SymbolIdentity
+    { symbolUniqueIdentity = UniqueIdentity 990003,
+      symbolNamespace = SymbolValue,
+      symbolDefiningModule = "Main",
+      symbolDefiningName = "get",
+      symbolOwnerIdentity = Nothing
     }
 
 capturedNullaryGlobalCaseClosureProgram :: BackendProgram
@@ -7442,21 +8666,21 @@ capturedNullaryGlobalCaseClosureProgram =
                           (BackendConstruct (optionTy intTy) "Some" [intLit 41])
                           ( BackendAlternative
                               (BackendConstructorPattern "Some" ["n"])
-                              ( BackendClosure
+                              ( BackendClosureWithParamIdentities
                                   { backendExprType = unaryIntTy,
                                     backendClosureEntryName = "__mlfp_closure$nullary_global_case_some",
-                                    backendClosureCaptures = [BackendClosureCapture "n" intTy (BackendVar intTy "n")],
-                                    backendClosureParams = [("x", intTy)],
+                                    backendClosureCaptures = [BackendClosureCapture Nothing "n" intTy (BackendVar intTy "n")],
+                                    backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
                                     backendClosureBody = BackendVar intTy "n"
                                   }
                               )
                               :| [ BackendAlternative
                                      (BackendConstructorPattern "None" [])
-                                     ( BackendClosure
+                                     ( BackendClosureWithParamIdentities
                                          { backendExprType = unaryIntTy,
                                            backendClosureEntryName = "__mlfp_closure$nullary_global_case_none",
                                            backendClosureCaptures = [],
-                                           backendClosureParams = [("x", intTy)],
+                                           backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
                                            backendClosureBody = intLit 0
                                          }
                                      )
@@ -7470,11 +8694,11 @@ capturedNullaryGlobalCaseClosureProgram =
                       backendBindingExpr =
                         BackendClosureCall
                           intTy
-                          ( BackendClosure
+                          ( BackendClosureWithParamIdentities
                               { backendExprType = unaryIntTy,
                                 backendClosureEntryName = "__mlfp_closure$call_captured_nullary_global_case",
-                                backendClosureCaptures = [BackendClosureCapture "f" unaryIntTy (BackendVar unaryIntTy "getCaseClosure")],
-                                backendClosureParams = [("x", intTy)],
+                                backendClosureCaptures = [BackendClosureCapture Nothing "f" unaryIntTy (BackendVar unaryIntTy "getCaseClosure")],
+                                backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
                                 backendClosureBody = BackendClosureCall intTy (BackendVar unaryIntTy "f") [BackendVar intTy "x"]
                               }
                           )
@@ -7499,8 +8723,8 @@ rawReturnedFunctionPointerCallProgram =
                     { backendBindingName = "inc",
                       backendBindingType = unaryIntTy,
                       backendBindingExpr =
-                        BackendLam
-                          { backendExprType = unaryIntTy,
+                        BackendLamWithIdentity
+                          { backendParamIdentity = Nothing, backendExprType = unaryIntTy,
                             backendParamName = "x",
                             backendParamType = intTy,
                             backendBody = BackendVar intTy "x"
@@ -7511,13 +8735,13 @@ rawReturnedFunctionPointerCallProgram =
                     { backendBindingName = "idRaw",
                       backendBindingType = BTArrow unaryIntTy (BTArrow intTy unaryIntTy),
                       backendBindingExpr =
-                        BackendLam
-                          { backendExprType = BTArrow unaryIntTy (BTArrow intTy unaryIntTy),
+                        BackendLamWithIdentity
+                          { backendParamIdentity = Nothing, backendExprType = BTArrow unaryIntTy (BTArrow intTy unaryIntTy),
                             backendParamName = "$evidence_f",
                             backendParamType = unaryIntTy,
                             backendBody =
-                              BackendLam
-                                { backendExprType = BTArrow intTy unaryIntTy,
+                              BackendLamWithIdentity
+                                { backendParamIdentity = Nothing, backendExprType = BTArrow intTy unaryIntTy,
                                   backendParamName = "ignored",
                                   backendParamType = intTy,
                                   backendBody =
@@ -7567,8 +8791,8 @@ rawFunctionPointerAliasReturnProgram =
                     { backendBindingName = "inc",
                       backendBindingType = unaryIntTy,
                       backendBindingExpr =
-                        BackendLam
-                          { backendExprType = unaryIntTy,
+                        BackendLamWithIdentity
+                          { backendParamIdentity = Nothing, backendExprType = unaryIntTy,
                             backendParamName = "x",
                             backendParamType = intTy,
                             backendBody = BackendVar intTy "x"
@@ -7579,13 +8803,13 @@ rawFunctionPointerAliasReturnProgram =
                     { backendBindingName = "idAlias",
                       backendBindingType = BTArrow unaryIntTy (BTArrow intTy unaryIntTy),
                       backendBindingExpr =
-                        BackendLam
-                          { backendExprType = BTArrow unaryIntTy (BTArrow intTy unaryIntTy),
+                        BackendLamWithIdentity
+                          { backendParamIdentity = Nothing, backendExprType = BTArrow unaryIntTy (BTArrow intTy unaryIntTy),
                             backendParamName = "$evidence_f",
                             backendParamType = unaryIntTy,
                             backendBody =
-                              BackendLam
-                                { backendExprType = BTArrow intTy unaryIntTy,
+                              BackendLamWithIdentity
+                                { backendParamIdentity = Nothing, backendExprType = BTArrow intTy unaryIntTy,
                                   backendParamName = "ignored",
                                   backendParamType = intTy,
                                   backendBody =
@@ -7641,13 +8865,13 @@ firstOrderFunctionParameterCallProgram =
                     { backendBindingName = "applyFirst",
                       backendBindingType = BTArrow unaryIntTy unaryIntTy,
                       backendBindingExpr =
-                        BackendLam
-                          { backendExprType = BTArrow unaryIntTy unaryIntTy,
+                        BackendLamWithIdentity
+                          { backendParamIdentity = Nothing, backendExprType = BTArrow unaryIntTy unaryIntTy,
                             backendParamName = "f",
                             backendParamType = unaryIntTy,
                             backendBody =
-                              BackendLam
-                                { backendExprType = unaryIntTy,
+                              BackendLamWithIdentity
+                                { backendParamIdentity = Nothing, backendExprType = unaryIntTy,
                                   backendParamName = "x",
                                   backendParamType = intTy,
                                   backendBody = BackendApp intTy (BackendVar unaryIntTy "f") (BackendVar intTy "x")
@@ -7676,11 +8900,11 @@ closureFirstOrderFunctionParameterCallProgram =
                       backendBindingExpr =
                         BackendClosureCall
                           intTy
-                          ( BackendClosure
+                          ( BackendClosureWithParamIdentities
                               { backendExprType = BTArrow unaryIntTy unaryIntTy,
                                 backendClosureEntryName = "__mlfp_closure$call_first_order_param",
                                 backendClosureCaptures = [],
-                                backendClosureParams = [("f", unaryIntTy), ("x", intTy)],
+                                backendClosureParamsWithIdentities = backendClosureParams [("f", unaryIntTy), ("x", intTy)],
                                 backendClosureBody = BackendApp intTy (BackendVar unaryIntTy "f") (BackendVar intTy "x")
                               }
                           )
@@ -7752,11 +8976,11 @@ closureFunctionFieldCallProgram =
                               ( BackendConstruct
                                   fnBoxTy
                                   "FnBox"
-                                  [ BackendClosure
+                                  [ BackendClosureWithParamIdentities
                                       { backendExprType = unaryIntTy,
                                         backendClosureEntryName = "__mlfp_closure$field_case_closure",
-                                        backendClosureCaptures = [BackendClosureCapture "captured" intTy (BackendVar intTy "captured")],
-                                        backendClosureParams = [("x", intTy)],
+                                        backendClosureCaptures = [BackendClosureCapture Nothing "captured" intTy (BackendVar intTy "captured")],
+                                        backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
                                         backendClosureBody = BackendVar intTy "captured"
                                       }
                                   ]
@@ -7798,11 +9022,11 @@ returnedClosureFunctionFieldCallProgram =
                           ( BackendConstruct
                               fnBoxTy
                               "FnBox"
-                              [ BackendClosure
+                              [ BackendClosureWithParamIdentities
                                   { backendExprType = unaryIntTy,
                                     backendClosureEntryName = "__mlfp_closure$returned_field_case_closure",
-                                    backendClosureCaptures = [BackendClosureCapture "base" intTy (BackendVar intTy "base")],
-                                    backendClosureParams = [("x", intTy)],
+                                    backendClosureCaptures = [BackendClosureCapture Nothing "base" intTy (BackendVar intTy "base")],
+                                    backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
                                     backendClosureBody = BackendVar intTy "base"
                                   }
                               ]
@@ -7873,11 +9097,11 @@ returnedReboxedClosureFunctionFieldCallProgram =
                                   ( BackendConstruct
                                       fnBoxTy
                                       "FnBox"
-                                      [ BackendClosure
+                                      [ BackendClosureWithParamIdentities
                                           { backendExprType = unaryIntTy,
                                             backendClosureEntryName = "__mlfp_closure$returned_reboxed_field_case_closure",
-                                            backendClosureCaptures = [BackendClosureCapture "captured" intTy (BackendVar intTy "captured")],
-                                            backendClosureParams = [("x", intTy)],
+                                            backendClosureCaptures = [BackendClosureCapture Nothing "captured" intTy (BackendVar intTy "captured")],
+                                            backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
                                             backendClosureBody = BackendVar intTy "captured"
                                           }
                                       ]
@@ -7918,21 +9142,21 @@ caseReturnedClosureOverApplicationProgram =
                               (BackendConstruct (optionTy intTy) "Some" [BackendVar intTy "base"])
                               ( BackendAlternative
                                   (BackendConstructorPattern "Some" ["captured"])
-                                  ( BackendClosure
+                                  ( BackendClosureWithParamIdentities
                                       { backendExprType = unaryIntTy,
                                         backendClosureEntryName = "__mlfp_closure$case_returned_some",
-                                        backendClosureCaptures = [BackendClosureCapture "captured" intTy (BackendVar intTy "captured")],
-                                        backendClosureParams = [("x", intTy)],
+                                        backendClosureCaptures = [BackendClosureCapture Nothing "captured" intTy (BackendVar intTy "captured")],
+                                        backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
                                         backendClosureBody = BackendVar intTy "captured"
                                       }
                                   )
                                   :| [ BackendAlternative
                                          (BackendConstructorPattern "None" [])
-                                         ( BackendClosure
+                                         ( BackendClosureWithParamIdentities
                                              { backendExprType = unaryIntTy,
                                                backendClosureEntryName = "__mlfp_closure$case_returned_none",
                                                backendClosureCaptures = [],
-                                               backendClosureParams = [("x", intTy)],
+                                               backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
                                                backendClosureBody = intLit 0
                                              }
                                          )
@@ -7983,11 +9207,11 @@ mixedCallableCaseResultProgram =
                                   (BackendConstruct (optionTy intTy) "Some" [BackendVar intTy "base"])
                                   ( BackendAlternative
                                       (BackendConstructorPattern "Some" ["captured"])
-                                      ( BackendClosure
+                                      ( BackendClosureWithParamIdentities
                                           { backendExprType = unaryIntTy,
                                             backendClosureEntryName = "__mlfp_closure$mixed_case_closure",
-                                            backendClosureCaptures = [BackendClosureCapture "captured" intTy (BackendVar intTy "captured")],
-                                            backendClosureParams = [("x", intTy)],
+                                            backendClosureCaptures = [BackendClosureCapture Nothing "captured" intTy (BackendVar intTy "captured")],
+                                            backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
                                             backendClosureBody = BackendVar intTy "captured"
                                           }
                                       )
@@ -8043,21 +9267,21 @@ caseHeadedDirectClosureBackendAppProgram =
                               (BackendConstruct (optionTy intTy) "Some" [intLit 41])
                               ( BackendAlternative
                                   (BackendConstructorPattern "Some" ["captured"])
-                                  ( BackendClosure
+                                  ( BackendClosureWithParamIdentities
                                       { backendExprType = unaryIntTy,
                                         backendClosureEntryName = "__mlfp_closure$backend_app_case_some",
-                                        backendClosureCaptures = [BackendClosureCapture "captured" intTy (BackendVar intTy "captured")],
-                                        backendClosureParams = [("x", intTy)],
+                                        backendClosureCaptures = [BackendClosureCapture Nothing "captured" intTy (BackendVar intTy "captured")],
+                                        backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
                                         backendClosureBody = BackendVar intTy "captured"
                                       }
                                   )
                                   :| [ BackendAlternative
                                          (BackendConstructorPattern "None" [])
-                                         ( BackendClosure
+                                         ( BackendClosureWithParamIdentities
                                              { backendExprType = unaryIntTy,
                                                backendClosureEntryName = "__mlfp_closure$backend_app_case_none",
                                                backendClosureCaptures = [],
-                                               backendClosureParams = [("x", intTy)],
+                                               backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
                                                backendClosureBody = intLit 0
                                              }
                                          )
@@ -8092,11 +9316,11 @@ letHeadedDirectClosureBackendAppProgram =
                               "captured"
                               intTy
                               (intLit 41)
-                              ( BackendClosure
+                              ( BackendClosureWithParamIdentities
                                   { backendExprType = unaryIntTy,
                                     backendClosureEntryName = "__mlfp_closure$backend_app_let",
-                                    backendClosureCaptures = [BackendClosureCapture "captured" intTy (BackendVar intTy "captured")],
-                                    backendClosureParams = [("x", intTy)],
+                                    backendClosureCaptures = [BackendClosureCapture Nothing "captured" intTy (BackendVar intTy "captured")],
+                                    backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
                                     backendClosureBody = BackendVar intTy "captured"
                                   }
                               )
@@ -8123,16 +9347,16 @@ capturedFirstOrderParameterClosureProgram =
                     { backendBindingName = "makeCaller",
                       backendBindingType = BTArrow unaryIntTy unaryIntTy,
                       backendBindingExpr =
-                        BackendLam
-                          { backendExprType = BTArrow unaryIntTy unaryIntTy,
+                        BackendLamWithIdentity
+                          { backendParamIdentity = Nothing, backendExprType = BTArrow unaryIntTy unaryIntTy,
                             backendParamName = "f",
                             backendParamType = unaryIntTy,
                             backendBody =
-                              BackendClosure
+                              BackendClosureWithParamIdentities
                                 { backendExprType = unaryIntTy,
                                   backendClosureEntryName = "__mlfp_closure$capture_first_order_param",
-                                  backendClosureCaptures = [BackendClosureCapture "f" unaryIntTy (BackendVar unaryIntTy "f")],
-                                  backendClosureParams = [("x", intTy)],
+                                  backendClosureCaptures = [BackendClosureCapture Nothing "f" unaryIntTy (BackendVar unaryIntTy "f")],
+                                  backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
                                   backendClosureBody = BackendApp intTy (BackendVar unaryIntTy "f") (BackendVar intTy "x")
                                 }
                           },
@@ -8170,16 +9394,16 @@ letBoundFirstOrderParameterClosureProgram =
                       (BTArrow unaryIntTy unaryIntTy)
                       "makeCaller"
                       (BTArrow unaryIntTy unaryIntTy)
-                      ( BackendLam
-                          { backendExprType = BTArrow unaryIntTy unaryIntTy,
+                      ( BackendLamWithIdentity
+                          { backendParamIdentity = Nothing, backendExprType = BTArrow unaryIntTy unaryIntTy,
                             backendParamName = "f",
                             backendParamType = unaryIntTy,
                             backendBody =
-                              BackendClosure
+                              BackendClosureWithParamIdentities
                                 { backendExprType = unaryIntTy,
                                   backendClosureEntryName = "__mlfp_closure$let_capture_first_order_param",
-                                  backendClosureCaptures = [BackendClosureCapture "f" unaryIntTy (BackendVar unaryIntTy "f")],
-                                  backendClosureParams = [("x", intTy)],
+                                  backendClosureCaptures = [BackendClosureCapture Nothing "f" unaryIntTy (BackendVar unaryIntTy "f")],
+                                  backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
                                   backendClosureBody = BackendApp intTy (BackendVar unaryIntTy "f") (BackendVar intTy "x")
                                 }
                           }
@@ -8244,27 +9468,27 @@ mixedCallableCaptureClosureEntryProgram =
 
 mixedCallableCaptureFunction :: BackendExpr
 mixedCallableCaptureFunction =
-  BackendLam
-    { backendExprType = BTArrow unaryIntTy unaryIntTy,
+  BackendLamWithIdentity
+    { backendParamIdentity = Nothing, backendExprType = BTArrow unaryIntTy unaryIntTy,
       backendParamName = "f",
       backendParamType = unaryIntTy,
       backendBody =
-        BackendClosure
+        BackendClosureWithParamIdentities
           { backendExprType = unaryIntTy,
             backendClosureEntryName = "__mlfp_closure$mixed_callable_capture",
-            backendClosureCaptures = [BackendClosureCapture "f" unaryIntTy (BackendVar unaryIntTy "f")],
-            backendClosureParams = [("x", intTy)],
+            backendClosureCaptures = [BackendClosureCapture Nothing "f" unaryIntTy (BackendVar unaryIntTy "f")],
+            backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
             backendClosureBody = BackendApp intTy (BackendVar unaryIntTy "f") (BackendVar intTy "x")
           }
     }
 
 mixedCallableCaptureClosureArgument :: BackendExpr
 mixedCallableCaptureClosureArgument =
-  BackendClosure
+  BackendClosureWithParamIdentities
     { backendExprType = unaryIntTy,
       backendClosureEntryName = "__mlfp_closure$mixed_callable_argument",
       backendClosureCaptures = [],
-      backendClosureParams = [("x", intTy)],
+      backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
       backendClosureBody = intLit 42
     }
 
@@ -8275,16 +9499,16 @@ returnedClosurePartialApplicationProgram =
         { backendBindingName = "makeBinary",
           backendBindingType = BTArrow intTy binaryIntTy,
           backendBindingExpr =
-            BackendLam
-              { backendExprType = BTArrow intTy binaryIntTy,
+            BackendLamWithIdentity
+              { backendParamIdentity = Nothing, backendExprType = BTArrow intTy binaryIntTy,
                 backendParamName = "base",
                 backendParamType = intTy,
                 backendBody =
-                  BackendClosure
+                  BackendClosureWithParamIdentities
                     { backendExprType = binaryIntTy,
                       backendClosureEntryName = "__mlfp_closure$returned_binary",
-                      backendClosureCaptures = [BackendClosureCapture "base" intTy (BackendVar intTy "base")],
-                      backendClosureParams = [("x", intTy), ("y", intTy)],
+                      backendClosureCaptures = [BackendClosureCapture Nothing "base" intTy (BackendVar intTy "base")],
+                      backendClosureParamsWithIdentities = backendClosureParams [("x", intTy), ("y", intTy)],
                       backendClosureBody = BackendVar intTy "base"
                     }
               },
@@ -8314,13 +9538,13 @@ rawReturnedFunctionPointerPartialApplicationProgram =
         { backendBindingName = "idRawBinary",
           backendBindingType = BTArrow binaryIntTy (BTArrow intTy binaryIntTy),
           backendBindingExpr =
-            BackendLam
-              { backendExprType = BTArrow binaryIntTy (BTArrow intTy binaryIntTy),
+            BackendLamWithIdentity
+              { backendParamIdentity = Nothing, backendExprType = BTArrow binaryIntTy (BTArrow intTy binaryIntTy),
                 backendParamName = "$evidence_f",
                 backendParamType = binaryIntTy,
                 backendBody =
-                  BackendLam
-                    { backendExprType = BTArrow intTy binaryIntTy,
+                  BackendLamWithIdentity
+                    { backendParamIdentity = Nothing, backendExprType = BTArrow intTy binaryIntTy,
                       backendParamName = "ignored",
                       backendParamType = intTy,
                       backendBody =
@@ -8405,13 +9629,13 @@ addBinding =
     { backendBindingName = "add",
       backendBindingType = binaryIntTy,
       backendBindingExpr =
-        BackendLam
-          { backendExprType = binaryIntTy,
+        BackendLamWithIdentity
+          { backendParamIdentity = Nothing, backendExprType = binaryIntTy,
             backendParamName = "x",
             backendParamType = intTy,
             backendBody =
-              BackendLam
-                { backendExprType = unaryIntTy,
+              BackendLamWithIdentity
+                { backendParamIdentity = Nothing, backendExprType = unaryIntTy,
                   backendParamName = "y",
                   backendParamType = intTy,
                   backendBody = BackendVar intTy "x"
@@ -8431,8 +9655,8 @@ helperBinding =
 
 intIdentityExpr :: BackendExpr
 intIdentityExpr =
-  BackendLam
-    { backendExprType = unaryIntTy,
+  BackendLamWithIdentity
+    { backendParamIdentity = Nothing, backendExprType = unaryIntTy,
       backendParamName = "x",
       backendParamType = intTy,
       backendBody = BackendVar intTy "x"
@@ -8440,8 +9664,8 @@ intIdentityExpr =
 
 boolIdentityExpr :: BackendExpr
 boolIdentityExpr =
-  BackendLam
-    { backendExprType = unaryBoolTy,
+  BackendLamWithIdentity
+    { backendParamIdentity = Nothing, backendExprType = unaryBoolTy,
       backendParamName = "x",
       backendParamType = boolTy,
       backendBody = BackendVar boolTy "x"
@@ -8483,6 +9707,30 @@ strictBoxData =
         ]
     }
 
+strictBoxDataWithConstructorIdentity :: BackendData
+strictBoxDataWithConstructorIdentity =
+  strictBoxData
+    { backendDataConstructors =
+        [ BackendConstructorWithIdentity
+            { backendConstructorIdentity = Just strictBoxConstructorIdentity,
+              backendConstructorNameWithIdentity = "StrictBox",
+              backendConstructorForallsWithIdentity = [],
+              backendConstructorFieldsWithIdentity = [polyIdTy, recIntTy],
+              backendConstructorResultWithIdentity = strictBoxTy
+            }
+        ]
+    }
+
+strictBoxConstructorIdentity :: SymbolIdentity
+strictBoxConstructorIdentity =
+  SymbolIdentity
+    { symbolUniqueIdentity = UniqueIdentity 990005,
+      symbolNamespace = SymbolConstructor,
+      symbolDefiningModule = "Main",
+      symbolDefiningName = "StrictBox",
+      symbolOwnerIdentity = Nothing
+    }
+
 immediateChoiceData :: BackendData
 immediateChoiceData =
   BackendData
@@ -8500,6 +9748,41 @@ immediateChoiceData =
             []
             immediateChoiceTy
         ]
+    }
+
+immediateChoiceDataWithConstructorIdentity :: BackendData
+immediateChoiceDataWithConstructorIdentity =
+  immediateChoiceData
+    { backendDataConstructors =
+        [ BackendConstructorWithIdentity
+            { backendConstructorIdentity = Just immediateChoiceConstructorIdentity,
+              backendConstructorNameWithIdentity = "WithStatic",
+              backendConstructorForallsWithIdentity = [],
+              backendConstructorFieldsWithIdentity = [polyIdTy, intTy],
+              backendConstructorResultWithIdentity = immediateChoiceTy
+            },
+          BackendConstructor "Other" [] [] immediateChoiceTy
+        ]
+    }
+
+immediateChoiceConstructorIdentity :: SymbolIdentity
+immediateChoiceConstructorIdentity =
+  SymbolIdentity
+    { symbolUniqueIdentity = UniqueIdentity 990006,
+      symbolNamespace = SymbolConstructor,
+      symbolDefiningModule = "Main",
+      symbolDefiningName = "WithStatic",
+      symbolOwnerIdentity = Nothing
+    }
+
+otherImmediateChoiceConstructorIdentity :: SymbolIdentity
+otherImmediateChoiceConstructorIdentity =
+  SymbolIdentity
+    { symbolUniqueIdentity = UniqueIdentity 990007,
+      symbolNamespace = SymbolConstructor,
+      symbolDefiningModule = "Other",
+      symbolDefiningName = "WithStatic",
+      symbolOwnerIdentity = Nothing
     }
 
 immediateStrictChoiceData :: BackendData
@@ -8564,6 +9847,16 @@ programWithBindings bindings =
         ],
       backendProgramMain = "main"
     }
+
+programWithEvidenceParamIndices :: [(String, [Int])] -> [BackendBinding] -> BackendProgram
+programWithEvidenceParamIndices evidenceParamIndices bindings =
+  programWithBindings (map attachEvidence bindings)
+  where
+    attachEvidence binding =
+      binding
+        { backendBindingEvidenceParamIndices =
+            maybe Set.empty Set.fromList (lookup (backendBindingName binding) evidenceParamIndices)
+        }
 
 intLit :: Integer -> BackendExpr
 intLit value =

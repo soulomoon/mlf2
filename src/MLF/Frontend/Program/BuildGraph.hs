@@ -154,11 +154,12 @@ moduleInterfaceSummaryMetadata interface =
     InterfaceSummaryMetadata
         ( show
             ( moduleInterfaceId interface
+            , moduleInterfaceIdentity interface
             , moduleInterfaceSourcePath interface
             , moduleInterfaceDependencies interface
             , moduleInterfaceExports interface
-            , moduleInterfaceData interface
-            , moduleInterfaceClasses interface
+            , moduleInterfaceDataByIdentity interface
+            , moduleInterfaceClassesByIdentity interface
             , moduleInterfaceInstances interface
             )
         )

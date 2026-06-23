@@ -6,14 +6,14 @@ module MLF.Util.RecursionSchemes (
     cataEither,
     cataMaybe,
     foldElabType,
-    foldElabTerm,
+    foldXmlfTerm,
     foldInstantiation,
     foldAnnExpr
 ) where
 
 import Data.Functor.Foldable (Base, Recursive, cata)
 
-import MLF.Elab.Types (ElabTerm, ElabTermF, ElabType, Instantiation, InstantiationF, TopVar(..))
+import MLF.Elab.Types (XmlfTerm, XmlfTermF, ElabType, Instantiation, InstantiationF, TopVar(..))
 import MLF.Types.Elab (TyIF, cataIx)
 import MLF.Frontend.ConstraintGen.Types (AnnExpr, AnnExprF)
 
@@ -35,8 +35,8 @@ cataMaybe = cataM
 foldElabType :: (forall i. TyIF i a -> a i) -> ElabType -> a 'AllowVar
 foldElabType = cataIx
 
-foldElabTerm :: (ElabTermF a -> a) -> ElabTerm -> a
-foldElabTerm = cata
+foldXmlfTerm :: (XmlfTermF a -> a) -> XmlfTerm -> a
+foldXmlfTerm = cata
 
 foldInstantiation :: (InstantiationF a -> a) -> Instantiation -> a
 foldInstantiation = cata

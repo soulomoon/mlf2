@@ -1,8 +1,11 @@
+{-# LANGUAGE GADTs #-}
+
 module PrimitiveInventorySpec (spec) where
 
 import Control.Monad (forM_)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import MLF.Types.Elab (Ty (..), TypeBinderIdentity, typeBinderRefIdentity)
 import qualified MLF.Frontend.Program.Builtins as Builtins
 import MLF.Frontend.Program.Types (ValueInfo (..))
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
@@ -18,8 +21,7 @@ spec = describe "MLF.Primitive.Inventory" $ do
 
     forM_ (Map.toList PrimitiveInventory.primitiveValueSpecs) $ \(name, spec0) ->
       case Map.lookup name Builtins.builtinValues of
-        Just OrdinaryValue {valueDisplayName, valueRuntimeName, valueType, valueIdentityType} -> do
-          valueDisplayName `shouldBe` name
+        Just OrdinaryValue {valueRuntimeName, valueType, valueIdentityType} -> do
           valueRuntimeName `shouldBe` name
           valueType
             `shouldBe` PrimitiveInventory.primitiveTypeToSourceType (PrimitiveInventory.primitiveValueType spec0)
@@ -27,6 +29,15 @@ spec = describe "MLF.Primitive.Inventory" $ do
             `shouldBe` PrimitiveInventory.canonicalizeBuiltinSourceType valueType
         other ->
           expectationFailure ("expected ordinary builtin value for " ++ name ++ ", got " ++ show other)
+
+  it "assigns unique generated type identities across primitive elab types" $ do
+    let idsByPrimitive =
+          map
+            (Set.fromList . typeIdentitiesInType)
+            (Map.elems PrimitiveInventory.primitiveValueElabTypes)
+        ids = concatMap Set.toList idsByPrimitive
+    ids `shouldSatisfy` (not . null)
+    length ids `shouldBe` Set.size (Set.fromList ids)
 
   it "classifies native-lowerable primitive support from the shared primitive inventory owner" $ do
     PrimitiveInventory.primitiveNativeSupport PrimitiveInventory.nativeAndPrimitiveName
@@ -185,3 +196,25 @@ spec = describe "MLF.Primitive.Inventory" $ do
 
 allNativeIOOperations :: [PrimitiveInventory.PrimitiveIOOperation]
 allNativeIOOperations = [minBound .. maxBound]
+
+typeIdentitiesInType :: Ty v -> [TypeBinderIdentity]
+typeIdentitiesInType ty =
+  case ty of
+    TVarRef ref ->
+      [typeBinderRefIdentity ref]
+    TArrow dom cod ->
+      typeIdentitiesInType dom ++ typeIdentitiesInType cod
+    TCon _ args ->
+      foldMap typeIdentitiesInType args
+    TVarAppRef ref args ->
+      typeBinderRefIdentity ref : foldMap typeIdentitiesInType args
+    TBase {} ->
+      []
+    TForallRef ref mb body ->
+      [typeBinderRefIdentity ref]
+        ++ maybe [] typeIdentitiesInType mb
+        ++ typeIdentitiesInType body
+    TMuRef ref body ->
+      typeBinderRefIdentity ref : typeIdentitiesInType body
+    TBottom ->
+      []

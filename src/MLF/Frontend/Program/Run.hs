@@ -25,22 +25,27 @@ import Data.List (elemIndex, find, findIndex, intercalate, isInfixOf, isPrefixOf
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import MLF.Elab.Pipeline (ElabTerm (..), Pretty (..), Ty (..), freeTypeVarsType, normalize, schemeFromType, typeCheck)
+import MLF.Elab.Pipeline (XmlfTerm (..), Pretty (..), Ty (TForallRef), normalize, schemeFromType, typeCheck)
+import MLF.Elab.Types (ElabType, ResolvedVar (..), resolvedVarBoundBy, resolvedVarConstructorRef, resolvedVarReferenceName, resolvedVarSameIdentity)
+import qualified MLF.Elab.Types as X
 import MLF.Frontend.Program.Check (checkLocatedProgram, checkLocatedProgramPackage, checkLocatedProgramPackageWithTiming, checkProgram, checkProgramPackage)
 import MLF.Frontend.Program.Elaborate
   ( ElaborateScope,
     classInfoForConstraint,
+    diagnosticTypeViewDisplay,
+    elaborateScopeDataTypesByIdentity,
     inferClassArgument,
     lookupEvidenceMethodByClass,
-    lowerTypeView,
-    matchTypesInScope,
+    lookupEvidenceMethodByClassTypes,
+    lowerType,
+    matchTypeViewsAgainstIdentity,
     mkElaborateScope,
     resolveInstanceInfoByConstraint,
     resolveMethodInstanceInfoByTypeView,
     sourceTypeViewInScope,
     zeroMethodConstraintCoveredByEvidenceInfo,
   )
-import MLF.Frontend.Program.Finalize (recoverSourceType)
+import MLF.Frontend.Program.Finalize (recoverSourceType, typeViewToElabType)
 import qualified MLF.Frontend.Program.Builtins as Builtins
 import MLF.Frontend.Program.Package
   ( LocatedProgramPackage,
@@ -60,37 +65,61 @@ import MLF.Frontend.Program.Types
     DeferredMethodCall (..),
     DeferredMethodEvidence (..),
     DeferredProgramObligation (..),
+    EvidenceMethod (..),
     EvidenceInfo (..),
     InstanceInfo (..),
     MethodInfo (..),
     ProgramDiagnostic,
     ProgramError (..),
     SymbolIdentity (..),
-    SymbolNamespace (..),
+    TypeBinderSubst,
     TypeView (..),
+    TypeViewSubst,
     ValueInfo (..),
     applyConstraintInfoSubst,
+    ctorName,
+    classInfoIdentityQualifiedName,
+    dataInfoIdentityName,
+    dataInfoIdentityQualifiedName,
+    deferredMethodName,
     diagnosticForProgramError,
+    emptyTypeBinderSubst,
     freeTypeVarsTypeView,
     freeTypeVarsTypeViews,
+    lookupInstanceMethod,
+    lookupMethodParamViewSubst,
+    methodTypeView,
+    methodResultTypeView,
     methodInfoOwnerClassSymbolIdentity,
-    specializeMethodType,
+    methodInfoSymbolIdentity,
+    methodParamIdentityName,
+    methodParamBinders,
+    mkTypeView,
+    specializeMethodTypeView,
     splitArrows,
     splitForalls,
     substituteTypeVar,
-    typeViewsDisplay,
+    typeViewSubstFromParamBinders,
     typeViewsIdentity,
+    typeBinderSubstFromTypeViewSubst,
+    typeBinderSubstToNameMap,
+    typeBinderSubstToTypeViewSubstWith,
+    typeParamBinderIdentity,
+    insertTypeBinderSubst,
+    resolvedVarFromValueInfo,
   )
-import MLF.Frontend.Syntax (Lit (..), SrcBound (..), SrcTy (..), SrcType, SurfaceExpr)
-import qualified MLF.Frontend.Syntax as Surface
+import MLF.Frontend.Symbol (symbolIdentityStableName)
+import MLF.Frontend.Syntax (Lit (..), SrcBound (..), SrcTy (..), SrcType)
 import qualified MLF.Frontend.Syntax.Program as ProgramSyntax
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
+import MLF.Reify.TypeOps (alphaEqType, churchAwareEqType, freeTypeVarRefsType)
+import MLF.Types.Identity (ConstructorRef (..), DeferredRef (..), EnvRef (..), IdDetails (..), LocalRef (..), PrimitiveRef (..), TypeBinderIdentity)
 import MLF.Util.Timing (TimingConfig, timeProgramIO)
 
 data Value
   = VLit Lit
   | VData String [Value]
-  | VTerm ElabTerm
+  | VTerm XmlfTerm
   deriving (Eq, Show)
 
 data ProgramRunResult = ProgramRunResult
@@ -171,11 +200,11 @@ programRunOutput result =
 
 runCheckedPureProgram :: CheckedProgram -> Either ProgramError Value
 runCheckedPureProgram checked =
-  case classifyMainMode checked of
+  case classifyMainMode (mkRuntimeContext checked) checked of
     MainPure -> do
       rejectOpaqueDependencies checked
       let normalizedTerm = normalizeProgramTerm (programMainTerm checked)
-      if any (`termMentionsName` normalizedTerm) runtimePurePrimitiveNames
+      if termMentionsRuntimePurePrimitive normalizedTerm
         then runtimeValueToValue <$> mainRuntimeValue checked
         else pure (toValueWithProgram checked normalizedTerm)
     MainIOUnit ->
@@ -187,7 +216,7 @@ runCheckedPureProgram checked =
 
 runCheckedProgramOutput :: CheckedProgram -> Either ProgramError ProgramRunResult
 runCheckedProgramOutput checked =
-  case classifyMainMode checked of
+  case classifyMainMode context checked of
     MainPure -> do
       value <- runCheckedPureProgram checked
       pure
@@ -196,10 +225,9 @@ runCheckedProgramOutput checked =
             programRunValue = Just value
           }
     MainIOUnit -> do
-      let context = mkRuntimeContext checked
       action <- mainIOAction checked
       (stdoutText, result) <- executeIOAction context action
-      if isRuntimeUnit result
+      if isRuntimeUnit context result
         then
           pure
             ProgramRunResult
@@ -208,7 +236,6 @@ runCheckedProgramOutput checked =
               }
         else Left (ProgramPipelineError "run-program IO main did not finish with Unit")
     MainIOOther _ty -> do
-      let context = mkRuntimeContext checked
       action <- mainIOAction checked
       (stdoutText, result) <- executeIOAction context action
       pure
@@ -218,6 +245,8 @@ runCheckedProgramOutput checked =
           }
     MainUnsupportedIO ty ->
       Left (unsupportedIOMainError ty)
+  where
+    context = mkRuntimeContext checked
 
 data MainMode
   = MainPure
@@ -226,54 +255,87 @@ data MainMode
   | MainUnsupportedIO SrcType
   deriving (Eq, Show)
 
-classifyMainMode :: CheckedProgram -> MainMode
-classifyMainMode checked =
-  case mainIdentitySourceType checked of
-    Just ty
-      | isIOUnitSourceType ty -> MainIOUnit
-      | isIOType ty -> MainIOOther (recoverMainSourceType checked ty)
-      | Builtins.srcTypeMentionsOpaqueBuiltin ty -> MainUnsupportedIO (recoverMainSourceType checked ty)
+classifyMainMode :: RuntimeContext -> CheckedProgram -> MainMode
+classifyMainMode context checked =
+  case mainBinding checked of
+    Just binding
+      | isIOUnitElabType context (checkedBindingType binding) -> MainIOUnit
+      | isIOElabType (checkedBindingType binding) -> MainIOOther (recoverMainSourceType checked sourceTy)
+      | Builtins.srcTypeMentionsOpaqueBuiltin sourceTy -> MainUnsupportedIO (recoverMainSourceType checked sourceTy)
+      where
+        sourceTy = checkedBindingSourceType binding
     _ -> MainPure
 
-isIOType :: SrcType -> Bool
-isIOType ty =
+isIOElabType :: ElabType -> Bool
+isIOElabType ty =
   case ty of
-    STCon name _ -> isIOTypeName name
+    X.TConWithIdentity (Just identity) _ _ ->
+      identity == Builtins.builtinTypeIdentity "IO"
     _ -> False
 
-isIOUnitSourceType :: SrcType -> Bool
-isIOUnitSourceType ty =
+isIOUnitElabType :: RuntimeContext -> ElabType -> Bool
+isIOUnitElabType context ty =
   case ty of
-    STCon name args ->
-      isIOTypeName name && case toList args of
-        [arg] -> isUnitSourceType arg
+    X.TConWithIdentity (Just identity) _ args
+      | identity == Builtins.builtinTypeIdentity "IO" ->
+          case toList args of
+            [arg] -> isPreludeUnitElabType context arg
+            _ -> False
+    _ -> False
+
+isPreludeUnitElabType :: RuntimeContext -> ElabType -> Bool
+isPreludeUnitElabType context ty =
+  hasPreludeUnitIdentityHead
+    || maybe False matchesExpandedPreludeUnit (preludeUnitElabType context)
+  where
+    hasPreludeUnitIdentityHead =
+      case ty of
+        X.TBaseWithIdentity (Just identity) _ ->
+          isPreludeUnitIdentity context identity
+        X.TConWithIdentity (Just identity) _ args ->
+          null (toList args) && isPreludeUnitIdentity context identity
         _ -> False
-    _ -> False
 
-isUnitSourceType :: SrcType -> Bool
-isUnitSourceType ty =
-  case ty of
-    STBase name -> isPreludeUnitTypeName name
-    STCon name args -> isPreludeUnitTypeName name && null (toList args)
-    _ -> False
+    matchesExpandedPreludeUnit unitTy =
+      ty == unitTy || alphaEqType ty unitTy || churchAwareEqType ty unitTy
 
-isIOTypeName :: String -> Bool
-isIOTypeName name = name == Builtins.builtinModuleName ++ ".IO"
+isPreludeUnitIdentity :: RuntimeContext -> SymbolIdentity -> Bool
+isPreludeUnitIdentity context identity =
+  maybe False ((== identity) . dataInfoSymbol) (preludeUnitDataInfo context)
 
-isPreludeUnitTypeName :: String -> Bool
-isPreludeUnitTypeName name = name == "Prelude.Unit"
+preludeUnitElabType :: RuntimeContext -> Maybe ElabType
+preludeUnitElabType context = do
+  view <- preludeUnitTypeView context
+  either
+    (const Nothing)
+    Just
+    (typeViewToElabType (runtimeElaborateScope context) view)
+
+preludeUnitTypeView :: RuntimeContext -> Maybe TypeView
+preludeUnitTypeView context = do
+  dataInfo <- preludeUnitDataInfo context
+  let scope = runtimeElaborateScope context
+  pure (sourceTypeViewInScope scope (STBase (symbolIdentityStableName (dataInfoSymbol dataInfo))))
+
+preludeUnitDataInfo :: RuntimeContext -> Maybe DataInfo
+preludeUnitDataInfo context = do
+  ctor <- lookupPreludeUnitConstructor context
+  infos <- Map.lookup (ctorOwningTypeIdentity ctor) (elaborateScopeDataTypesByIdentity (runtimeElaborateScope context))
+  case infos of
+    info : _ -> Just info
+    [] -> Nothing
 
 unsupportedIOMainError :: SrcType -> ProgramError
 unsupportedIOMainError ty =
   ProgramPipelineError ("run-program supports only main : IO Unit, got " ++ show ty)
 
-programMainTerm :: CheckedProgram -> ElabTerm
+programMainTerm :: CheckedProgram -> XmlfTerm
 programMainTerm checked =
-  foldr bindAll (EVar (checkedProgramMain checked)) (reachableRuntimeBindings checked)
+  foldr bindAll (EVarNode (checkedProgramMainResolvedVar checked)) (reachableRuntimeBindings checked)
   where
     bindAll binding body =
       ELet
-        (checkedBindingName binding)
+        (checkedBindingResolvedVar binding)
         (schemeFromType (checkedBindingType binding))
         (checkedBindingTerm binding)
         body
@@ -292,16 +354,47 @@ rejectOpaqueDependencies checked =
         )
 
 data RuntimeContext = RuntimeContext
-  { runtimeBindings :: Map.Map String CheckedBinding,
-    runtimeConstructors :: Map.Map String ConstructorInfo,
+  { runtimeBindingsByIdentity :: Map.Map SymbolIdentity CheckedBinding,
+    runtimeConstructorsByIdentity :: Map.Map SymbolIdentity ConstructorInfo,
+    runtimePreludeConstructorsByKey :: Map.Map PreludeConstructorKey ConstructorInfo,
+    runtimePreludeBindingsByKey :: Map.Map PreludeBindingKey CheckedBinding,
     runtimeElaborateScope :: ElaborateScope
   }
 
-type RuntimeDeferredValues = Map.Map String RuntimeDeferredValue
+data PreludeBindingKey
+  = PreludeStringFromList
+  deriving (Eq, Ord, Show)
 
-type RuntimeEnv = Map.Map String RuntimeValue
+data PreludeConstructorKey
+  = PreludeUnitUnit
+  | PreludeNatZero
+  | PreludeNatSucc
+  | PreludeOptionNone
+  | PreludeOptionSome
+  | PreludeListNil
+  | PreludeListCons
+  deriving (Eq, Ord, Show)
 
-type RuntimeLookupStack = [String]
+type RuntimeDeferredValues = Map.Map DeferredRef RuntimeDeferredValue
+
+type RuntimeEnv = Map.Map RuntimeVarKey RuntimeValue
+
+type RuntimeLookupStack = [RuntimeLookupFrame]
+
+data RuntimeLookupFrame = RuntimeLookupFrame
+  { runtimeLookupFrameKey :: RuntimeVarKey,
+    runtimeLookupFrameName :: String
+  }
+
+data RuntimeVarKey
+  = RuntimeLocalKey LocalRef
+  | RuntimeEnvKey EnvRef
+  | RuntimeTopLevelKey SymbolIdentity
+  | RuntimeConstructorKey SymbolIdentity
+  | RuntimeMethodKey SymbolIdentity
+  | RuntimePrimitiveKey PrimitiveRef
+  | RuntimeDeferredKey DeferredRef
+  deriving (Eq, Ord, Show)
 
 data RuntimeDeferredValue
   = RuntimeDeferredConstructor DeferredConstructorCall
@@ -317,7 +410,9 @@ data RuntimeValue
   = RuntimeLit Lit
   | RuntimeUnit
   | RuntimeData ConstructorInfo SrcType [RuntimeValue]
-  | RuntimeClosure String SurfaceExpr RuntimeEnv RuntimeLookupStack RuntimeDeferredValues
+  | RuntimeClosure ResolvedVar XmlfTerm RuntimeEnv RuntimeLookupStack RuntimeDeferredValues
+  | RuntimeUnrolled RuntimeValue
+  | RuntimeDataEliminator ConstructorInfo [RuntimeValue] [RuntimeValue]
   | RuntimeConstructor RuntimeConstructorSpec [RuntimeValue]
   | RuntimeCase DeferredCaseCall [RuntimeValue]
   | RuntimeMethod RuntimeLookupStack RuntimeDeferredValues RuntimeEnv DeferredMethodCall [RuntimeValue]
@@ -407,7 +502,7 @@ data RuntimeIOAction
 mainIOAction :: CheckedProgram -> Either ProgramError RuntimeIOAction
 mainIOAction checked = do
   binding <-
-    case Map.lookup (checkedProgramMain checked) (runtimeBindings context) of
+    case lookupRuntimeBindingResolved context (checkedProgramMainResolvedVar checked) of
       Just found -> Right found
       Nothing -> Left ProgramMainNotFound
   value <- evalRuntimeBinding context [] binding
@@ -420,7 +515,7 @@ mainIOAction checked = do
 mainRuntimeValue :: CheckedProgram -> Either ProgramError RuntimeValue
 mainRuntimeValue checked = do
   binding <-
-    case Map.lookup (checkedProgramMain checked) (runtimeBindings context) of
+    case lookupRuntimeBindingResolved context (checkedProgramMainResolvedVar checked) of
       Just found -> Right found
       Nothing -> Left ProgramMainNotFound
   evalRuntimeBinding context [] binding
@@ -430,25 +525,80 @@ mainRuntimeValue checked = do
 mkRuntimeContext :: CheckedProgram -> RuntimeContext
 mkRuntimeContext checked =
   RuntimeContext
-    { runtimeBindings = Map.fromList [(checkedBindingName binding, binding) | binding <- allCheckedBindings checked],
-      runtimeConstructors = Map.fromList [(ctorRuntimeName ctor, ctor) | dataInfo <- allDataInfos checked, ctor <- dataConstructors dataInfo],
+    { runtimeBindingsByIdentity =
+        Map.fromList
+          [ (symbol, binding)
+          | binding <- allCheckedBindings checked,
+            Just symbol <- [resolvedVarTopLevelSymbol (checkedBindingResolvedVar binding)]
+          ],
+      runtimeConstructorsByIdentity =
+        Map.fromList
+          [(ctorInfoSymbol ctor, ctor) | dataInfo <- allDataInfos checked, ctor <- dataConstructors dataInfo],
+      runtimePreludeConstructorsByKey =
+        Map.fromList
+          [ (key, ctor)
+          | checkedModule <- checkedProgramModules checked,
+            checkedModuleName checkedModule == "Prelude",
+            dataInfo <- Map.elems (checkedModuleData checkedModule),
+            ctor <- dataConstructors dataInfo,
+            Just key <- [preludeConstructorKey dataInfo ctor]
+          ],
+      runtimePreludeBindingsByKey =
+        Map.fromList
+          [ (key, binding)
+          | checkedModule <- checkedProgramModules checked,
+            checkedModuleName checkedModule == "Prelude",
+            binding <- checkedModuleBindings checkedModule,
+            Just key <- [preludeBindingKey binding]
+          ],
       runtimeElaborateScope = programElaborateScope checked
     }
 
+preludeBindingKey :: CheckedBinding -> Maybe PreludeBindingKey
+preludeBindingKey binding =
+  case resolvedVarTopLevelSymbol (checkedBindingResolvedVar binding) of
+    Just symbol
+      | symbol == Builtins.builtinValueIdentity PrimitiveInventory.stringFromListPrimitiveName -> Just PreludeStringFromList
+    _ -> Nothing
+
+preludeConstructorKey :: DataInfo -> ConstructorInfo -> Maybe PreludeConstructorKey
+preludeConstructorKey dataInfo ctor =
+  case (dataInfoIdentityName dataInfo, ctorName ctor) of
+    ("Unit", "Unit") -> Just PreludeUnitUnit
+    ("Nat", "Zero") -> Just PreludeNatZero
+    ("Nat", "Succ") -> Just PreludeNatSucc
+    ("Option", "None") -> Just PreludeOptionNone
+    ("Option", "Some") -> Just PreludeOptionSome
+    ("List", "Nil") -> Just PreludeListNil
+    ("List", "Cons") -> Just PreludeListCons
+    _ -> Nothing
+
+preludeConstructorLabel :: PreludeConstructorKey -> String
+preludeConstructorLabel key =
+  case key of
+    PreludeUnitUnit -> "Unit.Unit"
+    PreludeNatZero -> "Nat.Zero"
+    PreludeNatSucc -> "Nat.Succ"
+    PreludeOptionNone -> "Option.None"
+    PreludeOptionSome -> "Option.Some"
+    PreludeListNil -> "List.Nil"
+    PreludeListCons -> "List.Cons"
+
 evalRuntimeBinding :: RuntimeContext -> RuntimeLookupStack -> CheckedBinding -> Either ProgramError RuntimeValue
 evalRuntimeBinding context stack binding =
-  evalRuntimeExprWithStack
+  evalRuntimeTermWithStack
     context
     stack
     (bindingDeferredValues binding)
     Map.empty
-    (checkedBindingSurfaceExpr binding)
+    (checkedBindingTerm binding)
 
 bindingDeferredValues :: CheckedBinding -> RuntimeDeferredValues
 bindingDeferredValues binding =
   Map.fromList
-    [ (placeholder, runtimeDeferredValue obligation)
-      | (placeholder, obligation) <- Map.toList (checkedBindingDeferredObligations binding)
+    [ (runtimeDeferredValueRef value, value)
+    | obligation <- Map.elems (checkedBindingDeferredObligations binding),
+      let value = runtimeDeferredValue obligation
     ]
 
 runtimeDeferredValue :: DeferredProgramObligation -> RuntimeDeferredValue
@@ -458,57 +608,132 @@ runtimeDeferredValue obligation =
     DeferredCase deferred -> RuntimeDeferredCase deferred
     DeferredMethod deferred -> RuntimeDeferredMethod deferred
 
-evalRuntimeExprWithStack ::
+runtimeDeferredValueRef :: RuntimeDeferredValue -> DeferredRef
+runtimeDeferredValueRef value =
+  case value of
+    RuntimeDeferredConstructor deferred -> deferredConstructorRef deferred
+    RuntimeDeferredCase deferred -> deferredCaseRef deferred
+    RuntimeDeferredMethod deferred -> deferredMethodRef deferred
+
+evalRuntimeTermWithStack ::
   RuntimeContext ->
   RuntimeLookupStack ->
   RuntimeDeferredValues ->
   RuntimeEnv ->
-  SurfaceExpr ->
+  XmlfTerm ->
   Either ProgramError RuntimeValue
-evalRuntimeExprWithStack context stack deferredValues env expr =
-  case expr of
-    Surface.EVar name -> lookupRuntimeValue context stack deferredValues env name
-    Surface.ELit lit -> Right (RuntimeLit lit)
+evalRuntimeTermWithStack context stack deferredValues env term =
+  case term of
+    EVarNode resolved -> lookupRuntimeResolvedValue context stack deferredValues env resolved
+    ELit lit -> Right (RuntimeLit lit)
     -- Top-level recursion through a lambda body is a delayed call, not a
     -- recursive value lookup while the binding RHS is being forced.
-    Surface.ELam name body ->
-      Right (RuntimeClosure name body env [] deferredValues)
-    Surface.ELamAnn name _ body ->
-      Right (RuntimeClosure name body env [] deferredValues)
-    Surface.EApp fun arg -> do
-      funValue <- evalRuntimeExprWithStack context stack deferredValues env fun
-      argValue <- evalRuntimeExprWithStack context stack deferredValues env arg
+    ELam resolved body ->
+      Right (RuntimeClosure resolved body env [] deferredValues)
+    EApp fun arg -> do
+      funValue <- evalRuntimeTermWithStack context stack deferredValues env fun
+      argValue <- evalRuntimeTermWithStack context stack deferredValues env arg
       applyRuntimeValue context funValue argValue
-    Surface.ELet name rhs body -> do
-      rhsValue <- evalRuntimeExprWithStack context stack deferredValues env rhs
-      evalRuntimeExprWithStack context stack deferredValues (Map.insert name rhsValue env) body
-    Surface.EAnn inner _ ->
-      evalRuntimeExprWithStack context stack deferredValues env inner
+    ELet resolved _ rhs body -> do
+      rhsValue <- evalRuntimeTermWithStack context stack deferredValues env rhs
+      evalRuntimeTermWithStack context stack deferredValues (insertRuntimeEnv resolved rhsValue env) body
+    ETyAbsRef _ _ body ->
+      evalRuntimeTermWithStack context stack deferredValues env body
+    ETyInst inner _ ->
+      evalRuntimeTermWithStack context stack deferredValues env inner
+    ERoll _ body ->
+      evalRuntimeTermWithStack context stack deferredValues env body
+    EUnroll body -> do
+      value <- evalRuntimeTermWithStack context stack deferredValues env body
+      case value of
+        RuntimeData {} -> Right (RuntimeUnrolled value)
+        RuntimeUnit -> Right (RuntimeUnrolled value)
+        _ -> Right value
 
-lookupRuntimeValue ::
+lookupRuntimeResolvedValue ::
   RuntimeContext ->
   RuntimeLookupStack ->
   RuntimeDeferredValues ->
   RuntimeEnv ->
-  String ->
+  ResolvedVar ->
   Either ProgramError RuntimeValue
-lookupRuntimeValue context stack deferredValues env name =
-  case Map.lookup name env of
+lookupRuntimeResolvedValue context stack deferredValues env resolved =
+  case lookupRuntimeEnvResolved resolved env of
     Just value -> Right value
     Nothing ->
-      case runtimePrimitive name of
+      case runtimePrimitiveResolved resolved of
         Just prim -> Right (RuntimePrimitive prim [])
         Nothing
-          | name == preludeStringFromListRuntimeName -> Right (RuntimePrimitive RuntimePreludeStringFromList [])
+          | resolvedVarMatchesPreludeStringFromList context resolved -> Right (RuntimePrimitive RuntimePreludeStringFromList [])
         Nothing
-          | Just deferred <- Map.lookup name deferredValues ->
+          | Just deferred <- lookupRuntimeDeferredResolved resolved deferredValues ->
               lookupRuntimeDeferredValue context stack deferredValues env deferred
-          | Just ctor <- Map.lookup name (runtimeConstructors context) ->
+          | Just ctor <- lookupRuntimeConstructorResolved context resolved ->
               runtimeConstructorValue context (RuntimeConstructorSpec ctor Nothing) []
-          | name `elem` stack -> Left (recursiveRuntimeBindingError name stack)
-          | Just binding <- Map.lookup name (runtimeBindings context) ->
-              evalRuntimeBinding context (name : stack) binding
+          | Just binding <- lookupRuntimeBindingResolved context resolved ->
+              evalRuntimeBindingByIdentity context stack binding
           | otherwise -> Left (ProgramUnknownValue name)
+  where
+    name = resolvedVarReferenceName resolved
+
+lookupRuntimeEnvResolved :: ResolvedVar -> RuntimeEnv -> Maybe RuntimeValue
+lookupRuntimeEnvResolved resolved env =
+  Map.lookup (runtimeVarKey resolved) env
+
+lookupRuntimeDeferredResolved :: ResolvedVar -> RuntimeDeferredValues -> Maybe RuntimeDeferredValue
+lookupRuntimeDeferredResolved resolved deferredValues =
+  case resolvedVarDetails resolved of
+    DeferredId ref -> Map.lookup ref deferredValues
+    _ -> Nothing
+
+insertRuntimeEnv :: ResolvedVar -> RuntimeValue -> RuntimeEnv -> RuntimeEnv
+insertRuntimeEnv resolved value =
+  Map.insert (runtimeVarKey resolved) value
+
+runtimeVarKey :: ResolvedVar -> RuntimeVarKey
+runtimeVarKey resolved =
+  case resolvedVarDetails resolved of
+    LocalId ref -> RuntimeLocalKey ref
+    EvidenceId ref -> RuntimeLocalKey ref
+    EnvId ref -> RuntimeEnvKey ref
+    TopLevelId identity -> RuntimeTopLevelKey identity
+    ConstructorId ref -> RuntimeConstructorKey (constructorRefSymbol ref)
+    MethodId identity -> RuntimeMethodKey identity
+    PrimitiveId ref -> RuntimePrimitiveKey ref
+    DeferredId ref -> RuntimeDeferredKey ref
+
+lookupRuntimeConstructorResolved :: RuntimeContext -> ResolvedVar -> Maybe ConstructorInfo
+lookupRuntimeConstructorResolved context resolved =
+  case resolvedVarConstructorRef resolved of
+    Just ref -> Map.lookup (constructorRefSymbol ref) (runtimeConstructorsByIdentity context)
+    Nothing -> Nothing
+
+lookupRuntimeBindingResolved :: RuntimeContext -> ResolvedVar -> Maybe CheckedBinding
+lookupRuntimeBindingResolved context resolved =
+  resolvedVarTopLevelSymbol resolved >>= (`Map.lookup` runtimeBindingsByIdentity context)
+
+resolvedVarTopLevelSymbol :: ResolvedVar -> Maybe SymbolIdentity
+resolvedVarTopLevelSymbol resolved =
+  case resolvedVarDetails resolved of
+    TopLevelId symbol -> Just symbol
+    MethodId symbol -> Just symbol
+    _ -> Nothing
+
+evalRuntimeBindingByIdentity :: RuntimeContext -> RuntimeLookupStack -> CheckedBinding -> Either ProgramError RuntimeValue
+evalRuntimeBindingByIdentity context stack binding
+  | any ((== runtimeLookupFrameKey frame) . runtimeLookupFrameKey) stack =
+      Left (recursiveRuntimeBindingError frame stack)
+  | otherwise = evalRuntimeBinding context (frame : stack) binding
+  where
+    frame =
+      RuntimeLookupFrame
+        { runtimeLookupFrameKey = runtimeVarKey (checkedBindingResolvedVar binding),
+          runtimeLookupFrameName = checkedBindingRuntimeName binding
+        }
+
+checkedBindingRuntimeName :: CheckedBinding -> String
+checkedBindingRuntimeName =
+  resolvedVarRuntimeName . checkedBindingResolvedVar
 
 lookupRuntimeDeferredValue ::
   RuntimeContext ->
@@ -529,84 +754,120 @@ lookupRuntimeDeferredValue context stack deferredValues env deferred =
     RuntimeDeferredMethod deferredMethod ->
       resolveRuntimeMethod context stack deferredValues env deferredMethod []
 
-recursiveRuntimeBindingError :: String -> RuntimeLookupStack -> ProgramError
-recursiveRuntimeBindingError name stack =
+recursiveRuntimeBindingError :: RuntimeLookupFrame -> RuntimeLookupStack -> ProgramError
+recursiveRuntimeBindingError frame stack =
   ProgramPipelineError
     ( "run-program IO runtime encountered recursive top-level binding lookup: "
         ++ intercalate " -> " cyclePath
     )
   where
-    cyclePath = dropWhile (/= name) (reverse stack) ++ [name]
+    cycleFrames =
+      dropWhile
+        ((/= runtimeLookupFrameKey frame) . runtimeLookupFrameKey)
+        (reverse stack)
+        ++ [frame]
+    cyclePath = map runtimeLookupFrameName cycleFrames
 
-runtimePrimitive :: String -> Maybe RuntimePrimitive
-runtimePrimitive name =
-  case name of
-    "__io_pure" -> Just RuntimeIOPure
-    "__io_bind" -> Just RuntimeIOBind
-    "__io_map" -> Just RuntimeIOMap
-    "__io_ap" -> Just RuntimeIOAp
-    "__io_putStrLn" -> Just RuntimeIOPutStrLn
-    "__io_getLine" -> Just RuntimeIOGetLine
-    "__io_putStr" -> Just RuntimeIOPutStr
-    "__io_readFile" -> Just RuntimeIOReadFile
-    "__io_writeFile" -> Just RuntimeIOWriteFile
-    "__io_appendFile" -> Just RuntimeIOAppendFile
-    "__io_exitWith" -> Just RuntimeIOExitWith
-    "__io_newIORef" -> Just RuntimeIONewIORef
-    "__io_readIORef" -> Just RuntimeIOReadIORef
-    "__io_writeIORef" -> Just RuntimeIOWriteIORef
-    "__io_getArgs" -> Just RuntimeIOGetArgs
-    "__mlfp_and" -> Just RuntimeAnd
-    name'
-      | name' == PrimitiveInventory.stringLengthPrimitiveName -> Just RuntimeStringLength
-      | name' == PrimitiveInventory.stringIsEmptyPrimitiveName -> Just RuntimeStringIsEmpty
-      | name' == PrimitiveInventory.stringContainsCharPrimitiveName -> Just RuntimeStringContainsChar
-      | name' == PrimitiveInventory.stringContainsPrimitiveName -> Just RuntimeStringContains
-      | name' == PrimitiveInventory.stringEqualsPrimitiveName -> Just RuntimeStringEquals
-      | name' == PrimitiveInventory.stringStartsWithPrimitiveName -> Just RuntimeStringStartsWith
-      | name' == PrimitiveInventory.stringEndsWithPrimitiveName -> Just RuntimeStringEndsWith
-      | name' == PrimitiveInventory.stringAppendPrimitiveName -> Just RuntimeStringAppend
-      | name' == PrimitiveInventory.stringReplaceCharPrimitiveName -> Just RuntimeStringReplaceChar
-      | name' == PrimitiveInventory.stringReplacePrimitiveName -> Just RuntimeStringReplace
-      | name' == PrimitiveInventory.stringIndexOfCharPrimitiveName -> Just RuntimeStringIndexOfChar
-      | name' == PrimitiveInventory.stringIndexOfPrimitiveName -> Just RuntimeStringIndexOf
-      | name' == PrimitiveInventory.stringSplitPrimitiveName -> Just RuntimeStringSplit
-      | name' == PrimitiveInventory.stringJoinPrimitiveName -> Just RuntimeStringJoin
-      | name' == PrimitiveInventory.stringSplitCharPrimitiveName -> Just RuntimeStringSplitChar
-      | name' == PrimitiveInventory.stringComparePrimitiveName -> Just RuntimeStringCompare
-      | name' == PrimitiveInventory.stringFromCharPrimitiveName -> Just RuntimeStringFromChar
-      | name' == PrimitiveInventory.stringFromIntPrimitiveName -> Just RuntimeStringFromInt
-      | name' == PrimitiveInventory.stringFromBoolPrimitiveName -> Just RuntimeStringFromBool
-      | name' == PrimitiveInventory.stringFromNatPrimitiveName -> Just RuntimeStringFromNat
-      | name' == PrimitiveInventory.stringFromListPrimitiveName -> Just RuntimePreludeStringFromList
-      | name' == PrimitiveInventory.stringToListPrimitiveName -> Just RuntimeStringToList
-      | name' == PrimitiveInventory.stringDropPrimitiveName -> Just RuntimeStringDrop
-      | name' == PrimitiveInventory.stringTakePrimitiveName -> Just RuntimeStringTake
-      | name' == PrimitiveInventory.stringSlicePrimitiveName -> Just RuntimeStringSlice
-      | name' == PrimitiveInventory.stringCharAtPrimitiveName -> Just RuntimeStringCharAt
-      | name' == PrimitiveInventory.stringCharAtOptionPrimitiveName -> Just RuntimeStringCharAtOption
-      | name' == PrimitiveInventory.charIsDigitPrimitiveName -> Just RuntimeCharIsDigit
-      | name' == PrimitiveInventory.charIsAsciiLowerPrimitiveName -> Just RuntimeCharIsAsciiLower
-      | name' == PrimitiveInventory.charIsAsciiUpperPrimitiveName -> Just RuntimeCharIsAsciiUpper
-      | name' == PrimitiveInventory.charIsAsciiAlphaPrimitiveName -> Just RuntimeCharIsAsciiAlpha
-      | name' == PrimitiveInventory.charIsAsciiAlphaNumPrimitiveName -> Just RuntimeCharIsAsciiAlphaNum
-      | name' == PrimitiveInventory.charIsAsciiIdentifierStartPrimitiveName -> Just RuntimeCharIsAsciiIdentifierStart
-      | name' == PrimitiveInventory.charIsAsciiIdentifierContinuePrimitiveName -> Just RuntimeCharIsAsciiIdentifierContinue
-      | name' == PrimitiveInventory.charIsAsciiWhitespacePrimitiveName -> Just RuntimeCharIsAsciiWhitespace
-      | name' == PrimitiveInventory.charIsAsciiPunctuationPrimitiveName -> Just RuntimeCharIsAsciiPunctuation
-      | name' == PrimitiveInventory.charIsAsciiPrintablePrimitiveName -> Just RuntimeCharIsAsciiPrintable
-      | name' == PrimitiveInventory.charIsAsciiHexDigitPrimitiveName -> Just RuntimeCharIsAsciiHexDigit
-      | name' == PrimitiveInventory.charIsAsciiLineBreakPrimitiveName -> Just RuntimeCharIsAsciiLineBreak
-      | name' == PrimitiveInventory.charIsAsciiControlPrimitiveName -> Just RuntimeCharIsAsciiControl
-      | name' == PrimitiveInventory.charToAsciiLowerPrimitiveName -> Just RuntimeCharToAsciiLower
-      | name' == PrimitiveInventory.charToAsciiUpperPrimitiveName -> Just RuntimeCharToAsciiUpper
-      | name' == PrimitiveInventory.stringToAsciiLowerPrimitiveName -> Just RuntimeStringToAsciiLower
-      | name' == PrimitiveInventory.stringToAsciiUpperPrimitiveName -> Just RuntimeStringToAsciiUpper
-    _ -> Nothing
+runtimePrimitiveEntries :: [(String, RuntimePrimitive)]
+runtimePrimitiveEntries =
+  [ ("__io_pure", RuntimeIOPure),
+    ("__io_bind", RuntimeIOBind),
+    ("__io_map", RuntimeIOMap),
+    ("__io_ap", RuntimeIOAp),
+    ("__io_putStrLn", RuntimeIOPutStrLn),
+    ("__io_getLine", RuntimeIOGetLine),
+    ("__io_putStr", RuntimeIOPutStr),
+    ("__io_readFile", RuntimeIOReadFile),
+    ("__io_writeFile", RuntimeIOWriteFile),
+    ("__io_appendFile", RuntimeIOAppendFile),
+    ("__io_exitWith", RuntimeIOExitWith),
+    ("__io_newIORef", RuntimeIONewIORef),
+    ("__io_readIORef", RuntimeIOReadIORef),
+    ("__io_writeIORef", RuntimeIOWriteIORef),
+    ("__io_getArgs", RuntimeIOGetArgs),
+    ("__mlfp_and", RuntimeAnd),
+    (PrimitiveInventory.stringLengthPrimitiveName, RuntimeStringLength),
+    (PrimitiveInventory.stringIsEmptyPrimitiveName, RuntimeStringIsEmpty),
+    (PrimitiveInventory.stringContainsCharPrimitiveName, RuntimeStringContainsChar),
+    (PrimitiveInventory.stringContainsPrimitiveName, RuntimeStringContains),
+    (PrimitiveInventory.stringEqualsPrimitiveName, RuntimeStringEquals),
+    (PrimitiveInventory.stringStartsWithPrimitiveName, RuntimeStringStartsWith),
+    (PrimitiveInventory.stringEndsWithPrimitiveName, RuntimeStringEndsWith),
+    (PrimitiveInventory.stringAppendPrimitiveName, RuntimeStringAppend),
+    (PrimitiveInventory.stringReplaceCharPrimitiveName, RuntimeStringReplaceChar),
+    (PrimitiveInventory.stringReplacePrimitiveName, RuntimeStringReplace),
+    (PrimitiveInventory.stringIndexOfCharPrimitiveName, RuntimeStringIndexOfChar),
+    (PrimitiveInventory.stringIndexOfPrimitiveName, RuntimeStringIndexOf),
+    (PrimitiveInventory.stringSplitPrimitiveName, RuntimeStringSplit),
+    (PrimitiveInventory.stringJoinPrimitiveName, RuntimeStringJoin),
+    (PrimitiveInventory.stringSplitCharPrimitiveName, RuntimeStringSplitChar),
+    (PrimitiveInventory.stringComparePrimitiveName, RuntimeStringCompare),
+    (PrimitiveInventory.stringFromCharPrimitiveName, RuntimeStringFromChar),
+    (PrimitiveInventory.stringFromIntPrimitiveName, RuntimeStringFromInt),
+    (PrimitiveInventory.stringFromBoolPrimitiveName, RuntimeStringFromBool),
+    (PrimitiveInventory.stringFromNatPrimitiveName, RuntimeStringFromNat),
+    (PrimitiveInventory.stringFromListPrimitiveName, RuntimePreludeStringFromList),
+    (PrimitiveInventory.stringToListPrimitiveName, RuntimeStringToList),
+    (PrimitiveInventory.stringDropPrimitiveName, RuntimeStringDrop),
+    (PrimitiveInventory.stringTakePrimitiveName, RuntimeStringTake),
+    (PrimitiveInventory.stringSlicePrimitiveName, RuntimeStringSlice),
+    (PrimitiveInventory.stringCharAtPrimitiveName, RuntimeStringCharAt),
+    (PrimitiveInventory.stringCharAtOptionPrimitiveName, RuntimeStringCharAtOption),
+    (PrimitiveInventory.charIsDigitPrimitiveName, RuntimeCharIsDigit),
+    (PrimitiveInventory.charIsAsciiLowerPrimitiveName, RuntimeCharIsAsciiLower),
+    (PrimitiveInventory.charIsAsciiUpperPrimitiveName, RuntimeCharIsAsciiUpper),
+    (PrimitiveInventory.charIsAsciiAlphaPrimitiveName, RuntimeCharIsAsciiAlpha),
+    (PrimitiveInventory.charIsAsciiAlphaNumPrimitiveName, RuntimeCharIsAsciiAlphaNum),
+    (PrimitiveInventory.charIsAsciiIdentifierStartPrimitiveName, RuntimeCharIsAsciiIdentifierStart),
+    (PrimitiveInventory.charIsAsciiIdentifierContinuePrimitiveName, RuntimeCharIsAsciiIdentifierContinue),
+    (PrimitiveInventory.charIsAsciiWhitespacePrimitiveName, RuntimeCharIsAsciiWhitespace),
+    (PrimitiveInventory.charIsAsciiPunctuationPrimitiveName, RuntimeCharIsAsciiPunctuation),
+    (PrimitiveInventory.charIsAsciiPrintablePrimitiveName, RuntimeCharIsAsciiPrintable),
+    (PrimitiveInventory.charIsAsciiHexDigitPrimitiveName, RuntimeCharIsAsciiHexDigit),
+    (PrimitiveInventory.charIsAsciiLineBreakPrimitiveName, RuntimeCharIsAsciiLineBreak),
+    (PrimitiveInventory.charIsAsciiControlPrimitiveName, RuntimeCharIsAsciiControl),
+    (PrimitiveInventory.charToAsciiLowerPrimitiveName, RuntimeCharToAsciiLower),
+    (PrimitiveInventory.charToAsciiUpperPrimitiveName, RuntimeCharToAsciiUpper),
+    (PrimitiveInventory.stringToAsciiLowerPrimitiveName, RuntimeStringToAsciiLower),
+    (PrimitiveInventory.stringToAsciiUpperPrimitiveName, RuntimeStringToAsciiUpper)
+  ]
+
+runtimePrimitiveResolved :: ResolvedVar -> Maybe RuntimePrimitive
+runtimePrimitiveResolved resolved =
+  runtimePrimitiveByIdentity =<< resolvedVarPrimitiveSymbol resolved
+
+resolvedVarPrimitiveSymbol :: ResolvedVar -> Maybe SymbolIdentity
+resolvedVarPrimitiveSymbol resolved =
+  case resolvedVarDetails resolved of
+    PrimitiveId PrimitiveRef {primitiveRefSymbol = symbol} ->
+      Just symbol
+    TopLevelId symbol
+      | Map.member symbol runtimePrimitivesByIdentity ->
+          Just symbol
+    _ ->
+      Nothing
+
+runtimePrimitiveByIdentity :: SymbolIdentity -> Maybe RuntimePrimitive
+runtimePrimitiveByIdentity symbol =
+  Map.lookup symbol runtimePrimitivesByIdentity
+
+runtimePrimitivesByIdentity :: Map.Map SymbolIdentity RuntimePrimitive
+runtimePrimitivesByIdentity =
+  Map.fromList
+    [ (Builtins.builtinValueIdentity name, primitive)
+    | (name, primitive) <- runtimePrimitiveEntries
+    ]
+
+runtimePrimitiveNamesByIdentity :: Map.Map SymbolIdentity String
+runtimePrimitiveNamesByIdentity =
+  Map.fromList
+    [ (Builtins.builtinValueIdentity name, name)
+    | name <- Map.keys PrimitiveInventory.primitiveValueSpecs
+    ]
 
 runtimeConstructorValue :: RuntimeContext -> RuntimeConstructorSpec -> [RuntimeValue] -> Either ProgramError RuntimeValue
 runtimeConstructorValue context spec args
-  | isPreludeUnitConstructor ctor && null args = Right RuntimeUnit
+  | isPreludeUnitConstructor context ctor && null args = Right RuntimeUnit
   | length args == length (ctorArgs ctor) = do
       resultTy <- runtimeConstructorResultType context spec args
       Right (RuntimeData ctor resultTy args)
@@ -618,13 +879,13 @@ runtimeConstructorValue context spec args
 
 runtimeConstructorResultType :: RuntimeContext -> RuntimeConstructorSpec -> [RuntimeValue] -> Either ProgramError SrcType
 runtimeConstructorResultType context spec args =
-  Right (Map.foldrWithKey substituteTypeVar resultTy subst)
+  Right (applyRuntimeConstructorSubst subst resultTy)
   where
     scope = runtimeElaborateScope context
     ctor = runtimeConstructorInfo spec
-    startSubst = maybe Map.empty deferredConstructorInitialSubst (runtimeConstructorDeferred spec)
+    (substBinders, startSubst) = runtimeConstructorSubstSeed spec
     resultTy = runtimeConstructorOccurrenceResultType spec
-    resultTyFromDeferred = Map.foldrWithKey substituteTypeVar resultTy startSubst
+    resultTyFromDeferred = applyRuntimeConstructorSubst startSubst resultTy
     subst
       | Set.null (freeTypeVarsRuntimeSrcType resultTyFromDeferred) = startSubst
       | otherwise = foldl refineFromRuntimeArg startSubst (zip (ctorArgs ctor) args)
@@ -633,9 +894,58 @@ runtimeConstructorResultType context spec args =
       case runtimeValueTypeView context arg of
         Left _ -> acc
         Right actualView ->
-          case matchTypesInScope scope acc templateTy (typeViewDisplay actualView) of
+          case matchRuntimeTypeBinderSubstInScope scope substBinders acc templateTy (typeViewDisplay actualView) of
             Just acc' -> acc'
             Nothing -> acc
+
+runtimeConstructorSubstSeed :: RuntimeConstructorSpec -> ([(String, Maybe TypeBinderIdentity)], TypeBinderSubst)
+runtimeConstructorSubstSeed spec =
+  case runtimeConstructorDeferred spec of
+    Just deferred ->
+      (deferredConstructorInstBinders deferred, deferredConstructorInitialSubst deferred)
+    Nothing ->
+      (runtimeConstructorBinders ctor, emptyTypeBinderSubst)
+  where
+    ctor = runtimeConstructorInfo spec
+
+runtimeConstructorBinders :: ConstructorInfo -> [(String, Maybe TypeBinderIdentity)]
+runtimeConstructorBinders ctor =
+  explicitBinders ++ freeBinders
+  where
+    explicitBinders =
+      zip (map fst (ctorForalls ctor)) (ctorForallBinderIdentities ctor ++ repeat Nothing)
+    explicitNames = Set.fromList (map fst explicitBinders)
+    freeBinders =
+      [ (name, Nothing)
+      | name <- Set.toList (freeTypeVarsRuntimeSrcType (ctorType ctor)),
+        name `Set.notMember` explicitNames
+      ]
+
+matchRuntimeTypeBinderSubstInScope ::
+  ElaborateScope ->
+  [(String, Maybe TypeBinderIdentity)] ->
+  TypeBinderSubst ->
+  SrcType ->
+  SrcType ->
+  Maybe TypeBinderSubst
+matchRuntimeTypeBinderSubstInScope scope binders subst templateTy actualTy =
+  typeBinderSubstFromTypeViewSubst binders
+    <$> matchTypeViewsAgainstIdentity
+      scope
+      (typeBinderSubstToTypeViewSubstWith (sourceTypeViewInScope scope) subst)
+      (NE.singleton (typeBinderTemplateView scope binders templateTy))
+      (NE.singleton (sourceTypeViewInScope scope actualTy))
+
+typeBinderTemplateView :: ElaborateScope -> [(String, Maybe TypeBinderIdentity)] -> SrcType -> TypeView
+typeBinderTemplateView scope binders ty =
+  (sourceTypeViewInScope scope ty)
+    { typeViewBinderIdentities =
+        Map.fromList [(name, identity) | (name, Just identity) <- binders]
+    }
+
+applyRuntimeConstructorSubst :: TypeBinderSubst -> SrcType -> SrcType
+applyRuntimeConstructorSubst subst ty =
+  Map.foldrWithKey substituteTypeVar ty (typeBinderSubstToNameMap subst)
 
 runtimeConstructorOccurrenceResultType :: RuntimeConstructorSpec -> SrcType
 runtimeConstructorOccurrenceResultType spec =
@@ -657,8 +967,13 @@ dropSourceArrows count ty =
     _ -> ty
 
 freeTypeVarsRuntimeSrcType :: SrcType -> Set.Set String
-freeTypeVarsRuntimeSrcType = go Set.empty
+freeTypeVarsRuntimeSrcType =
+  freeTypeVarsRuntimeSrcTy
+
+freeTypeVarsRuntimeSrcTy :: SrcTy n v -> Set.Set String
+freeTypeVarsRuntimeSrcTy = go Set.empty
   where
+    go :: Set.Set String -> SrcTy n0 v0 -> Set.Set String
     go bound ty =
       case ty of
         STVar name
@@ -681,25 +996,21 @@ freeTypeVarsRuntimeSrcType = go Set.empty
         STMu name body -> go (Set.insert name bound) body
         STBottom -> Set.empty
 
-isPreludeUnitConstructor :: ConstructorInfo -> Bool
-isPreludeUnitConstructor ctor =
-  null (ctorArgs ctor)
-    && isPreludeUnitTypeIdentity (ctorOwningTypeIdentity ctor)
-    && symbolNamespace (ctorInfoSymbol ctor) == SymbolConstructor
-    && symbolDefiningModule (ctorInfoSymbol ctor) == "Prelude"
-    && symbolDefiningName (ctorInfoSymbol ctor) == "Unit"
-
-isPreludeUnitTypeIdentity :: SymbolIdentity -> Bool
-isPreludeUnitTypeIdentity identity =
-  symbolNamespace identity == SymbolType
-    && symbolDefiningModule identity == "Prelude"
-    && symbolDefiningName identity == "Unit"
+isPreludeUnitConstructor :: RuntimeContext -> ConstructorInfo -> Bool
+isPreludeUnitConstructor context ctor =
+  case lookupPreludeConstructor context PreludeUnitUnit of
+    Just unitCtor -> sameRuntimeConstructor ctor unitCtor
+    Nothing -> False
 
 applyRuntimeValue :: RuntimeContext -> RuntimeValue -> RuntimeValue -> Either ProgramError RuntimeValue
 applyRuntimeValue context funValue argValue =
   case funValue of
-    RuntimeClosure name body closureEnv closureStack closureDeferredValues ->
-      evalRuntimeExprWithStack context closureStack closureDeferredValues (Map.insert name argValue closureEnv) body
+    RuntimeClosure resolved body closureEnv closureStack closureDeferredValues ->
+      evalRuntimeTermWithStack context closureStack closureDeferredValues (insertRuntimeEnv resolved argValue closureEnv) body
+    RuntimeUnrolled value ->
+      applyRuntimeUnrolledData context value [argValue]
+    RuntimeDataEliminator ctor fields handlers ->
+      applyRuntimeDataEliminator context ctor fields (handlers ++ [argValue])
     RuntimePrimitive prim args ->
       applyRuntimePrimitive context prim (args ++ [argValue])
     RuntimeConstructor spec args
@@ -710,6 +1021,28 @@ applyRuntimeValue context funValue argValue =
     RuntimeMethod stack deferredValues env deferred args ->
       resolveRuntimeMethod context stack deferredValues env deferred (args ++ [argValue])
     _ -> Left (ProgramPipelineError "run-program IO interpreter expected a function")
+
+applyRuntimeUnrolledData :: RuntimeContext -> RuntimeValue -> [RuntimeValue] -> Either ProgramError RuntimeValue
+applyRuntimeUnrolledData context value handlers =
+  case value of
+    RuntimeData ctor _ fields ->
+      applyRuntimeDataEliminator context ctor fields handlers
+    RuntimeUnit ->
+      case lookupPreludeUnitConstructor context of
+        Just ctor -> applyRuntimeDataEliminator context ctor [] handlers
+        Nothing -> Left (ProgramPipelineError "run-program could not recover Unit constructor metadata")
+    _ -> Left (ProgramPipelineError "run-program expected an unrolled data value")
+
+applyRuntimeDataEliminator :: RuntimeContext -> ConstructorInfo -> [RuntimeValue] -> [RuntimeValue] -> Either ProgramError RuntimeValue
+applyRuntimeDataEliminator context ctor fields handlers
+  | length handlers < expectedHandlers =
+      Right (RuntimeDataEliminator ctor fields handlers)
+  | otherwise =
+      case drop (ctorIndex ctor) handlers of
+        handler : _ -> foldM (applyRuntimeValue context) handler fields
+        [] -> Left (ProgramPipelineError ("run-program constructor handler order missing `" ++ ctorName ctor ++ "`"))
+  where
+    expectedHandlers = length (ctorOwnerConstructors ctor)
 
 applyRuntimeCase :: RuntimeContext -> DeferredCaseCall -> [RuntimeValue] -> Either ProgramError RuntimeValue
 applyRuntimeCase context deferred args
@@ -726,19 +1059,19 @@ evaluateRuntimeCase context deferred args =
   case args of
     scrutinee : handlers
       | length args == deferredCaseExpectedArgCount deferred -> do
-          (ctor, fields) <- runtimeCaseScrutinee deferred scrutinee
+          (ctor, fields) <- runtimeCaseScrutinee context deferred scrutinee
           handler <- runtimeCaseHandler deferred ctor handlers
           foldM (applyRuntimeValue context) handler fields
     _ ->
       Left (ProgramPipelineError "run-program deferred case received malformed arguments")
 
-runtimeCaseScrutinee :: DeferredCaseCall -> RuntimeValue -> Either ProgramError (ConstructorInfo, [RuntimeValue])
-runtimeCaseScrutinee deferred value =
+runtimeCaseScrutinee :: RuntimeContext -> DeferredCaseCall -> RuntimeValue -> Either ProgramError (ConstructorInfo, [RuntimeValue])
+runtimeCaseScrutinee context deferred value =
   case value of
     RuntimeData ctor _ fields
       | constructorBelongsToCase deferred ctor -> Right (ctor, fields)
     RuntimeUnit ->
-      case find isPreludeUnitConstructor (dataConstructors (deferredCaseDataInfo deferred)) of
+      case find (isPreludeUnitConstructor context) (dataConstructors (deferredCaseDataInfo deferred)) of
         Just ctor -> Right (ctor, [])
         Nothing -> Left (ProgramPipelineError "run-program deferred case expected a data constructor scrutinee")
     _ -> Left (ProgramPipelineError "run-program deferred case expected a data constructor scrutinee")
@@ -797,31 +1130,79 @@ resolveRuntimeMethodReady context stack deferredValues env deferred args =
         case inferRuntimeMethodClassArgument context (deferredMethodInfo deferred) argViews (deferredMethodExpectedResult deferred) of
           Just view -> Right view
           Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
-      (instanceInfo, instanceSubst) <- resolveMethodInstanceInfoByTypeView (runtimeElaborateScope context) (deferredMethodInfo deferred) classArgView
-      methodValueInfo <-
-        case Map.lookup (deferredMethodName deferred) (instanceMethods instanceInfo) of
-          Just valueInfo@OrdinaryValue {} -> Right valueInfo
-          _ -> Left (ProgramUnknownMethod (deferredMethodName deferred))
-      methodSubst <-
-        case inferRuntimeMethodArgumentSubst context (deferredMethodInfo deferred) classArgView instanceSubst argViews of
-          Just subst -> Right subst
-          Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
-      let eagerConstraints =
-            filter
-              constraintGround
-              (map (applyConstraintInfoSubst methodSubst) (methodValueConstraints methodValueInfo))
-      evidenceArgs <-
-        resolveRuntimeConstraintEvidenceValues
-          context
-          stack
-          deferredValues
-          env
-          (deferredMethodLocalEvidence deferred)
-          Set.empty
-          eagerConstraints
-      runtimeName <- runtimeMethodValueName (deferredMethodName deferred) methodValueInfo
-      methodHead <- lookupRuntimeValue context stack deferredValues env runtimeName
-      foldM (applyRuntimeValue context) methodHead (evidenceArgs ++ args)
+      case lookupRuntimeMethodEvidence context deferred classArgView of
+        Just (evidence, evidenceSubst) ->
+          resolveRuntimeEvidenceMethod context stack deferredValues env deferred classArgView argViews args evidence
+            evidenceSubst
+        Nothing ->
+          resolveRuntimeInstanceMethod context stack deferredValues env deferred classArgView argViews args
+
+resolveRuntimeEvidenceMethod ::
+  RuntimeContext ->
+  RuntimeLookupStack ->
+  RuntimeDeferredValues ->
+  RuntimeEnv ->
+  DeferredMethodCall ->
+  TypeView ->
+  [TypeView] ->
+  [RuntimeValue] ->
+  DeferredMethodEvidence ->
+  TypeViewSubst ->
+  Either ProgramError RuntimeValue
+resolveRuntimeEvidenceMethod context stack deferredValues env deferred classArgView argViews args evidence evidenceSubst = do
+  methodSubst <-
+    case inferRuntimeMethodArgumentSubst context (deferredMethodInfo deferred) classArgView Map.empty argViews of
+      Just subst -> Right subst
+      Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
+  let methodSubst' = methodSubst `Map.union` evidenceSubst
+  evidenceArgs <-
+    resolveRuntimeConstraintEvidenceValues
+      context
+      stack
+      deferredValues
+      env
+      (deferredMethodLocalEvidence deferred)
+      Set.empty
+      (runtimeMethodLocalConstraints (deferredMethodInfo deferred) classArgView methodSubst')
+  methodHead <- lookupRuntimeEvidenceMethodValue context stack deferredValues env (deferredMethodEvidenceMethod evidence)
+  foldM (applyRuntimeValue context) methodHead (evidenceArgs ++ args)
+
+resolveRuntimeInstanceMethod ::
+  RuntimeContext ->
+  RuntimeLookupStack ->
+  RuntimeDeferredValues ->
+  RuntimeEnv ->
+  DeferredMethodCall ->
+  TypeView ->
+  [TypeView] ->
+  [RuntimeValue] ->
+  Either ProgramError RuntimeValue
+resolveRuntimeInstanceMethod context stack deferredValues env deferred classArgView argViews args = do
+  (instanceInfo, instanceSubst) <- resolveMethodInstanceInfoByTypeView (runtimeElaborateScope context) (deferredMethodInfo deferred) classArgView
+  methodValueInfo <-
+    case lookupInstanceMethod (deferredMethodInfo deferred) instanceInfo of
+      Just valueInfo@OrdinaryValue {} -> Right valueInfo
+      _ -> Left (ProgramUnknownMethod (deferredMethodName deferred))
+  methodSubst <-
+    case inferRuntimeMethodArgumentSubst context (deferredMethodInfo deferred) classArgView instanceSubst argViews of
+      Just subst -> Right subst
+      Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
+  let eagerConstraints =
+        filter
+          constraintGround
+          (map (applyConstraintInfoSubst methodSubst) (methodValueConstraints methodValueInfo))
+  evidenceArgs <-
+    resolveRuntimeConstraintEvidenceValues
+      context
+      stack
+      deferredValues
+      env
+      (deferredMethodLocalEvidence deferred)
+      Set.empty
+      eagerConstraints
+  methodResolved <- runtimeMethodValueResolved context (deferredMethodName deferred) methodValueInfo
+  methodHead <- lookupRuntimeResolvedValue context stack deferredValues env methodResolved
+  foldM (applyRuntimeValue context) methodHead (evidenceArgs ++ args)
 
 resolveRuntimeNullaryMethod ::
   RuntimeContext ->
@@ -839,9 +1220,9 @@ resolveRuntimeNullaryMethod context stack deferredValues env deferred = do
     case inferRuntimeNullaryMethodClassArgument context (deferredMethodInfo deferred) expectedView of
       Just view -> Right view
       Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
-  case lookupRuntimeNullaryEvidence context deferred classArgView of
-    Just evidence ->
-      resolveRuntimeNullaryEvidenceMethod context stack deferredValues env deferred classArgView expectedView evidence
+  case lookupRuntimeMethodEvidence context deferred classArgView of
+    Just (evidence, evidenceSubst) ->
+      resolveRuntimeNullaryEvidenceMethod context stack deferredValues env deferred classArgView expectedView evidence evidenceSubst
     Nothing ->
       resolveRuntimeNullaryInstanceMethod context stack deferredValues env deferred classArgView expectedView
 
@@ -854,12 +1235,14 @@ resolveRuntimeNullaryEvidenceMethod ::
   TypeView ->
   TypeView ->
   DeferredMethodEvidence ->
+  TypeViewSubst ->
   Either ProgramError RuntimeValue
-resolveRuntimeNullaryEvidenceMethod context stack deferredValues env deferred classArgView expectedView evidence = do
+resolveRuntimeNullaryEvidenceMethod context stack deferredValues env deferred classArgView expectedView evidence evidenceSubst = do
   methodSubst <-
     case inferRuntimeNullaryMethodSubst context (deferredMethodInfo deferred) classArgView Map.empty expectedView of
       Just subst -> Right subst
       Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
+  let methodSubst' = methodSubst `Map.union` evidenceSubst
   evidenceArgs <-
     resolveRuntimeConstraintEvidenceValues
       context
@@ -868,8 +1251,8 @@ resolveRuntimeNullaryEvidenceMethod context stack deferredValues env deferred cl
       env
       (deferredMethodLocalEvidence deferred)
       Set.empty
-      (runtimeNullaryMethodLocalConstraints (deferredMethodInfo deferred) classArgView methodSubst)
-  methodHead <- lookupRuntimeValue context stack deferredValues env (deferredMethodEvidenceRuntimeName evidence)
+      (runtimeMethodLocalConstraints (deferredMethodInfo deferred) classArgView methodSubst')
+  methodHead <- lookupRuntimeEvidenceMethodValue context stack deferredValues env (deferredMethodEvidenceMethod evidence)
   foldM (applyRuntimeValue context) methodHead evidenceArgs
 
 resolveRuntimeNullaryInstanceMethod ::
@@ -884,7 +1267,7 @@ resolveRuntimeNullaryInstanceMethod ::
 resolveRuntimeNullaryInstanceMethod context stack deferredValues env deferred classArgView expectedView = do
   (instanceInfo, instanceSubst) <- resolveMethodInstanceInfoByTypeView (runtimeElaborateScope context) (deferredMethodInfo deferred) classArgView
   methodValueInfo <-
-    case Map.lookup (deferredMethodName deferred) (instanceMethods instanceInfo) of
+    case lookupInstanceMethod (deferredMethodInfo deferred) instanceInfo of
       Just valueInfo@OrdinaryValue {} -> Right valueInfo
       _ -> Left (ProgramUnknownMethod (deferredMethodName deferred))
   methodSubst <-
@@ -904,44 +1287,54 @@ resolveRuntimeNullaryInstanceMethod context stack deferredValues env deferred cl
       (deferredMethodLocalEvidence deferred)
       Set.empty
       eagerConstraints
-  runtimeName <- runtimeMethodValueName (deferredMethodName deferred) methodValueInfo
-  methodHead <- lookupRuntimeValue context stack deferredValues env runtimeName
+  methodResolved <- runtimeMethodValueResolved context (deferredMethodName deferred) methodValueInfo
+  methodHead <- lookupRuntimeResolvedValue context stack deferredValues env methodResolved
   foldM (applyRuntimeValue context) methodHead evidenceArgs
 
-lookupRuntimeNullaryEvidence :: RuntimeContext -> DeferredMethodCall -> TypeView -> Maybe DeferredMethodEvidence
-lookupRuntimeNullaryEvidence context deferred classArgView =
-  case
-    lookupEvidenceMethodByClass
-      (runtimeElaborateScope context)
-      (methodInfoOwnerClassSymbolIdentity methodInfo)
-      (typeViewIdentity classArgView)
-      (methodName methodInfo)
-      `orElseRuntimeEvidenceMethod`
-      lookupRuntimeEvidenceMethod
-        (runtimeElaborateScope context)
-        (deferredMethodLocalEvidence deferred)
-        (methodInfoOwnerClassSymbolIdentity methodInfo)
-        (typeViewIdentity classArgView)
-        (methodName methodInfo)
-  of
-    Just (runtimeName, evidenceTy) ->
-      Just
-        DeferredMethodEvidence
-          { deferredMethodEvidenceClassArg = classArgView,
-            deferredMethodEvidenceClassArgs = classArgView NE.:| [],
-            deferredMethodEvidenceRuntimeName = runtimeName,
-            deferredMethodEvidenceType = evidenceTy
-          }
-    Nothing -> deferredMethodEvidence deferred
+lookupRuntimeMethodEvidence :: RuntimeContext -> DeferredMethodCall -> TypeView -> Maybe (DeferredMethodEvidence, TypeViewSubst)
+lookupRuntimeMethodEvidence context deferred classArgView =
+  case localMatches of
+    (methodEvidence, subst) : _ ->
+      Just (mkEvidence methodEvidence, subst)
+    [] ->
+      case globalEvidence of
+        Just methodEvidence -> Just (mkEvidence methodEvidence, Map.empty)
+        Nothing -> fallbackEvidence
   where
     methodInfo = deferredMethodInfo deferred
+    scope = runtimeElaborateScope context
+    targetViews = classArgView NE.:| []
+    mkEvidence methodEvidence =
+      DeferredMethodEvidence
+        { deferredMethodEvidenceClassArg = classArgView,
+          deferredMethodEvidenceClassArgs = targetViews,
+          deferredMethodEvidenceMethod = methodEvidence
+        }
+    globalEvidence =
+      lookupEvidenceMethodByClass
+        scope
+        (methodInfoOwnerClassSymbolIdentity methodInfo)
+        (typeViewIdentity classArgView)
+        (methodInfoSymbolIdentity methodInfo)
+    localMatches =
+      [ (methodEvidence, subst)
+      | evidence <- deferredMethodLocalEvidence deferred,
+        evidenceClassSymbol evidence == methodInfoOwnerClassSymbolIdentity methodInfo,
+        Just subst <- [matchTypeViewsAgainstIdentity scope Map.empty (evidenceTypeViews evidence) targetViews],
+        methodEvidence <- maybe [] (: []) (Map.lookup (methodInfoSymbolIdentity methodInfo) (evidenceMethodsByIdentity evidence))
+      ]
+    fallbackEvidence = do
+      evidence <- deferredMethodEvidence deferred
+      subst <- matchTypeViewsAgainstIdentity scope Map.empty (deferredMethodEvidenceClassArgs evidence) targetViews
+      pure (evidence {deferredMethodEvidenceClassArg = classArgView, deferredMethodEvidenceClassArgs = targetViews}, subst)
 
-runtimeNullaryMethodLocalConstraints :: MethodInfo -> TypeView -> Map.Map String TypeView -> [ConstraintInfo]
-runtimeNullaryMethodLocalConstraints methodInfo classArgView methodSubst =
+runtimeMethodLocalConstraints :: MethodInfo -> TypeView -> TypeViewSubst -> [ConstraintInfo]
+runtimeMethodLocalConstraints methodInfo classArgView methodSubst =
   let headVars = freeTypeVarsTypeView classArgView
+      classArgSubst = typeViewSubstFromParamBinders (methodParamBinders methodInfo) (NE.singleton classArgView)
       specializedForClass =
         map
-          (specializeRuntimeConstraintInfoType (methodParamName methodInfo) classArgView)
+          (applyConstraintInfoSubst classArgSubst)
           (methodConstraintInfos methodInfo)
       methodLocal =
         filter
@@ -949,31 +1342,14 @@ runtimeNullaryMethodLocalConstraints methodInfo classArgView methodSubst =
           specializedForClass
    in map (applyConstraintInfoSubst methodSubst) methodLocal
 
-specializeRuntimeConstraintInfoType :: String -> TypeView -> ConstraintInfo -> ConstraintInfo
-specializeRuntimeConstraintInfoType paramName headView constraint =
-  let views = fmap substituteView (constraintTypeViews constraint)
-   in constraint
-        { constraintTypeView = NE.head views,
-          constraintTypeViews = views
-        }
-  where
-    substituteView view =
-      TypeView
-        { typeViewDisplay =
-            substituteTypeVar
-              paramName
-              (typeViewDisplay headView)
-              (typeViewDisplay view),
-          typeViewIdentity =
-            substituteTypeVar
-              paramName
-              (typeViewIdentity headView)
-              (typeViewIdentity view)
-        }
-
-runtimeMethodValueName :: String -> ValueInfo -> Either ProgramError String
-runtimeMethodValueName _ OrdinaryValue {valueRuntimeName = name} = Right name
-runtimeMethodValueName methodName0 _ = Left (ProgramUnknownMethod methodName0)
+runtimeMethodValueResolved :: RuntimeContext -> String -> ValueInfo -> Either ProgramError ResolvedVar
+runtimeMethodValueResolved context _ valueInfo@OrdinaryValue {valueType = visibleTy} = do
+  resolvedTy <-
+    typeViewToElabType
+      (runtimeElaborateScope context)
+      (mkTypeView visibleTy (valueIdentityType valueInfo))
+  Right (resolvedVarFromValueInfo valueInfo resolvedTy)
+runtimeMethodValueResolved _ methodName0 _ = Left (ProgramUnknownMethod methodName0)
 
 methodValueConstraints :: ValueInfo -> [ConstraintInfo]
 methodValueConstraints OrdinaryValue {valueConstraintInfos = constraints} = constraints
@@ -989,7 +1365,7 @@ resolveRuntimeConstraintEvidenceValues ::
   RuntimeDeferredValues ->
   RuntimeEnv ->
   [EvidenceInfo] ->
-  Set.Set (SymbolIdentity, String) ->
+  Set.Set (SymbolIdentity, [SrcType]) ->
   [ConstraintInfo] ->
   Either ProgramError [RuntimeValue]
 resolveRuntimeConstraintEvidenceValues context stack deferredValues env localEvidence seen constraints =
@@ -1001,13 +1377,13 @@ resolveRuntimeConstraintEvidenceValue ::
   RuntimeDeferredValues ->
   RuntimeEnv ->
   [EvidenceInfo] ->
-  Set.Set (SymbolIdentity, String) ->
+  Set.Set (SymbolIdentity, [SrcType]) ->
   ConstraintInfo ->
   Either ProgramError [RuntimeValue]
 resolveRuntimeConstraintEvidenceValue context stack deferredValues env localEvidence seen constraint = do
   let key = constraintEvidenceKey constraint
   if key `Set.member` seen
-    then Left (noMatchingInstanceError constraint)
+    then Left (noMatchingInstanceError (runtimeElaborateScope context) constraint)
     else do
       mbLocalEvidence <- resolveRuntimeLocalConstraintEvidenceValues context stack deferredValues env localEvidence constraint
       case mbLocalEvidence of
@@ -1015,7 +1391,7 @@ resolveRuntimeConstraintEvidenceValue context stack deferredValues env localEvid
         Nothing -> do
           (instanceInfo, subst) <- resolveInstanceInfoByConstraint (runtimeElaborateScope context) constraint
           let seen' = Set.insert key seen
-              methodValues = [valueInfo | valueInfo@OrdinaryValue {} <- Map.elems (instanceMethods instanceInfo)]
+              methodValues = [valueInfo | valueInfo@OrdinaryValue {} <- Map.elems (instanceMethodsByIdentity instanceInfo)]
           if null methodValues
             then do
               _ <-
@@ -1036,16 +1412,15 @@ materializeRuntimeMethodEvidence ::
   RuntimeDeferredValues ->
   RuntimeEnv ->
   [EvidenceInfo] ->
-  Set.Set (SymbolIdentity, String) ->
-  Map.Map String TypeView ->
+  Set.Set (SymbolIdentity, [SrcType]) ->
+  TypeViewSubst ->
   ConstraintInfo ->
   ValueInfo ->
   Either ProgramError RuntimeValue
 materializeRuntimeMethodEvidence context stack deferredValues env localEvidence seen subst constraint valueInfo = do
-  let headVars = freeTypeVarsTypeViews (constraintTypeViews constraint)
-      eagerConstraints =
+  let eagerConstraints =
         filter
-          (constraintDeterminedByTypeVars headVars)
+          constraintGround
           (map (applyConstraintInfoSubst subst) (methodValueConstraints valueInfo))
   nestedEvidence <-
     resolveRuntimeConstraintEvidenceValues
@@ -1056,8 +1431,8 @@ materializeRuntimeMethodEvidence context stack deferredValues env localEvidence 
       localEvidence
       seen
       eagerConstraints
-  runtimeName <- runtimeMethodValueName (constraintDisplayClass constraint) valueInfo
-  methodHead <- lookupRuntimeValue context stack deferredValues env runtimeName
+  methodResolved <- runtimeMethodValueResolved context (constraintDisplayClass constraint) valueInfo
+  methodHead <- lookupRuntimeResolvedValue context stack deferredValues env methodResolved
   foldM (applyRuntimeValue context) methodHead nestedEvidence
 
 resolveRuntimeLocalConstraintEvidenceValues ::
@@ -1072,7 +1447,7 @@ resolveRuntimeLocalConstraintEvidenceValues context stack deferredValues env loc
   case classInfoForConstraint (runtimeElaborateScope context) constraint of
     Nothing -> Right Nothing
     Just classInfo
-      | Map.null (classMethods classInfo) ->
+      | Map.null (classMethodsByIdentity classInfo) ->
           Right $
             if zeroMethodConstraintCoveredByEvidenceInfo (runtimeElaborateScope context) constraint
               || zeroMethodConstraintCoveredByRuntimeEvidence (runtimeElaborateScope context) localEvidence constraint
@@ -1082,61 +1457,68 @@ resolveRuntimeLocalConstraintEvidenceValues context stack deferredValues env loc
           let localMethodEvidence =
                 mapM
                   ( \methodInfo -> do
-                      (runtimeName, _evidenceTy) <-
-                        lookupEvidenceMethodByClass
+                      methodEvidence <-
+                        lookupEvidenceMethodByClassTypes
                           (runtimeElaborateScope context)
                           (constraintClassSymbol constraint)
-                          (typeViewIdentity (constraintTypeView constraint))
-                          (methodName methodInfo)
+                          (typeViewsIdentity (constraintTypeViews constraint))
+                          (methodInfoSymbolIdentity methodInfo)
                           `orElseRuntimeEvidenceMethod`
                           lookupRuntimeEvidenceMethod
                             (runtimeElaborateScope context)
                             localEvidence
                             (constraintClassSymbol constraint)
-                            (typeViewIdentity (constraintTypeView constraint))
-                            (methodName methodInfo)
-                      pure runtimeName
+                            (constraintTypeViews constraint)
+                            (methodInfoSymbolIdentity methodInfo)
+                      pure methodEvidence
                   )
-                  (Map.elems (classMethods classInfo))
+                  (Map.elems (classMethodsByIdentity classInfo))
           case localMethodEvidence of
             Nothing -> Right Nothing
-            Just runtimeNames ->
-              Just <$> mapM (lookupRuntimeValue context stack deferredValues env) runtimeNames
+            Just methodEvidence ->
+              Just <$> mapM (lookupRuntimeEvidenceMethodValue context stack deferredValues env) methodEvidence
 
-lookupRuntimeEvidenceMethod :: ElaborateScope -> [EvidenceInfo] -> SymbolIdentity -> SrcType -> String -> Maybe (String, SrcType)
-lookupRuntimeEvidenceMethod scope evidenceInfos classIdentity headIdentityTy methodName0 =
+lookupRuntimeEvidenceMethod :: ElaborateScope -> [EvidenceInfo] -> SymbolIdentity -> NE.NonEmpty TypeView -> SymbolIdentity -> Maybe EvidenceMethod
+lookupRuntimeEvidenceMethod scope evidenceInfos classIdentity headViews methodIdentity =
   case
     [ methodEvidence
       | evidence <- evidenceInfos,
         evidenceClassSymbol evidence == classIdentity,
-        runtimeEvidenceTypeMatches scope (evidenceTypeIdentity evidence) headIdentityTy,
-        Just methodEvidence <- [Map.lookup methodName0 (evidenceMethods evidence)]
+        Just _ <- [matchTypeViewsAgainstIdentity scope Map.empty (evidenceTypeViews evidence) headViews],
+        methodEvidence <- maybe [] (: []) (Map.lookup methodIdentity (evidenceMethodsByIdentity evidence))
     ]
   of
     methodEvidence : _ -> Just methodEvidence
     [] -> Nothing
 
-runtimeEvidenceTypeMatches :: ElaborateScope -> SrcType -> SrcType -> Bool
-runtimeEvidenceTypeMatches scope left right =
-  matchTypesInScope scope Map.empty left right /= Nothing
-    || matchTypesInScope scope Map.empty right left /= Nothing
+lookupRuntimeEvidenceMethodValue ::
+  RuntimeContext ->
+  RuntimeLookupStack ->
+  RuntimeDeferredValues ->
+  RuntimeEnv ->
+  EvidenceMethod ->
+  Either ProgramError RuntimeValue
+lookupRuntimeEvidenceMethodValue context stack deferredValues env methodEvidence =
+  case evidenceMethodResolvedVar methodEvidence of
+    Just resolved ->
+      lookupRuntimeResolvedValue context stack deferredValues env resolved
+    Nothing ->
+      Left
+        ( ProgramPipelineError
+            ("run-program evidence method lacks resolved identity: " ++ evidenceMethodRuntimeName methodEvidence)
+        )
 
-runtimeEvidenceTypesMatch :: ElaborateScope -> NE.NonEmpty SrcType -> NE.NonEmpty SrcType -> Bool
-runtimeEvidenceTypesMatch scope left right =
-  length left == length right
-    && and (zipWith (runtimeEvidenceTypeMatches scope) (NE.toList left) (NE.toList right))
-
-orElseRuntimeEvidenceMethod :: Maybe (String, SrcType) -> Maybe (String, SrcType) -> Maybe (String, SrcType)
+orElseRuntimeEvidenceMethod :: Maybe EvidenceMethod -> Maybe EvidenceMethod -> Maybe EvidenceMethod
 orElseRuntimeEvidenceMethod (Just evidence) _ = Just evidence
 orElseRuntimeEvidenceMethod Nothing fallback = fallback
 
-constraintEvidenceKey :: ConstraintInfo -> (SymbolIdentity, String)
+constraintEvidenceKey :: ConstraintInfo -> (SymbolIdentity, [SrcType])
 constraintEvidenceKey constraint =
-  (constraintClassSymbol constraint, show (NE.toList (typeViewsIdentity (constraintTypeViews constraint))))
+  (constraintClassSymbol constraint, NE.toList (typeViewsIdentity (constraintTypeViews constraint)))
 
-noMatchingInstanceError :: ConstraintInfo -> ProgramError
-noMatchingInstanceError constraint =
-  case NE.toList (typeViewsDisplay (constraintTypeViews constraint)) of
+noMatchingInstanceError :: ElaborateScope -> ConstraintInfo -> ProgramError
+noMatchingInstanceError scope constraint =
+  case NE.toList (fmap (diagnosticTypeViewDisplay scope) (constraintTypeViews constraint)) of
     [ty] -> ProgramNoMatchingInstance (constraintDisplayClass constraint) ty
     tys -> ProgramNoMatchingInstanceHead (constraintDisplayClass constraint) tys
 
@@ -1145,7 +1527,9 @@ zeroMethodConstraintCoveredByRuntimeEvidence scope evidenceInfos constraint =
   any
     ( \evidence ->
         evidenceClassSymbol evidence == constraintClassSymbol constraint
-          && runtimeEvidenceTypesMatch scope (evidenceTypeIdentities evidence) (typeViewsIdentity (constraintTypeViews constraint))
+          && case matchTypeViewsAgainstIdentity scope Map.empty (evidenceTypeViews evidence) (constraintTypeViews constraint) of
+            Just _ -> True
+            Nothing -> False
     )
     evidenceInfos
 
@@ -1160,7 +1544,10 @@ runtimeValueTypeView context value =
     RuntimeLit (LBool _) -> Right (sourceTypeViewInScope scope (STBase "Bool"))
     RuntimeLit (LChar _) -> Right (sourceTypeViewInScope scope (STBase "Char"))
     RuntimeLit (LString _) -> Right (sourceTypeViewInScope scope (STBase "String"))
-    RuntimeUnit -> Right (sourceTypeViewInScope scope (STBase "Prelude.Unit"))
+    RuntimeUnit ->
+      case preludeUnitTypeView context of
+        Just view -> Right view
+        Nothing -> Left (ProgramPipelineError "run-program could not recover Unit type metadata")
     RuntimeData _ resultTy _ -> Right (sourceTypeViewInScope scope resultTy)
     _ -> Left (ProgramPipelineError "run-program IO runtime cannot infer deferred method argument type")
   where
@@ -1168,67 +1555,77 @@ runtimeValueTypeView context value =
 
 inferRuntimeMethodClassArgument :: RuntimeContext -> MethodInfo -> [TypeView] -> Maybe TypeView -> Maybe TypeView
 inferRuntimeMethodClassArgument context methodInfo argViews mbExpectedResult =
-  case inferClassArgument methodTy (methodParamName methodInfo) argDisplayTypes of
+    case inferClassArgument methodTy (methodParamIdentityName methodInfo) argIdentityTypes of
     Just classArgTy -> Just (sourceTypeViewInScope scope classArgTy)
-    Nothing -> inferRuntimeMethodClassArgumentFromExpected context methodInfo methodTy argDisplayTypes mbExpectedResult
+    Nothing -> inferRuntimeMethodClassArgumentFromExpected context methodInfo argViews mbExpectedResult
   where
     scope = runtimeElaborateScope context
-    methodTy = lowerTypeView scope (TypeView (methodType methodInfo) (methodTypeIdentity methodInfo))
-    argDisplayTypes = map typeViewDisplay argViews
+    methodTy = lowerType scope (methodTypeIdentity methodInfo)
+    argIdentityTypes = map typeViewIdentity argViews
 
-inferRuntimeMethodClassArgumentFromExpected :: RuntimeContext -> MethodInfo -> SrcType -> [SrcType] -> Maybe TypeView -> Maybe TypeView
-inferRuntimeMethodClassArgumentFromExpected _ _ _ _ Nothing = Nothing
-inferRuntimeMethodClassArgumentFromExpected context methodInfo methodTy argDisplayTypes (Just expectedView) = do
+inferRuntimeMethodClassArgumentFromExpected :: RuntimeContext -> MethodInfo -> [TypeView] -> Maybe TypeView -> Maybe TypeView
+inferRuntimeMethodClassArgumentFromExpected _ _ _ Nothing = Nothing
+inferRuntimeMethodClassArgumentFromExpected context methodInfo argViews (Just expectedView) = do
   let scope = runtimeElaborateScope context
-      (_, bodyTy) = splitForalls methodTy
-      (paramTys, resultTy) = splitArrows bodyTy
+      methodView = methodTypeView methodInfo
   substFromArgs <-
     foldM
-      (\acc (templateTy, actualTy) -> matchTypesInScope scope acc templateTy actualTy)
+      (\acc (templateView, actualView) -> matchTypeViewsAgainstIdentity scope acc (NE.singleton templateView) (NE.singleton actualView))
       Map.empty
-      (zip paramTys argDisplayTypes)
-  let resultTy' = Map.foldrWithKey substituteTypeVar resultTy substFromArgs
-  subst <- matchTypesInScope scope substFromArgs resultTy' (typeViewDisplay expectedView)
-  displayTy <- Map.lookup (methodParamName methodInfo) subst
-  pure (sourceTypeViewInScope scope displayTy)
+      (zip (methodParamViews methodView) argViews)
+  subst <- matchTypeViewsAgainstIdentity scope substFromArgs (NE.singleton (methodResultTypeView methodInfo)) (NE.singleton expectedView)
+  NE.head <$> lookupMethodParamViewSubst methodInfo subst
 
 inferRuntimeNullaryMethodClassArgument :: RuntimeContext -> MethodInfo -> TypeView -> Maybe TypeView
 inferRuntimeNullaryMethodClassArgument context methodInfo expectedView
   | methodFullArityFromInfo methodInfo /= 0 = Nothing
   | otherwise = do
       let scope = runtimeElaborateScope context
-          (_, bodyTy) = splitForalls (methodType methodInfo)
-          (_, resultTy) = splitArrows bodyTy
-      subst <- matchTypesInScope scope Map.empty resultTy (typeViewDisplay expectedView)
-      classArgTy <- Map.lookup (methodParamName methodInfo) subst
-      pure (sourceTypeViewInScope scope classArgTy)
+      subst <- matchTypeViewsAgainstIdentity scope Map.empty (NE.singleton (methodResultTypeView methodInfo)) (NE.singleton expectedView)
+      NE.head <$> lookupMethodParamViewSubst methodInfo subst
 
-inferRuntimeNullaryMethodSubst :: RuntimeContext -> MethodInfo -> TypeView -> Map.Map String TypeView -> TypeView -> Maybe (Map.Map String TypeView)
+inferRuntimeNullaryMethodSubst :: RuntimeContext -> MethodInfo -> TypeView -> TypeViewSubst -> TypeView -> Maybe TypeViewSubst
 inferRuntimeNullaryMethodSubst context methodInfo classArgView subst expectedView =
-  fmap (Map.map (sourceTypeViewInScope scope)) $
-    matchTypesInScope
-      scope
-      (fmap typeViewDisplay subst)
-      resultTy
-      (typeViewDisplay expectedView)
+  matchTypeViewsAgainstIdentity scope subst (NE.singleton (methodResultView specializedMethodView)) (NE.singleton expectedView)
   where
     scope = runtimeElaborateScope context
-    specializedMethodTy = specializeMethodType (methodType methodInfo) (methodParamName methodInfo) (typeViewDisplay classArgView)
-    (_, bodyTy) = splitForalls specializedMethodTy
-    (_, resultTy) = splitArrows bodyTy
+    specializedMethodView = specializeMethodTypeView methodInfo (NE.singleton classArgView)
 
-inferRuntimeMethodArgumentSubst :: RuntimeContext -> MethodInfo -> TypeView -> Map.Map String TypeView -> [TypeView] -> Maybe (Map.Map String TypeView)
+inferRuntimeMethodArgumentSubst :: RuntimeContext -> MethodInfo -> TypeView -> TypeViewSubst -> [TypeView] -> Maybe TypeViewSubst
 inferRuntimeMethodArgumentSubst context methodInfo classArgView subst argViews =
-  fmap (Map.map (sourceTypeViewInScope scope)) $
-    foldM
-      (\acc (templateTy, actualView) -> matchTypesInScope scope acc templateTy (typeViewDisplay actualView))
-      (fmap typeViewDisplay subst)
-      (zip paramTys argViews)
+  foldM
+    (\acc (templateView, actualView) -> matchTypeViewsAgainstIdentity scope acc (NE.singleton templateView) (NE.singleton actualView))
+    subst
+    (zip (methodParamViews specializedMethodView) argViews)
   where
     scope = runtimeElaborateScope context
-    specializedMethodTy = specializeMethodType (methodType methodInfo) (methodParamName methodInfo) (typeViewDisplay classArgView)
-    (_, bodyTy) = splitForalls specializedMethodTy
-    (paramTys, _) = splitArrows bodyTy
+    specializedMethodView = specializeMethodTypeView methodInfo (NE.singleton classArgView)
+
+methodResultView :: TypeView -> TypeView
+methodResultView view =
+  view
+    { typeViewDisplay = displayResult,
+      typeViewIdentity = identityResult
+    }
+  where
+    (_, displayBodyTy) = splitForalls (typeViewDisplay view)
+    (_, displayResult) = splitArrows displayBodyTy
+    (_, identityBodyTy) = splitForalls (typeViewIdentity view)
+    (_, identityResult) = splitArrows identityBodyTy
+
+methodParamViews :: TypeView -> [TypeView]
+methodParamViews view =
+  zipWith paramView displayParamTys identityParamTys
+  where
+    (_, displayBodyTy) = splitForalls (typeViewDisplay view)
+    (displayParamTys, _) = splitArrows displayBodyTy
+    (_, identityBodyTy) = splitForalls (typeViewIdentity view)
+    (identityParamTys, _) = splitArrows identityBodyTy
+    paramView displayTy identityTy =
+      view
+        { typeViewDisplay = displayTy,
+          typeViewIdentity = identityTy
+        }
 
 methodFullArityFromInfo :: MethodInfo -> Int
 methodFullArityFromInfo methodInfo =
@@ -1348,7 +1745,7 @@ applyRuntimePrimitive context prim args
         (RuntimeStringSplit, _) ->
           Left (ProgramPipelineError "run-program __string_split expected String arguments")
         (RuntimeStringJoin, [RuntimeLit (LString separator), values]) ->
-          RuntimeLit . LString . intercalate separator <$> runtimeStringListToStrings values
+          RuntimeLit . LString . intercalate separator <$> runtimeStringListToStrings context values
         (RuntimeStringJoin, _) ->
           Left (ProgramPipelineError "run-program __string_join expected String and List String arguments")
         (RuntimeStringSplitChar, [RuntimeLit (LString haystack), RuntimeLit (LChar delimiter)]) ->
@@ -1372,11 +1769,11 @@ applyRuntimePrimitive context prim args
         (RuntimeStringFromBool, _) ->
           Left (ProgramPipelineError "run-program __string_from_bool expected a Bool argument")
         (RuntimeStringFromNat, [value]) ->
-          RuntimeLit . LString . show <$> runtimeNatToInteger value
+          RuntimeLit . LString . show <$> runtimeNatToInteger context value
         (RuntimeStringFromNat, _) ->
           Left (ProgramPipelineError "run-program __string_from_nat expected a Nat argument")
         (RuntimePreludeStringFromList, [value]) ->
-          RuntimeLit . LString <$> runtimeListCharToString value
+          RuntimeLit . LString <$> runtimeListCharToString context value
         (RuntimePreludeStringFromList, _) ->
           Left (ProgramPipelineError "run-program stringFromList expected a List Char argument")
         (RuntimeStringToList, [RuntimeLit (LString value)]) ->
@@ -1480,9 +1877,15 @@ isAsciiDecimalDigit :: Char -> Bool
 isAsciiDecimalDigit value =
   value >= '0' && value <= '9'
 
-preludeStringFromListRuntimeName :: String
-preludeStringFromListRuntimeName =
-  "Prelude__stringFromList"
+resolvedVarMatchesPreludeStringFromList :: RuntimeContext -> ResolvedVar -> Bool
+resolvedVarMatchesPreludeStringFromList context resolved =
+  case lookupPreludeBinding context PreludeStringFromList of
+    Just binding -> resolvedVarMatchesCheckedBinding resolved binding
+    Nothing -> False
+
+lookupPreludeBinding :: RuntimeContext -> PreludeBindingKey -> Maybe CheckedBinding
+lookupPreludeBinding context key =
+  Map.lookup key (runtimePreludeBindingsByKey context)
 
 runtimeStringIndexOfChar :: RuntimeContext -> String -> Char -> Either ProgramError RuntimeValue
 runtimeStringIndexOfChar context value needle = do
@@ -1534,7 +1937,7 @@ splitString haystack delimiter
 
 runtimeSomeInt :: RuntimeContext -> Integer -> Either ProgramError RuntimeValue
 runtimeSomeInt context value = do
-  someCtor <- requirePreludeOptionConstructor context "Some"
+  someCtor <- requirePreludeConstructor context PreludeOptionSome
   runtimeConstructorValue context (RuntimeConstructorSpec someCtor Nothing) [RuntimeLit (LInt value)]
 
 runtimeNoneInt :: RuntimeContext -> Either ProgramError RuntimeValue
@@ -1547,12 +1950,12 @@ runtimeSomeChar context value =
 
 runtimeNone :: RuntimeContext -> Either ProgramError RuntimeValue
 runtimeNone context = do
-  noneCtor <- requirePreludeOptionConstructor context "None"
+  noneCtor <- requirePreludeConstructor context PreludeOptionNone
   runtimeConstructorValue context (RuntimeConstructorSpec noneCtor Nothing) []
 
 runtimeSome :: RuntimeContext -> RuntimeValue -> Either ProgramError RuntimeValue
 runtimeSome context value = do
-  someCtor <- requirePreludeOptionConstructor context "Some"
+  someCtor <- requirePreludeConstructor context PreludeOptionSome
   runtimeConstructorValue context (RuntimeConstructorSpec someCtor Nothing) [value]
 
 runtimeStringCharAtOption :: RuntimeContext -> String -> Integer -> Either ProgramError RuntimeValue
@@ -1571,8 +1974,8 @@ runtimeStringList context values =
 
 runtimeList :: RuntimeContext -> [RuntimeValue] -> Either ProgramError RuntimeValue
 runtimeList context values = do
-  nilCtor <- requirePreludeListConstructor context "Nil"
-  consCtor <- requirePreludeListConstructor context "Cons"
+  nilCtor <- requirePreludeConstructor context PreludeListNil
+  consCtor <- requirePreludeConstructor context PreludeListCons
   nilValue <- runtimeConstructorValue context (RuntimeConstructorSpec nilCtor Nothing) []
   foldM
     ( \tailValue value ->
@@ -1584,71 +1987,61 @@ runtimeList context values = do
     nilValue
     (reverse values)
 
-runtimeListCharToString :: RuntimeValue -> Either ProgramError String
-runtimeListCharToString =
+runtimeListCharToString :: RuntimeContext -> RuntimeValue -> Either ProgramError String
+runtimeListCharToString context =
   fmap reverse . go []
   where
     go chars value =
       case value of
         RuntimeData ctor _ []
-          | isPreludeListConstructor "Nil" ctor -> Right chars
+          | isPreludeConstructor context PreludeListNil ctor -> Right chars
         RuntimeData ctor _ [RuntimeLit (LChar char), rest]
-          | isPreludeListConstructor "Cons" ctor -> go (char : chars) rest
+          | isPreludeConstructor context PreludeListCons ctor -> go (char : chars) rest
         _ -> Left (ProgramPipelineError "run-program stringFromList expected a List Char argument")
 
-runtimeStringListToStrings :: RuntimeValue -> Either ProgramError [String]
-runtimeStringListToStrings =
+runtimeStringListToStrings :: RuntimeContext -> RuntimeValue -> Either ProgramError [String]
+runtimeStringListToStrings context =
   fmap reverse . go []
   where
     go strings value =
       case value of
         RuntimeData ctor _ []
-          | isPreludeListConstructor "Nil" ctor -> Right strings
+          | isPreludeConstructor context PreludeListNil ctor -> Right strings
         RuntimeData ctor _ [RuntimeLit (LString string), rest]
-          | isPreludeListConstructor "Cons" ctor -> go (string : strings) rest
+          | isPreludeConstructor context PreludeListCons ctor -> go (string : strings) rest
         _ -> Left (ProgramPipelineError "run-program __string_join expected a List String argument")
 
-runtimeNatToInteger :: RuntimeValue -> Either ProgramError Integer
-runtimeNatToInteger =
+runtimeNatToInteger :: RuntimeContext -> RuntimeValue -> Either ProgramError Integer
+runtimeNatToInteger context =
   go 0
   where
     go count value =
       case value of
         RuntimeData ctor _ []
-          | isPreludeNatConstructor "Zero" ctor -> Right count
+          | isPreludeConstructor context PreludeNatZero ctor -> Right count
         RuntimeData ctor _ [rest]
-          | isPreludeNatConstructor "Succ" ctor -> go (count + 1) rest
+          | isPreludeConstructor context PreludeNatSucc ctor -> go (count + 1) rest
         _ -> Left (ProgramPipelineError "run-program __string_from_nat expected a Nat argument")
 
-requirePreludeListConstructor :: RuntimeContext -> String -> Either ProgramError ConstructorInfo
-requirePreludeListConstructor context name =
-  case find (isPreludeListConstructor name) (Map.elems (runtimeConstructors context)) of
+requirePreludeConstructor :: RuntimeContext -> PreludeConstructorKey -> Either ProgramError ConstructorInfo
+requirePreludeConstructor context key =
+  case lookupPreludeConstructor context key of
     Just ctor -> Right ctor
-    Nothing -> Left (ProgramPipelineError ("run-program __string_to_list missing Prelude List constructor " ++ name))
+    Nothing -> Left (ProgramPipelineError ("run-program missing Prelude constructor " ++ preludeConstructorLabel key))
 
-requirePreludeOptionConstructor :: RuntimeContext -> String -> Either ProgramError ConstructorInfo
-requirePreludeOptionConstructor context name =
-  case find (isPreludeOptionConstructor name) (Map.elems (runtimeConstructors context)) of
-    Just ctor -> Right ctor
-    Nothing -> Left (ProgramPipelineError ("run-program __string_index_of_char missing Prelude Option constructor " ++ name))
+lookupPreludeUnitConstructor :: RuntimeContext -> Maybe ConstructorInfo
+lookupPreludeUnitConstructor context =
+  lookupPreludeConstructor context PreludeUnitUnit
 
-isPreludeListConstructor :: String -> ConstructorInfo -> Bool
-isPreludeListConstructor name ctor =
-  symbolNamespace (ctorInfoSymbol ctor) == SymbolConstructor
-    && symbolDefiningModule (ctorInfoSymbol ctor) == "Prelude"
-    && symbolDefiningName (ctorInfoSymbol ctor) == name
+lookupPreludeConstructor :: RuntimeContext -> PreludeConstructorKey -> Maybe ConstructorInfo
+lookupPreludeConstructor context key =
+  Map.lookup key (runtimePreludeConstructorsByKey context)
 
-isPreludeOptionConstructor :: String -> ConstructorInfo -> Bool
-isPreludeOptionConstructor name ctor =
-  symbolNamespace (ctorInfoSymbol ctor) == SymbolConstructor
-    && symbolDefiningModule (ctorInfoSymbol ctor) == "Prelude"
-    && symbolDefiningName (ctorInfoSymbol ctor) == name
-
-isPreludeNatConstructor :: String -> ConstructorInfo -> Bool
-isPreludeNatConstructor name ctor =
-  symbolNamespace (ctorInfoSymbol ctor) == SymbolConstructor
-    && symbolDefiningModule (ctorInfoSymbol ctor) == "Prelude"
-    && symbolDefiningName (ctorInfoSymbol ctor) == name
+isPreludeConstructor :: RuntimeContext -> PreludeConstructorKey -> ConstructorInfo -> Bool
+isPreludeConstructor context key ctor =
+  case lookupPreludeConstructor context key of
+    Just expected -> sameRuntimeConstructor ctor expected
+    Nothing -> False
 
 isAsciiLower :: Char -> Bool
 isAsciiLower value =
@@ -1869,11 +2262,11 @@ executeIOAction context action =
       applied <- applyRuntimeValue context functionValue value
       Right (functionStdout ++ valueStdout, applied)
 
-isRuntimeUnit :: RuntimeValue -> Bool
-isRuntimeUnit value =
+isRuntimeUnit :: RuntimeContext -> RuntimeValue -> Bool
+isRuntimeUnit context value =
   case value of
     RuntimeUnit -> True
-    RuntimeData ctor _ [] -> isPreludeUnitConstructor ctor
+    RuntimeData ctor _ [] -> isPreludeUnitConstructor context ctor
     _ -> False
 
 runtimeValueToValue :: RuntimeValue -> Value
@@ -1887,59 +2280,83 @@ runtimeValueToValue rv =
 
 reachableOpaqueRuntimeDependencies :: CheckedProgram -> [String]
 reachableOpaqueRuntimeDependencies checked =
-  map checkedBindingName (reachableOpaqueRuntimeBindings checked)
+  map checkedBindingRuntimeName (reachableOpaqueRuntimeBindings checked)
     ++ Set.toAscList (reachableOpaquePrimitiveNames checked)
 
 reachableRuntimeBindings :: CheckedProgram -> [CheckedBinding]
 reachableRuntimeBindings checked =
   [ binding
-    | binding <- allCheckedBindings checked,
-      checkedBindingName binding `Set.member` reachableNames,
+    | binding <- reachableCheckedBindings checked,
       not (checkedBindingMentionsOpaqueBuiltin binding)
   ]
-  where
-    reachableNames = reachableBindingNames checked (Set.singleton (checkedProgramMain checked))
 
 reachableOpaqueRuntimeBindings :: CheckedProgram -> [CheckedBinding]
 reachableOpaqueRuntimeBindings checked =
   [ binding
-    | binding <- allCheckedBindings checked,
-      checkedBindingName binding `Set.member` reachableNames,
+    | binding <- reachableCheckedBindings checked,
       checkedBindingMentionsOpaqueBuiltin binding
   ]
-  where
-    reachableNames = reachableBindingNames checked (Set.singleton (checkedProgramMain checked))
 
 reachableOpaquePrimitiveNames :: CheckedProgram -> Set.Set String
 reachableOpaquePrimitiveNames checked =
-  reachableFreeRuntimeNames checked `Set.intersection` Builtins.builtinOpaqueValueNames
-
-reachableFreeRuntimeNames :: CheckedProgram -> Set.Set String
-reachableFreeRuntimeNames checked =
-  Set.unions
-    [ freeTermVariables (checkedBindingTerm binding)
-      | binding <- allCheckedBindings checked,
-        checkedBindingName binding `Set.member` reachableNames
+  Set.fromList
+    [ name
+    | identity <- Set.toList (reachableOpaquePrimitiveIdentities checked),
+      Just name <- [Map.lookup identity runtimePrimitiveNamesByIdentity]
     ]
-  where
-    reachableNames = reachableBindingNames checked (Set.singleton (checkedProgramMain checked))
 
-reachableBindingNames :: CheckedProgram -> Set.Set String -> Set.Set String
-reachableBindingNames checked roots =
-  go Set.empty roots
-  where
-    bindingMap = Map.fromList [(checkedBindingName binding, binding) | binding <- allCheckedBindings checked]
-    topLevelNames = Map.keysSet bindingMap
+reachableOpaquePrimitiveIdentities :: CheckedProgram -> Set.Set SymbolIdentity
+reachableOpaquePrimitiveIdentities checked =
+  reachableFreePrimitiveIdentities checked `Set.intersection` builtinOpaqueValueIdentities
 
-    go visited pending =
-      case Set.minView pending of
-        Nothing -> visited
-        Just (name, rest)
-          | name `Set.member` visited -> go visited rest
-          | Just binding <- Map.lookup name bindingMap ->
-              let deps = freeTermVariables (checkedBindingTerm binding) `Set.intersection` topLevelNames
-               in go (Set.insert name visited) (rest `Set.union` deps)
-          | otherwise -> go visited rest
+reachableFreePrimitiveIdentities :: CheckedProgram -> Set.Set SymbolIdentity
+reachableFreePrimitiveIdentities checked =
+  Set.unions
+    [ freeResolvedTermPrimitiveIdentities (checkedBindingTerm binding)
+    | binding <- reachableCheckedBindings checked
+    ]
+
+reachableCheckedBindings :: CheckedProgram -> [CheckedBinding]
+reachableCheckedBindings checked =
+  [ binding
+    | binding <- bindings,
+      any (sameCheckedBindingIdentity binding) reachable
+  ]
+  where
+    bindings = allCheckedBindings checked
+    roots =
+      [ binding
+        | binding <- bindings,
+          resolvedVarMatchesCheckedBinding (checkedProgramMainResolvedVar checked) binding
+      ]
+    reachable = collectReachableCheckedBindings bindings [] roots
+
+collectReachableCheckedBindings :: [CheckedBinding] -> [CheckedBinding] -> [CheckedBinding] -> [CheckedBinding]
+collectReachableCheckedBindings bindings visited pending =
+  case pending of
+    [] -> visited
+    binding : rest
+      | any (sameCheckedBindingIdentity binding) visited ->
+          collectReachableCheckedBindings bindings visited rest
+      | otherwise ->
+          let deps = checkedBindingDependencyBindings bindings binding
+           in collectReachableCheckedBindings bindings (binding : visited) (deps ++ rest)
+
+checkedBindingDependencyBindings :: [CheckedBinding] -> CheckedBinding -> [CheckedBinding]
+checkedBindingDependencyBindings bindings binding =
+  [ candidate
+    | freeResolved <- freeResolvedTermVars (checkedBindingTerm binding),
+      candidate <- bindings,
+      resolvedVarMatchesCheckedBinding freeResolved candidate
+  ]
+
+resolvedVarMatchesCheckedBinding :: ResolvedVar -> CheckedBinding -> Bool
+resolvedVarMatchesCheckedBinding resolved binding =
+  resolvedVarSameIdentity resolved (checkedBindingResolvedVar binding)
+
+sameCheckedBindingIdentity :: CheckedBinding -> CheckedBinding -> Bool
+sameCheckedBindingIdentity left right =
+  resolvedVarSameIdentity (checkedBindingResolvedVar left) (checkedBindingResolvedVar right)
 
 allCheckedBindings :: CheckedProgram -> [CheckedBinding]
 allCheckedBindings checked =
@@ -1952,40 +2369,54 @@ checkedBindingMentionsOpaqueBuiltin :: CheckedBinding -> Bool
 checkedBindingMentionsOpaqueBuiltin =
   Builtins.srcTypeMentionsOpaqueBuiltin . checkedBindingSourceType
 
-freeTermVariables :: ElabTerm -> Set.Set String
-freeTermVariables =
-  go Set.empty
+freeResolvedTermVars :: XmlfTerm -> [ResolvedVar]
+freeResolvedTermVars =
+  go []
   where
     go bound term =
       case term of
-        EVar name
-          | name `Set.member` bound -> Set.empty
-          | otherwise -> Set.singleton name
-        ELit {} -> Set.empty
-        ELam name _ body -> go (Set.insert name bound) body
-        EApp fun arg -> go bound fun `Set.union` go bound arg
-        ELet name _ rhs body -> go bound rhs `Set.union` go (Set.insert name bound) body
-        ETyAbs _ _ body -> go bound body
+        EVarNode resolved ->
+          if resolvedVarBoundBy bound resolved
+            then []
+            else [resolved]
+        ELit {} -> []
+        ELam resolved body ->
+          go (resolved : bound) body
+        EApp fun arg -> go bound fun ++ go bound arg
+        ELet resolved _ rhs body ->
+          go bound rhs ++ go (resolved : bound) body
+        ETyAbsRef _ _ body -> go bound body
         ETyInst inner _ -> go bound inner
         ERoll _ body -> go bound body
         EUnroll body -> go bound body
 
-termMentionsName :: String -> ElabTerm -> Bool
-termMentionsName needle =
-  go Set.empty
-  where
-    go bound term =
-      case term of
-        EVar name ->
-          name == needle && name `Set.notMember` bound
-        ELit {} -> False
-        ELam name _ body -> go (Set.insert name bound) body
-        EApp fun arg -> go bound fun || go bound arg
-        ELet name _ rhs body -> go bound rhs || go (Set.insert name bound) body
-        ETyAbs _ _ body -> go bound body
-        ETyInst inner _ -> go bound inner
-        ERoll _ body -> go bound body
-        EUnroll body -> go bound body
+freeResolvedTermPrimitiveIdentities :: XmlfTerm -> Set.Set SymbolIdentity
+freeResolvedTermPrimitiveIdentities term =
+  Set.fromList
+    [ symbol
+    | resolved <- freeResolvedTermVars term,
+      Just symbol <- [resolvedVarPrimitiveSymbol resolved]
+    ]
+
+termMentionsRuntimePurePrimitive :: XmlfTerm -> Bool
+termMentionsRuntimePurePrimitive =
+  any resolvedVarIsRuntimePurePrimitive . freeResolvedTermVars
+
+resolvedVarIsRuntimePurePrimitive :: ResolvedVar -> Bool
+resolvedVarIsRuntimePurePrimitive resolved =
+  case resolvedVarPrimitiveSymbol resolved of
+    Just symbol ->
+      Set.member symbol runtimePurePrimitiveIdentities
+    Nothing ->
+      False
+
+runtimePurePrimitiveIdentities :: Set.Set SymbolIdentity
+runtimePurePrimitiveIdentities =
+  Set.fromList (map Builtins.builtinValueIdentity runtimePurePrimitiveNames)
+
+builtinOpaqueValueIdentities :: Set.Set SymbolIdentity
+builtinOpaqueValueIdentities =
+  Set.fromList (map Builtins.builtinValueIdentity (Set.toList Builtins.builtinOpaqueValueNames))
 
 runtimePurePrimitiveNames :: [String]
 runtimePurePrimitiveNames =
@@ -2035,21 +2466,22 @@ runtimePurePrimitiveNames =
     PrimitiveInventory.stringToAsciiUpperPrimitiveName
   ]
 
-normalizeProgramTerm :: ElabTerm -> ElabTerm
+normalizeProgramTerm :: XmlfTerm -> XmlfTerm
 normalizeProgramTerm term =
   let termNorm = normalize term
       termSimplified = case termNorm of
-        ELet v _ rhs (EVar bodyV)
-          | v == bodyV -> rhs
+        ELet resolved _ rhs (EVarNode bodyResolved)
+          | resolvedVarSameIdentity resolved bodyResolved ->
+              rhs
         _ -> termNorm
       termUnderTyAbs =
         case termSimplified of
-          ETyAbs v mbBound body ->
+          ETyAbsRef ref mbBound body ->
             let body' = normalizeProgramTerm body
-                rebuilt = ETyAbs v mbBound body'
+                rebuilt = ETyAbsRef ref mbBound body'
              in case typeCheck rebuilt of
-                  Right (TForall _ _ bodyTy)
-                    | v `notElem` freeTypeVarsType bodyTy -> body'
+                  Right (TForallRef _ _ bodyTy)
+                    | not (typeBinderRefOccursInType ref bodyTy) -> body'
                   _ -> rebuilt
           _ -> termSimplified
       termStripped = stripUnusedTopTyAbs termUnderTyAbs
@@ -2057,24 +2489,29 @@ normalizeProgramTerm term =
         then termStripped
         else normalizeProgramTerm termStripped
 
-stripUnusedTopTyAbs :: ElabTerm -> ElabTerm
+stripUnusedTopTyAbs :: XmlfTerm -> XmlfTerm
 stripUnusedTopTyAbs term = case term of
-  ETyAbs v mbBound body ->
+  ETyAbsRef ref mbBound body ->
     let body' = stripUnusedTopTyAbs body
-        term' = ETyAbs v mbBound body'
+        term' = ETyAbsRef ref mbBound body'
      in case typeCheck term' of
-          Right (TForall _ _ bodyTy)
-            | v `notElem` freeTypeVarsType bodyTy -> body'
+          Right (TForallRef _ _ bodyTy)
+            | not (typeBinderRefOccursInType ref bodyTy) -> body'
           _ -> term'
-  ELam v ty body -> ELam v ty (stripUnusedTopTyAbs body)
+  ELam resolved body -> ELam resolved (stripUnusedTopTyAbs body)
   EApp f a -> EApp (stripUnusedTopTyAbs f) (stripUnusedTopTyAbs a)
-  ELet v sch rhs body -> ELet v sch (stripUnusedTopTyAbs rhs) (stripUnusedTopTyAbs body)
+  ELet resolved sch rhs body ->
+    ELet resolved sch (stripUnusedTopTyAbs rhs) (stripUnusedTopTyAbs body)
   ETyInst e inst -> ETyInst (stripUnusedTopTyAbs e) inst
   ERoll ty body -> ERoll ty (stripUnusedTopTyAbs body)
   EUnroll body -> EUnroll (stripUnusedTopTyAbs body)
   _ -> term
 
-toValueWithProgram :: CheckedProgram -> ElabTerm -> Value
+typeBinderRefOccursInType :: X.TypeBinderRef -> ElabType -> Bool
+typeBinderRefOccursInType ref ty =
+  any (X.typeBinderRefsSameIdentity ref) (freeTypeVarRefsType ty)
+
+toValueWithProgram :: CheckedProgram -> XmlfTerm -> Value
 toValueWithProgram checked term =
   case mainSourceType checked of
     Just srcTy ->
@@ -2091,7 +2528,7 @@ toValueWithProgram checked term =
         Just value -> value
         Nothing -> toValue term
 
-toValue :: ElabTerm -> Value
+toValue :: XmlfTerm -> Value
 toValue term = case stripRuntimeWrappers term of
   ELit lit -> VLit lit
   other -> VTerm other
@@ -2117,14 +2554,18 @@ mainSourceType checked =
 
 mainIdentitySourceType :: CheckedProgram -> Maybe SrcType
 mainIdentitySourceType checked =
+  checkedBindingSourceType <$> mainBinding checked
+
+mainBinding :: CheckedProgram -> Maybe CheckedBinding
+mainBinding checked =
   case
-    [ checkedBindingSourceType binding
+    [ binding
       | checkedModule <- checkedProgramModules checked,
         binding <- checkedModuleBindings checkedModule,
-        checkedBindingName binding == checkedProgramMain checked
+        resolvedVarMatchesCheckedBinding (checkedProgramMainResolvedVar checked) binding
     ]
   of
-    ty : _ -> Just ty
+    binding : _ -> Just binding
     [] -> Nothing
 
 recoverMainSourceType :: CheckedProgram -> SrcType -> SrcType
@@ -2141,7 +2582,7 @@ programElaborateScope checked =
     (Map.fromList [(qualifiedClassName info, info) | info <- allClassInfos checked])
     (allInstanceInfos checked)
 
-decodeSourceValue :: CheckedProgram -> SrcType -> ElabTerm -> Maybe Value
+decodeSourceValue :: CheckedProgram -> SrcType -> XmlfTerm -> Maybe Value
 decodeSourceValue checked srcTy term =
   case lookupDataInfosForType checked srcTy of
     [] ->
@@ -2174,52 +2615,57 @@ sourceTypeIsData checked srcTy =
 lookupDataInfosByName :: CheckedProgram -> String -> [DataInfo]
 lookupDataInfosByName checked name =
   [ dataInfo
-    | dataInfo <- allDataInfos checked,
+    | dataInfo <- Map.elems (allDataInfosByIdentity checked),
       dataTypeHeadMatches dataInfo name
   ]
 
 dataTypeHeadMatches :: DataInfo -> String -> Bool
 dataTypeHeadMatches dataInfo name =
-  if isQualifiedSourceHead name
-    then qualifiedDataName dataInfo == name
-    else symbolDefiningName (dataInfoSymbol dataInfo) == name
+  name == symbolIdentityStableName (dataInfoSymbol dataInfo)
+    || if isQualifiedSourceHead name
+      then qualifiedDataName dataInfo == name
+      else dataInfoIdentityName dataInfo == name
 
 isQualifiedSourceHead :: String -> Bool
 isQualifiedSourceHead = elem '.'
 
 qualifiedDataName :: DataInfo -> String
-qualifiedDataName dataInfo =
-  symbolDefiningModule (dataInfoSymbol dataInfo) ++ "." ++ symbolDefiningName (dataInfoSymbol dataInfo)
+qualifiedDataName =
+  dataInfoIdentityQualifiedName
 
 qualifiedClassName :: ClassInfo -> String
-qualifiedClassName classInfo =
-  symbolDefiningModule (classInfoSymbol classInfo) ++ "." ++ symbolDefiningName (classInfoSymbol classInfo)
+qualifiedClassName =
+  classInfoIdentityQualifiedName
 
 allDataInfos :: CheckedProgram -> [DataInfo]
 allDataInfos checked =
   [ dataInfo
     | checkedModule <- checkedProgramModules checked,
-      dataInfo <- map snd (Map.toList (checkedModuleData checkedModule))
+      dataInfo <- Map.elems (checkedModuleData checkedModule)
   ]
+
+allDataInfosByIdentity :: CheckedProgram -> Map.Map SymbolIdentity DataInfo
+allDataInfosByIdentity checked =
+  Map.fromList [(dataInfoSymbol dataInfo, dataInfo) | dataInfo <- allDataInfos checked]
 
 allClassInfos :: CheckedProgram -> [ClassInfo]
 allClassInfos checked =
   [ classInfo
     | checkedModule <- checkedProgramModules checked,
-      classInfo <- map snd (Map.toList (checkedModuleClasses checkedModule))
+      classInfo <- Map.elems (checkedModuleClasses checkedModule)
   ]
 
 allInstanceInfos :: CheckedProgram -> [InstanceInfo]
 allInstanceInfos checked =
   concatMap checkedModuleInstances (checkedProgramModules checked)
 
-decodeAnyData :: CheckedProgram -> ElabTerm -> Maybe Value
+decodeAnyData :: CheckedProgram -> XmlfTerm -> Maybe Value
 decodeAnyData checked term =
-  case [value | dataInfo <- allDataInfos checked, Just value <- [decodeChurchData checked dataInfo Map.empty term]] of
+  case [value | dataInfo <- allDataInfos checked, Just value <- [decodeChurchData checked dataInfo emptyTypeBinderSubst term]] of
     value : _ -> Just value
     [] -> Nothing
 
-decodeChurchData :: CheckedProgram -> DataInfo -> Map.Map String SrcType -> ElabTerm -> Maybe Value
+decodeChurchData :: CheckedProgram -> DataInfo -> TypeBinderSubst -> XmlfTerm -> Maybe Value
 decodeChurchData checked dataInfo subst term = do
   let stripped = stripRuntimeWrappers term
       (handlerNames, body) = collectLeadingLams stripped
@@ -2230,49 +2676,63 @@ decodeChurchData checked dataInfo subst term = do
       let activeHandlers = take (length constructors) handlerNames
           (headTerm, args) = collectElabApps (stripRuntimeWrappers body)
       selectedHandler <- case headTerm of
-        EVar name -> Just name
+        EVarNode resolved -> Just resolved
         _ -> Nothing
       ctorInfo <- lookupByHandler activeHandlers constructors selectedHandler
-      if length args /= length (ctorArgs ctorInfo)
+      let ctorArgTypes = constructorInfoArgsIdentity ctorInfo
+      if length args /= length ctorArgTypes
         then Nothing
         else
-          let argTypes = map (canonicalFieldType checked dataInfo . substDataParams subst) (ctorArgs ctorInfo)
+          let argTypes = map (canonicalFieldType checked dataInfo . substDataParams subst) ctorArgTypes
            in Just (VData (ctorName ctorInfo) (zipWith (decodeArg checked) argTypes args))
 
-dataTypeSubst :: DataInfo -> SrcType -> Map.Map String SrcType
+dataTypeSubst :: DataInfo -> SrcType -> TypeBinderSubst
 dataTypeSubst dataInfo srcTy =
-  case (dataParams dataInfo, srcTy) of
+  case (dataTypeParams dataInfo, srcTy) of
     ([], STBase name)
-      | dataTypeHeadMatches dataInfo name -> Map.empty
+      | dataTypeHeadMatches dataInfo name -> emptyTypeBinderSubst
     (params, STCon name args)
       | dataTypeHeadMatches dataInfo name && length params == length args ->
-          Map.fromList (zip params (toList args))
-    _ -> Map.empty
+          foldr (uncurry insertDataParam) emptyTypeBinderSubst (zip params (toList args))
+    _ -> emptyTypeBinderSubst
+  where
+    insertDataParam param ty =
+      let mbIdentity = typeParamBinderIdentity param
+       in insertTypeBinderSubst (ProgramSyntax.typeParamName param, mbIdentity) ty
+            . insertTypeBinderSubst (ProgramSyntax.typeParamIdentityName param, mbIdentity) ty
 
-substDataParams :: Map.Map String SrcType -> SrcType -> SrcType
+constructorInfoArgsIdentity :: ConstructorInfo -> [SrcType]
+constructorInfoArgsIdentity ctorInfo =
+  let (_, identityBody) = splitForalls (ctorTypeIdentity ctorInfo)
+   in fst (splitArrows identityBody)
+
+substDataParams :: TypeBinderSubst -> SrcType -> SrcType
 substDataParams subst ty =
-  case ty of
-    STVar name -> Map.findWithDefault ty name subst
-    STArrow dom cod -> STArrow (substDataParams subst dom) (substDataParams subst cod)
-    STBase {} -> ty
-    STCon name args -> STCon name (fmap (substDataParams subst) args)
-    STVarApp name args ->
-      let args' = fmap (substDataParams subst) args
-       in case Map.lookup name subst of
-            Just (STVar replacementName) -> STVarApp replacementName args'
-            Just (STBase replacementName) -> STCon replacementName args'
-            Just (STCon replacementName replacementArgs) -> STCon replacementName (replacementArgs <> args')
-            Just (STVarApp replacementName replacementArgs) -> STVarApp replacementName (replacementArgs <> args')
-            _ -> STVarApp name args'
-    STTyLam name body ->
-      STTyLam name (substDataParams (Map.delete name subst) body)
-    STTyApp fun arg -> STTyApp (substDataParams subst fun) (substDataParams subst arg)
-    STForall name mb body ->
-      let subst' = Map.delete name subst
-       in STForall name (fmap (SrcBound . substDataParams subst' . unSrcBound) mb) (substDataParams subst' body)
-    STMu name body ->
-      STMu name (substDataParams (Map.delete name subst) body)
-    STBottom -> STBottom
+  go (typeBinderSubstToNameMap subst) ty
+  where
+    go substNames ty0 =
+      case ty0 of
+        STVar name -> Map.findWithDefault ty0 name substNames
+        STArrow dom cod -> STArrow (go substNames dom) (go substNames cod)
+        STBase {} -> ty0
+        STCon name args -> STCon name (fmap (go substNames) args)
+        STVarApp name args ->
+          let args' = fmap (go substNames) args
+           in case Map.lookup name substNames of
+                Just (STVar replacementName) -> STVarApp replacementName args'
+                Just (STBase replacementName) -> STCon replacementName args'
+                Just (STCon replacementName replacementArgs) -> STCon replacementName (replacementArgs <> args')
+                Just (STVarApp replacementName replacementArgs) -> STVarApp replacementName (replacementArgs <> args')
+                _ -> STVarApp name args'
+        STTyLam name body ->
+          STTyLam name (go (Map.delete name substNames) body)
+        STTyApp fun arg -> STTyApp (go substNames fun) (go substNames arg)
+        STForall name mb body ->
+          let substNames' = Map.delete name substNames
+           in STForall name (fmap (SrcBound . go substNames' . unSrcBound) mb) (go substNames' body)
+        STMu name body ->
+          STMu name (go (Map.delete name substNames) body)
+        STBottom -> STBottom
 
 canonicalFieldType :: CheckedProgram -> DataInfo -> SrcType -> SrcType
 canonicalFieldType checked ownerInfo = canonical
@@ -2281,12 +2741,12 @@ canonicalFieldType checked ownerInfo = canonical
       case ty of
         STVar {} -> ty
         STBase name ->
-          case lookupDataInfoInModule checked (dataModule ownerInfo) name of
+          case lookupDataInfoInOwnerModule checked ownerInfo name of
             Just info -> STBase (qualifiedDataName info)
             Nothing -> ty
         STCon name args ->
           let args' = fmap canonical args
-           in case lookupDataInfoInModule checked (dataModule ownerInfo) name of
+           in case lookupDataInfoInOwnerModule checked ownerInfo name of
                 Just info -> STCon (qualifiedDataName info) args'
                 Nothing -> STCon name args'
         STVarApp name args -> STVarApp name (fmap canonical args)
@@ -2298,19 +2758,18 @@ canonicalFieldType checked ownerInfo = canonical
         STMu name body -> STMu name (canonical body)
         STBottom -> STBottom
 
-lookupDataInfoInModule :: CheckedProgram -> ProgramSyntax.ModuleName -> String -> Maybe DataInfo
-lookupDataInfoInModule checked moduleName0 name =
-  case
-    [ dataInfo
-      | dataInfo <- allDataInfos checked,
-        symbolDefiningModule (dataInfoSymbol dataInfo) == moduleName0,
-        symbolDefiningName (dataInfoSymbol dataInfo) == name
-    ]
-  of
-    dataInfo : _ -> Just dataInfo
-    [] -> Nothing
+lookupDataInfoInOwnerModule :: CheckedProgram -> DataInfo -> String -> Maybe DataInfo
+lookupDataInfoInOwnerModule checked ownerInfo name = do
+  ownerModule <-
+    find
+      (Map.member (dataInfoSymbol ownerInfo) . checkedModuleData)
+      (checkedProgramModules checked)
+  find matchesName (Map.elems (checkedModuleData ownerModule))
+  where
+    matchesName info =
+      dataTypeHeadMatches info name
 
-decodeArg :: CheckedProgram -> SrcType -> ElabTerm -> Value
+decodeArg :: CheckedProgram -> SrcType -> XmlfTerm -> Value
 decodeArg checked srcTy term =
   case decodeSourceValue checked srcTy term of
     Just value -> value
@@ -2321,21 +2780,21 @@ decodeArg checked srcTy term =
             Nothing -> toValue term
       | otherwise -> toValue term
 
-lookupByHandler :: [String] -> [ConstructorInfo] -> String -> Maybe ConstructorInfo
+lookupByHandler :: [ResolvedVar] -> [ConstructorInfo] -> ResolvedVar -> Maybe ConstructorInfo
 lookupByHandler handlerNames constructors selected =
-  case [ctor | (handlerName, ctor) <- zip handlerNames constructors, handlerName == selected] of
+  case [ctor | (handlerName, ctor) <- zip handlerNames constructors, resolvedVarSameIdentity handlerName selected] of
     ctor : _ -> Just ctor
     [] -> Nothing
 
-collectLeadingLams :: ElabTerm -> ([String], ElabTerm)
+collectLeadingLams :: XmlfTerm -> ([ResolvedVar], XmlfTerm)
 collectLeadingLams = go []
   where
     go acc term =
       case stripRuntimeWrappers term of
-        ELam name _ body -> go (acc ++ [name]) body
+        ELam resolved body -> go (acc ++ [resolved]) body
         other -> (acc, other)
 
-collectElabApps :: ElabTerm -> (ElabTerm, [ElabTerm])
+collectElabApps :: XmlfTerm -> (XmlfTerm, [XmlfTerm])
 collectElabApps = go []
   where
     go acc term =
@@ -2343,10 +2802,10 @@ collectElabApps = go []
         EApp fun arg -> go (stripRuntimeWrappers arg : acc) fun
         other -> (other, acc)
 
-stripRuntimeWrappers :: ElabTerm -> ElabTerm
+stripRuntimeWrappers :: XmlfTerm -> XmlfTerm
 stripRuntimeWrappers term =
   case term of
-    ETyAbs _ _ body -> stripRuntimeWrappers body
+    ETyAbsRef _ _ body -> stripRuntimeWrappers body
     ETyInst inner _ -> stripRuntimeWrappers inner
     ERoll _ body -> stripRuntimeWrappers body
     EUnroll body -> stripRuntimeWrappers body

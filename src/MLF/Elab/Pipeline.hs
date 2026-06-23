@@ -1,13 +1,33 @@
-{-# LANGUAGE PatternSynonyms #-}
-
 module MLF.Elab.Pipeline
   ( ElabType,
-    Ty (..),
+    Ty
+      ( TVarRef,
+        TArrow,
+        TCon,
+        TVarAppRef,
+        TBase,
+        TForallRef,
+        TMuRef,
+        TBottom
+      ),
     BoundType,
+    UniqueIdentity (..),
+    TypeBinderIdentity,
+    typeBinderIdentityFromUnique,
+    TypeBinderRef,
+    typeBinderRefFromIdentity,
+    typeBinderRefIdentity,
+    typeBinderRefNode,
+    typeBinderRefName,
+    typeBinderRefsSameIdentity,
     ElabScheme,
-    pattern Forall,
-    ElabTerm (..),
+    mkElabSchemeWithRefs,
+    schemeBinderRefs,
+    schemeBody,
+    XmlfTerm (..),
     Instantiation (..),
+    instAbstrWithRef,
+    instUnderWithRef,
     ElabError (..),
     TypeCheckError (..),
     PipelineConfig (..),
@@ -26,9 +46,6 @@ module MLF.Elab.Pipeline
     Pretty (..),
     PrettyDisplay (..),
     reifyType,
-    reifyTypeWithNames,
-    reifyTypeWithNamedSet,
-    reifyBoundWithNames,
     generalizeAtWithBuilder,
     schemeToType,
     applyInstantiation,
@@ -47,17 +64,26 @@ module MLF.Elab.Pipeline
     canonicalizeAnn,
 
     -- * Exported for testing/debugging
+    authoritativeRootAnn,
     chaseRedirects,
     SchemeInfo (..),
+    schemeInfoFromRefSubst,
     Env (..),
     namedNodes,
+    freshenTypeAbsAgainstEnv,
 
     -- * Context representation for non-spine Raise (paper Fig. 10)
-    ContextStep (..),
+    ContextStep (StepUnderRef, StepInside),
     contextToNodeBound,
     selectMinPrecInsertionIndex,
 
     -- * Phase 7 helpers
+    mkTypeCheckEnvWithResolvedTerms,
+    resolvedTermEnvEntries,
+    insertResolvedTermBinding,
+    insertTypeBindingRef,
+    restrictResolvedTermBindings,
+    unionEnvs,
     typeCheck,
     typeCheckWithEnv,
     checkInstantiation,
@@ -84,8 +110,10 @@ import MLF.Elab.PipelineError
 import MLF.Elab.Reduce (isValue, normalize, step)
 import MLF.Elab.Run
   ( applyRedirectsToAnn,
+    authoritativeRootAnn,
     canonicalizeAnn,
     chaseRedirects,
+    freshenTypeAbsAgainstEnv,
     runPipelineElab,
     runPipelineElabWithConfig,
     runPipelineElabWithConfigAndEnv,
@@ -93,10 +121,21 @@ import MLF.Elab.Run
   )
 import MLF.Elab.Run.Generalize (generalizeAtWithBuilder)
 import MLF.Elab.Sigma (sigmaReorder)
-import MLF.Elab.TypeCheck (Env (..), checkInstantiation, typeCheck, typeCheckWithEnv)
+import MLF.Elab.TypeCheck
+  ( Env (..),
+    checkInstantiation,
+    insertResolvedTermBinding,
+    insertTypeBindingRef,
+    mkTypeCheckEnvWithResolvedTerms,
+    resolvedTermEnvEntries,
+    restrictResolvedTermBindings,
+    typeCheck,
+    typeCheckWithEnv,
+    unionEnvs,
+  )
 import MLF.Elab.Types
 import MLF.Frontend.ConstraintGen (ExternalEnv)
-import MLF.Reify.Core (namedNodes, reifyBoundWithNames, reifyType, reifyTypeWithNamedSet, reifyTypeWithNames)
+import MLF.Reify.Core (namedNodes, reifyType)
 import MLF.Reify.TypeOps (freeTypeVarsType)
 import MLF.Util.Trace (TraceConfig (..), defaultTraceConfig)
 

@@ -15,6 +15,7 @@ import qualified Data.IntSet as IntSet
 import MLF.Constraint.Presolution.Plan.BinderPlan.Order (GaBindParentsInfo)
 import MLF.Constraint.Presolution.View (PresolutionView)
 import MLF.Constraint.Types.Graph
+import MLF.Types.Elab (TypeBinderRef)
 import MLF.Util.ElabError (ElabError)
 
 data BinderPlanInput p = BinderPlanInput
@@ -71,7 +72,7 @@ data BinderPlan = BinderPlan
     , bpBinderIds :: [Int]
     , bpOrderedBinderIds :: [Int]
     , bpBinderNames :: [String]
-    , bpSubst0 :: IntMap.IntMap String
+    , bpSubst0 :: IntMap.IntMap TypeBinderRef
     , bpNestedSchemeInteriorSet :: IntSet.IntSet
     , bpGammaAlias :: IntMap.IntMap Int
     , bpBaseGammaSet :: IntSet.IntSet

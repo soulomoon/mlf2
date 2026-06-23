@@ -13,7 +13,6 @@ module MLF.Elab.Run.TypeOps (
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
-import qualified Data.Set as Set
 
 import MLF.Constraint.Presolution (PresolutionView(..))
 import qualified MLF.Constraint.VarStore as VarStore
@@ -21,23 +20,27 @@ import MLF.Constraint.Types.Graph (NodeMap, TyNode(..), cNodes, fromListNode, to
 import MLF.Elab.ReadModel (ElabReadModel(..))
 import MLF.Reify.Core
     ( namedNodes
-    , reifyTypeWithNamedSetNoFallback
-    , reifyTypeWithNamedSetNoFallbackReadModel
+    )
+import MLF.Reify.Type
+    ( reifyTypeWithNamedSetRefsNoFallback
+    , reifyTypeWithNamedSetRefsNoFallbackReadModel
     )
 import MLF.Reify.TypeOps (
-    freeTypeVarsType,
+    freeTypeVarRefsType,
     inlineAliasBoundsWithBySeen,
     inlineBaseBoundsType,
     resolveBoundBodyConstraint,
-    renameTypeVar,
-    splitForalls,
-    substTypeSimple
+    splitForallsRefs,
+    substTypeSimpleRef
     )
 import MLF.Elab.Types
     ( ElabType
     , Ty(..)
+    , TypeBinderRef
     , tyToElab
     , mapBoundType
+    , tForallWithRef
+    , typeBinderRefsSameIdentity
     )
 
 data InlineBoundVarsContext p = InlineBoundVarsContext
@@ -116,36 +119,36 @@ inlineBoundVarsTypeWithPrepared unboundToBottom context =
         t0 <-
             case ibvcReadModel context of
                 Just readModel ->
-                    reifyTypeWithNamedSetNoFallbackReadModel readModel IntMap.empty namedSet bndRoot
+                    reifyTypeWithNamedSetRefsNoFallbackReadModel readModel IntMap.empty namedSet bndRoot
                 Nothing ->
-                    reifyTypeWithNamedSetNoFallback presolutionView IntMap.empty namedSet bndRoot
+                    reifyTypeWithNamedSetRefsNoFallback presolutionView IntMap.empty namedSet bndRoot
         pure (inlineBaseBoundsType constraint canonical t0)
 
 simplifyAnnotationType :: ElabType -> ElabType
 simplifyAnnotationType = go
   where
     go ty = case ty of
-        TVar _ -> ty
-        TCon c args -> TCon c (fmap go args)
-        TVarApp v args -> TVarApp v (fmap go args)
-        TBase _ -> ty
+        TVarRef _ -> ty
+        TConWithIdentity identity c args -> TConWithIdentity identity c (fmap go args)
+        TVarAppRef ref args -> TVarAppRef ref (fmap go args)
+        TBaseWithIdentity _ _ -> ty
         TBottom -> ty
         TArrow a b -> TArrow (go a) (go b)
-        TMu v body -> TMu v (go body)
-        TForall{} ->
+        TMuRef ref body -> TMuRef ref (go body)
+        TForallRef{} ->
             normalizeForalls (stripForalls ty)
 
-    stripForalls = splitForalls
+    stripForalls = splitForallsRefs
 
     normalizeForalls (binds0, body0) =
         let binds1 =
-                [ (v, fmap (mapBoundType go) mb)
-                | (v, mb) <- binds0
+                [ (ref, fmap (mapBoundType go) mb)
+                | (ref, mb) <- binds0
                 ]
             body1 = go body0
             (binds2, body2) = mergeBaseBounds binds1 body1
             (binds3, body3) = dropUnusedBinds binds2 body2
-            ty = foldr (\(v, b) t -> TForall v b t) body3 binds3
+            ty = foldr (\(ref, b) t -> tForallWithRef ref b t) body3 binds3
         in inlineAlias ty
 
     mergeBaseBounds binds body =
@@ -154,14 +157,14 @@ simplifyAnnotationType = go
                 TBottom -> Just Nothing
                 _ -> Nothing
             usedInBounds =
-                Set.unions
-                    [ freeTypeVarsType bnd
+                concat
+                    [ freeTypeVarRefsType bnd
                     | (_, Just bnd) <- binds
                     ]
             goMerge _ [] body' = ([], body')
-            goMerge seen ((v, mb):rest) body' =
+            goMerge seen ((ref, mb):rest) body' =
                 let mb' = mb
-                    vUsed = Set.member v usedInBounds
+                    vUsed = refMember ref usedInBounds
                 in case mb' >>= baseKey of
                     Just key ->
                         case Map.lookup key seen of
@@ -170,26 +173,26 @@ simplifyAnnotationType = go
                                     then
                                         if vUsed
                                             then
-                                                let rest' = map (substBind v rep) rest
-                                                    body'' = renameTypeVar v rep body'
+                                                let rest' = map (substBind ref rep) rest
+                                                    body'' = substTypeSimpleRef ref (TVarRef rep) body'
                                                 in goMerge seen rest' body''
                                             else
-                                                let rest' = map (substBindType v (baseFromKey key)) rest
-                                                    body'' = substTypeSimple v (baseFromKey key) body'
+                                                let rest' = map (substBindType ref (baseFromKey key)) rest
+                                                    body'' = substTypeSimpleRef ref (baseFromKey key) body'
                                                 in goMerge seen rest' body''
                                     else
-                                        let rest' = map (substBind v rep) rest
-                                            body'' = renameTypeVar v rep body'
+                                        let rest' = map (substBind ref rep) rest
+                                            body'' = substTypeSimpleRef ref (TVarRef rep) body'
                                             repUsed' = repUsed || vUsed
                                             seen' = Map.insert key (rep, repUsed') seen
                                         in goMerge seen' rest' body''
                             Nothing ->
-                                let seen' = Map.insert key (v, vUsed) seen
+                                let seen' = Map.insert key (ref, vUsed) seen
                                     (rest', body'') = goMerge seen' rest body'
-                                in ((v, mb') : rest', body'')
+                                in ((ref, mb') : rest', body'')
                     Nothing ->
                         let (rest', body'') = goMerge seen rest body'
-                        in ((v, mb') : rest', body'')
+                        in ((ref, mb') : rest', body'')
         in goMerge Map.empty binds body
 
     baseFromKey key = case key of
@@ -197,37 +200,52 @@ simplifyAnnotationType = go
         Nothing -> TBottom
 
     dropUnusedBinds binds body =
-        let freeInBound = maybe Set.empty freeTypeVarsType
-            used = Set.union (freeTypeVarsType body)
-                (Set.unions [ freeInBound mb | (_, mb) <- binds ])
-            keep (v, mb) = Set.member v used || maybe False (Set.member v . freeTypeVarsType) mb
+        let freeInBound = maybe [] freeTypeVarRefsType
+            used =
+                unionRefs
+                    (freeTypeVarRefsType body)
+                    (concat [ freeInBound mb | (_, mb) <- binds ])
+            keep (ref, mb) =
+                refMember ref used || maybe False (refMember ref . freeTypeVarRefsType) mb
         in (filter keep binds, body)
 
     inlineAlias ty = case ty of
-        TForall v mb body ->
+        TForallRef ref mb body ->
             let mb' = fmap (mapBoundType go) mb
                 body' = go body
                 mb'' = case mb' of
                     Just bound
-                        | TVar v' <- tyToElab bound
-                        , v' == v -> Nothing
+                        | TVarRef ref' <- tyToElab bound
+                        , typeBinderRefsSameIdentity ref' ref -> Nothing
                     _ -> mb'
             in case (mb'', body') of
-                (Just bound, TVar v')
-                    | v' == v
+                (Just bound, TVarRef ref')
+                    | typeBinderRefsSameIdentity ref' ref
                     , inlineAliasBound (tyToElab bound) ->
                         tyToElab bound
-                _ -> TForall v mb'' body'
+                _ -> TForallRef ref mb'' body'
         _ -> ty
 
     inlineAliasBound bound = case bound of
-        TArrow (TVar v1) (TVar v2) -> v1 == v2
+        TArrow (TVarRef ref1) (TVarRef ref2) ->
+            typeBinderRefsSameIdentity ref1 ref2
         _ -> False
 
-    substBind v v0 (name, mb) =
-        let mb' = fmap (mapBoundType (renameTypeVar v v0)) mb
+    substBind ref rep (name, mb) =
+        let mb' = fmap (mapBoundType (substTypeSimpleRef ref (TVarRef rep))) mb
         in (name, mb')
 
-    substBindType v replacement (name, mb) =
-        let mb' = fmap (mapBoundType (substTypeSimple v replacement)) mb
+    substBindType ref replacement (name, mb) =
+        let mb' = fmap (mapBoundType (substTypeSimpleRef ref replacement)) mb
         in (name, mb')
+
+    unionRefs left right =
+        foldr insertRef right left
+
+    insertRef ref refs
+        | refMember ref refs = refs
+        | otherwise = ref : refs
+
+    refMember :: TypeBinderRef -> [TypeBinderRef] -> Bool
+    refMember ref =
+        any (typeBinderRefsSameIdentity ref)

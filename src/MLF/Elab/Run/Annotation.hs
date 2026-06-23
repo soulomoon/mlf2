@@ -10,11 +10,11 @@ module MLF.Elab.Run.Annotation
   )
 where
 
-import Data.Functor.Foldable (cata)
+import Data.Functor.Foldable (Recursive (project), cata)
 import qualified Data.IntMap.Strict as IntMap
 import MLF.Constraint.Types.Graph (NodeId (..))
 import MLF.Elab.Run.Util (chaseRedirects)
-import MLF.Elab.Types (Instantiation (..))
+import MLF.Elab.Types (Instantiation (..), InstantiationF (..), instAbstrWithRef, instUnderWithRef)
 import MLF.Frontend.ConstraintGen (AnnExpr (..))
 import MLF.Frontend.ConstraintGen.Types (AnnExprF (..))
 
@@ -59,18 +59,22 @@ annNode = cata alg
 -- See Note [Annotation instantiation preserves foralls] in
 -- docs/notes/2026-01-27-elab-changes.md.
 adjustAnnotationInst :: Instantiation -> Instantiation
-adjustAnnotationInst inst = case inst of
-  InstElim -> InstId
-  InstApp ty -> InstInside (InstBot ty)
-  InstBot ty -> InstInside (InstBot ty)
-  InstSeq (InstInside (InstBot ty)) InstElim -> InstInside (InstBot ty)
-  InstSeq a b ->
-    let a' = adjustAnnotationInst a
-        b' = adjustAnnotationInst b
-     in case (a', b') of
-          (InstId, x) -> x
-          (x, InstId) -> x
-          _ -> InstSeq a' b'
-  InstInside a -> InstInside (adjustAnnotationInst a)
-  InstUnder v a -> InstUnder v (adjustAnnotationInst a)
-  _ -> inst
+adjustAnnotationInst inst =
+  case inst of
+    InstSeq (InstInside (InstBot ty)) InstElim -> InstInside (InstBot ty)
+    _ -> case project inst of
+      InstElimF -> InstId
+      InstAppF ty -> InstInside (InstBot ty)
+      InstBotF ty -> InstInside (InstBot ty)
+      InstSeqF a b ->
+        let a' = adjustAnnotationInst a
+            b' = adjustAnnotationInst b
+         in case (a', b') of
+              (InstId, x) -> x
+              (x, InstId) -> x
+              _ -> InstSeq a' b'
+      InstInsideF a -> InstInside (adjustAnnotationInst a)
+      InstUnderFRef ref a -> instUnderWithRef ref (adjustAnnotationInst a)
+      InstAbstrFRef ref -> instAbstrWithRef ref
+      InstIdF -> InstId
+      InstIntroF -> InstIntro

@@ -46,9 +46,10 @@ import MLF.Elab.Pipeline
     renderPipelineError,
     runPipelineElab,
     runPipelineElab,
+    schemeBinderRefs,
+    schemeBody,
     step,
     typeCheck,
-    pattern Forall,
   )
 import MLF.Elab.Pipeline qualified as Elab
 import MLF.Elab.Run.Generalize.Prepare
@@ -87,7 +88,8 @@ import MLF.Elab.Run.Util
 import MLF.Frontend.ConstraintGen
 import MLF.Frontend.Syntax
 import MLF.Reify.Core (reifyType)
-import MLF.Types.Elab (Ty (..), containsArrowTy, containsForallTy)
+import MLF.Types.Elab (Ty (..), containsArrowTy, containsForallTy, typeBinderRefName)
+import ElabTermTestSupport (testTForall, testTMu, testTVar)
 import SolvedFacadeTestUtil qualified as SolvedTest
 import SpecUtil
   ( PipelineArtifacts (..),
@@ -155,95 +157,95 @@ matchesRecursiveArrowCodomain actual expected = case actual of
 
 matchesRecursiveMu :: ElabType -> ElabType -> Bool
 matchesRecursiveMu actual expected = case (actual, expected) of
-  (TMu _ bodyA, TMu _ bodyE) -> stripMuNames bodyA == stripMuNames bodyE
+  (TMuRef _ bodyA, TMuRef _ bodyE) -> stripMuNames bodyA == stripMuNames bodyE
   _ -> False
   where
     stripMuNames ty = case ty of
-      TVar _ -> TVar "_"
+      TVarRef _ -> testTVar "_"
       TArrow dom cod -> TArrow (stripMuNames dom) (stripMuNames cod)
       TBase base -> TBase base
       TCon con args -> TCon con (fmap stripMuNames args)
-      TVarApp name args -> TVarApp name (fmap stripMuNames args)
-      TForall _ mb body -> TForall "_" (fmap stripBoundNames mb) (stripMuNames body)
-      TMu _ body -> TMu "_" (stripMuNames body)
+      TVarAppRef ref args -> TVarAppRef ref (fmap stripMuNames args)
+      TForallRef _ mb body -> testTForall "_" (fmap stripBoundNames mb) (stripMuNames body)
+      TMuRef _ body -> testTMu "_" (stripMuNames body)
       TBottom -> TBottom
 
     stripBoundNames bound = case bound of
       TArrow dom cod -> TArrow (stripMuNames dom) (stripMuNames cod)
       TBase base -> TBase base
       TCon con args -> TCon con (fmap stripMuNames args)
-      TVarApp name args -> TVarApp name (fmap stripMuNames args)
-      TForall _ mb body -> TForall "_" (fmap stripBoundNames mb) (stripMuNames body)
-      TMu _ body -> TMu "_" (stripMuNames body)
+      TVarAppRef ref args -> TVarAppRef ref (fmap stripMuNames args)
+      TForallRef _ mb body -> testTForall "_" (fmap stripBoundNames mb) (stripMuNames body)
+      TMuRef _ body -> testTMu "_" (stripMuNames body)
       TBottom -> TBottom
 
 countLeadingUnboundedForalls :: ElabType -> Int
 countLeadingUnboundedForalls ty = case ty of
-  TForall _ Nothing body -> 1 + countLeadingUnboundedForalls body
+  TForallRef _ Nothing body -> 1 + countLeadingUnboundedForalls body
   _ -> 0
 
 stripLeadingUnboundedForalls :: ElabType -> ElabType
 stripLeadingUnboundedForalls ty = case ty of
-  TForall _ Nothing body -> stripLeadingUnboundedForalls body
+  TForallRef _ Nothing body -> stripLeadingUnboundedForalls body
   _ -> ty
 
 expectedSameLaneAliasFrameClearBoundaryArrow :: ElabType
 expectedSameLaneAliasFrameClearBoundaryArrow =
-  let recursiveTy = TMu "a" (TArrow (TVar "a") (TBase (BaseTy "Int")))
+  let recursiveTy = testTMu "a" (TArrow (testTVar "a") (TBase (BaseTy "Int")))
    in TArrow recursiveTy recursiveTy
 
 expectedUriR2C1RecursiveIntCarrier :: ElabType
 expectedUriR2C1RecursiveIntCarrier =
-  TMu "a" (TArrow (TVar "a") (TBase (BaseTy "Int")))
+  testTMu "a" (TArrow (testTVar "a") (TBase (BaseTy "Int")))
 
 expectedUriR2C1RecursiveBoolCarrier :: ElabType
 expectedUriR2C1RecursiveBoolCarrier =
-  TMu "a" (TArrow (TVar "a") (TBase (BaseTy "Bool")))
+  testTMu "a" (TArrow (testTVar "a") (TBase (BaseTy "Bool")))
 
 containsMu :: ElabType -> Bool
 containsMu ty = case ty of
-  TMu _ _ -> True
+  TMuRef _ _ -> True
   TArrow dom cod -> containsMu dom || containsMu cod
   TCon _ args -> any containsMu args
-  TForall _ mb body -> maybe False containsMuBound mb || containsMu body
+  TForallRef _ mb body -> maybe False containsMuBound mb || containsMu body
   _ -> False
   where
     containsMuBound bound = case bound of
       TArrow dom cod -> containsMu dom || containsMu cod
       TBase _ -> False
       TCon _ args -> any containsMu args
-      TVarApp _ args -> any containsMu args
-      TForall _ mb body -> maybe False containsMuBound mb || containsMu body
-      TMu _ _ -> True
+      TVarAppRef _ args -> any containsMu args
+      TForallRef _ mb body -> maybe False containsMuBound mb || containsMu body
+      TMuRef _ _ -> True
       TBottom -> False
 
-containsRollTerm :: Elab.ElabTerm -> Bool
+containsRollTerm :: Elab.XmlfTerm -> Bool
 containsRollTerm term = case term of
-  Elab.EVar _ -> False
+  Elab.EVarNode _ -> False
   Elab.ELit _ -> False
-  Elab.ELam _ _ body -> containsRollTerm body
+  Elab.ELam _ body -> containsRollTerm body
   Elab.EApp f a -> containsRollTerm f || containsRollTerm a
   Elab.ELet _ _ rhs body -> containsRollTerm rhs || containsRollTerm body
-  Elab.ETyAbs _ _ body -> containsRollTerm body
+  Elab.ETyAbsRef _ _ body -> containsRollTerm body
   Elab.ETyInst e _ -> containsRollTerm e
   Elab.ERoll _ _ -> True
   Elab.EUnroll body -> containsRollTerm body
 
-containsUnrollTerm :: Elab.ElabTerm -> Bool
+containsUnrollTerm :: Elab.XmlfTerm -> Bool
 containsUnrollTerm term = case term of
-  Elab.EVar _ -> False
+  Elab.EVarNode _ -> False
   Elab.ELit _ -> False
-  Elab.ELam _ _ body -> containsUnrollTerm body
+  Elab.ELam _ body -> containsUnrollTerm body
   Elab.EApp f a -> containsUnrollTerm f || containsUnrollTerm a
   Elab.ELet _ _ rhs body -> containsUnrollTerm rhs || containsUnrollTerm body
-  Elab.ETyAbs _ _ body -> containsUnrollTerm body
+  Elab.ETyAbsRef _ _ body -> containsUnrollTerm body
   Elab.ETyInst e _ -> containsUnrollTerm e
   Elab.ERoll _ body -> containsUnrollTerm body
   Elab.EUnroll _ -> True
 
 -- | Collect the sequence of intermediate terms produced by iterated 'step'.
 -- Lazy, so @take n (iterateStep t)@ is safe even for divergent terms.
-iterateStep :: Elab.ElabTerm -> [Elab.ElabTerm]
+iterateStep :: Elab.XmlfTerm -> [Elab.XmlfTerm]
 iterateStep t = case step t of
   Nothing -> []
   Just t' -> t' : iterateStep t'
@@ -420,8 +422,9 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   roots -> error ("PipelineSpec: unexpected binding roots " ++ show roots)
           let generalizeAt = generalizeAtWithBuilder (defaultPlanBuilder defaultTraceConfig) Nothing
           case generalizeAt (viewFromSolved res) scopeRoot root' of
-            Right (Forall binds ty, _subst) -> do
-              binds `shouldBe` []
+            Right (scheme, _subst) -> do
+              schemeBinderRefs scheme `shouldBe` []
+              let ty = schemeBody scheme
               let tyStr = pretty ty
               -- With coercion-only: type is inferred, not the declared scheme
               tyStr `shouldSatisfy` ("∀" `isInfixOf`)
@@ -525,7 +528,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         Right ty -> do
           -- Should produce a TMu wrapping the body type
           case ty of
-            TMu _ _ -> pure ()
+            TMuRef _ _ -> pure ()
             _ ->
               expectationFailure $
                 "Expected TMu, got: " ++ show ty
@@ -581,12 +584,12 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       view <- requireRight (ResultTypeView.buildResultTypeView inputs)
       let viewBound = ResultTypeView.rtvWithBoundOverlay rootN intN view
       ResultTypeView.rtvLookupVarBound viewBound rootN `shouldBe` Just intN
-      ResultTypeView.rtvReifyWithNamesNoFallback viewBound IntMap.empty rootN
+      ResultTypeView.rtvReifyNoFallback viewBound rootN
         `shouldBe` Right (TBase intBase)
-      ResultTypeView.rtvReifyBaseWithNamesNoFallback viewBound IntMap.empty baseRootN
+      ResultTypeView.rtvReifyBaseNoFallback viewBound baseRootN
         `shouldBe` Right (TBase intBase)
       (scheme, _subst) <- requireRight (ResultTypeView.rtvGeneralizeTarget viewBound (typeRef rootN) rootN)
-      scheme `shouldBe` Forall [] (TBase intBase)
+      scheme `shouldBe` Elab.schemeFromType (TBase intBase)
 
     it "single-solved refactor keeps canonical pipeline authoritative on representative corpus" $ do
       forM_ representativeMigrationCorpus assertCanonicalPipelineTypeChecks
@@ -673,8 +676,8 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           expr = ELamAnn "x" recursiveAnn (EVar "x")
           expectedTy =
             TArrow
-              (TMu "a" (TArrow (TVar "a") (TBase (BaseTy "Int"))))
-              (TMu "a" (TArrow (TVar "a") (TBase (BaseTy "Int"))))
+              (testTMu "a" (TArrow (testTVar "a") (TBase (BaseTy "Int"))))
+              (testTMu "a" (TArrow (testTVar "a") (TBase (BaseTy "Int"))))
       case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
         Left err -> expectationFailure (renderPipelineError err)
         Right (term, ty) -> do
@@ -3397,7 +3400,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
             expr = ELamAnn "x" recursiveAnn (EVar "x")
             isRecursiveArrow ty = case ty of
-              TArrow (TMu _ _) (TMu _ _) -> True
+              TArrow TMuRef {} TMuRef {} -> True
               _ -> False
             pipelineRuns =
               [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
@@ -3416,8 +3419,8 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 (ELamAnn "x" recursiveAnn (EVar "x"))
             expectedTy =
               TArrow
-                (TMu "a" (TArrow (TVar "a") (TBase (BaseTy "Int"))))
-                (TMu "a" (TArrow (TVar "a") (TBase (BaseTy "Int"))))
+                (testTMu "a" (TArrow (testTVar "a") (TBase (BaseTy "Int"))))
+                (testTMu "a" (TArrow (testTVar "a") (TBase (BaseTy "Int"))))
             pipelineRuns =
               [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
@@ -3695,7 +3698,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             inputs2 = injectSingleBaseWitness inputs1 argEid
         fallbackTy <- requireRight (computeResultTypeFallback inputs2 innerCanon innerPre)
         case fallbackTy of
-          TVar _ -> pure ()
+          TVarRef _ -> pure ()
           other ->
             expectationFailure
               ( "expected mixed retained-child/base-target competition to stay on the local fail-closed target variable, got "
@@ -3711,7 +3714,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "k")) (EVar "u"))
             pipelineRuns =
               [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneClearBoundaryExpr))]
-        let collapsedTy = TForall "a" Nothing (TVar "a")
+        let collapsedTy = testTForall "a" Nothing (testTVar "a")
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err -> expectationFailure (label ++ ": " ++ renderPipelineError err)
@@ -3725,7 +3728,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 "k"
                 (ELamAnn "x" recursiveAnn (EVar "x"))
                 (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "k")) (EVar "u"))
-            collapsedTy = TForall "a" Nothing (TVar "a")
+            collapsedTy = testTForall "a" Nothing (testTVar "a")
         (uncheckedTerm, uncheckedTy) <- requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneClearBoundaryExpr))
         (checkedTerm, checkedTy) <- requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneClearBoundaryExpr))
         when (uncheckedTy == collapsedTy) $
@@ -4820,7 +4823,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       it "keeps the preserved local scheme-alias/base-like continuity on the quantified rootFinal lane" $ do
         fallbackTy <- schemeAliasBaseLikeFallback True
         case fallbackTy of
-          TForall _ Nothing (TBase (BaseTy "Int")) -> pure ()
+          TForallRef _ Nothing (TBase (BaseTy "Int")) -> pure ()
           other ->
             expectationFailure
               ( "expected quantified Int result for local scheme-alias/base-like continuity lane, got "
@@ -4845,7 +4848,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
             expr =
               ELet "k" (ELamAnn "x" recursiveAnn (EVar "x")) (EVar "k")
-            blockedTy = TForall "a" Nothing (TArrow (TVar "a") (TVar "a"))
+            blockedTy = testTForall "a" Nothing (TArrow (testTVar "a") (testTVar "a"))
         (_uncheckedTerm, uncheckedTy) <- requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
         (_checkedTerm, checkedTy) <- requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
         uncheckedTy `shouldNotBe` blockedTy
@@ -4856,7 +4859,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       it "keeps local multi-inst fallback on the local TypeRef lane" $ do
         fallbackTy <- localMultiInstFallback True
         case fallbackTy of
-          TVar _ -> pure ()
+          TVarRef _ -> pure ()
           other ->
             expectationFailure
               ( "expected local multi-inst lane to retain the final target variable, got "
@@ -4866,7 +4869,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       it "keeps the same multi-inst wrapper fail-closed once it leaves the local TypeRef lane" $ do
         fallbackTy <- localMultiInstFallback False
         case fallbackTy of
-          TForall _ Nothing (TVar _) -> pure ()
+          TForallRef _ Nothing TVarRef {} -> pure ()
           other ->
             expectationFailure
               ( "expected non-local multi-inst contrast to stay on the quantified fail-closed shell, got "
@@ -4876,7 +4879,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       it "keeps local inst-arg multi-base fallback on the local TypeRef lane" $ do
         fallbackTy <- localInstArgMultiBaseFallback True
         case fallbackTy of
-          TVar _ -> pure ()
+          TVarRef _ -> pure ()
           other ->
             expectationFailure
               ( "expected local inst-arg multi-base lane to retain the final target variable, got "
@@ -4886,7 +4889,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       it "keeps the same inst-arg multi-base wrapper fail-closed once it leaves the local TypeRef lane" $ do
         fallbackTy <- localInstArgMultiBaseFallback False
         case fallbackTy of
-          TForall _ Nothing (TVar _) -> pure ()
+          TForallRef _ Nothing TVarRef {} -> pure ()
           other ->
             expectationFailure
               ( "expected non-local inst-arg multi-base contrast to stay on the quantified fail-closed shell, got "
@@ -4952,7 +4955,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 "g"
                 (ELamAnn "x" recursiveAnn (EVar "x"))
                 (EVar "g")
-            muTy = TMu "t6" (TArrow (TVar "t6") (TBase (BaseTy "Int")))
+            muTy = testTMu "t6" (TArrow (testTVar "t6") (TBase (BaseTy "Int")))
             expectedTy = TArrow muTy muTy
             pipelineRuns =
               [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
@@ -5054,8 +5057,8 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           Just actualBase ->
             lookupNodeIn (cNodes baseConstraint) actualBase `shouldSatisfy` isJust
       case generalizePreparedRoot artifact (preparedAnnotated artifact) ann of
-        Right (Forall _ ty, _subst) ->
-          pretty ty `shouldSatisfy` ("Bool" `isInfixOf`)
+        Right (scheme, _subst) ->
+          pretty (schemeBody scheme) `shouldSatisfy` ("Bool" `isInfixOf`)
         Left err ->
           expectationFailure ("Prepared artifact generalize-at failed: " ++ show err)
       resultTy <-
@@ -5394,9 +5397,9 @@ spec = describe "Pipeline (Phases 1-5)" $ do
     etBinderReplayMap tr0 `shouldBe` IntMap.empty
     Binding.orderedBinders id (prConstraint pres) (typeRef c1SchemeRoot) `shouldBe` Right []
     case generalizeAt (viewFromSolved solved) (genRef c1Gen) c1SchemeRoot of
-      Right (Forall binds ty, _subst) -> do
-        binds `shouldBe` []
-        pretty ty `shouldSatisfy` ("Int" `isInfixOf`)
+      Right (scheme, _subst) -> do
+        schemeBinderRefs scheme `shouldBe` []
+        pretty (schemeBody scheme) `shouldSatisfy` ("Int" `isInfixOf`)
       Left err ->
         expectationFailure ("Expected c1 generalization, got: " ++ show err)
 
@@ -5443,8 +5446,8 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         normExpr = unsafeNormalizeExpr expr
         expectPolyBinaryId ty =
           case ty of
-            TForall v Nothing (TArrow dom (TArrow dom' cod))
-              | dom == TVar v && dom' == TVar v && cod == TVar v -> pure ()
+            TForallRef ref Nothing (TArrow (TVarRef domRef) (TArrow (TVarRef domRef') (TVarRef codRef)))
+              | domRef == ref && domRef' == ref && codRef == ref -> pure ()
             other ->
               expectationFailure
                 ("Expected forall a. a -> a -> a, got: " ++ show other)
@@ -5610,8 +5613,8 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         expectForallIdentityArrow :: ElabType -> Expectation
         expectForallIdentityArrow ty =
           case ty of
-            TForall v Nothing (TArrow dom cod)
-              | dom == TVar v && cod == TVar v -> pure ()
+            TForallRef ref Nothing (TArrow (TVarRef domRef) (TVarRef codRef))
+              | domRef == ref && codRef == ref -> pure ()
             other ->
               expectationFailure
                 ("Expected forall identity arrow (forall a. a -> a), got: " ++ show other)
@@ -5681,7 +5684,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
 
   describe "Pipeline soundness proxies" $ do
     -- Note: Pipeline-elaborated terms may contain internal type annotations
-    -- (e.g. TVar "t0") that become unresolvable after step substitutes away
+    -- (e.g. testTVar "t0") that become unresolvable after step substitutes away
     -- ELet bindings. We skip typeCheck failures on stepped/normalized terms
     -- as a known limitation rather than a soundness violation.
 
@@ -5888,8 +5891,11 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         Right (_term, ty) ->
           ty `shouldSatisfy` \candidate ->
             case candidate of
-              TForall name Nothing (TArrow (TVar dom) (TVar cod)) ->
-                not (null name) && dom == name && cod == name
+              TForallRef ref Nothing (TArrow (TVarRef domRef) (TVarRef codRef)) ->
+                let name = typeBinderRefName ref
+                    dom = typeBinderRefName domRef
+                    cod = typeBinderRefName codRef
+                 in not (null name) && dom == name && cod == name
               _ -> False
 
     it "O08-BIND-MONO: alias bounds are inlined during normalization (B(σ))" $ do

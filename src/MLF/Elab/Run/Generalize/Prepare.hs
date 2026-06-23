@@ -9,6 +9,7 @@ module MLF.Elab.Run.Generalize.Prepare (
     preparedResultTypeViewReady,
     preparedElaborationConfig,
     preparedElaborationEnv,
+    preparedElaborationEnvWithInitialEnv,
     stripPreparedWitnesslessAuthoritativeAnn,
     generalizePreparedRoot,
     generalizePreparedRootDetailed,
@@ -29,6 +30,7 @@ import MLF.Elab.Run.Generalize.Prepare.Internal
     , preparedAnnotated
     , preparedElaborationConfig
     , preparedElaborationEnv
+    , preparedElaborationEnvWithInitialEnv
     , preparedReadContextReady
     , preparedResultTypeViewReady
     , stripPreparedWitnesslessAuthoritativeAnn

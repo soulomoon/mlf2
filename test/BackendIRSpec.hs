@@ -6,9 +6,13 @@ import Control.Monad (forM_)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
 import MLF.Backend.IR
-import MLF.Constraint.Types.Graph (BaseTy (..))
+import MLF.Constraint.Types.Graph (BaseTy (..), NodeId (..))
+import MLF.Frontend.Program.Builtins (builtinValueIdentity)
+import MLF.Frontend.Symbol (SymbolIdentity (..), SymbolNamespace (..), symbolIdentityStableName)
 import MLF.Frontend.Syntax (Lit (..))
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
+import MLF.Types.Identity (DeferredRef (..), IdDetails (DeferredId, LocalId, PrimitiveId, TopLevelId), LocalIdentity (GeneratedLocalId), LocalRef (..), PrimitiveRef (..), TypeBinderIdentity, typeBinderIdentityFromNode)
+import MLF.Types.Unique (UniqueIdentity (..))
 import Test.Hspec
 
 spec :: Spec
@@ -16,21 +20,41 @@ spec = describe "MLF.Backend.IR" $ do
   it "accepts a minimal checked-like backend program" $ do
     validateBackendProgram simpleProgram `shouldBe` Right ()
 
-  it "rejects duplicate modules and duplicate global bindings" $ do
+  it "rejects duplicate modules, data, and global bindings" $ do
     validateBackendProgram (BackendProgram [emptyModule "Main", emptyModule "Main"] "main")
       `shouldBe` Left (BackendDuplicateModule "Main")
+
+    validateBackendProgram duplicateDataIdentityProgram
+      `shouldBe` Left (BackendDuplicateData (symbolIdentityStableName duplicateDataIdentity))
 
     validateBackendProgram (programWithBindings [mainLiteralBinding, mainLiteralBinding])
       `shouldBe` Left (BackendDuplicateBinding "main")
 
+    validateBackendProgram duplicateBindingIdentityProgram
+      `shouldBe` Left (BackendDuplicateBinding (symbolIdentityStableName duplicateValueIdentity))
+
   it "recognizes shared primitive inventory globals during backend validation" $ do
     forM_ (Map.toList PrimitiveInventory.primitiveValueSpecs) $ \(name, spec0) -> do
       let ty = primitiveTypeToBackendType (PrimitiveInventory.primitiveValueType spec0)
-          program =
+          programByName =
             BackendProgram
               [BackendModule "Main" [] [BackendBinding "main" ty (BackendVar ty name) True]]
               "main"
-      validateBackendProgram program `shouldBe` Right ()
+          programByIdentity =
+            BackendProgram
+              [ BackendModule
+                  "Main"
+                  []
+                  [ BackendBinding
+                      "main"
+                      ty
+                      (BackendVarWithIdentity ty (Just (PrimitiveId (PrimitiveRef (builtinValueIdentity name)))) name)
+                      True
+                  ]
+              ]
+              "main"
+      validateBackendProgram programByName `shouldBe` Right ()
+      validateBackendProgram programByIdentity `shouldBe` Right ()
 
   it "rejects a missing main binding" $ do
     validateBackendProgram (BackendProgram [moduleWithBindings "Main" [binding "other" intTy (intLit 1)]] "main")
@@ -55,6 +79,15 @@ spec = describe "MLF.Backend.IR" $ do
           ]
       )
       `shouldBe` Left (BackendVariableTypeMismatch "helper" intTy (BTVar "a"))
+
+    validateBackendProgram mismatchedGlobalBindingIdentityProgram
+      `shouldBe` Left (BackendUnknownVariable "helper")
+
+    validateBackendProgram mismatchedLocalBindingIdentityProgram
+      `shouldBe` Left (BackendUnknownVariable "helper")
+
+    validateBackendProgram mismatchedLiftedHelperIdentityProgram
+      `shouldBe` Left (BackendUnknownVariable liftedHelperName)
 
     validateBackendProgram
       ( programWithMainExpr
@@ -81,13 +114,83 @@ spec = describe "MLF.Backend.IR" $ do
     validateBackendProgram (programWithMainExpr letIdentityExpr)
       `shouldBe` Right ()
 
+  it "checks lexical variable references by resolved identity when binders carry identity" $ do
+    validateBackendProgram (programWithMainExpr (identityLam localXIdentity "stale" localXIdentity))
+      `shouldBe` Right ()
+
+    validateBackendProgram (programWithMainExpr (identityLam localXIdentity "x" otherLocalIdentity))
+      `shouldBe` Left (BackendUnknownVariable "x")
+
+  it "checks case pattern binder references by resolved identity when binders carry identity" $ do
+    validateBackendProgram (programWithDataAndMainExpr [boxData] (identityPatternCase patternNIdentity "stale" patternNIdentity))
+      `shouldBe` Right ()
+
+    validateBackendProgram (programWithDataAndMainExpr [boxData] (identityPatternCase patternNIdentity "n" otherPatternNIdentity))
+      `shouldBe` Left (BackendUnknownVariable "n")
+
+  it "checks closure capture references by resolved identity when captures carry identity" $ do
+    validateBackendProgram (programWithMainExpr (identityCapturedClosure localXIdentity "stale" localXIdentity))
+      `shouldBe` Right ()
+
+    validateBackendProgram (programWithMainExpr (identityCapturedClosure localXIdentity "captured" otherLocalIdentity))
+      `shouldBe` Left (BackendUnknownVariable "captured")
+
+  it "checks closure parameter references by resolved identity when params carry identity" $ do
+    validateBackendProgram (programWithMainExpr (identityParamClosure localXIdentity "stale" localXIdentity))
+      `shouldBe` Right ()
+
+    validateBackendProgram (programWithMainExpr (identityParamClosure localXIdentity "x" otherLocalIdentity))
+      `shouldBe` Left (BackendUnknownVariable "x")
+
+  it "ignores same-named type bounds for identity-bearing generated case variables" $ do
+    let binderIdentity = typeBinderIdentityFromNode (NodeId 991401)
+        identityVar = BTVarWithIdentity (Just binderIdentity) "a"
+        expr =
+          BackendTyAbsWithIdentity
+            { backendExprType = BTForallWithIdentity Nothing "a" (Just intTy) (BTArrow identityVar boolTy),
+              backendTyParamIdentity = Nothing,
+              backendTyParamName = "a",
+              backendTyParamBound = Just intTy,
+              backendTyAbsBody =
+                BackendLamWithIdentity
+                  { backendExprType = BTArrow identityVar boolTy,
+                    backendParamIdentity = Nothing,
+                    backendParamName = "$case0",
+                    backendParamType = identityVar,
+                    backendBody = BackendVar boolTy "$case0"
+                  }
+            }
+
+    validateBackendProgram (programWithMainExpr expr)
+      `shouldBe` Right ()
+
+  it "classifies closure-call heads by identity when local names shadow" $ do
+    validateBackendProgram (programWithMainExpr identityShadowedClosureApp)
+      `shouldBe` Left (BackendClosureCalledWithBackendApp "f")
+
+  it "does not let name-only binders shadow identity-bearing closure heads" $ do
+    validateBackendProgram (programWithMainExpr identityShadowedClosureAppByNameOnlyBinder)
+      `shouldBe` Left (BackendClosureCalledWithBackendApp "f")
+
+  it "classifies pattern closure heads by identity when pattern names shadow" $ do
+    validateBackendProgram (programWithDataAndMainExpr [fnBoxData, boxData] identityShadowedPatternClosureApp)
+      `shouldBe` Left (BackendClosureCalledWithBackendApp "f")
+
+  it "keeps resolved global closure heads through same-named pattern and let binders" $ do
+    validateBackendProgram identityPatternFallbackClosureProgram
+      `shouldBe` Left (BackendClosureCalledWithBackendApp "f")
+
+  it "classifies closure-called parameters by identity through shadowing lets" $ do
+    validateBackendProgram (programWithMainExpr identityShadowedClosureParam)
+      `shouldBe` Right ()
+
   it "rejects bindings whose declared type differs from the expression type" $ do
     validateBackendBinding (BackendBinding "main" boolTy (intLit 1) True)
       `shouldBe` Left (BackendBindingTypeMismatch "main" boolTy intTy)
 
   it "rejects literal nodes with incorrect carried types" $ do
     validateBackendExpr (BackendLit boolTy (LInt 1))
-      `shouldBe` Left (BackendLiteralTypeMismatch (LInt 1) intTy boolTy)
+      `shouldBe` Left (BackendLiteralTypeMismatch (LInt 1) (literalBackendType (LInt 1)) boolTy)
 
   it "rejects invalid application, lambda, and let nodes" $ do
     validateBackendExpr (BackendApp intTy intIdentityExpr (boolLit True))
@@ -181,19 +284,19 @@ spec = describe "MLF.Backend.IR" $ do
 
   it "validates explicit closure construction and indirect closure calls" $ do
     let closure =
-          BackendClosure
+          BackendClosureWithParamIdentities
             { backendExprType = idTy,
               backendClosureEntryName = "__mlfp_closure$id",
               backendClosureCaptures = [],
-              backendClosureParams = [("x", intTy)],
+              backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
               backendClosureBody = BackendVar intTy "x"
             }
         capturedClosure =
-          BackendClosure
+          BackendClosureWithParamIdentities
             { backendExprType = idTy,
               backendClosureEntryName = "__mlfp_closure$captured",
-              backendClosureCaptures = [BackendClosureCapture "captured" intTy (intLit 7)],
-              backendClosureParams = [("x", intTy)],
+              backendClosureCaptures = [BackendClosureCapture Nothing "captured" intTy (intLit 7)],
+              backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
               backendClosureBody = BackendVar intTy "captured"
             }
         callClosure value =
@@ -228,11 +331,11 @@ spec = describe "MLF.Backend.IR" $ do
         structuralClosureArgTy =
           BTMu "$Box_self" (singleFieldStructuralBody (BTVar "a"))
         structuralClosure =
-          BackendClosure
+          BackendClosureWithParamIdentities
             { backendExprType = BTArrow structuralClosureArgTy boolTy,
               backendClosureEntryName = "__mlfp_closure$structural",
               backendClosureCaptures = [],
-              backendClosureParams = [("box", structuralClosureArgTy)],
+              backendClosureParamsWithIdentities = backendClosureParams [("box", structuralClosureArgTy)],
               backendClosureBody = boolLit True
             }
 
@@ -253,11 +356,11 @@ spec = describe "MLF.Backend.IR" $ do
 
   it "lets local non-closure binders shadow closure-valued globals during validation" $ do
     let globalClosure =
-          BackendClosure
+          BackendClosureWithParamIdentities
             { backendExprType = idTy,
               backendClosureEntryName = "__mlfp_closure$shadowed_global",
               backendClosureCaptures = [],
-              backendClosureParams = [("x", intTy)],
+              backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
               backendClosureBody = BackendVar intTy "x"
             }
         shadowedLetCallProgram =
@@ -289,11 +392,11 @@ spec = describe "MLF.Backend.IR" $ do
 
   it "treats function-valued case pattern binders as closure values during validation" $ do
     let fieldClosure =
-          BackendClosure
+          BackendClosureWithParamIdentities
             { backendExprType = idTy,
               backendClosureEntryName = "__mlfp_closure$field",
               backendClosureCaptures = [],
-              backendClosureParams = [("x", intTy)],
+              backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
               backendClosureBody = BackendVar intTy "x"
             }
         program =
@@ -315,37 +418,37 @@ spec = describe "MLF.Backend.IR" $ do
 
   it "rejects malformed closure IR" $ do
     let goodClosure entryName =
-          BackendClosure
+          BackendClosureWithParamIdentities
             { backendExprType = idTy,
               backendClosureEntryName = entryName,
               backendClosureCaptures = [],
-              backendClosureParams = [("x", intTy)],
+              backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
               backendClosureBody = BackendVar intTy "x"
             }
         higherOrderTy =
           BTArrow idTy intTy
         higherOrderClosure entryName =
-          BackendClosure
+          BackendClosureWithParamIdentities
             { backendExprType = higherOrderTy,
               backendClosureEntryName = entryName,
               backendClosureCaptures = [],
-              backendClosureParams = [("f", idTy)],
+              backendClosureParamsWithIdentities = backendClosureParams [("f", idTy)],
               backendClosureBody = BackendApp intTy (BackendVar idTy "f") (intLit 1)
             }
         captureMismatch =
-          BackendClosure
+          BackendClosureWithParamIdentities
             { backendExprType = idTy,
               backendClosureEntryName = "__mlfp_closure$bad_capture",
-              backendClosureCaptures = [BackendClosureCapture "captured" boolTy (intLit 7)],
-              backendClosureParams = [("x", intTy)],
+              backendClosureCaptures = [BackendClosureCapture Nothing "captured" boolTy (intLit 7)],
+              backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
               backendClosureBody = BackendVar intTy "x"
             }
         resultMismatch =
-          BackendClosure
+          BackendClosureWithParamIdentities
             { backendExprType = idTy,
               backendClosureEntryName = "__mlfp_closure$bad_result",
               backendClosureCaptures = [],
-              backendClosureParams = [("x", intTy)],
+              backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
               backendClosureBody = boolLit True
             }
         duplicateEntries =
@@ -369,27 +472,27 @@ spec = describe "MLF.Backend.IR" $ do
         entryNameRuntimeCollision =
           programWithMainExpr (goodClosure "__mlfp_and")
         duplicateCaptureAndParameter =
-          BackendClosure
+          BackendClosureWithParamIdentities
             { backendExprType = idTy,
               backendClosureEntryName = "__mlfp_closure$duplicate_binder",
-              backendClosureCaptures = [BackendClosureCapture "x" intTy (intLit 7)],
-              backendClosureParams = [("x", intTy)],
+              backendClosureCaptures = [BackendClosureCapture Nothing "x" intTy (intLit 7)],
+              backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
               backendClosureBody = BackendVar intTy "x"
             }
         nonFunctionClosure =
-          BackendClosure
+          BackendClosureWithParamIdentities
             { backendExprType = intTy,
               backendClosureEntryName = "__mlfp_closure$non_function",
               backendClosureCaptures = [],
-              backendClosureParams = [],
+              backendClosureParamsWithIdentities = backendClosureParams [],
               backendClosureBody = intLit 0
             }
         underspecifiedClosureParams =
-          BackendClosure
+          BackendClosureWithParamIdentities
             { backendExprType = idTy,
               backendClosureEntryName = "__mlfp_closure$underspecified_params",
               backendClosureCaptures = [],
-              backendClosureParams = [],
+              backendClosureParamsWithIdentities = backendClosureParams [],
               backendClosureBody = intIdentityExpr
             }
         badCall =
@@ -407,11 +510,11 @@ spec = describe "MLF.Backend.IR" $ do
             "captured"
             intTy
             (intLit 7)
-            ( BackendClosure
+            ( BackendClosureWithParamIdentities
                 { backendExprType = idTy,
                   backendClosureEntryName = "__mlfp_closure$unlisted_capture",
                   backendClosureCaptures = [],
-                  backendClosureParams = [("x", intTy)],
+                  backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
                   backendClosureBody = BackendVar intTy "captured"
                 }
             )
@@ -465,11 +568,11 @@ spec = describe "MLF.Backend.IR" $ do
             "g"
             higherOrderTy
             (higherOrderClosure "__mlfp_closure$app_captured_source")
-            ( BackendClosure
+            ( BackendClosureWithParamIdentities
                 { backendExprType = idTy,
                   backendClosureEntryName = "__mlfp_closure$app_captured",
-                  backendClosureCaptures = [BackendClosureCapture "capturedClosure" higherOrderTy (BackendVar higherOrderTy "g")],
-                  backendClosureParams = [("x", intTy)],
+                  backendClosureCaptures = [BackendClosureCapture Nothing "capturedClosure" higherOrderTy (BackendVar higherOrderTy "g")],
+                  backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
                   backendClosureBody =
                     BackendApp intTy (BackendVar higherOrderTy "capturedClosure") intIdentityExpr
                 }
@@ -542,6 +645,24 @@ spec = describe "MLF.Backend.IR" $ do
       )
       `shouldBe` Left (BackendTypeAppExpectedForall intTy)
 
+    let binderIdentity = typeBinderIdentityFromNode (NodeId 991205)
+        resolvedForallTy =
+          BTForallWithIdentity
+            (Just binderIdentity)
+            "a"
+            Nothing
+            (BTArrow (BTVarWithIdentity (Just binderIdentity) "a") (BTVar "a"))
+        resolvedAppTy = BTArrow intTy (BTVar "a")
+
+    validateBackendExpr
+      ( BackendTyApp
+          { backendExprType = resolvedAppTy,
+            backendTyFunction = BackendVar resolvedForallTy "resolvedPoly",
+            backendTyArgument = intTy
+          }
+      )
+      `shouldBe` Right ()
+
   it "uses capture-avoiding substitution for type application" $ do
     let sourceTy = BTForall "b" Nothing (BTArrow (BTVar "a") (BTVar "b"))
         polyTy = BTForall "a" Nothing sourceTy
@@ -582,6 +703,47 @@ spec = describe "MLF.Backend.IR" $ do
 
     substituteBackendTypes substitutions sourceTy `shouldBe` pairTy (BTVar "b") (BTVar "a")
 
+  it "substitutes backend type variables by identity when names collide" $ do
+    let leftIdentity = typeBinderIdentityFromNode (NodeId 991201)
+        rightIdentity = typeBinderIdentityFromNode (NodeId 991202)
+        leftVar = BTVarWithIdentity (Just leftIdentity) "a"
+        rightVar = BTVarWithIdentity (Just rightIdentity) "a"
+
+    substituteBackendTypeByIdentity leftIdentity intTy (BTArrow leftVar rightVar)
+      `shouldBe` BTArrow intTy rightVar
+
+    substituteBackendTypesByKey (Map.singleton (BackendTypeSubstitutionByName "a") boolTy) (BTArrow leftVar (BTVar "a"))
+      `shouldBe` BTArrow leftVar boolTy
+
+  it "compares free backend type variables by identity before spelling" $ do
+    let leftIdentity = typeBinderIdentityFromNode (NodeId 991301)
+        rightIdentity = typeBinderIdentityFromNode (NodeId 991302)
+
+    alphaEqBackendType
+      (BTVarWithIdentity (Just leftIdentity) "a")
+      (BTVarWithIdentity (Just leftIdentity) "renamed")
+      `shouldBe` True
+
+    alphaEqBackendType
+      (BTVarWithIdentity (Just leftIdentity) "a")
+      (BTVarWithIdentity (Just rightIdentity) "a")
+      `shouldBe` False
+
+    alphaEqBackendType
+      (BTVarWithIdentity (Just leftIdentity) "a")
+      (BTVar "a")
+      `shouldBe` False
+
+    alphaEqBackendType
+      (BTForallWithIdentity (Just leftIdentity) "a" Nothing (BTVarWithIdentity (Just leftIdentity) "stale"))
+      (BTForallWithIdentity (Just rightIdentity) "b" Nothing (BTVarWithIdentity (Just rightIdentity) "renamed"))
+      `shouldBe` True
+
+    alphaEqBackendType
+      (BTVarAppWithIdentity (Just leftIdentity) "f" (intTy :| []))
+      (BTVarAppWithIdentity (Just rightIdentity) "f" (intTy :| []))
+      `shouldBe` False
+
   it "checks bounded type application arguments" $ do
     let boundedIdTy = BTForall "a" (Just intTy) (BTArrow (BTVar "a") (BTVar "a"))
         boolIdTy = BTArrow boolTy boolTy
@@ -608,13 +770,14 @@ spec = describe "MLF.Backend.IR" $ do
     let exprTy = BTForall "a" Nothing (BTArrow (BTVar "a") (BTVar "a"))
         declaredTy = BTForall "b" Nothing (BTArrow (BTVar "b") (BTVar "b"))
         alphaIdentityExpr =
-          BackendTyAbs
+          BackendTyAbsWithIdentity
             { backendExprType = exprTy,
+              backendTyParamIdentity = Nothing,
               backendTyParamName = "a",
               backendTyParamBound = Nothing,
               backendTyAbsBody =
-                BackendLam
-                  { backendExprType = BTArrow (BTVar "a") (BTVar "a"),
+                BackendLamWithIdentity
+                  { backendParamIdentity = Nothing, backendExprType = BTArrow (BTVar "a") (BTVar "a"),
                     backendParamName = "x",
                     backendParamType = BTVar "a",
                     backendBody = BackendVar (BTVar "a") "x"
@@ -736,11 +899,66 @@ spec = describe "MLF.Backend.IR" $ do
     validateBackendProgram (programWithDataAndMainExpr [optionData] someBoolAsOptionIntExpr)
       `shouldBe` Left (BackendConstructorArgumentMismatch "Some" 0 intTy boolTy)
 
+  it "uses data parameter identities when backend parameter names collide" $ do
+    validateBackendProgram (programWithDataAndMainExpr [identityPairData] identityPairExpr)
+      `shouldBe` Right ()
+
+    validateBackendProgram (programWithDataAndMainExpr [identityPairData] swappedIdentityPairExpr)
+      `shouldBe` Left (BackendConstructorArgumentMismatch "IdentityPair" 0 intTy boolTy)
+
+  it "does not capture identity-bearing field placeholders by name-only data parameters" $ do
+    validateBackendProgram identityPlaceholderFieldProgram
+      `shouldBe` Right ()
+
+  it "accepts constructor result types named by data identity" $ do
+    validateBackendProgram dataIdentityConstructorResultProgram
+      `shouldBe` Right ()
+
+  it "accepts stale constructor result type heads when data identity is carried" $ do
+    validateBackendProgram dataIdentityConstructorStaleResultProgram
+      `shouldBe` Right ()
+
+  it "rejects stale constructor result type heads when data identities differ" $ do
+    validateBackendProgram dataIdentityConstructorMismatchedResultProgram
+      `shouldBe` Left (BackendConstructorResultMismatch "IdentityBox" dataIdentityBoxCanonicalTy dataIdentityBoxMismatchedStableTy)
+
+  it "compares backend type heads by carried identity" $ do
+    alphaEqBackendType
+      (BTBaseWithIdentity (Just dataIdentityBoxIdentity) (BaseTy "stale.Left"))
+      (BTBaseWithIdentity (Just dataIdentityBoxIdentity) (BaseTy "stale.Right"))
+      `shouldBe` True
+
+    alphaEqBackendType
+      (BTBaseWithIdentity (Just dataIdentityBoxIdentity) (BaseTy "IdentityBox"))
+      (BTBaseWithIdentity (Just duplicateDataIdentity) (BaseTy "IdentityBox"))
+      `shouldBe` False
+
+    alphaEqBackendType
+      (BTConWithIdentity (Just dataIdentityBoxIdentity) (BaseTy "stale.Left") (intTy :| []))
+      (BTConWithIdentity (Just dataIdentityBoxIdentity) (BaseTy "stale.Right") (intTy :| []))
+      `shouldBe` True
+
+  it "accepts constructor field arguments named by data identity" $ do
+    validateBackendProgram dataIdentityConstructorFieldArgumentProgram
+      `shouldBe` Right ()
+
+  it "accepts case scrutinees named by data identity" $ do
+    validateBackendProgram dataIdentityCaseScrutineeProgram
+      `shouldBe` Right ()
+
   it "substitutes applied type variables in constructor metadata" $ do
     substituteBackendTypes
       (Map.fromList [("f", BTBase (BaseTy "BoxF")), ("a", boolTy)])
       (BTVarApp "f" (BTVar "a" :| []))
       `shouldBe` boxFTy boolTy
+
+    let identityCon = BTConWithIdentity (Just dataIdentityBoxIdentity) (BaseTy "IdentityBox") (BTVar "a" :| [])
+    substituteBackendTypes Map.empty identityCon `shouldBe` identityCon
+
+    substituteBackendTypes
+      (Map.fromList [("f", BTBaseWithIdentity (Just dataIdentityBoxIdentity) (BaseTy "IdentityBox"))])
+      (BTVarApp "f" (intTy :| []))
+      `shouldBe` BTConWithIdentity (Just dataIdentityBoxIdentity) (BaseTy "IdentityBox") (intTy :| [])
 
     validateBackendProgram (programWithDataAndMainExpr [boxFData, maybeFData] justFBoxBoolExpr)
       `shouldBe` Right ()
@@ -806,6 +1024,9 @@ spec = describe "MLF.Backend.IR" $ do
     validateBackendProgram (programWithMainExpr (BackendConstruct boxTy "Missing" []))
       `shouldBe` Left (BackendUnknownConstructor "Missing")
 
+    validateBackendProgram mismatchedConstructorIdentityProgram
+      `shouldBe` Left (BackendUnknownConstructor "Box")
+
     validateBackendProgram
       ( BackendProgram
           [ BackendModule
@@ -820,6 +1041,9 @@ spec = describe "MLF.Backend.IR" $ do
           "main"
       )
       `shouldBe` Left (BackendDuplicateConstructor "Box")
+
+    validateBackendProgram duplicateConstructorIdentityProgram
+      `shouldBe` Left (BackendDuplicateConstructor (symbolIdentityStableName duplicateConstructorIdentity))
 
   it "rejects constructor arity, argument, and result mismatches" $ do
     validateBackendProgram (programWithMainExpr (BackendConstruct boxTy "Box" []))
@@ -897,14 +1121,373 @@ mainLiteralBinding :: BackendBinding
 mainLiteralBinding =
   mainBinding (intLit 1)
 
+duplicateBindingIdentityProgram :: BackendProgram
+duplicateBindingIdentityProgram =
+  programWithBindings
+    [ bindingWithIdentity "left" duplicateValueIdentity,
+      bindingWithIdentity "right" duplicateValueIdentity,
+      mainLiteralBinding
+    ]
+
+mismatchedGlobalBindingIdentityProgram :: BackendProgram
+mismatchedGlobalBindingIdentityProgram =
+  programWithBindings
+    [ bindingWithIdentity "helper" duplicateValueIdentity,
+      mainBinding (BackendVarWithIdentity intTy (Just (TopLevelId otherValueIdentity)) "helper")
+    ]
+
+mismatchedLocalBindingIdentityProgram :: BackendProgram
+mismatchedLocalBindingIdentityProgram =
+  programWithBindings
+    [ binding "helper" intTy (intLit 1),
+      mainBinding (BackendVarWithIdentity intTy (Just (localIdentity 991112 "helper")) "helper")
+    ]
+
+mismatchedLiftedHelperIdentityProgram :: BackendProgram
+mismatchedLiftedHelperIdentityProgram =
+  programWithBindings
+    [ binding liftedHelperName intTy (intLit 1),
+      mainBinding (BackendVarWithIdentity intTy (Just staleLiftedHelperIdentity) liftedHelperName)
+    ]
+
+liftedHelperName :: String
+liftedHelperName =
+  "Main__main$letrec$self$0"
+
+staleLiftedHelperIdentity :: IdDetails
+staleLiftedHelperIdentity =
+  DeferredId (DeferredRef (UniqueIdentity 991113) liftedHelperName)
+
+bindingWithIdentity :: String -> SymbolIdentity -> BackendBinding
+bindingWithIdentity name identity =
+  BackendBindingWithMetadata
+    { backendBindingIdentity = Just identity,
+      backendBindingNameWithMetadata = name,
+      backendBindingTypeWithMetadata = intTy,
+      backendBindingExprWithMetadata = intLit 1,
+      backendBindingExportedAsMainWithMetadata = False,
+      backendBindingEvidenceParamIndices = mempty
+    }
+
 binding :: String -> BackendType -> BackendExpr -> BackendBinding
 binding name ty expr =
   BackendBinding name ty expr False
 
+bindingWithMetadata :: String -> SymbolIdentity -> BackendType -> BackendExpr -> BackendBinding
+bindingWithMetadata name identity ty expr =
+  BackendBindingWithMetadata
+    { backendBindingIdentity = Just identity,
+      backendBindingNameWithMetadata = name,
+      backendBindingTypeWithMetadata = ty,
+      backendBindingExprWithMetadata = expr,
+      backendBindingExportedAsMainWithMetadata = False,
+      backendBindingEvidenceParamIndices = mempty
+    }
+
+duplicateValueIdentity :: SymbolIdentity
+duplicateValueIdentity =
+  SymbolIdentity
+    { symbolUniqueIdentity = UniqueIdentity 991001,
+      symbolNamespace = SymbolValue,
+      symbolDefiningModule = "Main",
+      symbolDefiningName = "value",
+      symbolOwnerIdentity = Nothing
+    }
+
+otherValueIdentity :: SymbolIdentity
+otherValueIdentity =
+  SymbolIdentity
+    { symbolUniqueIdentity = UniqueIdentity 991004,
+      symbolNamespace = SymbolValue,
+      symbolDefiningModule = "Other",
+      symbolDefiningName = "value",
+      symbolOwnerIdentity = Nothing
+    }
+
+globalClosureValueIdentity :: SymbolIdentity
+globalClosureValueIdentity =
+  SymbolIdentity
+    { symbolUniqueIdentity = UniqueIdentity 991111,
+      symbolNamespace = SymbolValue,
+      symbolDefiningModule = "Main",
+      symbolDefiningName = "f",
+      symbolOwnerIdentity = Nothing
+    }
+
+localXIdentity :: IdDetails
+localXIdentity =
+  localIdentity 991101 "x"
+
+otherLocalIdentity :: IdDetails
+otherLocalIdentity =
+  localIdentity 991102 "x"
+
+patternNIdentity :: IdDetails
+patternNIdentity =
+  localIdentity 991103 "n"
+
+otherPatternNIdentity :: IdDetails
+otherPatternNIdentity =
+  localIdentity 991104 "n"
+
+outerClosureIdentity :: IdDetails
+outerClosureIdentity =
+  localIdentity 991105 "f"
+
+innerDirectIdentity :: IdDetails
+innerDirectIdentity =
+  localIdentity 991106 "f"
+
+outerParamFIdentity :: IdDetails
+outerParamFIdentity =
+  localIdentity 991110 "f"
+
+outerClosureParamIdentity :: IdDetails
+outerClosureParamIdentity =
+  localIdentity 991107 "x"
+
+outerPatternFIdentity :: IdDetails
+outerPatternFIdentity =
+  localIdentity 991108 "f"
+
+innerPatternFIdentity :: IdDetails
+innerPatternFIdentity =
+  localIdentity 991109 "f"
+
+localIdentity :: Int -> String -> IdDetails
+localIdentity unique name =
+  LocalId (LocalRef (GeneratedLocalId (UniqueIdentity unique)) name)
+
+identityLam :: IdDetails -> String -> IdDetails -> BackendExpr
+identityLam binderIdentity occurrenceName occurrenceIdentity =
+  BackendLamWithIdentity
+    { backendExprType = idTy,
+      backendParamIdentity = Just binderIdentity,
+      backendParamName = "x",
+      backendParamType = intTy,
+      backendBody = BackendVarWithIdentity intTy (Just occurrenceIdentity) occurrenceName
+    }
+
+identityPatternCase :: IdDetails -> String -> IdDetails -> BackendExpr
+identityPatternCase binderIdentity occurrenceName occurrenceIdentity =
+  BackendCase
+    { backendExprType = intTy,
+      backendScrutinee = BackendConstruct boxTy "Box" [intLit 1],
+      backendAlternatives =
+        BackendAlternative
+          ( BackendConstructorPatternWithBinderIdentities
+              Nothing
+              "Box"
+              [BackendPatternBinder (Just binderIdentity) "n"]
+          )
+          (BackendVarWithIdentity intTy (Just occurrenceIdentity) occurrenceName)
+          :| []
+    }
+
+identityCapturedClosure :: IdDetails -> String -> IdDetails -> BackendExpr
+identityCapturedClosure binderIdentity occurrenceName occurrenceIdentity =
+  BackendClosureWithParamIdentities
+    { backendExprType = idTy,
+      backendClosureEntryName = "__mlfp_closure$identity_capture",
+      backendClosureCaptures =
+        [BackendClosureCapture (Just binderIdentity) "captured" intTy (intLit 7)],
+      backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
+      backendClosureBody = BackendVarWithIdentity intTy (Just occurrenceIdentity) occurrenceName
+    }
+
+identityParamClosure :: IdDetails -> String -> IdDetails -> BackendExpr
+identityParamClosure binderIdentity occurrenceName occurrenceIdentity =
+  BackendClosureWithParamIdentities
+    { backendExprType = idTy,
+      backendClosureEntryName = "__mlfp_closure$identity_param",
+      backendClosureCaptures = [],
+      backendClosureParamsWithIdentities =
+        [BackendClosureParam (Just binderIdentity) "x" intTy],
+      backendClosureBody = BackendVarWithIdentity intTy (Just occurrenceIdentity) occurrenceName
+    }
+
+identityShadowedClosureApp :: BackendExpr
+identityShadowedClosureApp =
+  BackendLetWithIdentity
+    { backendExprType = intTy,
+      backendLetIdentity = Just outerClosureIdentity,
+      backendLetName = "f",
+      backendLetType = idTy,
+      backendLetRhs =
+        identityParamClosure outerClosureParamIdentity "x" outerClosureParamIdentity,
+      backendLetBody =
+        BackendLetWithIdentity
+          { backendExprType = intTy,
+            backendLetIdentity = Just innerDirectIdentity,
+            backendLetName = "f",
+            backendLetType = idTy,
+            backendLetRhs = intIdentityExpr,
+            backendLetBody =
+              BackendApp
+                intTy
+                (BackendVarWithIdentity idTy (Just outerClosureIdentity) "f")
+                (intLit 1)
+          }
+    }
+
+identityShadowedClosureAppByNameOnlyBinder :: BackendExpr
+identityShadowedClosureAppByNameOnlyBinder =
+  BackendLetWithIdentity
+    { backendExprType = intTy,
+      backendLetIdentity = Just outerClosureIdentity,
+      backendLetName = "f",
+      backendLetType = idTy,
+      backendLetRhs =
+        identityParamClosure outerClosureParamIdentity "x" outerClosureParamIdentity,
+      backendLetBody =
+        BackendLetWithIdentity
+          { backendExprType = intTy,
+            backendLetIdentity = Nothing,
+            backendLetName = "f",
+            backendLetType = idTy,
+            backendLetRhs = intIdentityExpr,
+            backendLetBody =
+              BackendApp
+                intTy
+                (BackendVarWithIdentity idTy (Just outerClosureIdentity) "f")
+                (intLit 1)
+          }
+    }
+
+identityShadowedPatternClosureApp :: BackendExpr
+identityShadowedPatternClosureApp =
+  BackendApp
+    intTy
+    ( BackendCase
+        idTy
+        (BackendConstruct fnBoxTy "FnBox" [identityParamClosure outerClosureParamIdentity "x" outerClosureParamIdentity])
+        ( BackendAlternative
+            ( BackendConstructorPatternWithBinderIdentities
+                Nothing
+                "FnBox"
+                [BackendPatternBinder (Just outerPatternFIdentity) "f"]
+            )
+            ( BackendCase
+                idTy
+                (BackendConstruct boxTy "Box" [intLit 1])
+                ( BackendAlternative
+                    ( BackendConstructorPatternWithBinderIdentities
+                        Nothing
+                        "Box"
+                        [BackendPatternBinder (Just innerPatternFIdentity) "f"]
+                    )
+                    (BackendVarWithIdentity idTy (Just outerPatternFIdentity) "f")
+                    :| []
+                )
+            )
+            :| []
+        )
+    )
+    (intLit 1)
+
+identityPatternFallbackClosureProgram :: BackendProgram
+identityPatternFallbackClosureProgram =
+  programWithDataAndBindings
+    [boxData]
+    [ bindingWithMetadata
+        "f"
+        globalClosureValueIdentity
+        idTy
+        (identityParamClosure outerClosureParamIdentity "x" outerClosureParamIdentity),
+      mainBinding
+        ( BackendLetWithIdentity
+            { backendExprType = intTy,
+              backendLetIdentity = Just innerDirectIdentity,
+              backendLetName = "f",
+              backendLetType = idTy,
+              backendLetRhs = intIdentityExpr,
+              backendLetBody =
+                BackendApp
+                  intTy
+                  ( BackendCase
+                      idTy
+                      (BackendConstruct boxTy "Box" [intLit 1])
+                      ( BackendAlternative
+                          ( BackendConstructorPatternWithBinderIdentities
+                              Nothing
+                              "Box"
+                              [BackendPatternBinder (Just innerPatternFIdentity) "f"]
+                          )
+                          (BackendVarWithIdentity idTy (Just (TopLevelId globalClosureValueIdentity)) "f")
+                          :| []
+                      )
+                  )
+                  (intLit 1)
+            }
+        )
+    ]
+
+identityShadowedClosureParam :: BackendExpr
+identityShadowedClosureParam =
+  BackendLamWithIdentity
+    { backendExprType = BTArrow idTy intTy,
+      backendParamIdentity = Just outerParamFIdentity,
+      backendParamName = "f",
+      backendParamType = idTy,
+      backendBody =
+        BackendLetWithIdentity
+          { backendExprType = intTy,
+            backendLetIdentity = Just innerDirectIdentity,
+            backendLetName = "f",
+            backendLetType = idTy,
+            backendLetRhs = intIdentityExpr,
+            backendLetBody =
+              BackendClosureCall
+                intTy
+                (BackendVarWithIdentity idTy (Just outerParamFIdentity) "f")
+                [intLit 1]
+          }
+    }
+
+duplicateDataIdentity :: SymbolIdentity
+duplicateDataIdentity =
+  SymbolIdentity
+    { symbolUniqueIdentity = UniqueIdentity 991000,
+      symbolNamespace = SymbolType,
+      symbolDefiningModule = "Main",
+      symbolDefiningName = "Data",
+      symbolOwnerIdentity = Nothing
+    }
+
+duplicateConstructorIdentity :: SymbolIdentity
+duplicateConstructorIdentity =
+  SymbolIdentity
+    { symbolUniqueIdentity = UniqueIdentity 991002,
+      symbolNamespace = SymbolConstructor,
+      symbolDefiningModule = "Main",
+      symbolDefiningName = "Box",
+      symbolOwnerIdentity = Nothing
+    }
+
+otherConstructorIdentity :: SymbolIdentity
+otherConstructorIdentity =
+  SymbolIdentity
+    { symbolUniqueIdentity = UniqueIdentity 991005,
+      symbolNamespace = SymbolConstructor,
+      symbolDefiningModule = "Other",
+      symbolDefiningName = "Box",
+      symbolOwnerIdentity = Nothing
+    }
+
+dataIdentityBoxIdentity :: SymbolIdentity
+dataIdentityBoxIdentity =
+  SymbolIdentity
+    { symbolUniqueIdentity = UniqueIdentity 991003,
+      symbolNamespace = SymbolType,
+      symbolDefiningModule = "Main",
+      symbolDefiningName = "IdentityBox",
+      symbolOwnerIdentity = Nothing
+    }
+
 intIdentityExpr :: BackendExpr
 intIdentityExpr =
-  BackendLam
-    { backendExprType = idTy,
+  BackendLamWithIdentity
+    { backendParamIdentity = Nothing, backendExprType = idTy,
       backendParamName = "x",
       backendParamType = intTy,
       backendBody = BackendVar intTy "x"
@@ -912,8 +1495,8 @@ intIdentityExpr =
 
 letIdentityExpr :: BackendExpr
 letIdentityExpr =
-  BackendLet
-    { backendExprType = intTy,
+  BackendLetWithIdentity
+    { backendLetIdentity = Nothing, backendExprType = intTy,
       backendLetName = "x",
       backendLetType = intTy,
       backendLetRhs = intLit 1,
@@ -927,6 +1510,132 @@ boxData =
       backendDataParameters = [],
       backendDataConstructors = [BackendConstructor "Box" [] [intTy] boxTy]
     }
+
+duplicateDataIdentityProgram :: BackendProgram
+duplicateDataIdentityProgram =
+  programWithDataAndMainExpr
+    [ dataWithIdentity "LeftBox" duplicateDataIdentity,
+      dataWithIdentity "RightBox" duplicateDataIdentity
+    ]
+    (intLit 1)
+
+dataWithIdentity :: String -> SymbolIdentity -> BackendData
+dataWithIdentity name identity =
+  BackendDataWithIdentity
+    { backendDataIdentity = Just identity,
+      backendDataNameWithIdentity = name,
+      backendDataParametersWithIdentity = [],
+      backendDataParameterIdentities = [],
+      backendDataConstructorsWithIdentity = []
+    }
+
+duplicateConstructorIdentityProgram :: BackendProgram
+duplicateConstructorIdentityProgram =
+  programWithDataAndMainExpr
+    [ BackendData "LeftBox" [] [constructorWithIdentity "LeftBox" duplicateConstructorIdentity],
+      BackendData "RightBox" [] [constructorWithIdentity "RightBox" duplicateConstructorIdentity]
+    ]
+    (intLit 1)
+
+mismatchedConstructorIdentityProgram :: BackendProgram
+mismatchedConstructorIdentityProgram =
+  programWithDataAndMainExpr
+    [BackendData "Box" [] [constructorWithIdentity "Box" duplicateConstructorIdentity]]
+    (BackendConstructWithIdentity boxTy (Just otherConstructorIdentity) "Box" [intLit 1])
+
+constructorWithIdentity :: String -> SymbolIdentity -> BackendConstructor
+constructorWithIdentity name identity =
+  BackendConstructorWithIdentity
+    { backendConstructorIdentity = Just identity,
+      backendConstructorNameWithIdentity = name,
+      backendConstructorForallsWithIdentity = [],
+      backendConstructorFieldsWithIdentity = [intTy],
+      backendConstructorResultWithIdentity = BTBase (BaseTy name)
+    }
+
+dataIdentityConstructorResultProgram :: BackendProgram
+dataIdentityConstructorResultProgram =
+  programWithDataAndMainExpr
+    [dataIdentityBoxData]
+    (BackendConstruct dataIdentityBoxStableTy "IdentityBox" [])
+
+dataIdentityConstructorStaleResultProgram :: BackendProgram
+dataIdentityConstructorStaleResultProgram =
+  programWithDataAndMainExpr
+    [dataIdentityBoxData]
+    (BackendConstruct dataIdentityBoxStaleTy "IdentityBox" [])
+
+dataIdentityConstructorMismatchedResultProgram :: BackendProgram
+dataIdentityConstructorMismatchedResultProgram =
+  programWithDataAndMainExpr
+    [dataIdentityBoxData]
+    (BackendConstruct dataIdentityBoxMismatchedStableTy "IdentityBox" [])
+
+dataIdentityConstructorFieldArgumentProgram :: BackendProgram
+dataIdentityConstructorFieldArgumentProgram =
+  programWithDataAndBindings
+    [dataIdentityBoxData, dataIdentityWrapData]
+    [ binding "payload" dataIdentityBoxStableTy (BackendConstruct dataIdentityBoxStableTy "IdentityBox" []),
+      mainBinding (BackendConstruct dataIdentityWrapTy "IdentityWrap" [BackendVar dataIdentityBoxStableTy "payload"])
+    ]
+
+dataIdentityCaseScrutineeProgram :: BackendProgram
+dataIdentityCaseScrutineeProgram =
+  programWithDataAndMainExpr
+    [dataIdentityBoxData]
+    ( BackendCase
+        intTy
+        (BackendConstruct dataIdentityBoxStableTy "IdentityBox" [])
+        (BackendAlternative (BackendConstructorPattern "IdentityBox" []) (intLit 1) :| [])
+    )
+
+dataIdentityBoxData :: BackendData
+dataIdentityBoxData =
+  BackendDataWithIdentity
+    { backendDataIdentity = Just dataIdentityBoxIdentity,
+      backendDataNameWithIdentity = "IdentityBox",
+      backendDataParametersWithIdentity = [],
+      backendDataParameterIdentities = [],
+      backendDataConstructorsWithIdentity = [BackendConstructor "IdentityBox" [] [] (BTBase (BaseTy "IdentityBox"))]
+    }
+
+dataIdentityBoxStableTy :: BackendType
+dataIdentityBoxStableTy =
+  BTBase (BaseTy (symbolIdentityStableName dataIdentityBoxIdentity))
+
+dataIdentityBoxCanonicalTy :: BackendType
+dataIdentityBoxCanonicalTy =
+  BTBaseWithIdentity (Just dataIdentityBoxIdentity) (BaseTy "IdentityBox")
+
+dataIdentityBoxStaleTy :: BackendType
+dataIdentityBoxStaleTy =
+  BTBaseWithIdentity (Just dataIdentityBoxIdentity) (BaseTy "stale.IdentityBox")
+
+dataIdentityBoxMismatchedStableTy :: BackendType
+dataIdentityBoxMismatchedStableTy =
+  BTBaseWithIdentity (Just otherDataIdentityBoxIdentity) (BaseTy (symbolIdentityStableName dataIdentityBoxIdentity))
+
+otherDataIdentityBoxIdentity :: SymbolIdentity
+otherDataIdentityBoxIdentity =
+  SymbolIdentity
+    { symbolUniqueIdentity = UniqueIdentity 991006,
+      symbolNamespace = SymbolType,
+      symbolDefiningModule = "Other",
+      symbolDefiningName = "IdentityBox",
+      symbolOwnerIdentity = Nothing
+    }
+
+dataIdentityWrapData :: BackendData
+dataIdentityWrapData =
+  BackendData
+    { backendDataName = "IdentityWrap",
+      backendDataParameters = [],
+      backendDataConstructors = [BackendConstructor "IdentityWrap" [] [BTBase (BaseTy "IdentityBox")] dataIdentityWrapTy]
+    }
+
+dataIdentityWrapTy :: BackendType
+dataIdentityWrapTy =
+  BTBase (BaseTy "IdentityWrap")
 
 fnBoxData :: BackendData
 fnBoxData =
@@ -1091,6 +1800,106 @@ someBoolAsOptionIntExpr :: BackendExpr
 someBoolAsOptionIntExpr =
   BackendConstruct (optionTy intTy) "Some" [boolLit True]
 
+identityPairLeftParamIdentity :: TypeBinderIdentity
+identityPairLeftParamIdentity =
+  typeBinderIdentityFromNode (NodeId 991201)
+
+identityPairRightParamIdentity :: TypeBinderIdentity
+identityPairRightParamIdentity =
+  typeBinderIdentityFromNode (NodeId 991202)
+
+identityPairDataIdentity :: SymbolIdentity
+identityPairDataIdentity =
+  SymbolIdentity
+    { symbolUniqueIdentity = UniqueIdentity 991203,
+      symbolNamespace = SymbolType,
+      symbolDefiningModule = "Main",
+      symbolDefiningName = "IdentityPair",
+      symbolOwnerIdentity = Nothing
+    }
+
+identityPairConstructorIdentity :: SymbolIdentity
+identityPairConstructorIdentity =
+  SymbolIdentity
+    { symbolUniqueIdentity = UniqueIdentity 991204,
+      symbolNamespace = SymbolConstructor,
+      symbolDefiningModule = "Main",
+      symbolDefiningName = "IdentityPair",
+      symbolOwnerIdentity = Nothing
+    }
+
+identityPairTy :: BackendType -> BackendType -> BackendType
+identityPairTy left right =
+  BTConWithIdentity (Just identityPairDataIdentity) (BaseTy "IdentityPair") (left :| [right])
+
+identityPairData :: BackendData
+identityPairData =
+  BackendDataWithIdentity
+    { backendDataIdentity = Just identityPairDataIdentity,
+      backendDataNameWithIdentity = "IdentityPair",
+      backendDataParametersWithIdentity = ["a", "a"],
+      backendDataParameterIdentities = [Just identityPairLeftParamIdentity, Just identityPairRightParamIdentity],
+      backendDataConstructorsWithIdentity =
+        [ BackendConstructorWithIdentity
+            { backendConstructorIdentity = Just identityPairConstructorIdentity,
+              backendConstructorNameWithIdentity = "IdentityPair",
+              backendConstructorForallsWithIdentity = [],
+              backendConstructorFieldsWithIdentity =
+                [ BTVarWithIdentity (Just identityPairLeftParamIdentity) "a",
+                  BTVarWithIdentity (Just identityPairRightParamIdentity) "a"
+                ],
+              backendConstructorResultWithIdentity =
+                identityPairTy
+                  (BTVarWithIdentity (Just identityPairLeftParamIdentity) "a")
+                  (BTVarWithIdentity (Just identityPairRightParamIdentity) "a")
+            }
+        ]
+    }
+
+identityPairExpr :: BackendExpr
+identityPairExpr =
+  BackendConstructWithIdentity
+    (identityPairTy intTy boolTy)
+    (Just identityPairConstructorIdentity)
+    "IdentityPair"
+    [intLit 1, boolLit True]
+
+swappedIdentityPairExpr :: BackendExpr
+swappedIdentityPairExpr =
+  BackendConstructWithIdentity
+    (identityPairTy intTy boolTy)
+    (Just identityPairConstructorIdentity)
+    "IdentityPair"
+    [boolLit True, intLit 1]
+
+identityPlaceholderFieldIdentity :: TypeBinderIdentity
+identityPlaceholderFieldIdentity =
+  typeBinderIdentityFromNode (NodeId 991205)
+
+identityPlaceholderFieldProgram :: BackendProgram
+identityPlaceholderFieldProgram =
+  programWithDataAndMainExpr
+    [identityPlaceholderFieldData]
+    ( BackendConstruct
+        (BTCon (BaseTy "IdentityPlaceholder") (intTy :| []))
+        "IdentityPlaceholder"
+        [boolLit True]
+    )
+
+identityPlaceholderFieldData :: BackendData
+identityPlaceholderFieldData =
+  BackendData
+    { backendDataName = "IdentityPlaceholder",
+      backendDataParameters = ["a"],
+      backendDataConstructors =
+        [ BackendConstructor
+            "IdentityPlaceholder"
+            []
+            [BTVarWithIdentity (Just identityPlaceholderFieldIdentity) "a"]
+            (BTCon (BaseTy "IdentityPlaceholder") (BTVar "a" :| []))
+        ]
+    }
+
 malformedStructuralBoxTy :: BackendType
 malformedStructuralBoxTy =
   BTMu "$Box_self" BTBottom
@@ -1171,18 +1980,20 @@ dependentActualBoundPackWrongProgram =
 
 dependentActualBoundPackWrapper :: BackendType -> BackendExpr
 dependentActualBoundPackWrapper zBound =
-  BackendTyAbs
+  BackendTyAbsWithIdentity
     { backendExprType = dependentActualBoundPackWrapperTy zBound,
+      backendTyParamIdentity = Nothing,
       backendTyParamName = "z",
       backendTyParamBound = Just zBound,
       backendTyAbsBody =
-        BackendTyAbs
+        BackendTyAbsWithIdentity
           { backendExprType = dependentActualBoundPackInnerTy,
+            backendTyParamIdentity = Nothing,
             backendTyParamName = "b",
             backendTyParamBound = Just (listTy (BTVar "z")),
             backendTyAbsBody =
-              BackendLam
-                { backendExprType = BTArrow (BTVar "b") dependentActualBoundPackTy,
+              BackendLamWithIdentity
+                { backendParamIdentity = Nothing, backendExprType = BTArrow (BTVar "b") dependentActualBoundPackTy,
                   backendParamName = "x",
                   backendParamType = BTVar "b",
                   backendBody =
@@ -1234,13 +2045,14 @@ boundedPackOuterNameCollisionCaseWith :: BackendExpr -> BackendProgram
 boundedPackOuterNameCollisionCaseWith branchBody =
   programWithDataAndMainExpr
     [boundedPackData]
-    ( BackendTyAbs
+    ( BackendTyAbsWithIdentity
         { backendExprType = BTForall "a" (Just boolTy) (BTArrow (BTVar "a") intTy),
+          backendTyParamIdentity = Nothing,
           backendTyParamName = "a",
           backendTyParamBound = Just boolTy,
           backendTyAbsBody =
-            BackendLam
-              { backendExprType = BTArrow (BTVar "a") intTy,
+            BackendLamWithIdentity
+              { backendParamIdentity = Nothing, backendExprType = BTArrow (BTVar "a") intTy,
                 backendParamName = "outer",
                 backendParamType = BTVar "a",
                 backendBody =
@@ -1344,8 +2156,8 @@ vacuousRecursiveVariableMismatchProgram :: BackendProgram
 vacuousRecursiveVariableMismatchProgram =
   programWithBindings
     [ mainBinding
-        BackendLam
-          { backendExprType = BTArrow vacuousRecursiveIntTy vacuousRecursiveBoolTy,
+        BackendLamWithIdentity
+          { backendParamIdentity = Nothing, backendExprType = BTArrow vacuousRecursiveIntTy vacuousRecursiveBoolTy,
             backendParamName = "x",
             backendParamType = vacuousRecursiveIntTy,
             backendBody = BackendVar vacuousRecursiveBoolTy "x"
@@ -1356,8 +2168,8 @@ oneSidedVacuousRecursiveMismatchProgram :: BackendProgram
 oneSidedVacuousRecursiveMismatchProgram =
   programWithBindings
     [ mainBinding
-        BackendLam
-          { backendExprType = BTArrow recursiveArrowIntTy vacuousRecursiveBoolTy,
+        BackendLamWithIdentity
+          { backendParamIdentity = Nothing, backendExprType = BTArrow recursiveArrowIntTy vacuousRecursiveBoolTy,
             backendParamName = "x",
             backendParamType = recursiveArrowIntTy,
             backendBody = BackendVar vacuousRecursiveBoolTy "x"

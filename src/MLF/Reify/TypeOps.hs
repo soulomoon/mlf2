@@ -4,23 +4,21 @@
 {-# LANGUAGE RankNTypes #-}
 
 module MLF.Reify.TypeOps
-  ( splitForalls,
+  ( splitForallsRefs,
     stripForallsType,
-    freeTypeVarsFrom,
+    freeTypeVarRefsFrom,
     freeTypeVarsType,
-    freeTypeVarsList,
-    substTypeCapture,
-    substTypeSimple,
-    composeTypeHead,
-    renameTypeVar,
+    freeTypeVarRefsType,
+    freeTypeVarRefsList,
+    substTypeCaptureRef,
+    substTypeSimpleRef,
+    composeTypeHeadRef,
     freshNameLike,
-    freshTypeName,
-    freshTypeNameFromCounter,
     alphaEqType,
     churchMuEquivalent,
     churchAwareEqType,
     firstNonContractiveRecursiveType,
-    matchType,
+    matchTypeRefs,
     parseNameId,
     resolveBaseBoundForInstConstraint,
     resolveBaseBoundForInstSolved,
@@ -34,6 +32,7 @@ where
 import Control.Applicative ((<|>))
 import Data.Foldable (toList)
 import qualified Data.IntSet as IntSet
+import Data.List (find)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -45,252 +44,270 @@ import MLF.Types.Elab
 import MLF.Util.ElabError (ElabError (..))
 import MLF.Util.Names (freshNameLike, parseNameId)
 
-newtype BoundFun (i :: TopVar) = BoundFun {runBoundFun :: Set.Set String -> Set.Set String}
+newtype BoundRefFun (i :: TopVar) = BoundRefFun {runBoundRefFun :: [TypeBinderRef] -> [TypeBinderRef]}
 
-splitForalls :: Ty v -> ([(String, Maybe BoundType)], ElabType)
-splitForalls = go
+splitForallsRefs :: Ty v -> ([(TypeBinderRef, Maybe BoundType)], ElabType)
+splitForallsRefs = go
   where
-    go :: forall w. Ty w -> ([(String, Maybe BoundType)], ElabType)
+    go :: forall w. Ty w -> ([(TypeBinderRef, Maybe BoundType)], ElabType)
     go ty = case ty of
-      TForall v mb body ->
+      TForallRef ref mb body ->
         let (binds, body') = go body
-         in ((v, mb) : binds, body')
+         in ((ref, mb) : binds, body')
       _ -> ([], tyToElab ty)
 
 stripForallsType :: Ty v -> ElabType
-stripForallsType = snd . splitForalls
+stripForallsType = snd . splitForallsRefs
 
 freeTypeVarsType :: Ty v -> Set.Set String
-freeTypeVarsType = freeTypeVarsFromWith False Set.empty
+freeTypeVarsType =
+  Set.fromList . map typeBinderRefName . freeTypeVarRefsType
 
-freeTypeVarsFrom :: Set.Set String -> Ty v -> Set.Set String
-freeTypeVarsFrom = freeTypeVarsFromWith True
+freeTypeVarRefsType :: Ty v -> [TypeBinderRef]
+freeTypeVarRefsType = freeTypeVarRefsFromWith False []
 
-freeTypeVarsList :: Ty v -> [String]
-freeTypeVarsList = Set.toList . freeTypeVarsType
+freeTypeVarRefsFrom :: [TypeBinderRef] -> Ty v -> [TypeBinderRef]
+freeTypeVarRefsFrom = freeTypeVarRefsFromWith True
 
-freeTypeVarsFromWith :: Bool -> Set.Set String -> Ty v -> Set.Set String
-freeTypeVarsFromWith bindInBound bound0 ty =
-  runBoundFun (cataIx alg ty) bound0
+freeTypeVarRefsList :: Ty v -> [TypeBinderRef]
+freeTypeVarRefsList = freeTypeVarRefsType
+
+freeTypeVarRefsFromWith :: Bool -> [TypeBinderRef] -> Ty v -> [TypeBinderRef]
+freeTypeVarRefsFromWith bindInBound bound0 ty =
+  runBoundRefFun (cataIx alg ty) bound0
   where
-    alg :: TyIF i BoundFun -> BoundFun i
+    alg :: TyIF i BoundRefFun -> BoundRefFun i
     alg node = case node of
-      TVarIF v ->
-        BoundFun $ \boundSet ->
-          if Set.member v boundSet
-            then Set.empty
-            else Set.singleton v
+      TVarIFRef ref ->
+        BoundRefFun $ \boundRefs ->
+          if refMember ref boundRefs
+            then []
+            else [ref]
       TArrowIF d c ->
-        BoundFun $ \boundSet ->
-          Set.union (runBoundFun d boundSet) (runBoundFun c boundSet)
+        BoundRefFun $ \boundRefs ->
+          unionRefs (runBoundRefFun d boundRefs) (runBoundRefFun c boundRefs)
       TConIF _ args ->
-        BoundFun $ \boundSet ->
+        BoundRefFun $ \boundRefs ->
           foldr
-            (\arg acc -> Set.union (runBoundFun arg boundSet) acc)
-            Set.empty
+            (\arg acc -> unionRefs (runBoundRefFun arg boundRefs) acc)
+            []
             args
-      TVarAppIF v args ->
-        BoundFun $ \boundSet ->
+      TVarAppIFRef ref args ->
+        BoundRefFun $ \boundRefs ->
           let headFree =
-                if Set.member v boundSet
-                  then Set.empty
-                  else Set.singleton v
+                if refMember ref boundRefs
+                  then []
+                  else [ref]
               argsFree =
                 foldr
-                  (\arg acc -> Set.union (runBoundFun arg boundSet) acc)
-                  Set.empty
+                  (\arg acc -> unionRefs (runBoundRefFun arg boundRefs) acc)
+                  []
                   args
-           in Set.union headFree argsFree
-      TBaseIF _ -> BoundFun (const Set.empty)
-      TBottomIF -> BoundFun (const Set.empty)
-      TForallIF v mb body ->
-        BoundFun $ \boundSet ->
-          let boundBody = Set.insert v boundSet
-              boundBound = if bindInBound then boundBody else boundSet
-              freeBound = maybe Set.empty (\f -> runBoundFun f boundBound) mb
-              freeBody = runBoundFun body boundBody
-           in Set.union freeBound freeBody
-      TMuIF v body ->
-        BoundFun $ \boundSet ->
-          runBoundFun body (Set.insert v boundSet)
+           in unionRefs headFree argsFree
+      TBaseIF _ -> BoundRefFun (const [])
+      TBottomIF -> BoundRefFun (const [])
+      TForallIFRef ref mb body ->
+        BoundRefFun $ \boundRefs ->
+          let boundBody = insertRef ref boundRefs
+              boundBound = if bindInBound then boundBody else boundRefs
+              freeBound = maybe [] (\f -> runBoundRefFun f boundBound) mb
+              freeBody = runBoundRefFun body boundBody
+           in unionRefs freeBound freeBody
+      TMuIFRef ref body ->
+        BoundRefFun $ \boundRefs ->
+          runBoundRefFun body (insertRef ref boundRefs)
 
-substTypeCapture :: String -> ElabType -> ElabType -> ElabType
-substTypeCapture x s = goSub
+    unionRefs left right =
+      foldr insertRef right left
+
+    insertRef ref refs
+      | refMember ref refs = refs
+      | otherwise = ref : refs
+
+    refMember ref =
+      any (typeBinderRefsSameIdentity ref)
+
+substTypeCaptureRef :: TypeBinderRef -> ElabType -> ElabType -> ElabType
+substTypeCaptureRef target s = goSub
   where
-    freeS = freeTypeVarsType s
+    freeSRefs = freeTypeVarRefsType s
+    freeSNames = Set.fromList (map typeBinderRefName freeSRefs)
 
-    substBoundCaptureLocal :: String -> ElabType -> BoundType -> BoundType
-    substBoundCaptureLocal name replacement bound = case bound of
+    replacementMentionsRef :: TypeBinderRef -> Bool
+    replacementMentionsRef ref =
+      any (binderMayCaptureReplacementRef ref) freeSRefs
+
+    binderMayCaptureReplacementRef :: TypeBinderRef -> TypeBinderRef -> Bool
+    binderMayCaptureReplacementRef binder replacementRef =
+      typeBinderRefsSameIdentity binder replacementRef
+
+    substBoundCaptureLocal :: TypeBinderRef -> ElabType -> BoundType -> BoundType
+    substBoundCaptureLocal targetRef replacement bound = case bound of
       TArrow a b ->
-        TArrow (substTypeCapture name replacement a) (substTypeCapture name replacement b)
-      TCon c args -> TCon c (fmap (substTypeCapture name replacement) args)
-      TVarApp v args ->
-        let args' = fmap (substTypeCapture name replacement) args
-         in if v == name
-              then composeTypeHead v replacement args'
-              else TVarApp v args'
-      TBase b -> TBase b
+        TArrow (substTypeCaptureRef targetRef replacement a) (substTypeCaptureRef targetRef replacement b)
+      TConWithIdentity identity c args -> TConWithIdentity identity c (fmap (substTypeCaptureRef targetRef replacement) args)
+      TVarAppRef ref args ->
+        let args' = fmap (substTypeCaptureRef targetRef replacement) args
+         in if typeBinderRefsSameIdentity ref targetRef
+              then composeTypeHeadRef ref replacement args'
+              else TVarAppRef ref args'
+      TBaseWithIdentity identity b -> TBaseWithIdentity identity b
       TBottom -> TBottom
-      TForall v mb body
-        | v == name ->
-            let mb' = fmap (substBoundCaptureLocal name replacement) mb
-             in TForall v mb' body
-        | v `Set.member` freeS ->
+      TForallRef ref mb body
+        | typeBinderRefsSameIdentity ref targetRef ->
+            let mb' = fmap (substBoundCaptureLocal targetRef replacement) mb
+             in TForallRef ref mb' body
+        | replacementMentionsRef ref ->
             let used =
                   Set.unions
-                    [ freeS,
+                    [ freeSNames,
                       freeTypeVarsType body,
                       maybe Set.empty freeTypeVarsType mb,
                       Set.singleton v
                     ]
                 v' = freshNameLike v used
-                body' = substTypeCapture v (TVar v') body
-                mb' = fmap (substBoundCaptureLocal name replacement) mb
-             in TForall v' mb' (substTypeCapture name replacement body')
+                ref' = renameTypeBinderRef v' ref
+                body' = substTypeCaptureRef ref (TVarRef ref') body
+                mb' = fmap (substBoundCaptureLocal targetRef replacement) mb
+             in TForallRef ref' mb' (substTypeCaptureRef targetRef replacement body')
         | otherwise ->
-            let mb' = fmap (substBoundCaptureLocal name replacement) mb
-             in TForall v mb' (substTypeCapture name replacement body)
-      TMu v body
-        | v == name -> TMu v body
-        | v `Set.member` freeS ->
+            let mb' = fmap (substBoundCaptureLocal targetRef replacement) mb
+             in TForallRef ref mb' (substTypeCaptureRef targetRef replacement body)
+        where
+          v = typeBinderRefName ref
+      TMuRef ref body
+        | typeBinderRefsSameIdentity ref targetRef -> TMuRef ref body
+        | replacementMentionsRef ref ->
             let used =
                   Set.unions
-                    [ freeS,
+                    [ freeSNames,
                       freeTypeVarsType body,
                       Set.singleton v
                     ]
                 v' = freshNameLike v used
-                body' = substTypeCapture v (TVar v') body
-             in TMu v' (substTypeCapture name replacement body')
+                ref' = renameTypeBinderRef v' ref
+                body' = substTypeCaptureRef ref (TVarRef ref') body
+             in TMuRef ref' (substTypeCaptureRef targetRef replacement body')
         | otherwise ->
-            TMu v (substTypeCapture name replacement body)
+            TMuRef ref (substTypeCaptureRef targetRef replacement body)
+        where
+          v = typeBinderRefName ref
 
     goSub = paraIx alg
       where
         alg :: TyIF i (IxPair Ty Ty) -> Ty i
         alg ty = case ty of
-          TVarIF v
-            | v == x -> s
-            | otherwise -> TVar v
+          TVarIFRef ref
+            | typeBinderRefsSameIdentity ref target -> s
+            | otherwise -> TVarRef ref
           TArrowIF d c -> TArrow (snd (unIxPair d)) (snd (unIxPair c))
-          TConIF c args -> TCon c (fmap (snd . unIxPair) args)
-          TVarAppIF v args ->
+          TConIFWithIdentity identity c args -> TConWithIdentity identity c (fmap (snd . unIxPair) args)
+          TVarAppIFRef ref args ->
             let args' = fmap (snd . unIxPair) args
-             in if v == x
-                  then composeTypeHead v s args'
-                  else TVarApp v args'
-          TBaseIF b -> TBase b
+             in if typeBinderRefsSameIdentity ref target
+                  then composeTypeHeadRef ref s args'
+                  else TVarAppRef ref args'
+          TBaseIFWithIdentity identity b -> TBaseWithIdentity identity b
           TBottomIF -> TBottom
-          TForallIF v mb body
-            | v == x ->
-                let mb' = fmap (substBoundCaptureLocal x s . fst . unIxPair) mb
-                 in TForall v mb' (fst (unIxPair body))
-            | v `Set.member` freeS ->
+          TForallIFRef ref mb body
+            | typeBinderRefsSameIdentity ref target ->
+                let mb' = fmap (substBoundCaptureLocal target s . fst . unIxPair) mb
+                 in TForallRef ref mb' (fst (unIxPair body))
+            | replacementMentionsRef ref ->
                 let used =
                       Set.unions
-                        [ freeS,
+                        [ freeSNames,
                           freeTypeVarsType (fst (unIxPair body)),
                           maybe Set.empty (freeTypeVarsType . fst . unIxPair) mb,
                           Set.singleton v
                         ]
                     v' = freshNameLike v used
-                    body' = substTypeCapture v (TVar v') (fst (unIxPair body))
-                    mb' = fmap (substBoundCaptureLocal x s . fst . unIxPair) mb
-                 in TForall v' mb' (substTypeCapture x s body')
+                    ref' = renameTypeBinderRef v' ref
+                    body' = substTypeCaptureRef ref (TVarRef ref') (fst (unIxPair body))
+                    mb' = fmap (substBoundCaptureLocal target s . fst . unIxPair) mb
+                 in TForallRef ref' mb' (substTypeCaptureRef target s body')
             | otherwise ->
-                let mb' = fmap (substBoundCaptureLocal x s . fst . unIxPair) mb
-                 in TForall v mb' (snd (unIxPair body))
-          TMuIF v body
-            | v == x -> TMu v (fst (unIxPair body))
-            | v `Set.member` freeS ->
+                let mb' = fmap (substBoundCaptureLocal target s . fst . unIxPair) mb
+                 in TForallRef ref mb' (snd (unIxPair body))
+            where
+              v = typeBinderRefName ref
+          TMuIFRef ref body
+            | typeBinderRefsSameIdentity ref target -> TMuRef ref (fst (unIxPair body))
+            | replacementMentionsRef ref ->
                 let used =
                       Set.unions
-                        [ freeS,
+                        [ freeSNames,
                           freeTypeVarsType (fst (unIxPair body)),
                           Set.singleton v
                         ]
                     v' = freshNameLike v used
-                    body' = substTypeCapture v (TVar v') (fst (unIxPair body))
-                 in TMu v' (substTypeCapture x s body')
+                    ref' = renameTypeBinderRef v' ref
+                    body' = substTypeCaptureRef ref (TVarRef ref') (fst (unIxPair body))
+                 in TMuRef ref' (substTypeCaptureRef target s body')
             | otherwise ->
-                TMu v (snd (unIxPair body))
+                TMuRef ref (snd (unIxPair body))
+            where
+              v = typeBinderRefName ref
 
-substTypeSimple :: String -> ElabType -> ElabType -> ElabType
-substTypeSimple name replacement = paraIx alg
+substTypeSimpleRef :: TypeBinderRef -> ElabType -> ElabType -> ElabType
+substTypeSimpleRef target replacement = paraIx alg
   where
-    substBoundSimpleLocal :: String -> ElabType -> BoundType -> BoundType
-    substBoundSimpleLocal name0 replacement0 bound = case bound of
+    substBoundSimpleLocal :: TypeBinderRef -> ElabType -> BoundType -> BoundType
+    substBoundSimpleLocal target0 replacement0 bound = case bound of
       TArrow a b ->
-        TArrow (substTypeSimple name0 replacement0 a) (substTypeSimple name0 replacement0 b)
-      TCon c args -> TCon c (fmap (substTypeSimple name0 replacement0) args)
-      TVarApp v args ->
-        let args' = fmap (substTypeSimple name0 replacement0) args
-         in if v == name0
-              then composeTypeHead v replacement0 args'
-              else TVarApp v args'
-      TBase b -> TBase b
+        TArrow (substTypeSimpleRef target0 replacement0 a) (substTypeSimpleRef target0 replacement0 b)
+      TConWithIdentity identity c args -> TConWithIdentity identity c (fmap (substTypeSimpleRef target0 replacement0) args)
+      TVarAppRef ref args ->
+        let args' = fmap (substTypeSimpleRef target0 replacement0) args
+         in if typeBinderRefsSameIdentity ref target0
+              then composeTypeHeadRef ref replacement0 args'
+              else TVarAppRef ref args'
+      TBaseWithIdentity identity b -> TBaseWithIdentity identity b
       TBottom -> TBottom
-      TForall v mb body
-        | v == name0 ->
-            let mb' = fmap (substBoundSimpleLocal name0 replacement0) mb
-             in TForall v mb' body
+      TForallRef ref mb body
+        | typeBinderRefsSameIdentity ref target0 ->
+            let mb' = fmap (substBoundSimpleLocal target0 replacement0) mb
+             in TForallRef ref mb' body
         | otherwise ->
-            let mb' = fmap (substBoundSimpleLocal name0 replacement0) mb
-             in TForall v mb' (substTypeSimple name0 replacement0 body)
-      TMu v body
-        | v == name0 -> TMu v body
-        | otherwise -> TMu v (substTypeSimple name0 replacement0 body)
+            let mb' = fmap (substBoundSimpleLocal target0 replacement0) mb
+             in TForallRef ref mb' (substTypeSimpleRef target0 replacement0 body)
+      TMuRef ref body
+        | typeBinderRefsSameIdentity ref target0 -> TMuRef ref body
+        | otherwise -> TMuRef ref (substTypeSimpleRef target0 replacement0 body)
 
     alg :: TyIF i (IxPair Ty Ty) -> Ty i
     alg ty = case ty of
-      TVarIF v
-        | v == name -> replacement
-        | otherwise -> TVar v
+      TVarIFRef ref
+        | typeBinderRefsSameIdentity ref target -> replacement
+        | otherwise -> TVarRef ref
       TArrowIF d c -> TArrow (snd (unIxPair d)) (snd (unIxPair c))
-      TConIF c args -> TCon c (fmap (snd . unIxPair) args)
-      TVarAppIF v args ->
+      TConIFWithIdentity identity c args -> TConWithIdentity identity c (fmap (snd . unIxPair) args)
+      TVarAppIFRef ref args ->
         let args' = fmap (snd . unIxPair) args
-         in if v == name
-              then composeTypeHead v replacement args'
-              else TVarApp v args'
-      TBaseIF b -> TBase b
+         in if typeBinderRefsSameIdentity ref target
+              then composeTypeHeadRef ref replacement args'
+              else TVarAppRef ref args'
+      TBaseIFWithIdentity identity b -> TBaseWithIdentity identity b
       TBottomIF -> TBottom
-      TForallIF v mb body
-        | v == name ->
-            let mb' = fmap (substBoundSimpleLocal name replacement . fst . unIxPair) mb
-             in TForall v mb' (fst (unIxPair body))
+      TForallIFRef ref mb body
+        | typeBinderRefsSameIdentity ref target ->
+            let mb' = fmap (substBoundSimpleLocal target replacement . fst . unIxPair) mb
+             in TForallRef ref mb' (fst (unIxPair body))
         | otherwise ->
-            let mb' = fmap (substBoundSimpleLocal name replacement . fst . unIxPair) mb
-             in TForall v mb' (snd (unIxPair body))
-      TMuIF v body
-        | v == name -> TMu v (fst (unIxPair body))
-        | otherwise -> TMu v (snd (unIxPair body))
+            let mb' = fmap (substBoundSimpleLocal target replacement . fst . unIxPair) mb
+             in TForallRef ref mb' (snd (unIxPair body))
+      TMuIFRef ref body
+        | typeBinderRefsSameIdentity ref target -> TMuRef ref (fst (unIxPair body))
+        | otherwise -> TMuRef ref (snd (unIxPair body))
 
-freshTypeName :: Set.Set String -> String
-freshTypeName used =
-  let candidates = ["u" ++ show i | i <- [(0 :: Int) ..]]
-   in case filter (`Set.notMember` used) candidates of
-        (x : _) -> x
-        [] -> "u0"
-
-freshTypeNameFromCounter :: Int -> Set.Set String -> (String, Int)
-freshTypeNameFromCounter n used =
-  let candidate = "u" ++ show n
-   in if candidate `Set.member` used
-        then freshTypeNameFromCounter (n + 1) used
-        else (candidate, n + 1)
-
-renameTypeVar :: String -> String -> ElabType -> ElabType
-renameTypeVar old new = substTypeSimple old (TVar new)
-
-composeTypeHead :: String -> ElabType -> NE.NonEmpty ElabType -> Ty v
-composeTypeHead original replacement args =
+composeTypeHeadRef :: TypeBinderRef -> ElabType -> NE.NonEmpty ElabType -> Ty v
+composeTypeHeadRef original replacement args =
   case replacement of
-    TVar name -> TVarApp name args
-    TVarApp name existingArgs -> TVarApp name (existingArgs <> args)
-    TBase con -> TCon con args
-    TCon con existingArgs -> TCon con (existingArgs <> args)
-    _ -> TVarApp original args
+    TVarRef ref -> TVarAppRef ref args
+    TVarAppRef ref existingArgs -> TVarAppRef ref (existingArgs <> args)
+    TBaseWithIdentity identity con -> TConWithIdentity identity con args
+    TConWithIdentity identity con existingArgs -> TConWithIdentity identity con (existingArgs <> args)
+    _ -> TVarAppRef original args
 
 -- | Return the first explicit recursive type that violates the M4 v1
 -- contractiveness policy.
@@ -303,93 +320,103 @@ firstNonContractiveRecursiveType = goType
   where
     goType :: ElabType -> Maybe ElabType
     goType ty = case ty of
-      TVar _ -> Nothing
+      TVarRef _ -> Nothing
       TArrow a b -> goType a <|> goType b
       TCon _ args -> foldr (\arg acc -> goType arg <|> acc) Nothing args
-      TVarApp _ args -> foldr (\arg acc -> goType arg <|> acc) Nothing args
+      TVarAppRef _ args -> foldr (\arg acc -> goType arg <|> acc) Nothing args
       TBase _ -> Nothing
       TBottom -> Nothing
-      TForall _ mb body -> maybe Nothing goBound mb <|> goType body
-      TMu v body
-        | muBodyContractive v body -> goType body
+      TForallRef _ mb body -> maybe Nothing goBound mb <|> goType body
+      TMuRef ref body
+        | muBodyContractive ref body -> goType body
         | otherwise -> Just ty
 
     goBound :: BoundType -> Maybe ElabType
     goBound bound = case bound of
       TArrow a b -> goType a <|> goType b
       TCon _ args -> foldr (\arg acc -> goType arg <|> acc) Nothing args
-      TVarApp _ args -> foldr (\arg acc -> goType arg <|> acc) Nothing args
+      TVarAppRef _ args -> foldr (\arg acc -> goType arg <|> acc) Nothing args
       TBase _ -> Nothing
       TBottom -> Nothing
-      TForall _ mb body -> maybe Nothing goBound mb <|> goType body
-      TMu v body
-        | muBodyContractive v body -> goType body
+      TForallRef _ mb body -> maybe Nothing goBound mb <|> goType body
+      TMuRef ref body
+        | muBodyContractive ref body -> goType body
         | otherwise -> Just (tyToElab bound)
 
-    muBodyContractive :: String -> ElabType -> Bool
+    muBodyContractive :: TypeBinderRef -> ElabType -> Bool
     muBodyContractive needle = bodyType False False
       where
         bodyType :: Bool -> Bool -> ElabType -> Bool
         bodyType guarded shadowed ty = case ty of
-          TVar v -> shadowed || v /= needle || guarded
+          TVarRef ref -> shadowed || not (typeBinderRefsSameIdentity ref needle) || guarded
           TArrow a b -> bodyType True shadowed a && bodyType True shadowed b
           TCon _ args -> all (bodyType True shadowed) args
-          TVarApp v args ->
-            (shadowed || v /= needle || guarded)
+          TVarAppRef ref args ->
+            (shadowed || not (typeBinderRefsSameIdentity ref needle) || guarded)
               && all (bodyType guarded shadowed) args
           TBase _ -> True
           TBottom -> True
-          TForall v mb body ->
-            let shadowed' = shadowed || v == needle
+          TForallRef ref mb body ->
+            let shadowed' = shadowed || typeBinderRefsSameIdentity ref needle
                 boundOk = maybe True (bodyBound guarded shadowed') mb
              in boundOk && bodyType guarded shadowed' body
-          TMu v body ->
-            let shadowed' = shadowed || v == needle
+          TMuRef ref body ->
+            let shadowed' = shadowed || typeBinderRefsSameIdentity ref needle
              in bodyType guarded shadowed' body
 
         bodyBound :: Bool -> Bool -> BoundType -> Bool
         bodyBound guarded shadowed bound = case bound of
           TArrow a b -> bodyType True shadowed a && bodyType True shadowed b
           TCon _ args -> all (bodyType True shadowed) args
-          TVarApp v args ->
-            (shadowed || v /= needle || guarded)
+          TVarAppRef ref args ->
+            (shadowed || not (typeBinderRefsSameIdentity ref needle) || guarded)
               && all (bodyType guarded shadowed) args
           TBase _ -> True
           TBottom -> True
-          TForall v mb body ->
-            let shadowed' = shadowed || v == needle
+          TForallRef ref mb body ->
+            let shadowed' = shadowed || typeBinderRefsSameIdentity ref needle
                 boundOk = maybe True (bodyBound guarded shadowed') mb
              in boundOk && bodyType guarded shadowed' body
-          TMu v body ->
-            let shadowed' = shadowed || v == needle
+          TMuRef ref body ->
+            let shadowed' = shadowed || typeBinderRefsSameIdentity ref needle
              in bodyType guarded shadowed' body
 
+type AlphaEnv = [(TypeBinderRef, TypeBinderRef)]
+
+lookupAlphaRef :: TypeBinderRef -> AlphaEnv -> Maybe TypeBinderRef
+lookupAlphaRef ref =
+  fmap snd . find (typeBinderRefsSameIdentity ref . fst)
+
+alphaEqRef :: AlphaEnv -> AlphaEnv -> TypeBinderRef -> TypeBinderRef -> Bool
+alphaEqRef envL envR left right =
+  case lookupAlphaRef left envL of
+    Just expectedRight -> typeBinderRefsSameIdentity right expectedRight
+    Nothing ->
+      case lookupAlphaRef right envR of
+        Just expectedLeft -> typeBinderRefsSameIdentity left expectedLeft
+        Nothing -> typeBinderRefsSameIdentity left right
+
 alphaEqType :: ElabType -> ElabType -> Bool
-alphaEqType = go Map.empty Map.empty
+alphaEqType = go [] []
   where
     go envL envR t1 t2 = case (t1, t2) of
-      (TVar a, TVar b) ->
-        case Map.lookup a envL of
-          Just b' -> b == b'
-          Nothing ->
-            case Map.lookup b envR of
-              Just a' -> a == a'
-              Nothing -> a == b
+      (TVarRef a, TVarRef b) ->
+        alphaEqRef envL envR a b
       (TArrow a1 b1, TArrow a2 b2) ->
         go envL envR a1 a2 && go envL envR b1 b2
       (TCon c1 args1, TCon c2 args2) ->
         c1 == c2 && alphaEqArgs envL envR (toList args1) (toList args2)
-      (TVarApp a args1, TVarApp b args2) ->
+      (TVarAppRef a args1, TVarAppRef b args2) ->
         alphaEqVar envL envR a b && alphaEqArgs envL envR (toList args1) (toList args2)
       (TBase b1, TBase b2) -> b1 == b2
       (TBottom, TBottom) -> True
-      (TForall v1 mb1 body1, TForall v2 mb2 body2) ->
-        let envL' = Map.insert v1 v2 envL
-            envR' = Map.insert v2 v1 envR
+      (TForallRef ref1 mb1 body1, TForallRef ref2 mb2 body2) ->
+        let envL' = (ref1, ref2) : envL
+            envR' = (ref2, ref1) : envR
          in alphaEqMaybeBound envL envR mb1 mb2 && go envL' envR' body1 body2
-      (TMu v1 body1, TMu v2 body2) ->
-        let envL' = Map.insert v1 v2 envL
-            envR' = Map.insert v2 v1 envR
+      (TMuRef ref1 body1, TMuRef ref2 body2) ->
+        let envL' = (ref1, ref2) : envL
+            envR' = (ref2, ref1) : envR
          in go envL' envR' body1 body2
       _ -> False
 
@@ -398,13 +425,7 @@ alphaEqType = go Map.empty Map.empty
       (a : as', b : bs') -> go envL envR a b && alphaEqArgs envL envR as' bs'
       _ -> False
 
-    alphaEqVar envL envR a b =
-      case Map.lookup a envL of
-        Just b' -> b == b'
-        Nothing ->
-          case Map.lookup b envR of
-            Just a' -> a == a'
-            Nothing -> a == b
+    alphaEqVar = alphaEqRef
 
     alphaEqMaybeBound envL envR mb1 mb2 = case (mb1, mb2) of
       (Nothing, Nothing) -> True
@@ -416,17 +437,17 @@ alphaEqType = go Map.empty Map.empty
         go envL envR a1 a2 && go envL envR b1' b2'
       (TCon c1 args1, TCon c2 args2) ->
         c1 == c2 && alphaEqArgs envL envR (toList args1) (toList args2)
-      (TVarApp a args1, TVarApp b args2) ->
+      (TVarAppRef a args1, TVarAppRef b args2) ->
         alphaEqVar envL envR a b && alphaEqArgs envL envR (toList args1) (toList args2)
       (TBase b1', TBase b2') -> b1' == b2'
       (TBottom, TBottom) -> True
-      (TForall v1 mb1 body1, TForall v2 mb2 body2) ->
-        let envL' = Map.insert v1 v2 envL
-            envR' = Map.insert v2 v1 envR
+      (TForallRef ref1 mb1 body1, TForallRef ref2 mb2 body2) ->
+        let envL' = (ref1, ref2) : envL
+            envR' = (ref2, ref1) : envR
          in alphaEqMaybeBound envL envR mb1 mb2 && go envL' envR' body1 body2
-      (TMu v1 body1, TMu v2 body2) ->
-        let envL' = Map.insert v1 v2 envL
-            envR' = Map.insert v2 v1 envR
+      (TMuRef ref1 body1, TMuRef ref2 body2) ->
+        let envL' = (ref1, ref2) : envL
+            envR' = (ref2, ref1) : envR
          in go envL' envR' body1 body2
       _ -> False
 
@@ -449,7 +470,7 @@ This helper recognises the two representations as equivalent by:
   2. Repairing a "self alias" — a free var in the body that structurally
      occupies the self-reference position but has a different name than the
      μ binder (a presolution/reification artifact).
-  3. Using matchType with the stripped quantifier vars as matchable
+  3. Using matchTypeRefs with the stripped quantifier refs as matchable
      placeholders to align the remaining free variables.
 
 IMPORTANT: This is NOT a general semantic equivalence.  It is a narrow
@@ -463,46 +484,57 @@ Church-encoding-specific comparison, intentionally kept out of alphaEqType.
 churchMuEquivalent :: ElabType -> ElabType -> Bool
 churchMuEquivalent t1 t2 =
   case (t1, t2) of
-    (TMu v1 body1, TMu v2 body2) ->
+    (TMuRef ref1 body1, TMuRef ref2 body2) ->
       let (qs1, core1) = stripChurchForalls body1
           (qs2, core2) = stripChurchForalls body2
-          qset1 = Set.fromList qs1
-          qset2 = Set.fromList qs2
           -- All quantifier vars from both sides are matchable
-          allQs = Set.union qset1 qset2
+          allQs = unionRefs qs1 qs2
        in or
-            [ tryMatch allQs (TMu v1 c1) (TMu v2 c2)
-              | c1 <- selfAliasVariants qset1 v1 core1,
-                c2 <- selfAliasVariants qset2 v2 core2
+            [ tryMatch allQs (TMuRef ref1 c1) (TMuRef ref2 c2)
+              | c1 <- selfAliasVariants qs1 ref1 core1,
+                c2 <- selfAliasVariants qs2 ref2 core2
             ]
     _ -> False
   where
     -- Strip leading unbounded TForall from a μ body.
-    stripChurchForalls :: ElabType -> ([String], ElabType)
+    stripChurchForalls :: ElabType -> ([TypeBinderRef], ElabType)
     stripChurchForalls ty = case ty of
-      TForall v Nothing body ->
-        let (vs, core) = stripChurchForalls body
-         in (v : vs, core)
+      TForallRef ref Nothing body ->
+        let (refs, core) = stripChurchForalls body
+         in (ref : refs, core)
       _ -> ([], ty)
 
     -- Generate candidate cores where a free-variable self-alias is replaced
     -- by the actual μ binder name.
-    selfAliasVariants :: Set.Set String -> String -> ElabType -> [ElabType]
-    selfAliasVariants quantVars muVar core
-      | muVar `Set.member` freeTypeVarsType core = [core]
+    selfAliasVariants :: [TypeBinderRef] -> TypeBinderRef -> ElabType -> [ElabType]
+    selfAliasVariants quantRefs muRef core
+      | any (typeBinderRefsSameIdentity muRef) (freeTypeVarRefsType core) = [core]
       | otherwise =
           -- The mu binder doesn't appear in the body — some alias does.
           -- Try each free var (that isn't a stripped quantifier) as the alias.
           core
-            : [ substTypeSimple alias (TVar muVar) core
-                | alias <- Set.toList (freeTypeVarsType core `Set.difference` quantVars)
+            : [ substTypeSimpleRef alias (TVarRef muRef) core
+                | alias <- freeRefsExcept quantRefs core
               ]
 
-    tryMatch :: Set.Set String -> ElabType -> ElabType -> Bool
+    tryMatch :: [TypeBinderRef] -> ElabType -> ElabType -> Bool
     tryMatch matchableVars lhs rhs =
       alphaEqType lhs rhs
-        || isRight (matchType matchableVars lhs rhs)
-        || isRight (matchType matchableVars rhs lhs)
+        || isRight (matchTypeRefs matchableVars lhs rhs)
+        || isRight (matchTypeRefs matchableVars rhs lhs)
+
+    unionRefs left right =
+      foldr insertRef right left
+
+    insertRef ref refs
+      | any (typeBinderRefsSameIdentity ref) refs = refs
+      | otherwise = ref : refs
+
+    freeRefsExcept excluded ty =
+      [ ref
+        | ref <- freeTypeVarRefsType ty,
+          not (any (typeBinderRefsSameIdentity ref) excluded)
+      ]
 
     isRight :: Either a b -> Bool
     isRight (Right _) = True
@@ -512,82 +544,82 @@ churchMuEquivalent t1 t2 =
 -- junctions.  Keeps 'alphaEqType' strict while allowing Church-μ relaxation
 -- at every nesting depth.
 churchAwareEqType :: ElabType -> ElabType -> Bool
-churchAwareEqType = go Map.empty Map.empty
+churchAwareEqType = go [] []
   where
-    stripChurchForalls :: ElabType -> ([String], ElabType)
+    stripChurchForalls :: ElabType -> ([TypeBinderRef], ElabType)
     stripChurchForalls ty = case ty of
-      TForall v Nothing body ->
-        let (vs, core) = stripChurchForalls body
-         in (v : vs, core)
+      TForallRef ref Nothing body ->
+        let (refs, core) = stripChurchForalls body
+         in (ref : refs, core)
       _ -> ([], ty)
 
-    selfAliasVariants :: Set.Set String -> String -> ElabType -> [ElabType]
-    selfAliasVariants quantVars muVar core
-      | muVar `Set.member` freeTypeVarsType core = [core]
+    selfAliasVariants :: [TypeBinderRef] -> TypeBinderRef -> ElabType -> [ElabType]
+    selfAliasVariants quantRefs muRef core
+      | any (typeBinderRefsSameIdentity muRef) (freeTypeVarRefsType core) = [core]
       | otherwise =
           core
-            : [ substTypeSimple alias (TVar muVar) core
-                | alias <- Set.toList (freeTypeVarsType core `Set.difference` quantVars)
+            : [ substTypeSimpleRef alias (TVarRef muRef) core
+                | alias <- freeRefsExcept quantRefs core
               ]
 
-    tryMatch :: Set.Set String -> ElabType -> ElabType -> Bool
+    tryMatch :: [TypeBinderRef] -> ElabType -> ElabType -> Bool
     tryMatch matchableVars lhs rhs =
       alphaEqType lhs rhs
-        || isRight (matchType matchableVars lhs rhs)
-        || isRight (matchType matchableVars rhs lhs)
+        || isRight (matchTypeRefs matchableVars lhs rhs)
+        || isRight (matchTypeRefs matchableVars rhs lhs)
+
+    freeRefsExcept excluded ty =
+      [ ref
+        | ref <- freeTypeVarRefsType ty,
+          not (any (typeBinderRefsSameIdentity ref) excluded)
+      ]
 
     churchMuMatchesCore :: ElabType -> ElabType -> Bool
-    churchMuMatchesCore muTy@(TMu v body) otherTy =
+    churchMuMatchesCore muTy@(TMuRef ref body) otherTy =
       let muTy' = tyToElab muTy
           (quantVars, coreBody) = stripChurchForalls (tyToElab body)
-          (_, unfoldedCoreBody) = stripChurchForalls (substTypeSimple v muTy' (tyToElab body))
-          qset = Set.fromList quantVars
+          (_, unfoldedCoreBody) = stripChurchForalls (substTypeSimpleRef ref muTy' (tyToElab body))
           candidateBodies =
-            selfAliasVariants qset v coreBody
-              ++ selfAliasVariants qset v unfoldedCoreBody
+            selfAliasVariants quantVars ref coreBody
+              ++ selfAliasVariants quantVars ref unfoldedCoreBody
           (_, otherCore) = stripChurchForalls otherTy
        in or
-            [ tryMatch qset candidate otherTy || tryMatch qset candidate otherCore
+            [ tryMatch quantVars candidate otherTy || tryMatch quantVars candidate otherCore
               | candidate <- candidateBodies
             ]
     churchMuMatchesCore _ _ = False
 
     unfoldMuOnce :: Ty v -> Maybe ElabType
-    unfoldMuOnce muTy@(TMu v body) =
+    unfoldMuOnce muTy@(TMuRef ref body) =
       let muTy' = tyToElab muTy
-          unfolded = substTypeSimple v muTy' (tyToElab body)
+          unfolded = substTypeSimpleRef ref muTy' (tyToElab body)
        in if alphaEqType unfolded muTy' then Nothing else Just unfolded
     unfoldMuOnce _ = Nothing
 
     go envL envR t1 t2 = case (t1, t2) of
-      (TVar a, TVar b) ->
-        case Map.lookup a envL of
-          Just b' -> b == b'
-          Nothing ->
-            case Map.lookup b envR of
-              Just a' -> a == a'
-              Nothing -> a == b
+      (TVarRef a, TVarRef b) ->
+        alphaEqRef envL envR a b
       (TArrow a1 b1, TArrow a2 b2) ->
         go envL envR a1 a2 && go envL envR b1 b2
       (TCon c1 args1, TCon c2 args2) ->
         c1 == c2 && eqArgs envL envR (toList args1) (toList args2)
-      (TVarApp a args1, TVarApp b args2) ->
+      (TVarAppRef a args1, TVarAppRef b args2) ->
         eqVar envL envR a b && eqArgs envL envR (toList args1) (toList args2)
       (TBase b1, TBase b2) -> b1 == b2
       (TBottom, TBottom) -> True
-      (TForall v1 mb1 body1, TForall v2 mb2 body2) ->
-        let envL' = Map.insert v1 v2 envL
-            envR' = Map.insert v2 v1 envR
+      (TForallRef ref1 mb1 body1, TForallRef ref2 mb2 body2) ->
+        let envL' = (ref1, ref2) : envL
+            envR' = (ref2, ref1) : envR
          in eqMaybeBound envL envR mb1 mb2 && go envL' envR' body1 body2
-      (TMu v1 body1, TMu v2 body2) ->
-        let envL' = Map.insert v1 v2 envL
-            envR' = Map.insert v2 v1 envR
+      (TMuRef ref1 body1, TMuRef ref2 body2) ->
+        let envL' = (ref1, ref2) : envL
+            envR' = (ref2, ref1) : envR
          in go envL' envR' body1 body2
               || churchMuEquivalent t1 t2
-      (TMu {}, _) ->
+      (TMuRef {}, _) ->
         churchMuMatchesCore t1 t2
           || maybe False (\unfolded -> go envL envR unfolded t2) (unfoldMuOnce t1)
-      (_, TMu {}) ->
+      (_, TMuRef {}) ->
         churchMuMatchesCore t2 t1
           || maybe False (\unfolded -> go envL envR t1 unfolded) (unfoldMuOnce t2)
       _ -> False
@@ -597,42 +629,36 @@ churchAwareEqType = go Map.empty Map.empty
       (a : as', b : bs') -> go envL envR a b && eqArgs envL envR as' bs'
       _ -> False
 
-    eqVar envL envR a b =
-      case Map.lookup a envL of
-        Just b' -> b == b'
-        Nothing ->
-          case Map.lookup b envR of
-            Just a' -> a == a'
-            Nothing -> a == b
+    eqVar = alphaEqRef
 
     eqMaybeBound envL envR mb1 mb2 = case (mb1, mb2) of
       (Nothing, Nothing) -> True
       (Just b1, Just b2) -> eqBound envL envR b1 b2
       _ -> False
 
-    eqBound :: Map.Map String String -> Map.Map String String -> BoundType -> BoundType -> Bool
+    eqBound :: AlphaEnv -> AlphaEnv -> BoundType -> BoundType -> Bool
     eqBound envL envR b1 b2 = case (b1, b2) of
       (TArrow a1 b1', TArrow a2 b2') ->
         go envL envR a1 a2 && go envL envR b1' b2'
       (TCon c1 args1, TCon c2 args2) ->
         c1 == c2 && eqArgs envL envR (toList args1) (toList args2)
-      (TVarApp a args1, TVarApp b args2) ->
+      (TVarAppRef a args1, TVarAppRef b args2) ->
         eqVar envL envR a b && eqArgs envL envR (toList args1) (toList args2)
       (TBase b1', TBase b2') -> b1' == b2'
       (TBottom, TBottom) -> True
-      (TForall v1 mb1 body1, TForall v2 mb2 body2) ->
-        let envL' = Map.insert v1 v2 envL
-            envR' = Map.insert v2 v1 envR
+      (TForallRef ref1 mb1 body1, TForallRef ref2 mb2 body2) ->
+        let envL' = (ref1, ref2) : envL
+            envR' = (ref2, ref1) : envR
          in eqMaybeBound envL envR mb1 mb2 && go envL' envR' body1 body2
-      (TMu v1 body1, TMu v2 body2) ->
-        let envL' = Map.insert v1 v2 envL
-            envR' = Map.insert v2 v1 envR
+      (TMuRef ref1 body1, TMuRef ref2 body2) ->
+        let envL' = (ref1, ref2) : envL
+            envR' = (ref2, ref1) : envR
          in go envL' envR' body1 body2
-              || churchMuEquivalent (TMu v1 body1) (TMu v2 body2)
-      (TMu {}, _) ->
+              || churchMuEquivalent (TMuRef ref1 body1) (TMuRef ref2 body2)
+      (TMuRef {}, _) ->
         churchMuMatchesCore (tyToElab b1) (tyToElab b2)
           || maybe False (\unfolded -> go envL envR unfolded (tyToElab b2)) (unfoldMuOnce b1)
-      (_, TMu {}) ->
+      (_, TMuRef {}) ->
         churchMuMatchesCore (tyToElab b2) (tyToElab b1)
           || maybe False (\unfolded -> go envL envR (tyToElab b1) unfolded) (unfoldMuOnce b2)
       _ -> False
@@ -641,49 +667,47 @@ churchAwareEqType = go Map.empty Map.empty
     isRight (Right _) = True
     isRight _ = False
 
-matchType ::
-  Set.Set String ->
+matchTypeRefs ::
+  [TypeBinderRef] ->
   ElabType ->
   ElabType ->
-  Either ElabError (Map.Map String ElabType)
-matchType binderSet = goMatch Map.empty Map.empty
+  Either ElabError (Map.Map TypeBinderRef ElabType)
+matchTypeRefs binderRefs = goMatch [] Map.empty
   where
     goMatch env subst tyP tyT = case (tyP, tyT) of
-      (TVar v, _) | Set.member v binderSet ->
-        case Map.lookup v subst of
-          Nothing -> Right (Map.insert v tyT subst)
+      (TVarRef ref, _)
+        | Just binder <- matchableRef ref ->
+        case Map.lookup binder subst of
+          Nothing -> Right (Map.insert binder tyT subst)
           Just ty0 ->
             if alphaEqType ty0 tyT
               then Right subst
               else Left (InstantiationError "matchType: binder mismatch")
-      (TVar v, TVar v')
-        | Just v'' <- Map.lookup v env ->
-            if v' == v'' then Right subst else Left (InstantiationError "matchType: bound var mismatch")
-      (TVar v, TVar v')
-        | v == v' -> Right subst
+      (TVarRef ref, TVarRef ref')
+        | boundVarMatches env ref ref' -> Right subst
       (TArrow a b, TArrow a' b') -> do
         subst1 <- goMatch env subst a a'
         goMatch env subst1 b b'
       (TCon c0 args0, TCon c1 args1)
         | c0 == c1 ->
             matchArgs env subst (toList args0) (toList args1)
-      (TVarApp v argsP, _)
-        | Set.member v binderSet ->
-            matchVarHead env subst v (toList argsP) tyT
-      (TVarApp v args0, TVarApp v' args1)
-        | boundVarMatches env v v' ->
+      (TVarAppRef ref argsP, _)
+        | Just binder <- matchableRef ref ->
+            matchVarHead env subst binder (toList argsP) tyT
+      (TVarAppRef ref args0, TVarAppRef ref' args1)
+        | boundVarMatches env ref ref' ->
             matchArgs env subst (toList args0) (toList args1)
       (TBase b0, TBase b1)
         | b0 == b1 -> Right subst
       (TBottom, TBottom) -> Right subst
-      (TForall v mb b, TForall v' mb' b') -> do
+      (TForallRef ref mb b, TForallRef ref' mb' b') -> do
         subst1 <- case (mb, mb') of
           (Nothing, Nothing) -> Right subst
           (Just x, Just y) -> matchBound env subst x y
           _ -> Left (InstantiationError "matchType: forall bound mismatch")
-        goMatch (Map.insert v v' env) subst1 b b'
-      (TMu v b, TMu v' b') ->
-        goMatch (Map.insert v v' env) subst b b'
+        goMatch ((ref, ref') : env) subst1 b b'
+      (TMuRef ref b, TMuRef ref' b') ->
+        goMatch ((ref, ref') : env) subst b b'
       _ -> Left (InstantiationError "matchType: structure mismatch")
 
     matchArgs env subst0 argsP argsT = case (argsP, argsT) of
@@ -708,29 +732,34 @@ matchType binderSet = goMatch Map.empty Map.empty
           subst1 <- bindHeadSubst v replacement subst0
           matchArgs env subst1 argsP suffixArgs
 
-    bindHeadSubst v replacement subst0 =
-      case Map.lookup v subst0 of
-        Nothing -> Right (Map.insert v replacement subst0)
+    bindHeadSubst binder replacement subst0 =
+      case Map.lookup binder subst0 of
+        Nothing -> Right (Map.insert binder replacement subst0)
         Just existing
           | alphaEqType existing replacement -> Right subst0
           | otherwise -> Left (InstantiationError "matchType: higher-kinded binder mismatch")
 
-    boundVarMatches env v v' =
-      case Map.lookup v env of
-        Just expected -> expected == v'
-        Nothing -> v == v'
+    boundVarMatches env ref ref' =
+      case lookupAlphaRef ref env of
+        Just expected -> typeBinderRefsSameIdentity ref' expected
+        Nothing -> typeBinderRefsSameIdentity ref ref'
+
+    matchableRef ref =
+      find (typeBinderRefsSameIdentity ref) binderRefs
 
     unapplyTypeHead ty = case ty of
-      TVar v -> Just (TVar v, [])
-      TVarApp v args -> Just (TVar v, toList args)
-      TBase base -> Just (TBase base, [])
-      TCon con args -> Just (TBase con, toList args)
+      TVarRef ref -> Just (TVarRef ref, [])
+      TVarAppRef ref args -> Just (TVarRef ref, toList args)
+      TBaseWithIdentity identity base -> Just (TBaseWithIdentity identity base, [])
+      TConWithIdentity identity con args -> Just (TBaseWithIdentity identity con, toList args)
       _ -> Nothing
 
     applyHeadArgs headTy args =
       case NE.nonEmpty args of
         Nothing -> headTy
-        Just argsNE -> composeTypeHead "_" headTy argsNE
+        Just argsNE ->
+          let (fallbackRef, _) = freshTypeBinderRef "_" (identityGeneratorAfterType headTy)
+           in composeTypeHeadRef fallbackRef headTy argsNE
 
     matchBound env subst boundP boundT = case (boundP, boundT) of
       (TArrow a b, TArrow a' b') -> do
@@ -739,23 +768,23 @@ matchType binderSet = goMatch Map.empty Map.empty
       (TCon c0 args0, TCon c1 args1)
         | c0 == c1 ->
             matchArgs env subst (toList args0) (toList args1)
-      (TVarApp v argsP, _)
-        | Set.member v binderSet ->
-            matchVarHead env subst v (toList argsP) (tyToElab boundT)
-      (TVarApp v args0, TVarApp v' args1)
-        | boundVarMatches env v v' ->
+      (TVarAppRef ref argsP, _)
+        | Just binder <- matchableRef ref ->
+            matchVarHead env subst binder (toList argsP) (tyToElab boundT)
+      (TVarAppRef ref args0, TVarAppRef ref' args1)
+        | boundVarMatches env ref ref' ->
             matchArgs env subst (toList args0) (toList args1)
       (TBase b0, TBase b1)
         | b0 == b1 -> Right subst
       (TBottom, TBottom) -> Right subst
-      (TForall v mb b, TForall v' mb' b') -> do
+      (TForallRef ref mb b, TForallRef ref' mb' b') -> do
         subst1 <- case (mb, mb') of
           (Nothing, Nothing) -> Right subst
           (Just x, Just y) -> matchBound env subst x y
           _ -> Left (InstantiationError "matchType: forall bound mismatch")
-        goMatch (Map.insert v v' env) subst1 b b'
-      (TMu v b, TMu v' b') ->
-        goMatch (Map.insert v v' env) subst b b'
+        goMatch ((ref, ref') : env) subst1 b b'
+      (TMuRef ref b, TMuRef ref' b') ->
+        goMatch ((ref, ref') : env) subst b b'
       _ -> Left (InstantiationError "matchType: structure mismatch")
 
 resolveBaseBoundForInstConstraint ::
@@ -804,39 +833,79 @@ resolveBoundBodyConstraint canonical constraint visited0 start =
    in go visited0 start
 
 inlineBaseBoundsType :: Constraint p -> (NodeId -> NodeId) -> ElabType -> ElabType
-inlineBaseBoundsType constraint canonical = cataIx alg
+inlineBaseBoundsType constraint canonical = goType []
   where
-    alg :: TyIF i Ty -> Ty i
-    alg ty = case ty of
-      TVarIF v ->
-        case parseNameId v of
-          Just nidInt ->
-            let nid = NodeId nidInt
-             in case resolveBaseBoundForInstConstraint constraint canonical nid of
-                  Just baseN ->
-                    case NodeAccess.lookupNode constraint baseN of
-                      Just TyBase {tnBase = b} -> TBase b
-                      Just TyBottom {} -> TBottom
-                      _ -> TVar v
-                  Nothing -> TVar v
-          Nothing -> TVar v
-      TArrowIF a b -> TArrow a b
-      TForallIF v mb body -> TForall v mb body
-      TMuIF v body -> TMu v body
-      TConIF c args -> TCon c args
-      TVarAppIF v args ->
-        case parseNameId v of
-          Just nidInt ->
-            let nid = NodeId nidInt
-             in case resolveBaseBoundForInstConstraint constraint canonical nid of
-                  Just baseN ->
-                    case NodeAccess.lookupNode constraint baseN of
-                      Just TyBase {tnBase = b} -> TCon b args
-                      _ -> TVarApp v args
-                  Nothing -> TVarApp v args
-          Nothing -> TVarApp v args
-      TBaseIF b -> TBase b
-      TBottomIF -> TBottom
+    goType :: [TypeBinderRef] -> Ty v -> Ty v
+    goType boundRefs ty = case ty of
+      TVarRef ref -> inlineVarRef boundRefs ref
+      TArrow a b -> TArrow (goType boundRefs a) (goType boundRefs b)
+      TConWithIdentity identity c args -> TConWithIdentity identity c (fmap (goType boundRefs) args)
+      TVarAppRef ref args ->
+        let args' = fmap (goType boundRefs) args
+         in inlineVarAppRef boundRefs ref args'
+      TBaseWithIdentity identity b -> TBaseWithIdentity identity b
+      TBottom -> TBottom
+      TForallRef ref mb body ->
+        let boundRefs' = insertBoundRef ref boundRefs
+         in TForallRef ref (fmap (goBound boundRefs') mb) (goType boundRefs' body)
+      TMuRef ref body ->
+        let boundRefs' = insertBoundRef ref boundRefs
+         in TMuRef ref (goType boundRefs' body)
+
+    goBound :: [TypeBinderRef] -> BoundType -> BoundType
+    goBound boundRefs bound = case bound of
+      TArrow a b -> TArrow (goType boundRefs a) (goType boundRefs b)
+      TConWithIdentity identity c args -> TConWithIdentity identity c (fmap (goType boundRefs) args)
+      TVarAppRef ref args ->
+        let args' = fmap (goType boundRefs) args
+         in inlineVarAppRef boundRefs ref args'
+      TBaseWithIdentity identity b -> TBaseWithIdentity identity b
+      TBottom -> TBottom
+      TForallRef ref mb body ->
+        let boundRefs' = insertBoundRef ref boundRefs
+         in TForallRef ref (fmap (goBound boundRefs') mb) (goType boundRefs' body)
+      TMuRef ref body ->
+        let boundRefs' = insertBoundRef ref boundRefs
+         in TMuRef ref (goType boundRefs' body)
+
+    inlineVarRef :: [TypeBinderRef] -> TypeBinderRef -> ElabType
+    inlineVarRef boundRefs ref
+      | boundRefMember ref boundRefs = TVarRef ref
+      | otherwise =
+          case resolvedBaseBound ref of
+            Just (Left base) -> TBase base
+            Just (Right ()) -> TBottom
+            Nothing -> TVarRef ref
+
+    inlineVarAppRef :: [TypeBinderRef] -> TypeBinderRef -> NE.NonEmpty ElabType -> Ty v
+    inlineVarAppRef boundRefs ref args
+      | boundRefMember ref boundRefs = TVarAppRef ref args
+      | otherwise =
+          case resolvedBaseBound ref of
+            Just (Left base) -> TCon base args
+            _ -> TVarAppRef ref args
+
+    resolvedBaseBound :: TypeBinderRef -> Maybe (Either BaseTy ())
+    resolvedBaseBound ref = do
+      nid <- refNodeId ref
+      baseN <- resolveBaseBoundForInstConstraint constraint canonical nid
+      case NodeAccess.lookupNode constraint baseN of
+        Just TyBase {tnBase = b} -> Just (Left b)
+        Just TyBottom {} -> Just (Right ())
+        _ -> Nothing
+
+    refNodeId :: TypeBinderRef -> Maybe NodeId
+    refNodeId =
+      typeBinderRefNode
+
+    boundRefMember :: TypeBinderRef -> [TypeBinderRef] -> Bool
+    boundRefMember ref =
+      any (typeBinderRefsSameIdentity ref)
+
+    insertBoundRef :: TypeBinderRef -> [TypeBinderRef] -> [TypeBinderRef]
+    insertBoundRef ref refs
+      | boundRefMember ref refs = refs
+      | otherwise = ref : refs
 
 -- | Inline alias/bound nodes in an ElabType using the supplied lookup and reify
 -- functions. This is the shared implementation for scope-aware bound/alias
@@ -866,15 +935,15 @@ inlineAliasBoundsWithBySeen ::
   ElabType ->
   ElabType
 inlineAliasBoundsWithBySeen fallbackToBottom canonical nodes lookupBound reifyBound =
-  goAlias IntSet.empty Set.empty
+  goAlias IntSet.empty []
   where
-    goAlias seen boundNames ty = case ty of
-      TVar v
-        | Set.member v boundNames -> ty
+    goAlias seen boundRefs ty = case ty of
+      TVarRef ref
+        | boundRefMember ref boundRefs -> ty
         | otherwise ->
-            case parseNameId v of
-              Just nidInt ->
-                let nidC = canonical (NodeId nidInt)
+            case typeBinderRefNode ref of
+              Just nid ->
+                let nidC = canonical nid
                     key = getNodeId nidC
                     seen' = IntSet.insert key seen
                  in if IntSet.member key seen
@@ -884,46 +953,53 @@ inlineAliasBoundsWithBySeen fallbackToBottom canonical nodes lookupBound reifyBo
                           case lookupBound nidC of
                             Just bnd ->
                               case reifyBound seen' (canonical bnd) of
-                                Right ty' -> goAlias seen' boundNames ty'
+                                Right ty' -> goAlias seen' boundRefs ty'
                                 Left _ -> ty
                             Nothing -> if fallbackToBottom then TBottom else ty
                         Just _ ->
                           case reifyBound seen' nidC of
-                            Right ty' -> goAlias seen' boundNames ty'
+                            Right ty' -> goAlias seen' boundRefs ty'
                             Left _ -> ty
                         Nothing -> ty
               Nothing -> ty
-      TArrow a b -> TArrow (goAlias seen boundNames a) (goAlias seen boundNames b)
-      TCon c args -> TCon c (fmap (goAlias seen boundNames) args)
-      TVarApp v args ->
-        let args' = fmap (goAlias seen boundNames) args
-            headTy = goAlias seen boundNames (TVar v)
-         in composeTypeHead v headTy args'
-      TForall v mb body ->
-        let boundNames' = Set.insert v boundNames
-            mb' = fmap (goBound seen boundNames') mb
-            body' = goAlias seen boundNames' body
-         in TForall v mb' body'
-      TMu v body ->
-        let boundNames' = Set.insert v boundNames
-         in TMu v (goAlias seen boundNames' body)
-      TBase _ -> ty
+      TArrow a b -> TArrow (goAlias seen boundRefs a) (goAlias seen boundRefs b)
+      TConWithIdentity identity c args -> TConWithIdentity identity c (fmap (goAlias seen boundRefs) args)
+      TVarAppRef ref args ->
+        let args' = fmap (goAlias seen boundRefs) args
+            headTy = goAlias seen boundRefs (TVarRef ref)
+         in composeTypeHeadRef ref headTy args'
+      TForallRef ref mb body ->
+        let boundRefs' = insertBoundRef ref boundRefs
+            mb' = fmap (goBound seen boundRefs') mb
+            body' = goAlias seen boundRefs' body
+         in TForallRef ref mb' body'
+      TMuRef ref body ->
+        let boundRefs' = insertBoundRef ref boundRefs
+         in TMuRef ref (goAlias seen boundRefs' body)
+      TBaseWithIdentity _ _ -> ty
       TBottom -> ty
 
-    goBound seen boundNames bound = case bound of
-      TArrow a b -> TArrow (goAlias seen boundNames a) (goAlias seen boundNames b)
-      TCon c args -> TCon c (fmap (goAlias seen boundNames) args)
-      TVarApp v args ->
-        let args' = fmap (goAlias seen boundNames) args
-            headTy = goAlias seen boundNames (TVar v)
-         in composeTypeHead v headTy args'
-      TBase b -> TBase b
+    boundRefMember ref =
+      any (typeBinderRefsSameIdentity ref)
+
+    insertBoundRef ref refs
+      | boundRefMember ref refs = refs
+      | otherwise = ref : refs
+
+    goBound seen boundRefs bound = case bound of
+      TArrow a b -> TArrow (goAlias seen boundRefs a) (goAlias seen boundRefs b)
+      TConWithIdentity identity c args -> TConWithIdentity identity c (fmap (goAlias seen boundRefs) args)
+      TVarAppRef ref args ->
+        let args' = fmap (goAlias seen boundRefs) args
+            headTy = goAlias seen boundRefs (TVarRef ref)
+         in composeTypeHeadRef ref headTy args'
+      TBaseWithIdentity identity b -> TBaseWithIdentity identity b
       TBottom -> TBottom
-      TForall v mb body ->
-        let boundNames' = Set.insert v boundNames
-            mb' = fmap (goBound seen boundNames') mb
-            body' = goAlias seen boundNames' body
-         in TForall v mb' body'
-      TMu v body ->
-        let boundNames' = Set.insert v boundNames
-         in TMu v (goAlias seen boundNames' body)
+      TForallRef ref mb body ->
+        let boundRefs' = insertBoundRef ref boundRefs
+            mb' = fmap (goBound seen boundRefs') mb
+            body' = goAlias seen boundRefs' body
+         in TForallRef ref mb' body'
+      TMuRef ref body ->
+        let boundRefs' = insertBoundRef ref boundRefs
+         in TMuRef ref (goAlias seen boundRefs' body)

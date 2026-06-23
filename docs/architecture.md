@@ -165,14 +165,73 @@ after eMLF type recovery.
 The accepted target for checked xMLF is **Resolved xMLF Identity IR**; see
 `docs/adr/2026-06-18-resolved-xmlf-identity-ir.md`.
 
-Today `MLF.Types.Elab.ElabTerm` still stores executable term variables and
-binders as strings. `CheckedBinding` has started carrying a `ResolvedVar`
-beside the string term, and constructor bindings carry a `ConstructorId`
-reference consumed by backend conversion. Remaining term occurrences still need
-the same resolved identity migration. Final checked terms should carry resolved
-variable identity throughout, with constructor occurrences represented by an
-`IdDetails`-style constructor reference rather than by a string that must be
-classified later.
+Today `MLF.Types.Elab.XmlfTerm` stores `ResolvedVar` directly for executable
+variable occurrences and lambda/let binders. `EVarNode` is the single variable
+node; deferred terms are built from explicit `DeferredRef` values, with generated
+refs required for accepted checked-program terms. `ELam`/`ELet` are the only
+lambda/let term forms. Local-binder construction helpers are for tests and
+fixture-like call sites. `CheckedBinding` carries a
+`ResolvedVar`, constructor bindings carry a
+`ConstructorId` reference consumed by backend conversion, and checked-program
+finalization rejects accepted terms that still carry deferred variable identity
+after annotating occurrences from runtime metadata. `MLF.Types.Identity` owns
+common `IdDetails` reference-name, local, constructor, and local-rename
+projections for these consumers. Core elaboration now emits resolved variable
+occurrences from `EnvBinding`: external environment values carry `EnvId`, while
+lambda and let binders carry `LocalId`, and lambda/let rewrite helpers refresh
+local occurrence sidecar types when they rewrite binder types. The opaque
+unchecked fallback also annotates
+its stored checked term before returning. Backend-emission preparation, runtime
+reachability, and backend-conversion free-variable scans now consume resolved
+term identity before falling back to string-compatible legacy terms. Backend
+conversion recursive-let lifting and capture-avoiding rewrite helpers preserve
+the resolved occurrence and lambda/let binder identities. Backend conversion's
+builtin-type normalization and ordinary lambda/let emission also preserve those
+identities while running temporary backend type inference and emitting backend
+binders. Backend conversion partial-application, closure-demand, handler-call,
+and structural lambda-shape probes read resolved local identity before falling
+back to runtime names. Backend conversion let-alias application-head unfolding
+also compares resolved let binder identity before runtime names.
+Checked-program main-term aggregation and Church-data decoding also
+preserve/use resolved binding identity before falling back to runtime names.
+Constructor bindings without constructor foralls can be finalized directly from
+`ConstructorInfo` metadata instead of routing through the surface pipeline,
+including monomorphic field/multi-constructor ADTs and non-nullary
+data-parameterized constructors; parameterized nullary constructors and other
+constructor shapes still use the surface pipeline until their metadata path
+preserves the existing result-shape invariants.
+Constructor application heads are recognized from resolved
+`ConstructorId` identities when present, with string-name recognition retained
+only for unresolved compatibility terms. xMLF pretty/XMLF projection reads
+resolved local identity before the string-runtime compatibility view, so
+rendered checked terms do not expose stale local runtime spellings. Pipeline
+type-abstraction freshening preserves resolved occurrence and binder identities
+while renaming internal type variables, and authoritative-annotation selection
+uses resolved local identity for identity-lambda terms before falling back to
+runtime-name equality.
+Checked-program deferred constructor/case/method rewrite helpers also preserve
+resolved occurrence and binder identities during finalization.
+Deferred placeholder matching reads resolved occurrence identity before falling
+back to string-compatible names.
+Deferred local evidence finalization matches evidence methods by class identity,
+type identity, and method identity rather than evidence runtime names.
+Instance method resolution also keeps an identity-indexed method map beside the
+source-name map, so deferred method dispatch selects the instance method by
+`MethodInfo` identity.
+Module definition finalization collects checked layer results by definition
+`SymbolIdentity`, not checked-binding runtime name.
+Module finalization read contexts are keyed by lowered binding identity rather
+than lowered binding runtime name.
+Module pipeline results are re-keyed by lowered binding identity immediately
+after the string-keyed pipeline boundary returns.
+Parameterized constructor-binding result-shape repair preserves resolved lambda
+binder identities while reordering the generated spine.
+Retained-child preservation analysis reads resolved let-binder and variable
+identity before falling back to runtime names.
+Non-program eMLF producers are still string-compatible during the migration.
+Final checked terms should carry resolved variable identity throughout, with
+constructor occurrences represented by an `IdDetails`-style constructor
+reference rather than by a string that must be classified later.
 
 The target does not duplicate every checked module declaration inside every
 term occurrence. `CheckedModule` remains the declaration owner for data,
@@ -185,9 +244,9 @@ the semantic equality key.
 ## Key graph and witness types
 
 - `Expr` (`MLF.Frontend.Syntax`) — surface eMLF terms
-- `ElabTerm` (`MLF.Types.Elab`) — current checked xMLF term representation;
-  still string-based for executable variables during migration toward resolved
-  xMLF identity
+- `XmlfTerm` (`MLF.Types.Elab`) — checked xMLF term representation; executable
+  occurrences and checked lambda/let binders can carry `ResolvedVar`, while
+  legacy producer paths remain string-compatible during migration
 - `Constraint` (`MLF.Constraint.Types.Graph`) — constraint graph plus binding tree
 - `TyNode` — graph nodes (`TyVar`, `TyArrow`, `TyForall`, `TyBase`, `TyCon`, `TyExp`, `TyMu`, `TyBottom`)
 - `InstEdge` — instantiation edges (`<=`)
@@ -570,5 +629,6 @@ The active elaboration path is now intentionally fail-fast around the old fallba
 - planner scheme-owner resolution is body-root authoritative;
 - instantiation inference is structural and prefix-based rather than catch-all heuristic;
 - `reifyInst` is witness/domain-only apart from exact source-scheme reuse for already-authoritative annotations; the live authority set is `ewLeft`/`ewRight`, `etBinderArgs`, and copied witness-domain nodes from `etCopyMap`, and if only expansion-derived recovery would make an application/annotation succeed, the pipeline now fails fast.
+- Identity-backed forall binders are authoritative evidence: a nested let that carries graph identities through the elaborated scheme remains a normal success case, not an expansion-derived fallback.
 
 This keeps the runtime path closer to the thesis boundary: if witness/scheme information is insufficient, the code now fails explicitly instead of silently switching to a weaker reconstruction mode.

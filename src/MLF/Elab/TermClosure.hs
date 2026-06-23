@@ -1,35 +1,38 @@
 {-# LANGUAGE GADTs #-}
 
 module MLF.Elab.TermClosure
-  ( closeTermWithSchemeSubstIfNeeded,
+  ( closeTermWithSchemeSubstRefsIfNeeded,
     alignTopTyAbsToScheme,
     alignTermTypeVarsToScheme,
     alignTermTypeVarsToTopTyAbs,
     preserveRetainedChildAuthoritativeResult,
-    substInTerm,
+    substInTermRefs,
   )
 where
 
-import Data.Functor.Foldable (cata)
+import Data.Functor.Foldable (Recursive (project), cata)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import MLF.Constraint.Types.Graph (NodeId(..))
 import MLF.Elab.Inst (schemeToType)
-import MLF.Elab.TypeCheck (Env (..), emptyEnv, typeCheck, typeCheckWithEnv)
+import MLF.Elab.TypeCheck (emptyEnv, emptyResolvedTermEnv, insertResolvedTermBinding, insertResolvedTermEnv, insertTypeBindingRef, typeCheck, typeCheckWithResolvedEnv)
 import MLF.Elab.Types
-import MLF.Reify.TypeOps (alphaEqType, churchAwareEqType, freeTypeVarsType, freshNameLike, matchType, substTypeSimple)
-import MLF.Util.Names (parseNameId)
+import MLF.Reify.TypeOps (alphaEqType, churchAwareEqType, freeTypeVarRefsType, freshNameLike, matchTypeRefs, substTypeSimpleRef)
 
-closeTermWithSchemeSubstIfNeeded :: IntMap.IntMap String -> ElabScheme -> ElabTerm -> ElabTerm
-closeTermWithSchemeSubstIfNeeded subst sch term =
+type TypeVarRename = (TypeBinderRef, TypeBinderRef)
+
+closeTermWithSchemeSubstRefsIfNeeded :: IntMap.IntMap TypeBinderRef -> ElabScheme -> XmlfTerm -> XmlfTerm
+closeTermWithSchemeSubstRefsIfNeeded subst sch term =
   let (subst', sch', renames) = freshenSchemeAndSubstAgainstTerm term subst sch
-      termSubst = renameTermTypeVars renames (substInTerm subst' term)
+      schemeFreshened = not (null renames)
+      termSubst = renameTermTypeVars renames (substInTermRefs subst' term)
       schemeTy = schemeToType sch'
       rollIfRecursiveCandidate ty
         | alphaEqType ty schemeTy = termSubst
         | churchAwareEqType ty schemeTy =
             case schemeTy of
-              TMu {} ->
+              TMuRef {} ->
                 let rolled = ERoll schemeTy termSubst
                  in case typeCheck rolled of
                       Right _ -> rolled
@@ -43,56 +46,58 @@ closeTermWithSchemeSubstIfNeeded subst sch term =
             Just termAligned -> termAligned
             Nothing ->
               let termAlignedBody = maybe termSubst id (alignTermTypeVarsToSchemeBody sch' termSubst)
-               in wrapTermWithScheme sch' termAlignedBody
+               in wrapTermWithSchemeIfMatchesOrFreshened schemeFreshened sch' termAlignedBody
         _ ->
           let termAlignedBody = maybe termSubst id (alignTermTypeVarsToSchemeBody sch' termSubst)
-           in wrapTermWithScheme sch' termAlignedBody
+           in wrapTermWithSchemeIfMatchesOrFreshened schemeFreshened sch' termAlignedBody
 
-preserveRetainedChildAuthoritativeResult :: ElabTerm -> Maybe ElabTerm
-preserveRetainedChildAuthoritativeResult = go emptyEnv
+preserveRetainedChildAuthoritativeResult :: XmlfTerm -> Maybe XmlfTerm
+preserveRetainedChildAuthoritativeResult = go emptyResolvedTermEnv emptyEnv
   where
-    go env term = case term of
-      ELet v sch rhs body
-        | isTrivialRetainedChildBody v body,
-          isForallIdentityScheme sch ->
-            case typeCheckWithEnv env rhs of
-              Right rhsTy
-                | hasRecursiveComponent rhsTy ->
-                    Just rhs
-              _ -> descend env v sch rhs body
-        | Just bodyPreserved <- preserveRetainedChildDirectBoundary env v rhs body ->
-            Just bodyPreserved
-        | Just bodyPreserved <- preserveRetainedChildAliasBoundary env v sch rhs body ->
-            Just bodyPreserved
-        | otherwise -> descend env v sch rhs body
-      ETyAbs v mbBound body ->
+    go resolvedEnv env term = case term of
+      ELet resolved sch rhs body ->
+        let key = TermRefResolved resolved
+         in case () of
+              _
+                | isTrivialRetainedChildBody key body,
+                  isForallIdentityScheme sch ->
+                  case typeCheckWithResolvedEnv resolvedEnv env rhs of
+                    Right rhsTy
+                      | hasRecursiveComponent rhsTy ->
+                          Just rhs
+                    _ -> descendResolved resolvedEnv env resolved sch rhs body
+                | Just bodyPreserved <- preserveRetainedChildDirectBoundary resolvedEnv env key rhs body ->
+                  Just bodyPreserved
+                | Just bodyPreserved <- preserveRetainedChildAliasBoundary resolvedEnv env key resolved sch rhs body ->
+                  Just bodyPreserved
+                | otherwise -> descendResolved resolvedEnv env resolved sch rhs body
+      ETyAbsRef ref mbBound body ->
         let env' =
-              env
-                { typeEnv =
-                    Map.insert v (maybe TBottom tyToElab mbBound) (typeEnv env)
-                }
-         in fmap (ETyAbs v mbBound) (go env' body)
+              insertTypeBindingRef ref (maybe TBottom tyToElab mbBound) env
+         in fmap (eTyAbsWithRef ref mbBound) (go resolvedEnv env' body)
       _ -> Nothing
 
-    descend env v sch rhs body =
-      let env' = env {termEnv = Map.insert v (schemeToType sch) (termEnv env)}
-       in fmap (ELet v sch rhs) (go env' body)
+    descendResolved resolvedEnv env resolved sch rhs body =
+      let schTy = schemeToType sch
+          env' = insertResolvedTermBinding resolved schTy env
+          resolvedEnv' = insertResolvedTermEnv resolved schTy resolvedEnv
+       in fmap (ELet resolved sch rhs) (go resolvedEnv' env' body)
 
-    preserveRetainedChildDirectBoundary env v rhs body
-      | isClearBoundaryRetainedChildRhs v body =
-          case typeCheckWithEnv env rhs of
+    preserveRetainedChildDirectBoundary resolvedEnv env key rhs body
+      | isClearBoundaryRetainedChildRhs key body =
+          case typeCheckWithResolvedEnv resolvedEnv env rhs of
             Right rhsTy
               | hasRecursiveComponent rhsTy ->
                   Just rhs
             _ -> Nothing
       | otherwise = Nothing
 
-    preserveRetainedChildAliasBoundary env v sch rhs body
+    preserveRetainedChildAliasBoundary resolvedEnv env key resolved sch rhs body
       | isAliasFrameRhs rhs,
-        hasRetainedChildAliasBoundary v body 2 =
-          case typeCheckWithEnv env (ELet v sch rhs body) of
+        hasRetainedChildAliasBoundary key body 2 =
+          case typeCheckWithResolvedEnv resolvedEnv env (ELet resolved sch rhs body) of
             Left (TCLetTypeMismatch _ _) ->
-              case typeCheckWithEnv env rhs of
+              case typeCheckWithResolvedEnv resolvedEnv env rhs of
                 Right rhsTy
                   | hasRecursiveComponent rhsTy ->
                       Just rhs
@@ -100,178 +105,241 @@ preserveRetainedChildAuthoritativeResult = go emptyEnv
             _ -> Nothing
       | otherwise = Nothing
 
-    hasRetainedChildAliasBoundary :: String -> ElabTerm -> Int -> Bool
+    hasRetainedChildAliasBoundary :: TermRefKey -> XmlfTerm -> Int -> Bool
     hasRetainedChildAliasBoundary source term remainingAliasFrames = case term of
-      ELet child childSch childRhs childBody
-        | isClearBoundaryRetainedChildRhs source childRhs
-            && isForallIdentityScheme childSch
-            && isTrivialRetainedChildBody child childBody ->
-            True
-        | usesTermVar source childRhs
-            && remainingAliasFrames == 0
-            && isAliasFrameRhs childRhs
-            && hasRetainedChildClearBoundary child childBody ->
-            True
-        | usesTermVar source childRhs
-            && remainingAliasFrames > 0
-            && isAliasFrameRhs childRhs
-            && hasRetainedChildAliasBoundary child childBody (remainingAliasFrames - 1) ->
-            True
+      ELet resolved childSch childRhs childBody ->
+        hasRetainedChildAliasBoundaryLet
+          source
+          (TermRefResolved resolved)
+          childSch
+          childRhs
+          childBody
+          remainingAliasFrames
       _ -> False
 
-    hasRetainedChildClearBoundary :: String -> ElabTerm -> Bool
+    hasRetainedChildAliasBoundaryLet ::
+      TermRefKey ->
+      TermRefKey ->
+      ElabScheme ->
+      XmlfTerm ->
+      XmlfTerm ->
+      Int ->
+      Bool
+    hasRetainedChildAliasBoundaryLet source child childSch childRhs childBody remainingAliasFrames
+      | isClearBoundaryRetainedChildRhs source childRhs
+          && isForallIdentityScheme childSch
+          && isTrivialRetainedChildBody child childBody =
+          True
+      | usesTermVar source childRhs
+          && remainingAliasFrames == 0
+          && isAliasFrameRhs childRhs
+          && hasRetainedChildClearBoundary child childBody =
+          True
+      | usesTermVar source childRhs
+          && remainingAliasFrames > 0
+          && isAliasFrameRhs childRhs
+          && hasRetainedChildAliasBoundary child childBody (remainingAliasFrames - 1) =
+          True
+      | otherwise = False
+
+    hasRetainedChildClearBoundary :: TermRefKey -> XmlfTerm -> Bool
     hasRetainedChildClearBoundary source term =
       hasRetainedChildClearBoundaryWithAliasBudget source term 5
 
-    hasRetainedChildClearBoundaryWithAliasBudget :: String -> ElabTerm -> Int -> Bool
+    hasRetainedChildClearBoundaryWithAliasBudget :: TermRefKey -> XmlfTerm -> Int -> Bool
     hasRetainedChildClearBoundaryWithAliasBudget source term remainingAliasFrames = case term of
-      ELet child childSch childRhs childBody
-        | isClearBoundaryRetainedChildRhs source childRhs
-            && isForallIdentityScheme childSch
-            && isTrivialRetainedChildBody child childBody ->
-            True
-        | remainingAliasFrames > 0
-            && usesTermVar source childRhs
-            && isAliasFrameRhs childRhs
-            && hasRetainedChildClearBoundaryWithAliasBudget child childBody (remainingAliasFrames - 1) ->
-            True
+      ELet resolved childSch childRhs childBody ->
+        hasRetainedChildClearBoundaryWithAliasBudgetLet
+          source
+          (TermRefResolved resolved)
+          childSch
+          childRhs
+          childBody
+          remainingAliasFrames
       _ -> False
 
-isTrivialRetainedChildBody :: String -> ElabTerm -> Bool
+    hasRetainedChildClearBoundaryWithAliasBudgetLet ::
+      TermRefKey ->
+      TermRefKey ->
+      ElabScheme ->
+      XmlfTerm ->
+      XmlfTerm ->
+      Int ->
+      Bool
+    hasRetainedChildClearBoundaryWithAliasBudgetLet source child childSch childRhs childBody remainingAliasFrames
+      | isClearBoundaryRetainedChildRhs source childRhs
+          && isForallIdentityScheme childSch
+          && isTrivialRetainedChildBody child childBody =
+          True
+      | remainingAliasFrames > 0
+          && usesTermVar source childRhs
+          && isAliasFrameRhs childRhs
+          && hasRetainedChildClearBoundaryWithAliasBudget child childBody (remainingAliasFrames - 1) =
+          True
+      | otherwise = False
+
+newtype TermRefKey
+  = TermRefResolved ResolvedVar
+
+termRefKeyMatches :: TermRefKey -> ResolvedVar -> Bool
+termRefKeyMatches key resolved =
+  case key of
+    TermRefResolved expected ->
+      resolvedVarSameIdentity expected resolved
+
+isTrivialRetainedChildBody :: TermRefKey -> XmlfTerm -> Bool
 isTrivialRetainedChildBody v body = case body of
-  EVar bodyV -> bodyV == v
+  EVarNode resolved -> termRefKeyMatches v resolved
   _ -> False
 
 isForallIdentityScheme :: ElabScheme -> Bool
 isForallIdentityScheme sch = case schemeToType sch of
-  TForall v Nothing body -> body == TVar v
+  TForallRef ref Nothing body -> body == TVarRef ref
   _ -> False
 
 hasRecursiveComponent :: ElabType -> Bool
 hasRecursiveComponent ty = case ty of
-  TMu _ _ -> True
+  TMuRef _ _ -> True
   TArrow dom cod -> hasRecursiveComponent dom || hasRecursiveComponent cod
   TCon _ args -> any hasRecursiveComponent args
-  TForall _ mb body -> maybe False hasRecursiveBound mb || hasRecursiveComponent body
+  TForallRef _ mb body -> maybe False hasRecursiveBound mb || hasRecursiveComponent body
   _ -> False
   where
     hasRecursiveBound bound = case bound of
       TArrow dom cod -> hasRecursiveComponent dom || hasRecursiveComponent cod
       TBase _ -> False
       TCon _ args -> any hasRecursiveComponent args
-      TVarApp _ args -> any hasRecursiveComponent args
-      TForall _ mb body -> maybe False hasRecursiveBound mb || hasRecursiveComponent body
-      TMu _ _ -> True
+      TVarAppRef _ args -> any hasRecursiveComponent args
+      TForallRef _ mb body -> maybe False hasRecursiveBound mb || hasRecursiveComponent body
+      TMuRef _ _ -> True
       TBottom -> False
 
-wrapTermWithScheme :: ElabScheme -> ElabTerm -> ElabTerm
-wrapTermWithScheme (Forall binds _) term =
-  foldr (\(name, bound) acc -> ETyAbs name bound acc) term binds
+wrapTermWithScheme :: ElabScheme -> XmlfTerm -> XmlfTerm
+wrapTermWithScheme scheme term =
+  foldr (\(ref, bound) acc -> eTyAbsWithRef ref bound acc) term (schemeBinderRefs scheme)
+
+wrapTermWithSchemeIfMatchesOrFreshened :: Bool -> ElabScheme -> XmlfTerm -> XmlfTerm
+wrapTermWithSchemeIfMatchesOrFreshened schemeFreshened scheme term =
+  let wrapped = wrapTermWithScheme scheme term
+      schemeTy = schemeToType scheme
+   in case typeCheck wrapped of
+        Right ty
+          | alphaEqType ty schemeTy || churchAwareEqType ty schemeTy ->
+              wrapped
+        _ | schemeFreshened -> wrapped
+        _ -> term
 
 freshenSchemeAndSubstAgainstTerm ::
-  ElabTerm ->
-  IntMap.IntMap String ->
+  XmlfTerm ->
+  IntMap.IntMap TypeBinderRef ->
   ElabScheme ->
-  (IntMap.IntMap String, ElabScheme, [(String, String)])
-freshenSchemeAndSubstAgainstTerm term subst sch@(Forall binds body0) =
+  (IntMap.IntMap TypeBinderRef, ElabScheme, [TypeVarRename])
+freshenSchemeAndSubstAgainstTerm term subst sch =
   let reservedNames = Set.union (typeAbsNamesInTerm term) (typeVarNamesInTerm term)
-      binderNames = map fst binds
+      binds = schemeBinderRefs sch
+      body0 = schemeBody sch
+      binderNames = map (typeBinderRefName . fst) binds
       binderDomain = Set.fromList binderNames
-      renames = chooseBinderRenames binderDomain reservedNames binderNames
-      renameMap =
-        Map.fromList
-          [ (old, new)
-            | (old, new) <- renames,
-              old /= new
-          ]
-   in if Map.null renameMap
+      renameRefs =
+        [ (oldRef, renameTypeBinderRef newName oldRef)
+          | (oldRef, newName) <- chooseBinderRenames binderDomain reservedNames (map fst binds),
+            typeBinderRefName oldRef /= newName
+        ]
+   in if null renameRefs
         then (subst, sch, [])
         else
-          let subst' = IntMap.map (\name -> Map.findWithDefault name name renameMap) subst
-              fullRenames = [(old, new) | (old, new) <- renames, old /= new]
-              binds' = renameSchemeBinds renames binds
-              body' = applyTypeRenames fullRenames body0
-           in (subst', Forall binds' body', fullRenames)
+          let subst' =
+                IntMap.map (applyRefRenames renameRefs) subst
+              binds' = renameSchemeBinds renameRefs binds
+              body' = applyTypeRenames renameRefs body0
+           in (subst', mkElabSchemeWithRefs binds' body', renameRefs)
 
 chooseBinderRenames ::
   Set.Set String ->
   Set.Set String ->
-  [String] ->
-  [(String, String)]
+  [TypeBinderRef] ->
+  [(TypeBinderRef, String)]
 chooseBinderRenames binderDomain = go
   where
     go _ [] = []
-    go used (binder : rest) =
-      let needsRename = Set.member binder used
+    go used (binderRef : rest) =
+      let binder = typeBinderRefName binderRef
+          needsRename = Set.member binder used
           usedForFresh = Set.union used binderDomain
           binder' =
             if needsRename
               then freshNameLike binder usedForFresh
               else binder
           used' = Set.insert binder' used
-       in (binder, binder') : go used' rest
+       in (binderRef, binder') : go used' rest
 
 renameSchemeBinds ::
-  [(String, String)] ->
-  [(String, Maybe BoundType)] ->
-  [(String, Maybe BoundType)]
-renameSchemeBinds renames binds = go [] renames binds
+  [TypeVarRename] ->
+  [(TypeBinderRef, Maybe BoundType)] ->
+  [(TypeBinderRef, Maybe BoundType)]
+renameSchemeBinds renames = go []
   where
-    go _ [] [] = []
-    go prev ((old, new) : restRenames) ((_, mbBound) : restBinds) =
-      let mbBound' = fmap (renameBound prev) mbBound
+    go _ [] = []
+    go prev ((ref, mbBound) : restBinds) =
+      let ref' = applyRefRenames renames ref
+          refRenamed = ref /= ref'
+          mbBound' = fmap (renameBound prev) mbBound
           prev'
-            | old == new = prev
-            | otherwise = prev ++ [(old, new)]
-       in (new, mbBound') : go prev' restRenames restBinds
-    go _ _ _ = binds
+            | refRenamed = prev ++ [(ref, ref')]
+            | otherwise = prev
+       in (ref', mbBound') : go prev' restBinds
 
-renameBound :: [(String, String)] -> BoundType -> BoundType
+renameBound :: [TypeVarRename] -> BoundType -> BoundType
 renameBound renames bound =
   case elabToBound (applyTypeRenames renames (tyToElab bound)) of
     Right bound' -> bound'
     Left _ -> bound
 
-applyTypeRenames :: [(String, String)] -> ElabType -> ElabType
+applyTypeRenames :: [TypeVarRename] -> ElabType -> ElabType
 applyTypeRenames renames ty0 =
   foldl'
-    ( \ty (old, new) ->
-        substTypeSimple old (TVar new) ty
+    ( \ty (oldRef, newRef) ->
+        substTypeSimpleRef oldRef (TVarRef newRef) ty
     )
     ty0
     renames
 
-renameTermTypeVars :: [(String, String)] -> ElabTerm -> ElabTerm
+renameTermTypeVars :: [TypeVarRename] -> XmlfTerm -> XmlfTerm
 renameTermTypeVars renames0 = go renames0
   where
-    go renames term = case term of
-      EVar v -> EVar v
-      ELit lit -> ELit lit
-      ELam v ty body ->
-        ELam v (applyTypeRenames renames ty) (go renames body)
-      EApp f a ->
+    go renames term = case project term of
+      EVarNodeF resolved ->
+        EVarNode (mapResolvedVarType (applyTypeRenames renames) resolved)
+      ELitF lit -> ELit lit
+      ELamF resolved body ->
+        ELam
+          (mapResolvedVarType (applyTypeRenames renames) resolved)
+          (go renames body)
+      EAppF f a ->
         EApp (go renames f) (go renames a)
-      ELet v sch rhs body ->
-        let sch' = schemeFromType (applyTypeRenames renames (schemeToType sch))
-         in ELet v sch' (go renames rhs) (go renames body)
-      ETyAbs v mbBound body ->
-        let mbBound' = fmap (renameBound renames) mbBound
-            renamesBody = filter (\(old, _) -> old /= v) renames
-         in ETyAbs v mbBound' (go renamesBody body)
-      ETyInst e inst ->
+      ELetF resolved sch rhs body ->
+        let resolved' = mapResolvedVarType (applyTypeRenames renames) resolved
+            sch' = schemeFromType (applyTypeRenames renames (schemeToType sch))
+         in ELet resolved' sch' (go renames rhs) (go renames body)
+      ETyAbsFRef ref mbBound body ->
+        let ref' = applyRefRenames renames ref
+            mbBound' = fmap (renameBound renames) mbBound
+            renamesBody = filter (not . shadowsTypeBinder ref . fst) renames
+         in eTyAbsWithRef ref' mbBound' (go renamesBody body)
+      ETyInstF e inst ->
         ETyInst (go renames e) (renameInst renames inst)
-      ERoll ty body ->
+      ERollF ty body ->
         ERoll (applyTypeRenames renames ty) (go renames body)
-      EUnroll body ->
+      EUnrollF body ->
         EUnroll (go renames body)
 
-alignTermTypeVarsToScheme :: ElabScheme -> ElabTerm -> Maybe ElabTerm
+alignTermTypeVarsToScheme :: ElabScheme -> XmlfTerm -> Maybe XmlfTerm
 alignTermTypeVarsToScheme sch term =
-  let binderNames = map fst (case sch of Forall binds _ -> binds)
+  let binderRefs = map fst (schemeBinderRefs sch)
    in case typeCheck term of
         Right ty ->
-          let freeVars = Set.toList (freeTypeVarsType ty)
-              renames = zip freeVars binderNames
+          let freeRefs = freeTypeVarRefsType ty
+              renames = zip freeRefs binderRefs
               termAligned = renameTermTypeVars renames term
            in case typeCheck termAligned of
                 Right tyAligned
@@ -279,22 +347,22 @@ alignTermTypeVarsToScheme sch term =
                 _ -> Nothing
         Left _ -> Nothing
 
-alignTopTyAbsToScheme :: ElabScheme -> ElabTerm -> Maybe ElabTerm
+alignTopTyAbsToScheme :: ElabScheme -> XmlfTerm -> Maybe XmlfTerm
 alignTopTyAbsToScheme sch term =
-  let Forall binds _ = sch
+  let binds = schemeBinderRefs sch
       (topBinds, body) = splitTopTyAbs term
    in if length topBinds /= length binds
         then Nothing
         else
           let renames =
-                [ (oldName, newName)
-                  | ((oldName, _), (newName, _)) <- zip topBinds binds,
-                    oldName /= newName
+                [ (oldRef, newRef)
+                  | ((oldRef, _), (newRef, _)) <- zip topBinds binds,
+                    oldRef /= newRef
                 ]
               body' = renameTermTypeVars renames body
               rebuilt =
                 foldr
-                  (\(name, mbBound) acc -> ETyAbs name mbBound acc)
+                  (\(ref, mbBound) acc -> eTyAbsWithRef ref mbBound acc)
                   body'
                   binds
            in case typeCheck rebuilt of
@@ -302,38 +370,38 @@ alignTopTyAbsToScheme sch term =
                   | alphaEqType tyAligned (schemeToType sch) -> Just rebuilt
                 _ -> Nothing
 
-topTyAbsNames :: ElabTerm -> [String]
-topTyAbsNames term = case term of
-  ETyAbs v _ body -> v : topTyAbsNames body
+topTyAbsRefs :: XmlfTerm -> [TypeBinderRef]
+topTyAbsRefs term = case term of
+  ETyAbsRef ref _ body -> ref : topTyAbsRefs body
   _ -> []
 
-splitTopTyAbs :: ElabTerm -> ([(String, Maybe BoundType)], ElabTerm)
+splitTopTyAbs :: XmlfTerm -> ([(TypeBinderRef, Maybe BoundType)], XmlfTerm)
 splitTopTyAbs term = case term of
-  ETyAbs v mbBound body ->
+  ETyAbsRef ref mbBound body ->
     let (binds, core) = splitTopTyAbs body
-     in ((v, mbBound) : binds, core)
+     in ((ref, mbBound) : binds, core)
   _ -> ([], term)
 
-alignTermTypeVarsToTopTyAbs :: ElabTerm -> Maybe ElabTerm
+alignTermTypeVarsToTopTyAbs :: XmlfTerm -> Maybe XmlfTerm
 alignTermTypeVarsToTopTyAbs term =
-  let binders = topTyAbsNames term
+  let binders = topTyAbsRefs term
    in case (binders, typeCheck term) of
         ([], _) -> Nothing
         (_, Left _) -> Nothing
         (_, Right ty) ->
-          let freeVars = Set.toList (freeTypeVarsType ty)
-              renames = zip freeVars binders
+          let freeRefs = freeTypeVarRefsType ty
+              renames = zip freeRefs binders
               termAligned = renameTermTypeVars renames term
            in case typeCheck termAligned of
                 Right tyAligned
-                  | Set.null (freeTypeVarsType tyAligned) || length freeVars <= length binders -> Just termAligned
+                  | null (freeTypeVarRefsType tyAligned) || length freeRefs <= length binders -> Just termAligned
                 _ -> Nothing
 
-alignTermTypeVarsToSchemeBody :: ElabScheme -> ElabTerm -> Maybe ElabTerm
-alignTermTypeVarsToSchemeBody (Forall binds body) term =
+alignTermTypeVarsToSchemeBody :: ElabScheme -> XmlfTerm -> Maybe XmlfTerm
+alignTermTypeVarsToSchemeBody scheme term =
   case typeCheck term of
     Right ty ->
-      case structuralRenamesToSchemeBody binderNames body ty of
+      case structuralRenamesToSchemeBody binderRefs body ty of
         Just renames ->
           let termAligned = renameTermTypeVars renames term
            in case typeCheck termAligned of
@@ -343,185 +411,207 @@ alignTermTypeVarsToSchemeBody (Forall binds body) term =
         Nothing -> sortedFreeVarAlignment ty
     Left _ -> Nothing
   where
-    binderNames = map fst binds
+    binderRefs = map fst (schemeBinderRefs scheme)
+    body = schemeBody scheme
 
     sortedFreeVarAlignment ty =
-      let freeVars = Set.toList (freeTypeVarsType ty)
-          renames = zip freeVars binderNames
+      let freeRefs = freeTypeVarRefsType ty
+          renames = zip freeRefs binderRefs
           termAligned = renameTermTypeVars renames term
        in case typeCheck termAligned of
             Right tyAligned
               | alphaEqType tyAligned body -> Just termAligned
             _ -> Nothing
 
-structuralRenamesToSchemeBody :: [String] -> ElabType -> ElabType -> Maybe [(String, String)]
-structuralRenamesToSchemeBody binderNames body ty =
-  case matchType (Set.fromList binderNames) body ty of
+structuralRenamesToSchemeBody :: [TypeBinderRef] -> ElabType -> ElabType -> Maybe [TypeVarRename]
+structuralRenamesToSchemeBody binderRefs body ty =
+  case matchTypeRefs binderRefs body ty of
     Right subst ->
       let renames =
-            [ (source, target)
-              | target <- binderNames,
-                Just (TVar source) <- [Map.lookup target subst],
-                source /= target
+            [ (sourceRef, targetRef)
+              | targetRef <- binderRefs,
+                Just (TVarRef sourceRef) <- [Map.lookup targetRef subst],
+                sourceRef /= targetRef
             ]
-          sources = map fst renames
-       in if Set.size (Set.fromList sources) == length sources
+          sourceNames = map (typeBinderRefName . fst) renames
+       in if Set.size (Set.fromList sourceNames) == length sourceNames
             then Just renames
             else Nothing
     Left _ -> Nothing
 
-renameInst :: [(String, String)] -> Instantiation -> Instantiation
-renameInst renames inst = case inst of
-  InstId -> InstId
-  InstApp ty -> InstApp (applyTypeRenames renames ty)
-  InstBot ty -> InstBot (applyTypeRenames renames ty)
-  InstIntro -> InstIntro
-  InstElim -> InstElim
-  InstAbstr v -> InstAbstr (renameName renames v)
-  InstUnder v inner -> InstUnder (renameName renames v) (renameInst renames inner)
-  InstInside inner -> InstInside (renameInst renames inner)
-  InstSeq i1 i2 -> InstSeq (renameInst renames i1) (renameInst renames i2)
+renameInst :: [TypeVarRename] -> Instantiation -> Instantiation
+renameInst renames inst = case project inst of
+  InstIdF -> InstId
+  InstAppF ty -> InstApp (applyTypeRenames renames ty)
+  InstBotF ty -> InstBot (applyTypeRenames renames ty)
+  InstIntroF -> InstIntro
+  InstElimF -> InstElim
+  InstAbstrFRef ref ->
+    instAbstrWithRef (applyRefRenames renames ref)
+  InstUnderFRef ref inner ->
+    instUnderWithRef
+      (applyRefRenames renames ref)
+      (renameInst renames inner)
+  InstInsideF inner -> InstInside (renameInst renames inner)
+  InstSeqF i1 i2 -> InstSeq (renameInst renames i1) (renameInst renames i2)
 
-renameName :: [(String, String)] -> String -> String
-renameName renames name =
-  case lookup name renames of
-    Just renamed -> renamed
-    Nothing -> name
+applyRefRenames :: [TypeVarRename] -> TypeBinderRef -> TypeBinderRef
+applyRefRenames [] ref = ref
+applyRefRenames ((oldRef, newRef) : rest) ref
+  | typeBinderRefsSameIdentity ref oldRef = newRef
+  | otherwise = applyRefRenames rest ref
 
-isAliasFrameRhs :: ElabTerm -> Bool
+shadowsTypeBinder :: TypeBinderRef -> TypeBinderRef -> Bool
+shadowsTypeBinder = typeBinderRefsSameIdentity
+
+isAliasFrameRhs :: XmlfTerm -> Bool
 isAliasFrameRhs rhs = case rhs of
-  EVar _ -> True
-  ETyAbs _ _ body -> isAliasFrameRhs body
+  EVarNode {} -> True
+  ETyAbsRef _ _ body -> isAliasFrameRhs body
   _ -> False
 
-isClearBoundaryRetainedChildRhs :: String -> ElabTerm -> Bool
+isClearBoundaryRetainedChildRhs :: TermRefKey -> XmlfTerm -> Bool
 isClearBoundaryRetainedChildRhs source rhs = case rhs of
   EApp f arg -> isIdentityBoundaryLambda f && usesTermVar source arg
-  ETyAbs _ _ body -> isClearBoundaryRetainedChildRhs source body
+  ETyAbsRef _ _ body -> isClearBoundaryRetainedChildRhs source body
   ETyInst e _ -> isClearBoundaryRetainedChildRhs source e
   _ -> False
 
-isIdentityBoundaryLambda :: ElabTerm -> Bool
+isIdentityBoundaryLambda :: XmlfTerm -> Bool
 isIdentityBoundaryLambda term = case term of
-  ELam v _ body -> isIdentityBoundaryBody v body
-  ETyAbs _ _ body -> isIdentityBoundaryLambda body
+  ELam resolved body -> isIdentityBoundaryBody (TermRefResolved resolved) body
+  ETyAbsRef _ _ body -> isIdentityBoundaryLambda body
   ETyInst e _ -> isIdentityBoundaryLambda e
   _ -> False
 
-isIdentityBoundaryBody :: String -> ElabTerm -> Bool
+isIdentityBoundaryBody :: TermRefKey -> XmlfTerm -> Bool
 isIdentityBoundaryBody v body = case body of
-  EVar bodyV -> bodyV == v
-  ETyAbs _ _ inner -> isIdentityBoundaryBody v inner
+  EVarNode resolved -> termRefKeyMatches v resolved
+  ETyAbsRef _ _ inner -> isIdentityBoundaryBody v inner
   ETyInst e _ -> isIdentityBoundaryBody v e
   _ -> False
 
-usesTermVar :: String -> ElabTerm -> Bool
+usesTermVar :: TermRefKey -> XmlfTerm -> Bool
 usesTermVar target = go
   where
     go term = case term of
-      EVar v -> v == target
+      EVarNode resolved -> termRefKeyMatches target resolved
       ELit _ -> False
-      ELam v _ body
-        | v == target -> False
+      ELam resolved body
+        | termRefKeyMatches target resolved -> False
         | otherwise -> go body
       EApp f a -> go f || go a
-      ELet v _ rhs body ->
-        go rhs || ((v /= target) && go body)
-      ETyAbs _ _ body -> go body
+      ELet resolved _ rhs body ->
+        go rhs || (not (termRefKeyMatches target resolved) && go body)
+      ETyAbsRef _ _ body -> go body
       ETyInst e _ -> go e
       ERoll _ body -> go body
       EUnroll body -> go body
 
-typeAbsNamesInTerm :: ElabTerm -> Set.Set String
+typeAbsNamesInTerm :: XmlfTerm -> Set.Set String
 typeAbsNamesInTerm = cata alg
   where
     alg term = case term of
-      EVarF _ -> Set.empty
+      EVarNodeF _ -> Set.empty
       ELitF _ -> Set.empty
-      ELamF _ _ body -> body
+      ELamF _ body -> body
       EAppF f a -> Set.union f a
       ELetF _ _ rhs body -> Set.union rhs body
-      ETyAbsF v _ body -> Set.insert v body
+      ETyAbsFRef ref _ body -> Set.insert (typeBinderRefName ref) body
       ETyInstF e _ -> e
       ERollF _ body -> body
       EUnrollF body -> body
 
-typeVarNamesInTerm :: ElabTerm -> Set.Set String
-typeVarNamesInTerm = cata alg
+typeVarNamesInTerm :: XmlfTerm -> Set.Set String
+typeVarNamesInTerm =
+  Set.fromList . map typeBinderRefName . typeVarRefsInTerm
+
+typeVarRefsInTerm :: XmlfTerm -> [TypeBinderRef]
+typeVarRefsInTerm = cata alg
   where
     alg term = case term of
-      EVarF _ -> Set.empty
-      ELitF _ -> Set.empty
-      ELamF _ ty body -> Set.union (freeTypeVarsType ty) body
-      EAppF f a -> Set.union f a
-      ELetF _ sch rhs body -> Set.unions [freeTypeVarsType (schemeToType sch), rhs, body]
-      ETyAbsF v mb body -> Set.insert v (case mb of Just b -> Set.union (freeTypeVarsType b) body; Nothing -> body)
-      ETyInstF e inst -> Set.union e (freeTypeVarsInst inst)
-      ERollF ty body -> Set.union (freeTypeVarsType ty) body
+      EVarNodeF resolved -> freeTypeVarRefsType (resolvedVarType resolved)
+      ELitF _ -> []
+      ELamF resolved body -> freeTypeVarRefsType (resolvedVarType resolved) ++ body
+      EAppF f a -> f ++ a
+      ELetF resolved sch rhs body ->
+        freeTypeVarRefsType (resolvedVarType resolved) ++ freeTypeVarRefsType (schemeToType sch) ++ rhs ++ body
+      ETyAbsFRef ref mb body -> ref : (maybe [] freeTypeVarRefsType mb ++ body)
+      ETyInstF e inst -> e ++ typeVarRefsInst inst
+      ERollF ty body -> freeTypeVarRefsType ty ++ body
       EUnrollF body -> body
 
-freeTypeVarsInst :: Instantiation -> Set.Set String
-freeTypeVarsInst inst = case inst of
-  InstId -> Set.empty
-  InstApp ty -> freeTypeVarsType ty
-  InstIntro -> Set.empty
-  InstElim -> Set.empty
-  InstInside inner -> freeTypeVarsInst inner
-  InstSeq a b -> Set.union (freeTypeVarsInst a) (freeTypeVarsInst b)
-  InstUnder _ inner -> freeTypeVarsInst inner
-  InstBot ty -> freeTypeVarsType ty
-  InstAbstr _ -> Set.empty
+typeVarRefsInst :: Instantiation -> [TypeBinderRef]
+typeVarRefsInst inst = case project inst of
+  InstIdF -> []
+  InstAppF ty -> freeTypeVarRefsType ty
+  InstIntroF -> []
+  InstElimF -> []
+  InstInsideF inner -> typeVarRefsInst inner
+  InstSeqF a b -> typeVarRefsInst a ++ typeVarRefsInst b
+  InstUnderFRef _ inner -> typeVarRefsInst inner
+  InstBotF ty -> freeTypeVarRefsType ty
+  InstAbstrFRef _ -> []
 
-substInTerm :: IntMap.IntMap String -> ElabTerm -> ElabTerm
-substInTerm subst = cata alg
+substInTermRefs :: IntMap.IntMap TypeBinderRef -> XmlfTerm -> XmlfTerm
+substInTermRefs subst = cata alg
   where
     alg term = case term of
-      EVarF v -> EVar v
+      EVarNodeF resolved -> EVarNode (mapResolvedVarType (substInTyRefs subst) resolved)
       ELitF l -> ELit l
-      ELamF v ty body -> ELam v (substInTy subst ty) body
+      ELamF resolved body -> ELam (mapResolvedVarType (substInTyRefs subst) resolved) body
       EAppF f a -> EApp f a
-      ELetF v sch rhs body -> ELet v (substInScheme subst sch) rhs body
-      ETyAbsF v b body -> ETyAbs v (fmap (substInTy subst) b) body
-      ETyInstF e i -> ETyInst e (substInInst subst i)
-      ERollF ty body -> ERoll (substInTy subst ty) body
+      ELetF resolved sch rhs body ->
+        ELet
+          (mapResolvedVarType (substInTyRefs subst) resolved)
+          (substInSchemeRefs subst sch)
+          rhs
+          body
+      ETyAbsFRef ref b body ->
+        eTyAbsWithRef (applySubstRefByMap subst ref) (fmap (substInTyRefs subst) b) body
+      ETyInstF e i -> ETyInst e (substInInstRefs subst i)
+      ERollF ty body -> ERoll (substInTyRefs subst ty) body
       EUnrollF body -> EUnroll body
 
-substInTy :: IntMap.IntMap String -> Ty v -> Ty v
-substInTy subst = cataIx alg
+substInTyRefs :: IntMap.IntMap TypeBinderRef -> Ty v -> Ty v
+substInTyRefs subst = cataIx alg
   where
     alg :: TyIF i Ty -> Ty i
     alg node = case node of
-      TVarIF v -> TVar (applySubst v)
-      TVarAppIF v args -> TVarApp (applySubst v) args
+      TVarIFRef ref -> TVarRef (applySubstRef ref)
+      TVarAppIFRef ref args -> TVarAppRef (applySubstRef ref) args
       TArrowIF d c -> TArrow d c
-      TConIF c args -> TCon c args
-      TBaseIF b -> TBase b
-      TForallIF v mb body -> TForall v mb body
-      TMuIF v body -> TMu v body
+      TConIFWithIdentity identity c args -> TConWithIdentity identity c args
+      TBaseIFWithIdentity identity b -> TBaseWithIdentity identity b
+      TForallIFRef ref mb body -> TForallRef (applySubstRef ref) mb body
+      TMuIFRef ref body -> TMuRef (applySubstRef ref) body
       TBottomIF -> TBottom
 
-    applySubst name =
-      case parseNameId name of
-        Just nid ->
-          case IntMap.lookup nid subst of
-            Just newName -> newName
-            Nothing -> name
-        Nothing -> name
+    applySubstRef = applySubstRefByMap subst
 
-substInScheme :: IntMap.IntMap String -> ElabScheme -> ElabScheme
-substInScheme subst scheme =
-  schemeFromType (substInTy subst (schemeToType scheme))
+applySubstRefByMap :: IntMap.IntMap TypeBinderRef -> TypeBinderRef -> TypeBinderRef
+applySubstRefByMap subst ref =
+  case typeBinderRefNode ref of
+    Just (NodeId nid) ->
+      case IntMap.lookup nid subst of
+        Just ref' -> ref'
+        Nothing -> ref
+    Nothing -> ref
 
-substInInst :: IntMap.IntMap String -> Instantiation -> Instantiation
-substInInst subst = cata alg
+substInSchemeRefs :: IntMap.IntMap TypeBinderRef -> ElabScheme -> ElabScheme
+substInSchemeRefs subst scheme =
+  schemeFromType (substInTyRefs subst (schemeToType scheme))
+
+substInInstRefs :: IntMap.IntMap TypeBinderRef -> Instantiation -> Instantiation
+substInInstRefs subst = cata alg
   where
     alg inst = case inst of
       InstIdF -> InstId
-      InstAppF t -> InstApp (substInTy subst t)
-      InstBotF t -> InstBot (substInTy subst t)
+      InstAppF t -> InstApp (substInTyRefs subst t)
+      InstBotF t -> InstBot (substInTyRefs subst t)
       InstIntroF -> InstIntro
       InstElimF -> InstElim
-      InstAbstrF v -> InstAbstr v
-      InstUnderF v i' -> InstUnder v i'
+      InstAbstrFRef ref -> instAbstrWithRef (applySubstRefByMap subst ref)
+      InstUnderFRef ref i' -> instUnderWithRef (applySubstRefByMap subst ref) i'
       InstInsideF i' -> InstInside i'
       InstSeqF i1 i2 -> InstSeq i1 i2
