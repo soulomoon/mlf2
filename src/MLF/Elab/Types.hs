@@ -87,6 +87,7 @@ module MLF.Elab.Types (
     typeBinderRefsSameIdentityAndName,
     renameTypeBinderRef,
     freshTypeBinderRef,
+    sourceTypeBinderRefForName,
     freshTypeBinderRefFromNames,
     instAbstrWithRef,
     instUnderWithRef,
@@ -112,10 +113,12 @@ module MLF.Elab.Types (
     resolvedVarConstructorRef,
     resolvedVarIsLocal,
     resolvedVarIsEvidence,
+    resolvedVarIsDiscard,
     resolvedVarSameIdentity,
     resolvedVarBoundBy,
     mapResolvedVarType,
     renameResolvedLocalVar,
+    freshenResolvedLocalVar,
     renameResolvedDeferredVar,
     XmlfTerm(..),
     XmlfTermF
@@ -173,7 +176,7 @@ import qualified MLF.Util.Order as Order
 import MLF.Constraint.Types.Graph (BaseTy(..), NodeId(..), getNodeId)
 import MLF.Util.ElabError (ElabError(..), bindingToElab)
 import MLF.Types.Elab
-import MLF.Types.Unique (UniqueIdentity(..))
+import MLF.Types.Identity (UniqueIdentity(..))
 import MLF.Reify.TypeOps (freeTypeVarRefsType, substTypeCaptureRef)
 import qualified MLF.XMLF.Pretty as XMLFPretty
 import qualified MLF.XMLF.Syntax as XMLF

@@ -3,32 +3,64 @@
 module PrimitiveInventorySpec (spec) where
 
 import Control.Monad (forM_)
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import MLF.Constraint.Types.Graph (BaseTy (..))
 import MLF.Types.Elab (Ty (..), TypeBinderIdentity, typeBinderRefIdentity)
+import MLF.Types.Identity (UniqueIdentity (..), typeBinderIdentityFromUnique)
 import qualified MLF.Frontend.Program.Builtins as Builtins
-import MLF.Frontend.Program.Types (ValueInfo (..))
+import MLF.Frontend.Program.Types (ValueInfo (..), valueIdentityType, valueType)
+import MLF.Frontend.Symbol (renameSymbolDefiningName, symbolIdentityStableName)
+import MLF.Frontend.Syntax (SrcTy (..))
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
 import Test.Hspec
 
 spec :: Spec
 spec = describe "MLF.Primitive.Inventory" $ do
   it "keeps the frontend builtin registry derived from the shared primitive inventory owner" $ do
+    Map.keysSet PrimitiveInventory.builtinTypeSpecs `shouldBe` PrimitiveInventory.builtinTypeNames
     Builtins.builtinTypeNames `shouldBe` PrimitiveInventory.builtinTypeNames
     Builtins.builtinOpaqueTypeNames `shouldBe` PrimitiveInventory.builtinOpaqueTypeNames
     Map.keysSet Builtins.builtinValues `shouldBe` PrimitiveInventory.primitiveValueNames
     Map.keysSet Builtins.builtinOpaqueTypes `shouldBe` PrimitiveInventory.builtinOpaqueTypeNames
+    PrimitiveInventory.isBuiltinTypeName (PrimitiveInventory.builtinModuleName ++ ".Int") `shouldBe` True
+    PrimitiveInventory.isOpaqueBuiltinTypeName (PrimitiveInventory.builtinModuleName ++ ".IO") `shouldBe` True
+    PrimitiveInventory.builtinTypeKind (PrimitiveInventory.builtinModuleName ++ ".IO")
+      `shouldBe` PrimitiveInventory.builtinTypeKind "IO"
+    let intIdentity = PrimitiveInventory.builtinTypeIdentity "Int"
+        stableInt = symbolIdentityStableName intIdentity
+    PrimitiveInventory.normalizeBuiltinTypeReference stableInt `shouldBe` "Int"
+    PrimitiveInventory.builtinTypeHeadIdentity stableInt `shouldBe` Just intIdentity
+    PrimitiveInventory.isBuiltinTypeName stableInt `shouldBe` True
+    let stableHeads = Builtins.builtinSourceTypeHeadIdentities (STBase stableInt)
+    Map.lookup stableInt stableHeads `shouldBe` Just intIdentity
+    Map.lookup "Int" stableHeads `shouldBe` Just intIdentity
+    let andIdentity = PrimitiveInventory.builtinValueIdentity PrimitiveInventory.nativeAndPrimitiveName
+        stableAnd = symbolIdentityStableName andIdentity
+    PrimitiveInventory.builtinValueIdentity stableAnd `shouldBe` andIdentity
+    PrimitiveInventory.builtinValueIdentity (PrimitiveInventory.builtinModuleName ++ "." ++ PrimitiveInventory.nativeAndPrimitiveName)
+      `shouldBe` andIdentity
 
     forM_ (Map.toList PrimitiveInventory.primitiveValueSpecs) $ \(name, spec0) ->
       case Map.lookup name Builtins.builtinValues of
-        Just OrdinaryValue {valueRuntimeName, valueType, valueIdentityType} -> do
+        Just valueInfo@OrdinaryValue {valueRuntimeName} -> do
           valueRuntimeName `shouldBe` name
-          valueType
+          valueInfoSymbol valueInfo `shouldBe` PrimitiveInventory.builtinValueIdentity name
+          valueType valueInfo
             `shouldBe` PrimitiveInventory.primitiveTypeToSourceType (PrimitiveInventory.primitiveValueType spec0)
-          valueIdentityType
-            `shouldBe` PrimitiveInventory.canonicalizeBuiltinSourceType valueType
+          valueIdentityType valueInfo
+            `shouldBe` PrimitiveInventory.canonicalizeBuiltinSourceType (valueType valueInfo)
         other ->
           expectationFailure ("expected ordinary builtin value for " ++ name ++ ", got " ++ show other)
+
+  it "canonicalizes qualified builtin source type heads once" $ do
+    let builtinHead name = PrimitiveInventory.builtinModuleName ++ "." ++ name
+    PrimitiveInventory.matchesBuiltinTypeName (builtinHead "Int") "Int" `shouldBe` True
+    PrimitiveInventory.canonicalizeBuiltinSourceType (STBase (builtinHead "Int"))
+      `shouldBe` STBase (builtinHead "Int")
+    PrimitiveInventory.canonicalizeBuiltinSourceType (STCon (builtinHead "IO") (STBase (builtinHead "Int") :| []))
+      `shouldBe` STCon (builtinHead "IO") (STBase (builtinHead "Int") :| [])
 
   it "assigns unique generated type identities across primitive elab types" $ do
     let idsByPrimitive =
@@ -39,7 +71,45 @@ spec = describe "MLF.Primitive.Inventory" $ do
     ids `shouldSatisfy` (not . null)
     length ids `shouldBe` Set.size (Set.fromList ids)
 
+  it "attaches builtin identities to primitive elab type heads" $ do
+    PrimitiveInventory.builtinTypeIdentity (PrimitiveInventory.builtinModuleName ++ ".Int")
+      `shouldBe` PrimitiveInventory.builtinTypeIdentity "Int"
+    PrimitiveInventory.primitiveTypeToElabType (PrimitiveInventory.PrimitiveTypeBase "Int")
+      `shouldBe` TBaseWithIdentity (Just (Builtins.builtinTypeIdentity "Int")) (BaseTy "Int")
+    PrimitiveInventory.primitiveTypeToElabType (PrimitiveInventory.PrimitiveTypeCon "IO" (PrimitiveInventory.PrimitiveTypeBase "Int" :| []))
+      `shouldBe` TConWithIdentity
+        (Just (Builtins.builtinTypeIdentity "IO"))
+        (BaseTy "IO")
+        (TBaseWithIdentity (Just (Builtins.builtinTypeIdentity "Int")) (BaseTy "Int") :| [])
+
+  it "generates primitive type binder identities for stable-looking names" $ do
+    let stableName = "$typevar#991611"
+        stableIdentity = typeBinderIdentityFromUnique (UniqueIdentity 0)
+        freshIdentity = typeBinderIdentityFromUnique (UniqueIdentity 1)
+        sourceTy =
+          PrimitiveInventory.PrimitiveTypeForall
+            stableName
+            ( PrimitiveInventory.PrimitiveTypeForall
+                "a"
+                ( PrimitiveInventory.PrimitiveTypeArrow
+                    (PrimitiveInventory.PrimitiveTypeVar stableName)
+                    (PrimitiveInventory.PrimitiveTypeVar "a")
+                )
+            )
+    case PrimitiveInventory.primitiveTypeToElabType sourceTy of
+      TForallRef stableRef Nothing (TForallRef freshRef Nothing (TArrow (TVarRef stableOcc) (TVarRef freshOcc))) -> do
+        typeBinderRefIdentity stableRef `shouldBe` stableIdentity
+        typeBinderRefIdentity stableOcc `shouldBe` stableIdentity
+        typeBinderRefIdentity freshRef `shouldBe` freshIdentity
+        typeBinderRefIdentity freshOcc `shouldBe` freshIdentity
+      other ->
+        expectationFailure ("unexpected primitive elab type: " ++ show other)
+
   it "classifies native-lowerable primitive support from the shared primitive inventory owner" $ do
+    let staleAndIdentity =
+          renameSymbolDefiningName "$stale_and" (PrimitiveInventory.builtinValueIdentity PrimitiveInventory.nativeAndPrimitiveName)
+    PrimitiveInventory.primitiveValueNameByIdentity staleAndIdentity
+      `shouldBe` Just PrimitiveInventory.nativeAndPrimitiveName
     PrimitiveInventory.primitiveNativeSupport PrimitiveInventory.nativeAndPrimitiveName
       `shouldBe` Just PrimitiveInventory.PrimitiveNativeBooleanAnd
 

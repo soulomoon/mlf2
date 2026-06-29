@@ -50,6 +50,7 @@ import ElabTermTestSupport (generatedResolvedLocal, mkTestDeferredVar, mkTestLoc
 import MLF.Elab.Pipeline qualified as Elab
 import MLF.Elab.Types qualified as ElabTypes
 import MLF.Frontend.ConstraintGen (ConstraintResult (..))
+import MLF.Frontend.Program.Builtins qualified as Builtins
 import MLF.Frontend.Syntax qualified as Surf
 import MLF.Reify.TypeOps qualified as TypeOps
 import Presolution.Util (mkNormalizeConstraint, mkNormalizeEnv)
@@ -390,7 +391,7 @@ propGeneralizedUnify _size =
 
 propWfEmpty :: Int -> Property
 propWfEmpty _size =
-  Elab.typeCheck (Elab.ELit (Surf.LInt 0)) === Right intTy
+  Elab.typeCheck (Elab.ELit (Surf.LInt 0)) === Right builtinIntTy
 
 propWfTVar :: Int -> Property
 propWfTVar _size =
@@ -1767,6 +1768,9 @@ inertConstraint size =
 
 intTy :: Elab.ElabType
 intTy = Elab.TBase (BaseTy "Int")
+
+builtinIntTy :: Elab.ElabType
+builtinIntTy = ElabTypes.TBaseWithIdentity (Just (Builtins.builtinTypeIdentity "Int")) (BaseTy "Int")
 
 boolTy :: Elab.ElabType
 boolTy = Elab.TBase (BaseTy "Bool")

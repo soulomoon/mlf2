@@ -16,8 +16,9 @@ import qualified Data.Map.Strict as Map
 
 import MLF.Constraint.Presolution (PresolutionView(..))
 import qualified MLF.Constraint.VarStore as VarStore
-import MLF.Constraint.Types.Graph (NodeMap, TyNode(..), cNodes, fromListNode, toListNode)
+import MLF.Constraint.Types.Graph (BaseTy(..), NodeMap, TyNode(..), cNodes, fromListNode, toListNode)
 import MLF.Elab.ReadModel (ElabReadModel(..))
+import qualified MLF.Primitive.Identity as PrimitiveIdentity
 import MLF.Reify.Core
     ( namedNodes
     )
@@ -152,9 +153,12 @@ simplifyAnnotationType = go
         in inlineAlias ty
 
     mergeBaseBounds binds body =
-        let baseKey bound = case bound of
-                TBase b -> Just (Just b)
-                TBottom -> Just Nothing
+        let baseEntry bound = case bound of
+                TBaseWithIdentity (Just identity) base ->
+                    Just (Just (Left identity), TBaseWithIdentity (Just identity) base)
+                TBaseWithIdentity Nothing base@(BaseTy name) ->
+                    Just (Just (Right base), TBaseWithIdentity (PrimitiveIdentity.builtinTypeHeadIdentity name) base)
+                TBottom -> Just (Nothing, TBottom)
                 _ -> Nothing
             usedInBounds =
                 concat
@@ -165,10 +169,10 @@ simplifyAnnotationType = go
             goMerge seen ((ref, mb):rest) body' =
                 let mb' = mb
                     vUsed = refMember ref usedInBounds
-                in case mb' >>= baseKey of
-                    Just key ->
+                in case mb' >>= baseEntry of
+                    Just (key, boundTy) ->
                         case Map.lookup key seen of
-                            Just (rep, repUsed) ->
+                            Just (rep, repUsed, repTy) ->
                                 if repUsed
                                     then
                                         if vUsed
@@ -177,27 +181,23 @@ simplifyAnnotationType = go
                                                     body'' = substTypeSimpleRef ref (TVarRef rep) body'
                                                 in goMerge seen rest' body''
                                             else
-                                                let rest' = map (substBindType ref (baseFromKey key)) rest
-                                                    body'' = substTypeSimpleRef ref (baseFromKey key) body'
+                                                let rest' = map (substBindType ref repTy) rest
+                                                    body'' = substTypeSimpleRef ref repTy body'
                                                 in goMerge seen rest' body''
                                     else
                                         let rest' = map (substBind ref rep) rest
                                             body'' = substTypeSimpleRef ref (TVarRef rep) body'
                                             repUsed' = repUsed || vUsed
-                                            seen' = Map.insert key (rep, repUsed') seen
+                                            seen' = Map.insert key (rep, repUsed', repTy) seen
                                         in goMerge seen' rest' body''
                             Nothing ->
-                                let seen' = Map.insert key (ref, vUsed) seen
+                                let seen' = Map.insert key (ref, vUsed, boundTy) seen
                                     (rest', body'') = goMerge seen' rest body'
                                 in ((ref, mb') : rest', body'')
                     Nothing ->
                         let (rest', body'') = goMerge seen rest body'
                         in ((ref, mb') : rest', body'')
         in goMerge Map.empty binds body
-
-    baseFromKey key = case key of
-        Just b -> TBase b
-        Nothing -> TBottom
 
     dropUnusedBinds binds body =
         let freeInBound = maybe [] freeTypeVarRefsType

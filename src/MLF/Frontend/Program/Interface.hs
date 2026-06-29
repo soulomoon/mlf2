@@ -31,7 +31,7 @@ import MLF.Frontend.Program.Types
     , ExportedTypeInfo (..)
     , InstanceInfo (..)
     , ModuleExports (..)
-    , SymbolIdentity (..)
+    , SymbolIdentity
     , SymbolNamespace (..)
     , SymbolOwnerIdentity (..)
     , classInfoSymbolIdentity
@@ -40,6 +40,10 @@ import MLF.Frontend.Program.Types
     , instanceInfoClassSymbolIdentity
     , methodInfoOwnerClassSymbolIdentity
     , methodInfoSymbolIdentity
+    , symbolDefiningModule
+    , symbolDefiningName
+    , symbolNamespace
+    , symbolOwnerIdentity
     , valueInfoSymbolIdentity
     )
 import qualified MLF.Frontend.Syntax.Program as P
@@ -65,7 +69,7 @@ data ProgramInterfaceError
     = ProgramInterfaceModuleMissing PackageModuleId
     | ProgramInterfaceUnexpectedModule PackageModuleId
     | ProgramInterfaceModuleOrderMismatch [PackageModuleId] [PackageModuleId]
-    | ProgramInterfaceCheckedModuleMismatch PackageModuleId P.ModuleName
+    | ProgramInterfaceCheckedModuleMismatch PackageModuleId SymbolIdentity
     | ProgramInterfaceSourcePathMismatch PackageModuleId (Maybe FilePath) (Maybe FilePath)
     | ProgramInterfaceDependenciesMismatch PackageModuleId [PackageModuleId] [PackageModuleId]
     | ProgramInterfaceExportOwnerMismatch PackageModuleId SymbolIdentity
@@ -82,9 +86,8 @@ moduleInterfaceFromCheckedModule ::
     Either ProgramInterfaceError ModuleInterface
 moduleInterfaceFromCheckedModule node checked = do
     let moduleId = packageModuleGraphNodeId node
-        moduleName0 = packageModuleName moduleId
-    unless (checkedModuleName checked == moduleName0) $
-        Left (ProgramInterfaceCheckedModuleMismatch moduleId (checkedModuleName checked))
+    unless (checkedModuleMatchesId moduleId checked) $
+        Left (ProgramInterfaceCheckedModuleMismatch moduleId (checkedModuleIdentity checked))
     let interface =
             ModuleInterface
                 { moduleInterfaceId = moduleId
@@ -117,12 +120,6 @@ packageInterfaceFromCheckedProgram graph checked = do
             [ (packageModuleGraphNodeId node, node)
             | node <- packageModuleGraphNodes graph
             ]
-    checkedByModule =
-        Map.fromList
-            [ (checkedModuleName checkedModule, checkedModule)
-            | checkedModule <- checkedProgramModules checked
-            ]
-
     moduleInterfaceForGraphId moduleId = do
         node <-
             maybe
@@ -133,8 +130,17 @@ packageInterfaceFromCheckedProgram graph checked = do
             maybe
                 (Left (ProgramInterfaceModuleMissing moduleId))
                 Right
-                (Map.lookup (packageModuleName moduleId) checkedByModule)
+                (find (checkedModuleMatchesId moduleId) (checkedProgramModules checked))
         moduleInterfaceFromCheckedModule node checkedModule
+
+checkedModuleMatchesId :: PackageModuleId -> CheckedModule -> Bool
+checkedModuleMatchesId moduleId checked =
+    symbolNamespace identity == SymbolModule
+        && symbolDefiningModule identity == moduleName0
+        && symbolDefiningName identity == moduleName0
+  where
+    identity = checkedModuleIdentity checked
+    moduleName0 = packageModuleName moduleId
 
 packageInterfaceModuleById :: PackageModuleId -> PackageInterface -> Maybe ModuleInterface
 packageInterfaceModuleById moduleId =
@@ -329,7 +335,7 @@ renderProgramInterfaceError err =
             "checked module mismatch for "
                 ++ renderPackageModuleId moduleId
                 ++ ": got "
-                ++ actualModule
+                ++ symbolDefiningName actualModule
         ProgramInterfaceSourcePathMismatch moduleId expected actual ->
             "source path mismatch for "
                 ++ renderPackageModuleId moduleId

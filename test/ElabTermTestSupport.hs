@@ -38,6 +38,7 @@ import MLF.Types.Elab
     XmlfTerm (..),
     eTyAbsWithRef,
     freshTypeBinderRef,
+    generatedIdentitiesInTerm,
     identityGeneratorAfterTerm,
     mkDeferredVarWithRef,
     mkLocalRecursiveLetWithRef,
@@ -59,20 +60,19 @@ import MLF.Types.Elab
     typeBinderRefName,
   )
 import MLF.Types.Identity
-  ( DeferredRef (..),
+  ( DeferredRef,
+    deferredRefFromIdentity,
+    deferredRefName,
     IdDetails (..),
     LocalIdentity (..),
-    LocalRef (..),
+    LocalRef,
+    localRefFromIdentity,
     UniqueIdentity (..),
-    idDetailsGeneratedIdentities,
   )
 
 generatedLocalRef :: Int -> String -> LocalRef
 generatedLocalRef unique name =
-  LocalRef
-    { localRefIdentity = GeneratedLocalId (UniqueIdentity unique),
-      localRefName = name
-    }
+  localRefFromIdentity (GeneratedLocalId (UniqueIdentity unique)) name
 
 generatedLocalRefForName :: String -> LocalRef
 generatedLocalRefForName name =
@@ -80,10 +80,7 @@ generatedLocalRefForName name =
 
 generatedDeferredRef :: Int -> String -> DeferredRef
 generatedDeferredRef unique name =
-  DeferredRef
-    { deferredRefIdentity = UniqueIdentity unique,
-      deferredRefName = name
-    }
+  deferredRefFromIdentity (UniqueIdentity unique) name
 
 generatedDeferredRefForName :: String -> DeferredRef
 generatedDeferredRefForName name =
@@ -198,7 +195,7 @@ resolveFixtureLocalOccurrences target =
 
     deferredName resolved =
       case resolvedVarDetails resolved of
-        DeferredId DeferredRef {deferredRefName = name} -> Just name
+        DeferredId ref -> Just (deferredRefName ref)
         _ -> Nothing
 
 resolveFixtureTypeNameInTerm :: String -> TypeBinderRef -> XmlfTerm -> XmlfTerm
@@ -310,33 +307,9 @@ fixtureLocalRef :: String -> XmlfTerm -> LocalRef
 fixtureLocalRef name term =
   let used = Set.fromList (generatedIdentitiesInTerm term)
       candidate = firstUnusedIdentity used (UniqueIdentity (stableFixtureIdentity name))
-   in LocalRef (GeneratedLocalId candidate) name
+   in localRefFromIdentity (GeneratedLocalId candidate) name
 
 firstUnusedIdentity :: Set.Set UniqueIdentity -> UniqueIdentity -> UniqueIdentity
 firstUnusedIdentity used identity@(UniqueIdentity value)
   | Set.member identity used = firstUnusedIdentity used (UniqueIdentity (value + 1))
   | otherwise = identity
-
-generatedIdentitiesInTerm :: XmlfTerm -> [UniqueIdentity]
-generatedIdentitiesInTerm term =
-  case term of
-    EVarNode resolved -> generatedIdentitiesInResolved resolved
-    ELit {} -> []
-    ELam resolved body ->
-      generatedIdentitiesInResolved resolved ++ generatedIdentitiesInTerm body
-    EApp fun arg ->
-      generatedIdentitiesInTerm fun ++ generatedIdentitiesInTerm arg
-    ELet resolved _ rhs body ->
-      generatedIdentitiesInResolved resolved ++ generatedIdentitiesInTerm rhs ++ generatedIdentitiesInTerm body
-    ETyAbsRef _ _ body ->
-      generatedIdentitiesInTerm body
-    ETyInst inner _ ->
-      generatedIdentitiesInTerm inner
-    ERoll _ body ->
-      generatedIdentitiesInTerm body
-    EUnroll body ->
-      generatedIdentitiesInTerm body
-
-generatedIdentitiesInResolved :: ResolvedVar -> [UniqueIdentity]
-generatedIdentitiesInResolved =
-  idDetailsGeneratedIdentities . resolvedVarDetails

@@ -12,7 +12,10 @@ module MLF.Frontend.ConstraintGen
     ExternalEnv,
     ExternalBindingMode (..),
     ExternalBinding (..),
-    ExternalBindingIdentity (..),
+    ExternalBindingIdentity,
+    externalBindingIdentityFromDetails,
+    externalBindingRuntimeName,
+    externalBindingDetails,
     ExternalBindings,
     generateConstraints,
     generateConstraintsCore,
@@ -148,7 +151,9 @@ generateConstraintsCoreWithEnv polySyms extEnv expr = do
               ExternalBinding
                 { externalBindingType = srcTy,
                   externalBindingMode = ExternalBindingScheme,
-                  externalBindingIdentity = Nothing
+                  externalBindingIdentity = Nothing,
+                  externalBindingTypeHeadIdentities = Map.empty,
+                  externalBindingTypeBinderIdentities = Map.empty
                 }
           )
           extEnv

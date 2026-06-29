@@ -15,6 +15,8 @@ import MLF.Constraint.Types.Graph
     TyNode (..),
     fromListNode,
   )
+import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), symbolIdentityFromParts)
+import qualified MLF.Primitive.Identity as PrimitiveIdentity
 import MLF.Reify.TypeOps
   ( alphaEqType,
     firstNonContractiveRecursiveType,
@@ -25,7 +27,6 @@ import MLF.Reify.TypeOps
     inlineBaseBoundsType,
     inlineAliasBoundsWithBySeen,
     matchTypeRefs,
-    parseNameId,
     splitForallsRefs,
     stripForallsType,
     substTypeCaptureRef,
@@ -61,6 +62,10 @@ typeRef key name =
 generatedTypeRef :: Int -> String -> TypeBinderRef
 generatedTypeRef key name =
   typeBinderRefFromIdentity (typeBinderIdentityFromUnique (UniqueIdentity key)) name
+
+typeIdentity :: Int -> SymbolIdentity
+typeIdentity unique =
+  symbolIdentityFromParts (UniqueIdentity unique) SymbolType "Main" "Token" Nothing
 
 emptyConstraint :: Constraint p
 emptyConstraint =
@@ -350,6 +355,19 @@ spec = describe "MLF.Reify.TypeOps" $ do
        in inlineBaseBoundsType constraint id ty
             `shouldBe` tForallWithRef boundRef Nothing (TArrow (tVarWithRef boundRef) intTy)
 
+    it "attaches builtin identity when inlining builtin base bounds" $
+      let freeRef = typeRef 110 "t110"
+          constraint =
+            emptyConstraint
+              { cNodes = fromListNode [(NodeId 110, TyBase (NodeId 110) (BaseTy "Int"))]
+              }
+          expectedIdentity = PrimitiveIdentity.builtinTypeHeadIdentity "Int"
+       in do
+            inlineBaseBoundsType constraint id (tVarWithRef freeRef)
+              `shouldBe` TBaseWithIdentity expectedIdentity (BaseTy "Int")
+            inlineBaseBoundsType constraint id (tVarAppWithRef freeRef (intTy NE.:| []))
+              `shouldBe` TConWithIdentity expectedIdentity (BaseTy "Int") (intTy NE.:| [])
+
   describe "alphaEqType" $ do
     it "recognises equal variables" $
       alphaEqType (testTVar "a") (testTVar "a") `shouldBe` True
@@ -374,6 +392,16 @@ spec = describe "MLF.Reify.TypeOps" $ do
           refB = typeRef 42 "a"
        in alphaEqType (tVarWithRef refA) (tVarWithRef refB)
             `shouldBe` False
+
+    it "distinguishes same-named type heads with different identities" $
+      let left = TBaseWithIdentity (Just (typeIdentity 991801)) (BaseTy "Token")
+          right = TBaseWithIdentity (Just (typeIdentity 991802)) (BaseTy "Token")
+       in alphaEqType left right `shouldBe` False
+
+    it "does not match identity-bearing type heads through name-only fallback" $
+      let identityHead = TBaseWithIdentity (Just (typeIdentity 991806)) (BaseTy "Token")
+          nameOnlyHead = TBaseWithIdentity Nothing (BaseTy "Token")
+       in alphaEqType identityHead nameOnlyHead `shouldBe` False
 
     it "recognises alpha-equivalent bound variables by binder position" $
       let refA = typeRef 43 "a"
@@ -417,6 +445,13 @@ spec = describe "MLF.Reify.TypeOps" $ do
             Left _ -> pure ()
             Right subst -> expectationFailure ("Expected identity mismatch, got: " ++ show subst)
 
+    it "does not match same-named type heads with different identities" $
+      let left = TConWithIdentity (Just (typeIdentity 991803)) (BaseTy "Token") (intTy NE.:| [])
+          right = TConWithIdentity (Just (typeIdentity 991804)) (BaseTy "Token") (intTy NE.:| [])
+       in case matchTypeRefs [] left right of
+            Left _ -> pure ()
+            Right subst -> expectationFailure ("Expected identity mismatch, got: " ++ show subst)
+
   describe "firstNonContractiveRecursiveType" $ do
     it "returns Nothing for a type without TMu" $
       firstNonContractiveRecursiveType (TArrow (testTVar "a") (testTVar "b"))
@@ -435,13 +470,3 @@ spec = describe "MLF.Reify.TypeOps" $ do
           other = typeRef 52 "a"
        in firstNonContractiveRecursiveType (tMuWithRef self (tVarWithRef other))
             `shouldBe` Nothing
-
-  describe "parseNameId" $ do
-    it "parses t42" $
-      parseNameId "t42" `shouldBe` Just 42
-
-    it "rejects non-t-prefixed name" $
-      parseNameId "abc" `shouldBe` Nothing
-
-    it "parses t0" $
-      parseNameId "t0" `shouldBe` Just 0

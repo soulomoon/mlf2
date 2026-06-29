@@ -1,21 +1,37 @@
 module MLF.Frontend.Symbol
   ( SymbolNamespace (..),
     SymbolOwnerIdentity (..),
-    SymbolIdentity (..),
+    SymbolIdentity,
+    symbolUniqueIdentity,
+    symbolNamespace,
+    symbolDefiningModule,
+    symbolDefiningName,
+    symbolOwnerIdentity,
+    symbolIdentityFromParts,
+    symbolIdentityWithUnique,
+    renameSymbolDefiningName,
     SymbolOrigin (..),
     SymbolSpelling (..),
-    ResolvedSymbol (..),
+    ResolvedSymbol,
+    resolvedSymbolIdentity,
+    resolvedSymbolSpelling,
+    mapResolvedSymbolIdentity,
     ResolvedReferenceKind (..),
-    ResolvedReference (..),
+    ResolvedReference,
+    resolvedReferenceKind,
+    resolvedReferenceName,
+    resolvedReferenceSymbol,
     mkResolvedSymbol,
+    mkResolvedReference,
     sameSymbolIdentity,
     sameResolvedSymbol,
+    symbolRefMatches,
     symbolIdentityStableName,
     unqualifiedSymbolName,
   )
 where
 
-import MLF.Types.Unique (UniqueIdentity (..))
+import MLF.Types.Unique (UniqueIdentity, uniqueIdentityStableName)
 
 data SymbolNamespace
   = SymbolValue
@@ -31,14 +47,41 @@ data SymbolOwnerIdentity
   | SymbolOwnerClass SymbolIdentity
   deriving (Eq, Ord, Show)
 
-data SymbolIdentity = SymbolIdentity
-  { symbolUniqueIdentity :: UniqueIdentity,
-    symbolNamespace :: SymbolNamespace,
-    symbolDefiningModule :: String,
-    symbolDefiningName :: String,
-    symbolOwnerIdentity :: Maybe SymbolOwnerIdentity
-  }
+data SymbolIdentity
+  = SymbolIdentity UniqueIdentity SymbolNamespace String String (Maybe SymbolOwnerIdentity)
   deriving (Show)
+
+symbolUniqueIdentity :: SymbolIdentity -> UniqueIdentity
+symbolUniqueIdentity (SymbolIdentity unique _ _ _ _) =
+  unique
+
+symbolNamespace :: SymbolIdentity -> SymbolNamespace
+symbolNamespace (SymbolIdentity _ namespace _ _ _) =
+  namespace
+
+symbolDefiningModule :: SymbolIdentity -> String
+symbolDefiningModule (SymbolIdentity _ _ moduleName _ _) =
+  moduleName
+
+symbolDefiningName :: SymbolIdentity -> String
+symbolDefiningName (SymbolIdentity _ _ _ name _) =
+  name
+
+symbolOwnerIdentity :: SymbolIdentity -> Maybe SymbolOwnerIdentity
+symbolOwnerIdentity (SymbolIdentity _ _ _ _ owner) =
+  owner
+
+symbolIdentityFromParts :: UniqueIdentity -> SymbolNamespace -> String -> String -> Maybe SymbolOwnerIdentity -> SymbolIdentity
+symbolIdentityFromParts =
+  SymbolIdentity
+
+symbolIdentityWithUnique :: UniqueIdentity -> SymbolIdentity -> SymbolIdentity
+symbolIdentityWithUnique unique identity =
+  symbolIdentityFromParts unique (symbolNamespace identity) (symbolDefiningModule identity) (symbolDefiningName identity) (symbolOwnerIdentity identity)
+
+renameSymbolDefiningName :: String -> SymbolIdentity -> SymbolIdentity
+renameSymbolDefiningName name identity =
+  symbolIdentityFromParts (symbolUniqueIdentity identity) (symbolNamespace identity) (symbolDefiningModule identity) name (symbolOwnerIdentity identity)
 
 instance Eq SymbolIdentity where
   left == right =
@@ -115,6 +158,18 @@ mkResolvedSymbol identity sourceName displayName origin =
           }
     }
 
+mapResolvedSymbolIdentity :: (SymbolIdentity -> SymbolIdentity) -> ResolvedSymbol -> ResolvedSymbol
+mapResolvedSymbolIdentity f symbol =
+  symbol {resolvedSymbolIdentity = f (resolvedSymbolIdentity symbol)}
+
+mkResolvedReference :: ResolvedReferenceKind -> String -> ResolvedSymbol -> ResolvedReference
+mkResolvedReference kind name symbol =
+  ResolvedReference
+    { resolvedReferenceKind = kind,
+      resolvedReferenceName = name,
+      resolvedReferenceSymbol = symbol
+    }
+
 sameSymbolIdentity :: SymbolIdentity -> SymbolIdentity -> Bool
 sameSymbolIdentity left right =
   symbolUniqueIdentity left == symbolUniqueIdentity right
@@ -123,9 +178,17 @@ sameResolvedSymbol :: ResolvedSymbol -> ResolvedSymbol -> Bool
 sameResolvedSymbol left right =
   sameSymbolIdentity (resolvedSymbolIdentity left) (resolvedSymbolIdentity right)
 
+symbolRefMatches :: Maybe SymbolIdentity -> String -> Maybe SymbolIdentity -> String -> Bool
+symbolRefMatches (Just leftIdentity) _ (Just rightIdentity) _ =
+  symbolUniqueIdentity leftIdentity == symbolUniqueIdentity rightIdentity
+symbolRefMatches Nothing leftName Nothing rightName =
+  leftName == rightName
+symbolRefMatches _ _ _ _ =
+  False
+
 symbolIdentityStableName :: SymbolIdentity -> String
 symbolIdentityStableName identity =
-  "$identity#" ++ show (uniqueIdentityValue (symbolUniqueIdentity identity))
+  uniqueIdentityStableName (symbolUniqueIdentity identity)
 
 unqualifiedSymbolName :: String -> String
 unqualifiedSymbolName =

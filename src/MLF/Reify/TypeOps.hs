@@ -17,9 +17,9 @@ module MLF.Reify.TypeOps
     alphaEqType,
     churchMuEquivalent,
     churchAwareEqType,
+    typeHeadMatches,
     firstNonContractiveRecursiveType,
     matchTypeRefs,
-    parseNameId,
     resolveBaseBoundForInstConstraint,
     resolveBaseBoundForInstSolved,
     resolveBoundBodyConstraint,
@@ -40,9 +40,11 @@ import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types.Graph
 import qualified MLF.Constraint.VarStore as VarStore
+import MLF.Frontend.Symbol (SymbolIdentity)
+import qualified MLF.Primitive.Identity as PrimitiveIdentity
 import MLF.Types.Elab
 import MLF.Util.ElabError (ElabError (..))
-import MLF.Util.Names (freshNameLike, parseNameId)
+import MLF.Util.Names (freshNameLike)
 
 newtype BoundRefFun (i :: TopVar) = BoundRefFun {runBoundRefFun :: [TypeBinderRef] -> [TypeBinderRef]}
 
@@ -396,6 +398,10 @@ alphaEqRef envL envR left right =
         Just expectedLeft -> typeBinderRefsSameIdentity left expectedLeft
         Nothing -> typeBinderRefsSameIdentity left right
 
+typeHeadMatches :: Maybe SymbolIdentity -> BaseTy -> Maybe SymbolIdentity -> BaseTy -> Bool
+typeHeadMatches =
+  typeHeadRefMatches
+
 alphaEqType :: ElabType -> ElabType -> Bool
 alphaEqType = go [] []
   where
@@ -404,11 +410,12 @@ alphaEqType = go [] []
         alphaEqRef envL envR a b
       (TArrow a1 b1, TArrow a2 b2) ->
         go envL envR a1 a2 && go envL envR b1 b2
-      (TCon c1 args1, TCon c2 args2) ->
-        c1 == c2 && alphaEqArgs envL envR (toList args1) (toList args2)
+      (TConWithIdentity identity1 c1 args1, TConWithIdentity identity2 c2 args2) ->
+        typeHeadMatches identity1 c1 identity2 c2 && alphaEqArgs envL envR (toList args1) (toList args2)
       (TVarAppRef a args1, TVarAppRef b args2) ->
         alphaEqVar envL envR a b && alphaEqArgs envL envR (toList args1) (toList args2)
-      (TBase b1, TBase b2) -> b1 == b2
+      (TBaseWithIdentity identity1 b1, TBaseWithIdentity identity2 b2) ->
+        typeHeadMatches identity1 b1 identity2 b2
       (TBottom, TBottom) -> True
       (TForallRef ref1 mb1 body1, TForallRef ref2 mb2 body2) ->
         let envL' = (ref1, ref2) : envL
@@ -435,11 +442,12 @@ alphaEqType = go [] []
     alphaEqBound envL envR b1 b2 = case (b1, b2) of
       (TArrow a1 b1', TArrow a2 b2') ->
         go envL envR a1 a2 && go envL envR b1' b2'
-      (TCon c1 args1, TCon c2 args2) ->
-        c1 == c2 && alphaEqArgs envL envR (toList args1) (toList args2)
+      (TConWithIdentity identity1 c1 args1, TConWithIdentity identity2 c2 args2) ->
+        typeHeadMatches identity1 c1 identity2 c2 && alphaEqArgs envL envR (toList args1) (toList args2)
       (TVarAppRef a args1, TVarAppRef b args2) ->
         alphaEqVar envL envR a b && alphaEqArgs envL envR (toList args1) (toList args2)
-      (TBase b1', TBase b2') -> b1' == b2'
+      (TBaseWithIdentity identity1 b1', TBaseWithIdentity identity2 b2') ->
+        typeHeadMatches identity1 b1' identity2 b2'
       (TBottom, TBottom) -> True
       (TForallRef ref1 mb1 body1, TForallRef ref2 mb2 body2) ->
         let envL' = (ref1, ref2) : envL
@@ -601,11 +609,12 @@ churchAwareEqType = go [] []
         alphaEqRef envL envR a b
       (TArrow a1 b1, TArrow a2 b2) ->
         go envL envR a1 a2 && go envL envR b1 b2
-      (TCon c1 args1, TCon c2 args2) ->
-        c1 == c2 && eqArgs envL envR (toList args1) (toList args2)
+      (TConWithIdentity identity1 c1 args1, TConWithIdentity identity2 c2 args2) ->
+        typeHeadMatches identity1 c1 identity2 c2 && eqArgs envL envR (toList args1) (toList args2)
       (TVarAppRef a args1, TVarAppRef b args2) ->
         eqVar envL envR a b && eqArgs envL envR (toList args1) (toList args2)
-      (TBase b1, TBase b2) -> b1 == b2
+      (TBaseWithIdentity identity1 b1, TBaseWithIdentity identity2 b2) ->
+        typeHeadMatches identity1 b1 identity2 b2
       (TBottom, TBottom) -> True
       (TForallRef ref1 mb1 body1, TForallRef ref2 mb2 body2) ->
         let envL' = (ref1, ref2) : envL
@@ -640,11 +649,12 @@ churchAwareEqType = go [] []
     eqBound envL envR b1 b2 = case (b1, b2) of
       (TArrow a1 b1', TArrow a2 b2') ->
         go envL envR a1 a2 && go envL envR b1' b2'
-      (TCon c1 args1, TCon c2 args2) ->
-        c1 == c2 && eqArgs envL envR (toList args1) (toList args2)
+      (TConWithIdentity identity1 c1 args1, TConWithIdentity identity2 c2 args2) ->
+        typeHeadMatches identity1 c1 identity2 c2 && eqArgs envL envR (toList args1) (toList args2)
       (TVarAppRef a args1, TVarAppRef b args2) ->
         eqVar envL envR a b && eqArgs envL envR (toList args1) (toList args2)
-      (TBase b1', TBase b2') -> b1' == b2'
+      (TBaseWithIdentity identity1 b1', TBaseWithIdentity identity2 b2') ->
+        typeHeadMatches identity1 b1' identity2 b2'
       (TBottom, TBottom) -> True
       (TForallRef ref1 mb1 body1, TForallRef ref2 mb2 body2) ->
         let envL' = (ref1, ref2) : envL
@@ -688,8 +698,8 @@ matchTypeRefs binderRefs = goMatch [] Map.empty
       (TArrow a b, TArrow a' b') -> do
         subst1 <- goMatch env subst a a'
         goMatch env subst1 b b'
-      (TCon c0 args0, TCon c1 args1)
-        | c0 == c1 ->
+      (TConWithIdentity identity0 c0 args0, TConWithIdentity identity1 c1 args1)
+        | typeHeadMatches identity0 c0 identity1 c1 ->
             matchArgs env subst (toList args0) (toList args1)
       (TVarAppRef ref argsP, _)
         | Just binder <- matchableRef ref ->
@@ -697,8 +707,8 @@ matchTypeRefs binderRefs = goMatch [] Map.empty
       (TVarAppRef ref args0, TVarAppRef ref' args1)
         | boundVarMatches env ref ref' ->
             matchArgs env subst (toList args0) (toList args1)
-      (TBase b0, TBase b1)
-        | b0 == b1 -> Right subst
+      (TBaseWithIdentity identity0 b0, TBaseWithIdentity identity1 b1)
+        | typeHeadMatches identity0 b0 identity1 b1 -> Right subst
       (TBottom, TBottom) -> Right subst
       (TForallRef ref mb b, TForallRef ref' mb' b') -> do
         subst1 <- case (mb, mb') of
@@ -765,8 +775,8 @@ matchTypeRefs binderRefs = goMatch [] Map.empty
       (TArrow a b, TArrow a' b') -> do
         subst1 <- goMatch env subst a a'
         goMatch env subst1 b b'
-      (TCon c0 args0, TCon c1 args1)
-        | c0 == c1 ->
+      (TConWithIdentity identity0 c0 args0, TConWithIdentity identity1 c1 args1)
+        | typeHeadMatches identity0 c0 identity1 c1 ->
             matchArgs env subst (toList args0) (toList args1)
       (TVarAppRef ref argsP, _)
         | Just binder <- matchableRef ref ->
@@ -774,8 +784,8 @@ matchTypeRefs binderRefs = goMatch [] Map.empty
       (TVarAppRef ref args0, TVarAppRef ref' args1)
         | boundVarMatches env ref ref' ->
             matchArgs env subst (toList args0) (toList args1)
-      (TBase b0, TBase b1)
-        | b0 == b1 -> Right subst
+      (TBaseWithIdentity identity0 b0, TBaseWithIdentity identity1 b1)
+        | typeHeadMatches identity0 b0 identity1 b1 -> Right subst
       (TBottom, TBottom) -> Right subst
       (TForallRef ref mb b, TForallRef ref' mb' b') -> do
         subst1 <- case (mb, mb') of
@@ -873,7 +883,7 @@ inlineBaseBoundsType constraint canonical = goType []
       | boundRefMember ref boundRefs = TVarRef ref
       | otherwise =
           case resolvedBaseBound ref of
-            Just (Left base) -> TBase base
+            Just (Left base) -> baseWithBuiltinIdentity base
             Just (Right ()) -> TBottom
             Nothing -> TVarRef ref
 
@@ -882,7 +892,7 @@ inlineBaseBoundsType constraint canonical = goType []
       | boundRefMember ref boundRefs = TVarAppRef ref args
       | otherwise =
           case resolvedBaseBound ref of
-            Just (Left base) -> TCon base args
+            Just (Left base) -> conWithBuiltinIdentity base args
             _ -> TVarAppRef ref args
 
     resolvedBaseBound :: TypeBinderRef -> Maybe (Either BaseTy ())
@@ -893,6 +903,12 @@ inlineBaseBoundsType constraint canonical = goType []
         Just TyBase {tnBase = b} -> Just (Left b)
         Just TyBottom {} -> Just (Right ())
         _ -> Nothing
+
+    baseWithBuiltinIdentity base@(BaseTy name) =
+      TBaseWithIdentity (PrimitiveIdentity.builtinTypeHeadIdentity name) base
+
+    conWithBuiltinIdentity base@(BaseTy name) args =
+      TConWithIdentity (PrimitiveIdentity.builtinTypeHeadIdentity name) base args
 
     refNodeId :: TypeBinderRef -> Maybe NodeId
     refNodeId =

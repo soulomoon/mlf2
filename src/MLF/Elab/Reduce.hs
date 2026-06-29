@@ -16,7 +16,7 @@ import MLF.Frontend.Program.Builtins (builtinValueIdentity)
 import MLF.Frontend.Syntax (Lit (..))
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
 import MLF.Reify.TypeOps (freeTypeVarRefsType, substTypeCaptureRef)
-import MLF.Types.Identity (IdDetails (..), PrimitiveRef (..))
+import MLF.Types.Identity (IdDetails (..), primitiveRefSymbol)
 import MLF.Util.RecursionSchemes (cataMaybe, foldXmlfTerm, foldInstantiation)
 
 isValue :: XmlfTerm -> Bool
@@ -113,8 +113,8 @@ step term = case term of
 isAndPrimitive :: ResolvedVar -> Bool
 isAndPrimitive resolved =
   case resolvedVarDetails resolved of
-    PrimitiveId PrimitiveRef {primitiveRefSymbol = symbol} ->
-      symbol == andSymbol
+    PrimitiveId ref ->
+      primitiveRefSymbol ref == andSymbol
     TopLevelId symbol ->
       symbol == andSymbol
     _ -> False
@@ -344,7 +344,7 @@ substTermVarWithKey key s = goSub
   where
     x = termVarKeyName key
     freeSVars = freeResolvedTermVars s
-    freeSNames = Set.fromList (map resolvedVarReferenceName freeSVars)
+    replacementFreeNames = freeResolvedTermReferenceNames s
     termVarKeyName target =
       case target of
         TermVarIdentity resolved -> resolvedVarReferenceName resolved
@@ -362,9 +362,9 @@ substTermVarWithKey key s = goSub
           ELamF resolved body
             | resolvedMatches key resolved -> ELam resolved (fst body)
             | any (resolvedVarSameIdentity resolved) freeSVars ->
-                let used = Set.unions [freeSNames, freeResolvedTermReferenceNames (fst body), Set.singleton x]
+                let used = Set.unions [replacementFreeNames, freeResolvedTermReferenceNames (fst body), Set.singleton x]
                     v' = freshTermNameFrom binderName used
-                    resolved' = renameResolvedLocalVar v' resolved
+                    (resolved', _) = freshenResolvedLocalVar v' (identityGeneratorAfterTerm (EApp s (fst body))) resolved
                     body' = substResolvedTermVar resolved (EVarNode resolved') (fst body)
                  in ELam resolved' (goSub body')
             | otherwise -> ELam resolved (snd body)
@@ -374,9 +374,9 @@ substTermVarWithKey key s = goSub
           ELetF resolved sch rhs body
             | resolvedMatches key resolved -> ELet resolved sch (snd rhs) (fst body)
             | any (resolvedVarSameIdentity resolved) freeSVars ->
-                let used = Set.unions [freeSNames, freeResolvedTermReferenceNames (fst body), Set.singleton x]
+                let used = Set.unions [replacementFreeNames, freeResolvedTermReferenceNames (fst body), Set.singleton x]
                     v' = freshTermNameFrom binderName used
-                    resolved' = renameResolvedLocalVar v' resolved
+                    (resolved', _) = freshenResolvedLocalVar v' (identityGeneratorAfterTerm (EApp s (ELet resolved sch (fst rhs) (fst body)))) resolved
                     body' = substResolvedTermVar resolved (EVarNode resolved') (fst body)
                  in ELet resolved' sch (snd rhs) (goSub body')
             | otherwise -> ELet resolved sch (snd rhs) (snd body)

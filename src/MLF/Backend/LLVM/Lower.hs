@@ -137,11 +137,12 @@ module MLF.Backend.LLVM.Lower
   )
 where
 
+import Control.Applicative ((<|>))
 import Control.Monad (foldM, forM_, unless, void, when, zipWithM, zipWithM_)
-import Control.Monad.State.Strict (StateT (StateT), evalStateT, gets)
+import Control.Monad.State.Strict (StateT (StateT), evalStateT, get, gets, put, runStateT)
 import Data.Bifunctor (first)
 import Data.Char (ord)
-import Data.List (intercalate, isPrefixOf, nub, sort, sortOn, stripPrefix)
+import Data.List (find, intercalate, isPrefixOf, mapAccumL, nub, sort, sortOn, stripPrefix)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
@@ -154,6 +155,9 @@ import Numeric (showHex)
 import MLF.Backend.CallableShape
   ( BackendCallableBindingKind (..),
     BackendCallableHead (..),
+    BackendCallableRef,
+    backendCallableRef,
+    backendCallableRefMatches,
     backendCallableRefName,
     backendCallableHead,
   )
@@ -162,15 +166,16 @@ import MLF.Backend.IR hiding
     BackendCallableHead (..),
     backendCallableHead,
   )
+import MLF.Backend.IR.Types (closureEntryRefMatches)
 import MLF.Backend.LLVM.Lower.Emit
 import MLF.Backend.LLVM.Lower.Types
 import MLF.Backend.LLVM.Syntax
 import qualified MLF.Backend.StructuralRecursiveData as Structural
 import MLF.Constraint.Types.Graph (BaseTy (..))
-import MLF.Frontend.Symbol (SymbolIdentity, symbolIdentityStableName)
+import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), SymbolOwnerIdentity (..), symbolIdentityFromParts, symbolIdentityStableName, symbolRefMatches, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit (..))
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
-import MLF.Types.Identity (ConstructorRef (..), IdDetails (..), PrimitiveRef (..), TypeBinderIdentity, idDetailsSameIdentity)
+import MLF.Types.Identity (constructorRefSymbol, deferredRefIdentity, envRefIdentity, IdDetails (..), IdentityGenerator, LocalRef, localRefIdentity, primitiveRefSymbol, StructuralTypeBinderRole (..), TypeBinderIdentity, UniqueIdentity (..), freshIdentity, freshLocalRef, identityGeneratorAfter, initialIdentityGenerator, localIdentityStableUnique, typeBinderIdentityFromUnique, typeBinderIdentityStableName, typeBinderIdentityStructural)
 import MLF.Util.Names (freshNameLike)
 
 lowerBackendProgram :: BackendProgram -> Either BackendLLVMError LLVMModule
@@ -286,15 +291,18 @@ lowerBackendProgramNative program = do
   lowerNativeProgram lowered
 
 lowerBackendProgramCore :: BackendProgram -> Either BackendLLVMError LoweredProgram
-lowerBackendProgramCore program = do
+lowerBackendProgramCore program0 = do
+  first BackendLLVMValidationFailed (validateRawBackendBinderUniqueness program0)
+  let program = assignBackendIdentitiesInProgram program0
   first BackendLLVMValidationFailed (validateBackendProgram program)
   base <- buildProgramBase program
-  reachable <- reachableBindings base (backendProgramMain program)
-  specializations <- collectRequiredSpecializations base reachable
-  let evidenceWrappers = collectEvidenceWrappers base reachable specializations
-      functionWrappers = collectFunctionWrappers base reachable specializations
+  mainBinding <- requireProgramMainBinding base program
+  reachable <- reachableBindings base mainBinding
+  (generatorAfterSpecializations, specializations) <- collectRequiredSpecializations (pbIdentityGenerator base) base reachable
+  let (generatorAfterEvidenceWrappers, evidenceWrappers) = collectEvidenceWrappers generatorAfterSpecializations base reachable specializations
+      (generatorAfterFunctionWrappers, functionWrappers) = collectFunctionWrappers generatorAfterEvidenceWrappers base reachable specializations
       closureEntries0 = collectClosureEntries base reachable specializations evidenceWrappers functionWrappers
-      referencedFunctionNames = collectReferencedFunctionNames base reachable specializations evidenceWrappers functionWrappers
+      referencedFunctions = collectReferencedFunctions base reachable specializations evidenceWrappers functionWrappers
       stringGlobals = assignStringGlobals (collectProgramStrings reachable specializations evidenceWrappers functionWrappers)
       env =
         ProgramEnv
@@ -304,17 +312,21 @@ lowerBackendProgramCore program = do
             peFunctionWrappers = Map.fromList [(wrapperKey wrapper, wrapper) | wrapper <- functionWrappers],
             peStringGlobals = stringGlobals
           }
-  closureEntries <- requireUniqueClosureEntries closureEntries0
-  functions <-
-    concat
-      <$> sequence
-        [ traverse (lowerMonomorphicBinding env) (filter (shouldLowerReachableBinding referencedFunctionNames) reachable),
-          traverse (lowerSpecialization env) (filter (shouldLowerSpecialization referencedFunctionNames) specializations),
-          traverse (lowerEvidenceWrapper env) evidenceWrappers,
-          traverse (lowerFunctionWrapper env) functionWrappers,
-          traverse (lowerClosureEntry env) closureEntries
+  uniqueClosureEntries <- requireUniqueClosureEntries closureEntries0
+  let (generatorAfterClosureEntries, closureEntries) = assignGeneratedClosureEntryIdentities generatorAfterFunctionWrappers uniqueClosureEntries
+  (functions, _) <-
+    lowerFunctionJobs
+      generatorAfterClosureEntries
+      ( [ lowerMonomorphicBinding env binding
+          | binding <- filter (shouldLowerReachableBinding referencedFunctions) reachable
         ]
-  mainBinding <- requireBinding base (backendProgramMain program)
+          ++ [ lowerSpecialization env specialization
+               | specialization <- filter (shouldLowerSpecialization referencedFunctions) specializations
+             ]
+          ++ [lowerEvidenceWrapper env wrapper | wrapper <- evidenceWrappers]
+          ++ [lowerFunctionWrapper env wrapper | wrapper <- functionWrappers]
+          ++ [lowerClosureEntry env entry | entry <- closureEntries]
+      )
   when (not (null (ffTypeBinders (biForm mainBinding)))) $
     Left (BackendLLVMUnsupportedExpression "program main" "polymorphic main binding")
   pure
@@ -329,6 +341,551 @@ rawLLVMGlobals :: LoweredProgram -> [LLVMGlobal]
 rawLLVMGlobals lowered =
   [LLVMStringGlobal globalName value | (value, globalName) <- Map.toAscList (peStringGlobals (lpEnv lowered))]
 
+data RawTermBinderKey
+  = RawTermBinderIdentity LowerLocalKey
+  | RawTermBinderName String
+  deriving (Eq, Ord)
+
+validateRawBackendBinderUniqueness :: BackendProgram -> Either BackendValidationError ()
+validateRawBackendBinderUniqueness program =
+  mapM_ validateBinding (concatMap backendModuleBindings (backendProgramModules program))
+  where
+    validateBinding =
+      validateExpr . backendBindingExpr
+
+    validateExpr =
+      \case
+        BackendVarWithIdentity {} -> pure ()
+        BackendLit {} -> pure ()
+        BackendLamWithIdentity _ _ _ _ body -> validateExpr body
+        BackendApp _ fun arg -> validateExpr fun >> validateExpr arg
+        BackendLetWithIdentity _ _ _ _ rhs body -> validateExpr rhs >> validateExpr body
+        BackendTyAbsWithIdentity _ _ _ _ body -> validateExpr body
+        BackendTyApp _ fun _ -> validateExpr fun
+        BackendConstructWithIdentity _ _ _ args -> mapM_ validateExpr args
+        BackendCase _ scrutinee alternatives -> do
+          validateExpr scrutinee
+          mapM_ validateAlternative (NE.toList alternatives)
+        BackendRoll _ payload -> validateExpr payload
+        BackendUnroll _ payload -> validateExpr payload
+        BackendClosureWithParamIdentities _ _ _ captures params body -> do
+          requireUniqueRaw BackendDuplicateClosureCapture (map closureCaptureRef captures)
+          requireUniqueRaw BackendDuplicateClosureParameter (map closureParamRef params)
+          requireUniqueRaw BackendDuplicateClosureParameter (map closureCaptureRef captures ++ map closureParamRef params)
+          mapM_ (validateExpr . backendClosureCaptureExpr) captures
+          validateExpr body
+        BackendClosureCall _ fun args -> validateExpr fun >> mapM_ validateExpr args
+
+    validateAlternative (BackendAlternative pattern0 body) = do
+      validatePattern pattern0
+      validateExpr body
+
+    validatePattern =
+      \case
+        BackendDefaultPattern -> pure ()
+        BackendConstructorPatternWithBinderIdentities _ _ binders ->
+          requireUniqueRaw BackendDuplicatePatternBinding (map patternBinderRefRaw binders)
+
+    closureCaptureRef capture =
+      rawTermBinderRef (backendClosureCaptureIdentity capture) (backendClosureCaptureName capture)
+
+    closureParamRef param =
+      rawTermBinderRef (backendClosureParamIdentity param) (backendClosureParamName param)
+
+    patternBinderRefRaw binder =
+      rawTermBinderRef (backendPatternBinderIdentity binder) (backendPatternBinderName binder)
+
+    rawTermBinderRef mbIdentity name =
+      (maybe (RawTermBinderName name) RawTermBinderIdentity (mbIdentity >>= lowerLocalKey), name)
+
+    requireUniqueRaw mkError =
+      go Set.empty
+      where
+        go _ [] = pure ()
+        go seen ((key, name) : rest)
+          | Set.member key seen = Left (mkError name)
+          | otherwise = go (Set.insert key seen) rest
+
+type BackendTypeBinderEnv = Map String (Maybe TypeBinderIdentity)
+type BackendDataEnv = Map String SymbolIdentity
+type BackendConstructorEnv = Map String SymbolIdentity
+type BackendGlobalEnv = Map String SymbolIdentity
+type BackendTermEnv = Map String (Maybe IdDetails)
+
+insertBackendSymbolIdentity :: String -> SymbolIdentity -> Map String SymbolIdentity -> Map String SymbolIdentity
+insertBackendSymbolIdentity name identity =
+  Map.insert name identity
+
+backendSymbolIdentityEntries :: String -> SymbolIdentity -> [(String, SymbolIdentity)]
+backendSymbolIdentityEntries name identity =
+  [(name, identity)]
+
+insertUniqueBackendTypeBinderIdentity :: String -> TypeBinderIdentity -> BackendTypeBinderEnv -> BackendTypeBinderEnv
+insertUniqueBackendTypeBinderIdentity name identity =
+  Map.alter insert name
+  where
+    insert Nothing =
+      Just (Just identity)
+    insert (Just (Just existing))
+      | existing == identity = Just (Just existing)
+      | otherwise = Just Nothing
+    insert (Just Nothing) =
+      Just Nothing
+
+shadowBackendTypeBinderIdentity :: String -> TypeBinderIdentity -> BackendTypeBinderEnv -> BackendTypeBinderEnv
+shadowBackendTypeBinderIdentity name identity =
+  Map.insert name (Just identity)
+
+insertUniqueBackendTermIdentity :: String -> IdDetails -> BackendTermEnv -> BackendTermEnv
+insertUniqueBackendTermIdentity name identity =
+  Map.alter insert name
+  where
+    insert Nothing =
+      Just (Just identity)
+    insert (Just (Just existing))
+      | existing == identity = Just (Just existing)
+      | otherwise = Just Nothing
+    insert (Just Nothing) =
+      Just Nothing
+
+shadowBackendTermIdentity :: String -> IdDetails -> BackendTermEnv -> BackendTermEnv
+shadowBackendTermIdentity name identity =
+  Map.insert name (Just identity)
+
+unionUniqueBackendTermEnv :: BackendTermEnv -> BackendTermEnv -> BackendTermEnv
+unionUniqueBackendTermEnv =
+  Map.unionWith merge
+  where
+    merge (Just left) (Just right)
+      | left == right = Just left
+      | otherwise = Nothing
+    merge _ _ =
+      Nothing
+
+assignBackendIdentitiesInProgram :: BackendProgram -> BackendProgram
+assignBackendIdentitiesInProgram program =
+  program
+    { backendProgramModulesWithIdentity = modules',
+      backendProgramMainIdentity = backendProgramMainIdentity program <|> Map.lookup (backendProgramMain program) globalEnv
+    }
+  where
+    generator0 =
+      identityGeneratorAfter (generatedIdentitiesInBackendProgram program)
+    (generator1, modulesWithDataIdentities, dataEnv) =
+      assignGlobalDataIdentities generator0 (backendProgramModulesWithIdentity program)
+    (generator2, modulesWithData) =
+      mapAccumL (assignModuleData dataEnv) generator1 modulesWithDataIdentities
+    (generator3, modulesWithBindingIdentities, globalEnv) =
+      assignGlobalBindingIdentities generator2 modulesWithData
+    (_, modules') =
+      mapAccumL (assignModuleBindingBodies dataEnv constructorEnv globalEnv) generator3 modulesWithBindingIdentities
+    constructorEnv =
+      backendConstructorEnv modulesWithData
+
+assignGlobalDataIdentities :: IdentityGenerator -> [BackendModule] -> (IdentityGenerator, [BackendModule], BackendDataEnv)
+assignGlobalDataIdentities generator modules0 =
+  (generator', reverse modules', dataEnv)
+  where
+    (generator', modules', dataEnv) =
+      foldl assignModuleDataIdentities (generator, [], Map.empty) modules0
+
+    assignModuleDataIdentities (generator0, modulesAcc, env0) backendModule =
+      let moduleName = backendModuleName backendModule
+          (generator1, dataDecls', env1) =
+            foldl (assignDataIdentity moduleName) (generator0, [], env0) (backendModuleData backendModule)
+       in ( generator1,
+            backendModule {backendModuleDataWithIdentity = dataDecls'} : modulesAcc,
+            env1
+          )
+
+    assignDataIdentity moduleName (generator0, dataAcc, env0) dataDecl =
+      let name = backendDataName dataDecl
+          (identity, generator1) =
+            case backendDataIdentity dataDecl of
+              Just existing -> (existing, generator0)
+              Nothing ->
+                let (unique, generatorNext) = freshIdentity generator0
+                 in (generatedBackendDataIdentity moduleName name unique, generatorNext)
+          dataDecl' = dataDecl {backendDataIdentity = Just identity}
+       in (generator1, dataAcc ++ [dataDecl'], insertBackendSymbolIdentity name identity env0)
+
+backendConstructorEnv :: [BackendModule] -> BackendConstructorEnv
+backendConstructorEnv modules0 =
+  Map.fromList
+    [ entry
+    | backendModule <- modules0,
+      dataDecl <- backendModuleData backendModule,
+      constructor <- backendDataConstructors dataDecl,
+      Just identity <- [backendConstructorIdentity constructor],
+      entry <- backendSymbolIdentityEntries (backendConstructorName constructor) identity
+    ]
+
+assignModuleData :: BackendDataEnv -> IdentityGenerator -> BackendModule -> (IdentityGenerator, BackendModule)
+assignModuleData dataEnv generator backendModule =
+  ( generator1,
+    backendModule
+      { backendModuleDataWithIdentity = dataDecls',
+        backendModuleBindingsWithIdentity = backendModuleBindings backendModule
+      }
+  )
+  where
+    (generator1, dataDecls') =
+      mapAccumL (assignDataDeclaration dataEnv (backendModuleName backendModule)) generator (backendModuleData backendModule)
+
+assignGlobalBindingIdentities :: IdentityGenerator -> [BackendModule] -> (IdentityGenerator, [BackendModule], BackendGlobalEnv)
+assignGlobalBindingIdentities generator modules0 =
+  (generator', reverse modules', globalEnv)
+  where
+    (generator', modules', globalEnv) =
+      foldl assignModuleBindings (generator, [], Map.empty) modules0
+
+    assignModuleBindings (generator0, modulesAcc, env0) backendModule =
+      let moduleName = backendModuleName backendModule
+          (generator1, bindings', env1) =
+            foldl (assignBindingIdentity moduleName) (generator0, [], env0) (backendModuleBindings backendModule)
+       in ( generator1,
+            backendModule {backendModuleBindingsWithIdentity = bindings'} : modulesAcc,
+            env1
+          )
+
+    assignBindingIdentity moduleName (generator0, bindingsAcc, env0) binding =
+      let name = backendBindingName binding
+          (identity, generator1) =
+            case backendBindingIdentity binding of
+              Just existing -> (existing, generator0)
+              Nothing ->
+                let (unique, generatorNext) = freshIdentity generator0
+                 in (generatedBackendBindingIdentity moduleName name unique, generatorNext)
+          binding' = binding {backendBindingIdentity = Just identity}
+       in (generator1, bindingsAcc ++ [binding'], insertBackendSymbolIdentity name identity env0)
+
+generatedBackendBindingIdentity :: String -> String -> UniqueIdentity -> SymbolIdentity
+generatedBackendBindingIdentity moduleName name identity =
+  symbolIdentityFromParts identity SymbolValue moduleName name Nothing
+
+generatedBackendDataIdentity :: String -> String -> UniqueIdentity -> SymbolIdentity
+generatedBackendDataIdentity moduleName name identity =
+  symbolIdentityFromParts identity SymbolType moduleName name Nothing
+
+assignModuleBindingBodies :: BackendDataEnv -> BackendConstructorEnv -> BackendGlobalEnv -> IdentityGenerator -> BackendModule -> (IdentityGenerator, BackendModule)
+assignModuleBindingBodies dataEnv constructorEnv globalEnv generator backendModule =
+  ( generator',
+    backendModule {backendModuleBindingsWithIdentity = bindings'}
+  )
+  where
+    (generator', bindings') =
+      mapAccumL (assignBindingIdentities dataEnv constructorEnv globalEnv) generator (backendModuleBindings backendModule)
+
+assignDataDeclaration :: BackendDataEnv -> String -> IdentityGenerator -> BackendData -> (IdentityGenerator, BackendData)
+assignDataDeclaration dataEnv moduleName generator dataDecl =
+  ( generator2,
+    dataDecl
+      { backendDataParameterRefsWithIdentity = parameterRefs',
+        backendDataConstructorsWithIdentity = constructors'
+      }
+  )
+  where
+    (generator1, parameterRefs', env) =
+      foldl assignParameter (generator, [], Map.empty) (backendDataParameterRefs dataDecl)
+    (generator2, constructors') =
+      mapAccumL (assignConstructorTypeBinderIdentities dataEnv moduleName (backendDataIdentity dataDecl) env) generator1 (backendDataConstructors dataDecl)
+
+    assignParameter (generator0, refs, env0) ref =
+      let name = backendDataParameterRefName ref
+          oldIdentity = backendDataParameterRefIdentity ref
+          (identity, generatorNext) = freshTypeBinderIdentity oldIdentity name generator0
+          ref' = backendDataParameterRefFromIdentity identity name
+       in (generatorNext, refs ++ [ref'], insertUniqueBackendTypeBinderIdentity name identity env0)
+
+assignConstructorTypeBinderIdentities :: BackendDataEnv -> String -> Maybe SymbolIdentity -> BackendTypeBinderEnv -> IdentityGenerator -> BackendConstructor -> (IdentityGenerator, BackendConstructor)
+assignConstructorTypeBinderIdentities dataEnv moduleName mbDataIdentity env generator constructor =
+  ( generator3,
+    constructor
+      { backendConstructorIdentity = Just constructorIdentity,
+        backendConstructorForallsWithIdentity = foralls',
+        backendConstructorFieldsWithIdentity = fields',
+        backendConstructorResultWithIdentity = result'
+      }
+  )
+  where
+    (constructorIdentity, generator0) =
+      freshConstructorIdentity (backendConstructorIdentity constructor) moduleName mbDataIdentity (backendConstructorName constructor) generator
+    (generator1, foralls', env') =
+      assignTypeBinders dataEnv env generator0 (backendConstructorForalls constructor)
+    (generator2, fields') =
+      mapAccumL (assignTypeBinderIdentitiesInType dataEnv env') generator1 (backendConstructorFields constructor)
+    (generator3, result') =
+      assignTypeBinderIdentitiesInType dataEnv env' generator2 (backendConstructorResult constructor)
+
+assignBindingIdentities :: BackendDataEnv -> BackendConstructorEnv -> BackendGlobalEnv -> IdentityGenerator -> BackendBinding -> (IdentityGenerator, BackendBinding)
+assignBindingIdentities dataEnv constructorEnv globalEnv generator binding =
+  ( generator2,
+    binding
+      { backendBindingTypeWithMetadata = bindingTy',
+        backendBindingExprWithMetadata = expr'
+      }
+  )
+  where
+    (generator1, bindingTy') =
+      assignTypeBinderIdentitiesInType dataEnv Map.empty generator (backendBindingType binding)
+    (generator2, expr') =
+      assignIdentitiesInExpr dataEnv constructorEnv globalEnv Map.empty Map.empty generator1 (backendBindingExpr binding)
+
+assignTypeBinders :: BackendDataEnv -> BackendTypeBinderEnv -> IdentityGenerator -> [BackendTypeBinder] -> (IdentityGenerator, [BackendTypeBinder], BackendTypeBinderEnv)
+assignTypeBinders dataEnv env generator =
+  foldl assignOne (generator, [], env)
+  where
+    assignOne (generator0, binders, env0) binder =
+      let name = backendTypeBinderName binder
+          (generator1, bound') =
+            assignMaybeTypeBinderIdentitiesInType dataEnv env0 generator0 (backendTypeBinderBound binder)
+          (identity, generator2) =
+            freshTypeBinderIdentity (backendTypeBinderIdentity binder) name generator1
+          binder' =
+            BackendTypeBinderWithIdentity
+              (Just identity)
+              name
+              bound'
+       in (generator2, binders ++ [binder'], insertUniqueBackendTypeBinderIdentity name identity env0)
+
+assignMaybeTypeBinderIdentitiesInType :: BackendDataEnv -> BackendTypeBinderEnv -> IdentityGenerator -> Maybe BackendType -> (IdentityGenerator, Maybe BackendType)
+assignMaybeTypeBinderIdentitiesInType dataEnv env generator =
+  \case
+    Nothing -> (generator, Nothing)
+    Just ty ->
+      let (generator', ty') = assignTypeBinderIdentitiesInType dataEnv env generator ty
+       in (generator', Just ty')
+
+assignTypeBinderIdentitiesInType :: BackendDataEnv -> BackendTypeBinderEnv -> IdentityGenerator -> BackendType -> (IdentityGenerator, BackendType)
+assignTypeBinderIdentitiesInType dataEnv env generator ty =
+  case ty of
+    BTVarWithIdentity identity name ->
+      (generator, BTVarWithIdentity (typeRefIdentity env identity name) name)
+    BTArrow dom cod ->
+      let (generator1, dom') = assignTypeBinderIdentitiesInType dataEnv env generator dom
+          (generator2, cod') = assignTypeBinderIdentitiesInType dataEnv env generator1 cod
+       in (generator2, BTArrow dom' cod')
+    BTBaseWithIdentity identity base@(BaseTy name) ->
+      (generator, BTBaseWithIdentity (dataHeadIdentity dataEnv identity name) base)
+    BTConWithIdentity identity base@(BaseTy name) args ->
+      let (generator', args') = assignNonEmptyTypes dataEnv env generator args
+       in (generator', BTConWithIdentity (dataHeadIdentity dataEnv identity name) base args')
+    BTVarAppWithIdentity identity name args ->
+      let (generator', args') = assignNonEmptyTypes dataEnv env generator args
+       in (generator', BTVarAppWithIdentity (typeRefIdentity env identity name) name args')
+    BTForallWithIdentity identity name mbBound body ->
+      let (generator1, mbBound') = assignMaybeTypeBinderIdentitiesInType dataEnv env generator mbBound
+          (binderIdentity, generator2) = freshTypeBinderIdentity identity name generator1
+          env' = shadowBackendTypeBinderIdentity name binderIdentity env
+          (generator3, body') = assignTypeBinderIdentitiesInType dataEnv env' generator2 body
+       in (generator3, BTForallWithIdentity (Just binderIdentity) name mbBound' body')
+    BTMuWithIdentity identity name body ->
+      let (binderIdentity, generator1) = freshTypeBinderIdentity identity name generator
+          env' = shadowBackendTypeBinderIdentity name binderIdentity env
+          (generator2, body') = assignTypeBinderIdentitiesInType dataEnv env' generator1 body
+       in (generator2, BTMuWithIdentity (Just binderIdentity) name body')
+    BTBottom ->
+      (generator, BTBottom)
+
+assignNonEmptyTypes :: BackendDataEnv -> BackendTypeBinderEnv -> IdentityGenerator -> NonEmpty BackendType -> (IdentityGenerator, NonEmpty BackendType)
+assignNonEmptyTypes dataEnv env generator (ty :| tys) =
+  let (generator1, ty') = assignTypeBinderIdentitiesInType dataEnv env generator ty
+      (generator2, tys') = mapAccumL (assignTypeBinderIdentitiesInType dataEnv env) generator1 tys
+   in (generator2, ty' :| tys')
+
+assignIdentitiesInExpr :: BackendDataEnv -> BackendConstructorEnv -> BackendGlobalEnv -> BackendTypeBinderEnv -> BackendTermEnv -> IdentityGenerator -> BackendExpr -> (IdentityGenerator, BackendExpr)
+assignIdentitiesInExpr dataEnv constructorEnv globalEnv typeEnv termEnv generator expr =
+  case expr of
+    BackendVarWithIdentity resultTy mbIdentity name ->
+      let (generator', resultTy') = assignTypeBinderIdentitiesInType dataEnv typeEnv generator resultTy
+       in (generator', BackendVarWithIdentity resultTy' (termRefIdentity globalEnv termEnv mbIdentity name) name)
+    BackendLit resultTy lit ->
+      let (generator', resultTy') = assignTypeBinderIdentitiesInType dataEnv typeEnv generator resultTy
+       in (generator', BackendLit resultTy' lit)
+    BackendLamWithIdentity resultTy mbIdentity name paramTy body ->
+      let (generator1, resultTy') = assignTypeBinderIdentitiesInType dataEnv typeEnv generator resultTy
+          (generator2, paramTy') = assignTypeBinderIdentitiesInType dataEnv typeEnv generator1 paramTy
+          (identity, generator3) = freshTermIdentity mbIdentity name generator2
+          (generator4, body') = assignIdentitiesInExpr dataEnv constructorEnv globalEnv typeEnv (shadowBackendTermIdentity name identity termEnv) generator3 body
+       in (generator4, BackendLamWithIdentity resultTy' (Just identity) name paramTy' body')
+    BackendApp resultTy fun arg ->
+      let (generator1, resultTy') = assignTypeBinderIdentitiesInType dataEnv typeEnv generator resultTy
+          (generator2, fun') = assignIdentitiesInExpr dataEnv constructorEnv globalEnv typeEnv termEnv generator1 fun
+          (generator3, arg') = assignIdentitiesInExpr dataEnv constructorEnv globalEnv typeEnv termEnv generator2 arg
+       in (generator3, BackendApp resultTy' fun' arg')
+    BackendLetWithIdentity resultTy mbIdentity name bindingTy rhs body ->
+      let (generator1, resultTy') = assignTypeBinderIdentitiesInType dataEnv typeEnv generator resultTy
+          (generator2, bindingTy') = assignTypeBinderIdentitiesInType dataEnv typeEnv generator1 bindingTy
+          (generator3, rhs') = assignIdentitiesInExpr dataEnv constructorEnv globalEnv typeEnv termEnv generator2 rhs
+          (identity, generator4) = freshTermIdentity mbIdentity name generator3
+          (generator5, body') = assignIdentitiesInExpr dataEnv constructorEnv globalEnv typeEnv (shadowBackendTermIdentity name identity termEnv) generator4 body
+       in (generator5, BackendLetWithIdentity resultTy' (Just identity) name bindingTy' rhs' body')
+    BackendTyAbsWithIdentity resultTy identity name mbBound body ->
+      let (generator1, resultTy') = assignTypeBinderIdentitiesInType dataEnv typeEnv generator resultTy
+          (generator2, mbBound') = assignMaybeTypeBinderIdentitiesInType dataEnv typeEnv generator1 mbBound
+          (binderIdentity, generator3) =
+            case resultTy' of
+              BTForallWithIdentity (Just resultIdentity) _ _ _ ->
+                (resultIdentity, generator2)
+              _ -> freshTypeBinderIdentity identity name generator2
+          typeEnv' = shadowBackendTypeBinderIdentity name binderIdentity typeEnv
+          (generator4, body') = assignIdentitiesInExpr dataEnv constructorEnv globalEnv typeEnv' termEnv generator3 body
+       in (generator4, BackendTyAbsWithIdentity resultTy' (Just binderIdentity) name mbBound' body')
+    BackendTyApp resultTy fun argTy ->
+      let (generator1, resultTy') = assignTypeBinderIdentitiesInType dataEnv typeEnv generator resultTy
+          (generator2, fun') = assignIdentitiesInExpr dataEnv constructorEnv globalEnv typeEnv termEnv generator1 fun
+          (generator3, argTy') = assignTypeBinderIdentitiesInType dataEnv typeEnv generator2 argTy
+       in (generator3, BackendTyApp resultTy' fun' argTy')
+    BackendRoll resultTy payload ->
+      let (generator1, resultTy') = assignTypeBinderIdentitiesInType dataEnv typeEnv generator resultTy
+          (generator2, payload') = assignIdentitiesInExpr dataEnv constructorEnv globalEnv typeEnv termEnv generator1 payload
+       in (generator2, BackendRoll resultTy' payload')
+    BackendUnroll resultTy payload ->
+      let (generator1, resultTy') = assignTypeBinderIdentitiesInType dataEnv typeEnv generator resultTy
+          (generator2, payload') = assignIdentitiesInExpr dataEnv constructorEnv globalEnv typeEnv termEnv generator1 payload
+       in (generator2, BackendUnroll resultTy' payload')
+    BackendClosureWithParamIdentities resultTy entryIdentity entryName captures params body ->
+      let (generator1, resultTy') = assignTypeBinderIdentitiesInType dataEnv typeEnv generator resultTy
+          (entryIdentity', generator2) = freshClosureEntryIdentity entryIdentity generator1
+          (generator3, captures', captureEnv) = assignClosureCaptureIdentities dataEnv constructorEnv globalEnv typeEnv termEnv generator2 captures
+          (generator4, params', paramEnv) = assignClosureParamIdentities dataEnv typeEnv generator3 params
+          bodyEnv = unionUniqueBackendTermEnv paramEnv captureEnv
+          (generator5, body') = assignIdentitiesInExpr dataEnv constructorEnv globalEnv typeEnv bodyEnv generator4 body
+       in (generator5, BackendClosureWithParamIdentities resultTy' (Just entryIdentity') entryName captures' params' body')
+    BackendClosureCall resultTy fun args ->
+      let (generator1, resultTy') = assignTypeBinderIdentitiesInType dataEnv typeEnv generator resultTy
+          (generator2, fun') = assignIdentitiesInExpr dataEnv constructorEnv globalEnv typeEnv termEnv generator1 fun
+          (generator3, args') = mapAccumL (assignIdentitiesInExpr dataEnv constructorEnv globalEnv typeEnv termEnv) generator2 args
+       in (generator3, BackendClosureCall resultTy' fun' args')
+    BackendConstructWithIdentity resultTy mbIdentity name args ->
+      let (generator1, resultTy') = assignTypeBinderIdentitiesInType dataEnv typeEnv generator resultTy
+          (generator2, args') = mapAccumL (assignIdentitiesInExpr dataEnv constructorEnv globalEnv typeEnv termEnv) generator1 args
+       in (generator2, BackendConstructWithIdentity resultTy' (constructorRefIdentity constructorEnv mbIdentity name) name args')
+    BackendCase resultTy scrutinee alternatives ->
+      let (generator1, resultTy') = assignTypeBinderIdentitiesInType dataEnv typeEnv generator resultTy
+          (generator2, scrutinee') = assignIdentitiesInExpr dataEnv constructorEnv globalEnv typeEnv termEnv generator1 scrutinee
+          (generator3, alternatives') = assignNonEmptyAlternatives dataEnv constructorEnv globalEnv typeEnv termEnv generator2 alternatives
+       in (generator3, BackendCase resultTy' scrutinee' alternatives')
+
+assignClosureCaptureIdentities :: BackendDataEnv -> BackendConstructorEnv -> BackendGlobalEnv -> BackendTypeBinderEnv -> BackendTermEnv -> IdentityGenerator -> [BackendClosureCapture] -> (IdentityGenerator, [BackendClosureCapture], BackendTermEnv)
+assignClosureCaptureIdentities dataEnv constructorEnv globalEnv typeEnv termEnv generator captures =
+  foldl assignOne (generator, [], Map.empty) captures
+  where
+    assignOne (generator0, captures0, captureEnv) capture =
+      let (generator1, captureTy') =
+            assignTypeBinderIdentitiesInType dataEnv typeEnv generator0 (backendClosureCaptureType capture)
+          (generator2, captureExpr') =
+            assignIdentitiesInExpr dataEnv constructorEnv globalEnv typeEnv termEnv generator1 (backendClosureCaptureExpr capture)
+          name = backendClosureCaptureName capture
+          (identity, generator3) =
+            freshTermIdentity (backendClosureCaptureIdentity capture) name generator2
+          capture' =
+            capture
+              { backendClosureCaptureIdentity = Just identity,
+                backendClosureCaptureType = captureTy',
+                backendClosureCaptureExpr = captureExpr'
+              }
+       in (generator3, captures0 ++ [capture'], insertUniqueBackendTermIdentity name identity captureEnv)
+
+assignClosureParamIdentities :: BackendDataEnv -> BackendTypeBinderEnv -> IdentityGenerator -> [BackendClosureParam] -> (IdentityGenerator, [BackendClosureParam], BackendTermEnv)
+assignClosureParamIdentities dataEnv typeEnv generator params =
+  foldl assignOne (generator, [], Map.empty) params
+  where
+    assignOne (generator0, params0, paramEnv) param =
+      let (generator1, paramTy') =
+            assignTypeBinderIdentitiesInType dataEnv typeEnv generator0 (backendClosureParamType param)
+          name = backendClosureParamName param
+          (identity, generator2) =
+            freshTermIdentity (backendClosureParamIdentity param) name generator1
+          param' =
+            param
+              { backendClosureParamIdentity = Just identity,
+                backendClosureParamType = paramTy'
+              }
+       in (generator2, params0 ++ [param'], insertUniqueBackendTermIdentity name identity paramEnv)
+
+assignNonEmptyAlternatives :: BackendDataEnv -> BackendConstructorEnv -> BackendGlobalEnv -> BackendTypeBinderEnv -> BackendTermEnv -> IdentityGenerator -> NonEmpty BackendAlternative -> (IdentityGenerator, NonEmpty BackendAlternative)
+assignNonEmptyAlternatives dataEnv constructorEnv globalEnv typeEnv termEnv generator (alternative :| alternatives) =
+  let (generator1, alternative') = assignAlternativeIdentities dataEnv constructorEnv globalEnv typeEnv termEnv generator alternative
+      (generator2, alternatives') = mapAccumL (assignAlternativeIdentities dataEnv constructorEnv globalEnv typeEnv termEnv) generator1 alternatives
+   in (generator2, alternative' :| alternatives')
+
+assignAlternativeIdentities :: BackendDataEnv -> BackendConstructorEnv -> BackendGlobalEnv -> BackendTypeBinderEnv -> BackendTermEnv -> IdentityGenerator -> BackendAlternative -> (IdentityGenerator, BackendAlternative)
+assignAlternativeIdentities dataEnv constructorEnv globalEnv typeEnv termEnv generator alternative =
+  ( generator',
+    alternative {backendAltPattern = pattern', backendAltBody = body'}
+  )
+  where
+    (generator1, pattern', patternEnv) =
+      assignPatternIdentities constructorEnv generator (backendAltPattern alternative)
+    (generator', body') =
+      assignIdentitiesInExpr dataEnv constructorEnv globalEnv typeEnv (Map.union patternEnv termEnv) generator1 (backendAltBody alternative)
+
+assignPatternIdentities :: BackendConstructorEnv -> IdentityGenerator -> BackendPattern -> (IdentityGenerator, BackendPattern, BackendTermEnv)
+assignPatternIdentities constructorEnv generator =
+  \case
+    BackendDefaultPattern ->
+      (generator, BackendDefaultPattern, Map.empty)
+    BackendConstructorPatternWithBinderIdentities identity name binders ->
+      let (generator', binders', env) =
+            foldl assignBinder (generator, [], Map.empty) binders
+       in (generator', BackendConstructorPatternWithBinderIdentities (constructorRefIdentity constructorEnv identity name) name binders', env)
+  where
+    assignBinder (generator0, binders, env) binder =
+      let name = backendPatternBinderName binder
+          (identity, generator1) =
+            freshTermIdentity (backendPatternBinderIdentity binder) name generator0
+          binder' = binder {backendPatternBinderIdentity = Just identity}
+       in (generator1, binders ++ [binder'], insertUniqueBackendTermIdentity name identity env)
+
+freshTypeBinderIdentity :: Maybe TypeBinderIdentity -> String -> IdentityGenerator -> (TypeBinderIdentity, IdentityGenerator)
+freshTypeBinderIdentity identity _ generator =
+  case identity of
+    Just resolvedIdentity -> (resolvedIdentity, generator)
+    Nothing ->
+      let (unique, generator') = freshIdentity generator
+       in (typeBinderIdentityFromUnique unique, generator')
+
+freshTermIdentity :: Maybe IdDetails -> String -> IdentityGenerator -> (IdDetails, IdentityGenerator)
+freshTermIdentity (Just identity) _ generator =
+  (identity, generator)
+freshTermIdentity Nothing name generator =
+  let (localRef, generator') = freshLocalRef name generator
+   in (LocalId localRef, generator')
+
+freshClosureEntryIdentity :: Maybe UniqueIdentity -> IdentityGenerator -> (UniqueIdentity, IdentityGenerator)
+freshClosureEntryIdentity (Just identity) generator =
+  (identity, generator)
+freshClosureEntryIdentity Nothing generator =
+  freshIdentity generator
+
+freshConstructorIdentity :: Maybe SymbolIdentity -> String -> Maybe SymbolIdentity -> String -> IdentityGenerator -> (SymbolIdentity, IdentityGenerator)
+freshConstructorIdentity (Just identity) _ _ _ generator =
+  (identity, generator)
+freshConstructorIdentity Nothing moduleName mbDataIdentity name generator =
+  let (unique, generator') = freshIdentity generator
+   in (generatedBackendConstructorIdentity moduleName mbDataIdentity name unique, generator')
+
+generatedBackendConstructorIdentity :: String -> Maybe SymbolIdentity -> String -> UniqueIdentity -> SymbolIdentity
+generatedBackendConstructorIdentity moduleName mbDataIdentity name identity =
+  symbolIdentityFromParts identity SymbolConstructor moduleName name (SymbolOwnerType <$> mbDataIdentity)
+
+typeRefIdentity :: BackendTypeBinderEnv -> Maybe TypeBinderIdentity -> String -> Maybe TypeBinderIdentity
+typeRefIdentity env identity name =
+  identity <|> (Map.lookup name env >>= id)
+
+dataHeadIdentity :: BackendDataEnv -> Maybe SymbolIdentity -> String -> Maybe SymbolIdentity
+dataHeadIdentity env identity name =
+  identity <|> Map.lookup name env
+
+termRefIdentity :: BackendGlobalEnv -> BackendTermEnv -> Maybe IdDetails -> String -> Maybe IdDetails
+termRefIdentity globalEnv env identity name =
+  identity <|> (Map.lookup name env >>= id) <|> (TopLevelId <$> Map.lookup name globalEnv)
+
+constructorRefIdentity :: BackendConstructorEnv -> Maybe SymbolIdentity -> String -> Maybe SymbolIdentity
+constructorRefIdentity env identity name =
+  identity <|> Map.lookup name env
+
 lowerNativeProgram :: LoweredProgram -> Either BackendLLVMError LLVMModule
 lowerNativeProgram lowered = do
   let base = lpBase lowered
@@ -338,10 +895,11 @@ lowerNativeProgram lowered = do
   -- Reject self-referencing main bindings (from opaque placeholder fallback)
   -- which would cause infinite recursion in the native executable.
   case ffBody mainForm of
-    BackendVar _ v | v == biName mainBinding ->
-      Left (BackendLLVMUnsupportedExpression "native process main"
-        ("opaque main binding `" ++ biName mainBinding
-         ++ "` could not be elaborated; its body is a self-reference placeholder"))
+    BackendVarWithIdentity _ mbIdentity name
+      | bindingSelfReference mainBinding mbIdentity name ->
+          Left (BackendLLVMUnsupportedExpression "native process main"
+            ("opaque main binding `" ++ biName mainBinding
+             ++ "` could not be elaborated; its body is a self-reference placeholder"))
     _ -> pure ()
   renderSpecs <- collectNativeRenderSpecs base (ffReturnType mainForm)
   rejectNativeSymbolConflicts base renderSpecs
@@ -382,7 +940,7 @@ validateLLVMModuleSymbols module0 =
 nativeRuntimeDeclarations :: ProgramBase -> [LLVMDeclaration]
 nativeRuntimeDeclarations base =
   [ LLVMDeclaration runtimeMallocName LLVMPtr [LLVMInt 64] False
-    | Map.notMember runtimeMallocName (pbBindings base)
+    | runtimeBindingNameAvailable base runtimeMallocName
   ]
     ++ [LLVMDeclaration nativePrintfName (LLVMInt 32) [LLVMPtr] True]
     ++ [LLVMDeclaration nativeSprintfName (LLVMInt 32) [LLVMPtr, LLVMPtr] True]
@@ -397,56 +955,58 @@ nativeRuntimeDeclarations base =
 
 nativeRuntimeFunctions :: ProgramEnv -> [LLVMFunction]
 nativeRuntimeFunctions env =
-  [nativeAndFunction | Map.notMember runtimeAndName (pbBindings base)]
+  [nativeAndFunction | runtimeNameAvailable runtimeAndName]
     ++ [nativeStringByteLengthFunction (peStringGlobals env)]
     ++ [nativeStringRegisterLengthFunction]
-    ++ [nativeStringLengthFunction | Map.notMember runtimeStringLengthName (pbBindings base)]
-    ++ [nativeStringIsEmptyFunction | Map.notMember runtimeStringIsEmptyName (pbBindings base)]
-    ++ [nativeStringContainsCharFunction | Map.notMember runtimeStringContainsCharName (pbBindings base)]
-    ++ [nativeStringContainsFunction | Map.notMember runtimeStringContainsName (pbBindings base)]
-    ++ [nativeStringEqualsFunction (peStringGlobals env) | Map.notMember runtimeStringEqualsName (pbBindings base)]
-    ++ [nativeStringStartsWithFunction | Map.notMember runtimeStringStartsWithName (pbBindings base)]
-    ++ [nativeStringEndsWithFunction | Map.notMember runtimeStringEndsWithName (pbBindings base)]
-    ++ [nativeStringAppendFunction | Map.notMember runtimeStringAppendName (pbBindings base)]
-    ++ [nativeStringReplaceCharFunction | Map.notMember runtimeStringReplaceCharName (pbBindings base)]
-    ++ [nativeStringReplaceFunction | Map.notMember runtimeStringReplaceName (pbBindings base)]
-    ++ [nativeStringIndexOfCharFunction | Map.notMember runtimeStringIndexOfCharName (pbBindings base)]
-    ++ [nativeStringIndexOfFunction | Map.notMember runtimeStringIndexOfName (pbBindings base)]
-    ++ [nativeStringSplitFunction | Map.notMember runtimeStringSplitName (pbBindings base)]
-    ++ [nativeStringJoinFunction | Map.notMember runtimeStringJoinName (pbBindings base)]
-    ++ [nativeStringSplitCharFunction | Map.notMember runtimeStringSplitCharName (pbBindings base)]
-    ++ [nativeStringCompareFunction | Map.notMember runtimeStringCompareName (pbBindings base)]
-    ++ [nativeStringFromCharFunction | Map.notMember runtimeStringFromCharName (pbBindings base)]
-    ++ [nativeStringFromIntFunction | Map.notMember runtimeStringFromIntName (pbBindings base)]
-    ++ [nativeStringFromBoolFunction | Map.notMember runtimeStringFromBoolName (pbBindings base)]
-    ++ [nativeStringFromNatFunction | Map.notMember runtimeStringFromNatName (pbBindings base)]
-    ++ [nativeStringFromListFunction | Map.notMember runtimeStringFromListName (pbBindings base)]
-    ++ [nativeStringToListFunction | Map.notMember runtimeStringToListName (pbBindings base)]
-    ++ [nativeStringDropFunction | Map.notMember runtimeStringDropName (pbBindings base)]
-    ++ [nativeStringTakeFunction | Map.notMember runtimeStringTakeName (pbBindings base)]
-    ++ [nativeStringSliceFunction | Map.notMember runtimeStringSliceName (pbBindings base)]
-    ++ [nativeStringCharAtFunction | Map.notMember runtimeStringCharAtName (pbBindings base)]
-    ++ [nativeStringCharAtOptionFunction | Map.notMember runtimeStringCharAtOptionName (pbBindings base)]
-    ++ [nativeCharIsDigitFunction | Map.notMember runtimeCharIsDigitName (pbBindings base)]
-    ++ [nativeCharIsAsciiLowerFunction | Map.notMember runtimeCharIsAsciiLowerName (pbBindings base)]
-    ++ [nativeCharIsAsciiUpperFunction | Map.notMember runtimeCharIsAsciiUpperName (pbBindings base)]
-    ++ [nativeCharIsAsciiAlphaFunction | Map.notMember runtimeCharIsAsciiAlphaName (pbBindings base)]
-    ++ [nativeCharIsAsciiAlphaNumFunction | Map.notMember runtimeCharIsAsciiAlphaNumName (pbBindings base)]
-    ++ [nativeCharIsAsciiIdentifierStartFunction | Map.notMember runtimeCharIsAsciiIdentifierStartName (pbBindings base)]
-    ++ [nativeCharIsAsciiIdentifierContinueFunction | Map.notMember runtimeCharIsAsciiIdentifierContinueName (pbBindings base)]
-    ++ [nativeCharIsAsciiWhitespaceFunction | Map.notMember runtimeCharIsAsciiWhitespaceName (pbBindings base)]
-    ++ [nativeCharIsAsciiPunctuationFunction | Map.notMember runtimeCharIsAsciiPunctuationName (pbBindings base)]
-    ++ [nativeCharIsAsciiPrintableFunction | Map.notMember runtimeCharIsAsciiPrintableName (pbBindings base)]
-    ++ [nativeCharIsAsciiHexDigitFunction | Map.notMember runtimeCharIsAsciiHexDigitName (pbBindings base)]
-    ++ [nativeCharIsAsciiLineBreakFunction | Map.notMember runtimeCharIsAsciiLineBreakName (pbBindings base)]
-    ++ [nativeCharIsAsciiControlFunction | Map.notMember runtimeCharIsAsciiControlName (pbBindings base)]
-    ++ [nativeCharToAsciiLowerFunction | Map.notMember runtimeCharToAsciiLowerName (pbBindings base)]
-    ++ [nativeCharToAsciiUpperFunction | Map.notMember runtimeCharToAsciiUpperName (pbBindings base)]
-    ++ [nativeStringToAsciiLowerFunction | Map.notMember runtimeStringToAsciiLowerName (pbBindings base)]
-    ++ [nativeStringToAsciiUpperFunction | Map.notMember runtimeStringToAsciiUpperName (pbBindings base)]
+    ++ [nativeStringLengthFunction | runtimeNameAvailable runtimeStringLengthName]
+    ++ [nativeStringIsEmptyFunction | runtimeNameAvailable runtimeStringIsEmptyName]
+    ++ [nativeStringContainsCharFunction | runtimeNameAvailable runtimeStringContainsCharName]
+    ++ [nativeStringContainsFunction | runtimeNameAvailable runtimeStringContainsName]
+    ++ [nativeStringEqualsFunction (peStringGlobals env) | runtimeNameAvailable runtimeStringEqualsName]
+    ++ [nativeStringStartsWithFunction | runtimeNameAvailable runtimeStringStartsWithName]
+    ++ [nativeStringEndsWithFunction | runtimeNameAvailable runtimeStringEndsWithName]
+    ++ [nativeStringAppendFunction | runtimeNameAvailable runtimeStringAppendName]
+    ++ [nativeStringReplaceCharFunction | runtimeNameAvailable runtimeStringReplaceCharName]
+    ++ [nativeStringReplaceFunction | runtimeNameAvailable runtimeStringReplaceName]
+    ++ [nativeStringIndexOfCharFunction | runtimeNameAvailable runtimeStringIndexOfCharName]
+    ++ [nativeStringIndexOfFunction | runtimeNameAvailable runtimeStringIndexOfName]
+    ++ [nativeStringSplitFunction | runtimeNameAvailable runtimeStringSplitName]
+    ++ [nativeStringJoinFunction | runtimeNameAvailable runtimeStringJoinName]
+    ++ [nativeStringSplitCharFunction | runtimeNameAvailable runtimeStringSplitCharName]
+    ++ [nativeStringCompareFunction | runtimeNameAvailable runtimeStringCompareName]
+    ++ [nativeStringFromCharFunction | runtimeNameAvailable runtimeStringFromCharName]
+    ++ [nativeStringFromIntFunction | runtimeNameAvailable runtimeStringFromIntName]
+    ++ [nativeStringFromBoolFunction | runtimeNameAvailable runtimeStringFromBoolName]
+    ++ [nativeStringFromNatFunction | runtimeNameAvailable runtimeStringFromNatName]
+    ++ [nativeStringFromListFunction | runtimeNameAvailable runtimeStringFromListName]
+    ++ [nativeStringToListFunction | runtimeNameAvailable runtimeStringToListName]
+    ++ [nativeStringDropFunction | runtimeNameAvailable runtimeStringDropName]
+    ++ [nativeStringTakeFunction | runtimeNameAvailable runtimeStringTakeName]
+    ++ [nativeStringSliceFunction | runtimeNameAvailable runtimeStringSliceName]
+    ++ [nativeStringCharAtFunction | runtimeNameAvailable runtimeStringCharAtName]
+    ++ [nativeStringCharAtOptionFunction | runtimeNameAvailable runtimeStringCharAtOptionName]
+    ++ [nativeCharIsDigitFunction | runtimeNameAvailable runtimeCharIsDigitName]
+    ++ [nativeCharIsAsciiLowerFunction | runtimeNameAvailable runtimeCharIsAsciiLowerName]
+    ++ [nativeCharIsAsciiUpperFunction | runtimeNameAvailable runtimeCharIsAsciiUpperName]
+    ++ [nativeCharIsAsciiAlphaFunction | runtimeNameAvailable runtimeCharIsAsciiAlphaName]
+    ++ [nativeCharIsAsciiAlphaNumFunction | runtimeNameAvailable runtimeCharIsAsciiAlphaNumName]
+    ++ [nativeCharIsAsciiIdentifierStartFunction | runtimeNameAvailable runtimeCharIsAsciiIdentifierStartName]
+    ++ [nativeCharIsAsciiIdentifierContinueFunction | runtimeNameAvailable runtimeCharIsAsciiIdentifierContinueName]
+    ++ [nativeCharIsAsciiWhitespaceFunction | runtimeNameAvailable runtimeCharIsAsciiWhitespaceName]
+    ++ [nativeCharIsAsciiPunctuationFunction | runtimeNameAvailable runtimeCharIsAsciiPunctuationName]
+    ++ [nativeCharIsAsciiPrintableFunction | runtimeNameAvailable runtimeCharIsAsciiPrintableName]
+    ++ [nativeCharIsAsciiHexDigitFunction | runtimeNameAvailable runtimeCharIsAsciiHexDigitName]
+    ++ [nativeCharIsAsciiLineBreakFunction | runtimeNameAvailable runtimeCharIsAsciiLineBreakName]
+    ++ [nativeCharIsAsciiControlFunction | runtimeNameAvailable runtimeCharIsAsciiControlName]
+    ++ [nativeCharToAsciiLowerFunction | runtimeNameAvailable runtimeCharToAsciiLowerName]
+    ++ [nativeCharToAsciiUpperFunction | runtimeNameAvailable runtimeCharToAsciiUpperName]
+    ++ [nativeStringToAsciiLowerFunction | runtimeNameAvailable runtimeStringToAsciiLowerName]
+    ++ [nativeStringToAsciiUpperFunction | runtimeNameAvailable runtimeStringToAsciiUpperName]
     ++ nativeIOFunctions base
   where
     base = peBase env
+    bindingNames = programBindingRuntimeNames base
+    runtimeNameAvailable name = Set.notMember name bindingNames
 
 nativeCMainName :: String
 nativeCMainName =
@@ -573,14 +1133,49 @@ nativeDataRuntimeForType base =
   \case
     BTBaseWithIdentity identity (BaseTy name) -> lookupDataRuntimeByHead base identity name
     BTConWithIdentity identity (BaseTy name) _ -> lookupDataRuntimeByHead base identity name
-    BTMu name _ -> Structural.structuralRecursiveDataName name >>= (`Map.lookup` pbData base)
+    BTMuWithIdentity identity name _ -> lookupDataRuntimeForStructuralMu base identity name
+    BTMu name _ -> lookupDataRuntimeForStructuralMu base Nothing name
     _ -> Nothing
 
 lookupDataRuntimeByHead :: ProgramBase -> Maybe SymbolIdentity -> String -> Maybe DataRuntime
 lookupDataRuntimeByHead base mbIdentity name =
   case mbIdentity of
     Just identity -> Map.lookup identity (pbDataByIdentity base)
-    Nothing -> Map.lookup name (pbData base)
+    Nothing -> lookupDataRuntimeByName base name
+
+lookupDataRuntimeForStructuralMu :: ProgramBase -> Maybe TypeBinderIdentity -> String -> Maybe DataRuntime
+lookupDataRuntimeForStructuralMu base mbIdentity name =
+  case structuralIdentityRuntime of
+    Just runtime -> Just runtime
+    Nothing
+      | Just {} <- structuralSelfIdentityUnique mbIdentity -> Nothing
+      | otherwise -> structuralNameRuntime
+  where
+    structuralIdentityRuntime =
+      structuralSelfIdentityUnique mbIdentity >>= findDataRuntimeByUnique
+
+    structuralNameRuntime =
+      Structural.structuralRecursiveDataName name >>= lookupDataRuntimeByName base
+
+    structuralSelfIdentityUnique identity = do
+      selfIdentity <- identity
+      (unique, StructuralSelfBinder) <- typeBinderIdentityStructural selfIdentity
+      pure unique
+
+    findDataRuntimeByUnique unique =
+      case
+        [ runtime
+        | runtime <- Map.elems (pbDataByIdentity base),
+          Just dataIdentity <- [backendDataIdentity (drData runtime)],
+          symbolUniqueIdentity dataIdentity == unique
+        ]
+      of
+        runtime : _ -> Just runtime
+        [] -> Nothing
+
+lookupDataRuntimeByName :: ProgramBase -> String -> Maybe DataRuntime
+lookupDataRuntimeByName _ _ =
+  Nothing
 
 nativeConstructorGlobalName :: NativeRenderSpec -> ConstructorRuntime -> String
 nativeConstructorGlobalName spec constructorRuntime =
@@ -592,7 +1187,7 @@ nativeRendererName ty =
 
 rejectNativeSymbolConflicts :: ProgramBase -> [NativeRenderSpec] -> Either BackendLLVMError ()
 rejectNativeSymbolConflicts base renderSpecs =
-  case [name | name <- Map.keys (pbBindings base), nativeNameConflicts name] of
+  case [name | name <- Set.toList (programBindingRuntimeNames base), nativeNameConflicts name] of
     name : _ ->
       Left (BackendLLVMUnsupportedExpression "native process" ("reserved native LLVM symbol " ++ show name))
     [] -> Right ()
@@ -672,16 +1267,16 @@ data NativeRenderableKind
 nativeRenderableKind :: ProgramBase -> BackendType -> NativeRenderableKind
 nativeRenderableKind base ty =
   case ty of
-    BTBaseWithIdentity _ (BaseTy "Int") -> NativeScalar
-    BTBaseWithIdentity _ (BaseTy "Bool") -> NativeScalar
-    BTBaseWithIdentity _ (BaseTy "Char") -> NativeScalar
-    BTBaseWithIdentity _ (BaseTy "String") -> NativeString
-    BTBaseWithIdentity identity (BaseTy name)
-      | name == ioTypeName -> NativeIO
+    BTBaseWithIdentity identity baseTy@(BaseTy name)
+      | backendBuiltinHeadMatches "Int" identity baseTy -> NativeScalar
+      | backendBuiltinHeadMatches "Bool" identity baseTy -> NativeScalar
+      | backendBuiltinHeadMatches "Char" identity baseTy -> NativeScalar
+      | backendBuiltinHeadMatches "String" identity baseTy -> NativeString
+      | backendBuiltinHeadMatches ioTypeName identity baseTy -> NativeIO
       | otherwise ->
           maybe (NativeUnsupported ("unknown native result type " ++ show name)) NativeData (lookupDataRuntimeByHead base identity name)
-    BTConWithIdentity identity (BaseTy name) _
-      | name == ioTypeName -> NativeIO
+    BTConWithIdentity identity baseTy@(BaseTy name) _
+      | backendBuiltinHeadMatches ioTypeName identity baseTy -> NativeIO
       | otherwise ->
           maybe (NativeUnsupported ("unknown native result type " ++ show name)) NativeData (lookupDataRuntimeByHead base identity name)
     BTBase (BaseTy name) ->
@@ -692,8 +1287,12 @@ nativeRenderableKind base ty =
     BTForall {} -> NativeUnsupported "polymorphic main values are not native-renderable"
     BTVar {} -> NativeUnsupported "type-variable main values are not native-renderable"
     BTVarApp {} -> NativeUnsupported "variable-headed main values are not native-renderable"
+    BTMuWithIdentity identity name _ ->
+      case lookupDataRuntimeForStructuralMu base identity name of
+        Just dataRuntime0 -> NativeData dataRuntime0
+        Nothing -> NativeUnsupported "structural recursive main values are not native-renderable"
     BTMu name _ ->
-      case Structural.structuralRecursiveDataName name >>= (`Map.lookup` pbData base) of
+      case lookupDataRuntimeForStructuralMu base Nothing name of
         Just dataRuntime0 -> NativeData dataRuntime0
         Nothing -> NativeUnsupported "structural recursive main values are not native-renderable"
     BTBottom -> NativeUnsupported "bottom main values are not native-renderable"
@@ -701,6 +1300,28 @@ nativeRenderableKind base ty =
 ioTypeName :: String
 ioTypeName =
   "IO"
+
+backendBuiltinHeadMatches :: String -> Maybe SymbolIdentity -> BaseTy -> Bool
+backendBuiltinHeadMatches builtinName (Just identity) _ =
+  identity == PrimitiveInventory.builtinTypeIdentity builtinName
+backendBuiltinHeadMatches builtinName Nothing (BaseTy name) =
+  PrimitiveInventory.matchesBuiltinTypeName builtinName name
+
+backendIntTy :: BackendType
+backendIntTy =
+  literalBackendType (LInt 0)
+
+backendBoolTy :: BackendType
+backendBoolTy =
+  literalBackendType (LBool False)
+
+backendStringTy :: BackendType
+backendStringTy =
+  literalBackendType (LString "")
+
+backendCharTy :: BackendType
+backendCharTy =
+  literalBackendType (LChar '\0')
 
 lowerNativeRenderer :: ProgramEnv -> Map String String -> NativeRenderSpec -> Either BackendLLVMError LLVMFunction
 lowerNativeRenderer env renderMap spec =
@@ -721,7 +1342,7 @@ lowerNativeRenderer env renderMap spec =
 lowerNativeScalarRenderer :: NativeRenderSpec -> Either BackendLLVMError LLVMFunction
 lowerNativeScalarRenderer spec =
   case nrsType spec of
-    BTBase (BaseTy "Int") ->
+    BTBaseWithIdentity identity base | backendBuiltinHeadMatches "Int" identity base ->
       lowerNativeFunction
         (nrsFunctionName spec)
         (LLVMInt 32)
@@ -730,7 +1351,7 @@ lowerNativeScalarRenderer spec =
           let value = requireNativeParam "value" params
           _ <- emitPrintf nativeFmtIntName [(LLVMInt 64, value)]
           finishNativeSuccess
-    BTBase (BaseTy "Bool") ->
+    BTBaseWithIdentity identity base | backendBuiltinHeadMatches "Bool" identity base ->
       lowerNativeFunction
         (nrsFunctionName spec)
         (LLVMInt 32)
@@ -746,7 +1367,7 @@ lowerNativeScalarRenderer spec =
           startBlock falseLabel
           _ <- emitPrintStringGlobal nativeStrFalseName
           finishNativeSuccess
-    BTBase (BaseTy "Char") ->
+    BTBaseWithIdentity identity base | backendBuiltinHeadMatches "Char" identity base ->
       lowerNativeFunction
         (nrsFunctionName spec)
         (LLVMInt 32)
@@ -4557,6 +5178,10 @@ nativeIOFunctions _base =
 ioPrimitiveNames :: Set.Set String
 ioPrimitiveNames = PrimitiveInventory.nativeIOPrimitiveNames
 
+nativePrimitiveNames :: Set.Set String
+nativePrimitiveNames =
+  PrimitiveInventory.nativeLowerablePrimitiveNames `Set.difference` ioPrimitiveNames
+
 resolveIOPrimitiveAsValue :: BackendType -> String -> LowerM LowerValue
 resolveIOPrimitiveAsValue ty name = do
   let wrapperName = nativeIOWrapperName name
@@ -4565,6 +5190,13 @@ resolveIOPrimitiveAsValue ty name = do
     else do
       result <- emitAssign "io.prim" LLVMPtr (LLVMCall wrapperName [])
       pure (LowerValue ty LLVMPtr result LowerRuntimeValue Nothing)
+
+resolveNativePrimitiveAsValue :: BackendType -> String -> LowerM LowerValue
+resolveNativePrimitiveAsValue ty name
+  | isFunctionLikeBackendType ty =
+      pure (functionPointerValue ty (LLVMGlobalRef LLVMPtr name))
+  | otherwise =
+      liftEither (BackendLLVMUnknownFunction name)
 
 -- | LLVM-level names of IO wrapper functions generated by 'nativeIOFunctions'.
 ioWrapperNames :: Set.Set String
@@ -4618,7 +5250,7 @@ lowerNativeFunction ::
   (Map String LLVMOperand -> LowerM ()) ->
   Either BackendLLVMError LLVMFunction
 lowerNativeFunction name returnTy params buildBody = do
-  blocks <- evalStateT (buildBody paramOperands >> gets (reverse . fsCompletedBlocks)) initialFunctionState
+  blocks <- evalStateT (buildBody paramOperands >> gets (reverse . fsCompletedBlocks)) (initialFunctionState initialIdentityGenerator)
   pure
     LLVMFunction
       { llvmFunctionName = name,
@@ -4689,18 +5321,20 @@ runtimeModulePrefix qualifiedDataName0 =
     (_, []) -> Nothing
     (_, _ : reversedModuleName) -> Just (reverse reversedModuleName ++ "__")
 
-shouldLowerReachableBinding :: Set String -> BindingInfo -> Bool
-shouldLowerReachableBinding referencedFunctionNames binding =
+shouldLowerReachableBinding :: ReferencedFunctions -> BindingInfo -> Bool
+shouldLowerReachableBinding referencedFunctions binding =
   null (ffTypeBinders form)
     && ( biExportedAsMain binding
            || canEmitDirectReachableFunction binding
-           || (Set.member (biName binding) referencedFunctionNames && canEmitReferencedFunctionForm form)
+           || (Set.member (bindingInfoRef binding) (rfBindings referencedFunctions) && canEmitReferencedFunctionForm form)
        )
   where
     form = biForm binding
 
 canEmitDirectReachableFunction :: BindingInfo -> Bool
 canEmitDirectReachableFunction binding
+  | canEmitRawFunctionPointerReturningForm form =
+      True
   | not (requiresInlineCall form) =
       canEmitFunctionForm form
   | otherwise =
@@ -4708,9 +5342,48 @@ canEmitDirectReachableFunction binding
   where
     form = biForm binding
 
+canEmitRawFunctionPointerReturningForm :: FunctionForm -> Bool
+canEmitRawFunctionPointerReturningForm form =
+  isFirstOrderFunctionPointerType (ffReturnType form)
+    && canEmitReferencedFunctionForm form
+    && functionFormReturnsRawFunctionPointerAlias form
+    && not (containsInlineOnlyEvidenceParameterCall form)
+    && all inlineOnlyParamCanTravel (indexed (ffParams form))
+  where
+    inlineOnlyParamCanTravel (index0, (_, paramTy)) =
+      not (isInlineOnlyFunctionParameter (ffEvidenceParams form) index0 paramTy)
+        || isFirstOrderFunctionPointerType paramTy
+
+functionFormReturnsRawFunctionPointerAlias :: FunctionForm -> Bool
+functionFormReturnsRawFunctionPointerAlias form =
+  rawFunctionPointerAliasValueKind (functionFormParamValueKinds form) (ffBody form) == Just LowerFunctionPointer
+
+rawFunctionPointerAliasValueKind :: LocalValueKinds -> BackendExpr -> Maybe LowerValueKind
+rawFunctionPointerAliasValueKind kinds =
+  \case
+    BackendVarWithIdentity ty mbIdentity _name
+      | isFunctionLikeBackendType ty ->
+          lookupLocalValueKind mbIdentity kinds
+    expr0@(BackendTyApp ty fun _)
+      | isFunctionLikeBackendType ty ->
+          case collectTyApps expr0 of
+            (BackendVarWithIdentity _ mbIdentity _name, _) ->
+              lookupLocalValueKind mbIdentity kinds
+            _ ->
+              rawFunctionPointerAliasValueKind kinds fun
+    BackendLetWithIdentity ty mbIdentity _name _ rhs body
+      | isFunctionLikeBackendType ty ->
+          let kindsForBody =
+                case rawFunctionPointerAliasValueKind kinds rhs of
+                  Just kind -> bindLocalValueKind mbIdentity kind kinds
+                  Nothing -> deleteLocalValueKind mbIdentity kinds
+           in rawFunctionPointerAliasValueKind kindsForBody body
+    _ ->
+      Nothing
+
 functionFormCallsGlobal :: BindingInfo -> Bool
 functionFormCallsGlobal binding =
-  go (termBoundKeyRefs [(mbIdentity, name) | (mbIdentity, name, _) <- functionFormParamTriples form]) (ffBody form)
+  go (termBoundKeyRefs [mbIdentity | (mbIdentity, _, _) <- functionFormParamTriples form]) (ffBody form)
   where
     form = biForm binding
 
@@ -4718,7 +5391,7 @@ functionFormCallsGlobal binding =
       case collectCall expr of
         Just (BackendVarWithIdentity _ mbIdentity calleeName, _, _)
           | globalReferenceMatchesBinding binding mbIdentity calleeName,
-            Set.null (termReferenceKeys mbIdentity calleeName `Set.intersection` bound) ->
+            Set.null (termReferenceKeys mbIdentity `Set.intersection` bound) ->
               True
         _ -> childCalls bound expr
 
@@ -4726,12 +5399,12 @@ functionFormCallsGlobal binding =
       \case
         BackendVarWithIdentity {} -> False
         BackendLit {} -> False
-        BackendLamWithIdentity _ mbIdentity paramName _ body ->
-          go (Set.union (termBoundKeys mbIdentity paramName) bound) body
+        BackendLamWithIdentity _ mbIdentity _paramName _ body ->
+          go (Set.union (termBoundKeys mbIdentity) bound) body
         BackendApp _ fun arg ->
           go bound fun || go bound arg
-        BackendLetWithIdentity _ mbIdentity localName _ rhs body ->
-          go bound rhs || go (Set.union (termBoundKeys mbIdentity localName) bound) body
+        BackendLetWithIdentity _ mbIdentity _localName _ rhs body ->
+          go bound rhs || go (Set.union (termBoundKeys mbIdentity) bound) body
         BackendTyAbs _ _ _ body ->
           go bound body
         BackendTyApp _ fun _ ->
@@ -4744,9 +5417,9 @@ functionFormCallsGlobal binding =
           go bound payload
         BackendUnroll _ payload ->
           go bound payload
-        BackendClosureWithParamIdentities _ _ captures params body ->
+        BackendClosureWithParamIdentities _ _ _ captures params body ->
           any (go bound . backendClosureCaptureExpr) captures
-            || go (Set.union (termBoundKeyRefs closureRefs) bound) body
+            || go (Set.union (termBoundKeyRefs (map fst closureRefs)) bound) body
           where
             closureRefs =
               [(backendClosureCaptureIdentity capture, backendClosureCaptureName capture) | capture <- captures]
@@ -4759,17 +5432,7 @@ functionFormCallsGlobal binding =
 
 globalReferenceMatchesBinding :: BindingInfo -> Maybe IdDetails -> String -> Bool
 globalReferenceMatchesBinding binding mbIdentity calleeName =
-  case biIdentity binding of
-    Just identity ->
-      backendVarSymbolIdentity mbIdentity == Just identity
-    Nothing ->
-      case mbIdentity of
-        Nothing -> calleeName == biName binding
-        Just _ -> False
-
-patternBinders :: BackendPattern -> Set String
-patternBinders =
-  Set.fromList . map snd . patternBinderRefs
+  symbolRefMatches (biIdentity binding) (biName binding) (backendVarSymbolIdentity mbIdentity) calleeName
 
 patternBinderRefs :: BackendPattern -> [(Maybe IdDetails, String)]
 patternBinderRefs = \case
@@ -4779,12 +5442,12 @@ patternBinderRefs = \case
 
 patternBinderUsedBy :: Set TermBoundKey -> BackendPatternBinder -> Bool
 patternBinderUsedBy usedKeys binder =
-  not (Set.null (termBoundKeys (backendPatternBinderIdentity binder) (backendPatternBinderName binder) `Set.intersection` usedKeys))
+  not (Set.null (termBoundKeys (backendPatternBinderIdentity binder) `Set.intersection` usedKeys))
 
-shouldLowerSpecialization :: Set String -> Specialization -> Bool
-shouldLowerSpecialization referencedFunctionNames specialization =
+shouldLowerSpecialization :: ReferencedFunctions -> Specialization -> Bool
+shouldLowerSpecialization referencedFunctions specialization =
   (not (requiresInlineCall form) && canEmitFunctionForm form)
-    || (Set.member (spFunctionName specialization) referencedFunctionNames && canEmitReferencedFunctionForm form)
+    || (Set.member (spBindingRef specialization) (rfGeneratedBindings referencedFunctions) && canEmitReferencedFunctionForm form)
   where
     form = spForm specialization
 
@@ -4994,190 +5657,193 @@ runtimeMallocName =
 runtimeDeclarations :: ProgramBase -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> [LLVMDeclaration]
 runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContainsChar needsStringContains needsStringEquals needsStringStartsWith needsStringEndsWith needsStringAppend needsStringReplaceChar needsStringReplace needsStringIndexOfChar needsStringIndexOf needsStringSplit needsStringJoin needsStringSplitChar needsStringCompare needsStringFromChar needsStringFromInt needsStringFromBool needsStringFromNat needsStringFromList needsStringToList needsStringDrop needsStringTake needsStringSlice needsStringCharAt needsStringCharAtOption needsCharIsDigit needsCharIsAsciiLower needsCharIsAsciiUpper needsCharIsAsciiAlpha needsCharIsAsciiAlphaNum needsCharIsAsciiIdentifierStart needsCharIsAsciiIdentifierContinue needsCharIsAsciiWhitespace needsCharIsAsciiPunctuation needsCharIsAsciiPrintable needsCharIsAsciiHexDigit needsCharIsAsciiLineBreak needsCharIsAsciiControl needsCharToAsciiLower needsCharToAsciiUpper needsStringToAsciiLower needsStringToAsciiUpper =
   [ LLVMDeclaration runtimeMallocName LLVMPtr [LLVMInt 64] False
-    | Map.notMember runtimeMallocName (pbBindings base)
+    | runtimeNameAvailable runtimeMallocName
   ]
     ++ [ LLVMDeclaration runtimeAndName (LLVMInt 1) [LLVMInt 1, LLVMInt 1] False
-         | Map.notMember runtimeAndName (pbBindings base)
+         | runtimeNameAvailable runtimeAndName
        ]
     ++ [ LLVMDeclaration runtimeStringLengthName (LLVMInt 64) [LLVMPtr] False
          | needsStringLength,
-           Map.notMember runtimeStringLengthName (pbBindings base)
+           runtimeNameAvailable runtimeStringLengthName
        ]
     ++ [ LLVMDeclaration runtimeStringIsEmptyName (LLVMInt 1) [LLVMPtr] False
          | needsStringIsEmpty,
-           Map.notMember runtimeStringIsEmptyName (pbBindings base)
+           runtimeNameAvailable runtimeStringIsEmptyName
        ]
     ++ [ LLVMDeclaration runtimeStringContainsCharName (LLVMInt 1) [LLVMPtr, LLVMInt 32] False
          | needsStringContainsChar,
-           Map.notMember runtimeStringContainsCharName (pbBindings base)
+           runtimeNameAvailable runtimeStringContainsCharName
        ]
     ++ [ LLVMDeclaration runtimeStringContainsName (LLVMInt 1) [LLVMPtr, LLVMPtr] False
          | needsStringContains,
-           Map.notMember runtimeStringContainsName (pbBindings base)
+           runtimeNameAvailable runtimeStringContainsName
        ]
     ++ [ LLVMDeclaration runtimeStringEqualsName (LLVMInt 1) [LLVMPtr, LLVMPtr] False
          | needsStringEquals,
-           Map.notMember runtimeStringEqualsName (pbBindings base)
+           runtimeNameAvailable runtimeStringEqualsName
        ]
     ++ [ LLVMDeclaration runtimeStringStartsWithName (LLVMInt 1) [LLVMPtr, LLVMPtr] False
          | needsStringStartsWith,
-           Map.notMember runtimeStringStartsWithName (pbBindings base)
+           runtimeNameAvailable runtimeStringStartsWithName
        ]
     ++ [ LLVMDeclaration runtimeStringEndsWithName (LLVMInt 1) [LLVMPtr, LLVMPtr] False
          | needsStringEndsWith,
-           Map.notMember runtimeStringEndsWithName (pbBindings base)
+           runtimeNameAvailable runtimeStringEndsWithName
        ]
     ++ [ LLVMDeclaration runtimeStringAppendName LLVMPtr [LLVMPtr, LLVMPtr] False
          | needsStringAppend,
-           Map.notMember runtimeStringAppendName (pbBindings base)
+           runtimeNameAvailable runtimeStringAppendName
        ]
     ++ [ LLVMDeclaration runtimeStringReplaceCharName LLVMPtr [LLVMPtr, LLVMInt 32, LLVMInt 32] False
          | needsStringReplaceChar,
-           Map.notMember runtimeStringReplaceCharName (pbBindings base)
+           runtimeNameAvailable runtimeStringReplaceCharName
        ]
     ++ [ LLVMDeclaration runtimeStringReplaceName LLVMPtr [LLVMPtr, LLVMPtr, LLVMPtr] False
          | needsStringReplace,
-           Map.notMember runtimeStringReplaceName (pbBindings base)
+           runtimeNameAvailable runtimeStringReplaceName
        ]
     ++ [ LLVMDeclaration runtimeStringIndexOfCharName LLVMPtr [LLVMPtr, LLVMInt 32] False
          | needsStringIndexOfChar,
-           Map.notMember runtimeStringIndexOfCharName (pbBindings base)
+           runtimeNameAvailable runtimeStringIndexOfCharName
        ]
     ++ [ LLVMDeclaration runtimeStringIndexOfName LLVMPtr [LLVMPtr, LLVMPtr] False
          | needsStringIndexOf,
-           Map.notMember runtimeStringIndexOfName (pbBindings base)
+           runtimeNameAvailable runtimeStringIndexOfName
        ]
     ++ [ LLVMDeclaration runtimeStringSplitName LLVMPtr [LLVMPtr, LLVMPtr] False
          | needsStringSplit,
-           Map.notMember runtimeStringSplitName (pbBindings base)
+           runtimeNameAvailable runtimeStringSplitName
        ]
     ++ [ LLVMDeclaration runtimeStringJoinName LLVMPtr [LLVMPtr, LLVMPtr] False
          | needsStringJoin,
-           Map.notMember runtimeStringJoinName (pbBindings base)
+           runtimeNameAvailable runtimeStringJoinName
        ]
     ++ [ LLVMDeclaration runtimeStringSplitCharName LLVMPtr [LLVMPtr, LLVMInt 32] False
          | needsStringSplitChar,
-           Map.notMember runtimeStringSplitCharName (pbBindings base)
+           runtimeNameAvailable runtimeStringSplitCharName
        ]
     ++ [ LLVMDeclaration runtimeStringCompareName (LLVMInt 64) [LLVMPtr, LLVMPtr] False
          | needsStringCompare,
-           Map.notMember runtimeStringCompareName (pbBindings base)
+           runtimeNameAvailable runtimeStringCompareName
        ]
     ++ [ LLVMDeclaration runtimeStringFromCharName LLVMPtr [LLVMInt 32] False
          | needsStringFromChar,
-           Map.notMember runtimeStringFromCharName (pbBindings base)
+           runtimeNameAvailable runtimeStringFromCharName
        ]
     ++ [ LLVMDeclaration runtimeStringFromIntName LLVMPtr [LLVMInt 64] False
          | needsStringFromInt,
-           Map.notMember runtimeStringFromIntName (pbBindings base)
+           runtimeNameAvailable runtimeStringFromIntName
        ]
     ++ [ LLVMDeclaration nativeSprintfName (LLVMInt 32) [LLVMPtr, LLVMPtr] True
          | needsStringFromInt || needsStringFromNat
        ]
     ++ [ LLVMDeclaration runtimeStringFromBoolName LLVMPtr [LLVMInt 1] False
          | needsStringFromBool,
-           Map.notMember runtimeStringFromBoolName (pbBindings base)
+           runtimeNameAvailable runtimeStringFromBoolName
        ]
     ++ [ LLVMDeclaration runtimeStringFromNatName LLVMPtr [LLVMPtr] False
          | needsStringFromNat,
-           Map.notMember runtimeStringFromNatName (pbBindings base)
+           runtimeNameAvailable runtimeStringFromNatName
        ]
     ++ [ LLVMDeclaration runtimeStringFromListName LLVMPtr [LLVMPtr] False
          | needsStringFromList,
-           Map.notMember runtimeStringFromListName (pbBindings base)
+           runtimeNameAvailable runtimeStringFromListName
        ]
     ++ [ LLVMDeclaration runtimeStringToListName LLVMPtr [LLVMPtr] False
          | needsStringToList,
-           Map.notMember runtimeStringToListName (pbBindings base)
+           runtimeNameAvailable runtimeStringToListName
        ]
     ++ [ LLVMDeclaration runtimeStringDropName LLVMPtr [LLVMPtr, LLVMInt 64] False
          | needsStringDrop,
-           Map.notMember runtimeStringDropName (pbBindings base)
+           runtimeNameAvailable runtimeStringDropName
        ]
     ++ [ LLVMDeclaration runtimeStringTakeName LLVMPtr [LLVMPtr, LLVMInt 64] False
          | needsStringTake,
-           Map.notMember runtimeStringTakeName (pbBindings base)
+           runtimeNameAvailable runtimeStringTakeName
        ]
     ++ [ LLVMDeclaration runtimeStringSliceName LLVMPtr [LLVMPtr, LLVMInt 64, LLVMInt 64] False
          | needsStringSlice,
-           Map.notMember runtimeStringSliceName (pbBindings base)
+           runtimeNameAvailable runtimeStringSliceName
        ]
     ++ [ LLVMDeclaration runtimeStringCharAtName (LLVMInt 32) [LLVMPtr, LLVMInt 64] False
          | needsStringCharAt,
-           Map.notMember runtimeStringCharAtName (pbBindings base)
+           runtimeNameAvailable runtimeStringCharAtName
        ]
     ++ [ LLVMDeclaration runtimeStringCharAtOptionName LLVMPtr [LLVMPtr, LLVMInt 64] False
          | needsStringCharAtOption,
-           Map.notMember runtimeStringCharAtOptionName (pbBindings base)
+           runtimeNameAvailable runtimeStringCharAtOptionName
        ]
     ++ [ LLVMDeclaration runtimeCharIsDigitName (LLVMInt 1) [LLVMInt 32] False
          | needsCharIsDigit,
-           Map.notMember runtimeCharIsDigitName (pbBindings base)
+           runtimeNameAvailable runtimeCharIsDigitName
        ]
     ++ [ LLVMDeclaration runtimeCharIsAsciiLowerName (LLVMInt 1) [LLVMInt 32] False
          | needsCharIsAsciiLower,
-           Map.notMember runtimeCharIsAsciiLowerName (pbBindings base)
+           runtimeNameAvailable runtimeCharIsAsciiLowerName
        ]
     ++ [ LLVMDeclaration runtimeCharIsAsciiUpperName (LLVMInt 1) [LLVMInt 32] False
          | needsCharIsAsciiUpper,
-           Map.notMember runtimeCharIsAsciiUpperName (pbBindings base)
+           runtimeNameAvailable runtimeCharIsAsciiUpperName
        ]
     ++ [ LLVMDeclaration runtimeCharIsAsciiAlphaName (LLVMInt 1) [LLVMInt 32] False
          | needsCharIsAsciiAlpha,
-           Map.notMember runtimeCharIsAsciiAlphaName (pbBindings base)
+           runtimeNameAvailable runtimeCharIsAsciiAlphaName
        ]
     ++ [ LLVMDeclaration runtimeCharIsAsciiAlphaNumName (LLVMInt 1) [LLVMInt 32] False
          | needsCharIsAsciiAlphaNum,
-           Map.notMember runtimeCharIsAsciiAlphaNumName (pbBindings base)
+           runtimeNameAvailable runtimeCharIsAsciiAlphaNumName
        ]
     ++ [ LLVMDeclaration runtimeCharIsAsciiIdentifierStartName (LLVMInt 1) [LLVMInt 32] False
          | needsCharIsAsciiIdentifierStart,
-           Map.notMember runtimeCharIsAsciiIdentifierStartName (pbBindings base)
+           runtimeNameAvailable runtimeCharIsAsciiIdentifierStartName
        ]
     ++ [ LLVMDeclaration runtimeCharIsAsciiIdentifierContinueName (LLVMInt 1) [LLVMInt 32] False
          | needsCharIsAsciiIdentifierContinue,
-           Map.notMember runtimeCharIsAsciiIdentifierContinueName (pbBindings base)
+           runtimeNameAvailable runtimeCharIsAsciiIdentifierContinueName
        ]
     ++ [ LLVMDeclaration runtimeCharIsAsciiWhitespaceName (LLVMInt 1) [LLVMInt 32] False
          | needsCharIsAsciiWhitespace,
-           Map.notMember runtimeCharIsAsciiWhitespaceName (pbBindings base)
+           runtimeNameAvailable runtimeCharIsAsciiWhitespaceName
        ]
     ++ [ LLVMDeclaration runtimeCharIsAsciiPunctuationName (LLVMInt 1) [LLVMInt 32] False
          | needsCharIsAsciiPunctuation,
-           Map.notMember runtimeCharIsAsciiPunctuationName (pbBindings base)
+           runtimeNameAvailable runtimeCharIsAsciiPunctuationName
        ]
     ++ [ LLVMDeclaration runtimeCharIsAsciiPrintableName (LLVMInt 1) [LLVMInt 32] False
          | needsCharIsAsciiPrintable,
-           Map.notMember runtimeCharIsAsciiPrintableName (pbBindings base)
+           runtimeNameAvailable runtimeCharIsAsciiPrintableName
        ]
     ++ [ LLVMDeclaration runtimeCharIsAsciiHexDigitName (LLVMInt 1) [LLVMInt 32] False
          | needsCharIsAsciiHexDigit,
-           Map.notMember runtimeCharIsAsciiHexDigitName (pbBindings base)
+           runtimeNameAvailable runtimeCharIsAsciiHexDigitName
        ]
     ++ [ LLVMDeclaration runtimeCharIsAsciiLineBreakName (LLVMInt 1) [LLVMInt 32] False
          | needsCharIsAsciiLineBreak,
-           Map.notMember runtimeCharIsAsciiLineBreakName (pbBindings base)
+           runtimeNameAvailable runtimeCharIsAsciiLineBreakName
        ]
     ++ [ LLVMDeclaration runtimeCharIsAsciiControlName (LLVMInt 1) [LLVMInt 32] False
          | needsCharIsAsciiControl,
-           Map.notMember runtimeCharIsAsciiControlName (pbBindings base)
+           runtimeNameAvailable runtimeCharIsAsciiControlName
        ]
     ++ [ LLVMDeclaration runtimeCharToAsciiLowerName (LLVMInt 32) [LLVMInt 32] False
          | needsCharToAsciiLower,
-           Map.notMember runtimeCharToAsciiLowerName (pbBindings base)
+           runtimeNameAvailable runtimeCharToAsciiLowerName
        ]
     ++ [ LLVMDeclaration runtimeCharToAsciiUpperName (LLVMInt 32) [LLVMInt 32] False
          | needsCharToAsciiUpper,
-           Map.notMember runtimeCharToAsciiUpperName (pbBindings base)
+           runtimeNameAvailable runtimeCharToAsciiUpperName
        ]
     ++ [ LLVMDeclaration runtimeStringToAsciiLowerName LLVMPtr [LLVMPtr] False
          | needsStringToAsciiLower,
-           Map.notMember runtimeStringToAsciiLowerName (pbBindings base)
+           runtimeNameAvailable runtimeStringToAsciiLowerName
        ]
     ++ [ LLVMDeclaration runtimeStringToAsciiUpperName LLVMPtr [LLVMPtr] False
          | needsStringToAsciiUpper,
-           Map.notMember runtimeStringToAsciiUpperName (pbBindings base)
+           runtimeNameAvailable runtimeStringToAsciiUpperName
        ]
+  where
+    bindingNames = programBindingRuntimeNames base
+    runtimeNameAvailable name = Set.notMember name bindingNames
 
 buildProgramBase :: BackendProgram -> Either BackendLLVMError ProgramBase
 buildProgramBase program = do
@@ -5192,65 +5858,86 @@ buildProgramBase program = do
         | backendModule <- modules0,
           dataDecl <- backendModuleData backendModule
         ]
-      bindingInfos = map bindingInfo bindings
+      (generatorAfterBindings, bindingInfos) =
+        mapAccumL
+          bindingInfo
+          (identityGeneratorAfter (generatedIdentitiesInBackendProgram program))
+          bindings
+      (generatorAfterData, dataRuntimes) =
+        mapAccumL dataRuntime generatorAfterBindings dataDecls
       constructors =
-        concatMap constructorRuntimes dataDecls
-      dataRuntimes =
-        map dataRuntime dataDecls
+        concatMap drConstructors dataRuntimes
   pure
         ProgramBase
-          { pbBindings = Map.fromList [(biName info, info) | info <- bindingInfos],
-            pbBindingsByIdentity =
+          { pbBindingsByIdentity =
               Map.fromList
                 [ (identity, info)
                 | info <- bindingInfos,
                   Just identity <- [biIdentity info]
                 ],
-            pbBindingOrder = map biName bindingInfos,
-            pbConstructors = Map.fromList [(backendConstructorName (crConstructor ctor), ctor) | ctor <- constructors],
+            pbBindingsByRef =
+              Map.fromList [(bindingInfoRef info, info) | info <- bindingInfos],
+            pbBindingOrder = map bindingInfoRef bindingInfos,
             pbConstructorsByIdentity =
               Map.fromList
                 [ (identity, ctor)
                 | ctor <- constructors,
                   Just identity <- [backendConstructorIdentity (crConstructor ctor)]
                 ],
-            pbData = Map.fromList [(key, dataRuntime0) | dataRuntime0 <- dataRuntimes, key <- dataRuntimeLookupKeys dataRuntime0],
             pbDataByIdentity =
               Map.fromList
                 [ (identity, dataRuntime0)
                 | dataRuntime0 <- dataRuntimes,
                   Just identity <- [backendDataIdentity (drData dataRuntime0)]
                 ],
-            pbDataNames = Set.fromList (concatMap dataRuntimeLookupKeys dataRuntimes)
+            pbIdentityGenerator = generatorAfterData
           }
 
-bindingInfo :: BackendBinding -> BindingInfo
-bindingInfo binding =
-  BindingInfo
-    { biIdentity = backendBindingIdentity binding,
-      biName = backendBindingName binding,
-      biForm =
-        markFunctionFormEvidenceParams
-          (backendBindingEvidenceParamIndices binding)
-          (functionFormFromExpected (backendBindingType binding) (backendBindingExpr binding)),
-      biExportedAsMain = backendBindingExportedAsMain binding
-    }
+bindingInfo :: IdentityGenerator -> BackendBinding -> (IdentityGenerator, BindingInfo)
+bindingInfo generator binding =
+  ( generator'',
+    BindingInfo
+      { biRef = bindingRef,
+        biIdentity = backendBindingIdentity binding,
+        biName = backendBindingName binding,
+        biForm =
+          markFunctionFormEvidenceParams
+            (backendBindingEvidenceParamIndices binding)
+            form,
+        biExportedAsMain = backendBindingExportedAsMain binding
+      }
+  )
+  where
+    (form, generator') =
+      functionFormFromExpectedWithGenerator generator (backendBindingType binding) (backendBindingExpr binding)
+    (bindingRef, generator'') =
+      case backendBindingIdentity binding of
+        Just identity -> (backendBindingRefFromIdentity identity, generator')
+        Nothing ->
+          let (identity, generatorNext) = freshIdentity generator'
+           in (backendBindingRefFromGenerated identity (backendBindingName binding), generatorNext)
 
-lookupBindingInfo :: ProgramBase -> Maybe SymbolIdentity -> String -> Maybe BindingInfo
-lookupBindingInfo base mbIdentity name =
-  case mbIdentity of
-    Just identity -> Map.lookup identity (pbBindingsByIdentity base)
-    Nothing -> Map.lookup name (pbBindings base)
+programBindingRuntimeNames :: ProgramBase -> Set String
+programBindingRuntimeNames base =
+  Set.fromList (map biName (Map.elems (pbBindingsByIdentity base)))
 
-lookupNonLocalBindingInfo :: ProgramBase -> Maybe IdDetails -> String -> Maybe BindingInfo
-lookupNonLocalBindingInfo base mbIdentity name =
+runtimeBindingNameAvailable :: ProgramBase -> String -> Bool
+runtimeBindingNameAvailable base name =
+  Set.notMember name (programBindingRuntimeNames base)
+
+bindingSelfReference :: BindingInfo -> Maybe IdDetails -> String -> Bool
+bindingSelfReference binding mbIdentity name =
+  symbolRefMatches (biIdentity binding) (biName binding) (backendVarSymbolIdentity mbIdentity) name
+
+lookupNonLocalBindingInfo :: ProgramBase -> Maybe IdDetails -> Maybe BindingInfo
+lookupNonLocalBindingInfo base mbIdentity =
   case (mbIdentity >>= lowerLocalKey, backendVarSymbolIdentity mbIdentity) of
     (Just _, _) ->
       Nothing
     (_, Just identity) ->
-      lookupBindingInfo base (Just identity) name
+      Map.lookup identity (pbBindingsByIdentity base)
     _ ->
-      lookupBindingInfo base Nothing name
+      Nothing
 
 idDetailsSymbolIdentity :: IdDetails -> Maybe SymbolIdentity
 idDetailsSymbolIdentity =
@@ -5265,41 +5952,74 @@ backendVarSymbolIdentity :: Maybe IdDetails -> Maybe SymbolIdentity
 backendVarSymbolIdentity =
   (>>= idDetailsSymbolIdentity)
 
+primitiveRuntimeName :: Maybe IdDetails -> String -> Maybe String
+primitiveRuntimeName mbIdentity _name =
+  case mbIdentity of
+    Just (PrimitiveId ref) -> primitiveSymbolRuntimeName (primitiveRefSymbol ref)
+    Just (TopLevelId symbol) -> primitiveSymbolRuntimeName symbol
+    Just _ -> Nothing
+    Nothing -> Nothing
+
+primitiveSymbolRuntimeName :: SymbolIdentity -> Maybe String
+primitiveSymbolRuntimeName =
+  PrimitiveInventory.primitiveValueNameByIdentity
+
+ioPrimitiveRuntimeName :: Maybe IdDetails -> String -> Maybe String
+ioPrimitiveRuntimeName mbIdentity name =
+  case primitiveRuntimeName mbIdentity name of
+    Just primitiveName | Set.member primitiveName ioPrimitiveNames -> Just primitiveName
+    _ -> Nothing
+
+nativePrimitiveRuntimeName :: Maybe IdDetails -> String -> Maybe String
+nativePrimitiveRuntimeName mbIdentity name =
+  case primitiveRuntimeName mbIdentity name of
+    Just primitiveName | Set.member primitiveName nativePrimitiveNames -> Just primitiveName
+    _ -> Nothing
+
 resolvedNonLocalReference :: Maybe IdDetails -> Bool
 resolvedNonLocalReference mbIdentity =
   case backendVarSymbolIdentity mbIdentity of
     Just _ -> True
     Nothing -> False
 
-constructorRuntimes :: BackendData -> [ConstructorRuntime]
-constructorRuntimes dataDecl =
-  [ ConstructorRuntime
-      { crConstructor = constructor,
-        crData = dataDecl,
-        crDataParameters = backendDataParameters dataDecl,
-        crTag = tag
-      }
-  | (tag, constructor) <- zip [0 ..] (backendDataConstructors dataDecl)
-  ]
+constructorRuntimes :: IdentityGenerator -> BackendData -> (IdentityGenerator, [ConstructorRuntime])
+constructorRuntimes generator dataDecl =
+  mapAccumL constructorRuntime generator (zip [0 ..] (backendDataConstructors dataDecl))
+  where
+    constructorRuntime generator0 (tag, constructor) =
+      let (key, generator1) = constructorValueKey generator0 constructor
+       in ( generator1,
+            ConstructorRuntime
+              { crConstructor = constructor,
+                crData = dataDecl,
+                crTag = tag,
+                crValueKey = key
+              }
+          )
+
+    constructorValueKey generator0 constructor =
+      case backendConstructorIdentity constructor of
+        Just identity -> (constructorValueKeyFromIdentity identity, generator0)
+        Nothing ->
+          let (identity, generator1) = freshIdentity generator0
+           in (constructorValueKeyFromGenerated identity (backendConstructorName constructor), generator1)
 
 lookupConstructorRuntime :: ProgramBase -> Maybe SymbolIdentity -> String -> Maybe ConstructorRuntime
-lookupConstructorRuntime base mbIdentity name =
+lookupConstructorRuntime base mbIdentity _name =
   case mbIdentity of
     Just identity -> Map.lookup identity (pbConstructorsByIdentity base)
-    Nothing -> Map.lookup name (pbConstructors base)
+    Nothing -> Nothing
 
-dataRuntime :: BackendData -> DataRuntime
-dataRuntime dataDecl =
-  DataRuntime
-    { drData = dataDecl,
-      drConstructors = constructorRuntimes dataDecl
-    }
-
-dataRuntimeLookupKeys :: DataRuntime -> [String]
-dataRuntimeLookupKeys dataRuntime0 =
-  backendDataName dataDecl : [symbolIdentityStableName identity | Just identity <- [backendDataIdentity dataDecl]]
+dataRuntime :: IdentityGenerator -> BackendData -> (IdentityGenerator, DataRuntime)
+dataRuntime generator dataDecl =
+  ( generator',
+    DataRuntime
+      { drData = dataDecl,
+        drConstructors = constructors
+      }
+  )
   where
-    dataDecl = drData dataRuntime0
+    (generator', constructors) = constructorRuntimes generator dataDecl
 
 functionFormFromExpr :: BackendExpr -> FunctionForm
 functionFormFromExpr expr =
@@ -5317,16 +6037,181 @@ functionFormFromExpr expr =
 
 functionFormFromExpected :: BackendType -> BackendExpr -> FunctionForm
 functionFormFromExpected expectedTy expr =
-  case functionFormFromExpr expr of
-    form
-      | Just completed <- completeAliasFunctionForm form ->
-          completed
-      | not (null (ffTypeBinders form)) || not (null (ffParams form)) ->
-          form
-      | otherwise ->
-          case aliasFunctionForm expectedTy expr of
-            Just aliasForm -> aliasForm
-            Nothing -> form
+  fst (functionFormFromExpectedWithGenerator generator expectedTy expr)
+  where
+    generator =
+      identityGeneratorAfter
+        (generatedIdentitiesInBackendTypes [expectedTy] ++ generatedIdentitiesInBackendExpr expr)
+
+functionFormFromExpectedWithGenerator :: IdentityGenerator -> BackendType -> BackendExpr -> (FunctionForm, IdentityGenerator)
+functionFormFromExpectedWithGenerator generator expectedTy expr =
+  case freshenFunctionFormMissingTypeBinderIdentities generator (functionFormFromExpr expr) of
+    (typedForm, generator0) ->
+      case freshenFunctionFormMissingParamIdentities generator0 typedForm of
+        (form, generator')
+          | Just (completed, generator'') <- completeAliasFunctionFormWithGenerator generator' form ->
+              (completed, generator'')
+          | not (null (ffTypeBinders form)) || not (null (ffParams form)) ->
+              (form, generator')
+          | otherwise ->
+              case aliasFunctionFormWithGenerator generator' expectedTy expr of
+                Just result -> result
+                Nothing ->
+                  case expectedNullaryReturnType expectedTy of
+                    Just returnTy -> (form {ffReturnType = returnTy}, generator')
+                    Nothing -> (form, generator')
+
+freshenFunctionFormMissingTypeBinderIdentities :: IdentityGenerator -> FunctionForm -> (FunctionForm, IdentityGenerator)
+freshenFunctionFormMissingTypeBinderIdentities generator form =
+  ( form
+      { ffTypeBinders = binders,
+        ffParams = [(name, substituteTy ty) | (name, ty) <- ffParams form],
+        ffBody = substituteExprTypesByKey substitution (ffBody form),
+        ffReturnType = substituteTy (ffReturnType form)
+      },
+    generator'
+  )
+  where
+    substituteTy =
+      substituteBackendTypesByKey substitution
+
+    (generator', binders, substitution) =
+      foldl assignBinder (generator, [], Map.empty) (ffTypeBinders form)
+
+    assignBinder (generator0, bindersAcc, substitutionAcc) binder =
+      let name = backendTypeBinderName binder
+          oldIdentity = backendTypeBinderIdentity binder
+          oldKey = backendTypeSubstitutionKeyFor oldIdentity name
+          bound' = fmap (substituteBackendTypesByKey substitutionAcc) (backendTypeBinderBound binder)
+          (newIdentity, generator1) =
+            case oldIdentity of
+              Just identity -> (Just identity, generator0)
+              Nothing ->
+                let (unique, generatorNext) = freshIdentity generator0
+                 in (Just (typeBinderIdentityFromUnique unique), generatorNext)
+          binder' =
+            BackendTypeBinderWithIdentity
+              newIdentity
+              name
+              bound'
+          replacement =
+            BTVarWithIdentity newIdentity name
+          substitutionAcc' =
+            case newIdentity of
+              Just identity
+                | oldKey == backendTypeSubstitutionKeyFromIdentity identity -> substitutionAcc
+              _ -> Map.insert oldKey replacement substitutionAcc
+       in (generator1, bindersAcc ++ [binder'], substitutionAcc')
+
+expectedNullaryReturnType :: BackendType -> Maybe BackendType
+expectedNullaryReturnType ty =
+  case collectForallsType ty of
+    ([], afterForalls) ->
+      case collectArrowsType afterForalls of
+        ([], returnTy) -> Just returnTy
+        _ -> Nothing
+    _ -> Nothing
+
+functionFormFromExpectedM :: BackendType -> BackendExpr -> LowerM FunctionForm
+functionFormFromExpectedM expectedTy expr = do
+  state0 <- get
+  let (form, generator') =
+        functionFormFromExpectedWithGenerator
+          (fsIdentityGenerator state0)
+          expectedTy
+          expr
+  put state0 {fsIdentityGenerator = generator'}
+  pure form
+
+freshenFunctionFormMissingParamIdentities :: IdentityGenerator -> FunctionForm -> (FunctionForm, IdentityGenerator)
+freshenFunctionFormMissingParamIdentities generator form =
+  ( form
+      { ffParamIdentities = paramIdentities,
+        ffBody = rewriteBackendVarsByName generatedIdentities (ffBody form)
+      },
+    generator'
+  )
+  where
+    (generator', paramIdentities) =
+      mapAccumL assignIdentity generator (zip (ffParamIdentities form ++ repeat Nothing) (ffParams form))
+    generatedIdentities =
+      generatedBackendTermEnv
+        [ (name, Just identity)
+        | ((originalIdentity, (name, _)), Just identity) <- zip (zip (ffParamIdentities form ++ repeat Nothing) (ffParams form)) paramIdentities,
+          Nothing <- [originalIdentity]
+        ]
+
+    assignIdentity generator0 (Just identity, _) =
+      (generator0, Just identity)
+    assignIdentity generator0 (Nothing, (name, _)) =
+      let (localRef, generator1) = freshLocalRef name generator0
+       in (generator1, Just (LocalId localRef))
+
+generatedBackendTermEnv :: [(String, Maybe IdDetails)] -> BackendTermEnv
+generatedBackendTermEnv =
+  foldl insertOne Map.empty
+  where
+    insertOne env (name, Just identity) =
+      insertUniqueBackendTermIdentity name identity env
+    insertOne env (_, Nothing) =
+      env
+
+rewriteBackendVarsByName :: BackendTermEnv -> BackendExpr -> BackendExpr
+rewriteBackendVarsByName identities0 =
+  go identities0
+  where
+    go identities =
+      \case
+        BackendVarWithIdentity ty mbIdentity name
+          | not (resolvedNonLocalReference mbIdentity),
+            Just (Just identity) <- Map.lookup name identities ->
+              BackendVarWithIdentity ty (Just identity) name
+        BackendVarWithIdentity ty mbIdentity name ->
+          BackendVarWithIdentity ty mbIdentity name
+        BackendLit ty lit ->
+          BackendLit ty lit
+        BackendLamWithIdentity resultTy identity name paramTy body ->
+          BackendLamWithIdentity resultTy identity name paramTy (go (Map.delete name identities) body)
+        BackendApp resultTy fun arg ->
+          BackendApp resultTy (go identities fun) (go identities arg)
+        BackendLetWithIdentity resultTy identity name bindingTy rhs body ->
+          BackendLetWithIdentity resultTy identity name bindingTy (go identities rhs) (go (Map.delete name identities) body)
+        BackendTyAbsWithIdentity resultTy identity name mbBound body ->
+          BackendTyAbsWithIdentity resultTy identity name mbBound (go identities body)
+        BackendTyApp resultTy fun ty ->
+          BackendTyApp resultTy (go identities fun) ty
+        BackendConstructWithIdentity resultTy identity name args ->
+          BackendConstructWithIdentity resultTy identity name (map (go identities) args)
+        BackendCase resultTy scrutinee alternatives ->
+          BackendCase resultTy (go identities scrutinee) (fmap (rewriteAlternative identities) alternatives)
+        BackendRoll resultTy payload ->
+          BackendRoll resultTy (go identities payload)
+        BackendUnroll resultTy payload ->
+          BackendUnroll resultTy (go identities payload)
+        BackendClosureWithParamIdentities resultTy entryIdentity entryName captures params body ->
+          BackendClosureWithParamIdentities resultTy entryIdentity entryName (map (rewriteCapture identities) captures) params (go (withoutClosureLocals captures params identities) body)
+        BackendClosureCall resultTy fun args ->
+          BackendClosureCall resultTy (go identities fun) (map (go identities) args)
+
+    rewriteAlternative identities alternative =
+      alternative {backendAltBody = go (withoutPatternBinders (backendAltPattern alternative) identities) (backendAltBody alternative)}
+
+    rewriteCapture identities capture =
+      capture {backendClosureCaptureExpr = go identities (backendClosureCaptureExpr capture)}
+
+    withoutClosureLocals captures params =
+      withoutNames (map backendClosureCaptureName captures ++ map backendClosureParamName params)
+
+    withoutPatternBinders =
+      withoutNames . map backendPatternBinderName . patternLocalBinders
+
+    withoutNames names identities =
+      foldr Map.delete identities names
+
+    patternLocalBinders =
+      \case
+        BackendDefaultPattern -> []
+        BackendConstructorPatternWithBinderIdentities _ _ binders -> binders
 
 markFunctionFormEvidenceParams :: Set Int -> FunctionForm -> FunctionForm
 markFunctionFormEvidenceParams evidenceIndices form =
@@ -5375,7 +6260,7 @@ functionTypeBinderNames =
 
 substituteBackendTypeForBinderKey :: Maybe TypeBinderIdentity -> String -> BackendType -> BackendType -> BackendType
 substituteBackendTypeForBinderKey identity name replacement =
-  substituteBackendTypesByKey (Map.singleton (backendTypeSubstitutionKeyFor identity name) replacement)
+  substituteBackendTypeForBinder identity name replacement
 
 backendTyAbsIdentity :: BackendExpr -> Maybe TypeBinderIdentity
 backendTyAbsIdentity =
@@ -5386,7 +6271,6 @@ backendTyAbsIdentity =
 deleteTypeBinderSubstitution :: Maybe TypeBinderIdentity -> String -> Map BackendTypeSubstitutionKey BackendType -> Map BackendTypeSubstitutionKey BackendType
 deleteTypeBinderSubstitution identity name =
   Map.delete (backendTypeSubstitutionKeyFor identity name)
-    . Map.delete (BackendTypeSubstitutionByName name)
 
 substituteFunctionFormTypes :: Map BackendTypeSubstitutionKey BackendType -> FunctionForm -> FunctionForm
 substituteFunctionFormTypes substitution0 form =
@@ -5403,44 +6287,60 @@ substituteFunctionFormTypes substitution0 form =
     substitution = Map.withoutKeys substitution0 binderKeys
     substituteTy = substituteBackendTypesByKey substitution
 
-completeAliasFunctionForm :: FunctionForm -> Maybe FunctionForm
-completeAliasFunctionForm form
+completeAliasFunctionFormWithGenerator :: IdentityGenerator -> FunctionForm -> Maybe (FunctionForm, IdentityGenerator)
+completeAliasFunctionFormWithGenerator generator form
   | not (isAliasExpr (ffBody form)) = Nothing
   | null params = Nothing
   | otherwise = do
-      body <- applyAliasArguments (ffBody form) (ffReturnType form) (zip argNames params)
+      let argNames = take (length params) ["__mlfp_alias_arg" ++ show index0 | index0 <- [(0 :: Int) ..]]
+          (generator', identities) = generatedLocalIdentities generator argNames
+          args = zip3 identities argNames params
+      body <- applyAliasArguments (ffBody form) (ffReturnType form) args
       pure
-        form
-          { ffParams = ffParams form ++ zip argNames params,
-            ffParamIdentities = ffParamIdentities form ++ replicate (length params) Nothing,
-            ffBody = body,
-            ffReturnType = returnTy
-          }
+        ( form
+            { ffParams = ffParams form ++ zip argNames params,
+              ffParamIdentities = ffParamIdentities form ++ identities,
+              ffBody = body,
+              ffReturnType = returnTy
+            },
+          generator'
+        )
   where
     (params, returnTy) = collectArrowsType (ffReturnType form)
-    argNames = ["__mlfp_alias_arg" ++ show index0 | index0 <- [(0 :: Int) ..]]
 
-aliasFunctionForm :: BackendType -> BackendExpr -> Maybe FunctionForm
-aliasFunctionForm expectedTy expr
+aliasFunctionFormWithGenerator :: IdentityGenerator -> BackendType -> BackendExpr -> Maybe (FunctionForm, IdentityGenerator)
+aliasFunctionFormWithGenerator generator expectedTy expr
   | not (isAliasExpr expr) = Nothing
   | null typeBinders && null params = Nothing
   | otherwise = do
       headExpr <- either (const Nothing) Just (applyTypeApplicationsToExpr "function alias" afterForalls expr typeArgs)
-      body <- applyAliasArguments headExpr afterForalls (zip argNames params)
+      let argNames = take (length params) ["__mlfp_alias_arg" ++ show index0 | index0 <- [(0 :: Int) ..]]
+          (generator', identities) = generatedLocalIdentities generator argNames
+          args = zip3 identities argNames params
+      body <- applyAliasArguments headExpr afterForalls args
       pure
-        FunctionForm
-          { ffTypeBinders = typeBinders,
-            ffParams = zip argNames params,
-            ffParamIdentities = replicate (length params) Nothing,
-            ffEvidenceParams = Set.empty,
-            ffBody = body,
-            ffReturnType = returnTy
-          }
+        ( FunctionForm
+            { ffTypeBinders = typeBinders,
+              ffParams = zip argNames params,
+              ffParamIdentities = identities,
+              ffEvidenceParams = Set.empty,
+              ffBody = body,
+              ffReturnType = returnTy
+            },
+          generator'
+        )
   where
     (typeBinders, afterForalls) = collectForallsType expectedTy
     (params, returnTy) = collectArrowsType afterForalls
     typeArgs = map functionTypeBinderVar typeBinders
-    argNames = ["__mlfp_alias_arg" ++ show index0 | index0 <- [(0 :: Int) ..]]
+
+generatedLocalIdentities :: IdentityGenerator -> [String] -> (IdentityGenerator, [Maybe IdDetails])
+generatedLocalIdentities =
+  mapAccumL
+    ( \generator name ->
+        let (localRef, generator') = freshLocalRef name generator
+         in (generator', Just (LocalId localRef))
+    )
 
 isAliasExpr :: BackendExpr -> Bool
 isAliasExpr =
@@ -5516,15 +6416,13 @@ backendTypeRequiresStaticSpecialization =
 emptyExprEnv :: ExprEnv
 emptyExprEnv =
   ExprEnv
-    { eeValues = Map.empty,
-      eeValuesByIdentity = Map.empty,
-      eeLocalFunctions = Map.empty,
+    { eeValuesByIdentity = Map.empty,
       eeLocalFunctionsByIdentity = Map.empty,
       eeActiveGlobalInlines = Set.empty
     }
 
-lookupExprEnvValue :: Maybe IdDetails -> String -> ExprEnv -> Maybe LowerValue
-lookupExprEnvValue mbIdentity name exprEnv =
+lookupExprEnvValue :: Maybe IdDetails -> ExprEnv -> Maybe LowerValue
+lookupExprEnvValue mbIdentity exprEnv =
   if resolvedNonLocalReference mbIdentity
     then Nothing
     else
@@ -5532,10 +6430,10 @@ lookupExprEnvValue mbIdentity name exprEnv =
         Just key ->
           Map.lookup key (eeValuesByIdentity exprEnv)
         Nothing ->
-          Map.lookup name (eeValues exprEnv)
+          Nothing
 
-lookupExprEnvLocalFunction :: Maybe IdDetails -> String -> ExprEnv -> Maybe LocalFunction
-lookupExprEnvLocalFunction mbIdentity name exprEnv =
+lookupExprEnvLocalFunction :: Maybe IdDetails -> ExprEnv -> Maybe LocalFunction
+lookupExprEnvLocalFunction mbIdentity exprEnv =
   if resolvedNonLocalReference mbIdentity
     then Nothing
     else
@@ -5543,36 +6441,30 @@ lookupExprEnvLocalFunction mbIdentity name exprEnv =
         Just key ->
           Map.lookup key (eeLocalFunctionsByIdentity exprEnv)
         Nothing ->
-          Map.lookup name (eeLocalFunctions exprEnv)
+          Nothing
 
-bindExprEnvValue :: Maybe IdDetails -> String -> LowerValue -> ExprEnv -> ExprEnv
-bindExprEnvValue mbIdentity name value exprEnv =
+bindExprEnvValue :: Maybe IdDetails -> LowerValue -> ExprEnv -> ExprEnv
+bindExprEnvValue mbIdentity value exprEnv =
   exprEnv
-    { eeValues = Map.insert name value (eeValues exprEnv),
-      eeValuesByIdentity = maybe id (`Map.insert` value) mbKey (eeValuesByIdentity exprEnv),
-      eeLocalFunctions = Map.delete name (eeLocalFunctions exprEnv),
+    { eeValuesByIdentity = maybe id (`Map.insert` value) mbKey (eeValuesByIdentity exprEnv),
       eeLocalFunctionsByIdentity = maybe id Map.delete mbKey (eeLocalFunctionsByIdentity exprEnv)
     }
   where
     mbKey = mbIdentity >>= lowerLocalKey
 
-bindExprEnvLocalFunction :: Maybe IdDetails -> String -> LocalFunction -> ExprEnv -> ExprEnv
-bindExprEnvLocalFunction mbIdentity name localFunction exprEnv =
+bindExprEnvLocalFunction :: Maybe IdDetails -> LocalFunction -> ExprEnv -> ExprEnv
+bindExprEnvLocalFunction mbIdentity localFunction exprEnv =
   exprEnv
-    { eeLocalFunctions = Map.insert name localFunction (eeLocalFunctions exprEnv),
-      eeLocalFunctionsByIdentity = maybe id (`Map.insert` localFunction) mbKey (eeLocalFunctionsByIdentity exprEnv),
-      eeValues = Map.delete name (eeValues exprEnv),
+    { eeLocalFunctionsByIdentity = maybe id (`Map.insert` localFunction) mbKey (eeLocalFunctionsByIdentity exprEnv),
       eeValuesByIdentity = maybe id Map.delete mbKey (eeValuesByIdentity exprEnv)
     }
   where
     mbKey = mbIdentity >>= lowerLocalKey
 
-deleteExprEnvBinding :: Maybe IdDetails -> String -> ExprEnv -> ExprEnv
-deleteExprEnvBinding mbIdentity name exprEnv =
+deleteExprEnvBinding :: Maybe IdDetails -> ExprEnv -> ExprEnv
+deleteExprEnvBinding mbIdentity exprEnv =
   exprEnv
-    { eeValues = Map.delete name (eeValues exprEnv),
-      eeValuesByIdentity = maybe id Map.delete mbKey (eeValuesByIdentity exprEnv),
-      eeLocalFunctions = Map.delete name (eeLocalFunctions exprEnv),
+    { eeValuesByIdentity = maybe id Map.delete mbKey (eeValuesByIdentity exprEnv),
       eeLocalFunctionsByIdentity = maybe id Map.delete mbKey (eeLocalFunctionsByIdentity exprEnv)
     }
   where
@@ -5586,14 +6478,14 @@ collectArrowsType =
        in (paramTy : params, returnTy)
     ty -> ([], ty)
 
-applyAliasArguments :: BackendExpr -> BackendType -> [(String, BackendType)] -> Maybe BackendExpr
+applyAliasArguments :: BackendExpr -> BackendType -> [(Maybe IdDetails, String, BackendType)] -> Maybe BackendExpr
 applyAliasArguments expr _ [] =
   Just expr
-applyAliasArguments expr ty ((name, paramTy) : rest) =
+applyAliasArguments expr ty ((identity, name, paramTy) : rest) =
   case ty of
     BTArrow expectedParamTy resultTy
       | alphaEqBackendType expectedParamTy paramTy ->
-          applyAliasArguments (BackendApp resultTy expr (BackendVar paramTy name)) resultTy rest
+          applyAliasArguments (BackendApp resultTy expr (BackendVarWithIdentity paramTy identity name)) resultTy rest
     _ ->
       Nothing
 
@@ -5608,7 +6500,7 @@ collectTypeAbs =
 collectLams :: BackendExpr -> ([(Maybe IdDetails, String, BackendType)], BackendExpr)
 collectLams expr =
   let (params, core) = collectRawLams expr
-      paramNames = Set.fromList [name | (_, name, _) <- params]
+      paramNames = Set.fromList [name | (identity, name, _) <- params, not (hasLocalIdentity identity)]
       reserved = freeBackendExprVars core `Set.difference` paramNames
       (params', renaming) = freshenLambdaParams reserved params
    in (params', renameBackendVars renaming core)
@@ -5631,9 +6523,18 @@ freshenLambdaParams =
         (identity, name, ty) : rest ->
           let name' = freshNameLike name used
               used' = Set.insert name' used
-              renaming' = Map.insert name name' renaming
+              renaming' =
+                if hasLocalIdentity identity
+                  then renaming
+                  else Map.insert name name' renaming
               (rest', finalRenaming) = go renaming' used' rest
            in ((identity, name', ty) : rest', finalRenaming)
+
+hasLocalIdentity :: Maybe IdDetails -> Bool
+hasLocalIdentity mbIdentity =
+  case mbIdentity >>= lowerLocalKey of
+    Just _ -> True
+    Nothing -> False
 
 renameBackendVars :: Map String String -> BackendExpr -> BackendExpr
 renameBackendVars renaming0 =
@@ -5644,18 +6545,20 @@ renameBackendVars renaming0 =
 
     go renaming =
       \case
+        BackendVarWithIdentity resultTy Nothing name ->
+          BackendVarWithIdentity resultTy Nothing (renameName renaming name)
         BackendVarWithIdentity resultTy mbIdentity name ->
-          BackendVarWithIdentity resultTy mbIdentity (renameName renaming name)
+          BackendVarWithIdentity resultTy mbIdentity name
         BackendLit resultTy lit ->
           BackendLit resultTy lit
         BackendLamWithIdentity resultTy mbIdentity name paramTy body ->
-          BackendLamWithIdentity resultTy mbIdentity name paramTy (go (Map.delete name renaming) body)
+          BackendLamWithIdentity resultTy mbIdentity name paramTy (go (withoutBinder (mbIdentity, name) renaming) body)
         BackendApp resultTy fun arg ->
           BackendApp resultTy (go renaming fun) (go renaming arg)
         BackendLetWithIdentity resultTy mbIdentity name bindingTy rhs body ->
-          BackendLetWithIdentity resultTy mbIdentity name bindingTy (go renaming rhs) (go (Map.delete name renaming) body)
-        BackendTyAbs resultTy name mbBound body ->
-          BackendTyAbs resultTy name mbBound (go renaming body)
+          BackendLetWithIdentity resultTy mbIdentity name bindingTy (go renaming rhs) (go (withoutBinder (mbIdentity, name) renaming) body)
+        BackendTyAbsWithIdentity resultTy identity name mbBound body ->
+          BackendTyAbsWithIdentity resultTy identity name mbBound (go renaming body)
         BackendTyApp resultTy fun ty ->
           BackendTyApp resultTy (go renaming fun) ty
         BackendConstructWithIdentity resultTy mbIdentity name args ->
@@ -5666,13 +6569,14 @@ renameBackendVars renaming0 =
           BackendRoll resultTy (go renaming payload)
         BackendUnroll resultTy payload ->
           BackendUnroll resultTy (go renaming payload)
-        BackendClosureWithParamIdentities resultTy entryName captures params body ->
+        BackendClosureWithParamIdentities resultTy entryIdentity entryName captures params body ->
           BackendClosureWithParamIdentities
             resultTy
+            entryIdentity
             entryName
             (map (renameCapture renaming) captures)
             params
-            (go (withoutNames (map backendClosureCaptureName captures ++ map backendClosureParamName params) renaming) body)
+            (go (withoutBinders (closureBinderRefs captures params) renaming) body)
         BackendClosureCall resultTy fun args ->
           BackendClosureCall resultTy (go renaming fun) (map (go renaming) args)
 
@@ -5682,15 +6586,23 @@ renameBackendVars renaming0 =
     renameCapture renaming capture =
       capture {backendClosureCaptureExpr = go renaming (backendClosureCaptureExpr capture)}
 
-    withoutNames names renaming =
-      foldr Map.delete renaming names
+    withoutBinder (mbIdentity, name) renaming
+      | hasLocalIdentity mbIdentity = renaming
+      | otherwise = Map.delete name renaming
+
+    withoutBinders refs renaming =
+      foldr withoutBinder renaming refs
+
+    closureBinderRefs captures params =
+      [(backendClosureCaptureIdentity capture, backendClosureCaptureName capture) | capture <- captures]
+        ++ [(backendClosureParamIdentity param, backendClosureParamName param) | param <- params]
 
     withoutPatternBinders pattern0 renaming =
       case pattern0 of
         BackendDefaultPattern ->
           renaming
-        BackendConstructorPattern _ binders ->
-          foldr Map.delete renaming binders
+        BackendConstructorPatternWithBinderIdentities _ _ binders ->
+          withoutBinders [(backendPatternBinderIdentity binder, backendPatternBinderName binder) | binder <- binders] renaming
 
 freeBackendExprVars :: BackendExpr -> Set String
 freeBackendExprVars =
@@ -5700,17 +6612,18 @@ freeBackendExprVars =
       \case
         BackendVarWithIdentity _ mbIdentity _
           | Just _ <- backendVarSymbolIdentity mbIdentity -> Set.empty
+          | hasLocalIdentity mbIdentity -> Set.empty
         BackendVarWithIdentity _ _ name
           | Set.member name bound -> Set.empty
           | otherwise -> Set.singleton name
         BackendLit {} ->
           Set.empty
-        BackendLam _ name _ body ->
-          go (Set.insert name bound) body
+        BackendLamWithIdentity _ mbIdentity name _ body ->
+          go (bindNameOnly mbIdentity name bound) body
         BackendApp _ fun arg ->
           go bound fun `Set.union` go bound arg
-        BackendLet _ name _ rhs body ->
-          go bound rhs `Set.union` go (Set.insert name bound) body
+        BackendLetWithIdentity _ mbIdentity name _ rhs body ->
+          go bound rhs `Set.union` go (bindNameOnly mbIdentity name bound) body
         BackendTyAbs _ _ _ body ->
           go bound body
         BackendTyApp _ fun _ ->
@@ -5723,14 +6636,22 @@ freeBackendExprVars =
           go bound payload
         BackendUnroll _ payload ->
           go bound payload
-        BackendClosure _ _ captures params body ->
+        BackendClosureWithParamIdentities _ _ _ captures params body ->
           Set.unions (map (go bound . backendClosureCaptureExpr) captures)
-            `Set.union` go (Set.unions [bound, Set.fromList (map backendClosureCaptureName captures), Set.fromList (map fst params)]) body
+            `Set.union` go (foldr (uncurry bindNameOnly) bound (closureRefs captures params)) body
         BackendClosureCall _ fun args ->
           go bound fun `Set.union` Set.unions (map (go bound) args)
 
     freeAlternative bound (BackendAlternative pattern0 body) =
-      go (Set.union (patternBinders pattern0) bound) body
+      go (foldr (uncurry bindNameOnly) bound (patternBinderRefs pattern0)) body
+
+    bindNameOnly mbIdentity name bound
+      | hasLocalIdentity mbIdentity = bound
+      | otherwise = Set.insert name bound
+
+    closureRefs captures params =
+      [(backendClosureCaptureIdentity capture, backendClosureCaptureName capture) | capture <- captures]
+        ++ [(backendClosureParamIdentity param, backendClosureParamName param) | param <- params]
 
 backendExprVarTypesFor :: Set TermBoundKey -> BackendExpr -> Map TermBoundKey BackendType
 backendExprVarTypesFor targets =
@@ -5738,26 +6659,22 @@ backendExprVarTypesFor targets =
   where
     go shadowed =
       \case
-        BackendVarWithIdentity ty mbIdentity name
+        BackendVarWithIdentity ty mbIdentity _name
           | Just _ <- backendVarSymbolIdentity mbIdentity -> Map.empty
-          | Just key <- mbIdentity >>= lowerLocalKey,
-            let boundKey = TermBoundIdentity key,
-            Set.member boundKey targets,
-            Set.notMember boundKey shadowed ->
-              Map.singleton boundKey ty
-          | let boundKey = TermBoundName name,
-            Set.member boundKey targets,
-            Set.notMember boundKey shadowed ->
-              Map.singleton boundKey ty
+          | Just key <- mbIdentity >>= lowerLocalKey ->
+              let boundKey = TermBoundIdentity key
+               in if Set.member boundKey targets && Set.notMember boundKey shadowed
+                    then Map.singleton boundKey ty
+                    else Map.empty
           | otherwise -> Map.empty
         BackendLit {} ->
           Map.empty
-        BackendLamWithIdentity _ mbIdentity name _ body ->
-          go (Set.union (termBoundKeys mbIdentity name) shadowed) body
+        BackendLamWithIdentity _ mbIdentity _name _ body ->
+          go (Set.union (termBoundKeys mbIdentity) shadowed) body
         BackendApp _ fun arg ->
           go shadowed fun `Map.union` go shadowed arg
-        BackendLetWithIdentity _ mbIdentity name _ rhs body ->
-          go shadowed rhs `Map.union` go (Set.union (termBoundKeys mbIdentity name) shadowed) body
+        BackendLetWithIdentity _ mbIdentity _name _ rhs body ->
+          go shadowed rhs `Map.union` go (Set.union (termBoundKeys mbIdentity) shadowed) body
         BackendTyAbs _ _ _ body ->
           go shadowed body
         BackendTyApp _ fun _ ->
@@ -5770,9 +6687,9 @@ backendExprVarTypesFor targets =
           go shadowed payload
         BackendUnroll _ payload ->
           go shadowed payload
-        BackendClosureWithParamIdentities _ _ captures params body ->
+        BackendClosureWithParamIdentities _ _ _ captures params body ->
           Map.unions (map (go shadowed . backendClosureCaptureExpr) captures)
-            `Map.union` go (Set.union (termBoundKeyRefs closureRefs) shadowed) body
+            `Map.union` go (Set.union (termBoundKeyRefs (map fst closureRefs)) shadowed) body
           where
             closureRefs =
               [(backendClosureCaptureIdentity capture, backendClosureCaptureName capture) | capture <- captures]
@@ -5783,65 +6700,101 @@ backendExprVarTypesFor targets =
     goAlternative shadowed (BackendAlternative pattern0 body) =
       go (Set.union shadowed (patternTermBoundKeys pattern0)) body
 
-reachableBindings :: ProgramBase -> String -> Either BackendLLVMError [BindingInfo]
-reachableBindings base mainName =
-  traverse (requireBinding base) orderedReachable
-  where
-    reachableNames = reachableBindingNames base mainName
-    orderedReachable =
-      filter (`Set.member` reachableNames) (pbBindingOrder base)
+lookupBindingRef :: ProgramBase -> BackendBindingRef -> Maybe BindingInfo
+lookupBindingRef base ref =
+  case Map.lookup ref (pbBindingsByRef base) of
+    Just binding -> Just binding
+    Nothing ->
+      backendBindingRefIdentity ref >>= (`Map.lookup` pbBindingsByIdentity base)
 
-reachableBindingNames :: ProgramBase -> String -> Set String
-reachableBindingNames base mainName =
-  close (Set.singleton mainName) Set.empty
+reachableBindings :: ProgramBase -> BindingInfo -> Either BackendLLVMError [BindingInfo]
+reachableBindings base mainBinding =
+  Right orderedReachable
+  where
+    reachableRefs = reachableBindingRefs base mainBinding
+    orderedReachable =
+      [ binding
+      | ref <- pbBindingOrder base,
+        Just binding <- [lookupBindingRef base ref],
+        bindingInfoRef binding `Set.member` reachableRefs
+      ]
+
+reachableBindingRefs :: ProgramBase -> BindingInfo -> Set BackendBindingRef
+reachableBindingRefs base mainBinding =
+  close (Set.singleton (bindingInfoRef mainBinding)) Set.empty
   where
     close pending seen =
       case Set.minView (pending `Set.difference` seen) of
         Nothing -> seen
-        Just (name, pendingRest) ->
-          case Map.lookup name (pbBindings base) of
+        Just (ref, pendingRest) ->
+          case lookupBindingRef base ref of
             Nothing -> close pendingRest seen
             Just binding ->
               close
                 (pendingRest `Set.union` freeGlobalBindingRefs base binding)
-                (Set.insert name seen)
+                (Set.insert ref seen)
 
-requireBinding :: ProgramBase -> String -> Either BackendLLVMError BindingInfo
-requireBinding base name =
-  case Map.lookup name (pbBindings base) of
-    Just binding -> Right binding
-    Nothing -> Left (BackendLLVMUnknownFunction name)
+requireProgramMainBinding :: ProgramBase -> BackendProgram -> Either BackendLLVMError BindingInfo
+requireProgramMainBinding base program =
+  case backendProgramMainIdentity program of
+    Just identity ->
+      case Map.lookup identity (pbBindingsByIdentity base) of
+        Just binding -> Right binding
+        Nothing -> Left (BackendLLVMUnknownFunction (backendProgramMain program))
+    Nothing ->
+      Left (BackendLLVMUnknownFunction (backendProgramMain program))
 
-collectRequiredSpecializations :: ProgramBase -> [BindingInfo] -> Either BackendLLVMError [Specialization]
-collectRequiredSpecializations base reachable =
-  go Map.empty initialRequests
+requireSpecRequestBinding :: ProgramBase -> SpecRequest -> Either BackendLLVMError BindingInfo
+requireSpecRequestBinding base request =
+  case srBindingIdentity request of
+    Just identity ->
+      case Map.lookup identity (pbBindingsByIdentity base) of
+        Just binding -> Right binding
+        Nothing -> Left (BackendLLVMUnknownFunction (srBindingName request))
+    Nothing ->
+      Left (BackendLLVMUnknownFunction (srBindingName request))
+
+specRequestForBinding :: BindingInfo -> [BackendType] -> SpecRequest
+specRequestForBinding binding typeArgs =
+  SpecRequest
+    { srBindingIdentity = biIdentity binding,
+      srBindingName = biName binding,
+      srTypeArgs = typeArgs
+    }
+
+collectRequiredSpecializations :: IdentityGenerator -> ProgramBase -> [BindingInfo] -> Either BackendLLVMError (IdentityGenerator, [Specialization])
+collectRequiredSpecializations generator0 base reachable =
+  go generator0 Map.empty initialRequests
   where
     initialRequests =
       concatMap
         (collectSpecializationRequestsInForm base Map.empty . biForm)
         (filter (null . ffTypeBinders . biForm) reachable)
 
-    go seen [] =
-      Right (map snd (sortOn fst (Map.toList seen)))
-    go seen (request : rest)
-      | Map.member key seen = go seen rest
+    go generator seen [] =
+      Right (generator, map snd (sortOn fst (Map.toList seen)))
+    go generator seen (request : rest)
+      | Map.member key seen = go generator seen rest
       | otherwise = do
-          binding <- requireBinding base (srBindingName request)
+          binding <- requireSpecRequestBinding base request
           form <- instantiateFunctionForm ("specialization " ++ srBindingName request) (biForm binding) (srTypeArgs request) []
-          let spec =
+          let functionName = specializedFunctionName request
+              (bindingIdentity, generator') = freshIdentity generator
+              spec =
                 Specialization
                   { spRequest = request,
-                    spFunctionName = specializedFunctionName request,
+                    spBindingRef = backendBindingRefFromGenerated bindingIdentity functionName,
+                    spFunctionName = functionName,
                     spForm = form
                   }
               nestedRequests = collectSpecializationRequestsInForm base Map.empty form
-          go (Map.insert key spec seen) (rest ++ nestedRequests)
+          go generator' (Map.insert key spec seen) (rest ++ nestedRequests)
       where
         key = specializationKey request
 
-collectEvidenceWrappers :: ProgramBase -> [BindingInfo] -> [Specialization] -> [Wrapper]
-collectEvidenceWrappers base reachable specializations =
-  zipWith assignName [(0 :: Int) ..] uniqueRequests
+collectEvidenceWrappers :: IdentityGenerator -> ProgramBase -> [BindingInfo] -> [Specialization] -> (IdentityGenerator, [Wrapper])
+collectEvidenceWrappers generator base reachable specializations =
+  mapAccumL assignName generator (zip [(0 :: Int) ..] uniqueRequests)
   where
     requests =
       concatMap (collectEvidenceWrappersInForm base Map.empty Set.empty . biForm) monomorphicReachable
@@ -5850,18 +6803,25 @@ collectEvidenceWrappers base reachable specializations =
       filter (null . ffTypeBinders . biForm) reachable
     uniqueRequests =
       map snd (Map.toAscList (Map.fromList [(wrapperKey' expected expr, (expected, expr)) | (expected, expr) <- requests]))
-    assignName index0 (expected, expr) =
-      Wrapper
-        { wrapperKind = EvidenceWrapperKind,
-          wrapperKey = wrapperKey' expected expr,
-          wrapperFunctionName = "__mlfp_evidence_wrapper$" ++ show index0,
-          wrapperExpectedType = expected,
-          wrapperExpr = expr
-        }
+    assignName generator0 (index0, (expected, expr)) =
+      let functionName = "__mlfp_evidence_wrapper$" ++ show index0
+          (bindingIdentity, generator1) = freshIdentity generator0
+          (generator', identities) = generatedLocalIdentities generator1 (wrapperParamNames evidenceWrapperArgPrefix expected)
+       in ( generator',
+            Wrapper
+              { wrapperKind = EvidenceWrapperKind,
+                wrapperBindingRef = backendBindingRefFromGenerated bindingIdentity functionName,
+                wrapperKey = wrapperKey' expected expr,
+                wrapperFunctionName = functionName,
+                wrapperExpectedType = expected,
+                wrapperExpr = expr,
+                wrapperParamIdentities = identities
+              }
+          )
 
-collectFunctionWrappers :: ProgramBase -> [BindingInfo] -> [Specialization] -> [Wrapper]
-collectFunctionWrappers base reachable specializations =
-  zipWith assignName [(0 :: Int) ..] uniqueRequests
+collectFunctionWrappers :: IdentityGenerator -> ProgramBase -> [BindingInfo] -> [Specialization] -> (IdentityGenerator, [Wrapper])
+collectFunctionWrappers generator base reachable specializations =
+  mapAccumL assignName generator (zip [(0 :: Int) ..] uniqueRequests)
   where
     requests =
       concatMap (collectFunctionWrappersInForm base Map.empty Set.empty . biForm) monomorphicReachable
@@ -5870,23 +6830,55 @@ collectFunctionWrappers base reachable specializations =
       filter (null . ffTypeBinders . biForm) reachable
     uniqueRequests =
       map snd (Map.toAscList (Map.fromList [(wrapperKey' expected expr, (expected, expr)) | (expected, expr) <- requests]))
-    assignName index0 (expected, expr) =
-      Wrapper
-        { wrapperKind = FunctionWrapperKind,
-          wrapperKey = wrapperKey' expected expr,
-          wrapperFunctionName = "__mlfp_function_wrapper$" ++ show index0,
-          wrapperExpectedType = expected,
-          wrapperExpr = expr
-        }
+    assignName generator0 (index0, (expected, expr)) =
+      let functionName = "__mlfp_function_wrapper$" ++ show index0
+          (bindingIdentity, generator1) = freshIdentity generator0
+          (generator', identities) = generatedLocalIdentities generator1 (wrapperParamNames functionWrapperArgPrefix expected)
+       in ( generator',
+            Wrapper
+              { wrapperKind = FunctionWrapperKind,
+                wrapperBindingRef = backendBindingRefFromGenerated bindingIdentity functionName,
+                wrapperKey = wrapperKey' expected expr,
+                wrapperFunctionName = functionName,
+                wrapperExpectedType = expected,
+                wrapperExpr = expr,
+                wrapperParamIdentities = identities
+              }
+          )
 
-collectReferencedFunctionNames :: ProgramBase -> [BindingInfo] -> [Specialization] -> [Wrapper] -> [Wrapper] -> Set String
-collectReferencedFunctionNames base reachable specializations evidenceWrappers functionWrappers =
-  Set.unions
-    ( map (collectReferencedFunctionNamesInForm base Map.empty Set.empty . biForm) reachable
-        ++ map (collectReferencedFunctionNamesInForm base Map.empty Set.empty . spForm) specializations
-        ++ map (collectReferencedFunctionNamesInForm base Map.empty Set.empty . evidenceWrapperForm) evidenceWrappers
-        ++ map (collectReferencedFunctionNamesInForm base Map.empty Set.empty . functionWrapperForm) functionWrappers
-    )
+data ReferencedFunction
+  = ReferencedBinding BackendBindingRef
+  | ReferencedGeneratedBinding BackendBindingRef
+  deriving (Eq, Ord, Show)
+
+data ReferencedFunctions = ReferencedFunctions
+  { rfBindings :: Set BackendBindingRef,
+    rfGeneratedBindings :: Set BackendBindingRef
+  }
+
+collectReferencedFunctions :: ProgramBase -> [BindingInfo] -> [Specialization] -> [Wrapper] -> [Wrapper] -> ReferencedFunctions
+collectReferencedFunctions base reachable specializations evidenceWrappers functionWrappers =
+  ReferencedFunctions
+    { rfBindings =
+        Set.fromList
+          [ binding
+          | ReferencedBinding binding <- refs
+          ],
+      rfGeneratedBindings =
+        Set.fromList
+          [ binding
+          | ReferencedGeneratedBinding binding <- refs
+          ]
+    }
+  where
+    specializationsByKey =
+      Map.fromList [(specializationKey (spRequest spec), spec) | spec <- specializations]
+    refs =
+      concatMap Set.toList $
+        map (collectReferencedFunctionsInForm base specializationsByKey Map.empty Set.empty . biForm) reachable
+          ++ map (collectReferencedFunctionsInForm base specializationsByKey Map.empty Set.empty . spForm) specializations
+          ++ map (collectReferencedFunctionsInForm base specializationsByKey Map.empty Set.empty . evidenceWrapperForm) evidenceWrappers
+          ++ map (collectReferencedFunctionsInForm base specializationsByKey Map.empty Set.empty . functionWrapperForm) functionWrappers
 
 data LocalFunctionFormEntry = LocalFunctionFormEntry
   { lffeName :: String,
@@ -5894,8 +6886,7 @@ data LocalFunctionFormEntry = LocalFunctionFormEntry
   }
 
 data LocalFunctionForms = LocalFunctionForms
-  { lffByName :: Map String LocalFunctionFormEntry,
-    lffByIdentity :: Map LowerLocalKey LocalFunctionFormEntry
+  { lffByIdentity :: Map LowerLocalKey LocalFunctionFormEntry
   }
 
 data LocalStoredFunction = LocalStoredFunction
@@ -5904,31 +6895,24 @@ data LocalStoredFunction = LocalStoredFunction
     lsfSourceExpr :: BackendExpr
   }
 
-data LocalStoredFunctionKey
-  = LocalStoredFunctionName String
-  | LocalStoredFunctionIdentity LowerLocalKey
-  deriving (Eq, Ord)
-
 data TermBoundKey
-  = TermBoundName String
-  | TermBoundIdentity LowerLocalKey
+  = TermBoundIdentity LowerLocalKey
   deriving (Eq, Ord)
 
 data LocalStoredFunctions = LocalStoredFunctions
-  { lsfsByName :: Map String LocalStoredFunction,
-    lsfsByIdentity :: Map LowerLocalKey LocalStoredFunction
+  { lsfsByIdentity :: Map LowerLocalKey LocalStoredFunction
   }
 
 emptyLocalFunctionForms :: LocalFunctionForms
 emptyLocalFunctionForms =
-  LocalFunctionForms Map.empty Map.empty
+  LocalFunctionForms Map.empty
 
 emptyLocalStoredFunctions :: LocalStoredFunctions
 emptyLocalStoredFunctions =
-  LocalStoredFunctions Map.empty Map.empty
+  LocalStoredFunctions Map.empty
 
-lookupLocalStoredFunction :: Maybe IdDetails -> String -> LocalStoredFunctions -> Maybe LocalStoredFunction
-lookupLocalStoredFunction mbIdentity name functions =
+lookupLocalStoredFunction :: Maybe IdDetails -> LocalStoredFunctions -> Maybe LocalStoredFunction
+lookupLocalStoredFunction mbIdentity functions =
   if resolvedNonLocalReference mbIdentity
     then Nothing
     else
@@ -5936,13 +6920,12 @@ lookupLocalStoredFunction mbIdentity name functions =
         Just key ->
           Map.lookup key (lsfsByIdentity functions)
         Nothing ->
-          Map.lookup name (lsfsByName functions)
+          Nothing
 
 bindLocalStoredFunction :: Maybe IdDetails -> String -> FunctionForm -> BackendExpr -> LocalStoredFunctions -> LocalStoredFunctions
 bindLocalStoredFunction mbIdentity name form sourceExpr functions =
   functions
-    { lsfsByName = Map.insert name localFunction (lsfsByName functions),
-      lsfsByIdentity = maybe id (`Map.insert` localFunction) mbKey (lsfsByIdentity functions)
+    { lsfsByIdentity = maybe id (`Map.insert` localFunction) mbKey (lsfsByIdentity functions)
     }
   where
     mbKey = mbIdentity >>= lowerLocalKey
@@ -5953,49 +6936,45 @@ bindLocalStoredFunction mbIdentity name form sourceExpr functions =
           lsfSourceExpr = sourceExpr
         }
 
-deleteLocalStoredFunction :: Maybe IdDetails -> String -> LocalStoredFunctions -> LocalStoredFunctions
-deleteLocalStoredFunction mbIdentity name functions =
+deleteLocalStoredFunction :: Maybe IdDetails -> LocalStoredFunctions -> LocalStoredFunctions
+deleteLocalStoredFunction mbIdentity functions =
   functions
-    { lsfsByName = Map.delete name (lsfsByName functions),
-      lsfsByIdentity = maybe id Map.delete mbKey (lsfsByIdentity functions)
+    { lsfsByIdentity = maybe id Map.delete mbKey (lsfsByIdentity functions)
     }
   where
     mbKey = mbIdentity >>= lowerLocalKey
 
-shadowLocalStoredFunctions :: [(Maybe IdDetails, String)] -> LocalStoredFunctions -> LocalStoredFunctions
+shadowLocalStoredFunctions :: [Maybe IdDetails] -> LocalStoredFunctions -> LocalStoredFunctions
 shadowLocalStoredFunctions binders functions =
-  foldl' (\acc (mbIdentity, name) -> deleteLocalStoredFunction mbIdentity name acc) functions binders
+  foldl' (flip deleteLocalStoredFunction) functions binders
 
-localStoredFunctionKey :: Maybe IdDetails -> String -> LocalStoredFunctionKey
-localStoredFunctionKey mbIdentity name =
-  maybe (LocalStoredFunctionName name) LocalStoredFunctionIdentity (mbIdentity >>= lowerLocalKey)
+localStoredFunctionKey :: Maybe IdDetails -> Maybe LowerLocalKey
+localStoredFunctionKey =
+  (>>= lowerLocalKey)
 
-termBoundKeys :: Maybe IdDetails -> String -> Set TermBoundKey
-termBoundKeys mbIdentity name =
-  Set.insert (TermBoundName name) identityKeys
-  where
-    identityKeys =
-      case mbIdentity >>= lowerLocalKey of
-        Just key -> Set.singleton (TermBoundIdentity key)
-        Nothing -> Set.empty
+termBoundKeys :: Maybe IdDetails -> Set TermBoundKey
+termBoundKeys mbIdentity =
+  case mbIdentity >>= lowerLocalKey of
+    Just key -> Set.singleton (TermBoundIdentity key)
+    Nothing -> Set.empty
 
-termReferenceKeys :: Maybe IdDetails -> String -> Set TermBoundKey
-termReferenceKeys mbIdentity name
+termReferenceKeys :: Maybe IdDetails -> Set TermBoundKey
+termReferenceKeys mbIdentity
   | Just _ <- backendVarSymbolIdentity mbIdentity = Set.empty
-  | otherwise = termBoundKeys mbIdentity name
+  | otherwise = termBoundKeys mbIdentity
 
-termBoundKeyRefs :: [(Maybe IdDetails, String)] -> Set TermBoundKey
+termBoundKeyRefs :: [Maybe IdDetails] -> Set TermBoundKey
 termBoundKeyRefs =
-  Set.unions . map (uncurry termBoundKeys)
+  Set.unions . map termBoundKeys
 
 patternTermBoundKeys :: BackendPattern -> Set TermBoundKey
 patternTermBoundKeys =
-  termBoundKeyRefs . patternBinderRefs
+  termBoundKeyRefs . map fst . patternBinderRefs
 
 type LocalConstructedValues = Map TermBoundKey ConstructedValue
 
-lookupLocalConstructedValue :: Maybe IdDetails -> String -> LocalConstructedValues -> Maybe ConstructedValue
-lookupLocalConstructedValue mbIdentity name constructedValues =
+lookupLocalConstructedValue :: Maybe IdDetails -> LocalConstructedValues -> Maybe ConstructedValue
+lookupLocalConstructedValue mbIdentity constructedValues =
   if resolvedNonLocalReference mbIdentity
     then Nothing
     else
@@ -6003,18 +6982,26 @@ lookupLocalConstructedValue mbIdentity name constructedValues =
         Just key ->
           Map.lookup (TermBoundIdentity key) constructedValues
         Nothing ->
-          Map.lookup (TermBoundName name) constructedValues
+          Nothing
 
-bindLocalConstructedValue :: Maybe IdDetails -> String -> ConstructedValue -> LocalConstructedValues -> LocalConstructedValues
-bindLocalConstructedValue mbIdentity name constructed constructedValues =
-  foldr (`Map.insert` constructed) constructedValues (termBoundKeys mbIdentity name)
+bindLocalConstructedValue :: Maybe IdDetails -> ConstructedValue -> LocalConstructedValues -> LocalConstructedValues
+bindLocalConstructedValue mbIdentity constructed constructedValues =
+  case termStoreKey mbIdentity of
+    Just key ->
+      Map.insert key constructed (deleteLocalConstructedValue mbIdentity constructedValues)
+    Nothing ->
+      deleteLocalConstructedValue mbIdentity constructedValues
 
-deleteLocalConstructedValue :: Maybe IdDetails -> String -> LocalConstructedValues -> LocalConstructedValues
-deleteLocalConstructedValue mbIdentity name constructedValues =
-  constructedValues `Map.withoutKeys` (termBoundKeys mbIdentity name)
+deleteLocalConstructedValue :: Maybe IdDetails -> LocalConstructedValues -> LocalConstructedValues
+deleteLocalConstructedValue mbIdentity constructedValues =
+  constructedValues `Map.withoutKeys` (termBoundKeys mbIdentity)
 
-lookupLocalFunctionFormEntry :: Maybe IdDetails -> String -> LocalFunctionForms -> Maybe LocalFunctionFormEntry
-lookupLocalFunctionFormEntry mbIdentity name forms =
+termStoreKey :: Maybe IdDetails -> Maybe TermBoundKey
+termStoreKey mbIdentity =
+  TermBoundIdentity <$> (mbIdentity >>= lowerLocalKey)
+
+lookupLocalFunctionFormEntry :: Maybe IdDetails -> LocalFunctionForms -> Maybe LocalFunctionFormEntry
+lookupLocalFunctionFormEntry mbIdentity forms =
   if resolvedNonLocalReference mbIdentity
     then Nothing
     else
@@ -6022,46 +7009,43 @@ lookupLocalFunctionFormEntry mbIdentity name forms =
         Just key ->
           Map.lookup key (lffByIdentity forms)
         Nothing ->
-          Map.lookup name (lffByName forms)
+          Nothing
 
-lookupLocalFunctionForm :: Maybe IdDetails -> String -> LocalFunctionForms -> Maybe FunctionForm
-lookupLocalFunctionForm mbIdentity name forms =
-  lffeForm <$> lookupLocalFunctionFormEntry mbIdentity name forms
+lookupLocalFunctionForm :: Maybe IdDetails -> LocalFunctionForms -> Maybe FunctionForm
+lookupLocalFunctionForm mbIdentity forms =
+  lffeForm <$> lookupLocalFunctionFormEntry mbIdentity forms
 
 bindLocalFunctionForm :: Maybe IdDetails -> String -> FunctionForm -> LocalFunctionForms -> LocalFunctionForms
 bindLocalFunctionForm mbIdentity name form forms =
   forms
-    { lffByName = Map.insert name entry (lffByName forms),
-      lffByIdentity = maybe id (`Map.insert` entry) mbKey (lffByIdentity forms)
+    { lffByIdentity = maybe id (`Map.insert` entry) mbKey (lffByIdentity forms)
     }
   where
     mbKey = mbIdentity >>= lowerLocalKey
     entry = LocalFunctionFormEntry name form
 
-deleteLocalFunctionForm :: Maybe IdDetails -> String -> LocalFunctionForms -> LocalFunctionForms
-deleteLocalFunctionForm mbIdentity name forms =
+deleteLocalFunctionForm :: Maybe IdDetails -> LocalFunctionForms -> LocalFunctionForms
+deleteLocalFunctionForm mbIdentity forms =
   forms
-    { lffByName = Map.delete name (lffByName forms),
-      lffByIdentity = maybe id Map.delete mbKey (lffByIdentity forms)
+    { lffByIdentity = maybe id Map.delete mbKey (lffByIdentity forms)
     }
   where
     mbKey = mbIdentity >>= lowerLocalKey
 
-shadowLocalFunctionForms :: [(Maybe IdDetails, String)] -> LocalFunctionForms -> LocalFunctionForms
+shadowLocalFunctionForms :: [Maybe IdDetails] -> LocalFunctionForms -> LocalFunctionForms
 shadowLocalFunctionForms binders forms =
-  foldl' (\acc (mbIdentity, name) -> deleteLocalFunctionForm mbIdentity name acc) forms binders
+  foldl' (flip deleteLocalFunctionForm) forms binders
 
 data LocalValueKinds = LocalValueKinds
-  { lvkByName :: Map String LowerValueKind,
-    lvkByIdentity :: Map LowerLocalKey LowerValueKind
+  { lvkByIdentity :: Map LowerLocalKey LowerValueKind
   }
 
 emptyLocalValueKinds :: LocalValueKinds
 emptyLocalValueKinds =
-  LocalValueKinds Map.empty Map.empty
+  LocalValueKinds Map.empty
 
-lookupLocalValueKind :: Maybe IdDetails -> String -> LocalValueKinds -> Maybe LowerValueKind
-lookupLocalValueKind mbIdentity name kinds =
+lookupLocalValueKind :: Maybe IdDetails -> LocalValueKinds -> Maybe LowerValueKind
+lookupLocalValueKind mbIdentity kinds =
   if resolvedNonLocalReference mbIdentity
     then Nothing
     else
@@ -6069,60 +7053,57 @@ lookupLocalValueKind mbIdentity name kinds =
         Just key ->
           Map.lookup key (lvkByIdentity kinds)
         Nothing ->
-          Map.lookup name (lvkByName kinds)
+          Nothing
 
-bindLocalValueKind :: Maybe IdDetails -> String -> LowerValueKind -> LocalValueKinds -> LocalValueKinds
-bindLocalValueKind mbIdentity name kind kinds =
+bindLocalValueKind :: Maybe IdDetails -> LowerValueKind -> LocalValueKinds -> LocalValueKinds
+bindLocalValueKind mbIdentity kind kinds =
   kinds
-    { lvkByName = Map.insert name kind (lvkByName kinds),
-      lvkByIdentity = maybe id (`Map.insert` kind) mbKey (lvkByIdentity kinds)
+    { lvkByIdentity = maybe id (`Map.insert` kind) mbKey (lvkByIdentity kinds)
     }
   where
     mbKey = mbIdentity >>= lowerLocalKey
 
-deleteLocalValueKind :: Maybe IdDetails -> String -> LocalValueKinds -> LocalValueKinds
-deleteLocalValueKind mbIdentity name kinds =
+deleteLocalValueKind :: Maybe IdDetails -> LocalValueKinds -> LocalValueKinds
+deleteLocalValueKind mbIdentity kinds =
   kinds
-    { lvkByName = Map.delete name (lvkByName kinds),
-      lvkByIdentity = maybe id Map.delete mbKey (lvkByIdentity kinds)
+    { lvkByIdentity = maybe id Map.delete mbKey (lvkByIdentity kinds)
     }
   where
     mbKey = mbIdentity >>= lowerLocalKey
 
-shadowLocalValueKinds :: [(Maybe IdDetails, String)] -> LocalValueKinds -> LocalValueKinds
+shadowLocalValueKinds :: [Maybe IdDetails] -> LocalValueKinds -> LocalValueKinds
 shadowLocalValueKinds binders kinds =
-  foldl' (\acc (mbIdentity, name) -> deleteLocalValueKind mbIdentity name acc) kinds binders
+  foldl' (flip deleteLocalValueKind) kinds binders
 
 unionLocalValueKinds :: LocalValueKinds -> LocalValueKinds -> LocalValueKinds
 unionLocalValueKinds left right =
   LocalValueKinds
-    { lvkByName = Map.union (lvkByName left) (lvkByName right),
-      lvkByIdentity = Map.union (lvkByIdentity left) (lvkByIdentity right)
+    { lvkByIdentity = Map.union (lvkByIdentity left) (lvkByIdentity right)
     }
 
 exprEnvLocalValueKinds :: ExprEnv -> LocalValueKinds
 exprEnvLocalValueKinds exprEnv =
   LocalValueKinds
-    { lvkByName = Map.map lvValueKind (eeValues exprEnv),
-      lvkByIdentity = Map.map lvValueKind (eeValuesByIdentity exprEnv)
+    { lvkByIdentity = Map.map lvValueKind (eeValuesByIdentity exprEnv)
     }
 
-collectReferencedFunctionNamesInForm :: ProgramBase -> Map BackendTypeSubstitutionKey BackendType -> Set TermBoundKey -> FunctionForm -> Set String
-collectReferencedFunctionNamesInForm base substitution bound form =
-  collectReferencedFunctionNamesInFormWithLocals base substitution emptyLocalFunctionForms bound form
+collectReferencedFunctionsInForm :: ProgramBase -> Map String Specialization -> Map BackendTypeSubstitutionKey BackendType -> Set TermBoundKey -> FunctionForm -> Set ReferencedFunction
+collectReferencedFunctionsInForm base specializationsByKey substitution bound form =
+  collectReferencedFunctionsInFormWithLocals base specializationsByKey substitution emptyLocalFunctionForms bound form
 
-collectReferencedFunctionNamesInFormWithLocals :: ProgramBase -> Map BackendTypeSubstitutionKey BackendType -> LocalFunctionForms -> Set TermBoundKey -> FunctionForm -> Set String
-collectReferencedFunctionNamesInFormWithLocals base substitution localForms bound form =
+collectReferencedFunctionsInFormWithLocals :: ProgramBase -> Map String Specialization -> Map BackendTypeSubstitutionKey BackendType -> LocalFunctionForms -> Set TermBoundKey -> FunctionForm -> Set ReferencedFunction
+collectReferencedFunctionsInFormWithLocals base specializationsByKey substitution localForms bound form =
   let paramRefs = [(mbIdentity, name) | (mbIdentity, name, _) <- functionFormParamTriples form]
-   in collectReferencedFunctionNamesInExpr
+   in collectReferencedFunctionsInExpr
         base
+        specializationsByKey
         substitution
-        (shadowLocalFunctionForms paramRefs localForms)
-        (Set.union (termBoundKeyRefs paramRefs) bound)
+        (shadowLocalFunctionForms (map fst paramRefs) localForms)
+        (Set.union (termBoundKeyRefs (map fst paramRefs)) bound)
         (ffBody form)
 
-collectReferencedFunctionNamesInExpr :: ProgramBase -> Map BackendTypeSubstitutionKey BackendType -> LocalFunctionForms -> Set TermBoundKey -> BackendExpr -> Set String
-collectReferencedFunctionNamesInExpr base substitution localForms bound expr =
+collectReferencedFunctionsInExpr :: ProgramBase -> Map String Specialization -> Map BackendTypeSubstitutionKey BackendType -> LocalFunctionForms -> Set TermBoundKey -> BackendExpr -> Set ReferencedFunction
+collectReferencedFunctionsInExpr base specializationsByKey substitution localForms bound expr =
   referencedHere `Set.union` childReferences
   where
     referencedHere =
@@ -6134,10 +7115,10 @@ collectReferencedFunctionNamesInExpr base substitution localForms bound expr =
                 Right (_, form) ->
                   localCallReferences callee typeArgs' args'
                     `Set.union` Set.fromList
-                      [ functionName
+                      [ functionRef
                       | ((_, paramTy), arg) <- zip (ffParams form) args',
                         isFunctionLikeBackendType paramTy,
-                        Just functionName <- [referencedFunctionArgumentName arg]
+                        Just functionRef <- [referencedFunctionArgument arg]
                       ]
                 Left _ -> Set.empty
         Nothing ->
@@ -6145,110 +7126,117 @@ collectReferencedFunctionNamesInExpr base substitution localForms bound expr =
 
     callableForm callee =
       case callee of
-        BackendVarWithIdentity calleeTy mbIdentity name ->
-          case lookupLocalFunctionForm mbIdentity name localForms of
+        BackendVarWithIdentity calleeTy mbIdentity _name ->
+          case lookupLocalFunctionForm mbIdentity localForms of
             Just form -> form
             Nothing -> functionFormFromType calleeTy
         _ -> functionFormFromExpr callee
 
-    referencedFunctionArgumentName arg =
+    referencedFunctionArgument arg =
       case collectTyApps arg of
         (BackendVarWithIdentity _ mbIdentity name, typeArgs) ->
-          referencedFunctionNameByName Set.empty mbIdentity name typeArgs
+          referencedFunctionByName Set.empty mbIdentity name typeArgs
         _ -> Nothing
 
-    referencedFunctionNameByName seen mbIdentity name typeArgs
-      | Set.member key seen = Nothing
-      | Just form <- lookupLocalFunctionForm mbIdentity name localForms =
+    referencedFunctionByName seen mbIdentity name typeArgs
+      | Just key <- mbKey,
+        Set.member key seen =
+          Nothing
+      | Just key <- mbKey,
+        Just form <- lookupLocalFunctionForm mbIdentity localForms =
           case instantiateFunctionFormWithTypeArgs ("referenced local function argument " ++ name) form typeArgs [] of
             Right (_, instantiated) ->
               case etaAliasTarget instantiated of
                 Just (targetIdentity, targetName, targetTypeArgs) ->
-                  referencedFunctionNameByName (Set.insert key seen) targetIdentity targetName targetTypeArgs
+                  referencedFunctionByName (Set.insert key seen) targetIdentity targetName targetTypeArgs
                 Nothing -> Nothing
             Left _ -> Nothing
-      | Just binding <- lookupSpecializationBinding base bound mbIdentity name =
+      | Just binding <- lookupSpecializationBinding base mbIdentity =
           case instantiateFunctionFormWithTypeArgs ("referenced function argument " ++ name) (biForm binding) typeArgs [] of
             Right (resolvedTypeArgs, _)
-              | null (ffTypeBinders (biForm binding)) -> Just (biName binding)
-              | otherwise -> Just (specializedFunctionName (SpecRequest (biName binding) resolvedTypeArgs))
+              | null (ffTypeBinders (biForm binding)) -> Just (ReferencedBinding (bindingInfoRef binding))
+              | otherwise ->
+                  ReferencedGeneratedBinding . spBindingRef
+                    <$> Map.lookup (specializationKey (specRequestForBinding binding resolvedTypeArgs)) specializationsByKey
             Left _ -> Nothing
       | otherwise = Nothing
       where
-        key = localStoredFunctionKey mbIdentity name
+        mbKey = localStoredFunctionKey mbIdentity
 
     localCallReferences callee typeArgs args =
       case callee of
         BackendVarWithIdentity _ mbIdentity name
-          | Just form <- lookupLocalFunctionForm mbIdentity name localForms ->
+          | Just form <- lookupLocalFunctionForm mbIdentity localForms ->
               collectInstantiatedLocalReferences name form typeArgs args
         _ -> Set.empty
 
     localTypeApplicationReferences =
       case collectTyApps expr of
         (BackendVarWithIdentity _ mbIdentity name, typeArgs)
-          | Just form <- lookupLocalFunctionForm mbIdentity name localForms ->
+          | Just form <- lookupLocalFunctionForm mbIdentity localForms ->
               collectInstantiatedLocalReferences name form (map (substituteBackendTypesByKey substitution) typeArgs) []
         _ -> Set.empty
 
     collectInstantiatedLocalReferences name form typeArgs args =
       case instantiateFunctionFormWithTypeArgs ("referenced local function " ++ name) form typeArgs args of
         Right (_, instantiated) ->
-          collectReferencedFunctionNamesInFormWithLocals base Map.empty localForms bound instantiated
+          collectReferencedFunctionsInFormWithLocals base specializationsByKey Map.empty localForms bound instantiated
         Left _ -> Set.empty
 
     childReferences =
       case expr of
         BackendVarWithIdentity {} -> Set.empty
         BackendLit {} -> Set.empty
-        BackendLamWithIdentity _ mbIdentity name _ body ->
-          collectReferencedFunctionNamesInExpr base substitution (deleteLocalFunctionForm mbIdentity name localForms) (Set.union (termBoundKeys mbIdentity name) bound) body
+        BackendLamWithIdentity _ mbIdentity _name _ body ->
+          collectReferencedFunctionsInExpr base specializationsByKey substitution (deleteLocalFunctionForm mbIdentity localForms) (Set.union (termBoundKeys mbIdentity) bound) body
         BackendApp _ fun arg ->
-          collectReferencedFunctionNamesInExpr base substitution localForms bound fun
-            `Set.union` collectReferencedFunctionNamesInExpr base substitution localForms bound arg
+          collectReferencedFunctionsInExpr base specializationsByKey substitution localForms bound fun
+            `Set.union` collectReferencedFunctionsInExpr base specializationsByKey substitution localForms bound arg
         BackendLetWithIdentity _ mbIdentity name bindingTy rhs body ->
           collectLetRhsReferences bindingTy rhs
-            `Set.union` collectReferencedFunctionNamesInExpr base substitution (collectLetLocalForms mbIdentity name bindingTy rhs) (Set.union (termBoundKeys mbIdentity name) bound) body
+            `Set.union` collectReferencedFunctionsInExpr base specializationsByKey substitution (collectLetLocalForms mbIdentity name bindingTy rhs) (Set.union (termBoundKeys mbIdentity) bound) body
         BackendTyAbs _ name _ body ->
-          collectReferencedFunctionNamesInExpr base (deleteTypeBinderSubstitution (backendTyAbsIdentity expr) name substitution) localForms bound body
+          collectReferencedFunctionsInExpr base specializationsByKey (deleteTypeBinderSubstitution (backendTyAbsIdentity expr) name substitution) localForms bound body
         BackendTyApp _ fun _ ->
-          collectReferencedFunctionNamesInExpr base substitution localForms bound fun
+          collectReferencedFunctionsInExpr base specializationsByKey substitution localForms bound fun
         BackendConstructWithIdentity _ _ _ args ->
-          Set.unions (map (collectReferencedFunctionNamesInExpr base substitution localForms bound) args)
+          Set.unions (map (collectReferencedFunctionsInExpr base specializationsByKey substitution localForms bound) args)
         BackendCase _ scrutinee alternatives ->
-          collectReferencedFunctionNamesInExpr base substitution localForms bound scrutinee
+          collectReferencedFunctionsInExpr base specializationsByKey substitution localForms bound scrutinee
             `Set.union` Set.unions (map collectAlternativeReferences (NE.toList alternatives))
         BackendRoll _ payload ->
-          collectReferencedFunctionNamesInExpr base substitution localForms bound payload
+          collectReferencedFunctionsInExpr base specializationsByKey substitution localForms bound payload
         BackendUnroll _ payload ->
-          collectReferencedFunctionNamesInExpr base substitution localForms bound payload
-        BackendClosureWithParamIdentities _ _ captures params body ->
-          Set.unions (map (collectReferencedFunctionNamesInExpr base substitution localForms bound . backendClosureCaptureExpr) captures)
-            `Set.union` collectReferencedFunctionNamesInExpr
+          collectReferencedFunctionsInExpr base specializationsByKey substitution localForms bound payload
+        BackendClosureWithParamIdentities _ _ _ captures params body ->
+          Set.unions (map (collectReferencedFunctionsInExpr base specializationsByKey substitution localForms bound . backendClosureCaptureExpr) captures)
+            `Set.union` collectReferencedFunctionsInExpr
               base
+              specializationsByKey
               substitution
-              (shadowLocalFunctionForms closureRefs localForms)
-              (Set.union (termBoundKeyRefs closureRefs) bound)
+              (shadowLocalFunctionForms (map fst closureRefs) localForms)
+              (Set.union (termBoundKeyRefs (map fst closureRefs)) bound)
               body
           where
             closureRefs =
               [(backendClosureCaptureIdentity capture, backendClosureCaptureName capture) | capture <- captures]
                 ++ [(backendClosureParamIdentity param, backendClosureParamName param) | param <- params]
         BackendClosure _ _ captures params body ->
-          Set.unions (map (collectReferencedFunctionNamesInExpr base substitution localForms bound . backendClosureCaptureExpr) captures)
-            `Set.union` collectReferencedFunctionNamesInExpr
+          Set.unions (map (collectReferencedFunctionsInExpr base specializationsByKey substitution localForms bound . backendClosureCaptureExpr) captures)
+            `Set.union` collectReferencedFunctionsInExpr
               base
+              specializationsByKey
               substitution
-              (shadowLocalFunctionForms closureRefs localForms)
-              (Set.union (termBoundKeyRefs closureRefs) bound)
+              (shadowLocalFunctionForms (map fst closureRefs) localForms)
+              (Set.union (termBoundKeyRefs (map fst closureRefs)) bound)
               body
           where
             closureRefs =
               [(backendClosureCaptureIdentity capture, backendClosureCaptureName capture) | capture <- captures]
                 ++ [(Nothing, name) | (name, _) <- params]
         BackendClosureCall _ fun args ->
-          collectReferencedFunctionNamesInExpr base substitution localForms bound fun
-            `Set.union` Set.unions (map (collectReferencedFunctionNamesInExpr base substitution localForms bound) args)
+          collectReferencedFunctionsInExpr base specializationsByKey substitution localForms bound fun
+            `Set.union` Set.unions (map (collectReferencedFunctionsInExpr base specializationsByKey substitution localForms bound) args)
 
     collectLetRhsReferences bindingTy rhs =
       case functionFormFromExpected bindingTy rhs of
@@ -6256,10 +7244,10 @@ collectReferencedFunctionNamesInExpr base substitution localForms bound expr =
           | not (null (ffTypeBinders form0)) || not (null (ffParams form0)) ->
               let form = substituteFunctionFormTypes substitution form0
                in if null (ffTypeBinders form)
-                    then collectReferencedFunctionNamesInFormWithLocals base Map.empty localForms bound form
+                    then collectReferencedFunctionsInFormWithLocals base specializationsByKey Map.empty localForms bound form
                     else Set.empty
         _ ->
-          collectReferencedFunctionNamesInExpr base substitution localForms bound rhs
+          collectReferencedFunctionsInExpr base specializationsByKey substitution localForms bound rhs
 
     collectLetLocalForms mbIdentity name bindingTy rhs =
       case functionFormFromExpected bindingTy rhs of
@@ -6267,15 +7255,16 @@ collectReferencedFunctionNamesInExpr base substitution localForms bound expr =
           | not (null (ffTypeBinders form)) || not (null (ffParams form)) ->
               bindLocalFunctionForm mbIdentity name (substituteFunctionFormTypes substitution form) localForms
         _ ->
-          deleteLocalFunctionForm mbIdentity name localForms
+          deleteLocalFunctionForm mbIdentity localForms
 
     collectAlternativeReferences alternative =
       let binderRefs = patternBinderRefs (backendAltPattern alternative)
        in
-      collectReferencedFunctionNamesInExpr
+      collectReferencedFunctionsInExpr
         base
+        specializationsByKey
         substitution
-        (shadowLocalFunctionForms binderRefs localForms)
+        (shadowLocalFunctionForms (map fst binderRefs) localForms)
         (Set.union (patternTermBoundKeys (backendAltPattern alternative)) bound)
         (backendAltBody alternative)
 
@@ -6291,8 +7280,8 @@ collectEvidenceWrappersInFormWithLocals base substitution localForms bound form 
    in collectEvidenceWrappersInExpr
         base
         substitution
-        (shadowLocalFunctionForms paramRefs localForms)
-        (Set.union (termBoundKeyRefs paramRefs) bound)
+        (shadowLocalFunctionForms (map fst paramRefs) localForms)
+        (Set.union (termBoundKeyRefs (map fst paramRefs)) bound)
         (ffBody form)
 
 collectEvidenceWrappersInExpr :: ProgramBase -> Map BackendTypeSubstitutionKey BackendType -> LocalFunctionForms -> Set TermBoundKey -> BackendExpr -> [(BackendType, BackendExpr)]
@@ -6302,11 +7291,11 @@ collectEvidenceWrappersInExpr base substitution localForms bound expr =
     wrappersHere =
       case collectCall expr of
         Just (BackendVarWithIdentity _ mbIdentity name, typeArgs, args)
-          | Just form <- lookupLocalFunctionForm mbIdentity name localForms ->
+          | Just form <- lookupLocalFunctionForm mbIdentity localForms ->
               let typeArgs' = map (substituteBackendTypesByKey substitution) typeArgs
                   args' = map (substituteExprTypesByKey substitution) args
                in collectInstantiatedLocalWrappers name form typeArgs' args'
-          | Just binding <- lookupSpecializationBinding base bound mbIdentity name ->
+          | Just binding <- lookupSpecializationBinding base mbIdentity ->
               let typeArgs' = map (substituteBackendTypesByKey substitution) typeArgs
                   args' = map (substituteExprTypesByKey substitution) args
                in case instantiateFunctionFormWithTypeArgs ("evidence wrapper request " ++ name) (biForm binding) typeArgs' args' of
@@ -6318,14 +7307,14 @@ collectEvidenceWrappersInExpr base substitution localForms bound expr =
       case expr of
         BackendVarWithIdentity {} -> []
         BackendLit {} -> []
-        BackendLamWithIdentity _ mbIdentity name _ body ->
-          collectEvidenceWrappersInExpr base substitution (deleteLocalFunctionForm mbIdentity name localForms) (Set.union (termBoundKeys mbIdentity name) bound) body
+        BackendLamWithIdentity _ mbIdentity _name _ body ->
+          collectEvidenceWrappersInExpr base substitution (deleteLocalFunctionForm mbIdentity localForms) (Set.union (termBoundKeys mbIdentity) bound) body
         BackendApp _ fun arg ->
           collectEvidenceWrappersInExpr base substitution localForms bound fun
             ++ collectEvidenceWrappersInExpr base substitution localForms bound arg
         BackendLetWithIdentity _ mbIdentity name bindingTy rhs body ->
           collectLetRhsWrappers bindingTy rhs
-            ++ collectEvidenceWrappersInExpr base substitution (collectLetLocalForms mbIdentity name bindingTy rhs) (Set.union (termBoundKeys mbIdentity name) bound) body
+            ++ collectEvidenceWrappersInExpr base substitution (collectLetLocalForms mbIdentity name bindingTy rhs) (Set.union (termBoundKeys mbIdentity) bound) body
         BackendTyAbs _ name _ body ->
           collectEvidenceWrappersInExpr base (deleteTypeBinderSubstitution (backendTyAbsIdentity expr) name substitution) localForms bound body
         BackendTyApp _ fun _ ->
@@ -6339,32 +7328,32 @@ collectEvidenceWrappersInExpr base substitution localForms bound expr =
           collectEvidenceWrappersInExpr base substitution localForms bound payload
         BackendUnroll _ payload ->
           collectEvidenceWrappersInExpr base substitution localForms bound payload
-        BackendClosureWithParamIdentities _ _ captures params body ->
+        BackendClosureWithParamIdentities _ _ _ captures params body ->
           concatMap (collectEvidenceWrappersInExpr base substitution localForms bound . backendClosureCaptureExpr) captures
             ++ collectEvidenceWrappersInExpr
               base
               substitution
-              (shadowLocalFunctionForms closureRefs localForms)
+              (shadowLocalFunctionForms (map fst closureRefs) localForms)
               (Set.union closureBoundKeys bound)
               body
           where
             closureRefs =
               [(backendClosureCaptureIdentity capture, backendClosureCaptureName capture) | capture <- captures]
                 ++ [(backendClosureParamIdentity param, backendClosureParamName param) | param <- params]
-            closureBoundKeys = termBoundKeyRefs closureRefs
+            closureBoundKeys = termBoundKeyRefs (map fst closureRefs)
         BackendClosure _ _ captures params body ->
           concatMap (collectEvidenceWrappersInExpr base substitution localForms bound . backendClosureCaptureExpr) captures
             ++ collectEvidenceWrappersInExpr
               base
               substitution
-              (shadowLocalFunctionForms closureRefs localForms)
+              (shadowLocalFunctionForms (map fst closureRefs) localForms)
               (Set.union closureBoundKeys bound)
               body
           where
             closureRefs =
               [(backendClosureCaptureIdentity capture, backendClosureCaptureName capture) | capture <- captures]
                 ++ [(Nothing, name) | (name, _) <- params]
-            closureBoundKeys = termBoundKeyRefs closureRefs
+            closureBoundKeys = termBoundKeyRefs (map fst closureRefs)
         BackendClosureCall _ fun args ->
           collectEvidenceWrappersInExpr base substitution localForms bound fun
             ++ concatMap (collectEvidenceWrappersInExpr base substitution localForms bound) args
@@ -6380,7 +7369,7 @@ collectEvidenceWrappersInExpr base substitution localForms bound expr =
     localTypeApplicationWrappers =
       case collectTyApps expr of
         (BackendVarWithIdentity _ mbIdentity name, typeArgs)
-          | Just form <- lookupLocalFunctionForm mbIdentity name localForms ->
+          | Just form <- lookupLocalFunctionForm mbIdentity localForms ->
               collectInstantiatedLocalWrappers name form (map (substituteBackendTypesByKey substitution) typeArgs) []
         _ -> []
 
@@ -6408,7 +7397,7 @@ collectEvidenceWrappersInExpr base substitution localForms bound expr =
           | not (null (ffTypeBinders form)) || not (null (ffParams form)) ->
               bindLocalFunctionForm mbIdentity name (substituteFunctionFormTypes substitution form) localForms
         _ ->
-          deleteLocalFunctionForm mbIdentity name localForms
+          deleteLocalFunctionForm mbIdentity localForms
 
     collectAlternativeWrappers alternative =
       let binderRefs = patternBinderRefs (backendAltPattern alternative)
@@ -6416,7 +7405,7 @@ collectEvidenceWrappersInExpr base substitution localForms bound expr =
       collectEvidenceWrappersInExpr
         base
         substitution
-        (shadowLocalFunctionForms binderRefs localForms)
+        (shadowLocalFunctionForms (map fst binderRefs) localForms)
         (Set.union (patternTermBoundKeys (backendAltPattern alternative)) bound)
         (backendAltBody alternative)
 
@@ -6424,7 +7413,105 @@ collectEvidenceWrappersInExpr base substitution localForms bound expr =
 
 wrapperKey' :: BackendType -> BackendExpr -> String
 wrapperKey' expected expr =
-  backendTypeKey expected ++ "\0" ++ show expr
+  backendTypeKey expected ++ "\0" ++ canonicalBackendExprKey expr
+
+canonicalBackendExprKey :: BackendExpr -> String
+canonicalBackendExprKey =
+  \case
+    BackendVarWithIdentity ty identity name ->
+      "var(" ++ canonicalBackendTypeKey ty ++ "," ++ canonicalTermRefKey identity name ++ ")"
+    BackendLit ty lit ->
+      "lit(" ++ canonicalBackendTypeKey ty ++ "," ++ show lit ++ ")"
+    BackendLamWithIdentity resultTy identity name paramTy body ->
+      "lam(" ++ canonicalBackendTypeKey resultTy ++ "," ++ canonicalTermRefKey identity name ++ "," ++ canonicalBackendTypeKey paramTy ++ "," ++ canonicalBackendExprKey body ++ ")"
+    BackendApp resultTy fun arg ->
+      "app(" ++ canonicalBackendTypeKey resultTy ++ "," ++ canonicalBackendExprKey fun ++ "," ++ canonicalBackendExprKey arg ++ ")"
+    BackendLetWithIdentity resultTy identity name bindingTy rhs body ->
+      "let(" ++ canonicalBackendTypeKey resultTy ++ "," ++ canonicalTermRefKey identity name ++ "," ++ canonicalBackendTypeKey bindingTy ++ "," ++ canonicalBackendExprKey rhs ++ "," ++ canonicalBackendExprKey body ++ ")"
+    BackendTyAbsWithIdentity resultTy identity name mbBound body ->
+      "tyabs(" ++ canonicalBackendTypeKey resultTy ++ "," ++ canonicalTypeBinderKey identity name ++ "," ++ maybe "_" canonicalBackendTypeKey mbBound ++ "," ++ canonicalBackendExprKey body ++ ")"
+    BackendTyApp resultTy fun ty ->
+      "tyapp(" ++ canonicalBackendTypeKey resultTy ++ "," ++ canonicalBackendExprKey fun ++ "," ++ canonicalBackendTypeKey ty ++ ")"
+    BackendRoll resultTy payload ->
+      "roll(" ++ canonicalBackendTypeKey resultTy ++ "," ++ canonicalBackendExprKey payload ++ ")"
+    BackendUnroll resultTy payload ->
+      "unroll(" ++ canonicalBackendTypeKey resultTy ++ "," ++ canonicalBackendExprKey payload ++ ")"
+    BackendClosureWithParamIdentities resultTy entryIdentity entryName captures params body ->
+      "closure(" ++ canonicalBackendTypeKey resultTy ++ "," ++ canonicalClosureEntryKey entryIdentity entryName ++ "," ++ canonicalListKey (map canonicalBackendClosureCaptureKey captures) ++ "," ++ canonicalListKey (map canonicalBackendClosureParamKey params) ++ "," ++ canonicalBackendExprKey body ++ ")"
+    BackendClosureCall resultTy fun args ->
+      "closurecall(" ++ canonicalBackendTypeKey resultTy ++ "," ++ canonicalBackendExprKey fun ++ "," ++ canonicalListKey (map canonicalBackendExprKey args) ++ ")"
+    BackendConstructWithIdentity resultTy identity name args ->
+      "construct(" ++ canonicalBackendTypeKey resultTy ++ "," ++ canonicalSymbolRefKey identity name ++ "," ++ canonicalListKey (map canonicalBackendExprKey args) ++ ")"
+    BackendCase resultTy scrutinee alternatives ->
+      "case(" ++ canonicalBackendTypeKey resultTy ++ "," ++ canonicalBackendExprKey scrutinee ++ "," ++ canonicalListKey (map canonicalBackendAlternativeKey (NE.toList alternatives)) ++ ")"
+
+canonicalBackendClosureCaptureKey :: BackendClosureCapture -> String
+canonicalBackendClosureCaptureKey capture =
+  "capture("
+    ++ canonicalTermRefKey (backendClosureCaptureIdentity capture) (backendClosureCaptureName capture)
+    ++ ","
+    ++ canonicalBackendTypeKey (backendClosureCaptureType capture)
+    ++ ","
+    ++ canonicalBackendExprKey (backendClosureCaptureExpr capture)
+    ++ ")"
+
+canonicalBackendClosureParamKey :: BackendClosureParam -> String
+canonicalBackendClosureParamKey param =
+  "param("
+    ++ canonicalTermRefKey (backendClosureParamIdentity param) (backendClosureParamName param)
+    ++ ","
+    ++ canonicalBackendTypeKey (backendClosureParamType param)
+    ++ ")"
+
+canonicalBackendAlternativeKey :: BackendAlternative -> String
+canonicalBackendAlternativeKey (BackendAlternative pattern0 body) =
+  "alt(" ++ canonicalBackendPatternKey pattern0 ++ "," ++ canonicalBackendExprKey body ++ ")"
+
+canonicalBackendPatternKey :: BackendPattern -> String
+canonicalBackendPatternKey =
+  \case
+    BackendDefaultPattern ->
+      "default"
+    BackendConstructorPatternWithBinderIdentities identity name binders ->
+      "ctorpat(" ++ canonicalSymbolRefKey identity name ++ "," ++ canonicalListKey (map canonicalBackendPatternBinderKey binders) ++ ")"
+
+canonicalBackendPatternBinderKey :: BackendPatternBinder -> String
+canonicalBackendPatternBinderKey binder =
+  canonicalTermRefKey (backendPatternBinderIdentity binder) (backendPatternBinderName binder)
+
+canonicalListKey :: [String] -> String
+canonicalListKey items =
+  "[" ++ intercalate "," items ++ "]"
+
+canonicalSymbolRefKey :: Maybe SymbolIdentity -> String -> String
+canonicalSymbolRefKey (Just identity) _ =
+  symbolIdentityStableName identity
+canonicalSymbolRefKey Nothing name =
+  "name:" ++ show name
+
+canonicalClosureEntryKey :: Maybe UniqueIdentity -> String -> String
+canonicalClosureEntryKey (Just identity) _ =
+  "closure:" ++ show (uniqueIdentityValue identity)
+canonicalClosureEntryKey Nothing name =
+  "name:" ++ show name
+
+canonicalTermRefKey :: Maybe IdDetails -> String -> String
+canonicalTermRefKey Nothing name =
+  "name:" ++ show name
+canonicalTermRefKey (Just details) _ =
+  case details of
+    LocalId ref -> canonicalLocalRefKey ref
+    EvidenceId ref -> canonicalLocalRefKey ref
+    EnvId ref -> "env:" ++ show (envRefIdentity ref)
+    TopLevelId symbol -> "top:" ++ symbolIdentityStableName symbol
+    ConstructorId ref -> "ctor:" ++ symbolIdentityStableName (constructorRefSymbol ref)
+    MethodId symbol -> "method:" ++ symbolIdentityStableName symbol
+    PrimitiveId ref -> "primitive:" ++ symbolIdentityStableName (primitiveRefSymbol ref)
+    DeferredId ref -> "deferred:" ++ show (deferredRefIdentity ref)
+
+canonicalLocalRefKey :: LocalRef -> String
+canonicalLocalRefKey ref =
+  "local:" ++ show (localIdentityStableUnique (localRefIdentity ref))
 
 collectFunctionWrappersInForm :: ProgramBase -> Map BackendTypeSubstitutionKey BackendType -> Set TermBoundKey -> FunctionForm -> [(BackendType, BackendExpr)]
 collectFunctionWrappersInForm base substitution bound form =
@@ -6436,8 +7523,8 @@ collectFunctionWrappersInFormWithLocals base substitution localFunctions bound f
    in collectFunctionWrappersInExpr
         base
         substitution
-        (shadowLocalStoredFunctions paramRefs localFunctions)
-        (Set.union (termBoundKeyRefs paramRefs) bound)
+        (shadowLocalStoredFunctions (map fst paramRefs) localFunctions)
+        (Set.union (termBoundKeyRefs (map fst paramRefs)) bound)
         (ffBody form)
 
 collectFunctionWrappersInExpr :: ProgramBase -> Map BackendTypeSubstitutionKey BackendType -> LocalStoredFunctions -> Set TermBoundKey -> BackendExpr -> [(BackendType, BackendExpr)]
@@ -6473,18 +7560,21 @@ collectFunctionWrappersInExpr base substitution localFunctions bound expr =
 
     localStoredFunctionWrapperSource arg =
       case collectTyApps arg of
-        (BackendVarWithIdentity _ mbIdentity name, typeArgs) ->
-          localStoredFunctionSourceByRef Set.empty mbIdentity name typeArgs
+        (BackendVarWithIdentity _ mbIdentity _name, typeArgs) ->
+          localStoredFunctionSourceByRef Set.empty mbIdentity typeArgs
         _ -> Nothing
 
-    localStoredFunctionSourceByRef seen mbIdentity name typeArgs
-      | Set.member key seen = Nothing
-      | Just localFunction <- lookupLocalStoredFunction mbIdentity name localFunctions =
+    localStoredFunctionSourceByRef seen mbIdentity typeArgs
+      | Just key <- mbKey,
+        Set.member key seen =
+          Nothing
+      | Just key <- mbKey,
+        Just localFunction <- lookupLocalStoredFunction mbIdentity localFunctions =
           case instantiateFunctionFormWithTypeArgs ("function wrapper request " ++ lsfName localFunction) (lsfForm localFunction) typeArgs [] of
             Right (_, instantiated) ->
               case etaAliasTarget instantiated of
-                Just (targetIdentity, targetName, targetTypeArgs) ->
-                  localStoredFunctionSourceByRef (Set.insert key seen) targetIdentity targetName targetTypeArgs
+                Just (targetIdentity, _targetName, targetTypeArgs) ->
+                  localStoredFunctionSourceByRef (Set.insert key seen) targetIdentity targetTypeArgs
                 Nothing ->
                   applyStoredSourceTypeArgs (lsfName localFunction) (lsfSourceExpr localFunction) typeArgs
             Left _ ->
@@ -6492,7 +7582,7 @@ collectFunctionWrappersInExpr base substitution localFunctions bound expr =
       | otherwise =
           Nothing
       where
-        key = localStoredFunctionKey mbIdentity name
+        mbKey = localStoredFunctionKey mbIdentity
 
     applyStoredSourceTypeArgs _ sourceExpr [] =
       Just sourceExpr
@@ -6507,14 +7597,14 @@ collectFunctionWrappersInExpr base substitution localFunctions bound expr =
           []
         BackendLit {} ->
           []
-        BackendLamWithIdentity _ mbIdentity name _ body ->
-          collectFunctionWrappersInExpr base substitution (deleteLocalStoredFunction mbIdentity name localFunctions) (Set.union (termBoundKeys mbIdentity name) bound) body
+        BackendLamWithIdentity _ mbIdentity _name _ body ->
+          collectFunctionWrappersInExpr base substitution (deleteLocalStoredFunction mbIdentity localFunctions) (Set.union (termBoundKeys mbIdentity) bound) body
         BackendApp _ fun arg ->
           collectFunctionWrappersInExpr base substitution localFunctions bound fun
             ++ collectFunctionWrappersInExpr base substitution localFunctions bound arg
         BackendLetWithIdentity _ mbIdentity name _ rhs body ->
           collectFunctionWrappersInExpr base substitution localFunctions bound rhs
-            ++ collectFunctionWrappersInExpr base substitution (collectLetLocalFunction mbIdentity name rhs) (Set.union (termBoundKeys mbIdentity name) bound) body
+          ++ collectFunctionWrappersInExpr base substitution (collectLetLocalFunction mbIdentity name rhs) (Set.union (termBoundKeys mbIdentity) bound) body
         BackendTyAbs _ name _ body ->
           collectFunctionWrappersInExpr base (deleteTypeBinderSubstitution (backendTyAbsIdentity expr) name substitution) localFunctions bound body
         BackendTyApp _ fun _ ->
@@ -6528,13 +7618,13 @@ collectFunctionWrappersInExpr base substitution localFunctions bound expr =
           collectFunctionWrappersInExpr base substitution localFunctions bound payload
         BackendUnroll _ payload ->
           collectFunctionWrappersInExpr base substitution localFunctions bound payload
-        BackendClosureWithParamIdentities _ _ captures params body ->
+        BackendClosureWithParamIdentities _ _ _ captures params body ->
           concatMap (collectFunctionWrappersInExpr base substitution localFunctions bound . backendClosureCaptureExpr) captures
             ++ collectFunctionWrappersInExpr
               base
               substitution
-              (shadowLocalStoredFunctions closureRefs localFunctions)
-              (Set.union (termBoundKeyRefs closureRefs) bound)
+              (shadowLocalStoredFunctions (map fst closureRefs) localFunctions)
+              (Set.union (termBoundKeyRefs (map fst closureRefs)) bound)
               body
           where
             closureRefs =
@@ -6545,8 +7635,8 @@ collectFunctionWrappersInExpr base substitution localFunctions bound expr =
             ++ collectFunctionWrappersInExpr
               base
               substitution
-              (shadowLocalStoredFunctions closureRefs localFunctions)
-              (Set.union (termBoundKeyRefs closureRefs) bound)
+              (shadowLocalStoredFunctions (map fst closureRefs) localFunctions)
+              (Set.union (termBoundKeyRefs (map fst closureRefs)) bound)
               body
           where
             closureRefs =
@@ -6567,15 +7657,15 @@ collectFunctionWrappersInExpr base substitution localFunctions bound expr =
                 (substituteExprTypesByKey substitution rhs)
                 localFunctions
         _ ->
-          deleteLocalStoredFunction mbIdentity name localFunctions
+          deleteLocalStoredFunction mbIdentity localFunctions
 
     collectAlternativeWrappers alternative =
       let binderRefs = patternBinderRefs (backendAltPattern alternative)
        in collectFunctionWrappersInExpr
             base
             substitution
-            (shadowLocalStoredFunctions binderRefs localFunctions)
-            (Set.union (termBoundKeyRefs binderRefs) bound)
+            (shadowLocalStoredFunctions (map fst binderRefs) localFunctions)
+            (Set.union (termBoundKeyRefs (map fst binderRefs)) bound)
             (backendAltBody alternative)
 
 
@@ -6599,18 +7689,18 @@ freeTermVars =
   where
     go bound =
       \case
-        BackendVarWithIdentity _ mbIdentity name
+        BackendVarWithIdentity _ mbIdentity _name
           | Just _ <- backendVarSymbolIdentity mbIdentity -> Set.empty
           | Just key <- mbIdentity >>= lowerLocalKey -> localFreeTerm bound (TermBoundIdentity key)
-          | otherwise -> localFreeTerm bound (TermBoundName name)
+          | otherwise -> Set.empty
         BackendLit {} ->
           Set.empty
-        BackendLamWithIdentity _ mbIdentity name _ body ->
-          go (Set.union (termBoundKeys mbIdentity name) bound) body
+        BackendLamWithIdentity _ mbIdentity _name _ body ->
+          go (Set.union (termBoundKeys mbIdentity) bound) body
         BackendApp _ fun arg ->
           Set.union (go bound fun) (go bound arg)
-        BackendLetWithIdentity _ mbIdentity name _ rhs body ->
-          Set.union (go bound rhs) (go (Set.union (termBoundKeys mbIdentity name) bound) body)
+        BackendLetWithIdentity _ mbIdentity _name _ rhs body ->
+          Set.union (go bound rhs) (go (Set.union (termBoundKeys mbIdentity) bound) body)
         BackendTyAbs _ _ _ body ->
           go bound body
         BackendTyApp _ fun _ ->
@@ -6625,14 +7715,14 @@ freeTermVars =
           go bound payload
         BackendUnroll _ payload ->
           go bound payload
-        BackendClosureWithParamIdentities _ _ captures params body ->
+        BackendClosureWithParamIdentities _ _ _ captures params body ->
           foldMap (go bound . backendClosureCaptureExpr) captures
             `Set.union` go (Set.union closureBoundKeys bound) body
           where
             closureRefs =
               [(backendClosureCaptureIdentity capture, backendClosureCaptureName capture) | capture <- captures]
                 ++ [(backendClosureParamIdentity param, backendClosureParamName param) | param <- params]
-            closureBoundKeys = termBoundKeyRefs closureRefs
+            closureBoundKeys = termBoundKeyRefs (map fst closureRefs)
         BackendClosureCall _ fun args ->
           Set.union (go bound fun) (foldMap (go bound) args)
 
@@ -6649,15 +7739,13 @@ collectSpecializationRequestsInForm :: ProgramBase -> Map BackendTypeSubstitutio
 collectSpecializationRequestsInForm base substitution form =
   collectSpecializationRequestsInFormWithBound base substitution Set.empty form
 
-lookupSpecializationBinding :: ProgramBase -> Set TermBoundKey -> Maybe IdDetails -> String -> Maybe BindingInfo
-lookupSpecializationBinding base bound mbIdentity name =
+lookupSpecializationBinding :: ProgramBase -> Maybe IdDetails -> Maybe BindingInfo
+lookupSpecializationBinding base mbIdentity =
   case (mbIdentity >>= lowerLocalKey, backendVarSymbolIdentity mbIdentity) of
     (Just _, _) ->
       Nothing
     (_, Just identity) ->
-      lookupBindingInfo base (Just identity) name
-    _ | Set.notMember (TermBoundName name) bound ->
-      lookupBindingInfo base Nothing name
+      Map.lookup identity (pbBindingsByIdentity base)
     _ ->
       Nothing
 
@@ -6671,7 +7759,7 @@ collectSpecializationRequestsInFormWithBound base substitution bound form =
   collectSpecializationRequestsWithBound
     base
     substitution
-    (Set.union (termBoundKeyRefs [(mbIdentity, name) | (mbIdentity, name, _) <- functionFormParamTriples form]) bound)
+    (Set.union (termBoundKeyRefs [mbIdentity | (mbIdentity, _, _) <- functionFormParamTriples form]) bound)
     (ffBody form)
 
 collectSpecializationRequestsWithBound ::
@@ -6687,18 +7775,18 @@ collectSpecializationRequestsWithBound base substitution bound expr =
       case expr of
         BackendApp {} ->
           case collectCall expr of
-            Just (BackendVarWithIdentity _ mbIdentity name, typeArgs, _)
-              | Just binding <- lookupSpecializationBinding base bound mbIdentity name,
+            Just (BackendVarWithIdentity _ mbIdentity _name, typeArgs, _)
+              | Just binding <- lookupSpecializationBinding base mbIdentity,
                 not (null (ffTypeBinders (biForm binding))),
                 length typeArgs == length (ffTypeBinders (biForm binding)) ->
-                  [SpecRequest (biName binding) (map (substituteBackendTypesByKey substitution) typeArgs)]
+                  [specRequestForBinding binding (map (substituteBackendTypesByKey substitution) typeArgs)]
             Just (BackendVarWithIdentity _ mbIdentity name, typeArgs, args)
-              | Just binding <- lookupSpecializationBinding base bound mbIdentity name,
+              | Just binding <- lookupSpecializationBinding base mbIdentity,
                 not (null (ffTypeBinders (biForm binding))) ->
                   let typeArgs' = map (substituteBackendTypesByKey substitution) typeArgs
                       args' = map (substituteExprTypesByKey substitution) args
                    in case instantiateFunctionFormWithTypeArgs ("specialization request " ++ name) (biForm binding) typeArgs' args' of
-                        Right (resolvedTypeArgs, _) -> [SpecRequest (biName binding) resolvedTypeArgs]
+                        Right (resolvedTypeArgs, _) -> [specRequestForBinding binding resolvedTypeArgs]
                         Left _ -> []
             Just (fun, typeArgs, args) ->
               collectAdministrativeCallRequests fun typeArgs args
@@ -6706,11 +7794,11 @@ collectSpecializationRequestsWithBound base substitution bound expr =
         BackendTyApp {} ->
           case collectTyApps expr of
             (BackendVarWithIdentity _ mbIdentity name, typeArgs)
-              | Just binding <- lookupSpecializationBinding base bound mbIdentity name,
+              | Just binding <- lookupSpecializationBinding base mbIdentity,
                 not (null (ffTypeBinders (biForm binding))) ->
                   let typeArgs' = map (substituteBackendTypesByKey substitution) typeArgs
                    in case instantiateFunctionFormWithTypeArgs ("specialization request " ++ name) (biForm binding) typeArgs' [] of
-                        Right (resolvedTypeArgs, _) -> [SpecRequest (biName binding) resolvedTypeArgs]
+                        Right (resolvedTypeArgs, _) -> [specRequestForBinding binding resolvedTypeArgs]
                         _ -> []
             (fun, typeArgs) ->
               collectAdministrativeTypeAppRequests fun typeArgs
@@ -6720,14 +7808,14 @@ collectSpecializationRequestsWithBound base substitution bound expr =
       case expr of
         BackendVarWithIdentity {} -> []
         BackendLit {} -> []
-        BackendLamWithIdentity _ mbIdentity name _ body ->
-          collectSpecializationRequestsWithBound base substitution (Set.union (termBoundKeys mbIdentity name) bound) body
+        BackendLamWithIdentity _ mbIdentity _name _ body ->
+          collectSpecializationRequestsWithBound base substitution (Set.union (termBoundKeys mbIdentity) bound) body
         BackendApp _ fun arg ->
           collectSpecializationRequestsWithBound base substitution bound fun
             ++ collectSpecializationRequestsWithBound base substitution bound arg
-        BackendLetWithIdentity _ mbIdentity name bindingTy rhs body ->
+        BackendLetWithIdentity _ mbIdentity _name bindingTy rhs body ->
           collectLetRhsSpecializationRequests bindingTy rhs
-            ++ collectSpecializationRequestsWithBound base substitution (Set.union (termBoundKeys mbIdentity name) bound) body
+            ++ collectSpecializationRequestsWithBound base substitution (Set.union (termBoundKeys mbIdentity) bound) body
         BackendTyAbs _ name _ body ->
           collectSpecializationRequestsWithBound base (deleteTypeBinderSubstitution (backendTyAbsIdentity expr) name substitution) bound body
         BackendTyApp {} ->
@@ -6741,12 +7829,12 @@ collectSpecializationRequestsWithBound base substitution bound expr =
           collectSpecializationRequestsWithBound base substitution bound payload
         BackendUnroll _ payload ->
           collectSpecializationRequestsWithBound base substitution bound payload
-        BackendClosureWithParamIdentities _ _ captures params body ->
+        BackendClosureWithParamIdentities _ _ _ captures params body ->
           concatMap (collectSpecializationRequestsWithBound base substitution bound . backendClosureCaptureExpr) captures
             ++ collectSpecializationRequestsWithBound
               base
               substitution
-              (Set.union (termBoundKeyRefs closureRefs) bound)
+              (Set.union (termBoundKeyRefs (map fst closureRefs)) bound)
               body
           where
             closureRefs =
@@ -6781,7 +7869,7 @@ collectSpecializationRequestsWithBound base substitution bound expr =
               collectSpecializationRequestsWithBound
                 base
                 Map.empty
-                (Set.union (termBoundKeyRefs [(mbIdentity, name) | (mbIdentity, name, _) <- functionFormParamTriples form]) bound)
+                (Set.union (termBoundKeyRefs [mbIdentity | (mbIdentity, _, _) <- functionFormParamTriples form]) bound)
                 (ffBody form)
             Left _ ->
               []
@@ -6810,27 +7898,27 @@ collectSpecializationRequestsWithBound base substitution bound expr =
 
 
 
-freeGlobalBindingRefs :: ProgramBase -> BindingInfo -> Set String
+freeGlobalBindingRefs :: ProgramBase -> BindingInfo -> Set BackendBindingRef
 freeGlobalBindingRefs base binding =
   freeGlobalRefs
     base
-    (termBoundKeyRefs [(mbIdentity, name) | (mbIdentity, name, _) <- functionFormParamTriples (biForm binding)])
+    (termBoundKeyRefs [mbIdentity | (mbIdentity, _, _) <- functionFormParamTriples (biForm binding)])
     (ffBody (biForm binding))
 
-freeGlobalRefs :: ProgramBase -> Set TermBoundKey -> BackendExpr -> Set String
+freeGlobalRefs :: ProgramBase -> Set TermBoundKey -> BackendExpr -> Set BackendBindingRef
 freeGlobalRefs base bound expr =
   case expr of
-    BackendVarWithIdentity _ mbIdentity name
-      | Just binding <- lookupSpecializationBinding base bound mbIdentity name -> Set.singleton (biName binding)
+    BackendVarWithIdentity _ mbIdentity _name
+      | Just binding <- lookupSpecializationBinding base mbIdentity -> Set.singleton (bindingInfoRef binding)
       | otherwise -> Set.empty
     BackendLit {} ->
       Set.empty
-    BackendLamWithIdentity _ mbIdentity name _ body ->
-      freeGlobalRefs base (Set.union (termBoundKeys mbIdentity name) bound) body
+    BackendLamWithIdentity _ mbIdentity _name _ body ->
+      freeGlobalRefs base (Set.union (termBoundKeys mbIdentity) bound) body
     BackendApp _ fun arg ->
       freeGlobalRefs base bound fun `Set.union` freeGlobalRefs base bound arg
-    BackendLetWithIdentity _ mbIdentity name _ rhs body ->
-      freeGlobalRefs base bound rhs `Set.union` freeGlobalRefs base (Set.union (termBoundKeys mbIdentity name) bound) body
+    BackendLetWithIdentity _ mbIdentity _name _ rhs body ->
+      freeGlobalRefs base bound rhs `Set.union` freeGlobalRefs base (Set.union (termBoundKeys mbIdentity) bound) body
     BackendTyAbs _ _ _ body ->
       freeGlobalRefs base bound body
     BackendTyApp _ fun _ ->
@@ -6844,9 +7932,9 @@ freeGlobalRefs base bound expr =
       freeGlobalRefs base bound payload
     BackendUnroll _ payload ->
       freeGlobalRefs base bound payload
-    BackendClosureWithParamIdentities _ _ captures params body ->
+    BackendClosureWithParamIdentities _ _ _ captures params body ->
       Set.unions (map (freeGlobalRefs base bound . backendClosureCaptureExpr) captures)
-        `Set.union` freeGlobalRefs base (Set.union (termBoundKeyRefs closureRefs) bound) body
+        `Set.union` freeGlobalRefs base (Set.union (termBoundKeyRefs (map fst closureRefs)) bound) body
       where
         closureRefs =
           [(backendClosureCaptureIdentity capture, backendClosureCaptureName capture) | capture <- captures]
@@ -6921,7 +8009,11 @@ firstDuplicate =
 
 specializationKey :: SpecRequest -> String
 specializationKey request =
-  srBindingName request ++ "\0" ++ intercalate "\0" (map backendTypeKey (srTypeArgs request))
+  specRequestBindingKey request ++ "\0" ++ intercalate "\0" (map backendTypeKey (srTypeArgs request))
+
+specRequestBindingKey :: SpecRequest -> String
+specRequestBindingKey request =
+  maybe (srBindingName request) symbolIdentityStableName (srBindingIdentity request)
 
 specializedFunctionName :: SpecRequest -> String
 specializedFunctionName request =
@@ -6929,7 +8021,39 @@ specializedFunctionName request =
 
 backendTypeKey :: BackendType -> String
 backendTypeKey =
-  ("t" ++) . intercalate "_" . map (flip showHex "" . ord) . show
+  ("t" ++) . intercalate "_" . map (flip showHex "" . ord) . canonicalBackendTypeKey
+
+canonicalBackendTypeKey :: BackendType -> String
+canonicalBackendTypeKey =
+  \case
+    BTVarWithIdentity identity name ->
+      "var(" ++ canonicalTypeBinderKey identity name ++ ")"
+    BTArrow dom cod ->
+      "arrow(" ++ canonicalBackendTypeKey dom ++ "," ++ canonicalBackendTypeKey cod ++ ")"
+    BTBaseWithIdentity identity base ->
+      "base(" ++ canonicalTypeHeadKey identity base ++ ")"
+    BTConWithIdentity identity base args ->
+      "con(" ++ canonicalTypeHeadKey identity base ++ "," ++ intercalate "," (map canonicalBackendTypeKey (NE.toList args)) ++ ")"
+    BTVarAppWithIdentity identity name args ->
+      "varapp(" ++ canonicalTypeBinderKey identity name ++ "," ++ intercalate "," (map canonicalBackendTypeKey (NE.toList args)) ++ ")"
+    BTForallWithIdentity identity name mbBound body ->
+      "forall(" ++ canonicalTypeBinderKey identity name ++ "," ++ maybe "_" canonicalBackendTypeKey mbBound ++ "," ++ canonicalBackendTypeKey body ++ ")"
+    BTMuWithIdentity identity name body ->
+      "mu(" ++ canonicalTypeBinderKey identity name ++ "," ++ canonicalBackendTypeKey body ++ ")"
+    BTBottom ->
+      "bottom"
+
+canonicalTypeBinderKey :: Maybe TypeBinderIdentity -> String -> String
+canonicalTypeBinderKey (Just identity) _ =
+  typeBinderIdentityStableName identity
+canonicalTypeBinderKey Nothing name =
+  "name:" ++ name
+
+canonicalTypeHeadKey :: Maybe SymbolIdentity -> BaseTy -> String
+canonicalTypeHeadKey (Just identity) _ =
+  symbolIdentityStableName identity
+canonicalTypeHeadKey Nothing (BaseTy name) =
+  "name:" ++ name
 
 lowerValueKindKey :: LowerValueKind -> String
 lowerValueKindKey =
@@ -6966,21 +8090,30 @@ functionTypeFromParts :: [BackendType] -> BackendType -> BackendType
 functionTypeFromParts params returnTy =
   foldr BTArrow returnTy params
 
-lowerMonomorphicBinding :: ProgramEnv -> BindingInfo -> Either BackendLLVMError LLVMFunction
-lowerMonomorphicBinding env binding =
-  lowerFunction env (biName binding) False (biForm binding)
+lowerFunctionJobs :: IdentityGenerator -> [IdentityGenerator -> Either BackendLLVMError (IdentityGenerator, LLVMFunction)] -> Either BackendLLVMError ([LLVMFunction], IdentityGenerator)
+lowerFunctionJobs generator0 jobs =
+  foldM runJob ([], generator0) jobs >>= \(functionsRev, generator') ->
+    Right (reverse functionsRev, generator')
+  where
+    runJob (functionsRev, generator) job = do
+      (generator', function) <- job generator
+      Right (function : functionsRev, generator')
 
-lowerSpecialization :: ProgramEnv -> Specialization -> Either BackendLLVMError LLVMFunction
-lowerSpecialization env specialization =
-  lowerFunction env (spFunctionName specialization) True (qualifiedSpecializationForm specialization)
+lowerMonomorphicBinding :: ProgramEnv -> BindingInfo -> IdentityGenerator -> Either BackendLLVMError (IdentityGenerator, LLVMFunction)
+lowerMonomorphicBinding env binding generator =
+  lowerFunction env generator (bindingInfoRef binding) (biName binding) False (biForm binding)
 
-lowerEvidenceWrapper :: ProgramEnv -> Wrapper -> Either BackendLLVMError LLVMFunction
-lowerEvidenceWrapper env wrapper =
-  lowerFunction env (wrapperFunctionName wrapper) True (qualifiedEvidenceWrapperForm wrapper)
+lowerSpecialization :: ProgramEnv -> Specialization -> IdentityGenerator -> Either BackendLLVMError (IdentityGenerator, LLVMFunction)
+lowerSpecialization env specialization generator =
+  lowerFunction env generator (spBindingRef specialization) (spFunctionName specialization) True (qualifiedSpecializationForm specialization)
 
-lowerFunctionWrapper :: ProgramEnv -> Wrapper -> Either BackendLLVMError LLVMFunction
-lowerFunctionWrapper env wrapper =
-  lowerFunction env (wrapperFunctionName wrapper) True (qualifiedFunctionWrapperForm wrapper)
+lowerEvidenceWrapper :: ProgramEnv -> Wrapper -> IdentityGenerator -> Either BackendLLVMError (IdentityGenerator, LLVMFunction)
+lowerEvidenceWrapper env wrapper generator =
+  lowerFunction env generator (wrapperBindingRef wrapper) (wrapperFunctionName wrapper) True (qualifiedEvidenceWrapperForm wrapper)
+
+lowerFunctionWrapper :: ProgramEnv -> Wrapper -> IdentityGenerator -> Either BackendLLVMError (IdentityGenerator, LLVMFunction)
+lowerFunctionWrapper env wrapper generator =
+  lowerFunction env generator (wrapperBindingRef wrapper) (wrapperFunctionName wrapper) True (qualifiedFunctionWrapperForm wrapper)
 
 collectClosureEntries :: ProgramBase -> [BindingInfo] -> [Specialization] -> [Wrapper] -> [Wrapper] -> [ClosureEntry]
 collectClosureEntries base reachable specializations evidenceWrappers functionWrappers =
@@ -6994,14 +8127,55 @@ requireUniqueClosureEntries entries =
   reverse <$> foldM includeEntry [] entries
   where
     includeEntry kept entry =
-      case filter ((== ceEntryName entry) . ceEntryName) kept of
-        [] ->
-          Right (entry : kept)
-        existing : _
+      case find (`sameClosureEntryRef` entry) kept of
+        Just existing
           | existing == entry ->
               Right kept
           | otherwise ->
-              Left (BackendLLVMInternalError ("duplicate closure entry after specialization: " ++ ceEntryName entry))
+              duplicateEntry
+        Nothing ->
+          case find ((== ceEntryName entry) . ceEntryName) kept of
+            Just {} -> duplicateEntry
+            Nothing -> Right (entry : kept)
+      where
+        duplicateEntry =
+          Left (BackendLLVMInternalError ("duplicate closure entry after specialization: " ++ ceEntryName entry))
+
+    sameClosureEntryRef left right =
+      closureEntryRefMatches (ceEntryIdentity left) (ceEntryName left) (ceEntryIdentity right) (ceEntryName right)
+
+assignGeneratedClosureEntryIdentities :: IdentityGenerator -> [ClosureEntry] -> (IdentityGenerator, [ClosureEntry])
+assignGeneratedClosureEntryIdentities =
+  mapAccumL assignEntry
+  where
+    assignEntry generator entry
+      | returnedPartialClosureEntry entry || ceEntryIdentity entry == Nothing =
+          let captureNames = map ccsName (ceCaptures entry)
+              paramNames = map fst (ceParams entry)
+              (generator', captureIdentities) = generatedLocalIdentities generator captureNames
+              (generator'', paramIdentities) = generatedLocalIdentities generator' paramNames
+              (entryIdentity, generator''') =
+                case ceEntryIdentity entry of
+                  Just identity -> (identity, generator'')
+                  Nothing -> freshIdentity generator''
+              identities =
+                generatedBackendTermEnv (zip (captureNames ++ paramNames) (captureIdentities ++ paramIdentities))
+           in ( generator''',
+                entry
+                  { ceEntryIdentity = Just entryIdentity,
+                    ceCaptures = zipWith setCaptureIdentity captureIdentities (ceCaptures entry),
+                    ceParamIdentities = paramIdentities,
+                    ceBody = rewriteBackendVarsByName identities (ceBody entry)
+                  }
+              )
+      | otherwise =
+          (generator, entry)
+
+    returnedPartialClosureEntry entry =
+      "__mlfp_returned_partial$" `isPrefixOf` ceEntryName entry
+
+    setCaptureIdentity identity capture =
+      capture {ccsIdentity = identity}
 
 qualifiedSpecializationForm :: Specialization -> FunctionForm
 qualifiedSpecializationForm specialization =
@@ -7031,9 +8205,9 @@ qualifyInstantiatedClosureEntriesWithParamKinds ownerName resolvedTypeArgs suppl
   where
     firstOrderParamKinds =
       [ suppliedKind
-      | (mbIdentity, paramName, paramTy) <- functionFormParamTriples form,
+      | (mbIdentity, _paramName, paramTy) <- functionFormParamTriples form,
         isFirstOrderFunctionPointerType paramTy,
-        Just suppliedKind <- [lookupLocalValueKind mbIdentity paramName suppliedParamKinds]
+        Just suppliedKind <- [lookupLocalValueKind mbIdentity suppliedParamKinds]
       ]
 
 qualifyClosureEntriesInExpr :: String -> BackendExpr -> BackendExpr
@@ -7052,8 +8226,8 @@ qualifyClosureEntriesInExpr ownerName =
           BackendApp resultTy (go fun) (go arg)
         BackendLetWithIdentity resultTy mbIdentity name bindingTy rhs body ->
           BackendLetWithIdentity resultTy mbIdentity name bindingTy (go rhs) (go body)
-        BackendTyAbs resultTy name mbBound body ->
-          BackendTyAbs resultTy name mbBound (go body)
+        BackendTyAbsWithIdentity resultTy identity name mbBound body ->
+          BackendTyAbsWithIdentity resultTy identity name mbBound (go body)
         BackendTyApp resultTy fun ty ->
           BackendTyApp resultTy (go fun) ty
         BackendConstructWithIdentity resultTy mbIdentity name args ->
@@ -7064,9 +8238,10 @@ qualifyClosureEntriesInExpr ownerName =
           BackendRoll resultTy (go payload)
         BackendUnroll resultTy payload ->
           BackendUnroll resultTy (go payload)
-        BackendClosureWithParamIdentities resultTy entryName captures params body ->
+        BackendClosureWithParamIdentities resultTy _entryIdentity entryName captures params body ->
           BackendClosureWithParamIdentities
             resultTy
+            Nothing
             (qualifiedClosureEntryName ownerName entryName)
             (map qualifyCapture captures)
             params
@@ -7101,28 +8276,27 @@ collectClosureEntriesInFormWithLocals base localForms form =
 
 collectClosureEntriesInFormWithParamKinds :: ProgramBase -> LocalFunctionForms -> LocalValueKinds -> FunctionForm -> [ClosureEntry]
 collectClosureEntriesInFormWithParamKinds base localForms suppliedParamKinds form =
-  collectClosureEntriesInExpr base (shadowLocalFunctionForms paramRefs localForms) paramValueKinds (ffBody form)
+  collectClosureEntriesInExpr base (shadowLocalFunctionForms (map fst paramRefs) localForms) paramValueKinds (ffBody form)
   where
     paramRefs = [(mbIdentity, name) | (mbIdentity, name, _) <- functionFormParamTriples form]
     paramValueKinds =
       foldr bindParam emptyLocalValueKinds (indexed (functionFormParamTriples form))
 
-    bindParam (index0, (mbIdentity, paramName, paramTy)) =
+    bindParam (index0, (mbIdentity, _paramName, paramTy)) =
       bindLocalValueKind
         mbIdentity
-        paramName
-        (fromMaybe (parameterValueKind (ffEvidenceParams form) index0 paramTy) (lookupLocalValueKind mbIdentity paramName suppliedParamKinds))
+        (fromMaybe (parameterValueKind (ffEvidenceParams form) index0 paramTy) (lookupLocalValueKind mbIdentity suppliedParamKinds))
 
 collectClosureEntriesInExpr :: ProgramBase -> LocalFunctionForms -> LocalValueKinds -> BackendExpr -> [ClosureEntry]
 collectClosureEntriesInExpr base localForms valueKinds expr =
   case expr of
     BackendVarWithIdentity {} -> []
     BackendLit {} -> []
-    BackendLamWithIdentity _ mbIdentity name paramTy body ->
+    BackendLamWithIdentity _ mbIdentity _name paramTy body ->
       collectClosureEntriesInExpr
         base
-        (deleteLocalFunctionForm mbIdentity name localForms)
-        (bindLocalValueKind mbIdentity name (localFunctionParameterValueKind Set.empty 0 paramTy) valueKinds)
+        (deleteLocalFunctionForm mbIdentity localForms)
+        (bindLocalValueKind mbIdentity (localFunctionParameterValueKind Set.empty 0 paramTy) valueKinds)
         body
     BackendApp _ fun arg ->
       case collectAdministrativeCallEntries of
@@ -7148,8 +8322,8 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
         bodyLocalForms = collectLetLocalForm localForms mbIdentity name bindingTy rhs
         bodyValueKinds =
           case letBoundValueKind Set.empty localForms valueKinds bindingTy rhs of
-            Just kind -> bindLocalValueKind mbIdentity name kind valueKinds
-            Nothing -> deleteLocalValueKind mbIdentity name valueKinds
+            Just kind -> bindLocalValueKind mbIdentity kind valueKinds
+            Nothing -> deleteLocalValueKind mbIdentity valueKinds
     BackendTyAbs _ _ _ _ -> []
     BackendTyApp {} ->
       case collectAdministrativeTypeAppEntries of
@@ -7164,16 +8338,17 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
         ++ collectCaseResultAdapterEntries resultTy (NE.toList alternatives)
     BackendRoll _ payload -> collectClosureEntriesInExpr base localForms valueKinds payload
     BackendUnroll _ payload -> collectClosureEntriesInExpr base localForms valueKinds payload
-    BackendClosureWithParamIdentities resultTy entryName captures params body ->
-      closureEntriesFor resultTy entryName captures params body
+    BackendClosureWithParamIdentities resultTy entryIdentity entryName captures params body ->
+      closureEntriesFor resultTy entryIdentity entryName captures params body
     BackendClosure resultTy entryName captures params body ->
-      closureEntriesFor resultTy entryName captures (backendClosureParams params) body
+      closureEntriesFor resultTy Nothing entryName captures (backendClosureParams params) body
     BackendClosureCall _ fun args ->
       collectClosureEntriesInExpr base localForms valueKinds fun ++ concatMap (collectClosureEntriesInExpr base localForms valueKinds) args
   where
-    closureEntriesFor resultTy entryName captures params body =
+    closureEntriesFor resultTy entryIdentity entryName captures params body =
       ClosureEntry
         { ceFunctionType = resultTy,
+          ceEntryIdentity = entryIdentity,
           ceEntryName = entryName,
           ceCaptures = captureSlots,
           ceParams = [(backendClosureParamName param, backendClosureParamType param) | param <- params],
@@ -7182,30 +8357,29 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
           ceBody = body
         }
         : concatMap (collectClosureEntriesInExpr base localForms valueKinds . backendClosureCaptureExpr) captures
-          ++ collectClosureEntriesInExpr base (shadowLocalFunctionForms closureRefs localForms) closureBodyValueKinds body
+          ++ collectClosureEntriesInExpr base (shadowLocalFunctionForms (map fst closureRefs) localForms) closureBodyValueKinds body
       where
         captureSlots = map (closureCaptureSlot localForms valueKinds) captures
         closureRefs =
           [(backendClosureCaptureIdentity capture, backendClosureCaptureName capture) | capture <- captures]
             ++ [(backendClosureParamIdentity param, backendClosureParamName param) | param <- params]
         closureBodyValueKinds =
-          closureLocalValueKinds `unionLocalValueKinds` shadowLocalValueKinds closureRefs valueKinds
+          closureLocalValueKinds `unionLocalValueKinds` shadowLocalValueKinds (map fst closureRefs) valueKinds
         closureLocalValueKinds =
           foldr bindClosureParam closureCaptureValueKinds (indexed params)
         closureCaptureValueKinds =
           foldr bindClosureCapture emptyLocalValueKinds captureSlots
         bindClosureCapture capture =
-          bindLocalValueKind (ccsIdentity capture) (ccsName capture) (ccsValueKind capture)
+          bindLocalValueKind (ccsIdentity capture) (ccsValueKind capture)
         bindClosureParam (index0, param) =
           bindLocalValueKind
             (backendClosureParamIdentity param)
-            (backendClosureParamName param)
             (parameterValueKind Set.empty index0 (backendClosureParamType param))
 
     collectAppliedLocalClosureEntries =
       case collectCall expr of
-        Just (BackendVarWithIdentity _ mbIdentity name, typeArgs, args)
-          | Just entry <- lookupLocalFunctionFormEntry mbIdentity name localForms ->
+        Just (BackendVarWithIdentity _ mbIdentity _name, typeArgs, args)
+          | Just entry <- lookupLocalFunctionFormEntry mbIdentity localForms ->
               collectInstantiatedLocalClosureEntries (lffeName entry) (lffeForm entry) typeArgs args
         _ -> []
 
@@ -7221,10 +8395,10 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
 
     returnedPartialHeadForm =
       \case
-        BackendVarWithIdentity _ mbIdentity name
-          | Just form <- lookupLocalFunctionForm mbIdentity name localForms ->
+        BackendVarWithIdentity _ mbIdentity _name
+          | Just form <- lookupLocalFunctionForm mbIdentity localForms ->
               Just form
-          | Just binding <- lookupNonLocalBindingInfo base mbIdentity name ->
+          | Just binding <- lookupNonLocalBindingInfo base mbIdentity ->
               Just (biForm binding)
         headExpr@(BackendLam _ _ _ _) ->
           Just (functionFormFromExpr headExpr)
@@ -7267,6 +8441,7 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
     returnedPartialEntry calleeKind calleeTy suppliedParamTys remainingParamTys finalReturnTy suppliedKinds resultTy =
       ClosureEntry
         { ceFunctionType = resultTy,
+          ceEntryIdentity = Nothing,
           ceEntryName = returnedPartialClosureEntryName calleeKind calleeTy (length suppliedParamTys) suppliedKinds resultTy,
           ceCaptures =
             ClosureCaptureSlot Nothing returnedPartialCalleeCaptureName calleeTy calleeKind
@@ -7319,8 +8494,8 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
 
     collectTypeAppliedClosureEntries =
       case collectTyApps expr of
-        (BackendVarWithIdentity _ mbIdentity name, typeArgs)
-          | Just entry <- lookupLocalFunctionFormEntry mbIdentity name localForms ->
+        (BackendVarWithIdentity _ mbIdentity _name, typeArgs)
+          | Just entry <- lookupLocalFunctionFormEntry mbIdentity localForms ->
               collectInstantiatedLocalClosureEntries (lffeName entry) (lffeForm entry) typeArgs []
         (fun@(BackendTyAbs _ _ _ _), typeArgs) ->
           collectInstantiatedClosureEntries
@@ -7360,7 +8535,7 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
           | not (null (ffTypeBinders form)) || not (null (ffParams form)) ->
               bindLocalFunctionForm mbIdentity name form localForms0
         _ ->
-          deleteLocalFunctionForm mbIdentity name localForms0
+          deleteLocalFunctionForm mbIdentity localForms0
 
     letBoundValueKind visitedGlobals localForms0 valueKinds0 bindingTy rhs =
       case aliasValueKind visitedGlobals localForms0 valueKinds0 rhs of
@@ -7402,16 +8577,15 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
           _ -> False
 
     captureKnownFunctionPointer valueKinds0 capture =
-      lookupLocalValueKind (backendClosureCaptureIdentity capture) (backendClosureCaptureName capture) valueKinds0 == Just LowerFunctionPointer
+      lookupLocalValueKind (backendClosureCaptureIdentity capture) valueKinds0 == Just LowerFunctionPointer
         && isFunctionLikeBackendType (backendClosureCaptureType capture)
 
     suppliedArgumentValueKinds instantiated args =
       foldr bindArg emptyLocalValueKinds (indexed (zip (functionFormParamTriples instantiated) args))
       where
-        bindArg (index0, ((mbIdentity, paramName, paramTy), arg)) =
+        bindArg (index0, ((mbIdentity, _paramName, paramTy), arg)) =
           bindLocalValueKind
             mbIdentity
-            paramName
             (argumentValueKind localForms valueKinds (ffEvidenceParams instantiated) index0 paramTy arg)
 
     argumentValueKind localForms0 valueKinds0 evidenceParams index0 paramTy arg
@@ -7447,8 +8621,8 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
               let localForms' = collectLetLocalForm localForms0 mbIdentity name bindingTy rhs
                   valueKinds' =
                     case letBoundValueKind visitedGlobals localForms0 valueKinds0 bindingTy rhs of
-                      Just kind -> bindLocalValueKind mbIdentity name kind valueKinds0
-                      Nothing -> deleteLocalValueKind mbIdentity name valueKinds0
+                      Just kind -> bindLocalValueKind mbIdentity kind valueKinds0
+                      Nothing -> deleteLocalValueKind mbIdentity valueKinds0
                in aliasValueKind visitedGlobals localForms' valueKinds' body
         _ ->
           Nothing
@@ -7475,8 +8649,8 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
                 localForms' = collectLetLocalForm localForms0 mbIdentity name bindingTy rhs
                 valueKinds' =
                   case letBoundValueKind visitedGlobals localForms0 valueKinds0 bindingTy rhs of
-                    Just kind -> bindLocalValueKind mbIdentity name kind valueKinds0
-                    Nothing -> deleteLocalValueKind mbIdentity name valueKinds0
+                    Just kind -> bindLocalValueKind mbIdentity kind valueKinds0
+                    Nothing -> deleteLocalValueKind mbIdentity valueKinds0
             BackendCase _ scrutinee alternatives ->
               combineValueKinds
                 (backendExprType expr0)
@@ -7492,21 +8666,21 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
             _ ->
               valueKindForType (backendExprType expr0)
 
-    variableValueKind visitedGlobals localForms0 valueKinds0 mbIdentity name typeArgs =
-      case lookupLocalValueKind mbIdentity name valueKinds0 of
+    variableValueKind visitedGlobals localForms0 valueKinds0 mbIdentity _name typeArgs =
+      case lookupLocalValueKind mbIdentity valueKinds0 of
         Just kind ->
           Just kind
         Nothing
-          | Just _ <- lookupLocalFunctionForm mbIdentity name localForms0 ->
+          | Just _ <- lookupLocalFunctionForm mbIdentity localForms0 ->
               Just LowerFunctionPointer
           | otherwise ->
-              case lookupNonLocalBindingInfo base mbIdentity name of
+              case lookupNonLocalBindingInfo base mbIdentity of
                 Just binding ->
                   case instantiateFunctionFormWithTypeArgs "closure capture classification" (biForm binding) typeArgs [] of
                     Right (_, form)
                       | null (ffParams form),
                         isFunctionLikeBackendType (ffReturnType form) ->
-                          Just (nullaryGlobalReturnValueKind visitedGlobals (biName binding) (ffReturnType form) form)
+                          Just (nullaryGlobalReturnValueKind visitedGlobals (bindingInfoRef binding) (ffReturnType form) form)
                     _ ->
                       Just LowerFunctionPointer
                 Nothing ->
@@ -7521,18 +8695,18 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
           peStringGlobals = Map.empty
         }
 
-    nullaryGlobalReturnValueKind visitedGlobals name returnTy form
-      | Set.member name visitedGlobals =
+    nullaryGlobalReturnValueKind visitedGlobals ref returnTy form
+      | Set.member ref visitedGlobals =
           valueKindForType returnTy
       | otherwise =
-          backendExprValueKindWith valueKindEnv (Set.insert name visitedGlobals) emptyLocalValueKinds (ffBody form)
+          backendExprValueKindWith valueKindEnv (Set.insert ref visitedGlobals) emptyLocalValueKinds (ffBody form)
 
     collectAlternativeEntries alternative =
       let binderRefs = patternBinderRefs (backendAltPattern alternative)
        in collectClosureEntriesInExpr
             base
-            (shadowLocalFunctionForms binderRefs localForms)
-            (shadowLocalValueKinds binderRefs valueKinds)
+            (shadowLocalFunctionForms (map fst binderRefs) localForms)
+            (shadowLocalValueKinds (map fst binderRefs) valueKinds)
             (backendAltBody alternative)
 
     alternativeValueKinds valueKinds0 scrutinee alternative =
@@ -7552,7 +8726,6 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
             bindPatternField (binder, fieldTy) =
               bindLocalValueKind
                 (backendPatternBinderIdentity binder)
-                (backendPatternBinderName binder)
                 (constructorFieldStoredValueKind fieldTy)
 
     collectCaseResultAdapterEntries resultTy alternatives0 =
@@ -7586,17 +8759,31 @@ closureEntryOwnerName name typeArgs =
   name ++ concatMap (("$" ++) . backendTypeKey) typeArgs
 
 evidenceWrapperForm :: Wrapper -> FunctionForm
-evidenceWrapperForm = wrapperForm "__mlfp_evidence_arg" False
+evidenceWrapperForm = wrapperForm evidenceWrapperArgPrefix False
 
 functionWrapperForm :: Wrapper -> FunctionForm
-functionWrapperForm = wrapperForm "__mlfp_function_arg" False
+functionWrapperForm = wrapperForm functionWrapperArgPrefix False
+
+evidenceWrapperArgPrefix :: String
+evidenceWrapperArgPrefix =
+  "__mlfp_evidence_arg"
+
+functionWrapperArgPrefix :: String
+functionWrapperArgPrefix =
+  "__mlfp_function_arg"
+
+wrapperParamNames :: String -> BackendType -> [String]
+wrapperParamNames argPrefix expectedTy =
+  take (length params) [argPrefix ++ show index0 | index0 <- [(0 :: Int) ..]]
+  where
+    (params, _) = collectArrowsType expectedTy
 
 wrapperForm :: String -> Bool -> Wrapper -> FunctionForm
 wrapperForm argPrefix paramsAreEvidence wrapper =
   FunctionForm
     { ffTypeBinders = [],
       ffParams = zip paramNames params,
-      ffParamIdentities = replicate (length params) Nothing,
+      ffParamIdentities = paramIdentities,
       ffEvidenceParams =
         if paramsAreEvidence
           then Set.fromList [0 .. length params - 1]
@@ -7606,8 +8793,9 @@ wrapperForm argPrefix paramsAreEvidence wrapper =
     }
   where
     (params, returnTy) = collectArrowsType (wrapperExpectedType wrapper)
-    paramNames = [argPrefix ++ show index0 | index0 <- [(0 :: Int) ..]]
-    paramExprs = [BackendVar paramTy name | (name, paramTy) <- zip paramNames params]
+    paramNames = wrapperParamNames argPrefix (wrapperExpectedType wrapper)
+    paramIdentities = take (length params) (wrapperParamIdentities wrapper ++ repeat Nothing)
+    paramExprs = [BackendVarWithIdentity paramTy mbIdentity name | (mbIdentity, name, paramTy) <- zip3 paramIdentities paramNames params]
     body = applyWrapperArgs (wrapperExpr wrapper) (wrapperExpectedType wrapper) paramExprs
 
 applyWrapperArgs :: BackendExpr -> BackendType -> [BackendExpr] -> BackendExpr
@@ -7635,15 +8823,15 @@ backendExprUsesClosureCallPath expr =
     BackendClosureCallableHead _ -> True
     _ -> False
 
-lowerFunction :: ProgramEnv -> String -> Bool -> FunctionForm -> Either BackendLLVMError LLVMFunction
-lowerFunction env name private form = do
+lowerFunction :: ProgramEnv -> IdentityGenerator -> BackendBindingRef -> String -> Bool -> FunctionForm -> Either BackendLLVMError (IdentityGenerator, LLVMFunction)
+lowerFunction env generator bindingRef name private form = do
   unless (null (ffTypeBinders form)) $
     Left (BackendLLVMUnsupportedExpression ("binding " ++ show name) "unspecialized polymorphic binding")
   returnTy <- lowerRuntimeValueType env ("return type of " ++ name) (ffReturnType form)
   params <- traverse lowerParam (indexed (ffParams form))
-  let initialExprEnv = initialFunctionEnv name form params
-  result <-
-    evalStateT
+  let initialExprEnv = initialFunctionEnv bindingRef form params
+  (result, state') <-
+    runStateT
       ( do
           bodyValue <- lowerExpr env initialExprEnv ("binding " ++ show name) (ffBody form)
           unless (lvLLVMType bodyValue == returnTy) $
@@ -7651,49 +8839,58 @@ lowerFunction env name private form = do
           finishCurrentBlock (LLVMRet returnTy (lvOperand bodyValue))
           gets (reverse . fsCompletedBlocks)
       )
-      initialFunctionState
+      (initialFunctionState generator)
   pure
-    LLVMFunction
-      { llvmFunctionName = name,
-        llvmFunctionPrivate = private,
-        llvmFunctionReturnType = returnTy,
-        llvmFunctionParameters = params,
-        llvmFunctionBlocks = result
-      }
+    ( fsIdentityGenerator state',
+      LLVMFunction
+        { llvmFunctionName = name,
+          llvmFunctionPrivate = private,
+          llvmFunctionReturnType = returnTy,
+          llvmFunctionParameters = params,
+          llvmFunctionBlocks = result
+        }
+    )
   where
     lowerParam (index0, (paramName, paramTy)) = do
       llvmTy <- lowerFunctionParameterType env ("parameter " ++ show paramName ++ " of " ++ name) (ffEvidenceParams form) index0 paramTy
       pure (LLVMParameter llvmTy paramName)
 
-lowerClosureEntry :: ProgramEnv -> ClosureEntry -> Either BackendLLVMError LLVMFunction
-lowerClosureEntry env entry = do
+lowerClosureEntry :: ProgramEnv -> ClosureEntry -> IdentityGenerator -> Either BackendLLVMError (IdentityGenerator, LLVMFunction)
+lowerClosureEntry env entry generator = do
   returnTy <- lowerBackendType env ("return type of closure " ++ ceEntryName entry) (closureReturnType entry)
-  params <- traverse lowerParam (indexed (ceParams entry))
+  let rawParamTriples = closureEntryParamTriples entry
+      paramNames = Set.fromList [name | (identity, name, _) <- rawParamTriples, not (hasLocalIdentity identity)]
+      reserved = freeBackendExprVars (ceBody entry) `Set.difference` paramNames
+      (paramTriples, renaming) = freshenLambdaParams reserved rawParamTriples
+      body = renameBackendVars renaming (ceBody entry)
+  params <- traverse lowerParam (indexed [(paramName, paramTy) | (_, paramName, paramTy) <- paramTriples])
   let envParameter = LLVMParameter LLVMPtr "__mlfp_env"
       initialExprEnv =
         foldl'
           bindParam
           emptyExprEnv
-          (indexed (zip (closureEntryParamTriples entry) params))
-  result <-
-    evalStateT
+          (indexed (zip paramTriples params))
+  (result, state') <-
+    runStateT
       ( do
           bodyEnv <- loadClosureCaptures initialExprEnv
-          bodyValue <- lowerExpr env bodyEnv ("closure " ++ show (ceEntryName entry)) (ceBody entry)
+          bodyValue <- lowerExpr env bodyEnv ("closure " ++ show (ceEntryName entry)) body
           unless (lvLLVMType bodyValue == returnTy) $
             liftEither (BackendLLVMInternalError ("closure return type mismatch in " ++ ceEntryName entry))
           finishCurrentBlock (LLVMRet returnTy (lvOperand bodyValue))
           gets (reverse . fsCompletedBlocks)
       )
-      initialFunctionState
+      (initialFunctionState generator)
   pure
-    LLVMFunction
-      { llvmFunctionName = ceEntryName entry,
-        llvmFunctionPrivate = True,
-        llvmFunctionReturnType = returnTy,
-        llvmFunctionParameters = envParameter : params,
-        llvmFunctionBlocks = result
-      }
+    ( fsIdentityGenerator state',
+      LLVMFunction
+        { llvmFunctionName = ceEntryName entry,
+          llvmFunctionPrivate = True,
+          llvmFunctionReturnType = returnTy,
+          llvmFunctionParameters = envParameter : params,
+          llvmFunctionBlocks = result
+        }
+    )
   where
     closureReturnType closureEntry =
       case collectArrowsType (ceFunctionType closureEntry) of
@@ -7706,7 +8903,6 @@ lowerClosureEntry env entry = do
     bindParam exprEnv (index0, ((mbIdentity, paramName, paramTy), param)) =
       bindExprEnvValue
         mbIdentity
-        paramName
         ( LowerValue
             paramTy
             (llvmParameterType param)
@@ -7728,7 +8924,6 @@ lowerClosureEntry env entry = do
       pure $
         bindExprEnvValue
           (ccsIdentity capture)
-          captureName
           (LowerValue captureTy llvmTy loaded (ccsValueKind capture) Nothing)
           exprEnv0
 
@@ -7807,17 +9002,17 @@ containsInlineOnlyEvidenceParameterCall form =
         || case expr of
           BackendVarWithIdentity {} -> False
           BackendLit {} -> False
-          BackendLamWithIdentity _ mbIdentity name _ body ->
-            go evidenceParams (localFunctions `Set.difference` termBoundKeys mbIdentity name) body
+          BackendLamWithIdentity _ mbIdentity _name _ body ->
+            go evidenceParams (localFunctions `Set.difference` (termBoundKeys mbIdentity)) body
           BackendApp _ fun arg ->
             go evidenceParams localFunctions fun || go evidenceParams localFunctions arg
-          BackendLetWithIdentity _ mbIdentity name bindingTy rhs body ->
+          BackendLetWithIdentity _ mbIdentity _name bindingTy rhs body ->
             let rhsForm = functionFormFromExpected bindingTy rhs
                 rhsIsLocalFunction = not (null (ffTypeBinders rhsForm)) || not (null (ffParams rhsForm))
                 localFunctions' =
                   if rhsIsLocalFunction
-                    then Set.union (termBoundKeys mbIdentity name) localFunctions
-                    else localFunctions `Set.difference` termBoundKeys mbIdentity name
+                    then Set.union (termBoundKeys mbIdentity) localFunctions
+                    else localFunctions `Set.difference` (termBoundKeys mbIdentity)
              in go evidenceParams localFunctions rhs || go evidenceParams localFunctions' body
           BackendTyAbs _ _ _ body ->
             go evidenceParams localFunctions body
@@ -7832,11 +9027,11 @@ containsInlineOnlyEvidenceParameterCall form =
             go evidenceParams localFunctions payload
           BackendUnroll _ payload ->
             go evidenceParams localFunctions payload
-          BackendClosureWithParamIdentities _ _ captures params body ->
+          BackendClosureWithParamIdentities _ _ _ captures params body ->
             any (go evidenceParams localFunctions . backendClosureCaptureExpr) captures
               || go
                 evidenceParams
-                (localFunctions `Set.difference` termBoundKeyRefs closureRefs)
+                (localFunctions `Set.difference` (termBoundKeyRefs (map fst closureRefs)))
                 body
             where
               closureRefs =
@@ -7850,8 +9045,8 @@ containsInlineOnlyEvidenceParameterCall form =
 
     callRequiresInline evidenceParams localFunctions expr =
       case collectCall expr of
-        Just (BackendVarWithIdentity calleeTy mbIdentity name, typeArgs, args)
-          | not (Set.null (termReferenceKeys mbIdentity name `Set.intersection` evidenceParams)) ->
+        Just (BackendVarWithIdentity calleeTy mbIdentity _name, typeArgs, args)
+          | not (Set.null (termReferenceKeys mbIdentity `Set.intersection` evidenceParams)) ->
               case instantiateFunctionFormWithTypeArgs "inline evidence parameter call" (functionFormFromType calleeTy) typeArgs args of
                 Right (_, callForm) ->
                   any (uncurry (argumentRequiresInline localFunctions)) (zip (ffParams callForm) args)
@@ -7865,26 +9060,26 @@ containsInlineOnlyEvidenceParameterCall form =
 
     functionExpressionRequiresInline localFunctions arg =
       case collectTyApps arg of
-        (BackendVarWithIdentity _ mbIdentity name, _) ->
-          not (Set.null (termReferenceKeys mbIdentity name `Set.intersection` localFunctions))
+        (BackendVarWithIdentity _ mbIdentity _name, _) ->
+          not (Set.null (termReferenceKeys mbIdentity `Set.intersection` localFunctions))
         _ ->
           case arg of
             BackendLam _ _ _ _ -> True
             BackendTyAbs _ _ _ _ -> True
-            BackendLetWithIdentity _ mbIdentity name bindingTy rhs body ->
+            BackendLetWithIdentity _ mbIdentity _name bindingTy rhs body ->
               let rhsForm = functionFormFromExpected bindingTy rhs
                   localFunctions' =
                     if not (null (ffTypeBinders rhsForm)) || not (null (ffParams rhsForm))
-                      then Set.union (termBoundKeys mbIdentity name) localFunctions
-                      else localFunctions `Set.difference` termBoundKeys mbIdentity name
+                      then Set.union (termBoundKeys mbIdentity) localFunctions
+                      else localFunctions `Set.difference` (termBoundKeys mbIdentity)
                in functionExpressionRequiresInline localFunctions' body
             _ -> False
 
 evidenceParameterKeys :: FunctionForm -> Set TermBoundKey
 evidenceParameterKeys form =
   Set.unions
-    [ termBoundKeys mbIdentity name
-    | (index0, (mbIdentity, name, ty)) <- indexed (functionFormParamTriples form),
+    [ termBoundKeys mbIdentity
+    | (index0, (mbIdentity, _name, ty)) <- indexed (functionFormParamTriples form),
       isEvidenceArgument (ffEvidenceParams form) index0 ty
     ]
 
@@ -7894,27 +9089,27 @@ hasTypeBinders =
     BTForall {} -> True
     _ -> False
 
-initialFunctionState :: FunctionState
-initialFunctionState =
+initialFunctionState :: IdentityGenerator -> FunctionState
+initialFunctionState generator =
   FunctionState
     { fsNextLocal = 0,
       fsNextBlock = 0,
+      fsIdentityGenerator = generator,
       fsCurrentLabel = "entry",
       fsCurrentInstructions = [],
       fsCompletedBlocks = []
     }
 
-initialFunctionEnv :: String -> FunctionForm -> [LLVMParameter] -> ExprEnv
-initialFunctionEnv name form params =
+initialFunctionEnv :: BackendBindingRef -> FunctionForm -> [LLVMParameter] -> ExprEnv
+initialFunctionEnv bindingRef form params =
   foldl'
     bindParam
-    (emptyExprEnv {eeActiveGlobalInlines = Set.singleton name})
+    (emptyExprEnv {eeActiveGlobalInlines = Set.singleton bindingRef})
     (indexed (zip (functionFormParamTriples form) params))
   where
     bindParam exprEnv (index0, ((mbIdentity, paramName, paramTy), param)) =
       bindExprEnvValue
         mbIdentity
-        paramName
         ( LowerValue
             paramTy
             (llvmParameterType param)
@@ -7958,7 +9153,7 @@ lowerExpr env exprEnv context expr =
       lowerRollLike env exprEnv context resultTy payload "roll"
     BackendUnroll resultTy payload ->
       lowerRollLike env exprEnv context resultTy payload "unroll"
-    BackendClosureWithParamIdentities resultTy entryName captures _ _ ->
+    BackendClosureWithParamIdentities resultTy _ entryName captures _ _ ->
       lowerClosureValue env exprEnv context resultTy entryName captures
     BackendClosureCall resultTy fun args ->
       lowerClosureCall env exprEnv context resultTy fun args
@@ -7967,13 +9162,15 @@ lowerTyApp :: ProgramEnv -> ExprEnv -> String -> BackendExpr -> LowerM LowerValu
 lowerTyApp env exprEnv context expr =
   case collectTyApps expr of
     (BackendVarWithIdentity _ mbIdentity name, typeArgs)
-      | Just localFunction <- lookupExprEnvLocalFunction mbIdentity name exprEnv ->
+      | Just localFunction <- lookupExprEnvLocalFunction mbIdentity exprEnv ->
           lowerLocalFunctionValue env context (backendExprType expr) name localFunction typeArgs
-      | Just binding <- lookupNonLocalBindingInfo (peBase env) mbIdentity name,
+      | Just binding <- lookupNonLocalBindingInfo (peBase env) mbIdentity,
         not (null (ffTypeBinders (biForm binding))) ->
           lowerGlobalValue env exprEnv context (backendExprType expr) (biName binding) binding typeArgs
-      | Set.member name ioPrimitiveNames ->
-          resolveIOPrimitiveAsValue (backendExprType expr) name
+      | Just primitiveName <- ioPrimitiveRuntimeName mbIdentity name ->
+          resolveIOPrimitiveAsValue (backendExprType expr) primitiveName
+      | Just primitiveName <- nativePrimitiveRuntimeName mbIdentity name ->
+          resolveNativePrimitiveAsValue (backendExprType expr) primitiveName
     (fun, typeArgs) ->
       lowerDirectFunctionValue env exprEnv context (backendExprType expr) fun typeArgs
 
@@ -8086,25 +9283,24 @@ bindLet :: ProgramEnv -> ExprEnv -> String -> Maybe IdDetails -> String -> Backe
 bindLet env exprEnv context mbIdentity name rhs =
   case callablePointerAliasValue exprEnv rhs of
     Just value ->
-      pure (bindExprEnvValue mbIdentity name value exprEnv)
-    Nothing ->
-      case functionFormFromExpected (backendExprType rhs) rhs of
-        form
-          | not (null (ffTypeBinders form)) || not (null (ffParams form)) ->
-              pure $
-                bindExprEnvLocalFunction
-                  mbIdentity
-                  name
-                  LocalFunction
-                    { lfName = name,
-                      lfForm = form,
-                      lfCapturedEnv = exprEnv,
-                      lfStoredReference = Just (backendExprType rhs, rhs)
-                    }
-                  exprEnv
-        _ -> do
+      pure (bindExprEnvValue mbIdentity value exprEnv)
+    Nothing -> do
+      form <- functionFormFromExpectedM (backendExprType rhs) rhs
+      if not (null (ffTypeBinders form)) || not (null (ffParams form))
+        then
+          pure $
+            bindExprEnvLocalFunction
+              mbIdentity
+              LocalFunction
+                { lfName = name,
+                  lfForm = form,
+                  lfCapturedEnv = exprEnv,
+                  lfStoredReference = Just (backendExprType rhs, rhs)
+                }
+              exprEnv
+        else do
           value <- lowerExpr env exprEnv (context ++ ", let " ++ show name) rhs
-          pure (bindExprEnvValue mbIdentity name value exprEnv)
+          pure (bindExprEnvValue mbIdentity value exprEnv)
 
 callablePointerAliasValue :: ExprEnv -> BackendExpr -> Maybe LowerValue
 callablePointerAliasValue =
@@ -8123,9 +9319,9 @@ closurePointerAliasValue =
 pointerAliasValue :: (LowerValue -> Bool) -> ExprEnv -> BackendExpr -> Maybe LowerValue
 pointerAliasValue matches exprEnv =
   \case
-    BackendVarWithIdentity ty mbIdentity name
+    BackendVarWithIdentity ty mbIdentity _name
       | isFunctionLikeBackendType ty,
-        Just value <- lookupExprEnvValue mbIdentity name exprEnv,
+        Just value <- lookupExprEnvValue mbIdentity exprEnv,
         lvLLVMType value == LLVMPtr,
         matches value ->
           Just value {lvBackendType = ty}
@@ -8133,33 +9329,36 @@ pointerAliasValue matches exprEnv =
       | isFunctionLikeBackendType ty,
         Just value <- pointerAliasValue matches exprEnv fun ->
           Just value {lvBackendType = ty}
-    BackendLetWithIdentity ty mbIdentity name bindingTy rhs body
+    BackendLetWithIdentity ty mbIdentity _name bindingTy rhs body
       | isFunctionLikeBackendType ty ->
           let exprEnvForBody =
                 case pointerAliasValue matches exprEnv rhs of
                   Just value ->
-                    bindExprEnvValue mbIdentity name (value {lvBackendType = bindingTy}) exprEnv
+                    bindExprEnvValue mbIdentity (value {lvBackendType = bindingTy}) exprEnv
                   Nothing ->
-                    deleteExprEnvBinding mbIdentity name exprEnv
+                    deleteExprEnvBinding mbIdentity exprEnv
            in pointerAliasValue matches exprEnvForBody body
     _ ->
       Nothing
 
 lowerVar :: ProgramEnv -> ExprEnv -> String -> BackendType -> Maybe IdDetails -> String -> LowerM LowerValue
 lowerVar env exprEnv context ty mbIdentity name =
-  case lookupExprEnvValue mbIdentity name exprEnv of
+  case lookupExprEnvValue mbIdentity exprEnv of
     Just value -> pure value
     Nothing ->
-      case lookupExprEnvLocalFunction mbIdentity name exprEnv of
+      case lookupExprEnvLocalFunction mbIdentity exprEnv of
         Just localFunction ->
           lowerLocalFunctionValue env context ty name localFunction []
         Nothing ->
-          case lookupNonLocalBindingInfo (peBase env) mbIdentity name of
+          case lookupNonLocalBindingInfo (peBase env) mbIdentity of
             Just binding ->
               lowerGlobalValue env exprEnv context ty (biName binding) binding []
             Nothing
-              | Set.member name ioPrimitiveNames ->
-                  resolveIOPrimitiveAsValue ty name
+              | Just primitiveName <- ioPrimitiveRuntimeName mbIdentity name ->
+                  resolveIOPrimitiveAsValue ty primitiveName
+            Nothing
+              | Just primitiveName <- nativePrimitiveRuntimeName mbIdentity name ->
+                  resolveNativePrimitiveAsValue ty primitiveName
             Nothing ->
               liftEither (BackendLLVMUnknownFunction name)
 
@@ -8211,7 +9410,7 @@ lowerGlobalValue env exprEnv context resultTy name binding typeArgs =
       let actualTy = functionTypeFromForm instantiated
       requireEvidenceFunctionType context functionContext expectedTy actualTy
       functionName <- globalFunctionName env context binding0 resolvedTypeArgs
-      pure (functionPointerValue expectedTy (LLVMGlobalRef LLVMPtr functionName))
+      pure (functionPointerValueForBinding expectedTy binding0 resolvedTypeArgs (LLVMGlobalRef LLVMPtr functionName))
 
 residualZeroArityPolymorphism :: String -> [BackendType] -> FunctionForm -> Maybe BackendLLVMError
 residualZeroArityPolymorphism context typeArgs form
@@ -8285,8 +9484,8 @@ lowerClosureValue env exprEnv context resultTy entryName captures = do
 
     captureExprNamesGlobalClosureValue capture =
       case collectTyApps (backendClosureCaptureExpr capture) of
-        (BackendVarWithIdentity _ mbIdentity name, typeArgs)
-          | Just binding <- lookupNonLocalBindingInfo (peBase env) mbIdentity name,
+        (BackendVarWithIdentity _ mbIdentity _name, typeArgs)
+          | Just binding <- lookupNonLocalBindingInfo (peBase env) mbIdentity,
             Right (_, form) <- instantiateFunctionFormWithTypeArgs context (biForm binding) typeArgs [],
             null (ffParams form),
             alphaEqBackendType (backendClosureCaptureType capture) (ffReturnType form),
@@ -8310,7 +9509,7 @@ lowerClosureCall :: ProgramEnv -> ExprEnv -> String -> BackendType -> BackendExp
 lowerClosureCall env exprEnv context resultTy fun args = do
   case collectTyApps fun of
     (BackendVarWithIdentity _ mbIdentity name, typeArgs)
-      | Just localFunction <- lookupExprEnvLocalFunction mbIdentity name exprEnv ->
+      | Just localFunction <- lookupExprEnvLocalFunction mbIdentity exprEnv ->
           lowerLocalFunctionCall env exprEnv context resultTy name localFunction typeArgs args
     _ ->
       lowerClosurePointerCall
@@ -8448,11 +9647,11 @@ lowerCall env exprEnv context expr =
     Just (headExpr, typeArgs, args) ->
       case headExpr of
         BackendVarWithIdentity _ mbIdentity name ->
-          case lookupExprEnvLocalFunction mbIdentity name exprEnv of
+          case lookupExprEnvLocalFunction mbIdentity exprEnv of
             Just localFunction ->
               lowerLocalFunctionCall env exprEnv context (backendExprType expr) name localFunction typeArgs args
             Nothing ->
-              case lookupExprEnvValue mbIdentity name exprEnv of
+              case lookupExprEnvValue mbIdentity exprEnv of
                 Just value
                   | isFunctionLikeBackendType (lvBackendType value),
                     lvValueKind value == LowerClosureRecord ->
@@ -8488,11 +9687,11 @@ lowerIndirectValueCall env exprEnv context name callee typeArgs args = do
     liftEither (BackendLLVMArityMismatch name (length (ffParams form)) (length args))
   case indirectCalleeFunctionForm env callee of
     Just calleeForm0 -> do
-      calleeForm <- instantiateFunctionFormM context calleeForm0 typeArgs args
-      if requiresInlineCall calleeForm
+      instantiatedCalleeForm <- instantiateFunctionFormM context calleeForm0 typeArgs args
+      if requiresInlineCall instantiatedCalleeForm
         then do
-          bodyEnv <- bindCallArguments env exprEnv exprEnv context name calleeForm args
-          lowerExpr env bodyEnv context (ffBody calleeForm)
+          bodyEnv <- bindCallArguments env exprEnv exprEnv context name instantiatedCalleeForm args
+          lowerExpr env bodyEnv context (ffBody instantiatedCalleeForm)
         else lowerIndirectPointerCall form
     Nothing ->
       lowerIndirectPointerCall form
@@ -8506,33 +9705,35 @@ lowerIndirectValueCall env exprEnv context name callee typeArgs args = do
 
 indirectCalleeFunctionForm :: ProgramEnv -> LowerValue -> Maybe FunctionForm
 indirectCalleeFunctionForm env callee =
-  case lvOperand callee of
-    LLVMGlobalRef _ functionName ->
-      lookupFunctionFormByName env functionName
-    _ ->
-      Nothing
+  case lookupFunctionFormByIdentity env (lvSymbolIdentity callee) of
+    Just form -> Just form
+    Nothing ->
+      case lvOperand callee of
+        LLVMGlobalRef _ functionName -> lookupFunctionFormByName env functionName
+        _ -> Nothing
+
+lookupFunctionFormByIdentity :: ProgramEnv -> Maybe SymbolIdentity -> Maybe FunctionForm
+lookupFunctionFormByIdentity env mbIdentity =
+  biForm <$> (mbIdentity >>= (`Map.lookup` pbBindingsByIdentity (peBase env)))
 
 lookupFunctionFormByName :: ProgramEnv -> String -> Maybe FunctionForm
 lookupFunctionFormByName env functionName =
-  case Map.lookup functionName (pbBindings (peBase env)) of
-    Just binding -> Just (biForm binding)
-    Nothing ->
-      case [qualifiedSpecializationForm specialization | specialization <- Map.elems (peSpecializations env), spFunctionName specialization == functionName] of
+  case [qualifiedSpecializationForm specialization | specialization <- Map.elems (peSpecializations env), spFunctionName specialization == functionName] of
+    form : _ -> Just form
+    [] ->
+      case [qualifiedEvidenceWrapperForm wrapper | wrapper <- Map.elems (peEvidenceWrappers env), wrapperFunctionName wrapper == functionName] of
         form : _ -> Just form
         [] ->
-          case [qualifiedEvidenceWrapperForm wrapper | wrapper <- Map.elems (peEvidenceWrappers env), wrapperFunctionName wrapper == functionName] of
+          case [qualifiedFunctionWrapperForm wrapper | wrapper <- Map.elems (peFunctionWrappers env), wrapperFunctionName wrapper == functionName] of
             form : _ -> Just form
-            [] ->
-              case [qualifiedFunctionWrapperForm wrapper | wrapper <- Map.elems (peFunctionWrappers env), wrapperFunctionName wrapper == functionName] of
-                form : _ -> Just form
-                [] -> Nothing
+            [] -> Nothing
 
 functionFormFromType :: BackendType -> FunctionForm
 functionFormFromType ty =
   FunctionForm
     { ffTypeBinders = typeBinders,
       ffParams = zip paramNames params,
-      ffParamIdentities = replicate (length params) Nothing,
+      ffParamIdentities = identities,
       ffEvidenceParams = Set.empty,
       ffBody = BackendVar returnTy "__mlfp_callable_result",
       ffReturnType = returnTy
@@ -8541,6 +9742,10 @@ functionFormFromType ty =
     (typeBinders, afterForalls) = collectForallsType ty
     (params, returnTy) = collectArrowsType afterForalls
     paramNames = ["__mlfp_callable_arg" ++ show index0 | index0 <- [(0 :: Int) ..]]
+    (_, identities) =
+      generatedLocalIdentities
+        (identityGeneratorAfter (generatedIdentitiesInBackendTypes [ty]))
+        (take (length params) paramNames)
 
 lowerExprForArgument :: ProgramEnv -> ExprEnv -> String -> Set Int -> (Int, (String, BackendType)) -> BackendExpr -> LowerM LowerValue
 lowerExprForArgument env exprEnv context evidenceParams (index0, (_, paramTy)) arg
@@ -8598,7 +9803,7 @@ lowerEvidenceArgument env exprEnv context expectedTy arg =
 
 lowerFunctionReference :: ProgramEnv -> ExprEnv -> String -> BackendType -> Maybe IdDetails -> String -> [BackendType] -> LowerM LowerValue
 lowerFunctionReference env exprEnv context expectedTy mbIdentity name typeArgs =
-  case lookupExprEnvLocalFunction mbIdentity name exprEnv of
+  case lookupExprEnvLocalFunction mbIdentity exprEnv of
     Just localFunction ->
       lowerLocalFunctionReference env context expectedTy name localFunction typeArgs
     Nothing ->
@@ -8606,7 +9811,7 @@ lowerFunctionReference env exprEnv context expectedTy mbIdentity name typeArgs =
 
 lowerStoredFunctionReference :: ProgramEnv -> ExprEnv -> String -> BackendType -> Maybe IdDetails -> String -> [BackendType] -> LowerM LowerValue
 lowerStoredFunctionReference env exprEnv context expectedTy mbIdentity name typeArgs =
-  case lookupExprEnvLocalFunction mbIdentity name exprEnv of
+  case lookupExprEnvLocalFunction mbIdentity exprEnv of
     Just localFunction ->
       lowerLocalFunctionReferenceWith True env context expectedTy name localFunction typeArgs
     Nothing ->
@@ -8691,16 +9896,8 @@ etaAliasArgsMatch params args =
 etaAliasArgMatches :: (Maybe IdDetails, String, BackendType) -> BackendExpr -> Bool
 etaAliasArgMatches (paramIdentity, paramName, _) arg =
   case backendVarExprRef arg of
-    Just (argIdentity, argName) -> termRefMatches paramIdentity paramName argIdentity argName
+    Just argRef -> backendCallableRefMatches (backendCallableRef paramIdentity paramName) argRef
     Nothing -> False
-
-termRefMatches :: Maybe IdDetails -> String -> Maybe IdDetails -> String -> Bool
-termRefMatches (Just leftIdentity) _ (Just rightIdentity) _ =
-  idDetailsSameIdentity leftIdentity rightIdentity
-termRefMatches Nothing leftName Nothing rightName =
-  leftName == rightName
-termRefMatches _ _ _ _ =
-  False
 
 collectValueApps :: BackendExpr -> (BackendExpr, [BackendExpr])
 collectValueApps =
@@ -8711,26 +9908,26 @@ collectValueApps =
         BackendApp _ fun arg -> go (arg : args) fun
         expr -> (expr, args)
 
-backendVarExprRef :: BackendExpr -> Maybe (Maybe IdDetails, String)
+backendVarExprRef :: BackendExpr -> Maybe BackendCallableRef
 backendVarExprRef =
   \case
-    BackendVarWithIdentity _ mbIdentity name -> Just (mbIdentity, name)
+    BackendVarWithIdentity _ mbIdentity name -> Just (backendCallableRef mbIdentity name)
     _ -> Nothing
 
 lowerNonLocalFunctionReference :: ProgramEnv -> ExprEnv -> String -> BackendType -> Maybe IdDetails -> String -> [BackendType] -> LowerM LowerValue
 lowerNonLocalFunctionReference env exprEnv context expectedTy mbIdentity name typeArgs =
-  case lookupExprEnvValue mbIdentity name exprEnv of
+  case lookupExprEnvValue mbIdentity exprEnv of
     Just value
       | isFunctionLikeBackendType (lvBackendType value) ->
           lowerValueFunctionReference context expectedTy name value typeArgs
     _ ->
-      case lookupNonLocalBindingInfo (peBase env) mbIdentity name of
+      case lookupNonLocalBindingInfo (peBase env) mbIdentity of
         Just binding -> do
           (resolvedTypeArgs, form) <- instantiateFunctionFormWithTypeArgsM context (biForm binding) typeArgs []
           let actualTy = functionTypeFromForm form
           requireEvidenceFunctionType context (biName binding) expectedTy actualTy
           functionName <- globalFunctionName env context binding resolvedTypeArgs
-          pure (functionPointerValue expectedTy (LLVMGlobalRef LLVMPtr functionName))
+          pure (functionPointerValueForBinding expectedTy binding resolvedTypeArgs (LLVMGlobalRef LLVMPtr functionName))
         Nothing ->
           liftEither (BackendLLVMUnknownFunction name)
 
@@ -8799,9 +9996,12 @@ runtimeCompatibleValueType left right =
       (BTForallWithIdentity leftIdentity leftName leftBound leftBody, BTForallWithIdentity rightIdentity rightName rightBound rightBody) ->
         runtimeCompatibleMaybeType leftBound rightBound
           && runtimeCompatibleValueType
-            (substituteBackendTypeForBinder leftIdentity leftName (BTVar freshName) leftBody)
-            (substituteBackendTypeForBinder rightIdentity rightName (BTVar freshName) rightBody)
+            (substituteBackendTypeForBinder leftIdentity leftName freshTy leftBody)
+            (substituteBackendTypeForBinder rightIdentity rightName freshTy rightBody)
         where
+          freshTy =
+            BTVarWithIdentity (case leftIdentity of Just {} -> leftIdentity; Nothing -> rightIdentity) freshName
+
           freshName =
             freshNameLike
               leftName
@@ -8873,17 +10073,16 @@ lowerLocalFunctionCall env callEnv context resultTy _name localFunction typeArgs
     boundParamValueKinds form bodyEnv =
       foldr bindParam emptyLocalValueKinds (indexed (functionFormParamTriples form))
       where
-        bindParam (index0, (mbIdentity, paramName, paramTy)) =
+        bindParam (index0, (mbIdentity, _paramName, paramTy)) =
           bindLocalValueKind
             mbIdentity
-            paramName
-            (paramValueKind bodyEnv (ffEvidenceParams form) index0 mbIdentity paramName paramTy)
+            (paramValueKind bodyEnv (ffEvidenceParams form) index0 mbIdentity paramTy)
 
-    paramValueKind bodyEnv evidenceParams index0 mbIdentity paramName paramTy =
-      case lookupExprEnvValue mbIdentity paramName bodyEnv of
+    paramValueKind bodyEnv evidenceParams index0 mbIdentity paramTy =
+      case lookupExprEnvValue mbIdentity bodyEnv of
         Just value -> lvValueKind value
         Nothing
-          | Just _ <- lookupExprEnvLocalFunction mbIdentity paramName bodyEnv -> LowerFunctionPointer
+          | Just _ <- lookupExprEnvLocalFunction mbIdentity bodyEnv -> LowerFunctionPointer
           | otherwise -> parameterValueKind evidenceParams index0 paramTy
 
 lowerDirectFunctionCall :: ProgramEnv -> ExprEnv -> String -> BackendType -> FunctionForm -> [BackendType] -> [BackendExpr] -> LowerM LowerValue
@@ -8924,8 +10123,8 @@ markFunctionFormEvidenceArgumentsFromValues exprEnv args form =
   where
     argumentIsFunctionPointer arg =
       case collectTyApps arg of
-        (BackendVarWithIdentity _ mbIdentity name, _) ->
-          case lookupExprEnvValue mbIdentity name exprEnv of
+        (BackendVarWithIdentity _ mbIdentity _name, _) ->
+          case lookupExprEnvValue mbIdentity exprEnv of
             Just value -> lvValueKind value == LowerFunctionPointer
             Nothing -> False
         _ ->
@@ -8933,7 +10132,7 @@ markFunctionFormEvidenceArgumentsFromValues exprEnv args form =
 
 lowerGlobalCall :: ProgramEnv -> ExprEnv -> String -> BackendType -> Maybe IdDetails -> String -> [BackendType] -> [BackendExpr] -> LowerM LowerValue
 lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
-  case lookupNonLocalBindingInfo (peBase env) mbIdentity name of
+  case lookupNonLocalBindingInfo (peBase env) mbIdentity of
     Just binding -> do
       (resolvedTypeArgs, form0) <- instantiateFunctionFormWithTypeArgsM context (biForm binding) typeArgs args
       let bindingName = biName binding
@@ -8951,16 +10150,16 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
         EQ ->
           lowerSaturatedGlobalCall binding resolvedTypeArgs form
     Nothing
-      | name == runtimeAndName -> do
+      | primitiveCallMatches runtimeAndName -> do
           unless (length args == 2) $
             liftEither (BackendLLVMArityMismatch name 2 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
           let expectedTypes = [LLVMInt 1, LLVMInt 1]
           zipWithM_ (requireLLVMType context name) expectedTypes callArgs
           result <- emitAssign "call" (LLVMInt 1) (LLVMCall runtimeAndName [(LLVMInt 1, lvOperand arg) | arg <- callArgs])
-          pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue Nothing)
+          pure (LowerValue backendBoolTy (LLVMInt 1) result LowerRuntimeValue Nothing)
     Nothing
-      | name == runtimeStringLengthName -> do
+      | primitiveCallMatches runtimeStringLengthName -> do
           unless (length args == 1) $
             liftEither (BackendLLVMArityMismatch name 1 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -8968,11 +10167,11 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
             [arg] -> do
               requireLLVMType context name LLVMPtr arg
               result <- emitAssign "call" (LLVMInt 64) (LLVMCall runtimeStringLengthName [(LLVMPtr, lvOperand arg)])
-              pure (LowerValue (BTBase (BaseTy "Int")) (LLVMInt 64) result LowerRuntimeValue Nothing)
+              pure (LowerValue backendIntTy (LLVMInt 64) result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 1 (length args))
     Nothing
-      | name == runtimeStringIsEmptyName -> do
+      | primitiveCallMatches runtimeStringIsEmptyName -> do
           unless (length args == 1) $
             liftEither (BackendLLVMArityMismatch name 1 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -8980,11 +10179,11 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
             [arg] -> do
               requireLLVMType context name LLVMPtr arg
               result <- emitAssign "call" (LLVMInt 1) (LLVMCall runtimeStringIsEmptyName [(LLVMPtr, lvOperand arg)])
-              pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue Nothing)
+              pure (LowerValue backendBoolTy (LLVMInt 1) result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 1 (length args))
     Nothing
-      | name == runtimeStringContainsCharName -> do
+      | primitiveCallMatches runtimeStringContainsCharName -> do
           unless (length args == 2) $
             liftEither (BackendLLVMArityMismatch name 2 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9000,11 +10199,11 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                       runtimeStringContainsCharName
                       [(LLVMPtr, lvOperand haystack), (LLVMInt 32, lvOperand needle)]
                   )
-              pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue Nothing)
+              pure (LowerValue backendBoolTy (LLVMInt 1) result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 2 (length args))
     Nothing
-      | name == runtimeStringContainsName -> do
+      | primitiveCallMatches runtimeStringContainsName -> do
           unless (length args == 2) $
             liftEither (BackendLLVMArityMismatch name 2 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9020,11 +10219,11 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                       runtimeStringContainsName
                       [(LLVMPtr, lvOperand haystack), (LLVMPtr, lvOperand needle)]
                   )
-              pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue Nothing)
+              pure (LowerValue backendBoolTy (LLVMInt 1) result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 2 (length args))
     Nothing
-      | name == runtimeStringEqualsName -> do
+      | primitiveCallMatches runtimeStringEqualsName -> do
           unless (length args == 2) $
             liftEither (BackendLLVMArityMismatch name 2 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9040,11 +10239,11 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                       runtimeStringEqualsName
                       [(LLVMPtr, lvOperand left), (LLVMPtr, lvOperand right)]
                   )
-              pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue Nothing)
+              pure (LowerValue backendBoolTy (LLVMInt 1) result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 2 (length args))
     Nothing
-      | name == runtimeStringStartsWithName -> do
+      | primitiveCallMatches runtimeStringStartsWithName -> do
           unless (length args == 2) $
             liftEither (BackendLLVMArityMismatch name 2 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9060,11 +10259,11 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                       runtimeStringStartsWithName
                       [(LLVMPtr, lvOperand haystack), (LLVMPtr, lvOperand prefix)]
                   )
-              pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue Nothing)
+              pure (LowerValue backendBoolTy (LLVMInt 1) result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 2 (length args))
     Nothing
-      | name == runtimeStringEndsWithName -> do
+      | primitiveCallMatches runtimeStringEndsWithName -> do
           unless (length args == 2) $
             liftEither (BackendLLVMArityMismatch name 2 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9080,11 +10279,11 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                       runtimeStringEndsWithName
                       [(LLVMPtr, lvOperand haystack), (LLVMPtr, lvOperand suffix)]
                   )
-              pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue Nothing)
+              pure (LowerValue backendBoolTy (LLVMInt 1) result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 2 (length args))
     Nothing
-      | name == runtimeStringAppendName -> do
+      | primitiveCallMatches runtimeStringAppendName -> do
           unless (length args == 2) $
             liftEither (BackendLLVMArityMismatch name 2 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9100,11 +10299,11 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                       runtimeStringAppendName
                       [(LLVMPtr, lvOperand left), (LLVMPtr, lvOperand right)]
                   )
-              pure (LowerValue (BTBase (BaseTy "String")) LLVMPtr result LowerRuntimeValue Nothing)
+              pure (LowerValue backendStringTy LLVMPtr result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 2 (length args))
     Nothing
-      | name == runtimeStringReplaceCharName -> do
+      | primitiveCallMatches runtimeStringReplaceCharName -> do
           unless (length args == 3) $
             liftEither (BackendLLVMArityMismatch name 3 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9121,11 +10320,11 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                       runtimeStringReplaceCharName
                       [(LLVMPtr, lvOperand value), (LLVMInt 32, lvOperand needle), (LLVMInt 32, lvOperand replacement)]
                   )
-              pure (LowerValue (BTBase (BaseTy "String")) LLVMPtr result LowerRuntimeValue Nothing)
+              pure (LowerValue backendStringTy LLVMPtr result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 3 (length args))
     Nothing
-      | name == runtimeStringReplaceName -> do
+      | primitiveCallMatches runtimeStringReplaceName -> do
           unless (length args == 3) $
             liftEither (BackendLLVMArityMismatch name 3 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9142,11 +10341,11 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                       runtimeStringReplaceName
                       [(LLVMPtr, lvOperand haystack), (LLVMPtr, lvOperand needle), (LLVMPtr, lvOperand replacement)]
                   )
-              pure (LowerValue (BTBase (BaseTy "String")) LLVMPtr result LowerRuntimeValue Nothing)
+              pure (LowerValue backendStringTy LLVMPtr result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 3 (length args))
     Nothing
-      | name == runtimeStringIndexOfCharName -> do
+      | primitiveCallMatches runtimeStringIndexOfCharName -> do
           unless (length args == 2) $
             liftEither (BackendLLVMArityMismatch name 2 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9164,7 +10363,7 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                   )
               pure
                 ( LowerValue
-                    (BTCon (BaseTy "Option") (BTBase (BaseTy "Int") :| []))
+                    resultTy
                     LLVMPtr
                     result
                     LowerRuntimeValue
@@ -9173,7 +10372,7 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
             _ ->
               liftEither (BackendLLVMArityMismatch name 2 (length args))
     Nothing
-      | name == runtimeStringIndexOfName -> do
+      | primitiveCallMatches runtimeStringIndexOfName -> do
           unless (length args == 2) $
             liftEither (BackendLLVMArityMismatch name 2 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9191,7 +10390,7 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                   )
               pure
                 ( LowerValue
-                    (BTCon (BaseTy "Option") (BTBase (BaseTy "Int") :| []))
+                    resultTy
                     LLVMPtr
                     result
                     LowerRuntimeValue
@@ -9200,7 +10399,7 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
             _ ->
               liftEither (BackendLLVMArityMismatch name 2 (length args))
     Nothing
-      | name == runtimeStringSplitName -> do
+      | primitiveCallMatches runtimeStringSplitName -> do
           unless (length args == 2) $
             liftEither (BackendLLVMArityMismatch name 2 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9218,7 +10417,7 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                   )
               pure
                 ( LowerValue
-                    (BTCon (BaseTy "List") (BTBase (BaseTy "String") :| []))
+                    resultTy
                     LLVMPtr
                     result
                     LowerRuntimeValue
@@ -9227,7 +10426,7 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
             _ ->
               liftEither (BackendLLVMArityMismatch name 2 (length args))
     Nothing
-      | name == runtimeStringJoinName -> do
+      | primitiveCallMatches runtimeStringJoinName -> do
           unless (length args == 2) $
             liftEither (BackendLLVMArityMismatch name 2 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9243,11 +10442,11 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                       runtimeStringJoinName
                       [(LLVMPtr, lvOperand separator), (LLVMPtr, lvOperand values)]
                   )
-              pure (LowerValue (BTBase (BaseTy "String")) LLVMPtr result LowerRuntimeValue Nothing)
+              pure (LowerValue backendStringTy LLVMPtr result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 2 (length args))
     Nothing
-      | name == runtimeStringSplitCharName -> do
+      | primitiveCallMatches runtimeStringSplitCharName -> do
           unless (length args == 2) $
             liftEither (BackendLLVMArityMismatch name 2 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9265,7 +10464,7 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                   )
               pure
                 ( LowerValue
-                    (BTCon (BaseTy "List") (BTBase (BaseTy "String") :| []))
+                    resultTy
                     LLVMPtr
                     result
                     LowerRuntimeValue
@@ -9274,7 +10473,7 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
             _ ->
               liftEither (BackendLLVMArityMismatch name 2 (length args))
     Nothing
-      | name == runtimeStringCompareName -> do
+      | primitiveCallMatches runtimeStringCompareName -> do
           unless (length args == 2) $
             liftEither (BackendLLVMArityMismatch name 2 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9290,11 +10489,11 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                       runtimeStringCompareName
                       [(LLVMPtr, lvOperand left), (LLVMPtr, lvOperand right)]
                   )
-              pure (LowerValue (BTBase (BaseTy "Int")) (LLVMInt 64) result LowerRuntimeValue Nothing)
+              pure (LowerValue backendIntTy (LLVMInt 64) result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 2 (length args))
     Nothing
-      | name == runtimeStringFromCharName -> do
+      | primitiveCallMatches runtimeStringFromCharName -> do
           unless (length args == 1) $
             liftEither (BackendLLVMArityMismatch name 1 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9309,11 +10508,11 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                       runtimeStringFromCharName
                       [(LLVMInt 32, lvOperand value)]
                   )
-              pure (LowerValue (BTBase (BaseTy "String")) LLVMPtr result LowerRuntimeValue Nothing)
+              pure (LowerValue backendStringTy LLVMPtr result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 1 (length args))
     Nothing
-      | name == runtimeStringFromIntName -> do
+      | primitiveCallMatches runtimeStringFromIntName -> do
           unless (length args == 1) $
             liftEither (BackendLLVMArityMismatch name 1 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9328,11 +10527,11 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                       runtimeStringFromIntName
                       [(LLVMInt 64, lvOperand value)]
                   )
-              pure (LowerValue (BTBase (BaseTy "String")) LLVMPtr result LowerRuntimeValue Nothing)
+              pure (LowerValue backendStringTy LLVMPtr result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 1 (length args))
     Nothing
-      | name == runtimeStringFromBoolName -> do
+      | primitiveCallMatches runtimeStringFromBoolName -> do
           unless (length args == 1) $
             liftEither (BackendLLVMArityMismatch name 1 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9347,11 +10546,11 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                       runtimeStringFromBoolName
                       [(LLVMInt 1, lvOperand value)]
                   )
-              pure (LowerValue (BTBase (BaseTy "String")) LLVMPtr result LowerRuntimeValue Nothing)
+              pure (LowerValue backendStringTy LLVMPtr result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 1 (length args))
     Nothing
-      | name == runtimeStringFromNatName -> do
+      | primitiveCallMatches runtimeStringFromNatName -> do
           unless (length args == 1) $
             liftEither (BackendLLVMArityMismatch name 1 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9366,11 +10565,11 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                       runtimeStringFromNatName
                       [(LLVMPtr, lvOperand value)]
                   )
-              pure (LowerValue (BTBase (BaseTy "String")) LLVMPtr result LowerRuntimeValue Nothing)
+              pure (LowerValue backendStringTy LLVMPtr result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 1 (length args))
     Nothing
-      | name == runtimeStringFromListName -> do
+      | primitiveCallMatches runtimeStringFromListName -> do
           unless (length args == 1) $
             liftEither (BackendLLVMArityMismatch name 1 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9385,11 +10584,11 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                       runtimeStringFromListName
                       [(LLVMPtr, lvOperand value)]
                   )
-              pure (LowerValue (BTBase (BaseTy "String")) LLVMPtr result LowerRuntimeValue Nothing)
+              pure (LowerValue backendStringTy LLVMPtr result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 1 (length args))
     Nothing
-      | name == runtimeStringToListName -> do
+      | primitiveCallMatches runtimeStringToListName -> do
           unless (length args == 1) $
             liftEither (BackendLLVMArityMismatch name 1 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9406,7 +10605,7 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                   )
               pure
                 ( LowerValue
-                    (BTCon (BaseTy "List") (BTBase (BaseTy "Char") :| []))
+                    resultTy
                     LLVMPtr
                     result
                     LowerRuntimeValue
@@ -9415,7 +10614,7 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
             _ ->
               liftEither (BackendLLVMArityMismatch name 1 (length args))
     Nothing
-      | name == runtimeStringDropName -> do
+      | primitiveCallMatches runtimeStringDropName -> do
           unless (length args == 2) $
             liftEither (BackendLLVMArityMismatch name 2 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9431,11 +10630,11 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                       runtimeStringDropName
                       [(LLVMPtr, lvOperand value), (LLVMInt 64, lvOperand count)]
                   )
-              pure (LowerValue (BTBase (BaseTy "String")) LLVMPtr result LowerRuntimeValue Nothing)
+              pure (LowerValue backendStringTy LLVMPtr result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 2 (length args))
     Nothing
-      | name == runtimeStringTakeName -> do
+      | primitiveCallMatches runtimeStringTakeName -> do
           unless (length args == 2) $
             liftEither (BackendLLVMArityMismatch name 2 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9451,11 +10650,11 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                       runtimeStringTakeName
                       [(LLVMPtr, lvOperand value), (LLVMInt 64, lvOperand count)]
                   )
-              pure (LowerValue (BTBase (BaseTy "String")) LLVMPtr result LowerRuntimeValue Nothing)
+              pure (LowerValue backendStringTy LLVMPtr result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 2 (length args))
     Nothing
-      | name == runtimeStringSliceName -> do
+      | primitiveCallMatches runtimeStringSliceName -> do
           unless (length args == 3) $
             liftEither (BackendLLVMArityMismatch name 3 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9472,11 +10671,11 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                       runtimeStringSliceName
                       [(LLVMPtr, lvOperand value), (LLVMInt 64, lvOperand start), (LLVMInt 64, lvOperand count)]
                   )
-              pure (LowerValue (BTBase (BaseTy "String")) LLVMPtr result LowerRuntimeValue Nothing)
+              pure (LowerValue backendStringTy LLVMPtr result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 3 (length args))
     Nothing
-      | name == runtimeStringCharAtName -> do
+      | primitiveCallMatches runtimeStringCharAtName -> do
           unless (length args == 2) $
             liftEither (BackendLLVMArityMismatch name 2 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9492,11 +10691,11 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                       runtimeStringCharAtName
                       [(LLVMPtr, lvOperand value), (LLVMInt 64, lvOperand index)]
                   )
-              pure (LowerValue (BTBase (BaseTy "Char")) (LLVMInt 32) result LowerRuntimeValue Nothing)
+              pure (LowerValue backendCharTy (LLVMInt 32) result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 2 (length args))
     Nothing
-      | name == runtimeStringCharAtOptionName -> do
+      | primitiveCallMatches runtimeStringCharAtOptionName -> do
           unless (length args == 2) $
             liftEither (BackendLLVMArityMismatch name 2 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9514,7 +10713,7 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                   )
               pure
                 ( LowerValue
-                    (BTCon (BaseTy "Option") (BTBase (BaseTy "Char") :| []))
+                    resultTy
                     LLVMPtr
                     result
                     LowerRuntimeValue
@@ -9523,7 +10722,7 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
             _ ->
               liftEither (BackendLLVMArityMismatch name 2 (length args))
     Nothing
-      | name == runtimeCharIsDigitName -> do
+      | primitiveCallMatches runtimeCharIsDigitName -> do
           unless (length args == 1) $
             liftEither (BackendLLVMArityMismatch name 1 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9538,11 +10737,11 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                       runtimeCharIsDigitName
                       [(LLVMInt 32, lvOperand value)]
                   )
-              pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue Nothing)
+              pure (LowerValue backendBoolTy (LLVMInt 1) result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 1 (length args))
     Nothing
-      | name == runtimeCharIsAsciiLowerName -> do
+      | primitiveCallMatches runtimeCharIsAsciiLowerName -> do
           unless (length args == 1) $
             liftEither (BackendLLVMArityMismatch name 1 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9557,11 +10756,11 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                       runtimeCharIsAsciiLowerName
                       [(LLVMInt 32, lvOperand value)]
                   )
-              pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue Nothing)
+              pure (LowerValue backendBoolTy (LLVMInt 1) result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 1 (length args))
     Nothing
-      | name == runtimeCharIsAsciiUpperName -> do
+      | primitiveCallMatches runtimeCharIsAsciiUpperName -> do
           unless (length args == 1) $
             liftEither (BackendLLVMArityMismatch name 1 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9576,11 +10775,11 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                       runtimeCharIsAsciiUpperName
                       [(LLVMInt 32, lvOperand value)]
                   )
-              pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue Nothing)
+              pure (LowerValue backendBoolTy (LLVMInt 1) result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 1 (length args))
     Nothing
-      | name == runtimeCharIsAsciiAlphaName -> do
+      | primitiveCallMatches runtimeCharIsAsciiAlphaName -> do
           unless (length args == 1) $
             liftEither (BackendLLVMArityMismatch name 1 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9595,11 +10794,11 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                       runtimeCharIsAsciiAlphaName
                       [(LLVMInt 32, lvOperand value)]
                   )
-              pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue Nothing)
+              pure (LowerValue backendBoolTy (LLVMInt 1) result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 1 (length args))
     Nothing
-      | name == runtimeCharIsAsciiAlphaNumName -> do
+      | primitiveCallMatches runtimeCharIsAsciiAlphaNumName -> do
           unless (length args == 1) $
             liftEither (BackendLLVMArityMismatch name 1 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9614,11 +10813,11 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                       runtimeCharIsAsciiAlphaNumName
                       [(LLVMInt 32, lvOperand value)]
                   )
-              pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue Nothing)
+              pure (LowerValue backendBoolTy (LLVMInt 1) result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 1 (length args))
     Nothing
-      | name == runtimeCharIsAsciiIdentifierStartName -> do
+      | primitiveCallMatches runtimeCharIsAsciiIdentifierStartName -> do
           unless (length args == 1) $
             liftEither (BackendLLVMArityMismatch name 1 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9633,11 +10832,11 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                       runtimeCharIsAsciiIdentifierStartName
                       [(LLVMInt 32, lvOperand value)]
                   )
-              pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue Nothing)
+              pure (LowerValue backendBoolTy (LLVMInt 1) result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 1 (length args))
     Nothing
-      | name == runtimeCharIsAsciiIdentifierContinueName -> do
+      | primitiveCallMatches runtimeCharIsAsciiIdentifierContinueName -> do
           unless (length args == 1) $
             liftEither (BackendLLVMArityMismatch name 1 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9652,11 +10851,11 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                       runtimeCharIsAsciiIdentifierContinueName
                       [(LLVMInt 32, lvOperand value)]
                   )
-              pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue Nothing)
+              pure (LowerValue backendBoolTy (LLVMInt 1) result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 1 (length args))
     Nothing
-      | name == runtimeCharIsAsciiWhitespaceName -> do
+      | primitiveCallMatches runtimeCharIsAsciiWhitespaceName -> do
           unless (length args == 1) $
             liftEither (BackendLLVMArityMismatch name 1 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9671,11 +10870,11 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                       runtimeCharIsAsciiWhitespaceName
                       [(LLVMInt 32, lvOperand value)]
                   )
-              pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue Nothing)
+              pure (LowerValue backendBoolTy (LLVMInt 1) result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 1 (length args))
     Nothing
-      | name == runtimeCharIsAsciiPunctuationName -> do
+      | primitiveCallMatches runtimeCharIsAsciiPunctuationName -> do
           unless (length args == 1) $
             liftEither (BackendLLVMArityMismatch name 1 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9690,11 +10889,11 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                       runtimeCharIsAsciiPunctuationName
                       [(LLVMInt 32, lvOperand value)]
                   )
-              pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue Nothing)
+              pure (LowerValue backendBoolTy (LLVMInt 1) result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 1 (length args))
     Nothing
-      | name == runtimeCharIsAsciiPrintableName -> do
+      | primitiveCallMatches runtimeCharIsAsciiPrintableName -> do
           unless (length args == 1) $
             liftEither (BackendLLVMArityMismatch name 1 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9709,11 +10908,11 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                       runtimeCharIsAsciiPrintableName
                       [(LLVMInt 32, lvOperand value)]
                   )
-              pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue Nothing)
+              pure (LowerValue backendBoolTy (LLVMInt 1) result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 1 (length args))
     Nothing
-      | name == runtimeCharIsAsciiHexDigitName -> do
+      | primitiveCallMatches runtimeCharIsAsciiHexDigitName -> do
           unless (length args == 1) $
             liftEither (BackendLLVMArityMismatch name 1 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9728,11 +10927,11 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                       runtimeCharIsAsciiHexDigitName
                       [(LLVMInt 32, lvOperand value)]
                   )
-              pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue Nothing)
+              pure (LowerValue backendBoolTy (LLVMInt 1) result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 1 (length args))
     Nothing
-      | name == runtimeCharIsAsciiLineBreakName -> do
+      | primitiveCallMatches runtimeCharIsAsciiLineBreakName -> do
           unless (length args == 1) $
             liftEither (BackendLLVMArityMismatch name 1 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9747,11 +10946,11 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                       runtimeCharIsAsciiLineBreakName
                       [(LLVMInt 32, lvOperand value)]
                   )
-              pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue Nothing)
+              pure (LowerValue backendBoolTy (LLVMInt 1) result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 1 (length args))
     Nothing
-      | name == runtimeCharIsAsciiControlName -> do
+      | primitiveCallMatches runtimeCharIsAsciiControlName -> do
           unless (length args == 1) $
             liftEither (BackendLLVMArityMismatch name 1 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9766,11 +10965,11 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                       runtimeCharIsAsciiControlName
                       [(LLVMInt 32, lvOperand value)]
                   )
-              pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue Nothing)
+              pure (LowerValue backendBoolTy (LLVMInt 1) result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 1 (length args))
     Nothing
-      | name == runtimeCharToAsciiLowerName -> do
+      | primitiveCallMatches runtimeCharToAsciiLowerName -> do
           unless (length args == 1) $
             liftEither (BackendLLVMArityMismatch name 1 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9785,11 +10984,11 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                       runtimeCharToAsciiLowerName
                       [(LLVMInt 32, lvOperand value)]
                   )
-              pure (LowerValue (BTBase (BaseTy "Char")) (LLVMInt 32) result LowerRuntimeValue Nothing)
+              pure (LowerValue backendCharTy (LLVMInt 32) result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 1 (length args))
     Nothing
-      | name == runtimeCharToAsciiUpperName -> do
+      | primitiveCallMatches runtimeCharToAsciiUpperName -> do
           unless (length args == 1) $
             liftEither (BackendLLVMArityMismatch name 1 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9804,11 +11003,11 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                       runtimeCharToAsciiUpperName
                       [(LLVMInt 32, lvOperand value)]
                   )
-              pure (LowerValue (BTBase (BaseTy "Char")) (LLVMInt 32) result LowerRuntimeValue Nothing)
+              pure (LowerValue backendCharTy (LLVMInt 32) result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 1 (length args))
     Nothing
-      | name == runtimeStringToAsciiLowerName -> do
+      | primitiveCallMatches runtimeStringToAsciiLowerName -> do
           unless (length args == 1) $
             liftEither (BackendLLVMArityMismatch name 1 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9823,11 +11022,11 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                       runtimeStringToAsciiLowerName
                       [(LLVMPtr, lvOperand value)]
                   )
-              pure (LowerValue (BTBase (BaseTy "String")) LLVMPtr result LowerRuntimeValue Nothing)
+              pure (LowerValue backendStringTy LLVMPtr result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 1 (length args))
     Nothing
-      | name == runtimeStringToAsciiUpperName -> do
+      | primitiveCallMatches runtimeStringToAsciiUpperName -> do
           unless (length args == 1) $
             liftEither (BackendLLVMArityMismatch name 1 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
@@ -9842,28 +11041,31 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
                       runtimeStringToAsciiUpperName
                       [(LLVMPtr, lvOperand value)]
                   )
-              pure (LowerValue (BTBase (BaseTy "String")) LLVMPtr result LowerRuntimeValue Nothing)
+              pure (LowerValue backendStringTy LLVMPtr result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 1 (length args))
     Nothing
-      | Set.member name ioPrimitiveNames -> do
+      | Just primitiveName <- ioPrimitiveRuntimeName mbIdentity name -> do
           callArgs <- traverse (lowerExpr env exprEnv context) args
-          let wrapperName = nativeIOWrapperName name
+          let wrapperName = nativeIOWrapperName primitiveName
           result <- emitAssign "io.call" LLVMPtr (LLVMCall wrapperName [(lvLLVMType arg, lvOperand arg) | arg <- callArgs])
           pure (LowerValue resultTy LLVMPtr result LowerRuntimeValue Nothing)
     Nothing ->
       liftEither (BackendLLVMUnknownFunction name)
   where
+    primitiveCallMatches expected =
+      primitiveRuntimeName mbIdentity name == Just expected
+
     lowerSaturatedGlobalCall binding resolvedTypeArgs form =
       if requiresInlineCall form
-        && Set.member (biName binding) (eeActiveGlobalInlines exprEnv)
+        && Set.member (bindingInfoRef binding) (eeActiveGlobalInlines exprEnv)
         && not (canEmitFunctionForm form)
         then liftEither (BackendLLVMUnsupportedExpression context ("recursive static global " ++ show name))
         else if shouldInlineGlobalCall env exprEnv binding resolvedTypeArgs form args
         then do
           let bodyEnv0 =
                 exprEnv
-                  { eeActiveGlobalInlines = Set.insert (biName binding) (eeActiveGlobalInlines exprEnv)
+                  { eeActiveGlobalInlines = Set.insert (bindingInfoRef binding) (eeActiveGlobalInlines exprEnv)
                   }
           bodyEnv <- bindCallArguments env exprEnv bodyEnv0 context name form args
           lowerExpr env bodyEnv context (ffBody form)
@@ -9884,14 +11086,17 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
 
 shouldInlineGlobalCall :: ProgramEnv -> ExprEnv -> BindingInfo -> [BackendType] -> FunctionForm -> [BackendExpr] -> Bool
 shouldInlineGlobalCall env exprEnv binding resolvedTypeArgs form args =
-  (requiresInlineCall form && Set.notMember (biName binding) (eeActiveGlobalInlines exprEnv))
+  ( requiresInlineCall form
+      && Set.notMember (bindingInfoRef binding) (eeActiveGlobalInlines exprEnv)
+      && not (canEmitRawFunctionPointerReturningForm form)
+  )
     || missingPolymorphicSpecialization env binding resolvedTypeArgs
     || any (evidenceArgumentRequiresInline (ffEvidenceParams form) env exprEnv) (zip (indexed (ffParams form)) args)
 
 missingPolymorphicSpecialization :: ProgramEnv -> BindingInfo -> [BackendType] -> Bool
 missingPolymorphicSpecialization env binding resolvedTypeArgs =
   not (null (ffTypeBinders (biForm binding)))
-    && Map.notMember (specializationKey (SpecRequest (biName binding) resolvedTypeArgs)) (peSpecializations env)
+    && Map.notMember (specializationKey (specRequestForBinding binding resolvedTypeArgs)) (peSpecializations env)
 
 evidenceArgumentRequiresInline :: Set Int -> ProgramEnv -> ExprEnv -> ((Int, (String, BackendType)), BackendExpr) -> Bool
 evidenceArgumentRequiresInline evidenceParams env exprEnv ((index0, (_, paramTy)), arg) =
@@ -9900,10 +11105,10 @@ evidenceArgumentRequiresInline evidenceParams env exprEnv ((index0, (_, paramTy)
 functionArgumentRequiresInline :: ProgramEnv -> ExprEnv -> BackendExpr -> Bool
 functionArgumentRequiresInline env exprEnv arg =
   case collectTyApps arg of
-    (BackendVarWithIdentity _ mbIdentity name, typeArgs)
-      | Just localFunction <- lookupExprEnvLocalFunction mbIdentity name exprEnv ->
+    (BackendVarWithIdentity _ mbIdentity _name, typeArgs)
+      | Just localFunction <- lookupExprEnvLocalFunction mbIdentity exprEnv ->
           requiresInlineCall (lfForm localFunction)
-      | Just binding <- lookupNonLocalBindingInfo (peBase env) mbIdentity name ->
+      | Just binding <- lookupNonLocalBindingInfo (peBase env) mbIdentity ->
           case instantiateFunctionFormWithTypeArgs "inline evidence argument" (biForm binding) typeArgs [] of
             Right (_, form) -> requiresInlineCall form
             Left _ -> False
@@ -9919,21 +11124,21 @@ globalFunctionName env context binding typeArgs
         Nothing ->
           liftEither (BackendLLVMInternalError ("missing specialization for " ++ biName binding ++ " at " ++ context))
   where
-    request = SpecRequest (biName binding) typeArgs
+    request = specRequestForBinding binding typeArgs
 
 lowerStaticFunctionArgument :: ProgramEnv -> ExprEnv -> String -> String -> BackendType -> BackendExpr -> LowerM LocalFunction
 lowerStaticFunctionArgument env callEnv context paramName expectedTy arg =
   case collectTyApps arg of
-    (BackendVarWithIdentity _ mbIdentity name, typeArgs) ->
-      case lookupExprEnvLocalFunction mbIdentity name callEnv of
+    (BackendVarWithIdentity _ mbIdentity _name, typeArgs) ->
+      case lookupExprEnvLocalFunction mbIdentity callEnv of
         Just localFunction -> do
           form <- instantiateStaticFunctionForm context expectedTy (lfForm localFunction) typeArgs
           requireStaticFunctionType context paramName expectedTy (localFunction {lfForm = form})
         Nothing ->
-          case lookupNonLocalBindingInfo (peBase env) mbIdentity name of
+          case lookupNonLocalBindingInfo (peBase env) mbIdentity of
             Just binding -> do
               form <- instantiateStaticFunctionForm context expectedTy (biForm binding) typeArgs
-              if canEmitFunctionForm form
+              if canEmitReferencedFunctionForm form
                 then lowerDirectStaticFunctionArgument callEnv context paramName expectedTy arg
                 else
                   requireStaticFunctionType
@@ -9976,7 +11181,7 @@ inferStaticFunctionTypeArgs context expectedTy form =
 
 lowerDirectStaticFunctionArgument :: ExprEnv -> String -> String -> BackendType -> BackendExpr -> LowerM LocalFunction
 lowerDirectStaticFunctionArgument callEnv context paramName expectedTy arg = do
-  let form = functionFormFromExpected expectedTy arg
+  form <- functionFormFromExpectedM expectedTy arg
   when (null (ffTypeBinders form) && null (ffParams form)) $
     liftEither
       ( BackendLLVMUnsupportedExpression
@@ -10052,28 +11257,35 @@ bindCallArguments env callEnv bodyEnv0 context name form args = do
           mbClosureValue <- lowerClosureRuntimeArgumentMaybe env callEnv context paramTy arg
           case mbClosureValue of
             Just value ->
-              bindValue bodyEnv mbParamIdentity paramName value
-            Nothing ->
-              bindInlineOrValue bodyEnv index0 mbParamIdentity paramName paramTy arg
+              bindValue bodyEnv mbParamIdentity value
+            Nothing
+              | firstOrderPointerReference arg ->
+                  bindValueFromExpr bodyEnv index0 mbParamIdentity paramName paramTy arg
+              | otherwise ->
+                  bindStaticFunction bodyEnv mbParamIdentity paramName paramTy arg
       | isInlineFunctionArgument (ffEvidenceParams form) index0 paramTy = do
-          localFunction <- lowerStaticFunctionArgument env callEnv context paramName paramTy arg
-          pure (bindExprEnvLocalFunction mbParamIdentity paramName localFunction bodyEnv)
+          bindStaticFunction bodyEnv mbParamIdentity paramName paramTy arg
       | otherwise = do
           bindValueFromExpr bodyEnv index0 mbParamIdentity paramName paramTy arg
 
-    bindInlineOrValue bodyEnv index0 mbParamIdentity paramName paramTy arg
-      | isInlineFunctionArgument (ffEvidenceParams form) index0 paramTy = do
-          localFunction <- lowerStaticFunctionArgument env callEnv context paramName paramTy arg
-          pure (bindExprEnvLocalFunction mbParamIdentity paramName localFunction bodyEnv)
-      | otherwise =
-          bindValueFromExpr bodyEnv index0 mbParamIdentity paramName paramTy arg
+    firstOrderPointerReference arg =
+      case collectTyApps arg of
+        (BackendVarWithIdentity _ mbIdentity _refName, _) ->
+          case lookupExprEnvLocalFunction mbIdentity callEnv of
+            Just {} -> False
+            Nothing -> True
+        _ -> False
+
+    bindStaticFunction bodyEnv mbParamIdentity paramName paramTy arg = do
+      localFunction <- lowerStaticFunctionArgument env callEnv context paramName paramTy arg
+      pure (bindExprEnvLocalFunction mbParamIdentity localFunction bodyEnv)
 
     bindValueFromExpr bodyEnv index0 mbParamIdentity paramName paramTy arg = do
       value <- lowerExprForArgument env callEnv context (ffEvidenceParams form) (index0, (paramName, paramTy)) arg
-      bindValue bodyEnv mbParamIdentity paramName value
+      bindValue bodyEnv mbParamIdentity value
 
-    bindValue bodyEnv mbParamIdentity paramName value =
-      pure (bindExprEnvValue mbParamIdentity paramName value bodyEnv)
+    bindValue bodyEnv mbParamIdentity value =
+      pure (bindExprEnvValue mbParamIdentity value bodyEnv)
 
 lowerClosureRuntimeArgumentMaybe :: ProgramEnv -> ExprEnv -> String -> BackendType -> BackendExpr -> LowerM (Maybe LowerValue)
 lowerClosureRuntimeArgumentMaybe env exprEnv context expectedTy arg =
@@ -10087,8 +11299,8 @@ lowerClosureRuntimeArgumentMaybe env exprEnv context expectedTy arg =
               Just <$> lowerExpr env exprEnv context arg
         _ ->
           case collectTyApps arg of
-            (BackendVarWithIdentity _ mbIdentity name, typeArgs)
-              | Just binding <- lookupNonLocalBindingInfo (peBase env) mbIdentity name -> do
+            (BackendVarWithIdentity _ mbIdentity _name, typeArgs)
+              | Just binding <- lookupNonLocalBindingInfo (peBase env) mbIdentity -> do
                   (_, form) <- instantiateFunctionFormWithTypeArgsM context (biForm binding) typeArgs []
                   if null (ffParams form)
                     && alphaEqBackendType expectedTy (ffReturnType form)
@@ -10312,10 +11524,7 @@ matchTypeParamApplication binderSet substitution nameKey name expectedHead expec
 
 typeApplicationHeadMatches :: BackendType -> BackendType -> Bool
 typeApplicationHeadMatches (BTVarWithIdentity leftIdentity leftName) (BTVarWithIdentity rightIdentity rightName) =
-  case (leftIdentity, rightIdentity) of
-    (Just left, Just right) -> left == right
-    (Nothing, Nothing) -> leftName == rightName
-    _ -> False
+  typeBinderRefMatches leftIdentity leftName rightIdentity rightName
 typeApplicationHeadMatches left right =
   alphaEqBackendType left right
 
@@ -10377,7 +11586,7 @@ lowerConstruct env exprEnv context resultTy mbIdentity name args =
             LLVMPtr
             object
             LowerRuntimeValue
-            (Just (constructedValueForConstructor (backendConstructorName constructor) (map lvValueKind argValues)))
+            (Just (constructedValueForConstructorKey (crValueKey constructorRuntime) (map lvValueKind argValues)))
         )
   where
     storeField object index0 value = do
@@ -10474,7 +11683,7 @@ lowerHeapCase env exprEnv context resultTy scrutinee alternatives = do
     constructorSwitchTarget (BackendAlternative pattern0 _, label) =
       case pattern0 of
         BackendDefaultPattern -> Nothing
-        BackendConstructorPatternWithIdentity mbIdentity name _ ->
+        BackendConstructorPatternWithBinderIdentities mbIdentity name _ ->
           case lookupConstructorRuntime (peBase env) mbIdentity name of
             Just constructorRuntime -> Just (crTag constructorRuntime, label, name)
             Nothing -> Nothing
@@ -10521,19 +11730,19 @@ lowerHeapCase env exprEnv context resultTy scrutinee alternatives = do
       where
         mbConstructorRuntime =
           lookupConstructorRuntime (peBase env) mbIdentity constructorName
-        resolvedConstructorName =
-          maybe constructorName (backendConstructorName . crConstructor) mbConstructorRuntime
+        mbConstructorValueKey =
+          crValueKey <$> mbConstructorRuntime
         fieldTys =
           fromMaybe [] $
             mbConstructorRuntime >>= \constructorRuntime ->
               constructorRuntimeFieldTypes constructorRuntime (lvBackendType scrutineeValue)
         binderFieldValueKind index0 fieldTy =
           fromMaybe (constructorFieldStoredValueKind fieldTy) $
-            lvConstructedValue scrutineeValue >>= constructedFieldValueKind resolvedConstructorName index0
+            mbConstructorValueKey >>= \constructorKey ->
+              lvConstructedValue scrutineeValue >>= constructedFieldValueKindByKey constructorKey index0
         bindPatternField (index0, (binder, fieldTy)) =
           bindLocalValueKind
             (backendPatternBinderIdentity binder)
-            (backendPatternBinderName binder)
             (binderFieldValueKind index0 fieldTy)
 
     bindAlternativePattern scrutineeValue (BackendAlternative pattern0 body) =
@@ -10545,52 +11754,49 @@ lowerHeapCase env exprEnv context resultTy scrutinee alternatives = do
             Nothing ->
               liftEither (BackendLLVMUnknownConstructor name)
             Just constructorRuntime -> do
-              let resolvedConstructorName = backendConstructorName (crConstructor constructorRuntime)
+              let constructorKey = crValueKey constructorRuntime
                   binderNames = map backendPatternBinderName binders
               fieldTys <- constructorFieldTypesForScrutinee env context constructorRuntime (lvBackendType scrutineeValue)
               unless (length fieldTys == length binderNames) $
                 liftEither (BackendLLVMArityMismatch name (length fieldTys) (length binderNames))
               let usedBinders = freeTermVars body
-                  bodyBinderTypes = backendExprVarTypesFor (termBoundKeyRefs [(backendPatternBinderIdentity binder, backendPatternBinderName binder) | binder <- binders]) body
+                  bodyBinderTypes = backendExprVarTypesFor (termBoundKeyRefs [backendPatternBinderIdentity binder | binder <- binders]) body
                   effectiveFieldTys =
                     [ patternBinderBodyType bodyBinderTypes binder fieldTy
                       | (binder, fieldTy) <- zip binders fieldTys
                     ]
-              loadedFields <- mapMaybe id <$> traverse (loadUsedField resolvedConstructorName usedBinders scrutineeValue) (zip3 [0 :: Int ..] binders effectiveFieldTys)
+              loadedFields <- mapMaybe id <$> traverse (loadUsedField constructorKey usedBinders scrutineeValue) (zip3 [0 :: Int ..] binders effectiveFieldTys)
               pure (foldr bindLoadedField exprEnv loadedFields)
 
-    bindLoadedField (identity, name, value) acc =
-      bindExprEnvValue identity name value acc
+    bindLoadedField (identity, _name, value) acc =
+      bindExprEnvValue identity value acc
 
     patternBinderBodyType bodyBinderTypes binder fieldTy =
       case backendPatternBinderIdentity binder >>= lowerLocalKey of
         Just key ->
-          Map.findWithDefault nameFallback (TermBoundIdentity key) bodyBinderTypes
+          Map.findWithDefault fieldTy (TermBoundIdentity key) bodyBinderTypes
         Nothing ->
-          nameFallback
-      where
-        nameFallback =
-          Map.findWithDefault fieldTy (TermBoundName (backendPatternBinderName binder)) bodyBinderTypes
+          fieldTy
 
-    loadUsedField constructorName usedBinders scrutineeValue (index0, binder, fieldTy)
+    loadUsedField constructorKey usedBinders scrutineeValue (index0, binder, fieldTy)
       | patternBinderUsedBy usedBinders binder = do
-          loaded <- loadField constructorName scrutineeValue index0 fieldTy
+          loaded <- loadField constructorKey scrutineeValue index0 fieldTy
           pure (Just (backendPatternBinderIdentity binder, binderName, loaded))
       | otherwise =
           pure Nothing
       where
         binderName = backendPatternBinderName binder
 
-    loadField constructorName scrutineeValue index0 fieldTy = do
+    loadField constructorKey scrutineeValue index0 fieldTy = do
       llvmTy <- lowerStoredFieldTypeM env context fieldTy
       fieldPtr <- emitGep "case.field.ptr" (lvOperand scrutineeValue) (constructorFieldOffset index0)
       loaded <- emitAssign "case.field" llvmTy (LLVMLoad llvmTy fieldPtr)
-      pure (LowerValue fieldTy llvmTy loaded (fieldValueKind constructorName scrutineeValue index0 fieldTy) Nothing)
+      pure (LowerValue fieldTy llvmTy loaded (fieldValueKind constructorKey scrutineeValue index0 fieldTy) Nothing)
 
-    fieldValueKind constructorName scrutineeValue index0 fieldTy =
+    fieldValueKind constructorKey scrutineeValue index0 fieldTy =
       case lvConstructedValue scrutineeValue of
         Just constructed
-          | Just kind <- constructedFieldValueKind constructorName index0 constructed ->
+          | Just kind <- constructedFieldValueKindByKey constructorKey index0 constructed ->
               kind
         _ ->
           constructorFieldStoredValueKind fieldTy
@@ -10644,17 +11850,16 @@ functionFormParamValueKinds :: FunctionForm -> LocalValueKinds
 functionFormParamValueKinds form =
   foldr bindParam emptyLocalValueKinds (indexed (functionFormParamTriples form))
   where
-    bindParam (index0, (mbIdentity, paramName, paramTy)) =
+    bindParam (index0, (mbIdentity, _paramName, paramTy)) =
       bindLocalValueKind
         mbIdentity
-        paramName
         (parameterValueKind (ffEvidenceParams form) index0 paramTy)
 
 functionFormReturnValueKind :: ProgramEnv -> FunctionForm -> LowerValueKind
 functionFormReturnValueKind env form =
   functionFormReturnValueKindWith env Set.empty form
 
-functionFormReturnValueKindWith :: ProgramEnv -> Set String -> FunctionForm -> LowerValueKind
+functionFormReturnValueKindWith :: ProgramEnv -> Set BackendBindingRef -> FunctionForm -> LowerValueKind
 functionFormReturnValueKindWith env visitedGlobals form =
   backendExprValueKindWith env visitedGlobals (functionFormParamValueKinds form) (ffBody form)
 
@@ -10662,7 +11867,7 @@ functionFormReturnConstructedValue :: ProgramEnv -> FunctionForm -> Maybe Constr
 functionFormReturnConstructedValue env form =
   backendExprConstructedValueWith env Set.empty (functionFormParamValueKinds form) Map.empty (ffBody form)
 
-backendExprValueKindWith :: ProgramEnv -> Set String -> LocalValueKinds -> BackendExpr -> LowerValueKind
+backendExprValueKindWith :: ProgramEnv -> Set BackendBindingRef -> LocalValueKinds -> BackendExpr -> LowerValueKind
 backendExprValueKindWith env visitedGlobals valueKinds expr
   | not (isFunctionLikeBackendType (backendExprType expr)) = LowerRuntimeValue
   | otherwise =
@@ -10675,20 +11880,20 @@ backendExprValueKindWith env visitedGlobals valueKinds expr
               variableValueKind ty mbIdentity name typeArgs
             _ ->
               backendExprValueKindWith env visitedGlobals valueKinds fun
-        BackendLetWithIdentity _ mbIdentity name bindingTy rhs body ->
+        BackendLetWithIdentity _ mbIdentity _name bindingTy rhs body ->
           backendExprValueKindWith env visitedGlobals valueKindsForBody body
           where
             valueKindsForBody =
               case functionLikeAliasValueKind valueKinds rhs of
                 Just kind ->
-                  bindLocalValueKind mbIdentity name kind valueKinds
+                  bindLocalValueKind mbIdentity kind valueKinds
                 Nothing ->
                   case functionFormFromExpected bindingTy rhs of
                     form
                       | not (null (ffTypeBinders form)) || not (null (ffParams form)) ->
-                          deleteLocalValueKind mbIdentity name valueKinds
+                          deleteLocalValueKind mbIdentity valueKinds
                     _ ->
-                      bindLocalValueKind mbIdentity name (backendExprValueKindWith env visitedGlobals valueKinds rhs) valueKinds
+                      bindLocalValueKind mbIdentity (backendExprValueKindWith env visitedGlobals valueKinds rhs) valueKinds
         BackendCase _ scrutinee alternatives ->
           combineValueKinds
             (backendExprType expr)
@@ -10720,7 +11925,6 @@ backendExprValueKindWith env visitedGlobals valueKinds expr
             bindPatternField (binder, fieldTy) =
               bindLocalValueKind
                 (backendPatternBinderIdentity binder)
-                (backendPatternBinderName binder)
                 (constructorFieldStoredValueKind fieldTy)
 
     functionLikeAliasValueKind kinds =
@@ -10735,38 +11939,38 @@ backendExprValueKindWith env visitedGlobals valueKinds expr
                   Just (variableValueKindWith kinds varTy mbIdentity name typeArgs)
                 _ ->
                   functionLikeAliasValueKind kinds fun
-        BackendLetWithIdentity ty mbIdentity name bindingTy rhs body
+        BackendLetWithIdentity ty mbIdentity _name bindingTy rhs body
           | isFunctionLikeBackendType ty ->
               let kindsForBody =
                     case functionLikeAliasValueKind kinds rhs of
                       Just kind ->
-                        bindLocalValueKind mbIdentity name kind kinds
+                        bindLocalValueKind mbIdentity kind kinds
                       Nothing ->
                         case functionFormFromExpected bindingTy rhs of
                           form
                             | not (null (ffTypeBinders form)) || not (null (ffParams form)) ->
-                                deleteLocalValueKind mbIdentity name kinds
+                                deleteLocalValueKind mbIdentity kinds
                           _ ->
-                            bindLocalValueKind mbIdentity name (backendExprValueKindWith env visitedGlobals kinds rhs) kinds
+                            bindLocalValueKind mbIdentity (backendExprValueKindWith env visitedGlobals kinds rhs) kinds
                in functionLikeAliasValueKind kindsForBody body
         _ ->
           Nothing
 
-    variableValueKindWith kinds ty mbIdentity name typeArgs =
-      case lookupLocalValueKind mbIdentity name kinds of
+    variableValueKindWith kinds ty mbIdentity _name typeArgs =
+      case lookupLocalValueKind mbIdentity kinds of
         Just kind ->
           kind
         Nothing ->
-          case lookupNonLocalBindingInfo (peBase env) mbIdentity name of
+          case lookupNonLocalBindingInfo (peBase env) mbIdentity of
             Just binding ->
               case instantiateFunctionFormWithTypeArgs "value-kind classification" (biForm binding) typeArgs [] of
                 Right (_, form)
                   | not (null (ffParams form)) ->
                       LowerFunctionPointer
-                  | Set.member (biName binding) visitedGlobals ->
+                  | Set.member (bindingInfoRef binding) visitedGlobals ->
                       valueKindForType ty
                   | otherwise ->
-                      functionFormReturnValueKindWith env (Set.insert (biName binding) visitedGlobals) form
+                      functionFormReturnValueKindWith env (Set.insert (bindingInfoRef binding) visitedGlobals) form
                 _ ->
                   LowerFunctionPointer
             Nothing ->
@@ -10774,48 +11978,46 @@ backendExprValueKindWith env visitedGlobals valueKinds expr
 
 backendExprConstructedValueWith ::
   ProgramEnv ->
-  Set String ->
+  Set BackendBindingRef ->
   LocalValueKinds ->
   LocalConstructedValues ->
   BackendExpr ->
   Maybe ConstructedValue
 backendExprConstructedValueWith env visitedGlobals valueKinds constructedValues =
   \case
-    BackendVarWithIdentity _ mbIdentity name ->
-      variableConstructedValue mbIdentity name []
+    BackendVarWithIdentity _ mbIdentity _name ->
+      variableConstructedValue mbIdentity []
     expr@(BackendTyApp _ fun _) ->
       case collectTyApps expr of
-        (BackendVarWithIdentity _ mbIdentity name, typeArgs) ->
-          variableConstructedValue mbIdentity name typeArgs
+        (BackendVarWithIdentity _ mbIdentity _name, typeArgs) ->
+          variableConstructedValue mbIdentity typeArgs
         _ ->
           backendExprConstructedValueWith env visitedGlobals valueKinds constructedValues fun
-    BackendLetWithIdentity _ mbIdentity name bindingTy rhs body ->
+    BackendLetWithIdentity _ mbIdentity _name bindingTy rhs body ->
       backendExprConstructedValueWith env visitedGlobals valueKindsForBody constructedValuesForBody body
       where
         valueKindsForBody =
           case functionLikeAliasValueKind valueKinds rhs of
             Just kind ->
-              bindLocalValueKind mbIdentity name kind valueKinds
+              bindLocalValueKind mbIdentity kind valueKinds
             Nothing ->
               case functionFormFromExpected bindingTy rhs of
                 form
                   | not (null (ffTypeBinders form)) || not (null (ffParams form)) ->
-                      deleteLocalValueKind mbIdentity name valueKinds
+                      deleteLocalValueKind mbIdentity valueKinds
                 _ ->
-                  bindLocalValueKind mbIdentity name (backendExprValueKindWith env visitedGlobals valueKinds rhs) valueKinds
+                  bindLocalValueKind mbIdentity (backendExprValueKindWith env visitedGlobals valueKinds rhs) valueKinds
         constructedValuesForBody =
           case backendExprConstructedValueWith env visitedGlobals valueKinds constructedValues rhs of
             Just constructed ->
-              bindLocalConstructedValue mbIdentity name constructed constructedValues
+              bindLocalConstructedValue mbIdentity constructed constructedValues
             Nothing ->
-              deleteLocalConstructedValue mbIdentity name constructedValues
+              deleteLocalConstructedValue mbIdentity constructedValues
     BackendConstructWithIdentity resultTy mbIdentity name args ->
-      Just (constructedValueForConstructor resolvedConstructorName fieldKinds)
+      constructedValueForConstructorKey . crValueKey <$> mbConstructorRuntime <*> pure fieldKinds
       where
         mbConstructorRuntime =
           lookupConstructorRuntime (peBase env) mbIdentity name
-        resolvedConstructorName =
-          maybe name (backendConstructorName . crConstructor) mbConstructorRuntime
         fieldTys =
           fromMaybe (map backendExprType args) $
             mbConstructorRuntime >>= \constructorRuntime ->
@@ -10848,19 +12050,19 @@ backendExprConstructedValueWith env visitedGlobals valueKinds constructedValues 
                   Just (variableValueKindWith kinds varTy mbIdentity name typeArgs)
                 _ ->
                   functionLikeAliasValueKind kinds fun
-        BackendLetWithIdentity ty mbIdentity name bindingTy rhs body
+        BackendLetWithIdentity ty mbIdentity _name bindingTy rhs body
           | isFunctionLikeBackendType ty ->
               let kindsForBody =
                     case functionLikeAliasValueKind kinds rhs of
                       Just kind ->
-                        bindLocalValueKind mbIdentity name kind kinds
+                        bindLocalValueKind mbIdentity kind kinds
                       Nothing ->
                         case functionFormFromExpected bindingTy rhs of
                           form
                             | not (null (ffTypeBinders form)) || not (null (ffParams form)) ->
-                                deleteLocalValueKind mbIdentity name kinds
+                                deleteLocalValueKind mbIdentity kinds
                           _ ->
-                            bindLocalValueKind mbIdentity name (backendExprValueKindWith env visitedGlobals kinds rhs) kinds
+                            bindLocalValueKind mbIdentity (backendExprValueKindWith env visitedGlobals kinds rhs) kinds
                in functionLikeAliasValueKind kindsForBody body
         _ ->
           Nothing
@@ -10882,43 +12084,42 @@ backendExprConstructedValueWith env visitedGlobals valueKinds constructedValues 
             bindPatternField (binder, fieldTy) =
               bindLocalValueKind
                 (backendPatternBinderIdentity binder)
-                (backendPatternBinderName binder)
                 (constructorFieldStoredValueKind fieldTy)
 
-    variableValueKindWith kinds ty mbIdentity name typeArgs =
-      case lookupLocalValueKind mbIdentity name kinds of
+    variableValueKindWith kinds ty mbIdentity _name typeArgs =
+      case lookupLocalValueKind mbIdentity kinds of
         Just kind ->
           kind
         Nothing ->
-          case lookupNonLocalBindingInfo (peBase env) mbIdentity name of
+          case lookupNonLocalBindingInfo (peBase env) mbIdentity of
             Just binding ->
               case instantiateFunctionFormWithTypeArgs "value-kind classification" (biForm binding) typeArgs [] of
                 Right (_, form)
                   | not (null (ffParams form)) ->
                       LowerFunctionPointer
-                  | Set.member (biName binding) visitedGlobals ->
+                  | Set.member (bindingInfoRef binding) visitedGlobals ->
                       valueKindForType ty
                   | otherwise ->
-                      functionFormReturnValueKindWith env (Set.insert (biName binding) visitedGlobals) form
+                      functionFormReturnValueKindWith env (Set.insert (bindingInfoRef binding) visitedGlobals) form
                 _ ->
                   LowerFunctionPointer
             Nothing ->
               valueKindForType ty
 
-    variableConstructedValue mbIdentity name typeArgs =
-      case lookupLocalConstructedValue mbIdentity name constructedValues of
+    variableConstructedValue mbIdentity typeArgs =
+      case lookupLocalConstructedValue mbIdentity constructedValues of
         Just constructed ->
           Just constructed
         Nothing ->
-          case lookupNonLocalBindingInfo (peBase env) mbIdentity name of
+          case lookupNonLocalBindingInfo (peBase env) mbIdentity of
             Just binding ->
               case instantiateFunctionFormWithTypeArgs "constructed-value classification" (biForm binding) typeArgs [] of
                 Right (_, form)
                   | null (ffParams form),
-                    Set.notMember (biName binding) visitedGlobals ->
+                    Set.notMember (bindingInfoRef binding) visitedGlobals ->
                       backendExprConstructedValueWith
                         env
-                        (Set.insert (biName binding) visitedGlobals)
+                        (Set.insert (bindingInfoRef binding) visitedGlobals)
                         (functionFormParamValueKinds form)
                         Map.empty
                         (ffBody form)
@@ -10948,6 +12149,14 @@ lowerValueForType ty llvmTy operand =
 functionPointerValue :: BackendType -> LLVMOperand -> LowerValue
 functionPointerValue ty operand =
   LowerValue ty LLVMPtr operand LowerFunctionPointer Nothing
+
+functionPointerValueForBinding :: BackendType -> BindingInfo -> [BackendType] -> LLVMOperand -> LowerValue
+functionPointerValueForBinding ty binding resolvedTypeArgs operand =
+  (functionPointerValue ty operand) {lvSymbolIdentity = mbIdentity}
+  where
+    mbIdentity
+      | null resolvedTypeArgs = biIdentity binding
+      | otherwise = Nothing
 
 lowerImmediateConstructCase ::
   ProgramEnv ->
@@ -10988,13 +12197,15 @@ lowerImmediateConstructCase env exprEnv context resultTy mbConstructorIdentity c
 
     patternMatchesConstructor =
       \case
-        BackendConstructorPatternWithIdentity mbPatternIdentity name _ ->
+        BackendConstructorPatternWithBinderIdentities mbPatternIdentity name _ ->
           constructorPatternMatches mbConstructorIdentity constructorName mbPatternIdentity name
         BackendDefaultPattern ->
           False
 
     constructorPatternMatches (Just constructorIdentity) _ (Just patternIdentity) _ =
       constructorIdentity == patternIdentity
+    constructorPatternMatches (Just {}) _ Nothing _ =
+      False
     constructorPatternMatches _ expectedName _ patternName =
       patternName == expectedName
 
@@ -11011,16 +12222,16 @@ lowerImmediateConstructCase env exprEnv context resultTy mbConstructorIdentity c
       False
 
     rejectDuplicateConstructorAlternatives =
-      case firstDuplicate [constructorPatternDuplicateKey mbIdentity name | BackendAlternative (BackendConstructorPatternWithIdentity mbIdentity name _) _ <- alternativesList] of
+      case firstDuplicate [constructorPatternDuplicateKey mbIdentity name | BackendAlternative (BackendConstructorPatternWithBinderIdentities mbIdentity name _) _ <- alternativesList] of
         Just key ->
           liftEither (BackendLLVMUnsupportedExpression context ("duplicate constructor case alternative " ++ show key))
         Nothing ->
           pure ()
 
     constructorPatternDuplicateKey (Just identity) _ =
-      symbolIdentityStableName identity
+      Left identity
     constructorPatternDuplicateKey Nothing name =
-      name
+      Right name
 
     lowerUnmatchedImmediateCase = do
       zipWithM_ evaluateUnusedField fieldTys args
@@ -11053,16 +12264,16 @@ lowerImmediateConstructCase env exprEnv context resultTy mbConstructorIdentity c
 
     bindUsedField usedBinders acc (binder, fieldTy, arg)
       | backendTypeRequiresStaticSpecialization fieldTy = do
-        localFunction <- lowerStaticFunctionArgument env exprEnv context binderName fieldTy arg
-        if patternBinderUsedBy usedBinders binder
-          then pure (bindExprEnvLocalFunction binderIdentity binderName localFunction acc)
-          else pure acc
+          localFunction <- lowerStaticFunctionArgument env exprEnv context binderName fieldTy arg
+          if patternBinderUsedBy usedBinders binder
+            then pure (bindExprEnvLocalFunction binderIdentity localFunction acc)
+            else pure acc
       | backendTypeHasRuntimeRepresentation env fieldTy = do
         value <- lowerConstructField env exprEnv context fieldTy arg
         expectedTy <- lowerRuntimeValueTypeM env context fieldTy
         requireLLVMType context constructorName expectedTy value
         if patternBinderUsedBy usedBinders binder
-          then pure (bindExprEnvValue binderIdentity binderName value acc)
+          then pure (bindExprEnvValue binderIdentity value acc)
           else pure acc
       | otherwise = do
           liftEither (BackendLLVMUnsupportedType ("field " ++ show binderName ++ " at " ++ context) fieldTy)
@@ -11106,7 +12317,7 @@ constructorRuntimeFieldTypes constructorRuntime scrutineeTy =
     Right structuralMatch ->
       Just (Structural.srcmFieldTypes structuralMatch)
     Left _ ->
-      case Structural.matchConstructorResult (crDataParameters constructorRuntime) parameters Map.empty (backendConstructorResult constructor) scrutineeTy of
+      case Structural.matchConstructorResult (backendDataParameterRefs (crData constructorRuntime)) parameters Map.empty (backendConstructorResult constructor) scrutineeTy of
         Just substitution ->
           Just (map (substituteBackendTypesByKey substitution) (backendConstructorFields constructor))
         Nothing ->
@@ -11138,16 +12349,16 @@ lowerBackendTypeM env context ty =
 lowerBackendType :: ProgramEnv -> String -> BackendType -> Either BackendLLVMError LLVMType
 lowerBackendType env context ty =
   case ty of
-    BTBaseWithIdentity _ (BaseTy "Int") -> Right (LLVMInt 64)
-    BTBaseWithIdentity _ (BaseTy "Bool") -> Right (LLVMInt 1)
-    BTBaseWithIdentity _ (BaseTy "Char") -> Right (LLVMInt 32)
-    BTBaseWithIdentity _ (BaseTy "String") -> Right LLVMPtr
-    BTBaseWithIdentity _ (BaseTy "IO") -> Right LLVMPtr
-    BTConWithIdentity _ (BaseTy "IO") _ -> Right LLVMPtr
-    BTBaseWithIdentity identity (BaseTy name)
+    BTBaseWithIdentity identity base@(BaseTy name)
+      | backendBuiltinHeadMatches "Int" identity base -> Right (LLVMInt 64)
+      | backendBuiltinHeadMatches "Bool" identity base -> Right (LLVMInt 1)
+      | backendBuiltinHeadMatches "Char" identity base -> Right (LLVMInt 32)
+      | backendBuiltinHeadMatches "String" identity base -> Right LLVMPtr
+      | backendBuiltinHeadMatches ioTypeName identity base -> Right LLVMPtr
       | maybe False (const True) (lookupDataRuntimeByHead (peBase env) identity name) -> Right LLVMPtr
       | otherwise -> Left (BackendLLVMUnsupportedType context ty)
-    BTConWithIdentity identity (BaseTy name) _
+    BTConWithIdentity identity base@(BaseTy name) _
+      | backendBuiltinHeadMatches ioTypeName identity base -> Right LLVMPtr
       | maybe False (const True) (lookupDataRuntimeByHead (peBase env) identity name) -> Right LLVMPtr
       | otherwise -> Left (BackendLLVMUnsupportedType context ty)
     BTBase (BaseTy name)
@@ -11174,7 +12385,7 @@ decomposeBackendTypeHead ty =
 
 emitMalloc :: ProgramEnv -> String -> Int -> LowerM LLVMOperand
 emitMalloc env context size
-  | Map.member runtimeMallocName (pbBindings (peBase env)) =
+  | not (runtimeBindingNameAvailable (peBase env) runtimeMallocName) =
       liftEither (BackendLLVMUnsupportedExpression context ("reserved runtime binding " ++ show runtimeMallocName))
   | otherwise =
       emitAssign "malloc" LLVMPtr (LLVMCall runtimeMallocName [(LLVMInt 64, LLVMIntLiteral 64 (toInteger size))])
@@ -11214,9 +12425,10 @@ substituteExprTypesByKey substitution =
           BackendRoll (substituteTy resultTy) (go subst payload)
         BackendUnroll resultTy payload ->
           BackendUnroll (substituteTy resultTy) (go subst payload)
-        BackendClosureWithParamIdentities resultTy entryName captures params body ->
+        BackendClosureWithParamIdentities resultTy entryIdentity entryName captures params body ->
           BackendClosureWithParamIdentities
             (substituteTy resultTy)
+            entryIdentity
             entryName
             (map (substituteCapture subst) captures)
             [param {backendClosureParamType = substituteTy (backendClosureParamType param)} | param <- params]

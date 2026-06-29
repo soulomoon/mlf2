@@ -92,12 +92,27 @@ module MLF.Pipeline
     , CheckedBinding(..)
     , SymbolNamespace(..)
     , SymbolOwnerIdentity(..)
-    , SymbolIdentity(..)
+    , SymbolIdentity
+    , symbolIdentityFromParts
+    , symbolIdentityWithUnique
+    , symbolUniqueIdentity
+    , symbolNamespace
+    , symbolDefiningModule
+    , symbolDefiningName
+    , symbolOwnerIdentity
     , SymbolOrigin(..)
     , SymbolSpelling(..)
-    , ResolvedSymbol(..)
+    , ResolvedSymbol
+    , resolvedSymbolIdentity
+    , resolvedSymbolSpelling
+    , mapResolvedSymbolIdentity
+    , mkResolvedSymbol
     , ResolvedReferenceKind(..)
-    , ResolvedReference(..)
+    , ResolvedReference
+    , resolvedReferenceKind
+    , resolvedReferenceName
+    , resolvedReferenceSymbol
+    , mkResolvedReference
     , ResolvedScope(..)
     , ResolvedModule(..)
     , ResolvedProgram(..)
@@ -146,12 +161,27 @@ import MLF.Frontend.Program.Types
     , checkedProgramMain
     , ResolvedModule(..)
     , ResolvedProgram(..)
-    , ResolvedReference(..)
+    , ResolvedReference
     , ResolvedReferenceKind(..)
     , ResolvedScope(..)
-    , ResolvedSymbol(..)
+    , ResolvedSymbol
+    , mapResolvedSymbolIdentity
+    , mkResolvedReference
+    , mkResolvedSymbol
+    , resolvedReferenceKind
+    , resolvedReferenceName
+    , resolvedReferenceSymbol
+    , resolvedSymbolIdentity
+    , resolvedSymbolSpelling
     , sameResolvedSymbol
-    , SymbolIdentity(..)
+    , SymbolIdentity
+    , symbolIdentityFromParts
+    , symbolIdentityWithUnique
+    , symbolUniqueIdentity
+    , symbolNamespace
+    , symbolDefiningModule
+    , symbolDefiningName
+    , symbolOwnerIdentity
     , SymbolNamespace(..)
     , SymbolOrigin(..)
     , SymbolOwnerIdentity(..)

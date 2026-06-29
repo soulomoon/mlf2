@@ -7,43 +7,43 @@ backend-program
           constructors:
             ctor Main__Zero
               fields: []
-              result: mu $Main.Nat_self. forall $$Main.Nat_result. ($$Main.Nat_result -> (($$Main.Nat_self -> $$Main.Nat_result) -> $$Main.Nat_result))
+              result: Main.Nat
             ctor Main__Succ
-              fields: [mu $Main.Nat_self. forall $$Main.Nat_result. ($$Main.Nat_result -> (($$Main.Nat_self -> $$Main.Nat_result) -> $$Main.Nat_result))]
-              result: mu $Main.Nat_self. forall $$Main.Nat_result. ($$Main.Nat_result -> (($$Main.Nat_self -> $$Main.Nat_result) -> $$Main.Nat_result))
+              fields: [Main.Nat]
+              result: Main.Nat
       bindings:
-        binding Main__Zero : mu $Main.Nat_self. forall $$Main.Nat_result. ($$Main.Nat_result -> (($$Main.Nat_self -> $$Main.Nat_result) -> $$Main.Nat_result))
+        binding Main__Zero : Main.Nat
           exported-main: false
           expr:
-            construct Main__Zero : mu $Main.Nat_self. forall $$Main.Nat_result. ($$Main.Nat_result -> (($$Main.Nat_self -> $$Main.Nat_result) -> $$Main.Nat_result))
+            construct Main__Zero : Main.Nat
               args:
                 <none>
-        binding Main__Succ : (mu $Main.Nat_self. forall $$Main.Nat_result. ($$Main.Nat_result -> (($$Main.Nat_self -> $$Main.Nat_result) -> $$Main.Nat_result)) -> mu $Main.Nat_self. forall $$Main.Nat_result. ($$Main.Nat_result -> (($$Main.Nat_self -> $$Main.Nat_result) -> $$Main.Nat_result)))
+        binding Main__Succ : (Main.Nat -> Main.Nat)
           exported-main: false
           expr:
-            lam $Main__Succ_arg1 : mu $Main.Nat_self. forall $$Main.Nat_result. ($$Main.Nat_result -> (($$Main.Nat_self -> $$Main.Nat_result) -> $$Main.Nat_result)) -> (mu $Main.Nat_self. forall $$Main.Nat_result. ($$Main.Nat_result -> (($$Main.Nat_self -> $$Main.Nat_result) -> $$Main.Nat_result)) -> mu $Main.Nat_self. forall $$Main.Nat_result. ($$Main.Nat_result -> (($$Main.Nat_self -> $$Main.Nat_result) -> $$Main.Nat_result)))
+            lam $Main__Succ_arg1 : Main.Nat -> (Main.Nat -> Main.Nat)
               body:
-                construct Main__Succ : mu $Main.Nat_self. forall $$Main.Nat_result. ($$Main.Nat_result -> (($$Main.Nat_self -> $$Main.Nat_result) -> $$Main.Nat_result))
+                construct Main__Succ : Main.Nat
                   args:
                     arg 0:
-                      var $Main__Succ_arg1 : mu $Main.Nat_self. forall $$Main.Nat_result. ($$Main.Nat_result -> (($$Main.Nat_self -> $$Main.Nat_result) -> $$Main.Nat_result))
-        binding Main__main : mu $Main.Nat_self. forall $$Main.Nat_result. ($$Main.Nat_result -> (($$Main.Nat_self -> $$Main.Nat_result) -> $$Main.Nat_result))
+                      var $Main__Succ_arg1 : Main.Nat
+        binding Main__main : Main.Nat
           exported-main: true
           expr:
-            case : mu $Main.Nat_self. forall $$Main.Nat_result. ($$Main.Nat_result -> (($$Main.Nat_self -> $$Main.Nat_result) -> $$Main.Nat_result))
+            case : Main.Nat
               scrutinee:
-                construct Main__Succ : mu $Main.Nat_self. forall $$Main.Nat_result. ($$Main.Nat_result -> (($$Main.Nat_self -> $$Main.Nat_result) -> $$Main.Nat_result))
+                construct Main__Succ : Main.Nat
                   args:
                     arg 0:
-                      construct Main__Zero : mu $Main.Nat_self. forall $$Main.Nat_result. ($$Main.Nat_result -> (($$Main.Nat_self -> $$Main.Nat_result) -> $$Main.Nat_result))
+                      construct Main__Zero : Main.Nat
                         args:
                           <none>
               alternatives:
                 alternative Main__Zero()
                   body:
-                    construct Main__Zero : mu $Main.Nat_self. forall $$Main.Nat_result. ($$Main.Nat_result -> (($$Main.Nat_self -> $$Main.Nat_result) -> $$Main.Nat_result))
+                    construct Main__Zero : Main.Nat
                       args:
                         <none>
                 alternative Main__Succ($case1#3)
                   body:
-                    var $case1#3 : mu $Main.Nat_self. forall $$Main.Nat_result. ($$Main.Nat_result -> (($$Main.Nat_self -> $$Main.Nat_result) -> $$Main.Nat_result))
+                    var $case1#3 : Main.Nat

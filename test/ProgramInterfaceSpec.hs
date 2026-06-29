@@ -37,7 +37,7 @@ import MLF.Frontend.Program.Types
     , ExportedTypeInfo (..)
     , ModuleExports (..)
     , ProgramError (..)
-    , SymbolIdentity (..)
+    , symbolIdentityFromParts
     , SymbolNamespace (..)
     , ValueInfo (..)
     , ctorName
@@ -170,7 +170,17 @@ spec = do
                 mainModule = checkedProgramModules checked !! 1
 
             moduleInterfaceFromCheckedModule libNode mainModule
-                `shouldBe` Left (ProgramInterfaceCheckedModuleMismatch (packageModuleGraphNodeId libNode) "Main")
+                `shouldBe` Left (ProgramInterfaceCheckedModuleMismatch (packageModuleGraphNodeId libNode) (checkedModuleIdentity mainModule))
+
+        it "extracts interfaces by checked module identity when module names are stale" $ do
+            (graph, checked, packageInterface) <- requireCheckedPackageInterface interfacePackage
+            let checked' =
+                    checked
+                        { checkedProgramModules =
+                            map staleCheckedModuleName (checkedProgramModules checked)
+                        }
+
+            packageInterfaceFromCheckedProgram graph checked' `shouldBe` Right packageInterface
 
         it "accepts Prelude-owned interface exports for builtin opaque types" $ do
             let package =
@@ -208,7 +218,7 @@ spec = do
             case Map.toList (moduleInterfaceDataByIdentity libInterface) of
                 [] -> expectationFailure "expected interface data entries"
                 (actualKey, dataInfo) : _ -> do
-                    let staleKey = SymbolIdentity (UniqueIdentity 900001) SymbolType "Lib" "Stale" Nothing
+                    let staleKey = symbolIdentityFromParts (UniqueIdentity 900001) SymbolType "Lib" "Stale" Nothing
                         staleInterface =
                             libInterface
                                 { moduleInterfaceDataByIdentity =
@@ -226,7 +236,7 @@ spec = do
             let exports = moduleInterfaceExports libInterface
                 typeInfo = exportedTypesForDisplay exports Map.! "Nat"
                 typeIdentity = dataInfoSymbolIdentity (exportedTypeData typeInfo)
-                staleKey = SymbolIdentity (UniqueIdentity 900002) SymbolConstructor "Lib" "Stale" Nothing
+                staleKey = symbolIdentityFromParts (UniqueIdentity 900002) SymbolConstructor "Lib" "Stale" Nothing
                 staleTypeInfo =
                     typeInfo
                         { exportedTypeConstructorDisplaysByIdentity =
@@ -328,6 +338,10 @@ containsAll :: (Ord a) => [a] -> [a] -> Bool
 containsAll needles haystack =
     all (`elem` haystack) needles
 
+staleCheckedModuleName :: CheckedModule -> CheckedModule
+staleCheckedModuleName checkedModule =
+    checkedModule {checkedModuleName = "$stale_" ++ checkedModuleName checkedModule}
+
 poisonExportOwner :: ModuleInterface -> ModuleInterface
 poisonExportOwner interface =
     interface
@@ -340,7 +354,7 @@ poisonExportOwner interface =
     poisonValueOwner valueInfo@OrdinaryValue {} =
         valueInfo
             { valueInfoSymbol =
-                SymbolIdentity (UniqueIdentity 900003) SymbolValue "Other" (valueInfoIdentityName valueInfo) Nothing
+                symbolIdentityFromParts (UniqueIdentity 900003) SymbolValue "Other" (valueInfoIdentityName valueInfo) Nothing
             }
     poisonValueOwner valueInfo = valueInfo
 

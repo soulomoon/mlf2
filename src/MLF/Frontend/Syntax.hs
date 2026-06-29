@@ -12,7 +12,6 @@ module MLF.Frontend.Syntax
     SrcKind (..),
     TypeParam (..),
     typeParamName,
-    typeParamIdentityName,
     typeParamKind,
     typeParamRef,
     firstOrderTypeParam,
@@ -29,7 +28,7 @@ module MLF.Frontend.Syntax
 
     -- * Raw source types (parser output)
     SrcTy (..),
-    ResolvedTypeBinderRef (..),
+    ResolvedTypeBinderRef,
     ResolvedSrcTy (..),
     SrcType,
     ResolvedSrcType,
@@ -44,7 +43,10 @@ module MLF.Frontend.Syntax
     mkSrcBound,
     mkResolvedSrcBound,
     resolvedSrcTypeBinderName,
-    resolvedSrcTypeBinderIdentityName,
+    resolvedTypeBinderIdentity,
+    resolvedTypeBinderName,
+    resolvedTypeBinderRefFromIdentity,
+    resolvedTypeBinderTypeIdentity,
     resolvedSrcTypeToSrcType,
     resolvedSrcTypeIdentityType,
     mkNormBound,
@@ -61,14 +63,15 @@ where
 import Data.Functor.Foldable (Base, Corecursive (..), Recursive (..))
 import Data.List.NonEmpty (NonEmpty)
 import MLF.Frontend.Symbol
-  ( ResolvedSymbol (..),
+  ( ResolvedSymbol,
+    resolvedSymbolIdentity,
     SymbolNamespace (..),
     resolvedSymbolSpelling,
     symbolDisplayName,
     symbolIdentityStableName,
     symbolNamespace,
   )
-import MLF.Types.Unique (UniqueIdentity (..))
+import MLF.Types.Identity (TypeBinderIdentity, typeBinderIdentityStableName)
 
 {- Note [Surface syntax and paper alignment]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -180,10 +183,14 @@ mkSrcBound :: SrcTy n (BoundTopVar n) -> SrcBound n
 mkSrcBound = SrcBound
 
 data ResolvedTypeBinderRef = ResolvedTypeBinderRef
-  { resolvedTypeBinderIdentity :: UniqueIdentity,
+  { resolvedTypeBinderIdentity :: TypeBinderIdentity,
     resolvedTypeBinderName :: String
   }
   deriving (Show)
+
+resolvedTypeBinderRefFromIdentity :: TypeBinderIdentity -> String -> ResolvedTypeBinderRef
+resolvedTypeBinderRefFromIdentity =
+  ResolvedTypeBinderRef
 
 instance Eq ResolvedTypeBinderRef where
   left == right =
@@ -204,12 +211,6 @@ typeParamName param =
   case param of
     TypeParam name _ -> name
     ResolvedTypeParam ref _ -> resolvedTypeBinderName ref
-
-typeParamIdentityName :: TypeParam -> String
-typeParamIdentityName param =
-  case param of
-    TypeParam name _ -> name
-    ResolvedTypeParam ref _ -> resolvedSrcTypeBinderIdentityName ref
 
 typeParamKind :: TypeParam -> SrcKind
 typeParamKind param =
@@ -289,9 +290,13 @@ resolvedSrcTypeBinderName :: ResolvedTypeBinderRef -> String
 resolvedSrcTypeBinderName =
   resolvedTypeBinderName
 
+resolvedTypeBinderTypeIdentity :: ResolvedTypeBinderRef -> TypeBinderIdentity
+resolvedTypeBinderTypeIdentity =
+  resolvedTypeBinderIdentity
+
 resolvedSrcTypeBinderIdentityName :: ResolvedTypeBinderRef -> String
 resolvedSrcTypeBinderIdentityName ref =
-  "$typevar#" ++ show (uniqueIdentityValue (resolvedTypeBinderIdentity ref))
+  typeBinderIdentityStableName (resolvedTypeBinderTypeIdentity ref)
 
 resolvedSrcTypeToSrcType :: ResolvedSrcTy n v -> SrcTy n v
 resolvedSrcTypeToSrcType ty =

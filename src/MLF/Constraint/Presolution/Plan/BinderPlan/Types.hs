@@ -62,7 +62,6 @@ data BinderPlanInput p = BinderPlanInput
     , bpiSchemeRootByBody :: IntMap.IntMap NodeId
     , bpiSchemeRootOwnerBase :: IntMap.IntMap GenNodeId
     , bpiSchemeRootByBodyBase :: IntMap.IntMap NodeId
-    , bpiParseNameId :: String -> Maybe Int
     , bpiAliasBinderBases :: IntSet.IntSet
     , bpiOrderBinderCandidates :: [Int] -> (Int -> Either ElabError [Int]) -> Either ElabError [Int]
     }

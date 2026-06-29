@@ -94,7 +94,6 @@ buildBinderPlan BinderPlanInput {..} = do
       schemeRootByBody = bpiSchemeRootByBody
       schemeRootOwnerBase = bpiSchemeRootOwnerBase
       schemeRootByBodyBase = bpiSchemeRootByBodyBase
-      parseNameId = bpiParseNameId
       aliasBinderBases = bpiAliasBinderBases
       orderCandidates = bpiOrderBinderCandidates
 
@@ -487,7 +486,7 @@ buildBinderPlan BinderPlanInput {..} = do
       depFromRef ref =
         case typeBinderRefNode ref of
           Just node -> Just (getNodeId node)
-          Nothing -> nameToId (typeBinderRefName ref)
+          Nothing -> Nothing
       depsFromRefs k allowed refs =
         [ dep
           | ref <- refs,
@@ -510,7 +509,6 @@ buildBinderPlan BinderPlanInput {..} = do
                   Just baseN <- [IntMap.lookup k solvedToBasePref]
               ]
           Nothing -> IntMap.empty
-      nameToId = parseNameId
       substDepsFor k =
         IntMap.union substDeps $
           IntMap.fromList

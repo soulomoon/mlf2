@@ -66,7 +66,7 @@ import MLF.Elab.Types
     Ty (..),
     elabToBound,
     eTyAbsWithRef,
-    freshTypeBinderRef,
+    sourceTypeBinderRefForName,
     instAbstrWithRef,
     instUnderWithRef,
     mapResolvedVarType,
@@ -96,11 +96,10 @@ import MLF.Reify.TypeOps
     freeTypeVarRefsType,
     freeTypeVarsType,
     freshNameLike,
-    parseNameId,
     resolveBaseBoundForInstConstraint,
     substTypeCaptureRef,
   )
-import MLF.Types.Identity (IdentityGenerator, initialIdentityGenerator)
+import MLF.Types.Identity (IdentityGenerator, identityGeneratorAfter, symbolGeneratedIdentities)
 import MLF.Util.Trace (TraceConfig, traceGeneralize)
 
 data AnnotationContext (p :: Phase) = AnnotationContext
@@ -554,16 +553,16 @@ reifyInst annotationContext namedSetReify env funAnn (EdgeId eid) =
             Right phi0' -> pure phi0'
             Left err -> Left err
         let substForPhi = maybe IntMap.empty schemeInfoBinderRefSubst mSchemeInfo
-            resolvePhiVar v = do
-              nid <- parseNameId v
-              bnd <- pvLookupVarBound presolutionView (canonical (NodeId nid))
+            resolvePhiVar ref = do
+              nid <- typeBinderRefNode ref
+              bnd <- pvLookupVarBound presolutionView (canonical nid)
               either
                 (const Nothing)
                 Just
                 (reifyTypeWithNamedSetRefsNoFallbackReadModel (scReadModel scopeContext) substForPhi namedSetReify bnd)
             normalizePhiInst inst0 = case inst0 of
-              InstApp (TVarRef ref) -> maybe inst0 InstApp (resolvePhiVar (typeBinderRefName ref))
-              InstBot (TVarRef ref) -> maybe inst0 InstBot (resolvePhiVar (typeBinderRefName ref))
+              InstApp (TVarRef ref) -> maybe inst0 InstApp (resolvePhiVar ref)
+              InstBot (TVarRef ref) -> maybe inst0 InstBot (resolvePhiVar ref)
               _ -> inst0
             phi = normalizePhiInst phi0
         case debugGeneralize
@@ -924,8 +923,13 @@ renameTypeVarInTerm oldRef newRef term =
 
 srcTypeToElabType :: NormSrcType -> Either ElabError ElabType
 srcTypeToElabType ty =
-  let (refs, generator) = freshSourceTypeBinderRefs (Set.toList (freeSrcTypeVars ty)) initialIdentityGenerator
+  let (refs, generator) = freshSourceTypeBinderRefs (Set.toList (freeSrcTypeVars ty)) (sourceTypeIdentityGenerator ty)
    in fmap fst (srcTypeToElabTypeWith refs generator ty)
+
+sourceTypeIdentityGenerator :: NormSrcType -> IdentityGenerator
+sourceTypeIdentityGenerator ty =
+  identityGeneratorAfter
+    (concatMap symbolGeneratedIdentities (Map.elems (Builtins.builtinSourceTypeHeadIdentities ty)))
 
 freeSrcTypeVars :: SrcTy n v -> Set.Set String
 freeSrcTypeVars ty =
@@ -960,7 +964,7 @@ freshSourceTypeBinderRefs names generator0 =
   where
     go [] refs generator = (refs, generator)
     go (name : rest) refs generator =
-      let (ref, generator1) = freshTypeBinderRef name generator
+      let (ref, generator1) = sourceTypeBinderRefForName name generator
        in go rest (Map.insert name ref refs) generator1
 
 srcTypeToElabTypeWith :: Map.Map String TypeBinderRef -> IdentityGenerator -> NormSrcType -> Either ElabError (ElabType, IdentityGenerator)
@@ -984,14 +988,14 @@ srcTypeToElabTypeWith refs generator ty = case ty of
   STTyApp {} ->
     Left (InstantiationError "residual type application reached elaboration")
   STForall name mb body ->
-    let (ref, generator1) = freshTypeBinderRef name generator
+    let (ref, generator1) = sourceTypeBinderRefForName name generator
         refs' = Map.insert name ref refs
      in do
           (mb', generator2) <- maybe (Right (Nothing, generator1)) (srcBoundToElabBoundWith refs generator1) mb
           (body', generator3) <- srcTypeToElabTypeWith refs' generator2 body
           Right (TForallRef ref mb' body', generator3)
   STMu name body ->
-    let (ref, generator1) = freshTypeBinderRef name generator
+    let (ref, generator1) = sourceTypeBinderRefForName name generator
      in do
           (body', generator2) <- srcTypeToElabTypeWith (Map.insert name ref refs) generator1 body
           Right (TMuRef ref body', generator2)
@@ -1038,14 +1042,14 @@ structBoundToElabBoundWith refs generator bTy = case bTy of
   STTyApp {} ->
     Left (InstantiationError "residual type application reached elaboration")
   STForall name mb body ->
-    let (ref, generator1) = freshTypeBinderRef name generator
+    let (ref, generator1) = sourceTypeBinderRefForName name generator
         refs' = Map.insert name ref refs
      in do
           (mb', generator2) <- maybe (Right (Nothing, generator1)) (srcBoundToElabBoundWith refs generator1) mb
           (body', generator3) <- srcTypeToElabTypeWith refs' generator2 body
           Right (Just (TForallRef ref mb' body'), generator3)
   STMu name body ->
-    let (ref, generator1) = freshTypeBinderRef name generator
+    let (ref, generator1) = sourceTypeBinderRefForName name generator
      in do
       (body', generator2) <- srcTypeToElabTypeWith (Map.insert name ref refs) generator1 body
       Right (Just (TMuRef ref body'), generator2)

@@ -1,9 +1,13 @@
+{-# LANGUAGE GADTs #-}
+
 module BackendConvertSpec (spec) where
 
 import Control.Applicative ((<|>))
+import Data.Either (isLeft)
 import Data.Foldable (toList)
 import Data.List (find, intercalate, isInfixOf, isPrefixOf, nub)
 import Data.List.NonEmpty (NonEmpty (..))
+import qualified Data.Map.Strict as Map
 import ElabTermTestSupport
   ( generatedResolvedLocal,
     generatedResolvedLocalForName,
@@ -25,25 +29,35 @@ import MLF.Elab.Types (schemeFromType)
 import qualified MLF.Types.Elab as Elab
 import MLF.Frontend.Program.Builtins (builtinTypeIdentity)
 import MLF.Frontend.Program.Prelude (withPrelude)
-import MLF.Frontend.Symbol (SymbolIdentity, symbolIdentityStableName)
+import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), symbolDefiningName, symbolIdentityFromParts, symbolIdentityStableName, symbolUniqueIdentity)
 import MLF.Frontend.Program.Types
   ( CheckedBinding (..),
     CheckedModule (..),
     CheckedProgram (..),
+    ClassInfo (..),
+    TypeView (..),
+    ValueInfo (..),
     checkedBindingName,
     checkedProgramMain,
+    classInfoSymbolIdentity,
+    ctorForalls,
+    ctorArgs,
     constructorRefFromInfo,
     ConstructorInfo (..),
     DataInfo (..),
     dataInfoIdentityQualifiedName,
     IdDetails (..),
-    splitArrows,
-    splitForalls,
+    instanceHeadIdentityTypes,
+    instanceInfoClassSymbolIdentity,
+    lookupInstanceMethod,
+    methodName,
+    mkTypeView,
+    typeHeadNamesSrcType,
   )
-import MLF.Frontend.Syntax (Lit (..), SrcTy (..), SrcType)
+import MLF.Frontend.Syntax (Lit (..), SrcBound (..), SrcTy (..), SrcType)
 import MLF.Frontend.Syntax.Program (Program)
 import MLF.Pipeline (checkProgram)
-import MLF.Types.Identity (DeferredRef (deferredRefName))
+import MLF.Types.Identity (deferredRefName, UniqueIdentity (..), typeBinderIdentityFromUnique, typeBinderIdentityStableName)
 import System.Directory (createDirectoryIfMissing)
 import System.Environment (lookupEnv)
 import System.FilePath (takeDirectory)
@@ -126,6 +140,49 @@ spec = describe "MLF.Backend.Convert" $ do
           ]
     checked <- requireRight (checkProgram (withPrelude program))
     backend <- requireRight (convertCheckedProgram checked)
+    validateBackendProgram backend `shouldBe` Right ()
+
+  it "preserves source data identity when a primitive result is structurally compatible" $ do
+    program <-
+      requireParsed $
+        unlines
+          [ "module Main export (main) {",
+            "  import Prelude exposing (Option(..), stringCharAtOption);",
+            "  def main : Option Char = stringCharAtOption \"abc\" 0;",
+            "}"
+          ]
+    checked <- requireRight (checkProgram (withPrelude program))
+    backend <- requireRight (convertCheckedProgram checked)
+    validateBackendProgram backend `shouldBe` Right ()
+
+    optionData <- requireBackendData "Prelude.Option" backend
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    case backendBindingType mainBinding of
+      BTConWithIdentity (Just identity) (BaseTy "Prelude.Option") (_ :| []) ->
+        Just identity `shouldBe` backendDataIdentity optionData
+      other ->
+        expectationFailure ("expected identity-bearing Prelude.Option result, got " ++ show other)
+
+  it "converts backend modules from checked module identity when module names are stale" $ do
+    checked0 <- requireChecked simpleFunctionProgram
+    let checked = renameCheckedModuleName "Main" "$stale_Main" checked0
+    backend <- requireRight (convertCheckedProgram checked)
+
+    case backendProgramModules backend of
+      [backendModule] -> do
+        fmap symbolDefiningName (backendModuleIdentity backendModule) `shouldBe` Just "Main"
+        backendModuleName backendModule `shouldBe` "Main"
+      modules0 ->
+        expectationFailure ("expected one backend module, got " ++ show (length modules0))
+    validateBackendProgram backend `shouldBe` Right ()
+
+  it "resolves backend main by checked main identity when the main runtime name is stale" $ do
+    checked0 <- requireChecked simpleFunctionProgram
+    let checked = renameCheckedProgramMainRuntimeName "$stale_Main__main" checked0
+    backend <- requireRight (convertCheckedProgram checked)
+
+    backendProgramMain backend `shouldBe` "Main__main"
+    fmap symbolDefiningName (backendProgramMainIdentity backend) `shouldBe` Just "main"
     validateBackendProgram backend `shouldBe` Right ()
 
   it "matches the checked backend IR snapshot for a primitive function program" $ do
@@ -285,7 +342,7 @@ spec = describe "MLF.Backend.Convert" $ do
           mapMainBinding
             ( \binding ->
                 binding
-                  { checkedBindingSourceType = sameNamedTypeAbsSourceTy,
+                  { checkedBindingSourceTypeView = mkTypeView sameNamedTypeAbsSourceTy sameNamedTypeAbsSourceTy,
                     checkedBindingType = sameNamedTypeAbsElabTy,
                     checkedBindingTerm = sameNamedTypeAbsTerm
                   }
@@ -299,7 +356,17 @@ spec = describe "MLF.Backend.Convert" $ do
           Elab.freshTypeBinderRef "a" (Elab.identityGeneratorAfterType sameNamedTypeAbsElabTy)
         (canonicalInnerRef, _) =
           Elab.freshTypeBinderRef "a" gen1
-    backendBindingType mainBinding `shouldBe` BTForall "a" Nothing (BTForall "a1" Nothing intTy)
+    backendBindingType mainBinding
+      `shouldBe` BTForallWithIdentity
+        (Just (Elab.typeBinderRefIdentity canonicalOuterRef))
+        "a"
+        Nothing
+        ( BTForallWithIdentity
+            (Just (Elab.typeBinderRefIdentity canonicalInnerRef))
+            "a1"
+            Nothing
+            intTy
+        )
     case backendBindingType mainBinding of
       BTForallWithIdentity (Just outerTypeIdentity) "a" Nothing (BTForallWithIdentity (Just innerTypeIdentity) "a1" Nothing _) -> do
         outerTypeIdentity `shouldBe` Elab.typeBinderRefIdentity canonicalOuterRef
@@ -324,12 +391,235 @@ spec = describe "MLF.Backend.Convert" $ do
       other ->
         expectationFailure ("expected nested backend type abstraction, got " ++ show other)
 
+  it "rejects identity-less backend-to-elab free type variables" $ do
+    let dataIdentity =
+          symbolIdentityFromParts (UniqueIdentity 0) SymbolType "Main" "Box" Nothing
+        backendTy =
+          BTArrow
+            (BTBaseWithIdentity (Just dataIdentity) (BaseTy "Box"))
+            (BTVarWithIdentity Nothing "fresh")
+
+    backendTypeToElabType backendTy `shouldBe` Nothing
+
+  it "resolves backend-to-elab type binders by identity before display name" $ do
+    let identity = typeBinderIdentityFromUnique (UniqueIdentity 7)
+        backendTy =
+          BTForallWithIdentity
+            (Just identity)
+            "canonical"
+            Nothing
+            (BTVarWithIdentity (Just identity) "stale")
+
+    case backendTypeToElabType backendTy of
+      Just (Elab.TForallRef binderRef Nothing (Elab.TVarRef occurrenceRef)) -> do
+        Elab.typeBinderRefIdentity binderRef `shouldBe` identity
+        Elab.typeBinderRefName binderRef `shouldBe` "canonical"
+        Elab.typeBinderRefIdentity occurrenceRef `shouldBe` identity
+        Elab.typeBinderRefName occurrenceRef `shouldBe` "canonical"
+      other ->
+        expectationFailure ("expected identity-keyed backend type conversion, got " ++ show other)
+
+  it "rejects name-only backend-to-elab variables under identity binders" $ do
+    let identity = typeBinderIdentityFromUnique (UniqueIdentity 8)
+        backendTy =
+          BTForallWithIdentity
+            (Just identity)
+            "a"
+            Nothing
+            (BTVar "a")
+
+    backendTypeToElabType backendTy `shouldBe` Nothing
+
+  it "seeds checked source type binders after source type head identities" $ do
+    checked0 <- requireChecked simpleFunctionProgram
+    let typeIdentity =
+          symbolIdentityFromParts (UniqueIdentity 0) SymbolType "Main" "Box" Nothing
+        boxElabTy = Elab.TBaseWithIdentity (Just typeIdentity) (BaseTy "Box")
+        sourceTy =
+          STForall
+            "a"
+            (Just (SrcBound (STBase "Box")))
+            (STForall "a" Nothing (STBase "Int"))
+        sourceView =
+          (mkTypeView sourceTy sourceTy)
+            { typeViewHeadIdentities = Map.singleton "Box" typeIdentity
+            }
+        checkedTy =
+          Elab.TForallRef
+            sameNamedOuterTypeRef
+            (Just boxElabTy)
+            (Elab.TForallRef sameNamedInnerTypeRef Nothing intElabTy)
+        checkedTerm =
+          Elab.ETyAbsRef
+            sameNamedOuterTypeRef
+            (Just boxElabTy)
+            (Elab.ETyAbsRef sameNamedInnerTypeRef Nothing (Elab.ELit (LInt 1)))
+        expectedOuterIdentity = typeBinderIdentityFromUnique (UniqueIdentity 1)
+        expectedInnerIdentity = typeBinderIdentityFromUnique (UniqueIdentity 2)
+        checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingSourceTypeView = sourceView,
+                    checkedBindingType = checkedTy,
+                    checkedBindingTerm = checkedTerm
+                  }
+            )
+            checked0
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    backendBindingType mainBinding
+      `shouldBe` BTForallWithIdentity
+        (Just expectedOuterIdentity)
+        "a"
+        (Just (BTBaseWithIdentity (Just typeIdentity) (BaseTy "Box")))
+        (BTForallWithIdentity (Just expectedInnerIdentity) "a1" Nothing intTy)
+
+  it "generates source type binder identities while canonicalizing stable-looking checked source types" $ do
+    checked0 <- requireChecked simpleFunctionProgram
+    let stableName = "$typevar#991605"
+        (canonicalOuterRef, gen1) =
+          Elab.freshTypeBinderRef stableName (Elab.identityGeneratorAfterType sameNamedTypeAbsElabTy)
+        (canonicalInnerRef, _) =
+          Elab.freshTypeBinderRef "a" gen1
+        expectedOuterIdentity = Elab.typeBinderRefIdentity canonicalOuterRef
+        expectedInnerIdentity = Elab.typeBinderRefIdentity canonicalInnerRef
+        sourceTy = STForall stableName Nothing (STForall "a" Nothing (STBase "Int"))
+        checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingSourceTypeView = mkTypeView sourceTy sourceTy,
+                    checkedBindingType = sameNamedTypeAbsElabTy,
+                    checkedBindingTerm = sameNamedTypeAbsTerm
+                  }
+            )
+            checked0
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    backendBindingType mainBinding
+      `shouldBe` BTForallWithIdentity
+        (Just expectedOuterIdentity)
+        stableName
+        Nothing
+        (BTForallWithIdentity (Just expectedInnerIdentity) "a" Nothing intTy)
+    case backendBindingExpr mainBinding of
+      BackendTyAbsWithIdentity
+        { backendTyParamIdentity = Just outerIdentity,
+          backendTyAbsBody =
+            BackendTyAbsWithIdentity
+              { backendTyParamIdentity = Just innerIdentity
+              }
+        } -> do
+          outerIdentity `shouldBe` expectedOuterIdentity
+          innerIdentity `shouldBe` expectedInnerIdentity
+      other ->
+        expectationFailure ("expected fresh backend type abstraction identities, got " ++ show other)
+
+  it "uses checked source type binder identities while canonicalizing checked source types" $ do
+    checked0 <- requireChecked simpleFunctionProgram
+    let sourceIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991606)
+        sourceStableName = typeBinderIdentityStableName sourceIdentity
+        displayTy = STForall "a" Nothing (STBase "Int")
+        identityTy = STForall sourceStableName Nothing (STBase "Int")
+        checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingSourceTypeView =
+                      (mkTypeView displayTy identityTy)
+                        { typeViewBinderIdentities =
+                            Map.singleton "a" sourceIdentity
+                        },
+                    checkedBindingType = Elab.TForallRef sameNamedOuterTypeRef Nothing intElabTy,
+                    checkedBindingTerm = Elab.ETyAbsRef sameNamedOuterTypeRef Nothing (Elab.ELit (LInt 1))
+                  }
+            )
+            checked0
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    backendBindingType mainBinding
+      `shouldBe` BTForallWithIdentity (Just sourceIdentity) "a" Nothing intTy
+    case backendBindingExpr mainBinding of
+      BackendTyAbsWithIdentity {backendTyParamIdentity = Just identity, backendTyParamName = name} -> do
+        identity `shouldBe` sourceIdentity
+        name `shouldBe` "a"
+      other ->
+        expectationFailure ("expected source identity-backed backend type abstraction, got " ++ show other)
+
+  it "uses checked source type binder identities when identity names are stale" $ do
+    checked0 <- requireChecked simpleFunctionProgram
+    let sourceIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991608)
+        displayTy = STForall "a" Nothing (STBase "Int")
+        identityTy = STForall "$stale_a" Nothing (STBase "Int")
+        checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingSourceTypeView =
+                      (mkTypeView displayTy identityTy)
+                        { typeViewBinderIdentities =
+                            Map.singleton "a" sourceIdentity
+                        },
+                    checkedBindingType = Elab.TForallRef sameNamedOuterTypeRef Nothing intElabTy,
+                    checkedBindingTerm = Elab.ETyAbsRef sameNamedOuterTypeRef Nothing (Elab.ELit (LInt 1))
+                  }
+            )
+            checked0
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    backendBindingType mainBinding
+      `shouldBe` BTForallWithIdentity (Just sourceIdentity) "a" Nothing intTy
+
+  it "keeps checked source type binder identities through source type view fallback" $ do
+    checked0 <- requireChecked simpleFunctionProgram
+    let sourceIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991607)
+        displayTy = STForall "a" Nothing (STBase "Int")
+        identityTy = STBase "Int"
+        checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingSourceTypeView =
+                      (mkTypeView displayTy identityTy)
+                        { typeViewBinderIdentities =
+                            Map.singleton "a" sourceIdentity
+                        },
+                    checkedBindingType = Elab.TForallRef sameNamedOuterTypeRef Nothing intElabTy,
+                    checkedBindingTerm = Elab.ETyAbsRef sameNamedOuterTypeRef Nothing (Elab.ELit (LInt 1))
+                  }
+            )
+            checked0
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    backendBindingType mainBinding
+      `shouldBe` BTForallWithIdentity (Just sourceIdentity) "a" Nothing intTy
+
   it "synthesizes constructor bindings for checked GADT and existential programs" $ do
     mapM_
       ( \path -> do
           checked <- requireChecked =<< readFile path
           backend <- requireRight (convertCheckedProgram checked)
           validateBackendProgram backend `shouldBe` Right ()
+          let generatedConstructorArgBinders =
+                [ identity
+                | binding <- backendBindings backend,
+                  (name, identity) <- backendExprBinderRefs (backendBindingExpr binding),
+                  "$" `isPrefixOf` name,
+                  "_arg" `isInfixOf` name
+                ]
+          generatedConstructorArgBinders `shouldSatisfy` (not . null)
+          generatedConstructorArgBinders `shouldSatisfy` all (/= Nothing)
       )
       [ "test/programs/recursive-adt/recursive-gadt.mlfp",
         "test/programs/recursive-adt/recursive-existential.mlfp"
@@ -344,18 +634,25 @@ spec = describe "MLF.Backend.Convert" $ do
     mainBinding <- requireBinding (backendProgramMain backend) backend
     collectConstructNames (backendBindingExpr mainBinding) `shouldContain` ["Main__Some"]
 
-  it "accepts checked type identity aliases for binding data hints" $ do
+  it "accepts checked source type identities for binding data hints" $ do
     checked0 <- requireChecked parameterizedConstructorProgram
     case checkedDataInfos checked0 of
       dataInfo : _ -> do
+        let identityDataHead = dataInfoIdentityQualifiedName dataInfo
         let checked =
               mapMainBinding
                 ( \binding ->
                     binding
-                      { checkedBindingSourceType = STCon "$stale_source_option" (STBase "Int" :| []),
+                      { checkedBindingSourceTypeView =
+                          ( mkTypeView
+                              (STCon "$stale_source_option" (STBase "Int" :| []))
+                              (STCon identityDataHead (STBase "Int" :| []))
+                          )
+                            { typeViewHeadIdentities = Map.singleton identityDataHead (dataInfoSymbol dataInfo)
+                            },
                         checkedBindingType =
                           Elab.TConWithIdentity
-                            (Just (dataInfoSymbol dataInfo))
+                            Nothing
                             (BaseTy "$stale_elab_option")
                             (Elab.TBaseWithIdentity (Just (builtinTypeIdentity "Int")) (BaseTy "Int") :| [])
                       }
@@ -364,6 +661,111 @@ spec = describe "MLF.Backend.Convert" $ do
         backend <- requireRight (convertCheckedProgram checked)
         validateBackendProgram backend `shouldBe` Right ()
         backendDataNames backend `shouldContain` ["Main.Option"]
+      [] -> expectationFailure "expected checked data info"
+
+  it "uses checked source type head identity maps for binding data hints by identity aliases" $ do
+    checked0 <- requireChecked parameterizedConstructorProgram
+    case checkedDataInfos checked0 of
+      dataInfo : _ -> do
+        let staleIdentityDataHead = "$stale_identity_option"
+            stableIdentityDataHead = symbolIdentityStableName (dataInfoSymbol dataInfo)
+            checked =
+              mapMainBinding
+                ( \binding ->
+                    binding
+                      { checkedBindingSourceTypeView =
+                          ( mkTypeView
+                              (STCon "$stale_source_option" (STBase "Int" :| []))
+                              (STCon staleIdentityDataHead (STBase "Int" :| []))
+                          )
+                            { typeViewHeadIdentities = Map.singleton staleIdentityDataHead (dataInfoSymbol dataInfo)
+                            },
+                        checkedBindingType =
+                          Elab.TConWithIdentity
+                            Nothing
+                            (BaseTy "$stale_elab_option")
+                            (Elab.TBaseWithIdentity (Just (builtinTypeIdentity "Int")) (BaseTy "Int") :| [])
+                      }
+                )
+                checked0
+            checkedByStableHead =
+              mapMainBinding
+                ( \binding ->
+                    binding
+                      { checkedBindingSourceTypeView =
+                          ( mkTypeView
+                              (STCon "$stale_source_option" (STBase "Int" :| []))
+                              (STCon stableIdentityDataHead (STBase "Int" :| []))
+                          )
+                            { typeViewHeadIdentities = Map.singleton (dataInfoIdentityQualifiedName dataInfo) (dataInfoSymbol dataInfo)
+                            },
+                        checkedBindingType =
+                          Elab.TConWithIdentity
+                            Nothing
+                            (BaseTy "$stale_elab_option")
+                            (Elab.TBaseWithIdentity (Just (builtinTypeIdentity "Int")) (BaseTy "Int") :| [])
+                      }
+                )
+                checked0
+        backend <- requireRight (convertCheckedProgram checked)
+        validateBackendProgram backend `shouldBe` Right ()
+        backendDataNames backend `shouldContain` ["Main.Option"]
+        stableBackend <- requireRight (convertCheckedProgram checkedByStableHead)
+        validateBackendProgram stableBackend `shouldBe` Right ()
+        backendDataNames stableBackend `shouldContain` ["Main.Option"]
+      [] -> expectationFailure "expected checked data info"
+
+  it "does not recover source data hints through names when head identity metadata misses" $ do
+    checked0 <- requireChecked parameterizedConstructorProgram
+    case checkedDataInfos checked0 of
+      dataInfo : _ -> do
+        let staleIdentityDataHead = dataInfoIdentityQualifiedName dataInfo
+            fakeOptionIdentity =
+              symbolIdentityFromParts (UniqueIdentity 991420) SymbolType "Other" "Option" Nothing
+            checked =
+              mapMainBinding
+                ( \binding ->
+                    binding
+                      { checkedBindingSourceTypeView =
+                          ( mkTypeView
+                              (STCon "$stale_source_option" (STBase "Int" :| []))
+                              (STCon staleIdentityDataHead (STBase "Int" :| []))
+                          )
+                            { typeViewHeadIdentities = Map.singleton staleIdentityDataHead fakeOptionIdentity
+                            },
+                        checkedBindingType =
+                          Elab.TConWithIdentity
+                            Nothing
+                            (BaseTy "$stale_elab_option")
+                            (Elab.TBaseWithIdentity (Just (builtinTypeIdentity "Int")) (BaseTy "Int") :| [])
+                      }
+                )
+                checked0
+        convertCheckedProgram checked `shouldSatisfy` isLeft
+      [] -> expectationFailure "expected checked data info"
+
+  it "does not recover source data hints from identity names without head metadata" $ do
+    checked0 <- requireChecked parameterizedConstructorProgram
+    case checkedDataInfos checked0 of
+      dataInfo : _ -> do
+        let identityDataHead = dataInfoIdentityQualifiedName dataInfo
+            checked =
+              mapMainBinding
+                ( \binding ->
+                    binding
+                      { checkedBindingSourceTypeView =
+                          mkTypeView
+                            (STCon "$stale_source_option" (STBase "Int" :| []))
+                            (STCon identityDataHead (STBase "Int" :| [])),
+                        checkedBindingType =
+                          Elab.TConWithIdentity
+                            Nothing
+                            (BaseTy "$stale_elab_option")
+                            (Elab.TBaseWithIdentity (Just (builtinTypeIdentity "Int")) (BaseTy "Int") :| [])
+                      }
+                )
+                checked0
+        convertCheckedProgram checked `shouldSatisfy` isLeft
       [] -> expectationFailure "expected checked data info"
 
   it "converts constructor metadata by identity type when display type names are stale" $ do
@@ -378,6 +780,67 @@ spec = describe "MLF.Backend.Convert" $ do
     validateBackendProgram backend `shouldBe` Right ()
     constructor <- requireConstructor "Main__Some" backend
     backendConstructorResult constructor `shouldBe` backendConstructorResult originalConstructor
+
+  it "records constructor type head identities while checking local data declarations" $ do
+    checked <- requireChecked parameterizedConstructorProgram
+    case find ((== "Main.Option") . dataInfoIdentityQualifiedName) (checkedDataInfos checked) of
+      Just dataInfo ->
+        case find ((== "Main__Some") . ctorRuntimeName) (dataConstructors dataInfo) of
+          Just constructorInfo ->
+            dataInfoSymbol dataInfo
+              `shouldSatisfy` (`elem` Map.elems (typeViewHeadIdentities (ctorTypeView constructorInfo)))
+          Nothing ->
+            expectationFailure "expected Main__Some constructor"
+      Nothing ->
+        expectationFailure "expected Main.Option data info"
+
+  it "converts constructor metadata by head identity maps when identity names are stale" $ do
+    checked0 <- requireChecked parameterizedConstructorProgram
+    case find ((== "Main.Option") . dataInfoIdentityQualifiedName) (checkedDataInfos checked0) of
+      Just dataInfo -> do
+        let staleDisplayHead = "$stale_display_option"
+            staleIdentityHead = "$stale_identity_option"
+            staleCtorType =
+              ( mkTypeView
+                  (STArrow (STVar "a") (STCon staleDisplayHead (STVar "a" :| [])))
+                  (STArrow (STVar "a") (STCon staleIdentityHead (STVar "a" :| [])))
+              )
+                { typeViewHeadIdentities = Map.singleton staleIdentityHead (dataInfoSymbol dataInfo)
+                }
+            checked =
+              withConstructorTypeView "Main__Some" staleCtorType checked0
+        backend <- requireRight (convertCheckedProgram checked)
+        validateBackendProgram backend `shouldBe` Right ()
+        constructor <- requireConstructor "Main__Some" backend
+        case backendConstructorResult constructor of
+          BTConWithIdentity (Just identity) (BaseTy "Main.Option") (_ :| []) ->
+            identity `shouldBe` dataInfoSymbol dataInfo
+          other ->
+            expectationFailure ("expected identity-bearing Main.Option result, got " ++ show other)
+      Nothing ->
+        expectationFailure "expected Main.Option data info"
+
+  it "promotes constructor field local builtin names before checking metadata" $ do
+    checked0 <- requireChecked constructorFieldLetProgram
+    let nameOnlyIntTy = Elab.TBaseWithIdentity Nothing (BaseTy "Int")
+        checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingTerm =
+                      rewriteFirstLetBindingType nameOnlyIntTy (checkedBindingTerm binding)
+                  }
+            )
+            checked0
+
+    backend <- requireRight (convertCheckedProgram checked)
+    validateBackendProgram backend `shouldBe` Right ()
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    case backendBindingExpr mainBinding of
+      BackendLetWithIdentity {backendLetType = ty} ->
+        ty `shouldBe` intTy
+      other ->
+        expectationFailure ("expected backend let, got " ++ show other)
 
   it "recovers case data from local scrutinee types by data identity" $ do
     checked0 <- requireChecked identityAliasLetCaseProgram
@@ -399,6 +862,40 @@ spec = describe "MLF.Backend.Convert" $ do
         case findBackendCase (backendBindingExpr mainBinding) of
           Just BackendCase {backendScrutinee = scrutinee} -> do
             show (backendExprType scrutinee) `shouldNotSatisfy` isInfixOf "$stale_scrutinee_name"
+            show (backendExprType scrutinee) `shouldSatisfy` isInfixOf "Main.Flag"
+          other -> expectationFailure ("expected backend case, got " ++ show other)
+      [] -> expectationFailure "expected checked data info"
+
+  it "does not keep stable structural binder identity text as data identity" $ do
+    checked0 <- requireChecked identityAliasLambdaCaseProgram
+    case checkedDataInfos checked0 of
+      dataInfo : _ -> do
+        let stableSelfName = symbolIdentityStableName (dataInfoSymbol dataInfo) ++ "_self"
+            stableStructuralTy =
+              testTMu
+                stableSelfName
+                ( testTForall
+                    "$T_result"
+                    Nothing
+                    (Elab.TArrow (testTVar "$T_result") (testTVar "$T_result"))
+                )
+            checked =
+              mapMainBinding
+                ( \binding ->
+                    binding
+                      { checkedBindingType =
+                          replaceFunctionDomain stableStructuralTy (checkedBindingType binding),
+                        checkedBindingTerm =
+                          rewriteFirstLamBindingType stableStructuralTy (checkedBindingTerm binding)
+                      }
+                )
+                checked0
+        backend <- requireRight (convertCheckedProgram checked)
+        validateBackendProgram backend `shouldBe` Right ()
+        mainBinding <- requireBinding (backendProgramMain backend) backend
+        case findBackendCase (backendBindingExpr mainBinding) of
+          Just BackendCase {backendScrutinee = scrutinee} -> do
+            show (backendExprType scrutinee) `shouldNotSatisfy` isInfixOf stableSelfName
             show (backendExprType scrutinee) `shouldSatisfy` isInfixOf "Main.Flag"
           other -> expectationFailure ("expected backend case, got " ++ show other)
       [] -> expectationFailure "expected checked data info"
@@ -614,14 +1111,20 @@ spec = describe "MLF.Backend.Convert" $ do
       `shouldBe` [Just (BTBaseWithIdentity (Just (builtinTypeIdentity "Int")) (BaseTy "Int"))]
     map backendTypeBinderIdentity (backendConstructorForalls constructor)
       `shouldSatisfy` all (/= Nothing)
+    case backendConstructorForalls constructor of
+      [BackendTypeBinderWithIdentity (Just binderIdentity) "a" (Just boundTy)] -> do
+        boundTy `shouldBe` BTBaseWithIdentity (Just (builtinTypeIdentity "Int")) (BaseTy "Int")
+        backendConstructorFields constructor `shouldBe` [BTVarWithIdentity (Just binderIdentity) "a"]
+      other ->
+        expectationFailure ("expected one identity-bearing constructor forall, got " ++ show other)
 
     let corruptedExpr =
-          BackendConstructWithIdentity
-            { backendExprType = backendConstructorResult constructor,
-              backendConstructIdentity = Nothing,
-              backendConstructName = backendConstructorName constructor,
-              backendConstructArgs = [BackendLit boolTy (LBool True)]
-            }
+              BackendConstructWithIdentity
+                { backendExprType = backendConstructorResult constructor,
+                  backendConstructIdentity = backendConstructorIdentity constructor,
+                  backendConstructName = backendConstructorName constructor,
+                  backendConstructArgs = [BackendLit boolTy (LBool True)]
+                }
         corruptedBackend =
           mapBackendMainBinding
             ( \binding ->
@@ -658,7 +1161,7 @@ spec = describe "MLF.Backend.Convert" $ do
 
     mainBinding <- requireBinding (backendProgramMain backend) backend
     backendBindingExpr mainBinding
-      `shouldSatisfy` containsConstructArgType "Main__Pack" (BTVar "b")
+      `shouldSatisfy` containsConstructArgTypeVar "Main__Pack" "b"
 
   it "keeps same-spelled type env bounds under canonical backend names" $ do
     checked0 <- requireChecked boundedConstructorForallProgram
@@ -666,7 +1169,7 @@ spec = describe "MLF.Backend.Convert" $ do
           mapMainBinding
             ( \binding ->
                 binding
-                  { checkedBindingSourceType = sameNamedBoundedWrapSourceTy,
+                  { checkedBindingSourceTypeView = mkTypeView sameNamedBoundedWrapSourceTy sameNamedBoundedWrapSourceTy,
                     checkedBindingType = sameNamedBoundedWrapElabTy (checkedBindingType binding),
                     checkedBindingTerm = sameNamedBoundedWrapTerm checked0
                   }
@@ -712,7 +1215,7 @@ spec = describe "MLF.Backend.Convert" $ do
 
     mainBinding <- requireBinding (backendProgramMain backend) backend
     backendBindingExpr mainBinding
-      `shouldSatisfy` containsConstructArgType "Main__Pack" (BTVar "b")
+      `shouldSatisfy` containsConstructArgTypeVar "Main__Pack" "b"
 
   it "converts nested constructor arguments under expected constructor field types" $ do
     checked <- requireChecked =<< readFile "test/programs/recursive-adt/typeclass-integration.mlfp"
@@ -733,10 +1236,13 @@ spec = describe "MLF.Backend.Convert" $ do
     backend <- requireRight (convertCheckedProgram checked)
 
     validateBackendProgram backend `shouldBe` Right ()
-    case [symbolIdentityStableName (dataInfoSymbol info) | info <- checkedDataInfos checked, not (null (dataTypeParams info))] of
+    case [dataInfoSymbol info | info <- checkedDataInfos checked, not (null (dataTypeParams info))] of
       optionIdentity : _ ->
-        map backendBindingName (backendBindings backend)
-          `shouldSatisfy` any (isInfixOf ("Eq__" ++ sanitizeBackendName optionIdentity))
+        case parameterizedInstanceMethodRuntimeNames optionIdentity checked of
+          methodRuntimeName : _ ->
+            map backendBindingName (backendBindings backend)
+              `shouldSatisfy` elem methodRuntimeName
+          [] -> expectationFailure "expected parameterized instance method info"
       [] -> expectationFailure "expected parameterized data info"
 
   it "lifts recursive parameterized deriving Eq helpers with captured evidence" $ do
@@ -821,7 +1327,7 @@ spec = describe "MLF.Backend.Convert" $ do
           mapMainBinding
             ( \binding ->
                 binding
-                  { checkedBindingSourceType = polymorphicOptionSourceTy,
+                  { checkedBindingSourceTypeView = mkTypeView polymorphicOptionSourceTy polymorphicOptionSourceTy,
                     checkedBindingType = polymorphicOptionElabTy,
                     checkedBindingTerm = staleSomeInPolymorphicOptionTerm checked0
                   }
@@ -838,19 +1344,22 @@ spec = describe "MLF.Backend.Convert" $ do
 
   it "accepts constructor result placeholders by identity when same-named type binders differ" $ do
     checked0 <- requireChecked parameterizedConstructorProgram
-    let checked =
-          mapMainBinding
-            ( \binding ->
-                binding
-                  { checkedBindingSourceType = polymorphicOptionSourceTy,
-                    checkedBindingType = identityPlaceholderPolymorphicOptionElabTy,
-                    checkedBindingTerm = identityPlaceholderSomeTerm checked0
-                  }
-            )
-            checked0
+    case find ((== "Main.Option") . dataInfoIdentityQualifiedName) (checkedDataInfos checked0) of
+      Just dataInfo -> do
+        let checked =
+              mapMainBinding
+                ( \binding ->
+                    binding
+                      { checkedBindingSourceTypeView = polymorphicOptionSourceView dataInfo identityPlaceholderExpectedRef,
+                        checkedBindingType = identityPlaceholderPolymorphicOptionElabTy,
+                        checkedBindingTerm = identityPlaceholderSomeTerm checked0
+                      }
+                )
+                checked0
 
-    backend <- requireRight (convertCheckedProgram checked)
-    validateBackendProgram backend `shouldBe` Right ()
+        backend <- requireRight (convertCheckedProgram checked)
+        validateBackendProgram backend `shouldBe` Right ()
+      Nothing -> expectationFailure "expected Main.Option data info"
 
   it "matches repeated constructor parameters modulo alpha-equivalence" $ do
     checked0 <- requireChecked repeatedPolymorphicParameterProgram
@@ -916,7 +1425,7 @@ spec = describe "MLF.Backend.Convert" $ do
           mapMainBinding
             ( \binding ->
                 binding
-                  { checkedBindingSourceType = STBase "Main.T",
+                  { checkedBindingSourceTypeView = mkTypeView (STBase "Main.T") (STBase "Main.T"),
                     checkedBindingType = Elab.TBase (BaseTy "Main.T"),
                     checkedBindingTerm = unqualifiedStructuralNullaryConstructorTerm
                   }
@@ -929,6 +1438,33 @@ spec = describe "MLF.Backend.Convert" $ do
     mainBinding <- requireBinding (backendProgramMain backend) backend
     collectConstructNames (backendBindingExpr mainBinding) `shouldContain` ["Main__T"]
     collectConstructNames (backendBindingExpr mainBinding) `shouldNotContain` ["Core__External"]
+
+  it "recovers structural constructor owners by result type identity when display head is stale" $ do
+    checked0 <- requireChecked sameNameUnqualifiedStructuralOwnerProgram
+    case find ((== "Main.T") . dataInfoIdentityQualifiedName) (checkedDataInfos checked0) of
+      Just dataInfo -> do
+        let staleResultTy =
+              Elab.TBaseWithIdentity
+                (Just (dataInfoSymbol dataInfo))
+                (BaseTy "$stale_structural_result")
+            checked =
+              mapMainBinding
+                ( \binding ->
+                    binding
+                      { checkedBindingSourceTypeView = mkTypeView (STBase "Main.T") (STBase "Main.T"),
+                        checkedBindingType = Elab.TBase (BaseTy "Main.T"),
+                        checkedBindingTerm = structuralNullaryConstructorTermWithResult staleResultTy
+                      }
+                )
+                checked0
+
+        backend <- requireRight (convertCheckedProgram checked)
+
+        validateBackendProgram backend `shouldBe` Right ()
+        mainBinding <- requireBinding (backendProgramMain backend) backend
+        collectConstructNames (backendBindingExpr mainBinding) `shouldContain` ["Main__T"]
+        collectConstructNames (backendBindingExpr mainBinding) `shouldNotContain` ["Core__External"]
+      Nothing -> expectationFailure "missing Main.T data info"
 
   it "treats stale app-like instantiations on non-forall terms as no-ops" $ do
     checked0 <- requireChecked simpleFunctionProgram
@@ -963,6 +1499,58 @@ spec = describe "MLF.Backend.Convert" $ do
     mainBinding <- requireBinding (backendProgramMain backend) backend
     backendBindingExpr mainBinding `shouldSatisfy` containsBackendVar (backendBindingName helper)
 
+  it "generates unique lifted helper identities across checked bindings" $ do
+    checked0 <- requireChecked simpleFunctionProgram
+    let rewrite binding =
+          binding
+            { checkedBindingSourceTypeView = mkTypeView (STBase "Int") (STBase "Int"),
+              checkedBindingType = intElabTy,
+              checkedBindingTerm = recursiveIntLiftTerm
+            }
+        checked =
+          mapBinding "Main__id" rewrite $
+            mapMainBinding rewrite checked0
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    let helperNames = filter (isInfixOf "$letrec$") (map backendBindingName (backendBindings backend))
+    length helperNames `shouldBe` 2
+    helperNames `shouldBe` nub helperNames
+
+  it "seeds lifted helper identities from checked metadata identities" $ do
+    checked0 <- requireChecked simpleFunctionProgram
+    let reservedUnique = UniqueIdentity 991999
+        reservedDataIdentity =
+          symbolIdentityFromParts reservedUnique SymbolType "Main" "Reserved" Nothing
+        reservedDataInfo =
+          DataInfo
+            { dataInfoSymbol = reservedDataIdentity,
+              dataTypeParams = [],
+              dataConstructors = []
+            }
+        rewrite binding =
+          binding
+            { checkedBindingSourceTypeView = mkTypeView (STBase "Int") (STBase "Int"),
+              checkedBindingType = intElabTy,
+              checkedBindingTerm = recursiveIntLiftTerm
+            }
+        checked =
+          addDataInfo reservedDataInfo $
+            mapMainBinding rewrite checked0
+    backend <- requireRight (convertCheckedProgram checked)
+
+    case
+      [ symbolUniqueIdentity identity
+      | binding <- backendBindings backend,
+        "$letrec$" `isInfixOf` backendBindingName binding,
+        Just identity <- [backendBindingIdentity binding]
+      ]
+      of
+      [UniqueIdentity helperUnique] ->
+        helperUnique `shouldSatisfy` (> 991999)
+      helperUniques ->
+        expectationFailure ("expected one lifted helper identity, got " ++ show helperUniques)
+
   it "renames binders that would capture recursive helper evidence" $ do
     checked0 <- requireChecked simpleFunctionProgram
     let checked =
@@ -978,7 +1566,13 @@ spec = describe "MLF.Backend.Convert" $ do
 
     validateBackendProgram backend `shouldBe` Right ()
     helper <- requireSingleLiftedHelper backend
-    length (filter (== "$evidence_E") (backendExprBinders (backendBindingExpr helper))) `shouldBe` 1
+    let evidenceBinders =
+          filter ((== "$evidence_E") . fst) (backendExprBinderRefs (backendBindingExpr helper))
+    case map snd evidenceBinders of
+      [Just outerEvidence, Just shadowingEvidence] ->
+        outerEvidence `shouldNotBe` shadowingEvidence
+      other ->
+        expectationFailure ("expected two identity-distinct evidence binders, got " ++ show other)
 
   it "classifies declared evidence by resolved identity instead of evidence prefix" $ do
     checked0 <- requireChecked simpleFunctionProgram
@@ -1029,8 +1623,12 @@ spec = describe "MLF.Backend.Convert" $ do
 
     validateBackendProgram backend `shouldBe` Right ()
     helper <- requireSingleLiftedHelper backend
-    backendBindingType helper `shouldBe` BTForall "a" Nothing unaryIntBackendTy
-    backendBindingExpr helper `shouldSatisfy` containsBackendTyAppArgument (BTVar "a")
+    case backendBindingType helper of
+      BTForallWithIdentity (Just typeIdentity) "a" Nothing bodyTy -> do
+        bodyTy `shouldBe` unaryIntBackendTy
+        backendBindingExpr helper `shouldSatisfy` containsBackendTyAppArgument (BTVarWithIdentity (Just typeIdentity) "a")
+      other ->
+        expectationFailure ("expected identity-bearing helper type capture, got " ++ show other)
 
   it "captures recursive helper type refs by identity when binders share spelling" $ do
     checked0 <- requireChecked simpleFunctionProgram
@@ -1047,7 +1645,12 @@ spec = describe "MLF.Backend.Convert" $ do
 
     validateBackendProgram backend `shouldBe` Right ()
     helper <- requireSingleLiftedHelper backend
-    backendBindingType helper `shouldBe` BTForall "a" Nothing unaryIntBackendTy
+    backendBindingType helper
+      `shouldBe` BTForallWithIdentity
+        (Just (Elab.typeBinderRefIdentity sameNamedInnerTypeRef))
+        "a"
+        Nothing
+        unaryIntBackendTy
 
   it "captures recursive helper term refs by identity when binders share spelling" $ do
     checked0 <- requireChecked simpleFunctionProgram
@@ -1081,7 +1684,12 @@ spec = describe "MLF.Backend.Convert" $ do
 
     validateBackendProgram backend `shouldBe` Right ()
     helper <- requireSingleLiftedHelper backend
-    backendBindingType helper `shouldBe` BTForall "a" Nothing unaryIntBackendTy
+    backendBindingType helper
+      `shouldBe` BTForallWithIdentity
+        (Just (Elab.typeBinderRefIdentity recursiveTypeBoundScopeOuterRef))
+        "a"
+        Nothing
+        unaryIntBackendTy
     backendBindingExpr helper `shouldSatisfy` containsFreshenedTypeAbsWithOuterBound
 
   it "renames shadowing type abstraction bounds that refer to outer binders" $ do
@@ -1099,7 +1707,12 @@ spec = describe "MLF.Backend.Convert" $ do
 
     validateBackendProgram backend `shouldBe` Right ()
     helper <- requireSingleLiftedHelper backend
-    backendBindingType helper `shouldBe` BTForall "a" Nothing unaryIntBackendTy
+    backendBindingType helper
+      `shouldBe` BTForallWithIdentity
+        (Just (Elab.typeBinderRefIdentity recursiveNestedTypeBoundScopeOuterRef))
+        "a"
+        Nothing
+        unaryIntBackendTy
 
   it "lifts recursive lets that shadow outer term binders" $ do
     checked0 <- requireChecked simpleFunctionProgram
@@ -1134,7 +1747,11 @@ spec = describe "MLF.Backend.Convert" $ do
 
     validateBackendProgram backend `shouldBe` Right ()
     helper <- requireSingleLiftedHelper backend
-    backendBindingType helper `shouldBe` recursiveLexicalTypeOrderHelperBackendTy
+    case backendBindingType helper of
+      BTForallWithIdentity (Just {}) "z" Nothing (BTForallWithIdentity (Just {}) "a" Nothing bodyTy) ->
+        bodyTy `shouldBe` unaryIntBackendTy
+      other ->
+        expectationFailure ("expected identity-bearing helper captures in lexical order, got " ++ show other)
 
   it "rejects recursive local functions that capture lexical values" $ do
     checked <- requireChecked recursiveLetCaptureProgram
@@ -1160,6 +1777,18 @@ spec = describe "MLF.Backend.Convert" $ do
     convertSourceType unsupportedVariableHeadType
       `shouldBe` Right (BTVarApp "f" (intWithIdentity :| []))
 
+  it "keeps stable source type binder names metadata-free in backend source conversion" $ do
+    let stableName = "$typevar#991604"
+
+    convertSourceType (STForall stableName Nothing (STVarApp stableName (STVar stableName :| [])))
+      `shouldBe` Right
+        ( BTForallWithIdentity
+            Nothing
+            stableName
+            Nothing
+            (BTVarAppWithIdentity Nothing stableName (BTVarWithIdentity Nothing stableName :| []))
+        )
+
   it "preserves builtin source type identities in backend source conversion" $ do
     convertSourceType (STBase "Int")
       `shouldBe` Right (BTBaseWithIdentity (Just (builtinTypeIdentity "Int")) (BaseTy "Int"))
@@ -1171,6 +1800,20 @@ spec = describe "MLF.Backend.Convert" $ do
     validateBackendProgram backend `shouldBe` Right ()
     mainBinding <- requireBinding (backendProgramMain backend) backend
     backendBindingExpr mainBinding `shouldSatisfy` containsBackendClosure
+
+  it "seeds fresh closure entry names from the identity generator" $ do
+    checked <- requireChecked returnedClosureProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    case collectBackendClosureEntryRefs (backendBindingExpr mainBinding) of
+      (Just entryIdentity, entryName) : _ -> do
+        entryName `shouldSatisfy` isPrefixOf "__mlfp_closure$Main__main$"
+        closureNameUniqueSuffix entryName `shouldBe` Just (uniqueIdentityValue entryIdentity)
+      (Nothing, _) : _ ->
+        expectationFailure "expected generated closure entry identity"
+      [] ->
+        expectationFailure "expected converted closure entry"
 
   it "closure-converts local function aliases that cross let boundaries" $ do
     checked <- requireChecked closureAliasCallProgram
@@ -1495,7 +2138,7 @@ spec = describe "MLF.Backend.Convert" $ do
             ( \binding ->
                 binding
                   { checkedBindingType = unaryIntElabTy,
-                    checkedBindingSourceType = STArrow (STBase "Int") (STBase "Int"),
+                    checkedBindingSourceTypeView = mkTypeView (STArrow (STBase "Int") (STBase "Int")) (STArrow (STBase "Int") (STBase "Int")),
                     checkedBindingTerm =
                       Elab.EApp
                         (Elab.ELam binder (Elab.EVarNode occurrence))
@@ -1516,7 +2159,7 @@ spec = describe "MLF.Backend.Convert" $ do
             ( \binding ->
                 binding
                   { checkedBindingType = intElabTy,
-                    checkedBindingSourceType = STBase "Int",
+                    checkedBindingSourceTypeView = mkTypeView (STBase "Int") (STBase "Int"),
                     checkedBindingTerm = liftedRecursiveHelpersClosureNameTerm checked0
                   }
             )
@@ -1622,6 +2265,21 @@ identityAliasLetCaseProgram =
       "}"
     ]
 
+identityAliasLambdaCaseProgram :: String
+identityAliasLambdaCaseProgram =
+  unlines
+    [ "module Main export (Flag(..), main) {",
+      "  data Flag =",
+      "      Off : Flag",
+      "    | On : Flag;",
+      "",
+      "  def main : Flag -> Flag = λ(scrutinee : Flag) case scrutinee of {",
+      "    Off -> Off;",
+      "    On -> On",
+      "  };",
+      "}"
+    ]
+
 functionCaseProgram :: String
 functionCaseProgram =
   unlines
@@ -1632,6 +2290,17 @@ functionCaseProgram =
       "  def main : Int -> Int = case Box 0 of {",
       "    Box n -> λx x",
       "  };",
+      "}"
+    ]
+
+constructorFieldLetProgram :: String
+constructorFieldLetProgram =
+  unlines
+    [ "module Main export (Box(..), main) {",
+      "  data Box =",
+      "      Box : Int -> Box;",
+      "",
+      "  def main : Box = let x : Int = 1 in Box x;",
       "}"
     ]
 
@@ -2465,15 +3134,31 @@ requireBackendData name backend =
 checkedDataInfos :: CheckedProgram -> [DataInfo]
 checkedDataInfos checked =
   concatMap (toList . checkedModuleData) (checkedProgramModules checked)
-sanitizeBackendName :: String -> String
-sanitizeBackendName =
-  concatMap sanitizeChar
-  where
-    sanitizeChar c
-      | c `elem` ['a' .. 'z'] = [c]
-      | c `elem` ['A' .. 'Z'] = [c]
-      | c `elem` ['0' .. '9'] = [c]
-      | otherwise = "_u" ++ show (fromEnum c) ++ "_"
+
+parameterizedInstanceMethodRuntimeNames :: SymbolIdentity -> CheckedProgram -> [String]
+parameterizedInstanceMethodRuntimeNames dataIdentity checked =
+  [ runtimeName
+  | checkedModule <- checkedProgramModules checked,
+    classInfo <- toList (checkedModuleClasses checkedModule),
+    methodInfo <- Map.elems (classMethodsByIdentity classInfo),
+    methodName methodInfo == "eq",
+    instanceInfo <- checkedModuleInstances checkedModule,
+    instanceInfoClassSymbolIdentity instanceInfo == classInfoSymbolIdentity classInfo,
+    any (srcTypeMentionsDataIdentity dataIdentity) (toList (instanceHeadIdentityTypes instanceInfo)),
+    Just valueInfo <- [lookupInstanceMethod methodInfo instanceInfo],
+    Just runtimeName <- [valueInfoRuntimeName valueInfo]
+  ]
+
+valueInfoRuntimeName :: ValueInfo -> Maybe String
+valueInfoRuntimeName valueInfo =
+  case valueInfo of
+    OrdinaryValue {valueRuntimeName = runtimeName} -> Just runtimeName
+    ConstructorValue {valueRuntimeName = runtimeName} -> Just runtimeName
+    OverloadedMethod {} -> Nothing
+
+srcTypeMentionsDataIdentity :: SymbolIdentity -> SrcType -> Bool
+srcTypeMentionsDataIdentity identity ty =
+  symbolIdentityStableName identity `elem` typeHeadNamesSrcType ty
 
 backendConstructorNames :: BackendProgram -> [String]
 backendConstructorNames =
@@ -2583,24 +3268,34 @@ containsBackendClosure expr =
 
 collectBackendClosureEntryNames :: BackendExpr -> [String]
 collectBackendClosureEntryNames expr =
+  map snd (collectBackendClosureEntryRefs expr)
+
+collectBackendClosureEntryRefs :: BackendExpr -> [(Maybe UniqueIdentity, String)]
+collectBackendClosureEntryRefs expr =
   case expr of
-    BackendClosure _ entryName captures _ body ->
-      entryName : concatMap (collectBackendClosureEntryNames . backendClosureCaptureExpr) captures ++ collectBackendClosureEntryNames body
+    BackendClosureWithParamIdentities {backendClosureEntryIdentity = entryIdentity, backendClosureEntryName = entryName, backendClosureCaptures = captures, backendClosureBody = body} ->
+      (entryIdentity, entryName) : concatMap (collectBackendClosureEntryRefs . backendClosureCaptureExpr) captures ++ collectBackendClosureEntryRefs body
     BackendCase {backendScrutinee = scrutinee, backendAlternatives = alternatives} ->
-      collectBackendClosureEntryNames scrutinee ++ concatMap (collectBackendClosureEntryNames . backendAltBody) (toList alternatives)
-    BackendLamWithIdentity {backendBody = body} -> collectBackendClosureEntryNames body
+      collectBackendClosureEntryRefs scrutinee ++ concatMap (collectBackendClosureEntryRefs . backendAltBody) (toList alternatives)
+    BackendLamWithIdentity {backendBody = body} -> collectBackendClosureEntryRefs body
     BackendApp {backendFunction = fun, backendArgument = arg} ->
-      collectBackendClosureEntryNames fun ++ collectBackendClosureEntryNames arg
+      collectBackendClosureEntryRefs fun ++ collectBackendClosureEntryRefs arg
     BackendLetWithIdentity {backendLetRhs = rhs, backendLetBody = body} ->
-      collectBackendClosureEntryNames rhs ++ collectBackendClosureEntryNames body
-    BackendTyAbsWithIdentity {backendTyAbsBody = body} -> collectBackendClosureEntryNames body
-    BackendTyApp {backendTyFunction = fun} -> collectBackendClosureEntryNames fun
-    BackendConstructWithIdentity {backendConstructArgs = args} -> concatMap collectBackendClosureEntryNames args
-    BackendRoll {backendRollPayload = body} -> collectBackendClosureEntryNames body
-    BackendUnroll {backendUnrollPayload = body} -> collectBackendClosureEntryNames body
+      collectBackendClosureEntryRefs rhs ++ collectBackendClosureEntryRefs body
+    BackendTyAbsWithIdentity {backendTyAbsBody = body} -> collectBackendClosureEntryRefs body
+    BackendTyApp {backendTyFunction = fun} -> collectBackendClosureEntryRefs fun
+    BackendConstructWithIdentity {backendConstructArgs = args} -> concatMap collectBackendClosureEntryRefs args
+    BackendRoll {backendRollPayload = body} -> collectBackendClosureEntryRefs body
+    BackendUnroll {backendUnrollPayload = body} -> collectBackendClosureEntryRefs body
     BackendClosureCall {backendClosureFunction = fun, backendClosureArguments = args} ->
-      collectBackendClosureEntryNames fun ++ concatMap collectBackendClosureEntryNames args
+      collectBackendClosureEntryRefs fun ++ concatMap collectBackendClosureEntryRefs args
     _ -> []
+
+closureNameUniqueSuffix :: String -> Maybe Int
+closureNameUniqueSuffix name =
+  case reads (reverse (takeWhile (/= '$') (reverse name))) of
+    [(value, "")] -> Just value
+    _ -> Nothing
 
 containsBackendClosureCall :: BackendExpr -> Bool
 containsBackendClosureCall expr =
@@ -2748,7 +3443,7 @@ containsBackendTyAppArgument :: BackendType -> BackendExpr -> Bool
 containsBackendTyAppArgument expected expr =
   case expr of
     BackendTyApp {backendTyArgument = ty, backendTyFunction = fun} ->
-      ty == expected || containsBackendTyAppArgument expected fun
+      alphaEqBackendType ty expected || containsBackendTyAppArgument expected fun
     BackendCase {backendScrutinee = scrutinee, backendAlternatives = alternatives} ->
       containsBackendTyAppArgument expected scrutinee || any (containsBackendTyAppArgument expected . backendAltBody) (toList alternatives)
     BackendLamWithIdentity {backendBody = body} -> containsBackendTyAppArgument expected body
@@ -2803,34 +3498,38 @@ containsBackendVar expected expr =
     BackendUnroll {backendUnrollPayload = body} -> containsBackendVar expected body
     _ -> False
 
-backendExprBinders :: BackendExpr -> [String]
-backendExprBinders expr =
+backendExprBinderRefs :: BackendExpr -> [(String, Maybe IdDetails)]
+backendExprBinderRefs expr =
   case expr of
     BackendVarWithIdentity {} -> []
     BackendLit {} -> []
-    BackendLamWithIdentity {backendParamName = name, backendBody = body} -> name : backendExprBinders body
-    BackendApp {backendFunction = fun, backendArgument = arg} -> backendExprBinders fun ++ backendExprBinders arg
-    BackendLetWithIdentity {backendLetName = name, backendLetRhs = rhs, backendLetBody = body} -> name : backendExprBinders rhs ++ backendExprBinders body
-    BackendTyAbsWithIdentity {backendTyAbsBody = body} -> backendExprBinders body
-    BackendTyApp {backendTyFunction = fun} -> backendExprBinders fun
-    BackendConstructWithIdentity {backendConstructArgs = args} -> concatMap backendExprBinders args
+    BackendLamWithIdentity {backendParamName = name, backendParamIdentity = identity, backendBody = body} ->
+      (name, identity) : backendExprBinderRefs body
+    BackendApp {backendFunction = fun, backendArgument = arg} ->
+      backendExprBinderRefs fun ++ backendExprBinderRefs arg
+    BackendLetWithIdentity {backendLetName = name, backendLetIdentity = identity, backendLetRhs = rhs, backendLetBody = body} ->
+      (name, identity) : backendExprBinderRefs rhs ++ backendExprBinderRefs body
+    BackendTyAbsWithIdentity {backendTyAbsBody = body} -> backendExprBinderRefs body
+    BackendTyApp {backendTyFunction = fun} -> backendExprBinderRefs fun
+    BackendConstructWithIdentity {backendConstructArgs = args} -> concatMap backendExprBinderRefs args
     BackendCase {backendScrutinee = scrutinee, backendAlternatives = alternatives} ->
-      backendExprBinders scrutinee ++ concatMap alternativeBinders (toList alternatives)
-    BackendRoll {backendRollPayload = body} -> backendExprBinders body
-    BackendUnroll {backendUnrollPayload = body} -> backendExprBinders body
+      backendExprBinderRefs scrutinee ++ concatMap alternativeBinderRefs (toList alternatives)
+    BackendRoll {backendRollPayload = body} -> backendExprBinderRefs body
+    BackendUnroll {backendUnrollPayload = body} -> backendExprBinderRefs body
     BackendClosureWithParamIdentities {backendClosureCaptures = captures, backendClosureParamsWithIdentities = params, backendClosureBody = body} ->
-      concatMap (backendExprBinders . backendClosureCaptureExpr) captures
-        ++ map backendClosureCaptureName captures
-        ++ map backendClosureParamName params
-        ++ backendExprBinders body
+      concatMap (backendExprBinderRefs . backendClosureCaptureExpr) captures
+        ++ [(backendClosureCaptureName capture, backendClosureCaptureIdentity capture) | capture <- captures]
+        ++ [(backendClosureParamName param, backendClosureParamIdentity param) | param <- params]
+        ++ backendExprBinderRefs body
     BackendClosureCall {backendClosureFunction = fun, backendClosureArguments = args} ->
-      backendExprBinders fun ++ concatMap backendExprBinders args
+      backendExprBinderRefs fun ++ concatMap backendExprBinderRefs args
   where
-    alternativeBinders (BackendAlternative pattern0 body) =
-      patternBackendBinders pattern0 ++ backendExprBinders body
+    alternativeBinderRefs (BackendAlternative pattern0 body) =
+      patternBackendBinderRefs pattern0 ++ backendExprBinderRefs body
 
-    patternBackendBinders BackendDefaultPattern = []
-    patternBackendBinders (BackendConstructorPattern _ names) = names
+    patternBackendBinderRefs BackendDefaultPattern = []
+    patternBackendBinderRefs (BackendConstructorPatternWithBinderIdentities _ _ binders) =
+      [(backendPatternBinderName binder, backendPatternBinderIdentity binder) | binder <- binders]
 
 containsSelfReferentialLetRhs :: BackendExpr -> Bool
 containsSelfReferentialLetRhs expr =
@@ -2840,8 +3539,8 @@ containsSelfReferentialLetRhs expr =
     BackendLamWithIdentity {backendBody = body} -> containsSelfReferentialLetRhs body
     BackendApp {backendFunction = fun, backendArgument = arg} ->
       containsSelfReferentialLetRhs fun || containsSelfReferentialLetRhs arg
-    BackendLetWithIdentity {backendLetName = name, backendLetRhs = rhs, backendLetBody = body} ->
-      rhsIsSelfReference name rhs || containsSelfReferentialLetRhs rhs || containsSelfReferentialLetRhs body
+    BackendLetWithIdentity {backendLetIdentity = identity, backendLetName = name, backendLetRhs = rhs, backendLetBody = body} ->
+      rhsIsSelfReference (identity, name) rhs || containsSelfReferentialLetRhs rhs || containsSelfReferentialLetRhs body
     BackendTyAbsWithIdentity {backendTyAbsBody = body} -> containsSelfReferentialLetRhs body
     BackendTyApp {backendTyFunction = fun} -> containsSelfReferentialLetRhs fun
     BackendConstructWithIdentity {backendConstructArgs = args} -> any containsSelfReferentialLetRhs args
@@ -2854,10 +3553,15 @@ containsSelfReferentialLetRhs expr =
     BackendClosureCall {backendClosureFunction = fun, backendClosureArguments = args} ->
       containsSelfReferentialLetRhs fun || any containsSelfReferentialLetRhs args
   where
-    rhsIsSelfReference name rhs =
+    rhsIsSelfReference binder rhs =
       case rhs of
-        BackendVarWithIdentity {backendVarName = rhsName} -> rhsName == name
+        BackendVarWithIdentity {backendVarIdentity = rhsIdentity, backendVarName = rhsName} ->
+          backendBinderRefMatches binder (rhsIdentity, rhsName)
         _ -> False
+
+    backendBinderRefMatches (Just left, _) (Just right, _) = left == right
+    backendBinderRefMatches (Nothing, leftName) (Nothing, rightName) = leftName == rightName
+    backendBinderRefMatches _ _ = False
 
 isBackendFunctionType :: BackendType -> Bool
 isBackendFunctionType ty =
@@ -2865,32 +3569,36 @@ isBackendFunctionType ty =
     BTArrow {} -> True
     _ -> False
 
-containsConstructArgType :: String -> BackendType -> BackendExpr -> Bool
-containsConstructArgType constructorName argTy expr =
-  case expr of
-    BackendConstructWithIdentity {backendConstructName = name, backendConstructArgs = args} ->
-      (name == constructorName && any (alphaEqBackendType argTy . backendExprType) args)
-        || any (containsConstructArgType constructorName argTy) args
-    BackendCase {backendScrutinee = scrutinee, backendAlternatives = alternatives} ->
-      containsConstructArgType constructorName argTy scrutinee
-        || any (containsConstructArgType constructorName argTy . backendAltBody) (toList alternatives)
-    BackendLamWithIdentity {backendBody = body} -> containsConstructArgType constructorName argTy body
-    BackendApp {backendFunction = fun, backendArgument = arg} ->
-      containsConstructArgType constructorName argTy fun || containsConstructArgType constructorName argTy arg
-    BackendLetWithIdentity {backendLetRhs = rhs, backendLetBody = body} ->
-      containsConstructArgType constructorName argTy rhs || containsConstructArgType constructorName argTy body
-    BackendTyAbsWithIdentity {backendTyParamIdentity = mbIdentity, backendTyParamName = paramName, backendTyAbsBody = body} ->
-      containsConstructArgType constructorName (bindExpectedTypeArg mbIdentity paramName argTy) body
-    BackendTyApp {backendTyFunction = fun} -> containsConstructArgType constructorName argTy fun
-    BackendRoll {backendRollPayload = body} -> containsConstructArgType constructorName argTy body
-    BackendUnroll {backendUnrollPayload = body} -> containsConstructArgType constructorName argTy body
-    _ -> False
+containsConstructArgTypeVar :: String -> String -> BackendExpr -> Bool
+containsConstructArgTypeVar constructorName argName =
+  go Map.empty
   where
-    bindExpectedTypeArg mbIdentity paramName ty =
+    go scope expr =
+      case expr of
+        BackendConstructWithIdentity {backendConstructName = name, backendConstructArgs = args} ->
+          (name == constructorName && any (matchesArgType scope . backendExprType) args)
+            || any (go scope) args
+        BackendCase {backendScrutinee = scrutinee, backendAlternatives = alternatives} ->
+          go scope scrutinee
+            || any (go scope . backendAltBody) (toList alternatives)
+        BackendLamWithIdentity {backendBody = body} -> go scope body
+        BackendApp {backendFunction = fun, backendArgument = arg} ->
+          go scope fun || go scope arg
+        BackendLetWithIdentity {backendLetRhs = rhs, backendLetBody = body} ->
+          go scope rhs || go scope body
+        BackendTyAbsWithIdentity {backendTyParamIdentity = mbIdentity, backendTyParamName = paramName, backendTyAbsBody = body} ->
+          go (maybe scope (\identity -> Map.insert paramName identity scope) mbIdentity) body
+        BackendTyApp {backendTyFunction = fun} -> go scope fun
+        BackendRoll {backendRollPayload = body} -> go scope body
+        BackendUnroll {backendUnrollPayload = body} -> go scope body
+        _ -> False
+
+    matchesArgType scope ty =
       case ty of
-        BTVarWithIdentity Nothing name
-          | name == paramName -> BTVarWithIdentity mbIdentity paramName
-        _ -> ty
+        BTVarWithIdentity (Just identity) name ->
+          name == argName && Map.lookup argName scope == Just identity
+        _ ->
+          False
 
 findBackendCase :: BackendExpr -> Maybe BackendExpr
 findBackendCase expr =
@@ -2943,7 +3651,7 @@ collectConstructIdentities expr =
 collectPatternIdentities :: NonEmpty BackendAlternative -> [(String, Maybe SymbolIdentity)]
 collectPatternIdentities alternatives =
   [ (name, identity)
-  | BackendAlternative (BackendConstructorPatternWithIdentity identity name _) _ <- toList alternatives
+  | BackendAlternative (BackendConstructorPatternWithBinderIdentities identity name _) _ <- toList alternatives
   ]
 
 renameBackendConstructorReferences :: Bool -> Bool -> (String -> Bool) -> String -> BackendExpr -> BackendExpr
@@ -3067,6 +3775,13 @@ polymorphicOptionSourceTy =
     Nothing
     (STArrow (STVar "a") (STCon "Main.Option" (STVar "a" :| [])))
 
+polymorphicOptionSourceView :: DataInfo -> Elab.TypeBinderRef -> TypeView
+polymorphicOptionSourceView dataInfo ref =
+  (mkTypeView polymorphicOptionSourceTy polymorphicOptionSourceTy)
+    { typeViewHeadIdentities = Map.singleton "Main.Option" (dataInfoSymbol dataInfo),
+      typeViewBinderIdentities = Map.singleton "a" (Elab.typeBinderRefIdentity ref)
+    }
+
 polymorphicOptionElabTy :: Elab.ElabType
 polymorphicOptionElabTy =
   testTForall
@@ -3170,6 +3885,14 @@ recursiveCaptureAvoidingRhsWith evidenceName =
 recursiveLetRhsRenameElabTy :: Elab.ElabType
 recursiveLetRhsRenameElabTy =
   Elab.TArrow unaryIntElabTy intElabTy
+
+recursiveIntLiftTerm :: Elab.XmlfTerm
+recursiveIntLiftTerm =
+  mkTestRecursiveLocalLet
+    "loop"
+    (schemeFromType unaryIntElabTy)
+    (mkTestLocalLam "n" intElabTy (Elab.EApp (mkTestDeferredVar "loop") (mkTestDeferredVar "n")))
+    (Elab.ELit (LInt 0))
 
 recursiveLetRhsRenameTerm :: Elab.XmlfTerm
 recursiveLetRhsRenameTerm =
@@ -3519,17 +4242,6 @@ recursiveLexicalTypeOrderRhs =
         )
     )
 
-recursiveLexicalTypeOrderHelperBackendTy :: BackendType
-recursiveLexicalTypeOrderHelperBackendTy =
-  BTForall
-    "z"
-    Nothing
-    ( BTForall
-        "a"
-        Nothing
-        unaryIntBackendTy
-    )
-
 liftedRecursiveHelpersClosureNameTerm :: CheckedProgram -> Elab.XmlfTerm
 liftedRecursiveHelpersClosureNameTerm checked =
   mkTestRecursiveLocalLet
@@ -3651,8 +4363,12 @@ alphaEquivalentIdentityTerm =
 
 unqualifiedStructuralNullaryConstructorTerm :: Elab.XmlfTerm
 unqualifiedStructuralNullaryConstructorTerm =
+  structuralNullaryConstructorTermWithResult unqualifiedStructuralTElabTy
+
+structuralNullaryConstructorTermWithResult :: Elab.ElabType -> Elab.XmlfTerm
+structuralNullaryConstructorTermWithResult resultTy =
   Elab.ERoll
-    unqualifiedStructuralTElabTy
+    resultTy
     ( mkTestTyAbs "$T_result"
         Nothing
         (mkTestLocalLam "$T_handler" (testTVar "$T_result") (mkTestDeferredVar "$T_handler"))
@@ -3672,6 +4388,28 @@ mapMainBinding :: (CheckedBinding -> CheckedBinding) -> CheckedProgram -> Checke
 mapMainBinding f checked =
   mapBinding (checkedProgramMain checked) f checked
 
+renameCheckedProgramMainRuntimeName :: String -> CheckedProgram -> CheckedProgram
+renameCheckedProgramMainRuntimeName replacement checked =
+  checked
+    { checkedProgramMainResolvedVar =
+        (checkedProgramMainResolvedVar checked)
+          { Elab.resolvedVarRuntimeName = replacement
+          }
+    }
+
+addDataInfo :: DataInfo -> CheckedProgram -> CheckedProgram
+addDataInfo dataInfo checked =
+  checked
+    { checkedProgramModules =
+        case checkedProgramModules checked of
+          [] -> []
+          checkedModule : rest ->
+            checkedModule
+              { checkedModuleData = Map.insert (dataInfoSymbol dataInfo) dataInfo (checkedModuleData checkedModule)
+              }
+              : rest
+    }
+
 mapBinding :: String -> (CheckedBinding -> CheckedBinding) -> CheckedProgram -> CheckedProgram
 mapBinding target f checked =
   checked
@@ -3688,6 +4426,19 @@ mapBinding target f checked =
     updateBinding binding
       | checkedBindingName binding == target = f binding
       | otherwise = binding
+
+renameCheckedModuleName :: String -> String -> CheckedProgram -> CheckedProgram
+renameCheckedModuleName oldName newName checked =
+  checked
+    { checkedProgramModules =
+        map updateModule (checkedProgramModules checked)
+    }
+  where
+    updateModule checkedModule
+      | checkedModuleName checkedModule == oldName =
+          checkedModule {checkedModuleName = newName}
+      | otherwise =
+          checkedModule
 
 resolvedConstructorTerm :: CheckedProgram -> String -> Elab.XmlfTerm
 resolvedConstructorTerm checked runtimeName =
@@ -3808,6 +4559,20 @@ rewriteFirstLetBindingType replacementTy =
         _ ->
           term
 
+rewriteFirstLamBindingType :: Elab.ElabType -> Elab.XmlfTerm -> Elab.XmlfTerm
+rewriteFirstLamBindingType replacementTy term =
+  case term of
+    Elab.ELam resolved body ->
+      Elab.ELam (Elab.mapResolvedVarType (const replacementTy) resolved) body
+    _ ->
+      term
+
+replaceFunctionDomain :: Elab.ElabType -> Elab.ElabType -> Elab.ElabType
+replaceFunctionDomain replacementDomain ty =
+  case ty of
+    Elab.TArrow _ cod -> Elab.TArrow replacementDomain cod
+    _ -> ty
+
 withConstructorResult :: String -> SrcType -> CheckedProgram -> CheckedProgram
 withConstructorResult runtimeName resultTy checked =
   checked
@@ -3825,7 +4590,37 @@ withConstructorResult runtimeName resultTy checked =
 
     updateConstructorInfo constructorInfo
       | ctorRuntimeName constructorInfo == runtimeName =
-          constructorInfo {ctorResult = resultTy}
+          constructorInfo
+            { ctorTypeView =
+                (ctorTypeView constructorInfo)
+                  { typeViewDisplay =
+                      foldr
+                        (\(name, mbBound) body -> STForall name (fmap SrcBound mbBound) body)
+                        (foldr STArrow resultTy (ctorArgs constructorInfo))
+                        (ctorForalls constructorInfo)
+                  }
+            }
+      | otherwise =
+          constructorInfo
+
+withConstructorTypeView :: String -> TypeView -> CheckedProgram -> CheckedProgram
+withConstructorTypeView runtimeName view checked =
+  checked
+    { checkedProgramModules =
+        map updateModule (checkedProgramModules checked)
+    }
+  where
+    updateModule checkedModule =
+      checkedModule
+        { checkedModuleData = fmap updateDataInfo (checkedModuleData checkedModule)
+        }
+
+    updateDataInfo dataInfo =
+      dataInfo {dataConstructors = map updateConstructorInfo (dataConstructors dataInfo)}
+
+    updateConstructorInfo constructorInfo
+      | ctorRuntimeName constructorInfo == runtimeName =
+          constructorInfo {ctorTypeView = view}
       | otherwise =
           constructorInfo
 
@@ -3836,9 +4631,6 @@ withConstructorDisplayType runtimeName displayTy checked =
         map updateModule (checkedProgramModules checked)
     }
   where
-    (foralls, bodyTy) = splitForalls displayTy
-    (args, resultTy) = splitArrows bodyTy
-
     updateModule checkedModule =
       checkedModule
         { checkedModuleData = fmap updateDataInfo (checkedModuleData checkedModule)
@@ -3850,10 +4642,10 @@ withConstructorDisplayType runtimeName displayTy checked =
     updateConstructorInfo constructorInfo
       | ctorRuntimeName constructorInfo == runtimeName =
           constructorInfo
-            { ctorType = displayTy,
-              ctorForalls = foralls,
-              ctorArgs = args,
-              ctorResult = resultTy
+            { ctorTypeView =
+                (ctorTypeView constructorInfo)
+                  { typeViewDisplay = displayTy
+                  }
             }
       | otherwise =
           constructorInfo

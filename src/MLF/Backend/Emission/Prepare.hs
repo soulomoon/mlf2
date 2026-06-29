@@ -35,25 +35,27 @@ import MLF.Frontend.Program.Types
     , CheckedModule (..)
     , CheckedProgram (..)
     , ConstructorInfo (..)
-    , ConstructorRef (..)
     , DataInfo (..)
     , IdDetails (..)
     , ProgramDiagnostic
     , ProgramError
     , ResolvedProgram (..)
-    , ResolvedReference (..)
+    , ResolvedReference
     , ResolvedReferenceKind (..)
-    , ResolvedSymbol (..)
-    , SymbolIdentity (..)
-    , dataInfoIdentityName
-    , dataInfoIdentityQualifiedName
+    , SymbolIdentity
+    , SymbolNamespace (..)
+    , TypeView (..)
+    , symbolDefiningName
+    , symbolNamespace
+    , constructorRefSymbol
     , resolvedModuleIdentity
     , resolvedModuleReferences
+    , resolvedReferenceKind
+    , resolvedReferenceSymbol
+    , resolvedSymbolIdentity
     , diagnosticForProgramError
     , renderProgramDiagnostic
     )
-import MLF.Frontend.Symbol (symbolIdentityStableName)
-import MLF.Frontend.Syntax (SrcBound (..), SrcType, SrcTy (..))
 
 data BackendEmissionPreparationError
     = BackendEmissionProgramParseError ProgramParseError
@@ -103,9 +105,14 @@ prepareCheckedProgramForBackendEmission checked =
 
 preludeModuleIdentity :: [CheckedModule] -> Maybe SymbolIdentity
 preludeModuleIdentity modules0 =
-    case [checkedModuleIdentity checkedModule | checkedModule <- modules0, checkedModuleName checkedModule == "Prelude"] of
+    case [checkedModuleIdentity checkedModule | checkedModule <- modules0, isPreludeModuleIdentity (checkedModuleIdentity checkedModule)] of
         identity : _ -> Just identity
         [] -> Nothing
+
+isPreludeModuleIdentity :: SymbolIdentity -> Bool
+isPreludeModuleIdentity identity =
+    symbolNamespace identity == SymbolModule
+        && symbolDefiningName identity == "Prelude"
 
 isPreludeModule :: Maybe SymbolIdentity -> CheckedModule -> Bool
 isPreludeModule preludeIdentity checkedModule =
@@ -206,9 +213,6 @@ preludeDataDependencyClosure preludeIdentity checked retainedPreludeBindings =
     preludeDataByIdentity =
         Map.fromList [(dataInfoSymbol dataInfo, dataInfo) | dataInfo <- preludeData]
 
-    preludeDataBySourceHead =
-        preludeDataSourceHeadIndex preludeData
-
     preludeDataByConstructorBinding =
         Map.fromList
             [ (ctorInfoSymbol constructorInfo, dataInfoSymbol dataInfo)
@@ -235,7 +239,7 @@ preludeDataDependencyClosure preludeIdentity checked retainedPreludeBindings =
                     Nothing -> close pendingRest retained
                     Just dataInfo ->
                         close
-                            (Set.union pendingRest (preludeDataDependencies preludeDataBySourceHead dataInfo))
+                            (Set.union pendingRest (preludeDataDependencies (Map.keysSet preludeDataByIdentity) dataInfo))
                             (Set.insert dataIdentity retained)
 
     pendingPreludeData pending retained =
@@ -310,68 +314,12 @@ elabTypeHeadIdentities =
         TBottom ->
             Set.empty
 
-preludeDataDependencies :: Map.Map String (Set SymbolIdentity) -> DataInfo -> Set SymbolIdentity
-preludeDataDependencies preludeDataBySourceHead dataInfo =
+preludeDataDependencies :: Set SymbolIdentity -> DataInfo -> Set SymbolIdentity
+preludeDataDependencies preludeDataIdentities dataInfo =
     Set.unions
-        [ sourceTypePreludeData preludeDataBySourceHead sourceType
+        [ Set.filter (`Set.member` preludeDataIdentities) (Set.fromList (Map.elems (typeViewHeadIdentities (ctorTypeView constructorInfo))))
         | constructorInfo <- dataConstructors dataInfo
-        , sourceType <- constructorTypes constructorInfo
         ]
-  where
-    constructorTypes constructorInfo =
-        [ctorTypeIdentity constructorInfo]
-
-sourceTypePreludeData :: Map.Map String (Set SymbolIdentity) -> SrcType -> Set SymbolIdentity
-sourceTypePreludeData preludeDataBySourceHead sourceType =
-    Set.unions
-        [ Map.findWithDefault Set.empty name preludeDataBySourceHead
-        | name <- Set.toList (sourceTypeHeads sourceType)
-        ]
-
-preludeDataSourceHeadIndex :: [DataInfo] -> Map.Map String (Set SymbolIdentity)
-preludeDataSourceHeadIndex =
-    Map.unionsWith Set.union . map dataInfoSourceHeadEntries
-  where
-    dataInfoSourceHeadEntries dataInfo =
-        Map.fromListWith
-            Set.union
-            [ (name, Set.singleton (dataInfoSymbol dataInfo))
-            | name <- dataInfoSourceHeadNames dataInfo
-            ]
-
-dataInfoSourceHeadNames :: DataInfo -> [String]
-dataInfoSourceHeadNames dataInfo =
-    [ symbolIdentityStableName (dataInfoSymbol dataInfo)
-    , dataInfoIdentityQualifiedName dataInfo
-    , dataInfoIdentityName dataInfo
-    ]
-
-sourceTypeHeads :: SrcType -> Set String
-sourceTypeHeads =
-    go
-  where
-    go sourceType =
-        case sourceType of
-            STVar {} ->
-                Set.empty
-            STArrow dom cod ->
-                Set.union (go dom) (go cod)
-            STBase name ->
-                Set.singleton name
-            STCon name args ->
-                Set.insert name (foldMap go args)
-            STVarApp _ args ->
-                foldMap go args
-            STTyLam _ body ->
-                go body
-            STTyApp fun arg ->
-                Set.union (go fun) (go arg)
-            STForall _ mbBound body ->
-                maybe Set.empty (go . unSrcBound) mbBound `Set.union` go body
-            STMu _ body ->
-                go body
-            STBottom ->
-                Set.empty
 
 referencedBindingSymbols :: [CheckedBinding] -> Set SymbolIdentity
 referencedBindingSymbols bindings =

@@ -56,6 +56,7 @@ module MLF.Types.Elab (
     elabToBound,
     containsForallTy,
     containsArrowTy,
+    typeHeadRefMatches,
     ElabScheme,
     mkElabSchemeWithRefs,
     schemeBinderRefs,
@@ -75,6 +76,7 @@ module MLF.Types.Elab (
     typeBinderRefsSameIdentityAndName,
     renameTypeBinderRef,
     freshTypeBinderRef,
+    sourceTypeBinderRefForName,
     freshTypeBinderRefFromNames,
     instAbstrWithRef,
     instUnderWithRef,
@@ -100,10 +102,12 @@ module MLF.Types.Elab (
     resolvedVarConstructorRef,
     resolvedVarIsLocal,
     resolvedVarIsEvidence,
+    resolvedVarIsDiscard,
     resolvedVarSameIdentity,
     resolvedVarBoundBy,
     mapResolvedVarType,
     renameResolvedLocalVar,
+    freshenResolvedLocalVar,
     renameResolvedDeferredVar,
     XmlfTerm
         ( ELit,
@@ -161,27 +165,34 @@ import Data.List.NonEmpty (NonEmpty)
 import qualified Data.Set as Set
 
 import MLF.Constraint.Types.Graph (BaseTy(..), BindFlag(..), NodeId(..))
-import MLF.Frontend.Symbol (SymbolIdentity (..))
+import MLF.Frontend.Symbol (SymbolIdentity, symbolRefMatches)
 import MLF.Frontend.Syntax (Lit(..))
+import qualified MLF.Primitive.Identity as PrimitiveIdentity
 import MLF.Types.Identity
     ( ConstructorRef
-    , DeferredRef(..)
+    , DeferredRef
     , IdDetails(..)
     , IdentityGenerator
-    , LocalRef(..)
-    , TypeBinderIdentity(..)
+    , LocalRef
+    , TypeBinderIdentity
     , UniqueIdentity(..)
     , idDetailsConstructorRef
     , idDetailsDisplayName
     , idDetailsGeneratedIdentities
     , idDetailsIsEvidence
+    , idDetailsIsDiscard
     , idDetailsIsLocal
     , idDetailsRenameLocal
     , idDetailsReferenceName
     , idDetailsSameIdentity
-    , identityGeneratorAfter
     , freshIdentity
+    , freshenLocalRef
+    , identityGeneratorAfter
+    , deferredRefName
+    , localRefName
     , renameDeferredRef
+    , symbolGeneratedIdentities
+    , typeBinderGeneratedIdentities
     , typeBinderIdentityFromNode
     , typeBinderIdentityFromUnique
     , typeBinderIdentityKey
@@ -236,19 +247,44 @@ pattern TCon :: BaseTy -> NonEmpty (Ty AllowVar) -> Ty a
 pattern TCon con args <-
     TConWithIdentity _ con args
   where
-    TCon con args =
-        TConWithIdentity Nothing con args
+    TCon con@(BaseTy name) args =
+        TConWithIdentity (PrimitiveIdentity.builtinTypeHeadIdentity name) con args
 
 pattern TBase :: BaseTy -> Ty a
 pattern TBase base <-
     TBaseWithIdentity _ base
   where
-    TBase base =
-        TBaseWithIdentity Nothing base
+    TBase base@(BaseTy name) =
+        TBaseWithIdentity (PrimitiveIdentity.builtinTypeHeadIdentity name) base
 
 {-# COMPLETE TVarRef, TArrow, TCon, TVarAppRef, TBase, TForallRef, TMuRef, TBottom #-}
 
-deriving instance Eq (Ty v)
+instance Eq (Ty v) where
+    left == right =
+        case (left, right) of
+            (TVarRef leftRef, TVarRef rightRef) ->
+                leftRef == rightRef
+            (TArrow leftArg leftResult, TArrow rightArg rightResult) ->
+                leftArg == rightArg && leftResult == rightResult
+            (TConWithIdentity leftIdentity leftCon leftArgs, TConWithIdentity rightIdentity rightCon rightArgs) ->
+                typeHeadRefMatches leftIdentity leftCon rightIdentity rightCon && leftArgs == rightArgs
+            (TVarAppRef leftRef leftArgs, TVarAppRef rightRef rightArgs) ->
+                leftRef == rightRef && leftArgs == rightArgs
+            (TBaseWithIdentity leftIdentity leftBase, TBaseWithIdentity rightIdentity rightBase) ->
+                typeHeadRefMatches leftIdentity leftBase rightIdentity rightBase
+            (TForallRef leftRef leftBound leftBody, TForallRef rightRef rightBound rightBody) ->
+                leftRef == rightRef && leftBound == rightBound && leftBody == rightBody
+            (TMuRef leftRef leftBody, TMuRef rightRef rightBody) ->
+                leftRef == rightRef && leftBody == rightBody
+            (TBottom, TBottom) ->
+                True
+            _ ->
+                False
+
+typeHeadRefMatches :: Maybe SymbolIdentity -> BaseTy -> Maybe SymbolIdentity -> BaseTy -> Bool
+typeHeadRefMatches leftIdentity (BaseTy leftName) rightIdentity (BaseTy rightName) =
+    symbolRefMatches leftIdentity leftName rightIdentity rightName
+
 deriving instance Show (Ty v)
 
 type ElabType = Ty 'AllowVar
@@ -281,15 +317,15 @@ pattern TConIF :: BaseTy -> NonEmpty (r 'AllowVar) -> TyIF v r
 pattern TConIF con args <-
     TConIFWithIdentity _ con args
   where
-    TConIF con args =
-        TConIFWithIdentity Nothing con args
+    TConIF con@(BaseTy name) args =
+        TConIFWithIdentity (PrimitiveIdentity.builtinTypeHeadIdentity name) con args
 
 pattern TBaseIF :: BaseTy -> TyIF v r
 pattern TBaseIF base <-
     TBaseIFWithIdentity _ base
   where
-    TBaseIF base =
-        TBaseIFWithIdentity Nothing base
+    TBaseIF base@(BaseTy name) =
+        TBaseIFWithIdentity (PrimitiveIdentity.builtinTypeHeadIdentity name) base
 
 {-# COMPLETE TVarIFRef, TArrowIF, TConIF, TVarAppIFRef, TBaseIF, TForallIFRef, TMuIFRef, TBottomIF #-}
 
@@ -456,6 +492,10 @@ freshTypeBinderRef name generator =
     let (identity, generator') = freshIdentity generator
      in (typeBinderRefFromIdentity (typeBinderIdentityFromUnique identity) name, generator')
 
+sourceTypeBinderRefForName :: String -> IdentityGenerator -> (TypeBinderRef, IdentityGenerator)
+sourceTypeBinderRefForName name generator =
+    freshTypeBinderRef name generator
+
 freshTypeBinderRefFromNames :: Set.Set String -> IdentityGenerator -> (TypeBinderRef, IdentityGenerator)
 freshTypeBinderRefFromNames used generator =
     let (identity, generator') = freshIdentity generator
@@ -573,6 +613,9 @@ resolvedVarIsLocal = idDetailsIsLocal . resolvedVarDetails
 resolvedVarIsEvidence :: ResolvedVar -> Bool
 resolvedVarIsEvidence = idDetailsIsEvidence . resolvedVarDetails
 
+resolvedVarIsDiscard :: ResolvedVar -> Bool
+resolvedVarIsDiscard = idDetailsIsDiscard . resolvedVarDetails
+
 resolvedVarSameIdentity :: ResolvedVar -> ResolvedVar -> Bool
 resolvedVarSameIdentity left right =
     idDetailsSameIdentity (resolvedVarDetails left) (resolvedVarDetails right)
@@ -595,6 +638,25 @@ renameResolvedLocalVar name resolved =
                 , resolvedVarDetails = idDetailsRenameLocal name (resolvedVarDetails resolved)
                 }
         else resolved
+
+freshenResolvedLocalVar :: String -> IdentityGenerator -> ResolvedVar -> (ResolvedVar, IdentityGenerator)
+freshenResolvedLocalVar name generator resolved =
+    case resolvedVarDetails resolved of
+        LocalId ref ->
+            freshen LocalId ref
+        EvidenceId ref ->
+            freshen EvidenceId ref
+        _ ->
+            (resolved, generator)
+  where
+    freshen wrap ref =
+        let (ref', generator') = freshenLocalRef name generator ref
+         in ( resolved
+                { resolvedVarRuntimeName = name
+                , resolvedVarDetails = wrap ref'
+                }
+            , generator'
+            )
 
 renameResolvedDeferredVar :: String -> ResolvedVar -> ResolvedVar
 renameResolvedDeferredVar name resolved =
@@ -627,8 +689,6 @@ data Instantiation
     | InstSeq Instantiation Instantiation   -- φ; φ' (composition)
     deriving (Eq, Show)
 
-{-# COMPLETE InstId, InstApp, InstBot, InstIntro, InstElim, InstAbstrRef, InstUnderRef, InstInside, InstSeq #-}
-
 instAbstrWithRef :: TypeBinderRef -> Instantiation
 instAbstrWithRef = InstAbstrRef
 
@@ -646,8 +706,6 @@ data InstantiationF a
     | InstInsideF a
     | InstSeqF a a
     deriving (Eq, Show, Functor, Foldable, Traversable)
-
-{-# COMPLETE InstIdF, InstAppF, InstBotF, InstIntroF, InstElimF, InstAbstrFRef, InstUnderFRef, InstInsideF, InstSeqF #-}
 
 type instance Base Instantiation = InstantiationF
 
@@ -730,10 +788,10 @@ generatedIdentitiesInType ty =
         TVarRef ref -> generatedIdentitiesInTypeBinderRef ref
         TArrow a b -> generatedIdentitiesInType a ++ generatedIdentitiesInType b
         TConWithIdentity identity _ args ->
-            maybe [] pure (fmap symbolUniqueIdentity identity) ++ foldMap generatedIdentitiesInType args
+            maybe [] symbolGeneratedIdentities identity ++ foldMap generatedIdentitiesInType args
         TVarAppRef ref args ->
             generatedIdentitiesInTypeBinderRef ref ++ foldMap generatedIdentitiesInType args
-        TBaseWithIdentity identity _ -> maybe [] pure (fmap symbolUniqueIdentity identity)
+        TBaseWithIdentity identity _ -> maybe [] symbolGeneratedIdentities identity
         TForallRef ref mb body ->
             generatedIdentitiesInTypeBinderRef ref
                 ++ maybe [] generatedIdentitiesInType mb
@@ -750,10 +808,8 @@ generatedIdentitiesInScheme (Scheme binds body) =
         generatedIdentitiesInTypeBinderRef ref ++ maybe [] generatedIdentitiesInType mb
 
 generatedIdentitiesInTypeBinderRef :: TypeBinderRef -> [UniqueIdentity]
-generatedIdentitiesInTypeBinderRef ref =
-    case typeBinderRefIdentity ref of
-        GeneratedTypeBinderIdentity identity -> [identity]
-        _ -> []
+generatedIdentitiesInTypeBinderRef =
+    typeBinderGeneratedIdentities . typeBinderRefIdentity
 
 generatedIdentitiesInInstantiation :: Instantiation -> [UniqueIdentity]
 generatedIdentitiesInInstantiation inst =
@@ -811,8 +867,6 @@ data XmlfTerm
     | EUnroll XmlfTerm                         -- internal iso-recursive runtime destructor
     deriving (Eq, Show)
 
-{-# COMPLETE EVarNode, ELit, ELam, EApp, ELet, ETyAbsRef, ETyInst, ERoll, EUnroll #-}
-
 eTyAbsWithRef :: TypeBinderRef -> Maybe BoundType -> XmlfTerm -> XmlfTerm
 eTyAbsWithRef = ETyAbsRef
 
@@ -827,8 +881,6 @@ data XmlfTermF a
     | ERollF ElabType a
     | EUnrollF a
     deriving (Eq, Show, Functor, Foldable, Traversable)
-
-{-# COMPLETE EVarNodeF, ELitF, ELamF, EAppF, ELetF, ETyAbsFRef, ETyInstF, ERollF, EUnrollF #-}
 
 type instance Base XmlfTerm = XmlfTermF
 

@@ -13,6 +13,7 @@ where
 
 import Data.Functor.Foldable (para)
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.Map.Strict as Map
 import MLF.Constraint.Presolution (EdgeTrace, PresolutionView (..))
 import MLF.Constraint.Presolution.Base (EdgeArtifacts (..))
 import MLF.Constraint.Types.Graph (NodeRef)
@@ -32,7 +33,9 @@ import MLF.Elab.ReadModel (ElabReadModel (..))
 import MLF.Elab.Run.TypeOps (mkInlineBoundVarsContextWithReadModel)
 import MLF.Elab.Types (ElabError, XmlfTerm)
 import MLF.Frontend.ConstraintGen.Types (AnnExpr)
+import MLF.Frontend.Symbol (SymbolIdentity)
 import MLF.Frontend.Syntax (NormSrcType)
+import MLF.Types.Identity (TypeBinderIdentity)
 import MLF.Util.Trace (TraceConfig)
 
 data ElabConfig (p :: Phase) = ElabConfig
@@ -47,6 +50,8 @@ data ElabEnv (p :: Phase) = ElabEnv
     eeEdgeArtifacts :: EdgeArtifacts,
     eeScopeOverrides :: IntMap.IntMap NodeRef,
     eeAnnSourceTypes :: IntMap.IntMap NormSrcType,
+    eeSourceTypeHeadIdentities :: Map.Map String SymbolIdentity,
+    eeSourceTypeBinderIdentities :: Map.Map String TypeBinderIdentity,
     eeInitialTermEnv :: Env
   }
 
@@ -105,7 +110,9 @@ elaborateWithEnvReadModel config elabEnv readModel ann = do
             algAnnotationContext = annotationContext,
             algNamedSetReify = namedSet,
             algInlineBoundVarsContext = inlineBoundVarsContext,
-            algAnnSourceTypes = eeAnnSourceTypes elabEnv
+            algAnnSourceTypes = eeAnnSourceTypes elabEnv,
+            algSourceTypeHeadIdentities = eeSourceTypeHeadIdentities elabEnv,
+            algSourceTypeBinderIdentities = eeSourceTypeBinderIdentities elabEnv
           }
       ElabOut {elabTerm = runElab} = para (elabAlg algebraContext) ann
   runElab (eeInitialTermEnv elabEnv)

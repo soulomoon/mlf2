@@ -37,7 +37,9 @@ schemeExternalBindings =
         ExternalBinding
           { externalBindingType = srcTy,
             externalBindingMode = ExternalBindingScheme,
-            externalBindingIdentity = Nothing
+            externalBindingIdentity = Nothing,
+            externalBindingTypeHeadIdentities = Map.empty,
+            externalBindingTypeBinderIdentities = Map.empty
           }
     )
 

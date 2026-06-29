@@ -39,10 +39,11 @@ import MLF.Types.Elab
     typeBinderIdentityFromNode,
     typeBinderRefFromIdentity,
     typeBinderRefName,
+    typeBinderRefNode,
     typeBinderRefsSameIdentity,
   )
 import MLF.Util.ElabError (ElabError (..), bindingToElab)
-import MLF.Util.Names (alphaName, parseNameId)
+import MLF.Util.Names (alphaName)
 
 data ReifyPlan = ReifyPlan
   { rpSubst :: IntMap.IntMap TypeBinderRef,
@@ -55,8 +56,7 @@ data ReifyPlan = ReifyPlan
     rpHasExplicitBound :: NodeId -> Bool,
     rpIsTargetSchemeBinder :: NodeId -> Bool,
     rpBoundMentionsSelfAlias :: NodeId -> Bool,
-    rpContainsForall :: ElabType -> Bool,
-    rpParseNameId :: String -> Maybe Int
+    rpContainsForall :: ElabType -> Bool
   }
 
 data SchemeTypeChoice = SchemeTypeChoice
@@ -112,7 +112,6 @@ data ReifyBindingEnv p = ReifyBindingEnv
     rbeIsTargetSchemeBinder :: NodeId -> Bool,
     rbeBoundMentionsSelfAlias :: NodeId -> Bool,
     rbeContainsForall :: ElabType -> Bool,
-    rbeParseNameId :: String -> Maybe Int,
     rbeFirstGenAncestor :: NodeRef -> Maybe GenNodeId,
     rbeTraceM :: String -> Either ElabError ()
   }
@@ -307,16 +306,15 @@ buildReifyPlan ReifyPlanInput {..} =
           rpHasExplicitBound = hasExplicitBoundLocal,
           rpIsTargetSchemeBinder = isTargetSchemeBinderLocal,
           rpBoundMentionsSelfAlias = boundMentionsSelfAliasLocal,
-          rpContainsForall = containsForall,
-          rpParseNameId = parseNameId
+          rpContainsForall = containsForall
         }
 
 bindingFor ::
   ReifyBindingEnv p ->
   ReifyPlan ->
-  (String, Int) ->
-  Either ElabError (String, Maybe BoundType)
-bindingFor env plan (name, nidInt) = do
+  (TypeBinderRef, Int) ->
+  Either ElabError (TypeBinderRef, Maybe BoundType)
+bindingFor env plan (binderRef0, nidInt) = do
   let ReifyBindingEnv
         { rbeConstraint = constraint,
           rbeNodes = nodes,
@@ -340,7 +338,6 @@ bindingFor env plan (name, nidInt) = do
           rbeIsTargetSchemeBinder = isTargetSchemeBinder,
           rbeBoundMentionsSelfAlias = boundMentionsSelfAlias,
           rbeContainsForall = containsForallFn,
-          rbeParseNameId = parseNameIdFn,
           rbeFirstGenAncestor = firstGenAncestor,
           rbeTraceM = traceGeneralizeM
         } = env
@@ -360,9 +357,14 @@ bindingFor env plan (name, nidInt) = do
                   _ -> vC
       bNodeC = canonicalBinder (NodeId nidInt)
       binderRef =
-        typeBinderRefFromIdentity
-          (typeBinderIdentityFromNode bNodeC)
-          name
+        case typeBinderRefNode binderRef0 of
+          Just node
+            | canonical node == bNodeC -> binderRef0
+          _ ->
+            typeBinderRefFromIdentity
+              (typeBinderIdentityFromNode bNodeC)
+              (typeBinderRefName binderRef0)
+      name = typeBinderRefName binderRef
       binderIsNamed = IntSet.member (getNodeId bNodeC) namedUnderGaSet
       binderKey = getNodeId bNodeC
       substForBoundRefs = substForBound binderKey
@@ -469,12 +471,16 @@ bindingFor env plan (name, nidInt) = do
           resForReify
           substForBoundFiltered
           boundRoot
-  let fallbackAliasFor nm =
-        case (uniqueUnboundedName, parseNameIdFn nm) of
-          (Just fallbackName, Just k)
+  let canonicalKeyForRef ref =
+        case typeBinderRefNode ref of
+          Just node -> Just (getNodeId (canonical node))
+          Nothing -> Nothing
+      fallbackAliasFor ref =
+        case (uniqueUnboundedName, canonicalKeyForRef ref) of
+          (Just fallbackName, Just keyC)
             | boundIsLocalSchemeBody
-                && not (Set.member nm substNameSetForBound) ->
-                let nid = canonical (NodeId k)
+                && not (Set.member (typeBinderRefName ref) substNameSetForBound) ->
+                let nid = NodeId keyC
                  in case bindingScopeGenFn nid of
                       Just gid | Just gid /= scopeGen -> Just fallbackName
                       Nothing | isNothing scopeGen -> Just fallbackName
@@ -482,21 +488,19 @@ bindingFor env plan (name, nidInt) = do
           _ -> Nothing
       refMember ref refs =
         any (typeBinderRefsSameIdentity ref) refs
-      aliasRefForName nm =
-        case parseNameIdFn nm of
-          Just k ->
-            let keyC = getNodeId (canonical (NodeId k))
-                repKey = IntMap.findWithDefault keyC keyC gammaAlias
+      aliasRefFor ref =
+        case canonicalKeyForRef ref of
+          Just keyC ->
+            let repKey = IntMap.findWithDefault keyC keyC gammaAlias
              in case IntMap.lookup repKey substForBoundRefs of
-                  Just ref -> Just ref
+                  Just aliasRef -> Just aliasRef
                   Nothing ->
                     (\fallbackName ->
                       typeBinderRefFromIdentity
                         (typeBinderIdentityFromNode (NodeId repKey))
                         fallbackName)
-                      <$> fallbackAliasFor nm
+                      <$> fallbackAliasFor ref
           Nothing -> Nothing
-      aliasRefFor ref = aliasRefForName (typeBinderRefName ref)
       substAliasTy boundRefs ty = case ty of
         TVarRef ref ->
           if refMember ref boundRefs
@@ -505,7 +509,7 @@ bindingFor env plan (name, nidInt) = do
               Just ref' -> TVarRef ref'
               Nothing -> TVarRef ref
         TArrow a b -> TArrow (substAliasTy boundRefs a) (substAliasTy boundRefs b)
-        TCon c args -> TCon c (fmap (substAliasTy boundRefs) args)
+        TConWithIdentity identity c args -> TConWithIdentity identity c (fmap (substAliasTy boundRefs) args)
         TVarAppRef ref args ->
           let ref' =
                 if refMember ref boundRefs
@@ -514,7 +518,7 @@ bindingFor env plan (name, nidInt) = do
                     Just refAlias -> refAlias
                     Nothing -> ref
            in TVarAppRef ref' (fmap (substAliasTy boundRefs) args)
-        TBase _ -> ty
+        TBaseWithIdentity _ _ -> ty
         TBottom -> ty
         TForallRef ref mb body ->
           let boundRefs' = ref : boundRefs
@@ -525,7 +529,7 @@ bindingFor env plan (name, nidInt) = do
           TMuRef ref (substAliasTy (ref : boundRefs) body)
       substAliasBound boundRefs bound = case bound of
         TArrow a b -> TArrow (substAliasTy boundRefs a) (substAliasTy boundRefs b)
-        TCon c args -> TCon c (fmap (substAliasTy boundRefs) args)
+        TConWithIdentity identity c args -> TConWithIdentity identity c (fmap (substAliasTy boundRefs) args)
         TVarAppRef ref args ->
           let ref' =
                 if refMember ref boundRefs
@@ -534,7 +538,7 @@ bindingFor env plan (name, nidInt) = do
                     Just refAlias -> refAlias
                     Nothing -> ref
            in TVarAppRef ref' (fmap (substAliasTy boundRefs) args)
-        TBase _ -> bound
+        TBaseWithIdentity _ _ -> bound
         TBottom -> bound
         TForallRef ref mb body ->
           let boundRefs' = ref : boundRefs
@@ -552,9 +556,9 @@ bindingFor env plan (name, nidInt) = do
                   TBottom
               | otherwise -> TVarRef ref
             TArrow a b -> TArrow (goTy shadow a) (goTy shadow b)
-            TCon c args -> TCon c (fmap (goTy shadow) args)
+            TConWithIdentity identity c args -> TConWithIdentity identity c (fmap (goTy shadow) args)
             TVarAppRef ref args -> TVarAppRef ref (fmap (goTy shadow) args)
-            TBase _ -> ty
+            TBaseWithIdentity _ _ -> ty
             TBottom -> ty
             TForallRef ref mb body ->
               let shadow' = ref : shadow
@@ -566,9 +570,9 @@ bindingFor env plan (name, nidInt) = do
                in TMuRef ref (goTy shadow' body)
           goBound shadow bound = case bound of
             TArrow a b -> TArrow (goTy shadow a) (goTy shadow b)
-            TCon c args -> TCon c (fmap (goTy shadow) args)
+            TConWithIdentity identity c args -> TConWithIdentity identity c (fmap (goTy shadow) args)
             TVarAppRef ref args -> TVarAppRef ref (fmap (goTy shadow) args)
-            TBase _ -> bound
+            TBaseWithIdentity _ _ -> bound
             TBottom -> bound
             TForallRef ref mb body ->
               let shadow' = ref : shadow
@@ -608,10 +612,9 @@ bindingFor env plan (name, nidInt) = do
       boundTy0Normalized = normalizeSelfTy binderRef boundTy0Aliased
       extraBoundRefs =
         let isAliasBound ref =
-              case parseNameIdFn (typeBinderRefName ref) of
-                Just k ->
-                  let keyC = getNodeId (canonical (NodeId k))
-                      repKey = IntMap.findWithDefault keyC keyC gammaAlias
+              case canonicalKeyForRef ref of
+                Just keyC ->
+                  let repKey = IntMap.findWithDefault keyC keyC gammaAlias
                    in IntMap.member repKey substForBoundNames
                 Nothing -> False
             freeRefs = freeTypeVarRefsType boundTy0Normalized
@@ -633,15 +636,14 @@ bindingFor env plan (name, nidInt) = do
         ++ show extraBoundNames
         ++ " extraInfo="
         ++ show
-          [ ( nm,
+          [ ( typeBinderRefName ref,
               do
-                nid <- parseNameIdFn nm
-                let keyC = getNodeId (canonical (NodeId nid))
+                keyC <- canonicalKeyForRef ref
                 let baseM = IntMap.lookup keyC solvedToBasePref
                 let aliasM = IntMap.lookup keyC gammaAlias
                 pure (keyC, baseM, aliasM, firstGenAncestor (typeRef (NodeId keyC)))
             )
-          | nm <- extraBoundNames
+          | ref <- extraBoundRefs
           ]
     )
   traceGeneralizeM
@@ -724,7 +726,7 @@ bindingFor env plan (name, nidInt) = do
           Right typed -> Right (Just typed)
   case mbBoundTyped of
     Left err -> Left err
-    Right typed -> pure (name, typed)
+    Right typed -> pure (binderRef, typed)
 
 {- Note [Inter-binder alias bounds in recursive types]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

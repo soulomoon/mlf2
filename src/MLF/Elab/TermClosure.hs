@@ -433,8 +433,8 @@ structuralRenamesToSchemeBody binderRefs body ty =
                 Just (TVarRef sourceRef) <- [Map.lookup targetRef subst],
                 sourceRef /= targetRef
             ]
-          sourceNames = map (typeBinderRefName . fst) renames
-       in if Set.size (Set.fromList sourceNames) == length sourceNames
+          sourceRefs = map fst renames
+       in if Set.size (Set.fromList sourceRefs) == length sourceRefs
             then Just renames
             else Nothing
     Left _ -> Nothing

@@ -19,6 +19,7 @@ module MLF.Frontend.Program.Run
 where
 
 import Control.Exception (evaluate)
+import Control.Applicative ((<|>))
 import Control.Monad (foldM)
 import Data.Foldable (toList)
 import Data.List (elemIndex, find, findIndex, intercalate, isInfixOf, isPrefixOf, isSuffixOf, stripPrefix, tails)
@@ -34,10 +35,9 @@ import MLF.Frontend.Program.Elaborate
     classInfoForConstraint,
     diagnosticTypeViewDisplay,
     elaborateScopeDataTypesByIdentity,
-    inferClassArgument,
     lookupEvidenceMethodByClass,
     lookupEvidenceMethodByClassTypes,
-    lowerType,
+    matchMethodTypeViews,
     matchTypeViewsAgainstIdentity,
     mkElaborateScope,
     resolveInstanceInfoByConstraint,
@@ -58,6 +58,7 @@ import MLF.Frontend.Program.Types
     CheckedModule (..),
     CheckedProgram (..),
     ConstraintInfo (..),
+    ConstructorForallBinder (..),
     ConstructorInfo (..),
     DataInfo (..),
     DeferredCaseCall (..),
@@ -69,16 +70,24 @@ import MLF.Frontend.Program.Types
     EvidenceInfo (..),
     InstanceInfo (..),
     MethodInfo (..),
+    ModuleExports (..),
     ProgramDiagnostic,
     ProgramError (..),
-    SymbolIdentity (..),
+    SymbolIdentity,
+    SymbolNamespace (..),
+    symbolDefiningName,
+    symbolNamespace,
     TypeBinderSubst,
     TypeView (..),
     TypeViewSubst,
     ValueInfo (..),
     applyConstraintInfoSubst,
+    applyTypeViewSubst,
+    checkedBindingSourceType,
     ctorName,
+    ctorArgs,
     classInfoIdentityQualifiedName,
+    dataParamBinders,
     dataInfoIdentityName,
     dataInfoIdentityQualifiedName,
     deferredMethodName,
@@ -88,24 +97,28 @@ import MLF.Frontend.Program.Types
     freeTypeVarsTypeViews,
     lookupInstanceMethod,
     lookupMethodParamViewSubst,
+    methodType,
     methodTypeView,
     methodResultTypeView,
     methodInfoOwnerClassSymbolIdentity,
     methodInfoSymbolIdentity,
-    methodParamIdentityName,
-    methodParamBinders,
-    mkTypeView,
+    methodParamBinderIdentities,
+    mergeSymbolIdentityMaps,
+    mergeTypeBinderIdentityMaps,
     specializeMethodTypeView,
     splitArrows,
     splitForalls,
-    substituteTypeVar,
-    typeViewSubstFromParamBinders,
+    typeBinderAliasIdentityMap,
+    typeHeadNamesSrcType,
+    typeViewBinderIdentityForAlias,
+    typeViewHeadPairs,
+    typeViewHeadIdentityForAlias,
+    typeViewSubstFromParamIdentities,
     typeViewsIdentity,
     typeBinderSubstFromTypeViewSubst,
-    typeBinderSubstToNameMap,
     typeBinderSubstToTypeViewSubstWith,
-    typeParamBinderIdentity,
-    insertTypeBinderSubst,
+    insertTypeBinderSubstWithIdentity,
+    ordinaryValueTypeView,
     resolvedVarFromValueInfo,
   )
 import MLF.Frontend.Symbol (symbolIdentityStableName)
@@ -113,7 +126,7 @@ import MLF.Frontend.Syntax (Lit (..), SrcBound (..), SrcTy (..), SrcType)
 import qualified MLF.Frontend.Syntax.Program as ProgramSyntax
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
 import MLF.Reify.TypeOps (alphaEqType, churchAwareEqType, freeTypeVarRefsType)
-import MLF.Types.Identity (ConstructorRef (..), DeferredRef (..), EnvRef (..), IdDetails (..), LocalRef (..), PrimitiveRef (..), TypeBinderIdentity)
+import MLF.Types.Identity (constructorRefSymbol, DeferredRef, EnvRef, IdDetails (..), LocalRef, PrimitiveRef, primitiveRefSymbol, TypeBinderIdentity)
 import MLF.Util.Timing (TimingConfig, timeProgramIO)
 
 data Value
@@ -260,10 +273,10 @@ classifyMainMode context checked =
   case mainBinding checked of
     Just binding
       | isIOUnitElabType context (checkedBindingType binding) -> MainIOUnit
-      | isIOElabType (checkedBindingType binding) -> MainIOOther (recoverMainSourceType checked sourceTy)
-      | Builtins.srcTypeMentionsOpaqueBuiltin sourceTy -> MainUnsupportedIO (recoverMainSourceType checked sourceTy)
+      | isIOElabType (checkedBindingType binding) -> MainIOOther (recoverMainSourceType checked displaySourceTy)
+      | checkedBindingMentionsOpaqueBuiltin binding -> MainUnsupportedIO (recoverMainSourceType checked displaySourceTy)
       where
-        sourceTy = checkedBindingSourceType binding
+        displaySourceTy = checkedBindingSourceType binding
     _ -> MainPure
 
 isIOElabType :: ElabType -> Bool
@@ -314,16 +327,24 @@ preludeUnitElabType context = do
 preludeUnitTypeView :: RuntimeContext -> Maybe TypeView
 preludeUnitTypeView context = do
   dataInfo <- preludeUnitDataInfo context
-  let scope = runtimeElaborateScope context
-  pure (sourceTypeViewInScope scope (STBase (symbolIdentityStableName (dataInfoSymbol dataInfo))))
+  let displayHeadName = dataInfoIdentityName dataInfo
+      identityHeadName = symbolIdentityStableName (dataInfoSymbol dataInfo)
+  pure
+    TypeView
+      { typeViewDisplay = STBase displayHeadName,
+        typeViewIdentity = STBase identityHeadName,
+        typeViewHeadIdentities =
+          Map.fromList
+            [ (displayHeadName, dataInfoSymbol dataInfo),
+              (identityHeadName, dataInfoSymbol dataInfo)
+            ],
+        typeViewBinderIdentities = Map.empty
+      }
 
 preludeUnitDataInfo :: RuntimeContext -> Maybe DataInfo
 preludeUnitDataInfo context = do
   ctor <- lookupPreludeUnitConstructor context
-  infos <- Map.lookup (ctorOwningTypeIdentity ctor) (elaborateScopeDataTypesByIdentity (runtimeElaborateScope context))
-  case infos of
-    info : _ -> Just info
-    [] -> Nothing
+  Map.lookup (ctorOwningTypeIdentity ctor) (elaborateScopeDataTypesByIdentity (runtimeElaborateScope context))
 
 unsupportedIOMainError :: SrcType -> ProgramError
 unsupportedIOMainError ty =
@@ -409,7 +430,7 @@ data RuntimeConstructorSpec = RuntimeConstructorSpec
 data RuntimeValue
   = RuntimeLit Lit
   | RuntimeUnit
-  | RuntimeData ConstructorInfo SrcType [RuntimeValue]
+  | RuntimeData ConstructorInfo TypeView [RuntimeValue]
   | RuntimeClosure ResolvedVar XmlfTerm RuntimeEnv RuntimeLookupStack RuntimeDeferredValues
   | RuntimeUnrolled RuntimeValue
   | RuntimeDataEliminator ConstructorInfo [RuntimeValue] [RuntimeValue]
@@ -538,21 +559,30 @@ mkRuntimeContext checked =
         Map.fromList
           [ (key, ctor)
           | checkedModule <- checkedProgramModules checked,
-            checkedModuleName checkedModule == "Prelude",
+            isRuntimePreludeModule checkedModule,
             dataInfo <- Map.elems (checkedModuleData checkedModule),
             ctor <- dataConstructors dataInfo,
-            Just key <- [preludeConstructorKey dataInfo ctor]
+            Just key <- [preludeConstructorKey checkedModule dataInfo ctor]
           ],
       runtimePreludeBindingsByKey =
         Map.fromList
           [ (key, binding)
           | checkedModule <- checkedProgramModules checked,
-            checkedModuleName checkedModule == "Prelude",
+            isRuntimePreludeModule checkedModule,
             binding <- checkedModuleBindings checkedModule,
             Just key <- [preludeBindingKey binding]
           ],
       runtimeElaborateScope = programElaborateScope checked
     }
+
+isRuntimePreludeModule :: CheckedModule -> Bool
+isRuntimePreludeModule checkedModule =
+  isRuntimePreludeModuleIdentity (checkedModuleIdentity checkedModule)
+
+isRuntimePreludeModuleIdentity :: SymbolIdentity -> Bool
+isRuntimePreludeModuleIdentity identity =
+  symbolNamespace identity == SymbolModule
+    && symbolDefiningName identity == "Prelude"
 
 preludeBindingKey :: CheckedBinding -> Maybe PreludeBindingKey
 preludeBindingKey binding =
@@ -561,17 +591,21 @@ preludeBindingKey binding =
       | symbol == Builtins.builtinValueIdentity PrimitiveInventory.stringFromListPrimitiveName -> Just PreludeStringFromList
     _ -> Nothing
 
-preludeConstructorKey :: DataInfo -> ConstructorInfo -> Maybe PreludeConstructorKey
-preludeConstructorKey dataInfo ctor =
-  case (dataInfoIdentityName dataInfo, ctorName ctor) of
-    ("Unit", "Unit") -> Just PreludeUnitUnit
-    ("Nat", "Zero") -> Just PreludeNatZero
-    ("Nat", "Succ") -> Just PreludeNatSucc
-    ("Option", "None") -> Just PreludeOptionNone
-    ("Option", "Some") -> Just PreludeOptionSome
-    ("List", "Nil") -> Just PreludeListNil
-    ("List", "Cons") -> Just PreludeListCons
-    _ -> Nothing
+preludeConstructorKey :: CheckedModule -> DataInfo -> ConstructorInfo -> Maybe PreludeConstructorKey
+preludeConstructorKey checkedModule dataInfo ctor =
+  if ctorOwningTypeIdentity ctor == dataInfoSymbol dataInfo
+    then do
+      typeName <- Map.lookup (dataInfoSymbol dataInfo) (exportedTypeDisplaysByIdentity (checkedModuleExports checkedModule))
+      case (typeName, ctorIndex ctor) of
+        ("Unit", 0) -> Just PreludeUnitUnit
+        ("Nat", 0) -> Just PreludeNatZero
+        ("Nat", 1) -> Just PreludeNatSucc
+        ("Option", 0) -> Just PreludeOptionNone
+        ("Option", 1) -> Just PreludeOptionSome
+        ("List", 0) -> Just PreludeListNil
+        ("List", 1) -> Just PreludeListCons
+        _ -> Nothing
+    else Nothing
 
 preludeConstructorLabel :: PreludeConstructorKey -> String
 preludeConstructorLabel key =
@@ -839,8 +873,8 @@ runtimePrimitiveResolved resolved =
 resolvedVarPrimitiveSymbol :: ResolvedVar -> Maybe SymbolIdentity
 resolvedVarPrimitiveSymbol resolved =
   case resolvedVarDetails resolved of
-    PrimitiveId PrimitiveRef {primitiveRefSymbol = symbol} ->
-      Just symbol
+    PrimitiveId ref ->
+      Just (primitiveRefSymbol ref)
     TopLevelId symbol
       | Map.member symbol runtimePrimitivesByIdentity ->
           Just symbol
@@ -868,95 +902,185 @@ runtimePrimitiveNamesByIdentity =
 runtimeConstructorValue :: RuntimeContext -> RuntimeConstructorSpec -> [RuntimeValue] -> Either ProgramError RuntimeValue
 runtimeConstructorValue context spec args
   | isPreludeUnitConstructor context ctor && null args = Right RuntimeUnit
-  | length args == length (ctorArgs ctor) = do
-      resultTy <- runtimeConstructorResultType context spec args
-      Right (RuntimeData ctor resultTy args)
-  | length args < length (ctorArgs ctor) = Right (RuntimeConstructor spec args)
+  | length args == length argViews = do
+      resultView <- runtimeConstructorResultView context spec args
+      Right (RuntimeData ctor resultView args)
+  | length args < length argViews = Right (RuntimeConstructor spec args)
   | otherwise =
       Left (ProgramPipelineError ("run-program constructor over-applied: " ++ ctorName ctor))
   where
     ctor = runtimeConstructorInfo spec
+    argViews = constructorInfoArgViews ctor
 
-runtimeConstructorResultType :: RuntimeContext -> RuntimeConstructorSpec -> [RuntimeValue] -> Either ProgramError SrcType
-runtimeConstructorResultType context spec args =
-  Right (applyRuntimeConstructorSubst subst resultTy)
+runtimeConstructorResultView :: RuntimeContext -> RuntimeConstructorSpec -> [RuntimeValue] -> Either ProgramError TypeView
+runtimeConstructorResultView context spec args = do
+  (substBinders, startSubst) <- runtimeConstructorSubstSeed context spec
+  Right (applyRuntimeConstructorSubstView scope (subst substBinders startSubst) resultView)
   where
     scope = runtimeElaborateScope context
     ctor = runtimeConstructorInfo spec
-    (substBinders, startSubst) = runtimeConstructorSubstSeed spec
-    resultTy = runtimeConstructorOccurrenceResultType spec
-    resultTyFromDeferred = applyRuntimeConstructorSubst startSubst resultTy
-    subst
-      | Set.null (freeTypeVarsRuntimeSrcType resultTyFromDeferred) = startSubst
-      | otherwise = foldl refineFromRuntimeArg startSubst (zip (ctorArgs ctor) args)
+    argViews = constructorInfoArgViews ctor
+    resultView = runtimeConstructorOccurrenceResultView context spec
+    subst substBinders startSubst
+      | Set.null (freeTypeVarsTypeView resultViewFromDeferred) = startSubst
+      | otherwise = foldl (refineFromRuntimeArg substBinders) startSubst (zip argViews args)
+      where
+        resultViewFromDeferred = applyRuntimeConstructorSubstView scope startSubst resultView
 
-    refineFromRuntimeArg acc (templateTy, arg) =
+    refineFromRuntimeArg substBinders acc (templateView, arg) =
       case runtimeValueTypeView context arg of
         Left _ -> acc
         Right actualView ->
-          case matchRuntimeTypeBinderSubstInScope scope substBinders acc templateTy (typeViewDisplay actualView) of
+          case matchRuntimeTypeBinderSubstInScope scope substBinders acc templateView actualView of
             Just acc' -> acc'
             Nothing -> acc
 
-runtimeConstructorSubstSeed :: RuntimeConstructorSpec -> ([(String, Maybe TypeBinderIdentity)], TypeBinderSubst)
-runtimeConstructorSubstSeed spec =
+runtimeConstructorSubstSeed :: RuntimeContext -> RuntimeConstructorSpec -> Either ProgramError ([(String, TypeBinderIdentity)], TypeBinderSubst)
+runtimeConstructorSubstSeed context spec =
   case runtimeConstructorDeferred spec of
     Just deferred ->
-      (deferredConstructorInstBinders deferred, deferredConstructorInitialSubst deferred)
+      Right (deferredConstructorInstBinders deferred, deferredConstructorInitialSubst deferred)
     Nothing ->
-      (runtimeConstructorBinders ctor, emptyTypeBinderSubst)
+      (\binders -> (binders, emptyTypeBinderSubst)) <$> runtimeConstructorBinders context ctor
   where
     ctor = runtimeConstructorInfo spec
 
-runtimeConstructorBinders :: ConstructorInfo -> [(String, Maybe TypeBinderIdentity)]
-runtimeConstructorBinders ctor =
-  explicitBinders ++ freeBinders
+runtimeConstructorBinders :: RuntimeContext -> ConstructorInfo -> Either ProgramError [(String, TypeBinderIdentity)]
+runtimeConstructorBinders context ctor
+  | null missingFreeBinders = Right binders
+  | missing : _ <- missingFreeBinders =
+      Left (ProgramPipelineError ("run-program constructor binder `" ++ missing ++ "` is missing identity"))
+  | otherwise = Right binders
   where
+    binders = explicitBinders ++ viewBinders ++ ownerBinders ++ pairedViewBinders
     explicitBinders =
-      zip (map fst (ctorForalls ctor)) (ctorForallBinderIdentities ctor ++ repeat Nothing)
-    explicitNames = Set.fromList (map fst explicitBinders)
-    freeBinders =
-      [ (name, Nothing)
-      | name <- Set.toList (freeTypeVarsRuntimeSrcType (ctorType ctor)),
-        name `Set.notMember` explicitNames
+      Map.toList $
+        typeBinderAliasIdentityMap
+          [ (constructorForallDisplayName binder, constructorForallIdentity binder)
+          | binder <- ctorForallBinderInfo ctor
+          ]
+    viewBinders =
+      Map.toList (typeViewBinderIdentities (ctorTypeView ctor))
+    pairedViewBinders =
+      [ (identityName, identity)
+      | (identityName, _) <- Map.toList (typeViewRuntimeVarPairs (ctorTypeView ctor)),
+        Just identity <- [typeViewBinderIdentityForAlias ctorView identityName]
+      ]
+    ctorView =
+      ctorTypeView ctor
+    ownerBinders =
+      case Map.lookup (ctorOwningTypeIdentity ctor) (elaborateScopeDataTypesByIdentity (runtimeElaborateScope context)) of
+        Just dataInfo ->
+          Map.toList (typeBinderAliasIdentityMap (dataParamBinders dataInfo))
+        Nothing -> []
+    binderNames = Set.fromList (map fst binders)
+    missingFreeBinders =
+      [ name
+      | name <- Set.toList (freeTypeVarsTypeViewDisplayAndIdentity (ctorTypeView ctor)),
+        name `Set.notMember` binderNames
       ]
 
 matchRuntimeTypeBinderSubstInScope ::
   ElaborateScope ->
-  [(String, Maybe TypeBinderIdentity)] ->
+  [(String, TypeBinderIdentity)] ->
   TypeBinderSubst ->
-  SrcType ->
-  SrcType ->
+  TypeView ->
+  TypeView ->
   Maybe TypeBinderSubst
-matchRuntimeTypeBinderSubstInScope scope binders subst templateTy actualTy =
+matchRuntimeTypeBinderSubstInScope scope binders subst templateView actualView =
   typeBinderSubstFromTypeViewSubst binders
     <$> matchTypeViewsAgainstIdentity
       scope
       (typeBinderSubstToTypeViewSubstWith (sourceTypeViewInScope scope) subst)
-      (NE.singleton (typeBinderTemplateView scope binders templateTy))
-      (NE.singleton (sourceTypeViewInScope scope actualTy))
+      (NE.singleton (typeBinderTemplateView binders templateView))
+      (NE.singleton actualView)
 
-typeBinderTemplateView :: ElaborateScope -> [(String, Maybe TypeBinderIdentity)] -> SrcType -> TypeView
-typeBinderTemplateView scope binders ty =
-  (sourceTypeViewInScope scope ty)
+typeBinderTemplateView :: [(String, TypeBinderIdentity)] -> TypeView -> TypeView
+typeBinderTemplateView binders view =
+  view
     { typeViewBinderIdentities =
-        Map.fromList [(name, identity) | (name, Just identity) <- binders]
+        mergeTypeBinderIdentityMaps
+          [ typeViewBinderIdentities view,
+            typeBinderAliasIdentityMap binders
+          ]
     }
 
-applyRuntimeConstructorSubst :: TypeBinderSubst -> SrcType -> SrcType
-applyRuntimeConstructorSubst subst ty =
-  Map.foldrWithKey substituteTypeVar ty (typeBinderSubstToNameMap subst)
+applyRuntimeConstructorSubstView :: ElaborateScope -> TypeBinderSubst -> TypeView -> TypeView
+applyRuntimeConstructorSubstView scope subst =
+  applyTypeViewSubst (typeBinderSubstToTypeViewSubstWith (sourceTypeViewInScope scope) subst)
 
-runtimeConstructorOccurrenceResultType :: RuntimeConstructorSpec -> SrcType
-runtimeConstructorOccurrenceResultType spec =
+runtimeConstructorOccurrenceResultView :: RuntimeContext -> RuntimeConstructorSpec -> TypeView
+runtimeConstructorOccurrenceResultView context spec =
   case runtimeConstructorDeferred spec of
     Just deferred ->
-      dropSourceArrows
-        (length (ctorArgs ctor) - deferredConstructorArgCount deferred)
-        (deferredConstructorOccurrenceType deferred)
-    Nothing -> ctorResult ctor
+      occurrenceView
+        { typeViewBinderIdentities =
+            mergeTypeBinderIdentityMaps
+              [ typeViewBinderIdentities occurrenceView,
+                typeBinderAliasIdentityMap (deferredConstructorInstBinders deferred)
+              ]
+        }
+      where
+        occurrenceView =
+          sourceTypeViewInScope (runtimeElaborateScope context) occurrenceType
+        occurrenceType =
+          dropSourceArrows
+            (length (constructorInfoArgViews ctor) - deferredConstructorArgCount deferred)
+            (deferredConstructorOccurrenceType deferred)
+    Nothing -> constructorInfoResultView ctor
   where
     ctor = runtimeConstructorInfo spec
+
+freeTypeVarsTypeViewDisplayAndIdentity :: TypeView -> Set.Set String
+freeTypeVarsTypeViewDisplayAndIdentity view =
+  freeTypeVarsRuntimeSrcType (typeViewDisplay view)
+    <> freeTypeVarsRuntimeSrcType (typeViewIdentity view)
+
+typeViewRuntimeVarPairs :: TypeView -> Map.Map String String
+typeViewRuntimeVarPairs view =
+  srcTypeRuntimeVarPairs (typeViewDisplay view) (typeViewIdentity view)
+
+srcTypeRuntimeVarPairs :: SrcType -> SrcType -> Map.Map String String
+srcTypeRuntimeVarPairs =
+  go Set.empty Set.empty
+  where
+    go displayBound identityBound display identityTy =
+      case (display, identityTy) of
+        (STVar displayName, STVar identityName)
+          | identityName `Set.notMember` identityBound ->
+              Map.singleton identityName displayName
+        (STArrow displayDom displayCod, STArrow identityDom identityCod) ->
+          go displayBound identityBound displayDom identityDom
+            `Map.union` go displayBound identityBound displayCod identityCod
+        (STCon _ displayArgs, STCon _ identityArgs) ->
+          pairsFromArgs displayBound identityBound displayArgs identityArgs
+        (STVarApp displayName displayArgs, STVarApp identityName identityArgs) ->
+          let headPair =
+                if identityName `Set.member` identityBound
+                  then Map.empty
+                  else Map.singleton identityName displayName
+           in headPair `Map.union` pairsFromArgs displayBound identityBound displayArgs identityArgs
+        (STForall displayName displayMb displayBody, STForall identityName identityMb identityBody) ->
+          boundPairs displayBound identityBound displayMb identityMb
+            `Map.union` go
+              (Set.insert displayName displayBound)
+              (Set.insert identityName identityBound)
+              displayBody
+              identityBody
+        (STMu displayName displayBody, STMu identityName identityBody) ->
+          go (Set.insert displayName displayBound) (Set.insert identityName identityBound) displayBody identityBody
+        _ -> Map.empty
+
+    boundPairs displayBound identityBound displayMb identityMb =
+      case (displayMb, identityMb) of
+        (Just (SrcBound displayBoundTy), Just (SrcBound identityBoundTy)) ->
+          go displayBound identityBound displayBoundTy identityBoundTy
+        _ -> Map.empty
+
+    pairsFromArgs displayBound identityBound displayArgs identityArgs =
+      Map.unionsWith
+        const
+        (zipWith (go displayBound identityBound) (NE.toList displayArgs) (NE.toList identityArgs))
 
 dropSourceArrows :: Int -> SrcType -> SrcType
 dropSourceArrows count ty
@@ -1320,18 +1444,18 @@ lookupRuntimeMethodEvidence context deferred classArgView =
       [ (methodEvidence, subst)
       | evidence <- deferredMethodLocalEvidence deferred,
         evidenceClassSymbol evidence == methodInfoOwnerClassSymbolIdentity methodInfo,
-        Just subst <- [matchTypeViewsAgainstIdentity scope Map.empty (evidenceTypeViews evidence) targetViews],
+        Just subst <- [matchMethodTypeViews scope Map.empty (evidenceTypeViews evidence) targetViews],
         methodEvidence <- maybe [] (: []) (Map.lookup (methodInfoSymbolIdentity methodInfo) (evidenceMethodsByIdentity evidence))
       ]
     fallbackEvidence = do
       evidence <- deferredMethodEvidence deferred
-      subst <- matchTypeViewsAgainstIdentity scope Map.empty (deferredMethodEvidenceClassArgs evidence) targetViews
+      subst <- matchMethodTypeViews scope Map.empty (deferredMethodEvidenceClassArgs evidence) targetViews
       pure (evidence {deferredMethodEvidenceClassArg = classArgView, deferredMethodEvidenceClassArgs = targetViews}, subst)
 
 runtimeMethodLocalConstraints :: MethodInfo -> TypeView -> TypeViewSubst -> [ConstraintInfo]
 runtimeMethodLocalConstraints methodInfo classArgView methodSubst =
   let headVars = freeTypeVarsTypeView classArgView
-      classArgSubst = typeViewSubstFromParamBinders (methodParamBinders methodInfo) (NE.singleton classArgView)
+      classArgSubst = typeViewSubstFromParamIdentities (methodParamBinderIdentities methodInfo) (NE.singleton classArgView)
       specializedForClass =
         map
           (applyConstraintInfoSubst classArgSubst)
@@ -1343,11 +1467,11 @@ runtimeMethodLocalConstraints methodInfo classArgView methodSubst =
    in map (applyConstraintInfoSubst methodSubst) methodLocal
 
 runtimeMethodValueResolved :: RuntimeContext -> String -> ValueInfo -> Either ProgramError ResolvedVar
-runtimeMethodValueResolved context _ valueInfo@OrdinaryValue {valueType = visibleTy} = do
+runtimeMethodValueResolved context _ valueInfo@OrdinaryValue {} = do
   resolvedTy <-
     typeViewToElabType
       (runtimeElaborateScope context)
-      (mkTypeView visibleTy (valueIdentityType valueInfo))
+      (ordinaryValueTypeView valueInfo)
   Right (resolvedVarFromValueInfo valueInfo resolvedTy)
 runtimeMethodValueResolved _ methodName0 _ = Left (ProgramUnknownMethod methodName0)
 
@@ -1484,7 +1608,7 @@ lookupRuntimeEvidenceMethod scope evidenceInfos classIdentity headViews methodId
     [ methodEvidence
       | evidence <- evidenceInfos,
         evidenceClassSymbol evidence == classIdentity,
-        Just _ <- [matchTypeViewsAgainstIdentity scope Map.empty (evidenceTypeViews evidence) headViews],
+        Just _ <- [matchMethodTypeViews scope Map.empty (evidenceTypeViews evidence) headViews],
         methodEvidence <- maybe [] (: []) (Map.lookup methodIdentity (evidenceMethodsByIdentity evidence))
     ]
   of
@@ -1527,7 +1651,7 @@ zeroMethodConstraintCoveredByRuntimeEvidence scope evidenceInfos constraint =
   any
     ( \evidence ->
         evidenceClassSymbol evidence == constraintClassSymbol constraint
-          && case matchTypeViewsAgainstIdentity scope Map.empty (evidenceTypeViews evidence) (constraintTypeViews constraint) of
+          && case matchMethodTypeViews scope Map.empty (evidenceTypeViews evidence) (constraintTypeViews constraint) of
             Just _ -> True
             Nothing -> False
     )
@@ -1548,20 +1672,27 @@ runtimeValueTypeView context value =
       case preludeUnitTypeView context of
         Just view -> Right view
         Nothing -> Left (ProgramPipelineError "run-program could not recover Unit type metadata")
-    RuntimeData _ resultTy _ -> Right (sourceTypeViewInScope scope resultTy)
+    RuntimeData _ resultView _ -> Right resultView
     _ -> Left (ProgramPipelineError "run-program IO runtime cannot infer deferred method argument type")
   where
     scope = runtimeElaborateScope context
 
 inferRuntimeMethodClassArgument :: RuntimeContext -> MethodInfo -> [TypeView] -> Maybe TypeView -> Maybe TypeView
 inferRuntimeMethodClassArgument context methodInfo argViews mbExpectedResult =
-    case inferClassArgument methodTy (methodParamIdentityName methodInfo) argIdentityTypes of
-    Just classArgTy -> Just (sourceTypeViewInScope scope classArgTy)
-    Nothing -> inferRuntimeMethodClassArgumentFromExpected context methodInfo argViews mbExpectedResult
+  inferRuntimeMethodClassArgumentFromArgs context methodInfo argViews
+    <|> inferRuntimeMethodClassArgumentFromExpected context methodInfo argViews mbExpectedResult
+
+inferRuntimeMethodClassArgumentFromArgs :: RuntimeContext -> MethodInfo -> [TypeView] -> Maybe TypeView
+inferRuntimeMethodClassArgumentFromArgs context methodInfo argViews = do
+  subst <-
+    foldM
+      (\acc (templateView, actualView) -> matchMethodTypeViews scope acc (NE.singleton templateView) (NE.singleton actualView))
+      Map.empty
+      (zip (methodParamViews methodView) argViews)
+  NE.head <$> lookupMethodParamViewSubst methodInfo subst
   where
     scope = runtimeElaborateScope context
-    methodTy = lowerType scope (methodTypeIdentity methodInfo)
-    argIdentityTypes = map typeViewIdentity argViews
+    methodView = methodTypeView methodInfo
 
 inferRuntimeMethodClassArgumentFromExpected :: RuntimeContext -> MethodInfo -> [TypeView] -> Maybe TypeView -> Maybe TypeView
 inferRuntimeMethodClassArgumentFromExpected _ _ _ Nothing = Nothing
@@ -1570,10 +1701,10 @@ inferRuntimeMethodClassArgumentFromExpected context methodInfo argViews (Just ex
       methodView = methodTypeView methodInfo
   substFromArgs <-
     foldM
-      (\acc (templateView, actualView) -> matchTypeViewsAgainstIdentity scope acc (NE.singleton templateView) (NE.singleton actualView))
+      (\acc (templateView, actualView) -> matchMethodTypeViews scope acc (NE.singleton templateView) (NE.singleton actualView))
       Map.empty
       (zip (methodParamViews methodView) argViews)
-  subst <- matchTypeViewsAgainstIdentity scope substFromArgs (NE.singleton (methodResultTypeView methodInfo)) (NE.singleton expectedView)
+  subst <- matchMethodTypeViews scope substFromArgs (NE.singleton (methodResultTypeView methodInfo)) (NE.singleton expectedView)
   NE.head <$> lookupMethodParamViewSubst methodInfo subst
 
 inferRuntimeNullaryMethodClassArgument :: RuntimeContext -> MethodInfo -> TypeView -> Maybe TypeView
@@ -1581,12 +1712,12 @@ inferRuntimeNullaryMethodClassArgument context methodInfo expectedView
   | methodFullArityFromInfo methodInfo /= 0 = Nothing
   | otherwise = do
       let scope = runtimeElaborateScope context
-      subst <- matchTypeViewsAgainstIdentity scope Map.empty (NE.singleton (methodResultTypeView methodInfo)) (NE.singleton expectedView)
+      subst <- matchMethodTypeViews scope Map.empty (NE.singleton (methodResultTypeView methodInfo)) (NE.singleton expectedView)
       NE.head <$> lookupMethodParamViewSubst methodInfo subst
 
 inferRuntimeNullaryMethodSubst :: RuntimeContext -> MethodInfo -> TypeView -> TypeViewSubst -> TypeView -> Maybe TypeViewSubst
 inferRuntimeNullaryMethodSubst context methodInfo classArgView subst expectedView =
-  matchTypeViewsAgainstIdentity scope subst (NE.singleton (methodResultView specializedMethodView)) (NE.singleton expectedView)
+  matchMethodTypeViews scope subst (NE.singleton (methodResultView specializedMethodView)) (NE.singleton expectedView)
   where
     scope = runtimeElaborateScope context
     specializedMethodView = specializeMethodTypeView methodInfo (NE.singleton classArgView)
@@ -1594,7 +1725,7 @@ inferRuntimeNullaryMethodSubst context methodInfo classArgView subst expectedVie
 inferRuntimeMethodArgumentSubst :: RuntimeContext -> MethodInfo -> TypeView -> TypeViewSubst -> [TypeView] -> Maybe TypeViewSubst
 inferRuntimeMethodArgumentSubst context methodInfo classArgView subst argViews =
   foldM
-    (\acc (templateView, actualView) -> matchTypeViewsAgainstIdentity scope acc (NE.singleton templateView) (NE.singleton actualView))
+    (\acc (templateView, actualView) -> matchMethodTypeViews scope acc (NE.singleton templateView) (NE.singleton actualView))
     subst
     (zip (methodParamViews specializedMethodView) argViews)
   where
@@ -2366,8 +2497,9 @@ allCheckedBindings checked =
   ]
 
 checkedBindingMentionsOpaqueBuiltin :: CheckedBinding -> Bool
-checkedBindingMentionsOpaqueBuiltin =
-  Builtins.srcTypeMentionsOpaqueBuiltin . checkedBindingSourceType
+checkedBindingMentionsOpaqueBuiltin binding =
+  Builtins.srcTypeMentionsOpaqueBuiltin (checkedBindingSourceType binding)
+    || any (`Set.member` builtinOpaqueTypeIdentities) (Map.elems (typeViewHeadIdentities (checkedBindingSourceTypeView binding)))
 
 freeResolvedTermVars :: XmlfTerm -> [ResolvedVar]
 freeResolvedTermVars =
@@ -2417,6 +2549,10 @@ runtimePurePrimitiveIdentities =
 builtinOpaqueValueIdentities :: Set.Set SymbolIdentity
 builtinOpaqueValueIdentities =
   Set.fromList (map Builtins.builtinValueIdentity (Set.toList Builtins.builtinOpaqueValueNames))
+
+builtinOpaqueTypeIdentities :: Set.Set SymbolIdentity
+builtinOpaqueTypeIdentities =
+  Set.fromList (map Builtins.builtinTypeIdentity (Set.toList Builtins.builtinOpaqueTypeNames))
 
 runtimePurePrimitiveNames :: [String]
 runtimePurePrimitiveNames =
@@ -2513,16 +2649,18 @@ typeBinderRefOccursInType ref ty =
 
 toValueWithProgram :: CheckedProgram -> XmlfTerm -> Value
 toValueWithProgram checked term =
-  case mainSourceType checked of
-    Just srcTy ->
-      case decodeSourceValue checked srcTy term of
-        Just value -> value
-        Nothing
-          | sourceTypeIsData checked srcTy ->
-              case decodeAnyData checked term of
-                Just value -> value
+  case mainBinding checked of
+    Just binding ->
+      let mbDataInfo = lookupDataInfoForBinding checked binding
+       in case decodeSourceValueWithDataInfo checked (checkedBindingSourceTypeView binding) mbDataInfo term of
+            Just value -> value
+            Nothing ->
+              case mbDataInfo of
+                Just {} ->
+                  case decodeAnyData checked term of
+                    Just value -> value
+                    Nothing -> toValue term
                 Nothing -> toValue term
-          | otherwise -> toValue term
     Nothing ->
       case decodeAnyData checked term of
         Just value -> value
@@ -2547,14 +2685,6 @@ prettyValueArg :: Value -> String
 prettyValueArg value = case value of
   VData _ (_ : _) -> "(" ++ prettyValue value ++ ")"
   _ -> prettyValue value
-
-mainSourceType :: CheckedProgram -> Maybe SrcType
-mainSourceType checked =
-  recoverMainSourceType checked <$> mainIdentitySourceType checked
-
-mainIdentitySourceType :: CheckedProgram -> Maybe SrcType
-mainIdentitySourceType checked =
-  checkedBindingSourceType <$> mainBinding checked
 
 mainBinding :: CheckedProgram -> Maybe CheckedBinding
 mainBinding checked =
@@ -2582,52 +2712,59 @@ programElaborateScope checked =
     (Map.fromList [(qualifiedClassName info, info) | info <- allClassInfos checked])
     (allInstanceInfos checked)
 
-decodeSourceValue :: CheckedProgram -> SrcType -> XmlfTerm -> Maybe Value
-decodeSourceValue checked srcTy term =
-  case lookupDataInfosForType checked srcTy of
-    [] ->
+decodeSourceValueWithDataInfo :: CheckedProgram -> TypeView -> Maybe DataInfo -> XmlfTerm -> Maybe Value
+decodeSourceValueWithDataInfo checked view mbDataInfo term =
+  case mbDataInfo of
+    Nothing ->
       case stripRuntimeWrappers term of
         ELit lit -> Just (VLit lit)
         _ -> Nothing
-    dataInfos ->
-      firstJust
-        [ decodeChurchData checked dataInfo (dataTypeSubst dataInfo srcTy) term
-          | dataInfo <- dataInfos
-        ]
+    Just dataInfo ->
+      decodeChurchData checked view dataInfo (dataTypeSubst dataInfo view) term
 
-firstJust :: [Maybe a] -> Maybe a
-firstJust values =
-  case [value | Just value <- values] of
-    value : _ -> Just value
-    [] -> Nothing
+lookupDataInfoForBinding :: CheckedProgram -> CheckedBinding -> Maybe DataInfo
+lookupDataInfoForBinding checked binding =
+  lookupDataInfoByElabTypeIdentity checked (checkedBindingType binding)
+    <|> sourceTypeDataInfo checked binding
 
-lookupDataInfosForType :: CheckedProgram -> SrcType -> [DataInfo]
-lookupDataInfosForType checked srcTy =
-  case srcTy of
-    STBase name -> lookupDataInfosByName checked name
-    STCon name _ -> lookupDataInfosByName checked name
-    _ -> []
+lookupDataInfoByElabTypeIdentity :: CheckedProgram -> ElabType -> Maybe DataInfo
+lookupDataInfoByElabTypeIdentity checked ty =
+  case ty of
+    X.TBaseWithIdentity (Just identity) _ ->
+      Map.lookup identity (allDataInfosByIdentity checked)
+    X.TConWithIdentity (Just identity) _ _ ->
+      Map.lookup identity (allDataInfosByIdentity checked)
+    X.TForallRef _ _ body ->
+      lookupDataInfoByElabTypeIdentity checked body
+    _ ->
+      Nothing
 
-sourceTypeIsData :: CheckedProgram -> SrcType -> Bool
-sourceTypeIsData checked srcTy =
-  not (null (lookupDataInfosForType checked srcTy))
+sourceTypeDataInfo :: CheckedProgram -> CheckedBinding -> Maybe DataInfo
+sourceTypeDataInfo checked binding =
+  lookupDataInfoForTypeView checked (checkedBindingSourceTypeView binding)
 
-lookupDataInfosByName :: CheckedProgram -> String -> [DataInfo]
-lookupDataInfosByName checked name =
-  [ dataInfo
-    | dataInfo <- Map.elems (allDataInfosByIdentity checked),
-      dataTypeHeadMatches dataInfo name
-  ]
+lookupDataInfoForTypeView :: CheckedProgram -> TypeView -> Maybe DataInfo
+lookupDataInfoForTypeView checked view = do
+  identity <- sourceTypeDataHeadIdentity view
+  Map.lookup identity (allDataInfosByIdentity checked)
 
-dataTypeHeadMatches :: DataInfo -> String -> Bool
-dataTypeHeadMatches dataInfo name =
-  name == symbolIdentityStableName (dataInfoSymbol dataInfo)
-    || if isQualifiedSourceHead name
-      then qualifiedDataName dataInfo == name
-      else dataInfoIdentityName dataInfo == name
+sourceTypeDataHeadIdentity :: TypeView -> Maybe SymbolIdentity
+sourceTypeDataHeadIdentity view = do
+  identityName <- sourceTypeDataHeadName (typeViewIdentity view)
+  typeViewHeadIdentityForAlias view identityName
 
-isQualifiedSourceHead :: String -> Bool
-isQualifiedSourceHead = elem '.'
+sourceTypeDataHeadName :: SrcType -> Maybe String
+sourceTypeDataHeadName =
+  \case
+    STBase name -> Just name
+    STCon name _ -> Just name
+    _ -> Nothing
+
+sourceTypeIsDataView :: CheckedProgram -> TypeView -> Bool
+sourceTypeIsDataView checked view =
+  case lookupDataInfoForTypeView checked view of
+    Just {} -> True
+    Nothing -> False
 
 qualifiedDataName :: DataInfo -> String
 qualifiedDataName =
@@ -2661,12 +2798,20 @@ allInstanceInfos checked =
 
 decodeAnyData :: CheckedProgram -> XmlfTerm -> Maybe Value
 decodeAnyData checked term =
-  case [value | dataInfo <- allDataInfos checked, Just value <- [decodeChurchData checked dataInfo emptyTypeBinderSubst term]] of
+  case [value | dataInfo <- allDataInfos checked, Just value <- [decodeChurchData checked emptyView dataInfo emptyTypeBinderSubst term]] of
     value : _ -> Just value
     [] -> Nothing
+  where
+    emptyView =
+      TypeView
+        { typeViewDisplay = STBottom,
+          typeViewIdentity = STBottom,
+          typeViewHeadIdentities = Map.empty,
+          typeViewBinderIdentities = Map.empty
+        }
 
-decodeChurchData :: CheckedProgram -> DataInfo -> TypeBinderSubst -> XmlfTerm -> Maybe Value
-decodeChurchData checked dataInfo subst term = do
+decodeChurchData :: CheckedProgram -> TypeView -> DataInfo -> TypeBinderSubst -> XmlfTerm -> Maybe Value
+decodeChurchData checked sourceView dataInfo subst term = do
   let stripped = stripRuntimeWrappers term
       (handlerNames, body) = collectLeadingLams stripped
       constructors = dataConstructors dataInfo
@@ -2679,102 +2824,205 @@ decodeChurchData checked dataInfo subst term = do
         EVarNode resolved -> Just resolved
         _ -> Nothing
       ctorInfo <- lookupByHandler activeHandlers constructors selectedHandler
-      let ctorArgTypes = constructorInfoArgsIdentity ctorInfo
-      if length args /= length ctorArgTypes
+      let ctorArgViews = constructorInfoArgViews ctorInfo
+      if length args /= length ctorArgViews
         then Nothing
         else
-          let argTypes = map (canonicalFieldType checked dataInfo . substDataParams subst) ctorArgTypes
-           in Just (VData (ctorName ctorInfo) (zipWith (decodeArg checked) argTypes args))
+          let argViews = map (canonicalFieldTypeView checked dataInfo . substDataParamView sourceView subst) ctorArgViews
+           in Just (VData (ctorName ctorInfo) (zipWith (decodeArg checked) argViews args))
 
-dataTypeSubst :: DataInfo -> SrcType -> TypeBinderSubst
-dataTypeSubst dataInfo srcTy =
-  case (dataTypeParams dataInfo, srcTy) of
-    ([], STBase name)
-      | dataTypeHeadMatches dataInfo name -> emptyTypeBinderSubst
-    (params, STCon name args)
-      | dataTypeHeadMatches dataInfo name && length params == length args ->
-          foldr (uncurry insertDataParam) emptyTypeBinderSubst (zip params (toList args))
-    _ -> emptyTypeBinderSubst
+dataTypeSubst :: DataInfo -> TypeView -> TypeBinderSubst
+dataTypeSubst dataInfo view =
+  if sourceTypeDataHeadIdentity view == Just (dataInfoSymbol dataInfo)
+    then
+      case (dataParamBinders dataInfo, typeViewIdentity view) of
+        ([], STBase {}) -> emptyTypeBinderSubst
+        (binders, STCon _ args)
+          | length binders == length args ->
+              foldr (uncurry insertDataParam) emptyTypeBinderSubst (zip binders (toList args))
+        _ -> emptyTypeBinderSubst
+    else emptyTypeBinderSubst
   where
-    insertDataParam param ty =
-      let mbIdentity = typeParamBinderIdentity param
-       in insertTypeBinderSubst (ProgramSyntax.typeParamName param, mbIdentity) ty
-            . insertTypeBinderSubst (ProgramSyntax.typeParamIdentityName param, mbIdentity) ty
+    insertDataParam (displayName, identity) ty =
+      insertTypeBinderSubstWithIdentity identity displayName ty
 
-constructorInfoArgsIdentity :: ConstructorInfo -> [SrcType]
-constructorInfoArgsIdentity ctorInfo =
-  let (_, identityBody) = splitForalls (ctorTypeIdentity ctorInfo)
-   in fst (splitArrows identityBody)
-
-substDataParams :: TypeBinderSubst -> SrcType -> SrcType
-substDataParams subst ty =
-  go (typeBinderSubstToNameMap subst) ty
+constructorInfoArgViews :: ConstructorInfo -> [TypeView]
+constructorInfoArgViews ctorInfo =
+  zipWith argView displayArgs identityArgs
   where
-    go substNames ty0 =
-      case ty0 of
-        STVar name -> Map.findWithDefault ty0 name substNames
-        STArrow dom cod -> STArrow (go substNames dom) (go substNames cod)
-        STBase {} -> ty0
-        STCon name args -> STCon name (fmap (go substNames) args)
-        STVarApp name args ->
-          let args' = fmap (go substNames) args
-           in case Map.lookup name substNames of
-                Just (STVar replacementName) -> STVarApp replacementName args'
-                Just (STBase replacementName) -> STCon replacementName args'
-                Just (STCon replacementName replacementArgs) -> STCon replacementName (replacementArgs <> args')
-                Just (STVarApp replacementName replacementArgs) -> STVarApp replacementName (replacementArgs <> args')
-                _ -> STVarApp name args'
-        STTyLam name body ->
-          STTyLam name (go (Map.delete name substNames) body)
-        STTyApp fun arg -> STTyApp (go substNames fun) (go substNames arg)
-        STForall name mb body ->
-          let substNames' = Map.delete name substNames
-           in STForall name (fmap (SrcBound . go substNames' . unSrcBound) mb) (go substNames' body)
-        STMu name body ->
-          STMu name (go (Map.delete name substNames) body)
-        STBottom -> STBottom
+    view = ctorTypeView ctorInfo
+    (_, displayBody) = splitForalls (typeViewDisplay view)
+    (_, identityBody) = splitForalls (typeViewIdentity view)
+    (displayArgs, _) = splitArrows displayBody
+    (identityArgs, _) = splitArrows identityBody
 
-canonicalFieldType :: CheckedProgram -> DataInfo -> SrcType -> SrcType
-canonicalFieldType checked ownerInfo = canonical
+    argView displayTy identityTy =
+      TypeView
+        { typeViewDisplay = displayTy,
+          typeViewIdentity = identityTy,
+          typeViewHeadIdentities =
+            Map.filterWithKey
+              (\name _ -> Set.member name (typeHeadNamesSrcType identityTy) || Set.member name (typeHeadNamesSrcType displayTy))
+              (typeViewHeadIdentities view),
+          typeViewBinderIdentities = typeViewBinderIdentities view
+        }
+
+constructorInfoResultView :: ConstructorInfo -> TypeView
+constructorInfoResultView ctorInfo =
+  view
+    { typeViewDisplay = displayResult,
+      typeViewIdentity = identityResult,
+      typeViewHeadIdentities =
+        Map.filterWithKey
+          (\name _ -> Set.member name (typeHeadNamesSrcType identityResult) || Set.member name (typeHeadNamesSrcType displayResult))
+          (typeViewHeadIdentities view)
+    }
   where
-    canonical ty =
+    view = ctorTypeView ctorInfo
+    (_, displayBody) = splitForalls (typeViewDisplay view)
+    (_, identityBody) = splitForalls (typeViewIdentity view)
+    (_, displayResult) = splitArrows displayBody
+    (_, identityResult) = splitArrows identityBody
+
+substDataParamView :: TypeView -> TypeBinderSubst -> TypeView -> TypeView
+substDataParamView sourceView subst view =
+  substitutedView
+    { typeViewIdentity = identityTy,
+      typeViewHeadIdentities =
+        mergeSymbolIdentityMaps
+          [ typeViewHeadIdentities substitutedView,
+            sourceHeadIdentitiesFor identityHeadNames
+          ]
+    }
+  where
+    substitutedView =
+      applyTypeViewSubst (typeBinderSubstToTypeViewSubstWith substView subst) view
+
+    substView ty =
+      TypeView
+        { typeViewDisplay = displayTypeFromRuntimeHeadPairs sourceHeadPairs ty,
+          typeViewIdentity = ty,
+          typeViewHeadIdentities =
+            sourceHeadIdentitiesFor (typeHeadNamesSrcType ty),
+          typeViewBinderIdentities = Map.empty
+        }
+
+    identityTy = typeViewIdentity substitutedView
+    identityHeadNames = typeHeadNamesSrcType identityTy
+    sourceHeadIdentitiesFor names =
+      Map.filterWithKey
+        (\name _ -> Set.member name names || Set.member name (pairedSourceHeadNames names))
+        sourceHeadIdentities
+    pairedSourceHeadNames names =
+      Set.fromList
+        [ displayName
+        | identityName <- Set.toList names,
+          Just displayName <- [Map.lookup identityName sourceHeadPairs]
+        ]
+    sourceHeadPairs =
+      typeViewHeadPairs sourceView
+    sourceHeadIdentities = typeViewHeadIdentities sourceView
+
+displayTypeFromRuntimeHeadPairs :: Map.Map String String -> SrcType -> SrcType
+displayTypeFromRuntimeHeadPairs pairs =
+  go
+  where
+    displayHead name =
+      Map.findWithDefault name name pairs
+
+    go ty =
       case ty of
         STVar {} -> ty
-        STBase name ->
-          case lookupDataInfoInOwnerModule checked ownerInfo name of
-            Just info -> STBase (qualifiedDataName info)
-            Nothing -> ty
-        STCon name args ->
-          let args' = fmap canonical args
-           in case lookupDataInfoInOwnerModule checked ownerInfo name of
-                Just info -> STCon (qualifiedDataName info) args'
-                Nothing -> STCon name args'
-        STVarApp name args -> STVarApp name (fmap canonical args)
-        STTyLam name body -> STTyLam name (canonical body)
-        STTyApp fun arg -> STTyApp (canonical fun) (canonical arg)
-        STArrow dom cod -> STArrow (canonical dom) (canonical cod)
-        STForall name mb body ->
-          STForall name (fmap (SrcBound . canonical . unSrcBound) mb) (canonical body)
-        STMu name body -> STMu name (canonical body)
+        STBase name -> STBase (displayHead name)
+        STCon name args -> STCon (displayHead name) (fmap go args)
+        STVarApp name args -> STVarApp name (fmap go args)
+        STTyLam name body -> STTyLam name (go body)
+        STTyApp fun arg -> STTyApp (go fun) (go arg)
+        STArrow dom cod -> STArrow (go dom) (go cod)
+        STForall name mb body -> STForall name (fmap (SrcBound . go . unSrcBound) mb) (go body)
+        STMu name body -> STMu name (go body)
         STBottom -> STBottom
 
-lookupDataInfoInOwnerModule :: CheckedProgram -> DataInfo -> String -> Maybe DataInfo
-lookupDataInfoInOwnerModule checked ownerInfo name = do
-  ownerModule <-
-    find
-      (Map.member (dataInfoSymbol ownerInfo) . checkedModuleData)
-      (checkedProgramModules checked)
-  find matchesName (Map.elems (checkedModuleData ownerModule))
+canonicalFieldTypeView :: CheckedProgram -> DataInfo -> TypeView -> TypeView
+canonicalFieldTypeView checked _ownerInfo view =
+  view
+    { typeViewIdentity = identityTy,
+      typeViewHeadIdentities =
+        mergeSymbolIdentityMaps
+          [ typeViewHeadIdentities view,
+            canonicalHeadIdentities
+          ]
+    }
   where
-    matchesName info =
-      dataTypeHeadMatches info name
+    (identityTy, canonicalHeadIdentities) = canonical (typeViewIdentity view)
 
-decodeArg :: CheckedProgram -> SrcType -> XmlfTerm -> Value
-decodeArg checked srcTy term =
-  case decodeSourceValue checked srcTy term of
+    canonical ty =
+      case ty of
+        STVar {} -> (ty, Map.empty)
+        STBase name ->
+          case lookupDataInfoByViewHead name of
+            Just info ->
+              let canonicalName = qualifiedDataName info
+               in (STBase canonicalName, Map.singleton canonicalName (dataInfoSymbol info))
+            Nothing -> (ty, Map.empty)
+        STCon name args ->
+          let (args', argIdentities) = canonicalArgs args
+           in case lookupDataInfoByViewHead name of
+                Just info ->
+                  let canonicalName = qualifiedDataName info
+                   in (STCon canonicalName args', Map.insert canonicalName (dataInfoSymbol info) argIdentities)
+                Nothing -> (STCon name args', argIdentities)
+        STVarApp name args ->
+          let (args', identities) = canonicalArgs args
+           in (STVarApp name args', identities)
+        STTyLam name body ->
+          let (body', identities) = canonical body
+           in (STTyLam name body', identities)
+        STTyApp fun arg ->
+          let (fun', funIdentities) = canonical fun
+              (arg', argIdentities) = canonical arg
+           in (STTyApp fun' arg', mergeSymbolIdentityMaps [funIdentities, argIdentities])
+        STArrow dom cod ->
+          let (dom', domIdentities) = canonical dom
+              (cod', codIdentities) = canonical cod
+           in (STArrow dom' cod', mergeSymbolIdentityMaps [domIdentities, codIdentities])
+        STForall name mb body ->
+          let (mb', mbIdentities) =
+                case mb of
+                  Just (SrcBound bound) ->
+                    let (bound', boundIdentities) = canonical bound
+                     in (Just (SrcBound bound'), boundIdentities)
+                  Nothing -> (Nothing, Map.empty)
+              (body', bodyIdentities) = canonical body
+           in (STForall name mb' body', mergeSymbolIdentityMaps [mbIdentities, bodyIdentities])
+        STMu name body ->
+          let (body', identities) = canonical body
+           in (STMu name body', identities)
+        STBottom -> (STBottom, Map.empty)
+
+    canonicalArgs (arg NE.:| args) =
+      let (arg', argIdentities) = canonical arg
+          (argsRev, identities) =
+            foldl
+              ( \(accArgs, accIdentities) next ->
+                  let (next', nextIdentities) = canonical next
+                   in (next' : accArgs, mergeSymbolIdentityMaps [accIdentities, nextIdentities])
+              )
+              ([], argIdentities)
+              args
+       in (arg' NE.:| reverse argsRev, identities)
+
+    lookupDataInfoByViewHead name =
+      case typeViewHeadIdentityForAlias view name >>= (`Map.lookup` allDataInfosByIdentity checked) of
+        Just info -> Just info
+        Nothing -> Nothing
+
+decodeArg :: CheckedProgram -> TypeView -> XmlfTerm -> Value
+decodeArg checked view term =
+  case decodeSourceValueWithDataInfo checked view (lookupDataInfoForTypeView checked view) term of
     Just value -> value
     Nothing
-      | sourceTypeIsData checked srcTy ->
+      | sourceTypeIsDataView checked view ->
           case decodeAnyData checked term of
             Just value -> value
             Nothing -> toValue term

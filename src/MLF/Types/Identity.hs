@@ -1,46 +1,80 @@
 module MLF.Types.Identity
   ( UniqueIdentity (..),
-    TypeBinderIdentity (..),
+    uniqueIdentityStableName,
+    StructuralTypeBinderRole (..),
+    TypeBinderIdentity,
     typeBinderIdentityFromNode,
     typeBinderIdentityNode,
+    typeBinderIdentityGeneratedUnique,
+    typeBinderIdentityStructural,
     typeBinderIdentityKey,
+    typeBinderIdentityStableName,
     typeBinderIdentityFromUnique,
+    typeBinderIdentityFromStructural,
+    typeBinderGeneratedIdentities,
     LocalIdentity (..),
+    localIdentityStableUnique,
     IdentityGenerator,
     initialIdentityGenerator,
-    identityGeneratorFromNext,
     identityGeneratorAfter,
+    advanceIdentityGeneratorPast,
     freshIdentity,
-    LocalRef (..),
+    LocalRef,
+    localRefFromIdentity,
+    localRefIdentity,
+    localRefName,
+    localRefDiscard,
     freshLocalRef,
+    freshenLocalRef,
+    localRefFromNodeId,
+    localRefMatchesNodeId,
+    localRefGeneratedIdentities,
     renameLocalRef,
-    EnvRef (..),
+    EnvRef,
+    envRefFromIdentity,
+    envRefIdentity,
+    envRefName,
     freshEnvRef,
-    PrimitiveRef (..),
-    DeferredRef (..),
+    PrimitiveRef,
+    primitiveRefFromSymbol,
+    primitiveRefSymbol,
+    DeferredRef,
+    deferredRefFromIdentity,
+    deferredRefIdentity,
+    deferredRefName,
     freshDeferredRef,
     renameDeferredRef,
-    ConstructorRef (..),
+    ConstructorRef,
+    constructorRefFromSymbol,
+    constructorRefSymbol,
     IdDetails (..),
     idDetailsReferenceName,
     idDetailsDisplayName,
     idDetailsConstructorRef,
     idDetailsIsLocal,
     idDetailsIsEvidence,
+    idDetailsIsDiscard,
     idDetailsRenameLocal,
     idDetailsSameIdentity,
+    idDetailsRefMatches,
     idDetailsGeneratedIdentities,
     symbolGeneratedIdentities,
   )
 where
 
 import MLF.Constraint.Types.Graph (NodeId (..))
-import MLF.Frontend.Symbol (SymbolIdentity (..), SymbolOwnerIdentity (..))
+import MLF.Frontend.Symbol (SymbolIdentity, SymbolOwnerIdentity (..), symbolDefiningName, symbolOwnerIdentity, symbolUniqueIdentity)
 import MLF.Types.Unique
+
+data StructuralTypeBinderRole
+  = StructuralSelfBinder
+  | StructuralResultBinder
+  deriving (Eq, Ord, Show)
 
 data TypeBinderIdentity
   = GraphTypeBinderIdentity NodeId
   | GeneratedTypeBinderIdentity UniqueIdentity
+  | StructuralTypeBinderIdentity UniqueIdentity StructuralTypeBinderRole
   deriving (Eq, Ord, Show)
 
 typeBinderIdentityFromNode :: NodeId -> TypeBinderIdentity
@@ -51,25 +85,84 @@ typeBinderIdentityNode identity =
   case identity of
     GraphTypeBinderIdentity node -> Just node
     GeneratedTypeBinderIdentity {} -> Nothing
+    StructuralTypeBinderIdentity {} -> Nothing
+
+typeBinderIdentityGeneratedUnique :: TypeBinderIdentity -> Maybe UniqueIdentity
+typeBinderIdentityGeneratedUnique identity =
+  case identity of
+    GeneratedTypeBinderIdentity unique -> Just unique
+    GraphTypeBinderIdentity {} -> Nothing
+    StructuralTypeBinderIdentity {} -> Nothing
 
 typeBinderIdentityFromUnique :: UniqueIdentity -> TypeBinderIdentity
 typeBinderIdentityFromUnique = GeneratedTypeBinderIdentity
+
+typeBinderIdentityFromStructural :: UniqueIdentity -> StructuralTypeBinderRole -> TypeBinderIdentity
+typeBinderIdentityFromStructural =
+  StructuralTypeBinderIdentity
+
+typeBinderIdentityStructural :: TypeBinderIdentity -> Maybe (UniqueIdentity, StructuralTypeBinderRole)
+typeBinderIdentityStructural identity =
+  case identity of
+    StructuralTypeBinderIdentity unique role -> Just (unique, role)
+    GraphTypeBinderIdentity {} -> Nothing
+    GeneratedTypeBinderIdentity {} -> Nothing
 
 typeBinderIdentityKey :: TypeBinderIdentity -> Int
 typeBinderIdentityKey identity =
   case identity of
     GraphTypeBinderIdentity node -> getNodeId node
-    GeneratedTypeBinderIdentity unique -> uniqueIdentityValue unique
+    GeneratedTypeBinderIdentity unique -> negate (uniqueIdentityValue unique + 1)
+    StructuralTypeBinderIdentity unique role ->
+      negate (uniqueIdentityValue unique * 2 + structuralRoleKey role + 1000000)
+
+typeBinderIdentityStableName :: TypeBinderIdentity -> String
+typeBinderIdentityStableName identity =
+  case identity of
+    GraphTypeBinderIdentity node -> "$typevar#node#" ++ show (getNodeId node)
+    GeneratedTypeBinderIdentity unique -> "$typevar#" ++ show (uniqueIdentityValue unique)
+    StructuralTypeBinderIdentity unique role ->
+      "$typevar#structural#" ++ show (uniqueIdentityValue unique) ++ "#" ++ structuralRoleName role
+
+typeBinderGeneratedIdentities :: TypeBinderIdentity -> [UniqueIdentity]
+typeBinderGeneratedIdentities identity =
+  case identity of
+    GeneratedTypeBinderIdentity unique -> [unique]
+    GraphTypeBinderIdentity {} -> []
+    StructuralTypeBinderIdentity unique _ -> [unique]
+
+structuralRoleKey :: StructuralTypeBinderRole -> Int
+structuralRoleKey =
+  \case
+    StructuralSelfBinder -> 0
+    StructuralResultBinder -> 1
+
+structuralRoleName :: StructuralTypeBinderRole -> String
+structuralRoleName =
+  \case
+    StructuralSelfBinder -> "self"
+    StructuralResultBinder -> "result"
 
 data LocalRef = LocalRef
   { localRefIdentity :: LocalIdentity,
-    localRefName :: String
+    localRefName :: String,
+    localRefDiscard :: Bool
   }
   deriving (Show)
 
 data LocalIdentity
-  = GeneratedLocalId UniqueIdentity
+  = GraphLocalId NodeId
+  | GeneratedLocalId UniqueIdentity
   deriving (Eq, Ord, Show)
+
+localIdentityStableUnique :: LocalIdentity -> UniqueIdentity
+localIdentityStableUnique identity =
+  case identity of
+    GraphLocalId nodeId -> UniqueIdentity (graphLocalIdentityBase - getNodeId nodeId)
+    GeneratedLocalId unique -> unique
+
+graphLocalIdentityBase :: Int
+graphLocalIdentityBase = -400000
 
 instance Eq LocalRef where
   left == right =
@@ -82,7 +175,32 @@ instance Ord LocalRef where
 freshLocalRef :: String -> IdentityGenerator -> (LocalRef, IdentityGenerator)
 freshLocalRef name generator =
   let (identity, generator') = freshIdentity generator
-   in (LocalRef (GeneratedLocalId identity) name, generator')
+   in (localRefFromIdentity (GeneratedLocalId identity) name, generator')
+
+freshenLocalRef :: String -> IdentityGenerator -> LocalRef -> (LocalRef, IdentityGenerator)
+freshenLocalRef name generator ref =
+  let (identity, generator') = freshIdentity generator
+   in (LocalRef (GeneratedLocalId identity) name (localRefDiscard ref), generator')
+
+localRefFromIdentity :: LocalIdentity -> String -> LocalRef
+localRefFromIdentity identity name =
+  LocalRef identity name (name == "_")
+
+localRefFromNodeId :: String -> NodeId -> LocalRef
+localRefFromNodeId name nodeId =
+  localRefFromIdentity (GraphLocalId nodeId) name
+
+localRefMatchesNodeId :: LocalRef -> NodeId -> Bool
+localRefMatchesNodeId ref nodeId =
+  case localRefIdentity ref of
+    GraphLocalId refNodeId -> refNodeId == nodeId
+    GeneratedLocalId {} -> False
+
+localRefGeneratedIdentities :: LocalRef -> [UniqueIdentity]
+localRefGeneratedIdentities ref =
+  case localRefIdentity ref of
+    GraphLocalId {} -> []
+    GeneratedLocalId identity -> [identity]
 
 renameLocalRef :: String -> LocalRef -> LocalRef
 renameLocalRef name ref =
@@ -93,6 +211,13 @@ data EnvRef = EnvRef
     envRefName :: String
   }
   deriving (Show)
+
+envRefFromIdentity :: UniqueIdentity -> String -> EnvRef
+envRefFromIdentity identity name =
+  EnvRef
+    { envRefIdentity = identity,
+      envRefName = name
+    }
 
 instance Eq EnvRef where
   left == right =
@@ -105,12 +230,16 @@ instance Ord EnvRef where
 freshEnvRef :: String -> IdentityGenerator -> (EnvRef, IdentityGenerator)
 freshEnvRef name generator =
   let (identity, generator') = freshIdentity generator
-   in (EnvRef identity name, generator')
+   in (envRefFromIdentity identity name, generator')
 
 data PrimitiveRef = PrimitiveRef
   { primitiveRefSymbol :: SymbolIdentity
   }
   deriving (Show)
+
+primitiveRefFromSymbol :: SymbolIdentity -> PrimitiveRef
+primitiveRefFromSymbol symbol =
+  PrimitiveRef {primitiveRefSymbol = symbol}
 
 instance Eq PrimitiveRef where
   left == right =
@@ -126,6 +255,13 @@ data DeferredRef = DeferredRef
   }
   deriving (Show)
 
+deferredRefFromIdentity :: UniqueIdentity -> String -> DeferredRef
+deferredRefFromIdentity identity name =
+  DeferredRef
+    { deferredRefIdentity = identity,
+      deferredRefName = name
+    }
+
 instance Eq DeferredRef where
   left == right =
     deferredRefIdentity left == deferredRefIdentity right
@@ -137,7 +273,7 @@ instance Ord DeferredRef where
 freshDeferredRef :: String -> IdentityGenerator -> (DeferredRef, IdentityGenerator)
 freshDeferredRef name generator =
   let (identity, generator') = freshIdentity generator
-   in (DeferredRef identity name, generator')
+   in (deferredRefFromIdentity identity name, generator')
 
 renameDeferredRef :: String -> DeferredRef -> DeferredRef
 renameDeferredRef name ref =
@@ -147,6 +283,10 @@ data ConstructorRef = ConstructorRef
   { constructorRefSymbol :: SymbolIdentity
   }
   deriving (Show)
+
+constructorRefFromSymbol :: SymbolIdentity -> ConstructorRef
+constructorRefFromSymbol symbol =
+  ConstructorRef {constructorRefSymbol = symbol}
 
 instance Eq ConstructorRef where
   left == right =
@@ -161,7 +301,11 @@ data IdDetails
   | MethodId SymbolIdentity
   | PrimitiveId PrimitiveRef
   | DeferredId DeferredRef
-  deriving (Eq, Show)
+  deriving (Show)
+
+instance Eq IdDetails where
+  left == right =
+    idDetailsSameIdentity left right
 
 idDetailsReferenceName :: String -> IdDetails -> String
 idDetailsReferenceName runtimeName details =
@@ -203,6 +347,13 @@ idDetailsIsEvidence details =
     EvidenceId {} -> True
     _ -> False
 
+idDetailsIsDiscard :: IdDetails -> Bool
+idDetailsIsDiscard details =
+  case details of
+    LocalId localRef -> localRefDiscard localRef
+    EvidenceId localRef -> localRefDiscard localRef
+    _ -> False
+
 idDetailsRenameLocal :: String -> IdDetails -> IdDetails
 idDetailsRenameLocal name details =
   case details of
@@ -226,18 +377,26 @@ idDetailsSameIdentity left right =
     (DeferredId leftRef, DeferredId rightRef) -> leftRef == rightRef
     _ -> False
 
+idDetailsRefMatches :: Maybe IdDetails -> String -> Maybe IdDetails -> String -> Bool
+idDetailsRefMatches (Just left) _ (Just right) _ =
+  idDetailsSameIdentity left right
+idDetailsRefMatches Nothing leftName Nothing rightName =
+  leftName == rightName
+idDetailsRefMatches _ _ _ _ =
+  False
+
 idDetailsGeneratedIdentities :: IdDetails -> [UniqueIdentity]
 idDetailsGeneratedIdentities details =
   case details of
-    LocalId LocalRef {localRefIdentity = GeneratedLocalId identity} -> [identity]
-    EvidenceId LocalRef {localRefIdentity = GeneratedLocalId identity} -> [identity]
-    EnvId EnvRef {envRefIdentity = identity} -> [identity]
+    LocalId ref -> localRefGeneratedIdentities ref
+    EvidenceId ref -> localRefGeneratedIdentities ref
+    EnvId ref -> [envRefIdentity ref]
     TopLevelId symbol -> symbolGeneratedIdentities symbol
     ConstructorId ref ->
       symbolGeneratedIdentities (constructorRefSymbol ref)
     MethodId symbol -> symbolGeneratedIdentities symbol
     PrimitiveId ref -> symbolGeneratedIdentities (primitiveRefSymbol ref)
-    DeferredId DeferredRef {deferredRefIdentity = identity} -> [identity]
+    DeferredId ref -> [deferredRefIdentity ref]
 
 symbolGeneratedIdentities :: SymbolIdentity -> [UniqueIdentity]
 symbolGeneratedIdentities symbol =

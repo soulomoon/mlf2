@@ -65,7 +65,7 @@ import MLF.Reify.Core
     reifyTypeWithRefsNoFallback,
     reifyTypeWithRefsNoFallbackOnConstraint,
   )
-import MLF.Reify.TypeOps (alphaEqType, inlineAliasBoundsWithBy)
+import MLF.Reify.TypeOps (alphaEqType, inlineAliasBoundsWithBy, typeHeadMatches)
 import MLF.Util.Graph (reachableFromStop)
 import qualified MLF.Util.IntMapUtils as IntMapUtils
 import MLF.Util.Names (alphaName)
@@ -124,11 +124,11 @@ alphaEqTypeModuloVarRenaming tyL tyR =
       (TArrow a1 b1, TArrow a2 b2) -> do
         env' <- goType env a1 a2
         goType env' b1 b2
-      (TCon c1 args1, TCon c2 args2)
-        | c1 == c2 ->
+      (TConWithIdentity identity1 c1 args1, TConWithIdentity identity2 c2 args2)
+        | typeHeadMatches identity1 c1 identity2 c2 ->
             goTypes env (NonEmpty.toList args1) (NonEmpty.toList args2)
-      (TBase b1, TBase b2)
-        | b1 == b2 ->
+      (TBaseWithIdentity identity1 b1, TBaseWithIdentity identity2 b2)
+        | typeHeadMatches identity1 b1 identity2 b2 ->
             Just env
       (TBottom, TBottom) ->
         Just env
@@ -148,11 +148,11 @@ alphaEqTypeModuloVarRenaming tyL tyR =
       (TArrow a1 b1', TArrow a2 b2') -> do
         env' <- goType env a1 a2
         goType env' b1' b2'
-      (TCon c1 args1, TCon c2 args2)
-        | c1 == c2 ->
+      (TConWithIdentity identity1 c1 args1, TConWithIdentity identity2 c2 args2)
+        | typeHeadMatches identity1 c1 identity2 c2 ->
             goTypes env (NonEmpty.toList args1) (NonEmpty.toList args2)
-      (TBase base1, TBase base2)
-        | base1 == base2 ->
+      (TBaseWithIdentity identity1 base1, TBaseWithIdentity identity2 base2)
+        | typeHeadMatches identity1 base1 identity2 base2 ->
             Just env
       (TBottom, TBottom) ->
         Just env
@@ -357,8 +357,7 @@ applyGeneralizePlan plan reifyPlanWrapper = do
           Reify.rpHasExplicitBound = hasExplicitBoundPlan,
           Reify.rpIsTargetSchemeBinder = isTargetSchemeBinderPlan,
           Reify.rpBoundMentionsSelfAlias = boundMentionsSelfAliasPlan,
-          Reify.rpContainsForall = containsForallPlan,
-          Reify.rpParseNameId = parseNameIdPlan
+          Reify.rpContainsForall = containsForallPlan
         } = reifyPlan
       allowBoundTraversal =
         allowBoundTraversalFor schemeRootsPlan canonical scopeGen target0
@@ -407,12 +406,20 @@ applyGeneralizePlan plan reifyPlanWrapper = do
             Reify.rbeIsTargetSchemeBinder = isTargetSchemeBinderPlan,
             Reify.rbeBoundMentionsSelfAlias = boundMentionsSelfAliasPlan,
             Reify.rbeContainsForall = containsForallPlan,
-            Reify.rbeParseNameId = parseNameIdPlan,
             Reify.rbeFirstGenAncestor = firstGenAncestorGa,
             Reify.rbeTraceM = traceGeneralizeM env
           }
   -- Phase 8: construct per-binder bounds.
-  bindings <- mapM (Reify.bindingFor bindingEnv reifyPlan) (zip binderNames orderedBinders)
+  let orderedBinderRefs =
+        [ case IntMap.lookup nidInt substRefs of
+            Just ref -> ref
+            Nothing ->
+              typeBinderRefFromIdentity
+                (typeBinderIdentityFromNode (canonical (NodeId nidInt)))
+                name
+          | (name, nidInt) <- zip binderNames orderedBinders
+        ]
+  bindings <- mapM (Reify.bindingFor bindingEnv reifyPlan) (zip orderedBinderRefs orderedBinders)
   reachableType <- Right (reachableFromWithBounds typeRoot)
 
   -- Phase 9: scheme ownership and type reification.
@@ -762,8 +769,7 @@ applyGeneralizePlan plan reifyPlanWrapper = do
         fiSolvedToBasePref = solvedToBasePrefPlan,
         fiGammaAlias = gammaAliasPlan,
         fiNamedUnderGaSet = namedUnderGaSetPlan,
-        fiOrderedBinders = orderedBinders,
-        fiBinderNames = binderNames,
+        fiOrderedBinderRefs = zip orderedBinders orderedBinderRefs,
         fiBindings = bindings,
         fiSubst = substRefs,
         fiTyRaw = ty0Raw

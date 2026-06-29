@@ -8,7 +8,7 @@ import Control.Monad (forM_, unless, when)
 import Data.Either (isLeft)
 import Data.IntMap.Strict qualified as IntMap
 import Data.IntSet qualified as IntSet
-import Data.List (isInfixOf, stripPrefix)
+import Data.List (isInfixOf, mapAccumL, stripPrefix)
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as Map
 import Data.Set qualified as Set
@@ -76,8 +76,7 @@ import MLF.Elab.Types (ResolvedVar (..))
 import MLF.Elab.Types qualified as ElabTypes
 import MLF.Elab.Phi.TestSupport qualified as PhiTestSupport
 import ElabTermTestSupport
-  ( generatedLocalRef,
-    generatedLocalRefForName,
+  ( generatedLocalRefForName,
     mkTestDeferredVar,
     mkTestLocalLam,
     mkTestLocalLet,
@@ -110,9 +109,9 @@ import MLF.Frontend.Program.Builtins qualified as ProgramBuiltins
 import MLF.Frontend.Program.Elaborate qualified as ProgramElaborate
 import MLF.Frontend.Program.Finalize qualified as ProgramFinalize
 import MLF.Frontend.Program.Types qualified as ProgramTypes
-import MLF.Frontend.Symbol (SymbolIdentity (..), SymbolNamespace (..))
+import MLF.Frontend.Symbol (SymbolNamespace (..), symbolIdentityFromParts)
 import MLF.Frontend.Syntax (Expr (..), Lit (..), NormSrcType, SrcTy (..), SrcType, SurfaceExpr, mkSrcBound)
-import MLF.Types.Identity (EnvRef (..), IdDetails (..), UniqueIdentity (..))
+import MLF.Types.Identity (IdDetails (..), UniqueIdentity (..), envRefFromIdentity, envRefIdentity, localRefFromNodeId)
 import MLF.Reify.Type qualified as ReifyType
 import MLF.Reify.TypeOps qualified as TypeOps
 import MLF.Util.Order qualified as Order
@@ -186,11 +185,72 @@ generalizeAt ::
 generalizeAt = generalizeAtWith Nothing
 
 mkSchemeInfoFromNodeNames :: Elab.ElabScheme -> IntMap.IntMap String -> Elab.SchemeInfo
-mkSchemeInfoFromNodeNames scheme =
-  Elab.schemeInfoFromRefSubst scheme . IntMap.mapWithKey refFromName
+mkSchemeInfoFromNodeNames scheme names =
+  Elab.schemeInfoFromRefSubst (attachByFixtureNames refs scheme) refs
   where
+    refs = IntMap.mapWithKey refFromName names
+
     refFromName key =
       ElabTypes.typeBinderRefFromIdentity (ElabTypes.typeBinderIdentityFromNode (NodeId key))
+
+    attachByFixtureNames refsByNode scheme0 =
+      ElabTypes.mkElabSchemeWithRefs binds' (applyRenames renames body0)
+      where
+        refLists =
+          Map.fromListWith
+            (flip (++))
+            [ (ElabTypes.typeBinderRefName ref, [ref])
+              | ref <- IntMap.elems refsByNode
+            ]
+        (binds0, body0) = (ElabTypes.schemeBinderRefs scheme0, ElabTypes.schemeBody scheme0)
+        ((_, renames), binds') = mapAccumL attachOne (refLists, []) binds0
+
+    attachOne (refLists, renamesSoFar) (oldRef, mb) =
+      let name = ElabTypes.typeBinderRefName oldRef
+          mb' = fmap (applyRenames renamesSoFar) mb
+       in case Map.lookup name refLists of
+            Just (newRef : rest) ->
+              let refLists' =
+                    if null rest
+                      then Map.delete name refLists
+                      else Map.insert name rest refLists
+                  renames' =
+                    if ElabTypes.typeBinderRefsSameIdentity oldRef newRef
+                      then renamesSoFar
+                      else renamesSoFar ++ [(oldRef, newRef)]
+               in ((refLists', renames'), (newRef, mb'))
+            _ -> ((refLists, renamesSoFar), (oldRef, mb'))
+
+    applyRenames renames0 ty =
+      foldr
+        (\(oldRef, newRef) acc -> replaceBinderRef oldRef newRef acc)
+        ty
+        renames0
+
+    replaceBinderRef :: ElabTypes.TypeBinderRef -> ElabTypes.TypeBinderRef -> ElabTypes.Ty v -> ElabTypes.Ty v
+    replaceBinderRef target replacement ty =
+      case ty of
+        ElabTypes.TVarRef ref
+          | ElabTypes.typeBinderRefsSameIdentity target ref -> ElabTypes.TVarRef replacement
+          | otherwise -> ElabTypes.TVarRef ref
+        ElabTypes.TArrow a b -> ElabTypes.TArrow (replaceBinderRef target replacement a) (replaceBinderRef target replacement b)
+        ElabTypes.TConWithIdentity identity c args ->
+          ElabTypes.TConWithIdentity identity c (fmap (replaceBinderRef target replacement) args)
+        ElabTypes.TVarAppRef ref args ->
+          let args' = fmap (replaceBinderRef target replacement) args
+           in if ElabTypes.typeBinderRefsSameIdentity target ref
+                then ElabTypes.TVarAppRef replacement args'
+                else ElabTypes.TVarAppRef ref args'
+        ElabTypes.TBaseWithIdentity identity b -> ElabTypes.TBaseWithIdentity identity b
+        ElabTypes.TBottom -> ElabTypes.TBottom
+        ElabTypes.TForallRef ref mb body ->
+          let mb' = fmap (replaceBinderRef target replacement) mb
+           in if ElabTypes.typeBinderRefsSameIdentity target ref
+                then ElabTypes.TForallRef ref mb' body
+                else ElabTypes.TForallRef ref mb' (replaceBinderRef target replacement body)
+        ElabTypes.TMuRef ref body
+          | ElabTypes.typeBinderRefsSameIdentity target ref -> ElabTypes.TMuRef ref body
+          | otherwise -> ElabTypes.TMuRef ref (replaceBinderRef target replacement body)
 
 schemeInfoNameSubst :: Elab.SchemeInfo -> IntMap.IntMap String
 schemeInfoNameSubst =
@@ -1560,13 +1620,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
     it "preserves resolved type-head identities in ElabType transforms" $ do
       let boxIdentity =
-            SymbolIdentity
-              { symbolUniqueIdentity = UniqueIdentity 90901
-              , symbolNamespace = SymbolType
-              , symbolDefiningModule = "Main"
-              , symbolDefiningName = "Box"
-              , symbolOwnerIdentity = Nothing
-              }
+            symbolIdentityFromParts (UniqueIdentity 90901) SymbolType "Main" "Box" Nothing
           boxArg :: Elab.ElabType
           boxArg = ElabTypes.TBaseWithIdentity (Just boxIdentity) (BaseTy "stale.Box")
           boxElab :: Elab.ElabType
@@ -1713,6 +1767,37 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
       out <- requireRight (Elab.applyInstantiation ty inst)
       out `shouldBe` ElabTypes.tForallWithRef refA Nothing (ElabTypes.tVarWithRef refA)
 
+    it "applyInstantiation renames InstUnder type payload refs to the target forall identity" $ do
+      let refA =
+            ElabTypes.typeBinderRefFromIdentity
+              (ElabTypes.typeBinderIdentityFromNode (NodeId 1558))
+              "a"
+          refB =
+            ElabTypes.typeBinderRefFromIdentity
+              (ElabTypes.typeBinderIdentityFromNode (NodeId 1559))
+              "b"
+          refU =
+            ElabTypes.typeBinderRefFromIdentity
+              (ElabTypes.typeBinderIdentityFromNode (NodeId 1560))
+              "u"
+          payloadB = Elab.TArrow (ElabTypes.tVarWithRef refB) (ElabTypes.tVarWithRef refB)
+          payloadA = Elab.TArrow (ElabTypes.tVarWithRef refA) (ElabTypes.tVarWithRef refA)
+          ty =
+            ElabTypes.tForallWithRef
+              refA
+              Nothing
+              (ElabTypes.tForallWithRef refU Nothing (ElabTypes.tVarWithRef refU))
+          instBotPayload = ElabTypes.instUnderWithRef refB (Elab.InstInside (Elab.InstBot payloadB))
+          instAppPayload = ElabTypes.instUnderWithRef refB (Elab.InstApp payloadB)
+      botOut <- requireRight (Elab.applyInstantiation ty instBotPayload)
+      appOut <- requireRight (Elab.applyInstantiation ty instAppPayload)
+      botOut
+        `shouldBe` ElabTypes.tForallWithRef
+          refA
+          Nothing
+          (ElabTypes.tForallWithRef refU (Just (boundFromType payloadA)) (ElabTypes.tVarWithRef refU))
+      appOut `shouldBe` ElabTypes.tForallWithRef refA Nothing payloadA
+
     it "O14-APPLY-SEQ: InstApp behaves like (∀(⩾ τ); N) on the outermost quantifier" $ do
       let ty = testTForall "a" Nothing (testTVar "a")
       out <- requireRight (Elab.applyInstantiation ty (Elab.InstApp (Elab.TBase (BaseTy "Int"))))
@@ -1786,15 +1871,15 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
         Left err -> expectationFailure ("Expected InstantiationError, got: " ++ show err)
         Right t -> expectationFailure ("Expected strict InstBot failure, got: " ++ show t)
 
-    it "URI-R2-C1 witness replay stays alpha-equivalent to the locked no-fallback shape" $ do
+    it "URI-R2-C1 empty witness replay does not synthesize inferred instantiations" $ do
       fixture <- uriR2C1ReplayFixture
       Elab.pretty (uriR2C1ReplaySchemeType fixture) `shouldBe` "∀(a ⩾ ⊥) ∀(b ⩾ a -> a) b"
       Elab.pretty (uriR2C1ReplayNoFallbackType fixture) `shouldBe` "t5 -> t5"
-      Elab.pretty (uriR2C1ReplayPhi fixture) `shouldBe` "∀(⩾ ⊲t9); N; (∀(⩾ ⊲(a -> a)); N)"
+      Elab.pretty (uriR2C1ReplayPhi fixture) `shouldBe` "ε"
       replayedTy <-
         requireRight
           (Elab.applyInstantiation (uriR2C1ReplaySchemeType fixture) (uriR2C1ReplayPhi fixture))
-      shouldEqUpToTypeVarRenaming replayedTy (uriR2C1ReplayNoFallbackType fixture)
+      replayedTy `shouldBe` uriR2C1ReplaySchemeType fixture
 
     it "InstInside(InstBot) still rejects explicit non-bottom bounds without replay variables" $ do
       let ty = testTForall "a" (Just (boundFromType (Elab.TBase (BaseTy "Int")))) (testTVar "a")
@@ -1989,11 +2074,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               { resolvedVarRuntimeName = "captured",
                 resolvedVarType = ElabTypes.tVarWithRef envRef,
                 resolvedVarDetails =
-                  EnvId
-                    EnvRef
-                      { envRefIdentity = UniqueIdentity 1866,
-                        envRefName = "captured"
-                      }
+                  EnvId (envRefFromIdentity (UniqueIdentity 1866) "captured")
               }
           env = Elab.mkTypeCheckEnvWithResolvedTerms [(captured, ElabTypes.tVarWithRef envRef)] Map.empty
           resolved ref runtime ty =
@@ -2048,7 +2129,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             ResolvedVar
               { resolvedVarRuntimeName = runtime,
                 resolvedVarType = intTy,
-                resolvedVarDetails = LocalId (generatedLocalRef (negate (node + 1)) ref)
+                resolvedVarDetails = LocalId (localRefFromNodeId ref (NodeId node))
               }
           matchingArg = AVar "stale-name" (NodeId 7)
           matchingApp =
@@ -2070,13 +2151,34 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
       Elab.authoritativeRootAnn term matchingApp `shouldBe` matchingArg
       Elab.authoritativeRootAnn term staleApp `shouldBe` staleApp
 
+    it "does not select authoritative var annotations by top-level name alone" $ do
+      let intTy = Elab.TBase (BaseTy "Int")
+          topIdentity =
+            symbolIdentityFromParts (UniqueIdentity 991901) SymbolValue "Main" "x" Nothing
+          resolved =
+            ResolvedVar
+              { resolvedVarRuntimeName = "runtime-x",
+                resolvedVarType = intTy,
+                resolvedVarDetails = TopLevelId topIdentity
+              }
+          matchingByNameArg = AVar "runtime-x" (NodeId 7)
+          appAnn =
+            AApp
+              (AVar "runtime-x" (NodeId 2))
+              matchingByNameArg
+              (EdgeId 0)
+              (EdgeId 1)
+              (NodeId 3)
+          term = Elab.EVarNode resolved
+      Elab.authoritativeRootAnn term appAnn `shouldBe` appAnn
+
     it "uses let scheme-root identity instead of local names for authoritative let annotations" $ do
       let intTy = Elab.TBase (BaseTy "Int")
           resolvedAt (NodeId node) ref runtime =
             ResolvedVar
               { resolvedVarRuntimeName = runtime,
                 resolvedVarType = intTy,
-                resolvedVarDetails = LocalId (generatedLocalRef (negate (node + 1)) ref)
+                resolvedVarDetails = LocalId (localRefFromNodeId ref (NodeId node))
               }
           bodyAnn = AVar "body" (NodeId 20)
           matchingAnn =
@@ -4656,6 +4758,50 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
           other ->
             expectationFailure ("Expected duplicate-name SchemeInfo body refs, got: " ++ show other)
 
+      it "seeds mkEnv generated env identities after scheme identities" $ do
+        let ref =
+              ElabTypes.typeBinderRefFromIdentity
+                (ElabTypes.typeBinderIdentityFromUnique (UniqueIdentity 0))
+                "a"
+            schemeInfo =
+              Elab.schemeInfoFromRefSubst
+                (Elab.schemeFromType (ElabTypes.tVarWithRef ref))
+                IntMap.empty
+            env = Algebra.mkEnv (Map.singleton "x" schemeInfo)
+            generatedEnvIdentities =
+              [ identity
+              | (ResolvedVar {resolvedVarDetails = EnvId envRef}, _) <-
+                  Elab.resolvedTermEnvEntries (Elab.resolvedTermEnv (Algebra.typeCheckEnvFrom env))
+              , let identity = envRefIdentity envRef
+              ]
+        generatedEnvIdentities `shouldBe` [UniqueIdentity 1]
+
+      it "looks up SchemeInfo by resolved identity when names are stale" $ do
+        let targetSchemeInfo =
+              Elab.schemeInfoFromRefSubst
+                (Elab.schemeFromType (Elab.TBase (BaseTy "Int")))
+                IntMap.empty
+            decoySchemeInfo =
+              Elab.schemeInfoFromRefSubst
+                (Elab.schemeFromType (Elab.TBase (BaseTy "Bool")))
+                IntMap.empty
+            targetDetails = EnvId (envRefFromIdentity (UniqueIdentity 991900) "actual")
+            decoyDetails = EnvId (envRefFromIdentity (UniqueIdentity 991901) "actual")
+            env =
+              Algebra.mkEnvWithBindingDetails
+                ( Map.fromList
+                    [ ("actual", (decoySchemeInfo, decoyDetails)),
+                      ("$stale_actual", (targetSchemeInfo, targetDetails))
+                    ]
+                )
+            resolved =
+              ResolvedVar
+                { resolvedVarRuntimeName = "actual",
+                  resolvedVarType = Elab.TBase (BaseTy "Int"),
+                  resolvedVarDetails = targetDetails
+                }
+        Algebra.lookupSchemeInfoForResolved resolved env `shouldBe` Just targetSchemeInfo
+
       it "freshens later SchemeInfo binders by identity when only later names collide" $ do
         let refA =
               ElabTypes.typeBinderRefFromIdentity
@@ -6616,18 +6762,23 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   }
             solved = mkSolved c IntMap.empty
 
-            nTy = Elab.TArrow (testTVar "a") (testTVar "a")
+            aRef = graphTypeBinderRef (getNodeId aN) "a"
+            mRef = graphTypeBinderRef (getNodeId mN) "m"
+            cRef = graphTypeBinderRef (getNodeId nN) "c"
+            nTy = Elab.TArrow (ElabTypes.tVarWithRef aRef) (ElabTypes.tVarWithRef aRef)
             scheme =
-              Elab.schemeFromType
-                ( testTForall "a"
-                    Nothing
-                    ( testTForall "m"
-                        (Just (boundFromType (testTForall "c" (Just (boundFromType nTy)) (testTVar "c"))))
-                        (testTVar "m")
-                    )
-                )
-            subst = IntMap.fromList [(getNodeId aN, "a"), (getNodeId mN, "m")]
-            si = mkSchemeInfoFromNodeNames scheme subst
+              ElabTypes.mkElabSchemeWithRefs
+                [ (aRef, Nothing),
+                  ( mRef,
+                    Just
+                      ( boundFromType
+                          (ElabTypes.tForallWithRef cRef (Just (boundFromType nTy)) (ElabTypes.tVarWithRef cRef))
+                      )
+                  )
+                ]
+                (ElabTypes.tVarWithRef mRef)
+            subst = IntMap.fromList [(getNodeId aN, aRef), (getNodeId mN, mRef)]
+            si = Elab.schemeInfoFromRefSubst scheme subst
 
             tr =
               EdgeTrace
@@ -6655,13 +6806,15 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
         out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
 
         let expected =
-              testTForall "a"
+              ElabTypes.tForallWithRef
+                aRef
                 Nothing
                 ( testTForall "u0"
                     (Just (boundFromType nTy))
-                    ( testTForall "m"
+                    ( ElabTypes.tForallWithRef
+                        mRef
                         (Just (boundFromType nTy))
-                        (testTVar "m")
+                        (ElabTypes.tVarWithRef mRef)
                     )
                 )
         out `shouldAlphaEqType` expected

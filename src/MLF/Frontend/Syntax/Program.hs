@@ -16,7 +16,6 @@ module MLF.Frontend.Syntax.Program
     , SrcKind (..)
     , TypeParam (..)
     , typeParamName
-    , typeParamIdentityName
     , typeParamKind
     , typeParamRef
     , firstOrderTypeParam
@@ -96,7 +95,10 @@ module MLF.Frontend.Syntax.Program
     , Pattern
     , ResolvedPattern
     , ResolvedValueRef (..)
-    , ResolvedExportTypeRef (..)
+    , ResolvedExportTypeRef
+    , resolvedExportTypeName
+    , resolvedExportTypeSymbols
+    , resolvedExportTypeRefFromSymbols
     , ProgramSrcType
     , ModuleRef
     , ValueRef
@@ -131,7 +133,7 @@ import qualified Data.Map.Strict as Map
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import MLF.Frontend.Symbol
-    ( ResolvedSymbol (..)
+    ( ResolvedSymbol
     , resolvedSymbolSpelling
     , symbolDisplayName
     )
@@ -143,7 +145,6 @@ import MLF.Frontend.Syntax
     , TypeParam (..)
     , firstOrderTypeParam
     , typeParamName
-    , typeParamIdentityName
     , typeParamKind
     , typeParamRef
     , resolvedSrcTypeIdentityType
@@ -152,7 +153,7 @@ import MLF.Frontend.Syntax
     , typeParamNames
     )
 import MLF.Frontend.TypeLevel (TypeFamilyDecl)
-import MLF.Types.Identity (LocalRef (..))
+import MLF.Types.Identity (LocalRef, localRefName)
 
 data ProgramPhase = Parsed | Resolved
     deriving (Eq, Show)
@@ -179,6 +180,10 @@ data ResolvedExportTypeRef = ResolvedExportTypeRef
     , resolvedExportTypeSymbols :: [ResolvedSymbol]
     }
     deriving (Show)
+
+resolvedExportTypeRefFromSymbols :: TypeName -> [ResolvedSymbol] -> ResolvedExportTypeRef
+resolvedExportTypeRefFromSymbols =
+    ResolvedExportTypeRef
 
 instance Eq ResolvedExportTypeRef where
     left == right =

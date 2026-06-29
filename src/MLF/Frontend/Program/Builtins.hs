@@ -11,6 +11,7 @@ module MLF.Frontend.Program.Builtins
     builtinValueIdentity,
     builtinValueSymbol,
     builtinValues,
+    builtinSourceTypeHeadIdentities,
     builtinOpaqueValueNames,
     builtinOpaqueTypes,
     builtinOpaqueTypeNames,
@@ -29,18 +30,21 @@ import qualified Data.Set as Set
 import MLF.Frontend.Program.Types
   ( DataInfo (..),
     ResolvedSymbol,
-    SymbolIdentity (..),
+    SymbolIdentity,
     SymbolNamespace (..),
     SymbolOrigin (..),
     ValueInfo (..),
+    mkTypeView,
     mkResolvedSymbol,
     resolvedSymbolIdentity,
+    typeViewDisplay,
+    typeViewHeadIdentities,
   )
 import MLF.Frontend.Symbol (symbolIdentityStableName)
-import MLF.Frontend.Syntax (SrcBound (..), SrcTy (..), SrcType, firstOrderTypeParam)
+import MLF.Frontend.Syntax (SrcBound (..), SrcKind (..), SrcTy (..), SrcType, TypeParam (..), resolvedTypeBinderRefFromIdentity)
 import qualified MLF.Frontend.Syntax.Program as P
 import qualified MLF.Primitive.Inventory as Inventory
-import MLF.Types.Unique (UniqueIdentity (..))
+import MLF.Types.Identity (UniqueIdentity (..), typeBinderIdentityFromUnique)
 
 builtinModuleName :: String
 builtinModuleName = Inventory.builtinModuleName
@@ -65,20 +69,25 @@ builtinValueSymbol = builtinSymbol SymbolValue
 
 builtinTypeIdentity :: String -> SymbolIdentity
 builtinTypeIdentity =
-  builtinIdentity SymbolType
+  Inventory.builtinTypeIdentity
 
 builtinTypeHeadIdentity :: String -> Maybe SymbolIdentity
-builtinTypeHeadIdentity name
-  | isBuiltinTypeName canonical = Just (builtinTypeIdentity canonical)
-  | otherwise = Nothing
-  where
-    canonical = normalizeBuiltinTypeReference name
+builtinTypeHeadIdentity =
+  Inventory.builtinTypeHeadIdentity
 
 builtinValueIdentity :: String -> SymbolIdentity
 builtinValueIdentity =
-  builtinIdentity SymbolValue
+  Inventory.builtinValueIdentity
 
 builtinSymbol :: SymbolNamespace -> String -> ResolvedSymbol
+builtinSymbol SymbolType name =
+  mkResolvedSymbol
+    (builtinTypeIdentity canonical)
+    canonical
+    canonical
+    SymbolBuiltin
+  where
+    canonical = normalizeBuiltinTypeReference name
 builtinSymbol namespace name =
   mkResolvedSymbol
     (builtinIdentity namespace name)
@@ -102,20 +111,50 @@ builtinValues =
 
 builtinOrdinary :: String -> SrcType -> ValueInfo
 builtinOrdinary name ty =
-  OrdinaryValue
-    { valueInfoSymbol = builtinIdentity SymbolValue name,
-      valueRuntimeName = name,
-      valueType = ty,
-      valueIdentityType = canonicalBuiltinSrcType ty,
-      valueConstraints = [],
-      valueConstraintInfos = []
-    }
+  let identityTy = canonicalBuiltinSrcType ty
+   in OrdinaryValue
+        { valueInfoSymbol = builtinIdentity SymbolValue name,
+          valueRuntimeName = name,
+          valueTypeView =
+            (mkTypeView ty identityTy)
+              { typeViewHeadIdentities = builtinSourceTypeHeadIdentities identityTy
+              },
+          valueConstraints = [],
+          valueConstraintInfos = []
+        }
+
+builtinSourceTypeHeadIdentities :: SrcTy n v -> Map String SymbolIdentity
+builtinSourceTypeHeadIdentities =
+  \case
+    STVar {} -> Map.empty
+    STBase name -> headIdentity name
+    STCon name args -> headIdentity name <> foldMap builtinSourceTypeHeadIdentities args
+    STVarApp _ args -> foldMap builtinSourceTypeHeadIdentities args
+    STTyLam _ body -> builtinSourceTypeHeadIdentities body
+    STTyApp fun arg -> builtinSourceTypeHeadIdentities fun <> builtinSourceTypeHeadIdentities arg
+    STArrow dom cod -> builtinSourceTypeHeadIdentities dom <> builtinSourceTypeHeadIdentities cod
+    STForall _ mb body ->
+      maybe Map.empty (builtinSourceTypeHeadIdentities . unSrcBound) mb
+        <> builtinSourceTypeHeadIdentities body
+    STMu _ body -> builtinSourceTypeHeadIdentities body
+    STBottom -> Map.empty
+  where
+    headIdentity name =
+      case builtinTypeHeadIdentity name of
+        Just identity ->
+          Map.fromList
+            [ (alias, identity)
+            | alias <- [name, normalizeBuiltinTypeReference name, symbolIdentityStableName identity],
+              not (null alias)
+            ]
+        Nothing -> Map.empty
 
 builtinOpaqueValueNames :: Set String
 builtinOpaqueValueNames =
   Set.fromList
     [ runtimeName
-      | OrdinaryValue {valueRuntimeName = runtimeName, valueType = ty} <- Map.elems builtinValues,
+      | OrdinaryValue {valueRuntimeName = runtimeName, valueTypeView = tyView} <- Map.elems builtinValues,
+        let ty = typeViewDisplay tyView,
         srcTypeMentionsOpaqueBuiltin ty
     ]
 
@@ -125,7 +164,7 @@ builtinOpaqueTypes =
     [ ( name,
         DataInfo
           { dataInfoSymbol = builtinIdentity SymbolType name,
-            dataTypeParams = fmap firstOrderTypeParam params,
+            dataTypeParams = zipWith (builtinTypeParam name) [0 :: Int ..] params,
             dataConstructors = []
           }
       )
@@ -143,82 +182,39 @@ builtinOpaqueTypeIdentities =
   Set.fromList (map builtinTypeIdentity (Set.toList builtinOpaqueTypeNames))
 
 srcTypeMentionsOpaqueBuiltin :: SrcType -> Bool
-srcTypeMentionsOpaqueBuiltin ty =
-  Inventory.sourceTypeMentionsOpaqueBuiltin ty || mentionsOpaqueBuiltinIdentity ty
-  where
-    mentionsOpaqueBuiltinIdentity =
-      \case
-        STVar {} -> False
-        STBase name -> isOpaqueBuiltinIdentityReference name
-        STCon name args ->
-          isOpaqueBuiltinIdentityReference name || any mentionsOpaqueBuiltinIdentity args
-        STVarApp _ args ->
-          any mentionsOpaqueBuiltinIdentity args
-        STTyLam _ body ->
-          mentionsOpaqueBuiltinIdentity body
-        STTyApp fun arg ->
-          mentionsOpaqueBuiltinIdentity fun || mentionsOpaqueBuiltinIdentity arg
-        STArrow dom cod ->
-          mentionsOpaqueBuiltinIdentity dom || mentionsOpaqueBuiltinIdentity cod
-        STForall _ mb body ->
-          maybe False (mentionsOpaqueBuiltinIdentity . unSrcBound) mb
-            || mentionsOpaqueBuiltinIdentity body
-        STMu _ body ->
-          mentionsOpaqueBuiltinIdentity body
-        STBottom ->
-          False
-
-    isOpaqueBuiltinIdentityReference name =
-      name `Set.member` builtinOpaqueTypeIdentityNames
-
-builtinOpaqueTypeIdentityNames :: Set String
-builtinOpaqueTypeIdentityNames =
-  Set.map (symbolIdentityStableName . builtinTypeIdentity) builtinOpaqueTypeNames
+srcTypeMentionsOpaqueBuiltin =
+  Inventory.sourceTypeMentionsOpaqueBuiltin
 
 normalizeBuiltinTypeReference :: String -> String
-normalizeBuiltinTypeReference name =
-  Map.findWithDefault (Inventory.normalizeBuiltinTypeReference name) name builtinTypeNamesByIdentityName
-
-builtinTypeNamesByIdentityName :: Map String String
-builtinTypeNamesByIdentityName =
-  Map.fromList
-    [ (symbolIdentityStableName (builtinTypeIdentity name), name)
-    | name <- Set.toList builtinTypeNames
-    ]
+normalizeBuiltinTypeReference =
+  Inventory.normalizeBuiltinTypeReference
 
 builtinIdentity :: SymbolNamespace -> String -> SymbolIdentity
-builtinIdentity namespace name =
-  SymbolIdentity
-    { symbolUniqueIdentity = builtinUniqueIdentity namespace name,
-      symbolNamespace = namespace,
-      symbolDefiningModule = builtinModuleName,
-      symbolDefiningName = name,
-      symbolOwnerIdentity = Nothing
-    }
-
-builtinUniqueIdentity :: SymbolNamespace -> String -> UniqueIdentity
-builtinUniqueIdentity namespace name =
+builtinIdentity namespace =
   case namespace of
-    SymbolType -> lookupBuiltinIdentity builtinTypeUniqueIdentities
-    SymbolValue -> lookupBuiltinIdentity builtinValueUniqueIdentities
-    _ -> missingBuiltinIdentity
+    SymbolType -> builtinTypeIdentity
+    SymbolValue -> builtinValueIdentity
+    _ -> error ("unsupported builtin identity namespace " ++ show namespace)
+
+builtinTypeParam :: String -> Int -> String -> TypeParam
+builtinTypeParam typeName index paramName =
+  ResolvedTypeParam
+    (resolvedTypeBinderRefFromIdentity (typeBinderIdentityFromUnique (builtinTypeParamIdentity typeName index paramName)) paramName)
+    KType
+
+builtinTypeParamIdentity :: String -> Int -> String -> UniqueIdentity
+builtinTypeParamIdentity typeName index paramName =
+  Map.findWithDefault missing (typeName, index, paramName) builtinTypeParamUniqueIdentities
   where
-    lookupBuiltinIdentity identities =
-      Map.findWithDefault missingBuiltinIdentity name identities
-    missingBuiltinIdentity =
-      error ("missing builtin identity for " ++ show namespace ++ " `" ++ name ++ "`")
+    missing =
+      error ("missing builtin type parameter identity for `" ++ typeName ++ "." ++ paramName ++ "`")
 
-builtinTypeUniqueIdentities :: Map String UniqueIdentity
-builtinTypeUniqueIdentities =
-  stableNegativeIdentities 100000 (Set.toAscList builtinTypeNames)
-
-builtinValueUniqueIdentities :: Map String UniqueIdentity
-builtinValueUniqueIdentities =
-  stableNegativeIdentities 200000 (Set.toAscList Inventory.primitiveValueNames)
-
-stableNegativeIdentities :: Int -> [String] -> Map String UniqueIdentity
-stableNegativeIdentities offset names =
-  Map.fromList (zip names (map (UniqueIdentity . negate) [offset ..]))
+builtinTypeParamUniqueIdentities :: Map (String, Int, String) UniqueIdentity
+builtinTypeParamUniqueIdentities =
+  Map.fromList
+    [ (("IO", 0, "a"), UniqueIdentity (-300000)),
+      (("IORef", 0, "a"), UniqueIdentity (-300001))
+    ]
 
 canonicalBuiltinSrcType :: SrcType -> SrcType
 canonicalBuiltinSrcType = Inventory.canonicalizeBuiltinSourceType

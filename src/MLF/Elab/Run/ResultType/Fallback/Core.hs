@@ -15,7 +15,8 @@ import Data.List (nub)
 import MLF.Constraint.Presolution (EdgeTrace (..), PresolutionView (..))
 import MLF.Constraint.Presolution.Base (lookupCopy)
 import MLF.Constraint.Types.Graph
-  ( EdgeId (..),
+  ( BaseTy (..),
+    EdgeId (..),
     NodeId (..),
     NodeRef (..),
     TyNode (..),
@@ -50,6 +51,7 @@ import MLF.Elab.Run.ResultType.Util
 import qualified MLF.Elab.Run.ResultType.View as View
 import MLF.Elab.Types
 import MLF.Frontend.ConstraintGen (AnnExpr (..))
+import qualified MLF.Primitive.Inventory as PrimitiveInventory
 
 data RootLocality
   = LocalTypeRoot
@@ -201,7 +203,11 @@ computeResultTypeFallbackCoreWithRoots ctx viewBase (rootForTypeAnn, rootForType
                 _ -> []
           baseNodeForTy ty =
             case ty of
-              TBase base ->
+              TBaseWithIdentity (Just identity) base@(BaseTy name)
+                | identity == PrimitiveInventory.builtinTypeIdentity name ->
+                    Map.lookup base baseNodeByTy
+                | otherwise -> Nothing
+              TBaseWithIdentity Nothing base ->
                 Map.lookup base baseNodeByTy
               _ -> Nothing
           instAppBasesFromWitness funEid =

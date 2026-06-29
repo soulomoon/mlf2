@@ -13,11 +13,13 @@ import MLF.Elab.Generalize
     , selectSolvedOrderWithShadow
     , shadowCompareTypes
     )
+import MLF.Elab.Run.TypeOps (simplifyAnnotationType)
 import MLF.Elab.Run.ResultType
     ( inferInstAppArgsFromSchemeRefs
     , substTypeSelectiveRefs
     )
 import MLF.Elab.Pipeline (ElabError(..))
+import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace(..), symbolIdentityFromParts)
 import MLF.Types.Elab
     ( ElabType
     , Ty(..)
@@ -29,10 +31,15 @@ import MLF.Types.Elab
     , typeBinderIdentityFromNode
     , typeBinderRefFromIdentity
     )
+import MLF.Types.Identity (UniqueIdentity(..))
 
 typeRef :: Int -> String -> TypeBinderRef
 typeRef key name =
     typeBinderRefFromIdentity (typeBinderIdentityFromNode (NodeId key)) name
+
+typeIdentity :: Int -> SymbolIdentity
+typeIdentity unique =
+    symbolIdentityFromParts (UniqueIdentity unique) SymbolType "Main" "Token" Nothing
 
 spec :: Spec
 spec = do
@@ -127,6 +134,26 @@ spec = do
                     testTForall "x" Nothing
                         (testTForall "y" Nothing (TCon (BaseTy "Pair") (testTVar "x" :| [testTVar "y"])))
             shadowCompareTypes "ctx" solvedTy baseTy `shouldBe` Right ()
+
+        it "rejects same-named type heads with different identities" $ do
+            let solvedTy = TBaseWithIdentity (Just (typeIdentity 991811)) (BaseTy "Token")
+                baseTy = TBaseWithIdentity (Just (typeIdentity 991812)) (BaseTy "Token")
+            case shadowCompareTypes "ctx" solvedTy baseTy of
+                Left (ValidationFailed msgs) ->
+                    msgs `shouldSatisfy` any (isInfixOf "shadow reify mismatch")
+                other ->
+                    expectationFailure ("Expected ValidationFailed identity mismatch, got: " ++ show other)
+
+        it "keeps same-named base bounds separate when type head identities differ" $ do
+            let leftRef = typeRef 991813 "a"
+                rightRef = typeRef 991814 "b"
+                leftBound = TBaseWithIdentity (Just (typeIdentity 991815)) (BaseTy "Token")
+                rightBound = TBaseWithIdentity (Just (typeIdentity 991816)) (BaseTy "Token")
+                ty =
+                    tForallWithRef leftRef (Just leftBound) $
+                        tForallWithRef rightRef (Just rightBound) $
+                            TArrow (tVarWithRef leftRef) (tVarWithRef rightRef)
+            simplifyAnnotationType ty `shouldBe` ty
 
         it "rejects semantic mismatch with shadow reify mismatch diagnostics" $ do
             let solvedTy = testTForall "a" Nothing (TArrow (testTVar "a") (testTVar "a"))

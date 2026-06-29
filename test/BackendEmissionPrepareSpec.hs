@@ -39,20 +39,28 @@ import MLF.Frontend.Program.Types
     , ResolvedModule (..)
     , ResolvedModuleDiagnosticAdapter (..)
     , ResolvedProgram (..)
-    , ResolvedReference (..)
+    , ResolvedReference
     , ResolvedReferenceKind (..)
     , ResolvedScope (..)
     , ResolvedSemanticModule (..)
     , ResolvedVar (..)
-    , SymbolIdentity (..)
+    , SymbolIdentity
+    , symbolDefiningModule
+    , symbolDefiningName
+    , symbolIdentityFromParts
+    , symbolNamespace
     , SymbolNamespace (..)
     , SymbolOwnerIdentity (..)
     , SymbolOrigin (..)
+    , TypeView (..)
     , checkedBindingName
     , ctorName
+    , mkTypeView
     , mkResolvedSymbol
+    , mkResolvedReference
     , moduleExportsFromMaps
     )
+import MLF.Frontend.Symbol (symbolIdentityStableName)
 import qualified MLF.Frontend.Syntax.Program as ProgramSyntax
 import MLF.Types.Identity (UniqueIdentity (..))
 
@@ -107,6 +115,12 @@ spec =
             preludeModule <- requirePreludeModule checked
 
             map checkedBindingName (checkedModuleBindings preludeModule) `shouldBe` ["$stale_keep"]
+
+        it "retains Prelude bindings by module identity when checked module names are stale" $ do
+            let checked = prepareCheckedProgramForBackendEmission stalePreludeModuleNameProgram
+            preludeModule <- requireModuleByIdentity (moduleIdentity "Prelude") checked
+
+            map checkedBindingName (checkedModuleBindings preludeModule) `shouldBe` ["Prelude__keep"]
 
         it "retains Prelude data by checked type identity when data names are stale" $ do
             let checked = prepareCheckedProgramForBackendEmission stalePreludeDataNameProgram
@@ -218,6 +232,28 @@ stalePreludeBindingNameProgram =
     preludeDropVar = topLevelVar 21 "Prelude__drop" "Prelude" "drop" intTy
     mainVar = topLevelVar 22 "Main__main" "Main" "main" intTy
 
+stalePreludeModuleNameProgram :: CheckedProgram
+stalePreludeModuleNameProgram =
+    CheckedProgram
+        { checkedProgramModules =
+            [ ( checkedModule
+                  "$stale_prelude"
+                  [ testBinding "Prelude__keep" preludeKeepVar (Elab.ELit (Surface.LInt 1))
+                  , testBinding "Prelude__drop" preludeDropVar (Elab.ELit (Surface.LInt 0))
+                  ]
+              )
+                { checkedModuleIdentity = moduleIdentity "Prelude" }
+            , checkedModule "Main" [testBinding "Main__main" mainVar (Elab.EVarNode preludeKeepVar)]
+            ]
+        , checkedProgramMainResolvedVar = mainVar
+        , checkedProgramResolved = ResolvedProgram []
+        }
+  where
+    intTy = Elab.TBase (BaseTy "Int")
+    preludeKeepVar = topLevelVar 23 "Prelude__keep" "Prelude" "keep" intTy
+    preludeDropVar = topLevelVar 24 "Prelude__drop" "Prelude" "drop" intTy
+    mainVar = topLevelVar 25 "Main__main" "Main" "main" intTy
+
 stalePreludeDataNameProgram :: CheckedProgram
 stalePreludeDataNameProgram =
     CheckedProgram
@@ -225,8 +261,10 @@ stalePreludeDataNameProgram =
             [ (checkedModule
                 "Prelude"
                 [ (testBinding "Prelude__keep" preludeKeepVar (Elab.ELit (Surface.LInt 1)))
-                    { checkedBindingSourceType =
-                        Surface.STArrow (Surface.STBase "$stale_source_name") (Surface.STBase "Int")
+                    { checkedBindingSourceTypeView =
+                        mkTypeView
+                            (Surface.STArrow (Surface.STBase "$stale_source_name") (Surface.STBase "Int"))
+                            (Surface.STArrow (Surface.STBase "$stale_source_name") (Surface.STBase "Int"))
                     , checkedBindingType =
                         Elab.TArrow
                             (Elab.TBaseWithIdentity (Just (typeIdentity "Prelude" "Unit")) (BaseTy "$stale_elab_name"))
@@ -277,12 +315,8 @@ stalePreludeConstructorOwnerProgram =
         ConstructorInfo
             { ctorInfoSymbol = constructorIdentity "Prelude" "$stale_Unit_owner" "Unit"
             , ctorRuntimeName = "Prelude__Unit"
-            , ctorType = Surface.STBase "Unit"
-            , ctorTypeIdentity = Surface.STBase "Prelude.Unit"
-            , ctorForalls = []
-            , ctorForallBinderIdentities = []
-            , ctorArgs = []
-            , ctorResult = Surface.STBase "Unit"
+            , ctorTypeView = mkTypeView (Surface.STBase "Unit") (Surface.STBase "Prelude.Unit")
+            , ctorForallBinderInfo = []
             , ctorOwningTypeIdentity = typeIdentity "Prelude" "Unit"
             , ctorIndex = 0
             , ctorOwnerConstructors = []
@@ -315,12 +349,8 @@ staleResolvedModuleNameProgram =
         ConstructorInfo
             { ctorInfoSymbol = constructorIdentity "Prelude" "Unit" "Unit"
             , ctorRuntimeName = "Prelude__Unit"
-            , ctorType = Surface.STBase "Unit"
-            , ctorTypeIdentity = Surface.STBase "Prelude.Unit"
-            , ctorForalls = []
-            , ctorForallBinderIdentities = []
-            , ctorArgs = []
-            , ctorResult = Surface.STBase "Unit"
+            , ctorTypeView = mkTypeView (Surface.STBase "Unit") (Surface.STBase "Prelude.Unit")
+            , ctorForallBinderInfo = []
             , ctorOwningTypeIdentity = typeIdentity "Prelude" "Unit"
             , ctorIndex = 0
             , ctorOwnerConstructors = []
@@ -370,12 +400,21 @@ stalePreludeConstructorTypeProgram =
                     "Box"
                     (Just (SymbolOwnerType boxTypeIdentity))
             , ctorRuntimeName = "Prelude__Box"
-            , ctorType = Surface.STArrow (Surface.STBase "$stale_unit") (Surface.STBase "$stale_box")
-            , ctorTypeIdentity = Surface.STArrow (Surface.STBase "Prelude.Unit") (Surface.STBase "Prelude.Box")
-            , ctorForalls = []
-            , ctorForallBinderIdentities = []
-            , ctorArgs = [Surface.STBase "$stale_unit"]
-            , ctorResult = Surface.STBase "$stale_box"
+            , ctorTypeView =
+                ( mkTypeView
+                    (Surface.STArrow (Surface.STBase "$stale_unit") (Surface.STBase "$stale_box"))
+                    ( Surface.STArrow
+                        (Surface.STBase (symbolIdentityStableName (dataInfoSymbol unitData)))
+                        (Surface.STBase (symbolIdentityStableName boxTypeIdentity))
+                    )
+                )
+                    { typeViewHeadIdentities =
+                        Map.fromList
+                            [ ("$stale_unit", dataInfoSymbol unitData)
+                            , ("$stale_box", boxTypeIdentity)
+                            ]
+                    }
+            , ctorForallBinderInfo = []
             , ctorOwningTypeIdentity = boxTypeIdentity
             , ctorIndex = 0
             , ctorOwnerConstructors = []
@@ -397,7 +436,7 @@ testBinding :: String -> ResolvedVar -> Elab.XmlfTerm -> CheckedBinding
 testBinding name resolved term =
     CheckedBinding
         { checkedBindingResolvedVar = resolved {Elab.resolvedVarRuntimeName = name}
-        , checkedBindingSourceType = Surface.STBase "Int"
+        , checkedBindingSourceTypeView = mkTypeView (Surface.STBase "Int") (Surface.STBase "Int")
         , checkedBindingSurfaceExpr = Surface.ELit (Surface.LInt 0)
         , checkedBindingDeferredObligations = Map.empty
         , checkedBindingTerm = term
@@ -416,13 +455,7 @@ topLevelVar unique runtimeName moduleName sourceName ty =
 
 generatedSymbolIdentity :: Int -> SymbolNamespace -> String -> String -> Maybe SymbolOwnerIdentity -> SymbolIdentity
 generatedSymbolIdentity unique namespace moduleName sourceName owner =
-    SymbolIdentity
-        { symbolUniqueIdentity = UniqueIdentity unique
-        , symbolNamespace = namespace
-        , symbolDefiningModule = moduleName
-        , symbolDefiningName = sourceName
-        , symbolOwnerIdentity = owner
-        }
+    symbolIdentityFromParts (UniqueIdentity unique) namespace moduleName sourceName owner
 
 typeIdentity :: String -> String -> SymbolIdentity
 typeIdentity moduleName sourceName =
@@ -451,7 +484,7 @@ constructorIdentity moduleName typeName sourceName =
 
 constructorReference :: ConstructorInfo -> ResolvedReference
 constructorReference ctor =
-    ResolvedReference
+    mkResolvedReference
         ResolvedConstructorReference
         (ctorName ctor)
         (mkResolvedSymbol (ctorInfoSymbol ctor) (ctorName ctor) (ctorName ctor) (SymbolUnqualifiedImport "Prelude"))
@@ -495,6 +528,18 @@ requirePreludeModule checked =
         preludeModules ->
             expectationFailure ("expected one Prelude module, got " ++ show (length preludeModules))
                 >> fail "duplicate Prelude modules"
+
+requireModuleByIdentity :: SymbolIdentity -> CheckedProgram -> IO CheckedModule
+requireModuleByIdentity identity checked =
+    case [candidate | candidate <- checkedProgramModules checked, checkedModuleIdentity candidate == identity] of
+        [matchedModule] ->
+            pure matchedModule
+        [] ->
+            expectationFailure "expected prepared program to contain module identity"
+                >> fail "missing module identity"
+        modules0 ->
+            expectationFailure ("expected one module identity, got " ++ show (length modules0))
+                >> fail "duplicate module identity"
 
 requireRight :: (Show err) => Either err a -> IO a
 requireRight =

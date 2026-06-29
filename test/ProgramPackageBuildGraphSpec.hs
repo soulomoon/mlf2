@@ -63,8 +63,8 @@ import MLF.Frontend.Program.Package
 import MLF.Frontend.Program.Types
     ( ProgramDiagnostic (..)
     , ProgramError (..)
-    , SymbolIdentity (..)
     , renderProgramDiagnostic
+    , symbolIdentityWithUnique
     )
 import MLF.Frontend.Syntax.Program qualified as P
 import MLF.Types.Identity (UniqueIdentity (..))
@@ -144,9 +144,7 @@ spec =
                     moduleInterfaceSummaryMetadata
                         libInterface
                             { moduleInterfaceIdentity =
-                                (moduleInterfaceIdentity libInterface)
-                                    { symbolUniqueIdentity = UniqueIdentity 900004
-                                    }
+                                symbolIdentityWithUnique (UniqueIdentity 900004) (moduleInterfaceIdentity libInterface)
                             }
 
         it "accepts fresh cache entries derived from the current graph and interfaces" $ do

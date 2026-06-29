@@ -87,7 +87,6 @@ import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Util.ElabError (ElabError (..), bindingToElab)
 import MLF.Util.Graph (reachableFrom, reachableFromStop)
 import qualified MLF.Util.IntMapUtils as IntMapUtils
-import MLF.Util.Names (parseNameId)
 
 data GeneralizePlan p = GeneralizePlan
   { gpEnv :: GeneralizeEnv p,
@@ -614,7 +613,6 @@ planGeneralizeAt
             bpiSchemeRootOwnerBase = schemeRootOwnerBase,
             bpiSchemeRootByBodyBase = schemeRootByBodyBase,
             bpiAliasBinderBases = aliasBinderBases,
-            bpiParseNameId = parseNameId,
             bpiOrderBinderCandidates = orderBinderCandidatesFor
           }
     pure

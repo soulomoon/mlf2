@@ -200,8 +200,8 @@ renameInstBoundRef oldRef newRef = para alg
   where
     alg inst0 = case inst0 of
       InstIdF -> InstId
-      InstAppF t -> InstApp t
-      InstBotF t -> InstBot t
+      InstAppF t -> InstApp (renameType t)
+      InstBotF t -> InstBot (renameType t)
       InstIntroF -> InstIntro
       InstElimF -> InstElim
       InstAbstrFRef ref ->
@@ -214,3 +214,5 @@ renameInstBoundRef oldRef newRef = para alg
       InstUnderFRef ref i
         | typeBinderRefsSameIdentity ref oldRef -> instUnderWithRef ref (fst i) -- shadowing: stop renaming under this binder
         | otherwise -> instUnderWithRef ref (snd i)
+    renameType =
+      substTypeCaptureRef oldRef (TVarRef newRef)

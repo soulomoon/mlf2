@@ -3,8 +3,26 @@
 {-# LANGUAGE ViewPatterns #-}
 
 module MLF.Backend.IR.Types
-  ( BackendProgram (..),
-    BackendModule (..),
+  ( BackendProgram
+      ( BackendProgramWithIdentity,
+        backendProgramModulesWithIdentity,
+        backendProgramMainIdentity,
+        backendProgramMainWithIdentity
+      ),
+    pattern BackendProgram,
+    backendProgramModules,
+    backendProgramMain,
+    BackendModule
+      ( BackendModuleWithIdentity,
+        backendModuleIdentity,
+        backendModuleNameWithIdentity,
+        backendModuleDataWithIdentity,
+        backendModuleBindingsWithIdentity
+      ),
+    pattern BackendModule,
+    backendModuleName,
+    backendModuleData,
+    backendModuleBindings,
     BackendBinding
       ( BackendBindingWithMetadata,
         backendBindingIdentity,
@@ -23,13 +41,19 @@ module MLF.Backend.IR.Types
       ( BackendDataWithIdentity,
         backendDataIdentity,
         backendDataNameWithIdentity,
-        backendDataParametersWithIdentity,
-        backendDataParameterIdentities,
+        backendDataParameterRefsWithIdentity,
         backendDataConstructorsWithIdentity
       ),
     pattern BackendData,
     backendDataName,
     backendDataParameters,
+    BackendDataParameterRef,
+    backendDataParameterRefFromIdentity,
+    backendDataParameterRefIdentity,
+    backendDataParameterRefName,
+    backendDataParameterRefKey,
+    backendDataParameterRefType,
+    backendDataParameterRefs,
     backendDataParameterKeys,
     backendDataConstructors,
     BackendConstructor (..),
@@ -48,8 +72,10 @@ module MLF.Backend.IR.Types
       ),
     pattern BackendTypeBinder,
     BackendType (..),
-    BackendTypeSubstitutionKey (..),
+    BackendTypeSubstitutionKey,
+    backendTypeSubstitutionKeyFromIdentity,
     backendTypeSubstitutionKeyFor,
+    backendTypeSubstitutionKeyIdentity,
     backendTypeSubstitutionKeyName,
     pattern BTVar,
     pattern BTBase,
@@ -68,62 +94,175 @@ module MLF.Backend.IR.Types
     BackendAlternative (..),
     BackendPatternBinder (..),
     BackendPattern (..),
-    pattern BackendConstructorPatternWithIdentity,
     pattern BackendConstructorPattern,
     freeBackendTypeVars,
-    freeBackendTypeVarsIn,
     freeBackendTypeVarsInKeyed,
+    freeBackendTypeVarRefs,
+    freeBackendTypeVarKeys,
+    freeBackendTypeVarKeysInKeyed,
+    generatedIdentitiesInBackendProgram,
+    generatedIdentitiesInBackendTypes,
+    generatedIdentitiesInBackendExpr,
+    typeBinderRefMatches,
     backendTypeHeadMatches,
+    backendTermRefMatches,
+    closureEntryRefMatches,
     literalBackendType,
-    substituteBackendType,
+    symbolRefMatches,
     substituteBackendTypeByIdentity,
     substituteBackendTypeForBinder,
-    substituteBackendTypes,
     substituteBackendTypesByKey,
     unfoldBackendRecursiveType,
   )
 where
 
+import Data.List (mapAccumL)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import MLF.Constraint.Types.Graph (BaseTy (..))
-import MLF.Frontend.Program.Builtins (builtinTypeIdentity)
-import MLF.Frontend.Symbol (SymbolIdentity (..))
+import MLF.Frontend.Program.Builtins (builtinTypeHeadIdentity, builtinTypeIdentity)
+import MLF.Frontend.Symbol (SymbolIdentity, symbolRefMatches)
 import MLF.Frontend.Syntax (Lit (..))
-import MLF.Types.Identity (IdDetails, TypeBinderIdentity)
+import MLF.Types.Identity
+  ( IdDetails,
+    IdentityGenerator,
+    TypeBinderIdentity,
+    UniqueIdentity (..),
+    freshIdentity,
+    idDetailsGeneratedIdentities,
+    idDetailsRefMatches,
+    identityGeneratorAfter,
+    symbolGeneratedIdentities,
+    typeBinderGeneratedIdentities,
+    typeBinderIdentityFromUnique,
+    typeBinderIdentityStableName,
+  )
 import MLF.Util.Names (freshNameLike)
 
 -- | A checked backend program. Module order is preserved from the source
 -- program for diagnostics/debug output, but backend binding names are global
 -- runtime names.
-data BackendProgram = BackendProgram
-  { backendProgramModules :: [BackendModule],
-    backendProgramMain :: String
+data BackendProgram = BackendProgramWithIdentity
+  { backendProgramModulesWithIdentity :: [BackendModule],
+    backendProgramMainIdentity :: Maybe SymbolIdentity,
+    backendProgramMainWithIdentity :: String
   }
-  deriving (Eq, Show)
+  deriving (Show)
+
+instance Eq BackendProgram where
+  left == right =
+    backendProgramModules left == backendProgramModules right
+      && symbolRefMatches (backendProgramMainIdentity left) (backendProgramMain left) (backendProgramMainIdentity right) (backendProgramMain right)
+
+pattern BackendProgram :: [BackendModule] -> String -> BackendProgram
+pattern BackendProgram
+  { backendProgramModules,
+    backendProgramMain
+  } <-
+  BackendProgramWithIdentity
+    backendProgramModules
+    _
+    backendProgramMain
+  where
+    BackendProgram modules0 mainName =
+      BackendProgramWithIdentity modules0 Nothing mainName
+
+{-# COMPLETE BackendProgram #-}
 
 -- | Backend-owned module payload. Imports/exports have already been resolved
 -- by the `.mlfp` checker; this record keeps only the data and binding shapes
 -- needed by backend conversion and lowering.
-data BackendModule = BackendModule
-  { backendModuleName :: String,
-    backendModuleData :: [BackendData],
-    backendModuleBindings :: [BackendBinding]
+data BackendModule = BackendModuleWithIdentity
+  { backendModuleIdentity :: Maybe SymbolIdentity,
+    backendModuleNameWithIdentity :: String,
+    backendModuleDataWithIdentity :: [BackendData],
+    backendModuleBindingsWithIdentity :: [BackendBinding]
   }
-  deriving (Eq, Show)
+  deriving (Show)
+
+instance Eq BackendModule where
+  left == right =
+    symbolRefMatches (backendModuleIdentity left) (backendModuleName left) (backendModuleIdentity right) (backendModuleName right)
+      && backendModuleData left == backendModuleData right
+      && backendModuleBindings left == backendModuleBindings right
+
+pattern BackendModule :: String -> [BackendData] -> [BackendBinding] -> BackendModule
+pattern BackendModule
+  { backendModuleName,
+    backendModuleData,
+    backendModuleBindings
+  } <-
+  BackendModuleWithIdentity
+    _
+    backendModuleName
+    backendModuleData
+    backendModuleBindings
+  where
+    BackendModule name dataDecls bindings =
+      BackendModuleWithIdentity Nothing name dataDecls bindings
+
+{-# COMPLETE BackendModule #-}
 
 -- | Explicit ADT metadata available to lowerers. Constructor result types are
 -- kept explicit so GADT-style results can survive the source-to-backend cut.
+data BackendDataParameterRef
+  = BackendDataParameterByIdentity TypeBinderIdentity String
+  | BackendDataParameterByName String
+  deriving (Show)
+
+instance Eq BackendDataParameterRef where
+  left == right =
+    compare left right == EQ
+
+instance Ord BackendDataParameterRef where
+  compare left right =
+    case (left, right) of
+      (BackendDataParameterByIdentity leftIdentity _, BackendDataParameterByIdentity rightIdentity _) ->
+        compare leftIdentity rightIdentity
+      (BackendDataParameterByIdentity {}, BackendDataParameterByName {}) ->
+        LT
+      (BackendDataParameterByName {}, BackendDataParameterByIdentity {}) ->
+        GT
+      (BackendDataParameterByName leftName, BackendDataParameterByName rightName) ->
+        compare leftName rightName
+
+backendDataParameterRef :: Maybe TypeBinderIdentity -> String -> BackendDataParameterRef
+backendDataParameterRef mbIdentity name =
+  case mbIdentity of
+    Just identity -> BackendDataParameterByIdentity identity name
+    Nothing -> BackendDataParameterByName name
+
+backendDataParameterRefFromIdentity :: TypeBinderIdentity -> String -> BackendDataParameterRef
+backendDataParameterRefFromIdentity =
+  BackendDataParameterByIdentity
+
+backendDataParameterRefIdentity :: BackendDataParameterRef -> Maybe TypeBinderIdentity
+backendDataParameterRefIdentity =
+  \case
+    BackendDataParameterByIdentity identity _ -> Just identity
+    BackendDataParameterByName {} -> Nothing
+
+backendDataParameterRefName :: BackendDataParameterRef -> String
+backendDataParameterRefName =
+  \case
+    BackendDataParameterByIdentity _ name -> name
+    BackendDataParameterByName name -> name
+
 data BackendData = BackendDataWithIdentity
   { backendDataIdentity :: Maybe SymbolIdentity,
     backendDataNameWithIdentity :: String,
-    backendDataParametersWithIdentity :: [String],
-    backendDataParameterIdentities :: [Maybe TypeBinderIdentity],
+    backendDataParameterRefsWithIdentity :: [BackendDataParameterRef],
     backendDataConstructorsWithIdentity :: [BackendConstructor]
   }
-  deriving (Eq, Show)
+  deriving (Show)
+
+instance Eq BackendData where
+  left == right =
+    symbolRefMatches (backendDataIdentity left) (backendDataName left) (backendDataIdentity right) (backendDataName right)
+      && backendDataParameterRefs left == backendDataParameterRefs right
+      && backendDataConstructors left == backendDataConstructors right
 
 pattern BackendData :: String -> [String] -> [BackendConstructor] -> BackendData
 pattern BackendData
@@ -134,21 +273,31 @@ pattern BackendData
   BackendDataWithIdentity
     _
     backendDataName
-    backendDataParameters
-    _
+    (map backendDataParameterRefName -> backendDataParameters)
     backendDataConstructors
   where
     BackendData name parameters constructors =
-      BackendDataWithIdentity Nothing name parameters (replicate (length parameters) Nothing) constructors
+      BackendDataWithIdentity Nothing name (map (backendDataParameterRef Nothing) parameters) constructors
 
 {-# COMPLETE BackendData #-}
 
+backendDataParameterRefKey :: BackendDataParameterRef -> BackendTypeSubstitutionKey
+backendDataParameterRefKey =
+  \case
+    BackendDataParameterByIdentity identity _ -> backendTypeSubstitutionKeyFromIdentity identity
+    BackendDataParameterByName name -> BackendTypeSubstitutionByName name
+
+backendDataParameterRefType :: BackendDataParameterRef -> BackendType
+backendDataParameterRefType ref =
+  BTVarWithIdentity (backendDataParameterRefIdentity ref) (backendDataParameterRefName ref)
+
+backendDataParameterRefs :: BackendData -> [BackendDataParameterRef]
+backendDataParameterRefs =
+  backendDataParameterRefsWithIdentity
+
 backendDataParameterKeys :: BackendData -> [BackendTypeSubstitutionKey]
 backendDataParameterKeys dataDecl =
-  zipWith backendTypeSubstitutionKeyFor identities (backendDataParameters dataDecl)
-  where
-    identities =
-      backendDataParameterIdentities dataDecl ++ repeat Nothing
+  map backendDataParameterRefKey (backendDataParameterRefs dataDecl)
 
 data BackendConstructor = BackendConstructorWithIdentity
   { backendConstructorIdentity :: Maybe SymbolIdentity,
@@ -157,7 +306,14 @@ data BackendConstructor = BackendConstructorWithIdentity
     backendConstructorFieldsWithIdentity :: [BackendType],
     backendConstructorResultWithIdentity :: BackendType
   }
-  deriving (Eq, Show)
+  deriving (Show)
+
+instance Eq BackendConstructor where
+  left == right =
+    symbolRefMatches (backendConstructorIdentity left) (backendConstructorName left) (backendConstructorIdentity right) (backendConstructorName right)
+      && backendConstructorForalls left == backendConstructorForalls right
+      && backendConstructorFields left == backendConstructorFields right
+      && backendConstructorResult left == backendConstructorResult right
 
 pattern BackendConstructor :: String -> [BackendTypeBinder] -> [BackendType] -> BackendType -> BackendConstructor
 pattern BackendConstructor
@@ -184,21 +340,37 @@ data BackendClosureCapture = BackendClosureCapture
     backendClosureCaptureType :: BackendType,
     backendClosureCaptureExpr :: BackendExpr
   }
-  deriving (Eq, Show)
+  deriving (Show)
+
+instance Eq BackendClosureCapture where
+  left == right =
+    backendTermRefMatches (backendClosureCaptureIdentity left) (backendClosureCaptureName left) (backendClosureCaptureIdentity right) (backendClosureCaptureName right)
+      && backendClosureCaptureType left == backendClosureCaptureType right
+      && backendClosureCaptureExpr left == backendClosureCaptureExpr right
 
 data BackendClosureParam = BackendClosureParam
   { backendClosureParamIdentity :: Maybe IdDetails,
     backendClosureParamName :: String,
     backendClosureParamType :: BackendType
   }
-  deriving (Eq, Show)
+  deriving (Show)
+
+instance Eq BackendClosureParam where
+  left == right =
+    backendTermRefMatches (backendClosureParamIdentity left) (backendClosureParamName left) (backendClosureParamIdentity right) (backendClosureParamName right)
+      && backendClosureParamType left == backendClosureParamType right
 
 data BackendTypeBinder = BackendTypeBinderWithIdentity
   { backendTypeBinderIdentity :: Maybe TypeBinderIdentity,
     backendTypeBinderName :: String,
     backendTypeBinderBound :: Maybe BackendType
   }
-  deriving (Eq, Show)
+  deriving (Show)
+
+instance Eq BackendTypeBinder where
+  left == right =
+    typeBinderRefMatches (backendTypeBinderIdentity left) (backendTypeBinderName left) (backendTypeBinderIdentity right) (backendTypeBinderName right)
+      && backendTypeBinderBound left == backendTypeBinderBound right
 
 pattern BackendTypeBinder :: String -> Maybe BackendType -> BackendTypeBinder
 pattern BackendTypeBinder name bound <-
@@ -217,7 +389,15 @@ data BackendBinding = BackendBindingWithMetadata
     backendBindingExportedAsMainWithMetadata :: Bool,
     backendBindingEvidenceParamIndices :: Set.Set Int
   }
-  deriving (Eq, Show)
+  deriving (Show)
+
+instance Eq BackendBinding where
+  left == right =
+    symbolRefMatches (backendBindingIdentity left) (backendBindingName left) (backendBindingIdentity right) (backendBindingName right)
+      && backendBindingType left == backendBindingType right
+      && backendBindingExpr left == backendBindingExpr right
+      && backendBindingExportedAsMain left == backendBindingExportedAsMain right
+      && backendBindingEvidenceParamIndices left == backendBindingEvidenceParamIndices right
 
 pattern BackendBinding :: String -> BackendType -> BackendExpr -> Bool -> BackendBinding
 pattern BackendBinding
@@ -255,9 +435,9 @@ instance Eq BackendType where
       (BTArrow leftDom leftCod, BTArrow rightDom rightCod) ->
         leftDom == rightDom && leftCod == rightCod
       (BTBaseWithIdentity leftIdentity leftBase, BTBaseWithIdentity rightIdentity rightBase) ->
-        leftIdentity == rightIdentity && leftBase == rightBase
+        typeHeadRefMatches leftIdentity leftBase rightIdentity rightBase
       (BTConWithIdentity leftIdentity leftBase leftArgs, BTConWithIdentity rightIdentity rightBase rightArgs) ->
-        leftIdentity == rightIdentity && leftBase == rightBase && leftArgs == rightArgs
+        typeHeadRefMatches leftIdentity leftBase rightIdentity rightBase && leftArgs == rightArgs
       (BTVarAppWithIdentity leftIdentity leftName leftArgs, BTVarAppWithIdentity rightIdentity rightName rightArgs) ->
         typeBinderRefMatches leftIdentity leftName rightIdentity rightName && leftArgs == rightArgs
       (BTForallWithIdentity leftIdentity leftName leftBound leftBody, BTForallWithIdentity rightIdentity rightName rightBound rightBody) ->
@@ -277,6 +457,22 @@ typeBinderRefMatches Nothing leftName Nothing rightName =
 typeBinderRefMatches _ _ _ _ =
   False
 
+typeHeadRefMatches :: Maybe SymbolIdentity -> BaseTy -> Maybe SymbolIdentity -> BaseTy -> Bool
+typeHeadRefMatches leftIdentity (BaseTy leftName) rightIdentity (BaseTy rightName) =
+  symbolRefMatches leftIdentity leftName rightIdentity rightName
+
+backendTermRefMatches :: Maybe IdDetails -> String -> Maybe IdDetails -> String -> Bool
+backendTermRefMatches =
+  idDetailsRefMatches
+
+closureEntryRefMatches :: Maybe UniqueIdentity -> String -> Maybe UniqueIdentity -> String -> Bool
+closureEntryRefMatches (Just left) _ (Just right) _ =
+  left == right
+closureEntryRefMatches Nothing leftName Nothing rightName =
+  leftName == rightName
+closureEntryRefMatches _ _ _ _ =
+  False
+
 pattern BTVar :: String -> BackendType
 pattern BTVar name <-
   BTVarWithIdentity _ name
@@ -288,15 +484,15 @@ pattern BTBase :: BaseTy -> BackendType
 pattern BTBase base <-
   BTBaseWithIdentity _ base
   where
-    BTBase base =
-      BTBaseWithIdentity Nothing base
+    BTBase base@(BaseTy name) =
+      BTBaseWithIdentity (builtinTypeHeadIdentity name) base
 
 pattern BTCon :: BaseTy -> NonEmpty BackendType -> BackendType
 pattern BTCon base args <-
   BTConWithIdentity _ base args
   where
-    BTCon base args =
-      BTConWithIdentity Nothing base args
+    BTCon base@(BaseTy name) args =
+      BTConWithIdentity (builtinTypeHeadIdentity name) base args
 
 pattern BTVarApp :: String -> NonEmpty BackendType -> BackendType
 pattern BTVarApp name args <-
@@ -326,16 +522,26 @@ data BackendTypeSubstitutionKey
   | BackendTypeSubstitutionByName String
   deriving (Eq, Ord, Show)
 
+backendTypeSubstitutionKeyFromIdentity :: TypeBinderIdentity -> BackendTypeSubstitutionKey
+backendTypeSubstitutionKeyFromIdentity =
+  BackendTypeSubstitutionByIdentity
+
 backendTypeSubstitutionKeyFor :: Maybe TypeBinderIdentity -> String -> BackendTypeSubstitutionKey
-backendTypeSubstitutionKeyFor (Just identity) _ =
-  BackendTypeSubstitutionByIdentity identity
-backendTypeSubstitutionKeyFor Nothing name =
-  BackendTypeSubstitutionByName name
+backendTypeSubstitutionKeyFor mbIdentity name =
+  case mbIdentity of
+    Just identity -> BackendTypeSubstitutionByIdentity identity
+    Nothing -> BackendTypeSubstitutionByName name
+
+backendTypeSubstitutionKeyIdentity :: BackendTypeSubstitutionKey -> Maybe TypeBinderIdentity
+backendTypeSubstitutionKeyIdentity =
+  \case
+    BackendTypeSubstitutionByIdentity identity -> Just identity
+    BackendTypeSubstitutionByName {} -> Nothing
 
 backendTypeSubstitutionKeyName :: BackendTypeSubstitutionKey -> String
 backendTypeSubstitutionKeyName =
   \case
-    BackendTypeSubstitutionByIdentity identity -> show identity
+    BackendTypeSubstitutionByIdentity identity -> typeBinderIdentityStableName identity
     BackendTypeSubstitutionByName name -> name
 
 -- | Typed backend expression. `backendExprType` is the result type of the node.
@@ -391,6 +597,7 @@ data BackendExpr
       }
   | BackendClosureWithParamIdentities
       { backendExprType :: BackendType,
+        backendClosureEntryIdentity :: Maybe UniqueIdentity,
         backendClosureEntryName :: String,
         backendClosureCaptures :: [BackendClosureCapture],
         backendClosureParamsWithIdentities :: [BackendClosureParam],
@@ -412,7 +619,55 @@ data BackendExpr
         backendScrutinee :: BackendExpr,
         backendAlternatives :: NonEmpty BackendAlternative
       }
-  deriving (Eq, Show)
+  deriving (Show)
+
+instance Eq BackendExpr where
+  left == right =
+    case (left, right) of
+      (BackendVarWithIdentity leftTy leftIdentity leftName, BackendVarWithIdentity rightTy rightIdentity rightName) ->
+        leftTy == rightTy && backendTermRefMatches leftIdentity leftName rightIdentity rightName
+      (BackendLit leftTy leftLit, BackendLit rightTy rightLit) ->
+        leftTy == rightTy && leftLit == rightLit
+      (BackendLamWithIdentity leftTy leftIdentity leftName leftParamTy leftBody, BackendLamWithIdentity rightTy rightIdentity rightName rightParamTy rightBody) ->
+        leftTy == rightTy
+          && backendTermRefMatches leftIdentity leftName rightIdentity rightName
+          && leftParamTy == rightParamTy
+          && leftBody == rightBody
+      (BackendApp leftTy leftFun leftArg, BackendApp rightTy rightFun rightArg) ->
+        leftTy == rightTy && leftFun == rightFun && leftArg == rightArg
+      (BackendLetWithIdentity leftTy leftIdentity leftName leftBindingTy leftRhs leftBody, BackendLetWithIdentity rightTy rightIdentity rightName rightBindingTy rightRhs rightBody) ->
+        leftTy == rightTy
+          && backendTermRefMatches leftIdentity leftName rightIdentity rightName
+          && leftBindingTy == rightBindingTy
+          && leftRhs == rightRhs
+          && leftBody == rightBody
+      (BackendTyAbsWithIdentity leftTy leftIdentity leftName leftBound leftBody, BackendTyAbsWithIdentity rightTy rightIdentity rightName rightBound rightBody) ->
+        leftTy == rightTy
+          && typeBinderRefMatches leftIdentity leftName rightIdentity rightName
+          && leftBound == rightBound
+          && leftBody == rightBody
+      (BackendTyApp leftTy leftFun leftArg, BackendTyApp rightTy rightFun rightArg) ->
+        leftTy == rightTy && leftFun == rightFun && leftArg == rightArg
+      (BackendRoll leftTy leftPayload, BackendRoll rightTy rightPayload) ->
+        leftTy == rightTy && leftPayload == rightPayload
+      (BackendUnroll leftTy leftPayload, BackendUnroll rightTy rightPayload) ->
+        leftTy == rightTy && leftPayload == rightPayload
+      (BackendClosureWithParamIdentities leftTy leftEntryIdentity leftEntry leftCaptures leftParams leftBody, BackendClosureWithParamIdentities rightTy rightEntryIdentity rightEntry rightCaptures rightParams rightBody) ->
+        leftTy == rightTy
+          && closureEntryRefMatches leftEntryIdentity leftEntry rightEntryIdentity rightEntry
+          && leftCaptures == rightCaptures
+          && leftParams == rightParams
+          && leftBody == rightBody
+      (BackendClosureCall leftTy leftFun leftArgs, BackendClosureCall rightTy rightFun rightArgs) ->
+        leftTy == rightTy && leftFun == rightFun && leftArgs == rightArgs
+      (BackendConstructWithIdentity leftTy leftIdentity leftName leftArgs, BackendConstructWithIdentity rightTy rightIdentity rightName rightArgs) ->
+        leftTy == rightTy
+          && symbolRefMatches leftIdentity leftName rightIdentity rightName
+          && leftArgs == rightArgs
+      (BackendCase leftTy leftScrutinee leftAlternatives, BackendCase rightTy rightScrutinee rightAlternatives) ->
+        leftTy == rightTy && leftScrutinee == rightScrutinee && leftAlternatives == rightAlternatives
+      _ ->
+        False
 
 pattern BackendVar :: BackendType -> String -> BackendExpr
 pattern BackendVar resultTy name <-
@@ -453,6 +708,7 @@ pattern BackendClosure :: BackendType -> String -> [BackendClosureCapture] -> [(
 pattern BackendClosure resultTy entryName captures params body <-
   BackendClosureWithParamIdentities
     resultTy
+    _
     entryName
     captures
     (map backendClosureParamPair -> params)
@@ -461,6 +717,7 @@ pattern BackendClosure resultTy entryName captures params body <-
     BackendClosure resultTy entryName captures params body =
       BackendClosureWithParamIdentities
         resultTy
+        Nothing
         entryName
         captures
         (backendClosureParams params)
@@ -488,32 +745,38 @@ data BackendPatternBinder = BackendPatternBinder
   { backendPatternBinderIdentity :: Maybe IdDetails,
     backendPatternBinderName :: String
   }
-  deriving (Eq, Show)
+  deriving (Show)
+
+instance Eq BackendPatternBinder where
+  left == right =
+    backendTermRefMatches (backendPatternBinderIdentity left) (backendPatternBinderName left) (backendPatternBinderIdentity right) (backendPatternBinderName right)
 
 data BackendPattern
   = BackendDefaultPattern
   | BackendConstructorPatternWithBinderIdentities (Maybe SymbolIdentity) String [BackendPatternBinder]
-  deriving (Eq, Show)
+  deriving (Show)
 
-pattern BackendConstructorPatternWithIdentity :: Maybe SymbolIdentity -> String -> [String] -> BackendPattern
-pattern BackendConstructorPatternWithIdentity identity name binders <-
-  BackendConstructorPatternWithBinderIdentities identity name (map backendPatternBinderName -> binders)
-  where
-    BackendConstructorPatternWithIdentity identity name binders =
-      BackendConstructorPatternWithBinderIdentities
-        identity
-        name
-        [BackendPatternBinder Nothing binder | binder <- binders]
+instance Eq BackendPattern where
+  left == right =
+    case (left, right) of
+      (BackendDefaultPattern, BackendDefaultPattern) ->
+        True
+      (BackendConstructorPatternWithBinderIdentities leftIdentity leftName leftBinders, BackendConstructorPatternWithBinderIdentities rightIdentity rightName rightBinders) ->
+        symbolRefMatches leftIdentity leftName rightIdentity rightName && leftBinders == rightBinders
+      _ ->
+        False
 
 pattern BackendConstructorPattern :: String -> [String] -> BackendPattern
 pattern BackendConstructorPattern name binders <-
-  BackendConstructorPatternWithIdentity _ name binders
+  BackendConstructorPatternWithBinderIdentities _ name (map backendPatternBinderName -> binders)
   where
     BackendConstructorPattern name binders =
-      BackendConstructorPatternWithIdentity Nothing name binders
+      BackendConstructorPatternWithBinderIdentities
+        Nothing
+        name
+        [BackendPatternBinder Nothing binder | binder <- binders]
 
 {-# COMPLETE BackendDefaultPattern, BackendConstructorPattern #-}
-{-# COMPLETE BackendDefaultPattern, BackendConstructorPatternWithIdentity #-}
 {-# COMPLETE BackendDefaultPattern, BackendConstructorPatternWithBinderIdentities #-}
 
 literalBackendType :: Lit -> BackendType
@@ -529,121 +792,339 @@ builtinLiteralType name =
 
 freeBackendTypeVars :: BackendType -> Set.Set String
 freeBackendTypeVars =
-  \case
-    BTVar name ->
-      Set.singleton name
-    BTArrow dom cod ->
-      Set.union (freeBackendTypeVars dom) (freeBackendTypeVars cod)
-    BTBase {} ->
-      Set.empty
-    BTCon _ args ->
-      Set.unions (map freeBackendTypeVars (NE.toList args))
-    BTVarApp name args ->
-      Set.insert name (Set.unions (map freeBackendTypeVars (NE.toList args)))
-    BTForall name mbBound body ->
-      Set.union
-        (maybe Set.empty freeBackendTypeVars mbBound)
-        (Set.delete name (freeBackendTypeVars body))
-    BTMu name body ->
-      Set.delete name (freeBackendTypeVars body)
-    BTBottom ->
-      Set.empty
-
-freeBackendTypeVarsIn :: Map.Map String BackendType -> Set.Set String
-freeBackendTypeVarsIn replacements =
-  Set.unions (map freeBackendTypeVars (Map.elems replacements))
+  Set.map backendTypeSubstitutionKeyName . freeBackendTypeVarKeys
 
 freeBackendTypeVarsInKeyed :: Map.Map BackendTypeSubstitutionKey BackendType -> Set.Set String
 freeBackendTypeVarsInKeyed replacements =
   Set.unions (map freeBackendTypeVars (Map.elems replacements))
 
-backendTypeHeadMatches :: Maybe SymbolIdentity -> BaseTy -> Maybe SymbolIdentity -> BaseTy -> Bool
-backendTypeHeadMatches leftIdentity leftBase rightIdentity rightBase =
-  case (leftIdentity, rightIdentity) of
-    (Just left, Just right) -> left == right
-    _ ->
-      leftBase == rightBase
-        || identityHeadMatches leftIdentity rightBase
-        || identityHeadMatches rightIdentity leftBase
+freeBackendTypeVarRefs :: BackendType -> Set.Set BackendDataParameterRef
+freeBackendTypeVarRefs =
+  go Set.empty
   where
-    identityHeadMatches Nothing _ = False
-    identityHeadMatches (Just identity) (BaseTy name) =
-      name == qualifiedHeadName identity || name == symbolDefiningName identity
+    go bound =
+      \case
+        BTVarWithIdentity identity name
+          | Set.member (backendTypeSubstitutionKeyFor identity name) bound -> Set.empty
+          | otherwise -> freeBackendTypeVarRef identity name
+        BTArrow dom cod ->
+          Set.union (go bound dom) (go bound cod)
+        BTBaseWithIdentity {} ->
+          Set.empty
+        BTConWithIdentity _ _ args ->
+          Set.unions (map (go bound) (NE.toList args))
+        BTVarAppWithIdentity identity name args ->
+          let headRefs =
+                if Set.member (backendTypeSubstitutionKeyFor identity name) bound
+                  then Set.empty
+                  else freeBackendTypeVarRef identity name
+           in Set.union headRefs (Set.unions (map (go bound) (NE.toList args)))
+        BTForallWithIdentity identity name mbBound body ->
+          Set.union
+            (maybe Set.empty (go bound) mbBound)
+            (go (Set.insert (backendTypeSubstitutionKeyFor identity name) bound) body)
+        BTMuWithIdentity identity name body ->
+          go (Set.insert (backendTypeSubstitutionKeyFor identity name) bound) body
+        BTBottom ->
+          Set.empty
 
-    qualifiedHeadName identity =
-      symbolDefiningModule identity ++ "." ++ symbolDefiningName identity
+    freeBackendTypeVarRef identity name =
+      case identity of
+        Just refIdentity ->
+          Set.singleton (backendDataParameterRefFromIdentity refIdentity name)
+        Nothing ->
+          Set.empty
 
--- | Capture-avoiding substitution for backend types. Forall binders scope over
--- their body but not their optional bound, matching the frontend type syntax.
-substituteBackendType :: String -> BackendType -> BackendType -> BackendType
-substituteBackendType needle replacement =
-  substituteBackendTypes (Map.singleton needle replacement)
+freeBackendTypeVarKeys :: BackendType -> Set.Set BackendTypeSubstitutionKey
+freeBackendTypeVarKeys =
+  \case
+    BTVarWithIdentity identity name ->
+      Set.singleton (backendTypeSubstitutionKeyFor identity name)
+    BTArrow dom cod ->
+      Set.union (freeBackendTypeVarKeys dom) (freeBackendTypeVarKeys cod)
+    BTBaseWithIdentity {} ->
+      Set.empty
+    BTConWithIdentity _ _ args ->
+      Set.unions (map freeBackendTypeVarKeys (NE.toList args))
+    BTVarAppWithIdentity identity name args ->
+      Set.insert
+        (backendTypeSubstitutionKeyFor identity name)
+        (Set.unions (map freeBackendTypeVarKeys (NE.toList args)))
+    BTForallWithIdentity identity name mbBound body ->
+      Set.union
+        (maybe Set.empty freeBackendTypeVarKeys mbBound)
+        (Set.delete (backendTypeSubstitutionKeyFor identity name) (freeBackendTypeVarKeys body))
+    BTMuWithIdentity identity name body ->
+      Set.delete (backendTypeSubstitutionKeyFor identity name) (freeBackendTypeVarKeys body)
+    BTBottom ->
+      Set.empty
+
+freeBackendTypeVarKeysInKeyed :: Map.Map BackendTypeSubstitutionKey BackendType -> Set.Set BackendTypeSubstitutionKey
+freeBackendTypeVarKeysInKeyed replacements =
+  Set.unions (map freeBackendTypeVarKeys (Map.elems replacements))
+
+generatedIdentitiesInBackendTypes :: [BackendType] -> [UniqueIdentity]
+generatedIdentitiesInBackendTypes =
+  foldMap generatedIdentitiesInBackendType
+
+generatedIdentitiesInBackendProgram :: BackendProgram -> [UniqueIdentity]
+generatedIdentitiesInBackendProgram program =
+  maybe [] symbolGeneratedIdentities (backendProgramMainIdentity program)
+    ++ foldMap generatedIdentitiesInBackendModule (backendProgramModules program)
+
+generatedIdentitiesInBackendModule :: BackendModule -> [UniqueIdentity]
+generatedIdentitiesInBackendModule backendModule =
+  maybe [] symbolGeneratedIdentities (backendModuleIdentity backendModule)
+    ++ foldMap generatedIdentitiesInBackendData (backendModuleData backendModule)
+    ++ foldMap generatedIdentitiesInBackendBinding (backendModuleBindings backendModule)
+
+generatedIdentitiesInBackendData :: BackendData -> [UniqueIdentity]
+generatedIdentitiesInBackendData dataDecl =
+  maybe [] symbolGeneratedIdentities (backendDataIdentity dataDecl)
+    ++ foldMap generatedIdentitiesInBackendDataParameterRef (backendDataParameterRefs dataDecl)
+    ++ foldMap generatedIdentitiesInBackendConstructor (backendDataConstructors dataDecl)
+
+generatedIdentitiesInBackendDataParameterRef :: BackendDataParameterRef -> [UniqueIdentity]
+generatedIdentitiesInBackendDataParameterRef ref =
+  generatedIdentitiesInTypeBinderRef (backendDataParameterRefIdentity ref) (backendDataParameterRefName ref)
+
+generatedIdentitiesInBackendConstructor :: BackendConstructor -> [UniqueIdentity]
+generatedIdentitiesInBackendConstructor constructor =
+  maybe [] symbolGeneratedIdentities (backendConstructorIdentity constructor)
+    ++ foldMap generatedIdentitiesInBackendTypeBinder (backendConstructorForalls constructor)
+    ++ generatedIdentitiesInBackendTypes (backendConstructorFields constructor)
+    ++ generatedIdentitiesInBackendType (backendConstructorResult constructor)
+
+generatedIdentitiesInBackendTypeBinder :: BackendTypeBinder -> [UniqueIdentity]
+generatedIdentitiesInBackendTypeBinder binder =
+  generatedIdentitiesInTypeBinderRef (backendTypeBinderIdentity binder) (backendTypeBinderName binder)
+    ++ maybe [] generatedIdentitiesInBackendType (backendTypeBinderBound binder)
+
+generatedIdentitiesInBackendBinding :: BackendBinding -> [UniqueIdentity]
+generatedIdentitiesInBackendBinding binding =
+  maybe [] symbolGeneratedIdentities (backendBindingIdentity binding)
+    ++ generatedIdentitiesInBackendType (backendBindingType binding)
+    ++ generatedIdentitiesInBackendExpr (backendBindingExpr binding)
+
+generatedIdentitiesInBackendExpr :: BackendExpr -> [UniqueIdentity]
+generatedIdentitiesInBackendExpr =
+  \case
+    BackendVarWithIdentity ty identity _ ->
+      generatedIdentitiesInBackendType ty ++ foldMap idDetailsGeneratedIdentities identity
+    BackendLit ty _ ->
+      generatedIdentitiesInBackendType ty
+    BackendLamWithIdentity resultTy identity _ paramTy body ->
+      generatedIdentitiesInBackendType resultTy
+        ++ foldMap idDetailsGeneratedIdentities identity
+        ++ generatedIdentitiesInBackendType paramTy
+        ++ generatedIdentitiesInBackendExpr body
+    BackendApp resultTy fun arg ->
+      generatedIdentitiesInBackendType resultTy ++ generatedIdentitiesInBackendExpr fun ++ generatedIdentitiesInBackendExpr arg
+    BackendLetWithIdentity resultTy identity _ bindingTy rhs body ->
+      generatedIdentitiesInBackendType resultTy
+        ++ foldMap idDetailsGeneratedIdentities identity
+        ++ generatedIdentitiesInBackendType bindingTy
+        ++ generatedIdentitiesInBackendExpr rhs
+        ++ generatedIdentitiesInBackendExpr body
+    BackendTyAbsWithIdentity resultTy identity _ mbBound body ->
+      generatedIdentitiesInBackendType resultTy
+        ++ generatedIdentitiesInTypeBinderIdentity identity
+        ++ maybe [] generatedIdentitiesInBackendType mbBound
+        ++ generatedIdentitiesInBackendExpr body
+    BackendTyApp resultTy fun ty ->
+      generatedIdentitiesInBackendType resultTy ++ generatedIdentitiesInBackendExpr fun ++ generatedIdentitiesInBackendType ty
+    BackendRoll resultTy payload ->
+      generatedIdentitiesInBackendType resultTy ++ generatedIdentitiesInBackendExpr payload
+    BackendUnroll resultTy payload ->
+      generatedIdentitiesInBackendType resultTy ++ generatedIdentitiesInBackendExpr payload
+    BackendClosureWithParamIdentities resultTy identity _ captures params body ->
+      generatedIdentitiesInBackendType resultTy
+        ++ maybe [] (: []) identity
+        ++ foldMap generatedIdentitiesInBackendClosureCapture captures
+        ++ foldMap generatedIdentitiesInBackendClosureParam params
+        ++ generatedIdentitiesInBackendExpr body
+    BackendClosureCall resultTy fun args ->
+      generatedIdentitiesInBackendType resultTy ++ generatedIdentitiesInBackendExpr fun ++ foldMap generatedIdentitiesInBackendExpr args
+    BackendConstructWithIdentity resultTy identity _ args ->
+      generatedIdentitiesInBackendType resultTy
+        ++ maybe [] symbolGeneratedIdentities identity
+        ++ foldMap generatedIdentitiesInBackendExpr args
+    BackendCase resultTy scrutinee alternatives ->
+      generatedIdentitiesInBackendType resultTy
+        ++ generatedIdentitiesInBackendExpr scrutinee
+        ++ foldMap generatedIdentitiesInBackendAlternative alternatives
+
+generatedIdentitiesInBackendClosureCapture :: BackendClosureCapture -> [UniqueIdentity]
+generatedIdentitiesInBackendClosureCapture capture =
+  foldMap idDetailsGeneratedIdentities (backendClosureCaptureIdentity capture)
+    ++ generatedIdentitiesInBackendType (backendClosureCaptureType capture)
+    ++ generatedIdentitiesInBackendExpr (backendClosureCaptureExpr capture)
+
+generatedIdentitiesInBackendClosureParam :: BackendClosureParam -> [UniqueIdentity]
+generatedIdentitiesInBackendClosureParam param =
+  foldMap idDetailsGeneratedIdentities (backendClosureParamIdentity param)
+    ++ generatedIdentitiesInBackendType (backendClosureParamType param)
+
+generatedIdentitiesInBackendAlternative :: BackendAlternative -> [UniqueIdentity]
+generatedIdentitiesInBackendAlternative (BackendAlternative pattern0 body) =
+  generatedIdentitiesInBackendPattern pattern0 ++ generatedIdentitiesInBackendExpr body
+
+generatedIdentitiesInBackendPattern :: BackendPattern -> [UniqueIdentity]
+generatedIdentitiesInBackendPattern =
+  \case
+    BackendDefaultPattern ->
+      []
+    BackendConstructorPatternWithBinderIdentities identity _ binders ->
+      maybe [] symbolGeneratedIdentities identity
+        ++ foldMap generatedIdentitiesInBackendPatternBinder binders
+
+generatedIdentitiesInBackendPatternBinder :: BackendPatternBinder -> [UniqueIdentity]
+generatedIdentitiesInBackendPatternBinder binder =
+  foldMap idDetailsGeneratedIdentities (backendPatternBinderIdentity binder)
+
+generatedIdentitiesInBackendType :: BackendType -> [UniqueIdentity]
+generatedIdentitiesInBackendType =
+  \case
+    BTVarWithIdentity identity name ->
+      generatedIdentitiesInTypeBinderRef identity name
+    BTArrow dom cod ->
+      generatedIdentitiesInBackendType dom ++ generatedIdentitiesInBackendType cod
+    BTBaseWithIdentity identity _ ->
+      maybe [] symbolGeneratedIdentities identity
+    BTConWithIdentity identity _ args ->
+      maybe [] symbolGeneratedIdentities identity ++ foldMap generatedIdentitiesInBackendType args
+    BTVarAppWithIdentity identity name args ->
+      generatedIdentitiesInTypeBinderRef identity name ++ foldMap generatedIdentitiesInBackendType args
+    BTForallWithIdentity identity name mbBound body ->
+      generatedIdentitiesInTypeBinderRef identity name
+        ++ maybe [] generatedIdentitiesInBackendType mbBound
+        ++ generatedIdentitiesInBackendType body
+    BTMuWithIdentity identity name body ->
+      generatedIdentitiesInTypeBinderRef identity name ++ generatedIdentitiesInBackendType body
+    BTBottom ->
+      []
+
+generatedIdentitiesInTypeBinderIdentity :: Maybe TypeBinderIdentity -> [UniqueIdentity]
+generatedIdentitiesInTypeBinderIdentity =
+  maybe [] typeBinderGeneratedIdentities
+
+generatedIdentitiesInTypeBinderRef :: Maybe TypeBinderIdentity -> String -> [UniqueIdentity]
+generatedIdentitiesInTypeBinderRef identity _ =
+  generatedIdentitiesInTypeBinderIdentity identity
+
+generatedIdentitiesInBackendTypeSubstitutionKey :: BackendTypeSubstitutionKey -> [UniqueIdentity]
+generatedIdentitiesInBackendTypeSubstitutionKey =
+  \case
+    BackendTypeSubstitutionByIdentity identity -> generatedIdentitiesInTypeBinderIdentity (Just identity)
+    BackendTypeSubstitutionByName {} -> []
+
+backendTypeHeadMatches :: Maybe SymbolIdentity -> BaseTy -> Maybe SymbolIdentity -> BaseTy -> Bool
+backendTypeHeadMatches =
+  typeHeadRefMatches
 
 substituteBackendTypeByIdentity :: TypeBinderIdentity -> BackendType -> BackendType -> BackendType
 substituteBackendTypeByIdentity needle replacement =
   substituteBackendTypesByKey (Map.singleton (BackendTypeSubstitutionByIdentity needle) replacement)
 
-substituteBackendTypes :: Map.Map String BackendType -> BackendType -> BackendType
-substituteBackendTypes replacements0 =
-  substituteBackendTypesByKey (Map.mapKeys BackendTypeSubstitutionByName replacements0)
-
 substituteBackendTypesByKey :: Map.Map BackendTypeSubstitutionKey BackendType -> BackendType -> BackendType
-substituteBackendTypesByKey replacements0 =
-  go replacements0
+substituteBackendTypesByKey replacements0 ty0 =
+  fst (go replacements0 initialGenerator ty0)
   where
-    go replacements ty =
+    initialGenerator =
+      identityGeneratorAfter
+        ( generatedIdentitiesInBackendTypes (ty0 : Map.elems replacements0)
+            ++ concatMap generatedIdentitiesInBackendTypeSubstitutionKey (Map.keys replacements0)
+        )
+
+    go replacements generator ty =
       case ty of
         BTVarWithIdentity identity name ->
-          lookupTypeReplacement identity name replacements ty
-        BTArrow dom cod -> BTArrow (go replacements dom) (go replacements cod)
-        BTBaseWithIdentity {} -> ty
+          (lookupTypeReplacement identity name replacements ty, generator)
+        BTArrow dom cod ->
+          let (dom', generator') = go replacements generator dom
+              (cod', generator'') = go replacements generator' cod
+           in (BTArrow dom' cod', generator'')
+        BTBaseWithIdentity {} -> (ty, generator)
         BTConWithIdentity identity con args ->
-          BTConWithIdentity identity con (fmap (go replacements) args)
+          let (args', generator') = goNonEmpty replacements generator args
+           in (BTConWithIdentity identity con args', generator')
         BTVarAppWithIdentity identity name args ->
-          let args' = fmap (go replacements) args
+          let (args', generator') = goNonEmpty replacements generator args
            in case lookupTypeReplacementMaybe identity name replacements >>= (`applyBackendTypeHead` NE.toList args') of
-                Just ty' -> ty'
-                Nothing -> BTVarAppWithIdentity identity name args'
+                Just ty' -> (ty', generator')
+                Nothing -> (BTVarAppWithIdentity identity name args', generator')
         BTForallWithIdentity identity name mbBound body
-          | Map.null bodyReplacements ->
-              BTForallWithIdentity identity name (fmap (go replacements) mbBound) body
-          | Set.member name freeBodyReplacements ->
-              let used =
-                    Set.unions
-                      [ freeBodyReplacements,
-                        freeBackendTypeVars body,
-                        maybe Set.empty freeBackendTypeVars mbBound,
-                        Set.map backendTypeSubstitutionKeyName (Map.keysSet bodyReplacements),
-                        Set.singleton name
-                      ]
-                  name' = freshNameLike name used
-                  body' = substituteBackendTypeForBinder identity name (BTVarWithIdentity identity name') body
-               in BTForallWithIdentity identity name' (fmap (go replacements) mbBound) (go bodyReplacements body')
-          | otherwise ->
-              BTForallWithIdentity identity name (fmap (go replacements) mbBound) (go bodyReplacements body)
-          where
-            bodyReplacements = deleteTypeReplacement identity name replacements
-            freeBodyReplacements = freeBackendTypeVarsInKeyed bodyReplacements
+          ->
+            let (mbBound', generator') = goMaybe replacements generator mbBound
+                bodyReplacements = deleteTypeReplacement identity name replacements
+             in if Map.null bodyReplacements
+                  then (BTForallWithIdentity identity name mbBound' body, generator')
+                  else
+                    let binderKey = backendTypeSubstitutionKeyFor identity name
+                        freeBodyReplacementKeys = freeBackendTypeVarKeysInKeyed bodyReplacements
+                     in if Set.member binderKey freeBodyReplacementKeys
+                          then
+                            let used =
+                                  Set.unions
+                                    [ freeBackendTypeVarsInKeyed bodyReplacements,
+                                      freeBackendTypeVars body,
+                                      maybe Set.empty freeBackendTypeVars mbBound,
+                                      Set.map backendTypeSubstitutionKeyName (Map.keysSet bodyReplacements),
+                                      Set.singleton name
+                                    ]
+                                name' = freshNameLike name used
+                                (identity', generator'') = freshBackendBinderIdentity identity generator'
+                                body' = renameBackendTypeBinder identity name identity' name' body
+                                (body'', generator''') = go bodyReplacements generator'' body'
+                             in (BTForallWithIdentity identity' name' mbBound' body'', generator''')
+                          else
+                            let (body', generator'') = go bodyReplacements generator' body
+                             in (BTForallWithIdentity identity name mbBound' body', generator'')
         BTMuWithIdentity identity name body
-          | Map.null bodyReplacements ->
-              ty
-          | Set.member name freeBodyReplacements ->
-              let used =
-                    Set.unions
-                      [ freeBodyReplacements,
-                        freeBackendTypeVars body,
-                        Set.map backendTypeSubstitutionKeyName (Map.keysSet bodyReplacements),
-                        Set.singleton name
-                      ]
-                  name' = freshNameLike name used
-                  body' = substituteBackendTypeForBinder identity name (BTVarWithIdentity identity name') body
-               in BTMuWithIdentity identity name' (go bodyReplacements body')
-          | otherwise ->
-              BTMuWithIdentity identity name (go bodyReplacements body)
-          where
-            bodyReplacements = deleteTypeReplacement identity name replacements
-            freeBodyReplacements = freeBackendTypeVarsInKeyed bodyReplacements
-        BTBottom -> BTBottom
+          ->
+            let bodyReplacements = deleteTypeReplacement identity name replacements
+             in if Map.null bodyReplacements
+                  then (ty, generator)
+                  else
+                    let binderKey = backendTypeSubstitutionKeyFor identity name
+                        freeBodyReplacementKeys = freeBackendTypeVarKeysInKeyed bodyReplacements
+                     in if Set.member binderKey freeBodyReplacementKeys
+                          then
+                            let used =
+                                  Set.unions
+                                    [ freeBackendTypeVarsInKeyed bodyReplacements,
+                                      freeBackendTypeVars body,
+                                      Set.map backendTypeSubstitutionKeyName (Map.keysSet bodyReplacements),
+                                      Set.singleton name
+                                    ]
+                                name' = freshNameLike name used
+                                (identity', generator') = freshBackendBinderIdentity identity generator
+                                body' = renameBackendTypeBinder identity name identity' name' body
+                                (body'', generator'') = go bodyReplacements generator' body'
+                             in (BTMuWithIdentity identity' name' body'', generator'')
+                          else
+                            let (body', generator') = go bodyReplacements generator body
+                             in (BTMuWithIdentity identity name body', generator')
+        BTBottom -> (BTBottom, generator)
+
+    goMaybe replacements generator =
+      \case
+        Nothing -> (Nothing, generator)
+        Just ty ->
+          let (ty', generator') = go replacements generator ty
+           in (Just ty', generator')
+
+    goNonEmpty replacements generator (ty :| tys) =
+      let (ty', generator') = go replacements generator ty
+          (generator'', tys') =
+            mapAccumL
+              ( \acc item ->
+                  let (item', acc') = go replacements acc item
+                   in (acc', item')
+              )
+              generator'
+              tys
+       in (ty' :| tys', generator'')
 
 lookupTypeReplacement :: Maybe TypeBinderIdentity -> String -> Map.Map BackendTypeSubstitutionKey BackendType -> BackendType -> BackendType
 lookupTypeReplacement identity name replacements fallback =
@@ -653,20 +1134,67 @@ lookupTypeReplacement identity name replacements fallback =
 
 lookupTypeReplacementMaybe :: Maybe TypeBinderIdentity -> String -> Map.Map BackendTypeSubstitutionKey BackendType -> Maybe BackendType
 lookupTypeReplacementMaybe identity name replacements =
-  case identity of
-    Just typeIdentity -> Map.lookup (BackendTypeSubstitutionByIdentity typeIdentity) replacements
-    Nothing -> Map.lookup (BackendTypeSubstitutionByName name) replacements
+  Map.lookup (backendTypeSubstitutionKeyFor identity name) replacements
 
 deleteTypeReplacement :: Maybe TypeBinderIdentity -> String -> Map.Map BackendTypeSubstitutionKey BackendType -> Map.Map BackendTypeSubstitutionKey BackendType
 deleteTypeReplacement identity name =
-  maybe id (Map.delete . BackendTypeSubstitutionByIdentity) identity
-    . Map.delete (BackendTypeSubstitutionByName name)
+  Map.delete (backendTypeSubstitutionKeyFor identity name)
+
+freshBackendBinderIdentity :: Maybe TypeBinderIdentity -> IdentityGenerator -> (Maybe TypeBinderIdentity, IdentityGenerator)
+freshBackendBinderIdentity Nothing generator =
+  let (unique, generator') = freshIdentity generator
+   in (Just (typeBinderIdentityFromUnique unique), generator')
+freshBackendBinderIdentity (Just {}) generator =
+  let (unique, generator') = freshIdentity generator
+   in (Just (typeBinderIdentityFromUnique unique), generator')
+
+renameBackendTypeBinder ::
+  Maybe TypeBinderIdentity ->
+  String ->
+  Maybe TypeBinderIdentity ->
+  String ->
+  BackendType ->
+  BackendType
+renameBackendTypeBinder oldIdentity oldName newIdentity newName =
+  go
+  where
+    replacement = BTVarWithIdentity newIdentity newName
+
+    matches identity name =
+      typeBinderRefMatches identity name oldIdentity oldName
+
+    go ty =
+      case ty of
+        BTVarWithIdentity identity name
+          | matches identity name -> replacement
+          | otherwise -> ty
+        BTArrow dom cod ->
+          BTArrow (go dom) (go cod)
+        BTBaseWithIdentity {} ->
+          ty
+        BTConWithIdentity identity con args ->
+          BTConWithIdentity identity con (fmap go args)
+        BTVarAppWithIdentity identity name args
+          | matches identity name ->
+              maybe replacement id (applyBackendTypeHead replacement (NE.toList (fmap go args)))
+          | otherwise ->
+              BTVarAppWithIdentity identity name (fmap go args)
+        BTForallWithIdentity identity name mbBound body
+          | matches identity name ->
+              BTForallWithIdentity identity name (fmap go mbBound) body
+          | otherwise ->
+              BTForallWithIdentity identity name (fmap go mbBound) (go body)
+        BTMuWithIdentity identity name body
+          | matches identity name -> ty
+          | otherwise -> BTMuWithIdentity identity name (go body)
+        BTBottom ->
+          BTBottom
 
 substituteBackendTypeForBinder :: Maybe TypeBinderIdentity -> String -> BackendType -> BackendType -> BackendType
-substituteBackendTypeForBinder (Just identity) _ replacement =
-  substituteBackendTypeByIdentity identity replacement
-substituteBackendTypeForBinder Nothing name replacement =
-  substituteBackendType name replacement
+substituteBackendTypeForBinder identity _ replacement ty =
+  case identity of
+    Just resolvedIdentity -> substituteBackendTypeByIdentity resolvedIdentity replacement ty
+    Nothing -> ty
 
 applyBackendTypeHead :: BackendType -> [BackendType] -> Maybe BackendType
 applyBackendTypeHead headTy args =
@@ -688,5 +1216,5 @@ applyBackendTypeHead headTy args =
 unfoldBackendRecursiveType :: BackendType -> Maybe BackendType
 unfoldBackendRecursiveType ty =
   case ty of
-    BTMu name body -> Just (substituteBackendType name ty body)
+    BTMuWithIdentity identity name body -> Just (substituteBackendTypeForBinder identity name ty body)
     _ -> Nothing

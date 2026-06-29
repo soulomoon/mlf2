@@ -15,7 +15,10 @@ module MLF.Frontend.ConstraintGen.Types
     ExternalEnv,
     ExternalBindingMode (..),
     ExternalBinding (..),
-    ExternalBindingIdentity (..),
+    ExternalBindingIdentity,
+    externalBindingIdentityFromDetails,
+    externalBindingRuntimeName,
+    externalBindingDetails,
     ExternalBindings,
     replaceScopeRoot,
   )
@@ -26,8 +29,9 @@ import qualified Data.IntMap.Strict as IntMap
 import Data.Map.Strict (Map)
 import MLF.Constraint.RootOwnership (ModuleRootId (..), RootOwnershipIndex (..))
 import MLF.Constraint.Types.Graph
+import MLF.Frontend.Symbol (SymbolIdentity)
 import MLF.Frontend.Syntax (Lit, NormSrcType, VarName)
-import MLF.Types.Identity (IdDetails)
+import MLF.Types.Identity (IdDetails, TypeBinderIdentity)
 
 -- | Errors that can surface during constraint generation.
 data ConstraintError
@@ -152,16 +156,28 @@ data ExternalBindingMode
 data ExternalBinding = ExternalBinding
   { externalBindingType :: NormSrcType,
     externalBindingMode :: ExternalBindingMode,
-    externalBindingIdentity :: Maybe ExternalBindingIdentity
+    externalBindingIdentity :: Maybe ExternalBindingIdentity,
+    externalBindingTypeHeadIdentities :: Map String SymbolIdentity,
+    externalBindingTypeBinderIdentities :: Map String TypeBinderIdentity
   }
   deriving (Eq, Show)
 
 data ExternalBindingIdentity = ExternalBindingIdentity
-  { externalBindingDisplayName :: String,
-    externalBindingRuntimeName :: String,
+  { externalBindingRuntimeName :: String,
     externalBindingDetails :: IdDetails
   }
-  deriving (Eq, Show)
+  deriving (Show)
+
+externalBindingIdentityFromDetails :: String -> IdDetails -> ExternalBindingIdentity
+externalBindingIdentityFromDetails runtimeName details =
+  ExternalBindingIdentity
+    { externalBindingRuntimeName = runtimeName,
+      externalBindingDetails = details
+    }
+
+instance Eq ExternalBindingIdentity where
+  left == right =
+    externalBindingDetails left == externalBindingDetails right
 
 -- | External environment: maps free variable names to their normalized
 -- source types.  Used by 'generateConstraintsWithEnv' to inject

@@ -139,6 +139,8 @@ spec =
                                 { externalBindingType = intSourceType
                                 , externalBindingMode = ExternalBindingScheme
                                 , externalBindingIdentity = Nothing
+                                , externalBindingTypeHeadIdentities = Map.empty
+                                , externalBindingTypeBinderIdentities = Map.empty
                                 }
                         )
                         [ ("value1", externalOneExpr)

@@ -41,7 +41,7 @@ where
 
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.List (mapAccumL, stripPrefix)
+import Data.List (stripPrefix)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -74,8 +74,6 @@ import MLF.Types.Elab
     cataIx,
     mkElabSchemeWithRefs,
     renameTypeBinderRef,
-    freshTypeBinderRef,
-    identityGeneratorAfterType,
     typeBinderIdentityFromNode,
     typeBinderRefFromIdentity,
     typeBinderRefName,
@@ -102,9 +100,8 @@ data FinalizeInput p = FinalizeInput
     fiSolvedToBasePref :: IntMap.IntMap NodeId,
     fiGammaAlias :: IntMap.IntMap Int,
     fiNamedUnderGaSet :: IntSet.IntSet,
-    fiOrderedBinders :: [Int],
-    fiBinderNames :: [String],
-    fiBindings :: [(String, Maybe BoundType)],
+    fiOrderedBinderRefs :: [(Int, TypeBinderRef)],
+    fiBindings :: [(TypeBinderRef, Maybe BoundType)],
     fiSubst :: IntMap.IntMap TypeBinderRef,
     fiTyRaw :: ElabType
   }
@@ -121,26 +118,36 @@ finalizeScheme FinalizeInput {..} =
       solvedToBasePrefPlan = fiSolvedToBasePref
       gammaAliasPlan = fiGammaAlias
       namedUnderGaSetPlan = fiNamedUnderGaSet
-      orderedBinders = fiOrderedBinders
-      binderNames = fiBinderNames
+      orderedBinderRefs = fiOrderedBinderRefs
       bindings = fiBindings
       subst = fiSubst
       ty0Raw = fiTyRaw
+      originalBinderRef nidInt ref =
+        case IntMap.lookup nidInt subst of
+          Just substRef -> substRef
+          Nothing ->
+            typeBinderRefFromIdentity
+              (typeBinderIdentityFromNode (canonical (NodeId nidInt)))
+              (typeBinderRefName ref)
+      originalBinderRefs =
+        [ (nidInt, originalBinderRef nidInt ref)
+          | (nidInt, ref) <- orderedBinderRefs
+        ]
       aliasToTypeRootRefs =
-        [ refForOriginalName name
-          | (nidInt, name) <- zip orderedBinders binderNames,
+        [ ref
+          | (nidInt, ref) <- originalBinderRefs,
             let nid = NodeId nidInt,
             Just bnd <- [VarStore.lookupVarBound constraint (canonical nid)],
             canonical bnd == canonical typeRoot
         ]
-      bindingMatchesRef ref (n, _) =
-        typeBinderRefsSameIdentity (refForOriginalName n) ref
+      bindingMatchesRef ref (bindingRef, _) =
+        typeBinderRefsSameIdentity bindingRef ref
       lookupBindingRef ref binds =
         [ mb
           | binding@(_, mb) <- binds,
             bindingMatchesRef ref binding
         ]
-      inlineAliasBinder :: ElabType -> [(String, Maybe BoundType)] -> (ElabType, [(String, Maybe BoundType)])
+      inlineAliasBinder :: ElabType -> [(TypeBinderRef, Maybe BoundType)] -> (ElabType, [(TypeBinderRef, Maybe BoundType)])
       inlineAliasBinder ty binds = case ty of
         TVarRef ref
           | refMember ref aliasToTypeRootRefs ->
@@ -172,13 +179,13 @@ finalizeScheme FinalizeInput {..} =
                     Nothing ->
                       let ref' = freshCanonRef n ref
                        in (TVarRef ref', (ref, ref') : freeEnv, n + 1)
-            TBase b -> (TBase b, freeEnv, n)
+            TBaseWithIdentity identity b -> (TBaseWithIdentity identity b, freeEnv, n)
             TBottom -> (TBottom, freeEnv, n)
             TArrow a b ->
               let (a', free1, n1) = go boundEnv freeEnv n a
                   (b', free2, n2) = go boundEnv free1 n1 b
                in (TArrow a' b', free2, n2)
-            TCon c (arg :| args) ->
+            TConWithIdentity identity c (arg :| args) ->
               let (arg', free1, n1) = go boundEnv freeEnv n arg
                   (argsRev, free2, n2) =
                     foldl
@@ -189,7 +196,7 @@ finalizeScheme FinalizeInput {..} =
                       ([], free1, n1)
                       args
                   args' = reverse argsRev
-               in (TCon c (arg' :| args'), free2, n2)
+               in (TConWithIdentity identity c (arg' :| args'), free2, n2)
             TVarAppRef ref (arg :| args) ->
               let (headTy, free1, n1) = go boundEnv freeEnv n (TVarRef ref)
                   ref' = case headTy of
@@ -228,7 +235,7 @@ finalizeScheme FinalizeInput {..} =
               let (a', free1, n1) = go boundEnv freeEnv n a
                   (b', free2, n2) = go boundEnv free1 n1 b
                in (TArrow a' b', free2, n2)
-            TCon c (arg :| args) ->
+            TConWithIdentity identity c (arg :| args) ->
               let (arg', free1, n1) = go boundEnv freeEnv n arg
                   (argsRev, free2, n2) =
                     foldl
@@ -239,7 +246,7 @@ finalizeScheme FinalizeInput {..} =
                       ([], free1, n1)
                       args
                   args' = reverse argsRev
-               in (TCon c (arg' :| args'), free2, n2)
+               in (TConWithIdentity identity c (arg' :| args'), free2, n2)
             TVarAppRef ref (arg :| args) ->
               let (headTy, free1, n1) = go boundEnv freeEnv n (TVarRef ref)
                   ref' = case headTy of
@@ -256,7 +263,7 @@ finalizeScheme FinalizeInput {..} =
                       args
                   args' = reverse argsRev
                in (TVarAppRef ref' (arg' :| args'), free2, n2)
-            TBase b -> (TBase b, freeEnv, n)
+            TBaseWithIdentity identity b -> (TBaseWithIdentity identity b, freeEnv, n)
             TBottom -> (TBottom, freeEnv, n)
             TForallRef ref mb body ->
               let ref' = freshCanonRef n ref
@@ -274,15 +281,14 @@ finalizeScheme FinalizeInput {..} =
                   n1 = n + 1
                   (body', free1, n2) = go ((ref, ref') : boundEnv) freeEnv n1 body
                in (TMuRef ref' body', free1, n2)
-      replaceAlias boundNorm v = goReplace
+      replaceAlias boundNorm ref = goReplace
         where
-          ref = refForOriginalName v
           goReplace ty
             | canonAllVars ty == boundNorm = TVarRef ref
             | otherwise =
                 case ty of
                   TArrow a b -> TArrow (goReplace a) (goReplace b)
-                  TCon c args -> TCon c (fmap goReplace args)
+                  TConWithIdentity identity c args -> TConWithIdentity identity c (fmap goReplace args)
                   TVarAppRef headRef args -> TVarAppRef headRef (fmap goReplace args)
                   TForallRef binderRef mb body ->
                     TForallRef binderRef (fmap (mapBoundType goReplace) mb) (goReplace body)
@@ -298,15 +304,15 @@ finalizeScheme FinalizeInput {..} =
         TForallRef ref Nothing body ->
           TForallRef ref Nothing (stripAliasForall body)
         TArrow a b -> TArrow (stripAliasForall a) (stripAliasForall b)
-        TCon c args -> TCon c (fmap stripAliasForall args)
+        TConWithIdentity identity c args -> TConWithIdentity identity c (fmap stripAliasForall args)
         TVarAppRef ref args -> TVarAppRef ref (fmap stripAliasForall args)
         TMuRef ref body -> TMuRef ref (stripAliasForall body)
         _ -> ty
       stripAliasForallBound bound = case bound of
         TArrow a b -> TArrow (stripAliasForall a) (stripAliasForall b)
-        TCon c args -> TCon c (fmap stripAliasForall args)
+        TConWithIdentity identity c args -> TConWithIdentity identity c (fmap stripAliasForall args)
         TVarAppRef ref args -> TVarAppRef ref (fmap stripAliasForall args)
-        TBase _ -> bound
+        TBaseWithIdentity _ _ -> bound
         TBottom -> bound
         TForallRef ref mb body ->
           let mb' = fmap stripAliasForallBound mb
@@ -336,14 +342,14 @@ finalizeScheme FinalizeInput {..} =
       normalizeScheme tyRaw binds =
         let tyAdjusted0 =
               case (binds, tyRaw) of
-                ((v, mb) : _, TForallRef ref mb' body)
-                  | typeBinderRefsSameIdentity (refForOriginalName v) ref && mb == mb' -> body
+                ((bindingRef, mb) : _, TForallRef ref mb' body)
+                  | typeBinderRefsSameIdentity bindingRef ref && mb == mb' -> body
                 _ -> tyRaw
             tyAdjusted =
               case stripForallsType tyAdjusted0 of
                 TVarRef ref ->
-                  case lookup (typeBinderRefName ref) binds of
-                    Just (Just bound)
+                  case lookupBindingRef ref binds of
+                    Just bound : _
                       | containsForall (tyToElab bound) -> tyToElab bound
                     _ -> tyAdjusted0
                 _ -> tyAdjusted0
@@ -364,47 +370,6 @@ finalizeScheme FinalizeInput {..} =
         [ (nameForId k, ref)
           | (k, ref) <- IntMap.toList subst
         ]
-      substRefByOriginalName =
-        Map.fromList
-          [ (name, ref)
-            | (nidInt, name) <- zip orderedBinders binderNames,
-              Just ref <- [IntMap.lookup nidInt subst]
-          ]
-      originalBinderKeyByName =
-        Map.fromList
-          [ (name, nidInt)
-          | (nidInt, name) <- zip orderedBinders binderNames
-          ]
-      generatedFallbackRefs =
-        let fallbackNames =
-              Set.toList $
-                Set.fromList
-                  [ name
-                  | name <- binderNames ++ map fst bindings,
-                    Map.notMember name substRefByOriginalName,
-                    Map.notMember name originalBinderKeyByName
-                  ]
-            seedTy = foldr TArrow ty0Raw (map TVarRef (IntMap.elems subst))
-            (_, refs) =
-              mapAccumL
-                ( \generator name ->
-                    let (ref, generator') = freshTypeBinderRef name generator
-                     in (generator', (name, ref))
-                )
-                (identityGeneratorAfterType seedTy)
-                fallbackNames
-         in Map.fromList refs
-      refForOriginalName name =
-        case Map.lookup name substRefByOriginalName of
-          Just ref -> ref
-          Nothing ->
-            case Map.lookup name originalBinderKeyByName of
-              Just nidInt ->
-                typeBinderRefFromIdentity
-                  (typeBinderIdentityFromNode (canonical (NodeId nidInt)))
-                  name
-              Nothing ->
-                generatedFallbackRefs Map.! name
       namedBinderRefs =
         [ ref
           | (nidInt, ref) <- IntMap.toList subst,
@@ -441,18 +406,16 @@ finalizeScheme FinalizeInput {..} =
           alg ty = case ty of
             TVarIFRef ref -> TVarRef (renameRefFromSubst ref)
             TArrowIF a b -> TArrow a b
-            TConIF c args -> TCon c args
+            TConIFWithIdentity identity c args -> TConWithIdentity identity c args
             TVarAppIFRef ref args -> TVarAppRef (renameRefFromSubst ref) args
-            TBaseIF b -> TBase b
+            TBaseIFWithIdentity identity b -> TBaseWithIdentity identity b
             TBottomIF -> TBottom
             TForallIFRef ref mb body -> TForallRef (renameRefFromSubst ref) mb body
             TMuIFRef ref body -> TMuRef (renameRefFromSubst ref) body
       ty0 = renameVars ty0RawAdjusted
       inlineBaseBounds = False
       bindingsAdjustedRefs =
-        [ (refForOriginalName name, mb)
-          | (name, mb) <- bindingsAdjusted
-        ]
+        bindingsAdjusted
       (bindingsNorm0Refs, tyNorm0) =
         simplifySchemeBindingsRefs inlineBaseBounds namedBinderRefs bindingsAdjustedRefs ty0
       (bindingsNorm1Refs, tyNorm1) = promoteArrowAliasRefs bindingsNorm0Refs tyNorm0
@@ -505,9 +468,9 @@ finalizeScheme FinalizeInput {..} =
           alg ty = case ty of
             TVarIFRef ref -> TVarRef (renameRefFromMap ref)
             TArrowIF a b -> TArrow a b
-            TConIF c args -> TCon c args
+            TConIFWithIdentity identity c args -> TConWithIdentity identity c args
             TVarAppIFRef ref args -> TVarAppRef (renameRefFromMap ref) args
-            TBaseIF b -> TBase b
+            TBaseIFWithIdentity identity b -> TBaseWithIdentity identity b
             TBottomIF -> TBottom
             TForallIFRef ref mb body -> TForallRef (renameRefFromMap ref) mb body
             TMuIFRef ref body -> TMuRef (renameRefFromMap ref) body

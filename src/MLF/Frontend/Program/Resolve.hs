@@ -21,15 +21,16 @@ import MLF.Frontend.Program.Types
 import MLF.Frontend.Syntax
   ( ResolvedSrcType,
     ResolvedSrcTy (..),
-    ResolvedTypeBinderRef (..),
+    ResolvedTypeBinderRef,
     SrcBound (..),
     SrcTy (..),
     SrcType,
     mkResolvedSrcBound,
+    resolvedTypeBinderRefFromIdentity,
   )
 import qualified MLF.Frontend.Syntax.Program as P
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
-import MLF.Types.Identity (IdentityGenerator, freshIdentity, freshLocalRef, initialIdentityGenerator)
+import MLF.Types.Identity (IdentityGenerator, freshIdentity, freshLocalRef, initialIdentityGenerator, typeBinderIdentityFromUnique)
 
 type ResolveM a = Either ProgramError a
 
@@ -53,10 +54,7 @@ freshResolvedTypeBinderRef :: String -> LocalResolveM ResolvedTypeBinderRef
 freshResolvedTypeBinderRef name =
   state $ \generator ->
     let (identity, generator') = freshIdentity generator
-     in ( ResolvedTypeBinderRef
-            { resolvedTypeBinderIdentity = identity,
-              resolvedTypeBinderName = name
-            },
+     in ( resolvedTypeBinderRefFromIdentity (typeBinderIdentityFromUnique identity) name,
           generator'
         )
 
@@ -64,13 +62,7 @@ freshSymbolIdentity :: SymbolNamespace -> P.ModuleName -> String -> Maybe Symbol
 freshSymbolIdentity namespace moduleName0 name owner =
   state $ \generator ->
     let (identity, generator') = freshIdentity generator
-     in ( SymbolIdentity
-            { symbolUniqueIdentity = identity,
-              symbolNamespace = namespace,
-              symbolDefiningModule = moduleName0,
-              symbolDefiningName = name,
-              symbolOwnerIdentity = owner
-            },
+     in ( symbolIdentityFromParts identity namespace moduleName0 name owner,
           generator'
         )
 
@@ -187,13 +179,7 @@ resolveModule (priorExports, resolvedRev, generator0) mod0 = do
 freshModuleIdentity :: P.ModuleName -> IdentityGenerator -> (SymbolIdentity, IdentityGenerator)
 freshModuleIdentity moduleName0 generator =
   let (identity, generator') = freshIdentity generator
-   in ( SymbolIdentity
-          { symbolUniqueIdentity = identity,
-            symbolNamespace = SymbolModule,
-            symbolDefiningModule = moduleName0,
-            symbolDefiningName = moduleName0,
-            symbolOwnerIdentity = Nothing
-          },
+   in ( symbolIdentityFromParts identity SymbolModule moduleName0 moduleName0 Nothing,
         generator'
       )
 
@@ -525,7 +511,7 @@ resolveExportItem moduleName0 locals item =
     builtinPreludeExportType typeName
       | moduleName0 == "Prelude",
         typeName == "IO" =
-          Just (P.ResolvedExportTypeRef typeName [builtinTypeSymbol typeName])
+          Just (P.resolvedExportTypeRefFromSymbols typeName [builtinTypeSymbol typeName])
       | otherwise = Nothing
 
 resolvedLocalExportTypeRef :: LocalSymbols -> String -> Maybe P.ResolvedExportTypeRef
@@ -535,7 +521,7 @@ resolvedLocalExportTypeRef locals name =
           ++ Map.findWithDefault [] name (localClasses locals)
    in case distinctByIdentity symbols of
         [] -> Nothing
-        distinct -> Just (P.ResolvedExportTypeRef name distinct)
+        distinct -> Just (P.resolvedExportTypeRefFromSymbols name distinct)
 
 resolvedExportTypeRef :: String -> ResolvedScope -> Maybe P.ResolvedExportTypeRef
 resolvedExportTypeRef name exports =
@@ -544,7 +530,7 @@ resolvedExportTypeRef name exports =
           ++ maybe [] (: []) (Map.lookup name (resolvedScopeClasses exports))
    in case distinctByIdentity symbols of
         [] -> Nothing
-        distinct -> Just (P.ResolvedExportTypeRef name distinct)
+        distinct -> Just (P.resolvedExportTypeRefFromSymbols name distinct)
 
 uniqueLocalSymbol :: (String -> ProgramError) -> String -> Map String [ResolvedSymbol] -> ResolveM ResolvedSymbol
 uniqueLocalSymbol err name symbolsByName =
@@ -668,7 +654,7 @@ resolveInstanceMethodRef scope classSymbol name = do
             && symbolOwnerIdentity (resolvedSymbolIdentity candidate) == Just owner
       )
       (candidateValues scope)
-  pure (ResolvedReference ResolvedMethodReference name symbol)
+  pure (mkResolvedReference ResolvedMethodReference name symbol)
   where
     classIdentity = resolvedSymbolIdentity classSymbol
     owner = SymbolOwnerClass classIdentity
@@ -853,7 +839,7 @@ resolveTypeWith typeBinders scope = \case
 resolveTypeName :: CandidateScope -> String -> ResolveM ResolvedReference
 resolveTypeName scope name
   | name `Set.member` PrimitiveInventory.builtinTypeNames =
-      pure (ResolvedReference ResolvedTypeReference name (builtinTypeSymbol name))
+      pure (mkResolvedReference ResolvedTypeReference name (builtinTypeSymbol name))
   | otherwise = resolveReference ResolvedTypeReference ProgramUnknownType candidateTypes scope name
 
 resolveClassRef :: CandidateScope -> P.ClassName -> ResolveM ResolvedReference
@@ -869,13 +855,13 @@ resolveValueRef scope name =
           _ -> ResolvedValueReference
    in do
         symbol <- resolveSymbol ProgramUnknownValue (candidateValues scope) name
-        pure (ResolvedReference (kindFor symbol) name symbol)
+        pure (mkResolvedReference (kindFor symbol) name symbol)
 
 resolveConstructorRef :: CandidateScope -> P.ConstructorName -> ResolveM ResolvedReference
 resolveConstructorRef scope name = do
   symbol <- resolveSymbol ProgramUnknownConstructor (candidateValues scope) name
   if symbolNamespace (resolvedSymbolIdentity symbol) == SymbolConstructor
-    then pure (ResolvedReference ResolvedConstructorReference name symbol)
+    then pure (mkResolvedReference ResolvedConstructorReference name symbol)
     else Left (ProgramUnknownConstructor name)
 
 resolveReference ::
@@ -887,7 +873,7 @@ resolveReference ::
   ResolveM ResolvedReference
 resolveReference kind unknownErr select scope name = do
   symbol <- resolveSymbol unknownErr (select scope) name
-  pure (ResolvedReference kind name symbol)
+  pure (mkResolvedReference kind name symbol)
 
 resolveSymbol :: (String -> ProgramError) -> Map String [ResolvedSymbol] -> String -> ResolveM ResolvedSymbol
 resolveSymbol unknownErr candidates name =

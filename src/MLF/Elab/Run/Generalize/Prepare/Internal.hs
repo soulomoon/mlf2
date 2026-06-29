@@ -314,6 +314,8 @@ preparedElaborationEnvWithInitialEnv annSourceTypes initialTermEnv artifact =
         , eeEdgeArtifacts = pgaEdgeArtifacts artifact
         , eeScopeOverrides = pgaScopeOverrides artifact
         , eeAnnSourceTypes = canonicalizePreparedAnnSourceTypes artifact annSourceTypes
+        , eeSourceTypeHeadIdentities = Map.empty
+        , eeSourceTypeBinderIdentities = Map.empty
         , eeInitialTermEnv = initialTermEnv
         }
 

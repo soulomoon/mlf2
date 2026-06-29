@@ -149,13 +149,13 @@ substBoundRef :: TypeBinderRef -> ElabType -> BoundType -> BoundType
 substBoundRef ref replacement bound = case bound of
     TArrow a b ->
         TArrow (substTypeRef ref replacement a) (substTypeRef ref replacement b)
-    TCon c args -> TCon c (fmap (substTypeRef ref replacement) args)
+    TConWithIdentity identity c args -> TConWithIdentity identity c (fmap (substTypeRef ref replacement) args)
     TVarAppRef headRef args ->
         let args' = fmap (substTypeRef ref replacement) args
         in if typeBinderRefsSameIdentity headRef ref
             then composeTypeHeadRef headRef replacement args'
             else TVarAppRef headRef args'
-    TBase b -> TBase b
+    TBaseWithIdentity identity b -> TBaseWithIdentity identity b
     TBottom -> TBottom
     TForallRef binderRef mb body
         | typeBinderRefsSameIdentity binderRef ref ->

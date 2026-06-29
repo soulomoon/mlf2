@@ -3,7 +3,6 @@ module TypeSoundnessSpec (spec) where
 
 import Data.Maybe (isJust)
 import qualified Data.Map.Strict as Map
-import qualified Data.Set as Set
 import Test.Hspec
 import Test.QuickCheck
     ( Gen
@@ -34,11 +33,13 @@ import MLF.Elab.Pipeline
     , step
     , typeCheck
     )
-import ElabTermTestSupport (mkTestDeferredVar, mkTestLocalLam, mkTestLocalLet, mkTestTyAbs, testTMu, testTVar)
+import ElabTermTestSupport (generatedResolvedLocal, mkTestDeferredVar, mkTestLocalLam, mkTestLocalLet, mkTestTyAbs, testTMu, testTVar)
 import MLF.Types.Elab
-    ( TypeBinderRef
+    ( ResolvedVar
+    , TypeBinderRef
     , instUnderWithRef
-    , resolvedVarReferenceName
+    , renameResolvedLocalVar
+    , resolvedVarSameIdentity
     , typeBinderIdentityFromNode
     , typeBinderRefFromIdentity
     )
@@ -46,6 +47,12 @@ import MLF.Frontend.Syntax (Lit(..))
 
 spec :: Spec
 spec = describe "Phase 7 theorem obligations" $ do
+    it "checks closedness by resolved identity when names are stale" $ do
+        let intType = TBase (BaseTy "Int")
+            binder = generatedResolvedLocal 91701 "x" "x" intType
+            occurrence = renameResolvedLocalVar "$stale_x" binder
+        isClosedTerm (ELam binder (EVarNode occurrence)) `shouldBe` True
+
     it "Preservation proxy: if typeCheck t = Right tau and step t = Just t', then typeCheck t' = Right tau" $
         property $
             withMaxSuccess 300 $
@@ -574,16 +581,16 @@ typeRef key name =
 -- ---------------------------------------------------------------------------
 
 isClosedTerm :: XmlfTerm -> Bool
-isClosedTerm = Set.null . freeTermVars
+isClosedTerm = null . freeTermVars
 
-freeTermVars :: XmlfTerm -> Set.Set String
+freeTermVars :: XmlfTerm -> [ResolvedVar]
 freeTermVars term = case term of
-    EVarNode resolved -> Set.singleton (resolvedVarReferenceName resolved)
-    ELit _ -> Set.empty
-    ELam resolved body -> Set.delete (resolvedVarReferenceName resolved) (freeTermVars body)
-    EApp f a -> Set.union (freeTermVars f) (freeTermVars a)
+    EVarNode resolved -> [resolved]
+    ELit _ -> []
+    ELam resolved body -> filter (not . resolvedVarSameIdentity resolved) (freeTermVars body)
+    EApp f a -> freeTermVars f ++ freeTermVars a
     ELet resolved _ rhs body ->
-        Set.union (freeTermVars rhs) (Set.delete (resolvedVarReferenceName resolved) (freeTermVars body))
+        freeTermVars rhs ++ filter (not . resolvedVarSameIdentity resolved) (freeTermVars body)
     ETyAbsRef _ _ body -> freeTermVars body
     ETyInst e _ -> freeTermVars e
     ERoll _ body -> freeTermVars body

@@ -27,6 +27,7 @@ import MLF.Types.Elab
     , instAbstrWithRef
     , instUnderWithRef
     , resolvedVarReferenceName
+    , resolvedVarSameIdentity
     , tVarWithRef
     , typeBinderIdentityFromNode
     , typeBinderRefName
@@ -36,7 +37,7 @@ import MLF.Frontend.Program.Builtins (builtinValueIdentity)
 import MLF.Frontend.Syntax (Lit(..))
 import qualified MLF.Frontend.Syntax as Surf (Expr(..), SrcTy(..))
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
-import MLF.Types.Identity (IdDetails(..), PrimitiveRef(..), freshLocalRef, initialIdentityGenerator)
+import MLF.Types.Identity (IdDetails(..), primitiveRefFromSymbol, freshLocalRef, initialIdentityGenerator)
 import ElabTermTestSupport
     ( generatedResolvedLocalForName
     , mkTestDeferredVar
@@ -133,6 +134,25 @@ spec = do
                 term = EApp (ELam outer (ELam inner (EVarNode occurrence))) (ELit (LInt 1))
             step term `shouldBe` Just (ELam inner (ELit (LInt 1)))
 
+        it "freshens binder identity when capture avoidance collides by identity" $ do
+            let (xRef, gen1) = freshLocalRef "x" initialIdentityGenerator
+                (yRef, _) = freshLocalRef "y" gen1
+                resolved ref runtime =
+                    ResolvedVar
+                        { resolvedVarRuntimeName = runtime
+                        , resolvedVarType = intTy
+                        , resolvedVarDetails = LocalId ref
+                        }
+                x = resolved xRef "x-runtime"
+                yBinder = resolved yRef "inner-y-runtime"
+                yReplacement = resolved yRef "free-y-runtime"
+                term = EApp (ELam x (ELam yBinder (EVarNode x))) (EVarNode yReplacement)
+            case step term of
+                Just (ELam binder' (EVarNode occurrence')) -> do
+                    resolvedVarSameIdentity occurrence' yReplacement `shouldBe` True
+                    resolvedVarSameIdentity binder' yReplacement `shouldBe` False
+                other -> expectationFailure ("Expected capture-avoiding identity freshening, got: " ++ show other)
+
         it "reduces primitive and by resolved identity instead of runtime spelling" $ do
             let boolTy = TBase (BaseTy "Bool")
                 andResolved =
@@ -140,10 +160,7 @@ spec = do
                         { resolvedVarRuntimeName = "stale-and"
                         , resolvedVarType = TArrow boolTy (TArrow boolTy boolTy)
                         , resolvedVarDetails =
-                            PrimitiveId
-                                PrimitiveRef
-                                    { primitiveRefSymbol = builtinValueIdentity PrimitiveInventory.nativeAndPrimitiveName
-                                    }
+                            PrimitiveId (primitiveRefFromSymbol (builtinValueIdentity PrimitiveInventory.nativeAndPrimitiveName))
                         }
                 term = EApp (EApp (EVarNode andResolved) (ELit (LBool True))) (ELit (LBool False))
             step term `shouldBe` Just (ELit (LBool False))

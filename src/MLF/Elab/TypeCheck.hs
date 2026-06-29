@@ -27,15 +27,18 @@ import Data.List.NonEmpty (NonEmpty (..))
 import MLF.Constraint.Types.Graph (BaseTy (..))
 import MLF.Elab.Inst (InstEvalSpec (..), evalInstantiationWith, renameInstBoundRef, schemeToType)
 import MLF.Elab.Types
-import MLF.Frontend.Symbol (SymbolIdentity)
+import qualified MLF.Frontend.Program.Builtins as Builtins
+import MLF.Frontend.Symbol (SymbolIdentity, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit (..))
 import MLF.Types.Identity
-  ( ConstructorRef (..),
-    DeferredRef (..),
-    EnvRef (..),
+  ( constructorRefSymbol,
+    DeferredRef,
+    EnvRef,
     IdDetails (..),
     LocalRef,
-    PrimitiveRef (..),
+    primitiveRefSymbol,
+    StructuralTypeBinderRole (..),
+    typeBinderIdentityStructural,
   )
 import MLF.Reify.TypeOps
   ( alphaEqType,
@@ -137,14 +140,7 @@ deleteTypeEnvBinding ref =
 
 lookupTypeRefInMap :: TypeBinderRef -> Map.Map TypeBinderRef ElabType -> Maybe ElabType
 lookupTypeRefInMap ref bindings =
-  case Map.lookup ref bindings of
-    Just ty -> Just ty
-    Nothing -> go (Map.toList bindings)
-  where
-    go [] = Nothing
-    go ((existing, ty) : rest)
-      | typeBinderRefsSameIdentity existing ref = Just ty
-      | otherwise = go rest
+  Map.lookup ref bindings
 
 typeEnvContainsRef :: TypeBinderRef -> Env -> Bool
 typeEnvContainsRef ref env =
@@ -239,6 +235,7 @@ typeCheckWithEnvSummary envSummary resolvedEnv env term = case term of
               || argTy' == aTy'
               || alphaEqType argTy' aTy'
               || churchAwareEqType argTy' aTy'
+              || nominalStructuralMuCompatible argTy' aTy'
               || opaqueIOCompatible argTy' aTy'
               || muCompatible
               then Right resTy
@@ -249,13 +246,12 @@ typeCheckWithEnvSummary envSummary resolvedEnv env term = case term of
       _ -> Left (TCExpectedArrow fTy)
   ELet resolved sch rhs body -> do
     ensureContractiveType (schemeToType sch)
-    let v = resolvedVarReferenceName resolved
-        schTy = schemeToType sch
+    let schTy = schemeToType sch
         envSummary' = insertResolvedTermSummary resolved schTy env envSummary
         env' = insertResolvedTermBinding resolved schTy env
         resolvedEnv' = insertResolvedTermEnv (mapResolvedVarType (const schTy) resolved) schTy resolvedEnv
     rhsTy <- typeCheckWithEnvSummary envSummary' resolvedEnv' env' rhs
-    if v == "_" || letSchemeAccepts rhsTy schTy
+    if resolvedVarIsDiscard resolved || letSchemeAccepts rhsTy schTy
       then do
         typeCheckWithEnvSummary envSummary' resolvedEnv' env' body
       else Left (TCLetTypeMismatch rhsTy schTy)
@@ -365,11 +361,15 @@ checkInstantiation env ty inst =
         }
 
 litType :: Lit -> ElabType
-litType lit = case lit of
-  LInt _ -> TBase (BaseTy "Int")
-  LBool _ -> TBase (BaseTy "Bool")
-  LChar _ -> TBase (BaseTy "Char")
-  LString _ -> TBase (BaseTy "String")
+litType = \case
+  LInt _ -> builtinLiteralType "Int"
+  LBool _ -> builtinLiteralType "Bool"
+  LChar _ -> builtinLiteralType "Char"
+  LString _ -> builtinLiteralType "String"
+
+builtinLiteralType :: String -> ElabType
+builtinLiteralType name =
+  TBaseWithIdentity (Builtins.builtinTypeHeadIdentity name) (BaseTy name)
 
 boundType :: Maybe BoundType -> ElabType
 boundType = maybe TBottom tyToElab
@@ -646,15 +646,17 @@ stripVacuousForallsDeepBound bound = case bound of
 opaqueIOCompatible :: ElabType -> ElabType -> Bool
 opaqueIOCompatible expected actual =
   case (expected, actual) of
-    (TCon expectedName (_ :| []), TCon actualName (_ :| [])) ->
-      isOpaqueIOName expectedName && isOpaqueIOName actualName
+    (TConWithIdentity expectedIdentity expectedName (_ :| []), TConWithIdentity actualIdentity actualName (_ :| [])) ->
+      isOpaqueIOHead expectedIdentity expectedName && isOpaqueIOHead actualIdentity actualName
     (TArrow expectedDom expectedCod, TArrow actualDom actualCod) ->
       opaqueIODomainCompatible expectedDom actualDom
         && opaqueIOCompatible expectedCod actualCod
     _ -> False
   where
-    isOpaqueIOName (BaseTy name) =
-      name == "IO" || name == "<builtin>.IO"
+    isOpaqueIOHead (Just identity) _ =
+      identity == Builtins.builtinTypeIdentity "IO"
+    isOpaqueIOHead Nothing _ =
+      False
 
     opaqueIODomainCompatible expectedDom actualDom =
       expectedDom == actualDom
@@ -663,6 +665,33 @@ opaqueIOCompatible expected actual =
         || case (expectedDom, actualDom) of
           (TVarRef {}, TVarRef {}) -> True
           _ -> False
+
+nominalStructuralMuCompatible :: ElabType -> ElabType -> Bool
+nominalStructuralMuCompatible expected actual =
+  case (expected, actual) of
+    (TBaseWithIdentity expectedIdentity expectedBase, actualMu@TMuRef {}) ->
+      nominalHeadMatchesStructuralMu expectedIdentity expectedBase actualMu
+    (TConWithIdentity expectedIdentity expectedBase _, actualMu@TMuRef {}) ->
+      nominalHeadMatchesStructuralMu expectedIdentity expectedBase actualMu
+    (expectedMu@TMuRef {}, TBaseWithIdentity actualIdentity actualBase) ->
+      nominalHeadMatchesStructuralMu actualIdentity actualBase expectedMu
+    (expectedMu@TMuRef {}, TConWithIdentity actualIdentity actualBase _) ->
+      nominalHeadMatchesStructuralMu actualIdentity actualBase expectedMu
+    _ -> False
+
+nominalHeadMatchesStructuralMu :: Maybe SymbolIdentity -> BaseTy -> ElabType -> Bool
+nominalHeadMatchesStructuralMu nominalIdentity _ (TMuRef selfRef _) =
+  structuralSelfMatchesNominalIdentity nominalIdentity selfRef
+nominalHeadMatchesStructuralMu _ _ _ =
+  False
+
+structuralSelfMatchesNominalIdentity :: Maybe SymbolIdentity -> TypeBinderRef -> Bool
+structuralSelfMatchesNominalIdentity (Just identity) selfRef =
+  case typeBinderIdentityStructural (typeBinderRefIdentity selfRef) of
+    Just (unique, StructuralSelfBinder) -> unique == symbolUniqueIdentity identity
+    _ -> False
+structuralSelfMatchesNominalIdentity Nothing _ =
+  False
 
 collapseRecursiveAlias :: TypeBinderRef -> ElabType -> ElabType -> ElabType
 collapseRecursiveAlias muRef recursiveTy = go

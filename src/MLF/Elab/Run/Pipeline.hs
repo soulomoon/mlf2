@@ -10,6 +10,7 @@ module MLF.Elab.Run.Pipeline
     PreparedExternalBindings,
     prepareExternalBindings,
     preparedExternalTypeCheckEnv,
+    extendPreparedExternalBindingTypeIdentities,
     restrictPreparedExternalBindings,
     unionPreparedExternalBindings,
     runPipelineElabDetailedWithEnv,
@@ -78,7 +79,7 @@ import MLF.Constraint.Types.Graph
     toListNode,
   )
 import MLF.Constraint.Types.Phase (Phase (Presolved, Raw))
-import MLF.Elab.Elaborate (ElabConfig, ElabEnv, elaborateWithEnv)
+import MLF.Elab.Elaborate (ElabConfig, ElabEnv (..), elaborateWithEnv)
 import MLF.Elab.Elaborate.Algebra (Env, mkEnvWithBindingDetails)
 import MLF.Elab.Inst (schemeToType)
 import MLF.Elab.PipelineConfig (PipelineConfig (..), defaultPipelineConfig)
@@ -119,7 +120,9 @@ import MLF.Frontend.ConstraintGen
     ConstraintError (..),
     ConstraintResult (..),
     ExternalBinding (..),
-    ExternalBindingIdentity (..),
+    ExternalBindingIdentity,
+    externalBindingRuntimeName,
+    externalBindingDetails,
     ExternalBindingMode (..),
     ExternalBindings,
     ExternalEnv,
@@ -129,6 +132,7 @@ import MLF.Frontend.ConstraintGen
     generateModuleConstraintsKeyedWithExternalBindings,
   )
 import qualified MLF.Frontend.Program.Builtins as Builtins
+import MLF.Frontend.Symbol (SymbolIdentity, symbolDefiningModule, symbolDefiningName, symbolIdentityStableName, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (NormSrcType, NormSurfaceExpr, StructBound, VarName)
 import qualified MLF.Frontend.Syntax as Surface
 import MLF.Reify.TypeOps (freeTypeVarRefsType, freeTypeVarsType, freshNameLike, substTypeCaptureRef)
@@ -144,12 +148,16 @@ import MLF.Types.Identity
   ( EnvRef,
     IdDetails (..),
     IdentityGenerator,
-    LocalIdentity (..),
-    LocalRef (..),
     freshEnvRef,
     idDetailsGeneratedIdentities,
     idDetailsSameIdentity,
     identityGeneratorAfter,
+    localRefMatchesNodeId,
+    typeBinderIdentityFromStructural,
+    symbolGeneratedIdentities,
+    StructuralTypeBinderRole (..),
+    typeBinderIdentityStableName,
+    typeBinderGeneratedIdentities,
   )
 
 data PipelineElabDetailedResult = PipelineElabDetailedResult
@@ -163,7 +171,9 @@ data PreparedExternalBindings = PreparedExternalBindings
   { pebBindings :: ExternalBindings,
     pebSchemeInfos :: Map.Map VarName SchemeInfo,
     pebElaborationBindings :: Map.Map VarName (SchemeInfo, IdDetails),
-    pebTypeCheckEnv :: TypeCheck.Env
+    pebTypeCheckEnv :: TypeCheck.Env,
+    pebSourceTypeHeadIdentities :: Map.Map String SymbolIdentity,
+    pebSourceTypeBinderIdentities :: Map.Map String TypeBinderIdentity
   }
 
 preparedExternalTypeCheckEnv :: PreparedExternalBindings -> TypeCheck.Env
@@ -172,6 +182,75 @@ preparedExternalTypeCheckEnv = pebTypeCheckEnv
 preparedExternalElaborationEnv :: PreparedExternalBindings -> Env
 preparedExternalElaborationEnv =
   mkEnvWithBindingDetails . pebElaborationBindings
+
+preparedElaborationEnvWithExternalIdentities ::
+  IntMap.IntMap NormSrcType ->
+  PreparedExternalBindings ->
+  PreparedGeneralizationArtifact ->
+  ElabEnv 'Presolved
+preparedElaborationEnvWithExternalIdentities annSourceTypes extPrepared artifact =
+  (preparedElaborationEnvWithInitialEnv annSourceTypes (preparedExternalElaborationEnv extPrepared) artifact)
+    { eeSourceTypeHeadIdentities = headIdentities,
+      eeSourceTypeBinderIdentities = binderIdentities
+    }
+  where
+    (headIdentities, binderIdentities) =
+      preparedSourceTypeIdentityMaps extPrepared
+
+preparedSourceTypeIdentityMaps ::
+  PreparedExternalBindings ->
+  (Map.Map String SymbolIdentity, Map.Map String TypeBinderIdentity)
+preparedSourceTypeIdentityMaps prepared =
+  ( pebSourceTypeHeadIdentities prepared,
+    pebSourceTypeBinderIdentities prepared
+  )
+
+externalBindingsSourceTypeIdentityMaps ::
+  ExternalBindings ->
+  (Map.Map String SymbolIdentity, Map.Map String TypeBinderIdentity)
+externalBindingsSourceTypeIdentityMaps extBindings =
+  (headIdentities, binderIdentities)
+  where
+    bindings = Map.elems extBindings
+
+    headIdentities =
+      mergeIdentityMaps (map externalBindingTypeHeadIdentities bindings)
+
+    binderIdentities =
+      mergeIdentityMaps (structuralTypeBinderIdentitiesFromHeads headIdentities : map externalBindingTypeBinderIdentities bindings)
+
+structuralTypeBinderIdentitiesFromHeads :: Map.Map String SymbolIdentity -> Map.Map String TypeBinderIdentity
+structuralTypeBinderIdentitiesFromHeads headIdentities =
+  mergeIdentityMaps $
+    [ Map.fromList
+        [ ("$" ++ headName ++ "_self", typeBinderIdentityFromStructural (symbolUniqueIdentity identity) StructuralSelfBinder),
+          ("$" ++ headName ++ "_result", typeBinderIdentityFromStructural (symbolUniqueIdentity identity) StructuralResultBinder)
+        ]
+    | identity <- Map.elems headIdentities,
+      headName <- structuralHeadNames identity
+    ]
+  where
+    structuralHeadNames identity =
+      [ symbolDefiningModule identity ++ "." ++ symbolDefiningName identity,
+        symbolDefiningName identity,
+        symbolIdentityStableName identity
+      ]
+
+mergeIdentityMaps :: (Ord a) => [Map.Map String a] -> Map.Map String a
+mergeIdentityMaps maps =
+  Map.fromList
+    [ (name, identity)
+    | (name, identities) <- Map.toList identitiesByName,
+      [identity] <- [Set.toList identities]
+    ]
+  where
+    identitiesByName =
+      Map.fromListWith
+        Set.union
+        [ (name, Set.singleton identity)
+        | identityMap <- maps,
+          (name, identity) <- Map.toList identityMap
+        ]
 
 data ModuleBatchPlan key p = ModuleBatchPlan
   { mbpRoots :: [(key, PreparedExternalBindings, ModuleConstraintRoot)],
@@ -382,7 +461,9 @@ schemeExternalBindings =
         ExternalBinding
           { externalBindingType = srcTy,
             externalBindingMode = ExternalBindingScheme,
-            externalBindingIdentity = Nothing
+            externalBindingIdentity = Nothing,
+            externalBindingTypeHeadIdentities = Map.empty,
+            externalBindingTypeBinderIdentities = Map.empty
           }
     )
 
@@ -391,13 +472,36 @@ prepareExternalBindings extBindings = do
   let initialGenerator = identityGeneratorAfter (externalBindingsGeneratedIdentities extBindings)
   (schemeGenerator, schemeInfos) <- externalBindingSchemeInfos initialGenerator extBindings
   let (elaborationBindings, typeCheckEnv0) = externalBindingPreparedEnvs schemeGenerator extBindings schemeInfos
+      (headIdentities, binderIdentities) = externalBindingsSourceTypeIdentityMaps extBindings
   pure
     PreparedExternalBindings
       { pebBindings = extBindings,
         pebSchemeInfos = schemeInfos,
         pebElaborationBindings = elaborationBindings,
-        pebTypeCheckEnv = typeCheckEnv0
+        pebTypeCheckEnv = typeCheckEnv0,
+        pebSourceTypeHeadIdentities = headIdentities,
+        pebSourceTypeBinderIdentities = binderIdentities
       }
+
+extendPreparedExternalBindingTypeIdentities ::
+  Map.Map String SymbolIdentity ->
+  Map.Map String TypeBinderIdentity ->
+  PreparedExternalBindings ->
+  PreparedExternalBindings
+extendPreparedExternalBindingTypeIdentities headIdentities binderIdentities prepared =
+  let heads =
+        mergeIdentityMaps
+          [pebSourceTypeHeadIdentities prepared, headIdentities]
+      binders =
+        mergeIdentityMaps
+          [ pebSourceTypeBinderIdentities prepared,
+            binderIdentities,
+            structuralTypeBinderIdentitiesFromHeads heads
+          ]
+   in prepared
+        { pebSourceTypeHeadIdentities = heads,
+          pebSourceTypeBinderIdentities = binders
+        }
 
 restrictPreparedExternalBindings :: Set.Set VarName -> PreparedExternalBindings -> PreparedExternalBindings
 restrictPreparedExternalBindings names prepared =
@@ -407,17 +511,30 @@ restrictPreparedExternalBindings names prepared =
         { pebBindings = Map.restrictKeys (pebBindings prepared) names,
           pebSchemeInfos = schemeInfos,
           pebElaborationBindings = elaborationBindings,
-          pebTypeCheckEnv = restrictTypeCheckEnv elaborationBindings (pebTypeCheckEnv prepared)
+          pebTypeCheckEnv = restrictTypeCheckEnv elaborationBindings (pebTypeCheckEnv prepared),
+          pebSourceTypeHeadIdentities = pebSourceTypeHeadIdentities prepared,
+          pebSourceTypeBinderIdentities = pebSourceTypeBinderIdentities prepared
         }
 
 unionPreparedExternalBindings :: PreparedExternalBindings -> PreparedExternalBindings -> PreparedExternalBindings
 unionPreparedExternalBindings preferred fallback =
   let schemeInfos = pebSchemeInfos preferred `Map.union` pebSchemeInfos fallback
+      heads =
+        mergeIdentityMaps
+          [pebSourceTypeHeadIdentities preferred, pebSourceTypeHeadIdentities fallback]
+      binders =
+        mergeIdentityMaps
+          [ pebSourceTypeBinderIdentities preferred,
+            pebSourceTypeBinderIdentities fallback,
+            structuralTypeBinderIdentitiesFromHeads heads
+          ]
    in PreparedExternalBindings
         { pebBindings = pebBindings preferred `Map.union` pebBindings fallback,
           pebSchemeInfos = schemeInfos,
           pebElaborationBindings = pebElaborationBindings preferred `Map.union` pebElaborationBindings fallback,
-          pebTypeCheckEnv = unionTypeCheckEnv (pebTypeCheckEnv preferred) (pebTypeCheckEnv fallback)
+          pebTypeCheckEnv = unionTypeCheckEnv (pebTypeCheckEnv preferred) (pebTypeCheckEnv fallback),
+          pebSourceTypeHeadIdentities = heads,
+          pebSourceTypeBinderIdentities = binders
         }
 
 externalBindingPreparedEnvs :: IdentityGenerator -> ExternalBindings -> Map.Map VarName SchemeInfo -> (Map.Map VarName (SchemeInfo, IdDetails), TypeCheck.Env)
@@ -434,7 +551,7 @@ externalBindingPreparedEnvs generator0 extBindings schemeInfos =
               let details = externalBindingDetails identity
                in ( generator,
                     (name, (schemeInfo, details)) : elabAcc,
-                    (resolvedExternalBindingVar name identity schemeInfo, ty) : tcAcc
+                    (resolvedExternalBindingVar identity schemeInfo, ty) : tcAcc
                   )
             Nothing ->
               let (envRef, generator') = freshEnvRef name generator
@@ -450,9 +567,17 @@ externalBindingsGeneratedIdentities extBindings =
   | ExternalBinding {externalBindingIdentity = Just externalIdentity} <- Map.elems extBindings,
     identity <- idDetailsGeneratedIdentities (externalBindingDetails externalIdentity)
   ]
+    ++ [ identity
+       | ExternalBinding {externalBindingTypeBinderIdentities = binderIdentities} <- Map.elems extBindings,
+         identity <- concatMap typeBinderGeneratedIdentities (Map.elems binderIdentities)
+       ]
+    ++ [ identity
+       | ExternalBinding {externalBindingTypeHeadIdentities = headIdentities} <- Map.elems extBindings,
+         identity <- concatMap symbolGeneratedIdentities (Map.elems headIdentities)
+       ]
 
-resolvedExternalBindingVar :: VarName -> ExternalBindingIdentity -> SchemeInfo -> ResolvedVar
-resolvedExternalBindingVar _fallbackName identity schemeInfo =
+resolvedExternalBindingVar :: ExternalBindingIdentity -> SchemeInfo -> ResolvedVar
+resolvedExternalBindingVar identity schemeInfo =
   ResolvedVar
     { resolvedVarRuntimeName = externalBindingRuntimeName identity,
       resolvedVarType = schemeToType (siScheme schemeInfo),
@@ -558,10 +683,7 @@ runPipelineElabWithPreparedGenerated finalCheckMode diagnosticsMode traceCfg ext
       annCanon = preparedAnnotated prepared
       elabConfig = preparedElaborationConfig traceCfg prepared
       elabEnv =
-        preparedElaborationEnvWithInitialEnv
-          annSourceTypes
-          (preparedExternalElaborationEnv extPrepared)
-          prepared
+        preparedElaborationEnvWithExternalIdentities annSourceTypes extPrepared prepared
   term <- fromElabError (elaborateWithEnv elabConfig elabEnv annCanon)
   case traceGeneralize traceCfg ("pipeline elaborated term=" ++ show term) () of
     () -> pure ()
@@ -672,10 +794,7 @@ runPipelineElabWithPreparedGeneratedWithTiming timing label finalCheckMode diagn
     let annCanon = preparedAnnotated prepared
         elabConfig = preparedElaborationConfig traceCfg prepared
         elabEnv =
-          preparedElaborationEnvWithInitialEnv
-            annSourceTypes
-            (preparedExternalElaborationEnv extPrepared)
-            prepared
+          preparedElaborationEnvWithExternalIdentities annSourceTypes extPrepared prepared
     finishPreparedPipelineRootStage
       timing
       label
@@ -728,10 +847,7 @@ runPipelineElabWithPreparedConstraintWithTiming timing label finalCheckMode diag
     let annCanon = preparedAnnotated prepared
         elabConfig = preparedElaborationConfig traceCfg prepared
         elabEnv =
-          preparedElaborationEnvWithInitialEnv
-            annSourceTypes
-            (preparedExternalElaborationEnv extPrepared)
-            prepared
+          preparedElaborationEnvWithExternalIdentities annSourceTypes extPrepared prepared
     finishPreparedPipelineRootStage
       timing
       label
@@ -1246,10 +1362,7 @@ finishPreparedPipelineRootsWithTiming timing label finalCheckMode diagnosticsMod
       pure acc
     go index acc ((key, rootExtPrepared, root) : rest) = do
       let elabEnv =
-            preparedElaborationEnvWithInitialEnv
-              annSourceTypes
-              (preparedExternalElaborationEnv rootExtPrepared)
-              prepared
+            preparedElaborationEnvWithExternalIdentities annSourceTypes rootExtPrepared prepared
           rootLabel = rootTimingLabel label index
       out <-
         ExceptT $
@@ -1635,8 +1748,8 @@ authoritativeRootAnn term annExpr =
     (term0, AUnfold inner _ _)
       | shouldStripAuthoritativeAnn term0 ->
           authoritativeRootAnn term0 inner
-    (ELet resolved _ _ bodyTerm, ALet annName _ schemeRootId _ _ _ bodyAnn _)
-      | resolvedVarMatchesAnnNodeOrName resolved annName schemeRootId ->
+    (ELet resolved _ _ bodyTerm, ALet _ _ schemeRootId _ _ _ bodyAnn _)
+      | resolvedVarMatchesAnnNode resolved schemeRootId ->
           authoritativeRootAnn bodyTerm bodyAnn
     (EApp (ELam param (EVarNode bodyVar)) argTerm, AApp _ argAnn _ _ _)
       | sameResolvedLocalVar param bodyVar ->
@@ -1660,30 +1773,17 @@ annProducesResolvedVar resolved = go
   where
     go annExpr =
       case annExpr of
-        AVar annName nodeId -> resolvedVarMatchesAnnNodeOrName resolved annName nodeId
+        AVar _ nodeId -> resolvedVarMatchesAnnNode resolved nodeId
         AAnn inner _ _ -> go inner
         AUnfold inner _ _ -> go inner
         _ -> False
 
-resolvedVarMatchesAnnNodeOrName :: ResolvedVar -> Surface.VarName -> NodeId -> Bool
-resolvedVarMatchesAnnNodeOrName resolved name nodeId =
+resolvedVarMatchesAnnNode :: ResolvedVar -> NodeId -> Bool
+resolvedVarMatchesAnnNode resolved nodeId =
   case resolvedVarDetails resolved of
-    LocalId ref -> localRefMatchesNode ref nodeId
-    EvidenceId ref -> localRefMatchesNode ref nodeId
-    _ -> resolvedVarMatchesName resolved name
-
-localRefMatchesNode :: LocalRef -> NodeId -> Bool
-localRefMatchesNode ref nodeId =
-  localRefIdentity ref == GeneratedLocalId (UniqueIdentity (negate (getNodeId nodeId + 1)))
-
-resolvedVarMatchesName :: ResolvedVar -> Surface.VarName -> Bool
-resolvedVarMatchesName resolved name =
-  any
-    (== name)
-    [ resolvedVarReferenceName resolved,
-      resolvedVarRuntimeName resolved,
-      resolvedVarName resolved
-    ]
+    LocalId ref -> localRefMatchesNodeId ref nodeId
+    EvidenceId ref -> localRefMatchesNodeId ref nodeId
+    _ -> False
 
 sameResolvedLocalVar :: ResolvedVar -> ResolvedVar -> Bool
 sameResolvedLocalVar left right =
@@ -1714,14 +1814,23 @@ externalBindingSchemeInfos generator0 extBindings =
       pure (generator', Map.insert name schemeInfo acc)
 
 externalBindingSchemeInfoWithGenerator :: IdentityGenerator -> ExternalBinding -> Either ConstraintError (SchemeInfo, IdentityGenerator)
-externalBindingSchemeInfoWithGenerator generator0 ExternalBinding {externalBindingType = srcTy} = do
-  (ty, generator) <- srcTypeToElabTypeWithFresh generator0 srcTy
-  pure (schemeInfoFromRefSubst (schemeFromType ty) IntMap.empty, generator)
+externalBindingSchemeInfoWithGenerator generator0 ExternalBinding {externalBindingType = srcTy, externalBindingTypeHeadIdentities = headIdentities, externalBindingTypeBinderIdentities = binderIdentities} = do
+  (scheme, generator) <- srcTypeToElabSchemeWithFresh headIdentities binderIdentities generator0 srcTy
+  pure (schemeInfoFromRefSubst scheme IntMap.empty, generator)
 
-srcTypeToElabTypeWithFresh :: IdentityGenerator -> NormSrcType -> Either ConstraintError (ElabType, IdentityGenerator)
-srcTypeToElabTypeWithFresh generator0 ty =
-  let (refs, generator) = freshSourceTypeBinderRefs (Set.toList (freeSrcTypeVars ty)) generator0
-   in srcTypeToElabTypeWith refs generator ty
+srcTypeToElabSchemeWithFresh :: Map.Map String SymbolIdentity -> Map.Map String TypeBinderIdentity -> IdentityGenerator -> NormSrcType -> Either ConstraintError (ElabScheme, IdentityGenerator)
+srcTypeToElabSchemeWithFresh headIdentities binderIdentities generator0 srcTy = do
+  let (refs, generator1) = sourceTypeBinderRefs binderIdentities (Set.toList (freeSrcTypeVars srcTy)) generator0
+  (ty, generator2) <- srcTypeToElabTypeWith headIdentities binderIdentities refs generator1 srcTy
+  let explicitScheme = schemeFromType ty
+      explicitRefs = map fst (schemeBinderRefs explicitScheme)
+      freeBinds =
+        [ (ref, Nothing)
+        | ref <- Map.elems refs,
+          any (typeBinderRefsSameIdentity ref) (freeTypeVarRefsType (schemeBody explicitScheme)),
+          not (any (typeBinderRefsSameIdentity ref) explicitRefs)
+        ]
+  pure (mkElabSchemeWithRefs (freeBinds ++ schemeBinderRefs explicitScheme) (schemeBody explicitScheme), generator2)
 
 freeSrcTypeVars :: Surface.SrcTy n v -> Set.Set String
 freeSrcTypeVars ty =
@@ -1750,28 +1859,54 @@ freeSrcTypeVars ty =
         Surface.STMu name body -> go (Set.insert name bound) body
         Surface.STBottom -> Set.empty
 
-freshSourceTypeBinderRefs :: [String] -> IdentityGenerator -> (Map.Map String TypeBinderRef, IdentityGenerator)
-freshSourceTypeBinderRefs names generator0 =
+sourceTypeBinderRefs :: Map.Map String TypeBinderIdentity -> [String] -> IdentityGenerator -> (Map.Map String TypeBinderRef, IdentityGenerator)
+sourceTypeBinderRefs binderIdentities names generator0 =
   go names Map.empty generator0
   where
     go [] refs generator = (refs, generator)
     go (name : rest) refs generator =
-      let (ref, generator1) = freshTypeBinderRef name generator
+      let (ref, generator1) = sourceTypeBinderRefOrFresh binderIdentities name generator
        in go rest (Map.insert name ref refs) generator1
 
-srcTypeToElabTypeWith :: Map.Map String TypeBinderRef -> IdentityGenerator -> NormSrcType -> Either ConstraintError (ElabType, IdentityGenerator)
-srcTypeToElabTypeWith refs generator ty = case ty of
+sourceTypeBinderRefOrFresh :: Map.Map String TypeBinderIdentity -> String -> IdentityGenerator -> (TypeBinderRef, IdentityGenerator)
+sourceTypeBinderRefOrFresh binderIdentities name generator =
+  case lookupSourceTypeBinderIdentity binderIdentities name of
+    Just identity -> (typeBinderRefFromIdentity identity name, generator)
+    Nothing -> sourceTypeBinderRefForName name generator
+
+lookupSourceTypeBinderIdentity :: Map.Map String TypeBinderIdentity -> String -> Maybe TypeBinderIdentity
+lookupSourceTypeBinderIdentity binderIdentities name =
+  case Map.lookup name binderIdentities of
+    Just identity -> Just identity
+    Nothing -> Map.lookup name (sourceTypeBinderStableAliases binderIdentities)
+
+sourceTypeBinderStableAliases :: Map.Map String TypeBinderIdentity -> Map.Map String TypeBinderIdentity
+sourceTypeBinderStableAliases =
+  Map.fromList . map (\identity -> (typeBinderIdentityStableName identity, identity)) . Map.elems
+
+lookupSourceTypeHeadIdentity :: Map.Map String SymbolIdentity -> String -> Maybe SymbolIdentity
+lookupSourceTypeHeadIdentity headIdentities name =
+  case Map.lookup name headIdentities of
+    Just identity -> Just identity
+    Nothing -> Map.lookup name (sourceTypeHeadStableAliases headIdentities)
+
+sourceTypeHeadStableAliases :: Map.Map String SymbolIdentity -> Map.Map String SymbolIdentity
+sourceTypeHeadStableAliases =
+  Map.fromList . map (\identity -> (symbolIdentityStableName identity, identity)) . Map.elems
+
+srcTypeToElabTypeWith :: Map.Map String SymbolIdentity -> Map.Map String TypeBinderIdentity -> Map.Map String TypeBinderRef -> IdentityGenerator -> NormSrcType -> Either ConstraintError (ElabType, IdentityGenerator)
+srcTypeToElabTypeWith headIdentities binderIdentities refs generator ty = case ty of
   Surface.STVar name -> do
     ref <- sourceTypeBinderRef refs name
     Right (TVarRef ref, generator)
   Surface.STArrow dom cod -> do
-    (dom', generator1) <- srcTypeToElabTypeWith refs generator dom
-    (cod', generator2) <- srcTypeToElabTypeWith refs generator1 cod
+    (dom', generator1) <- srcTypeToElabTypeWith headIdentities binderIdentities refs generator dom
+    (cod', generator2) <- srcTypeToElabTypeWith headIdentities binderIdentities refs generator1 cod
     Right (TArrow dom' cod', generator2)
-  Surface.STBase name -> Right (TBaseWithIdentity (Builtins.builtinTypeHeadIdentity name) (builtinBaseTy name), generator)
+  Surface.STBase name -> Right (TBaseWithIdentity (sourceTypeHeadIdentity name) (builtinBaseTy name), generator)
   Surface.STCon name args -> do
     (args', generator') <- srcTypesToElabTypesWith refs generator args
-    Right (TConWithIdentity (Builtins.builtinTypeHeadIdentity name) (builtinBaseTy name) args', generator')
+    Right (TConWithIdentity (sourceTypeHeadIdentity name) (builtinBaseTy name) args', generator')
   Surface.STVarApp name args -> do
     (args', generator') <- srcTypesToElabTypesWith refs generator args
     ref <- sourceTypeBinderRef refs name
@@ -1781,16 +1916,16 @@ srcTypeToElabTypeWith refs generator ty = case ty of
   Surface.STTyApp {} ->
     Left (InternalConstraintError "residual type application reached elaboration")
   Surface.STForall name mb body ->
-    let (ref, generator1) = freshTypeBinderRef name generator
+    let (ref, generator1) = sourceTypeBinderRefOrFresh binderIdentities name generator
         refs' = Map.insert name ref refs
      in do
           (mb', generator2) <- maybe (Right (Nothing, generator1)) (srcBoundToElabBoundWith refs generator1) mb
-          (body', generator3) <- srcTypeToElabTypeWith refs' generator2 body
+          (body', generator3) <- srcTypeToElabTypeWith headIdentities binderIdentities refs' generator2 body
           Right (TForallRef ref mb' body', generator3)
   Surface.STMu name body ->
-    let (ref, generator1) = freshTypeBinderRef name generator
+    let (ref, generator1) = sourceTypeBinderRefOrFresh binderIdentities name generator
      in do
-          (body', generator2) <- srcTypeToElabTypeWith (Map.insert name ref refs) generator1 body
+          (body', generator2) <- srcTypeToElabTypeWith headIdentities binderIdentities (Map.insert name ref refs) generator1 body
           Right (TMuRef ref body', generator2)
   Surface.STBottom -> Right (TBottom, generator)
   where
@@ -1799,12 +1934,17 @@ srcTypeToElabTypeWith refs generator ty = case ty of
         Just ref -> Right ref
         Nothing -> Left (InternalConstraintError ("unresolved source type binder `" ++ name ++ "` reached pipeline external binding preparation"))
 
+    sourceTypeHeadIdentity name =
+      case lookupSourceTypeHeadIdentity headIdentities name of
+        Just identity -> Just identity
+        Nothing -> Builtins.builtinTypeHeadIdentity name
+
     srcTypesToElabTypesWith refs0 generator0 (arg :| args) = do
-      (arg', generator1) <- srcTypeToElabTypeWith refs0 generator0 arg
+      (arg', generator1) <- srcTypeToElabTypeWith headIdentities binderIdentities refs0 generator0 arg
       (argsRev, generator') <-
         foldM
           ( \(acc, gen) next -> do
-              (next', gen') <- srcTypeToElabTypeWith refs0 gen next
+              (next', gen') <- srcTypeToElabTypeWith headIdentities binderIdentities refs0 gen next
               Right (next' : acc, gen')
           )
           ([], generator1)
@@ -1817,13 +1957,13 @@ srcTypeToElabTypeWith refs generator ty = case ty of
     structBoundToElabBoundWith :: Map.Map String TypeBinderRef -> IdentityGenerator -> StructBound -> Either ConstraintError (Maybe BoundType, IdentityGenerator)
     structBoundToElabBoundWith refs' generator0 bTy = case bTy of
       Surface.STArrow dom cod -> do
-        (dom', generator1) <- srcTypeToElabTypeWith refs' generator0 dom
-        (cod', generator2) <- srcTypeToElabTypeWith refs' generator1 cod
+        (dom', generator1) <- srcTypeToElabTypeWith headIdentities binderIdentities refs' generator0 dom
+        (cod', generator2) <- srcTypeToElabTypeWith headIdentities binderIdentities refs' generator1 cod
         Right (Just (TArrow dom' cod'), generator2)
-      Surface.STBase name -> Right (Just (TBaseWithIdentity (Builtins.builtinTypeHeadIdentity name) (builtinBaseTy name)), generator0)
+      Surface.STBase name -> Right (Just (TBaseWithIdentity (sourceTypeHeadIdentity name) (builtinBaseTy name)), generator0)
       Surface.STCon name args -> do
         (args', generator1) <- srcTypesToElabTypesWith refs' generator0 args
-        Right (Just (TConWithIdentity (Builtins.builtinTypeHeadIdentity name) (builtinBaseTy name) args'), generator1)
+        Right (Just (TConWithIdentity (sourceTypeHeadIdentity name) (builtinBaseTy name) args'), generator1)
       Surface.STVarApp name args -> do
         (args', generator1) <- srcTypesToElabTypesWith refs' generator0 args
         ref <- sourceTypeBinderRef refs' name
@@ -1833,16 +1973,16 @@ srcTypeToElabTypeWith refs generator ty = case ty of
       Surface.STTyApp {} ->
         Left (InternalConstraintError "residual type application reached elaboration")
       Surface.STForall name mb body ->
-        let (ref, generator1) = freshTypeBinderRef name generator0
+        let (ref, generator1) = sourceTypeBinderRefOrFresh binderIdentities name generator0
             refs'' = Map.insert name ref refs'
          in do
               (mb', generator2) <- maybe (Right (Nothing, generator1)) (srcBoundToElabBoundWith refs' generator1) mb
-              (body', generator3) <- srcTypeToElabTypeWith refs'' generator2 body
+              (body', generator3) <- srcTypeToElabTypeWith headIdentities binderIdentities refs'' generator2 body
               Right (Just (TForallRef ref mb' body'), generator3)
       Surface.STMu name body ->
-        let (ref, generator1) = freshTypeBinderRef name generator0
+        let (ref, generator1) = sourceTypeBinderRefOrFresh binderIdentities name generator0
          in do
-              (body', generator2) <- srcTypeToElabTypeWith (Map.insert name ref refs') generator1 body
+              (body', generator2) <- srcTypeToElabTypeWith headIdentities binderIdentities (Map.insert name ref refs') generator1 body
               Right (Just (TMuRef ref body'), generator2)
       Surface.STBottom -> Right (Nothing, generator0)
 

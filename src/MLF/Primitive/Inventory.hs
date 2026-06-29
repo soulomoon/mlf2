@@ -11,6 +11,9 @@ module MLF.Primitive.Inventory
     builtinTypeSpecs,
     builtinTypeNames,
     builtinOpaqueTypeNames,
+    builtinTypeIdentity,
+    builtinTypeHeadIdentity,
+    builtinValueIdentity,
     isBuiltinTypeName,
     isOpaqueBuiltinTypeName,
     builtinTypeKind,
@@ -20,7 +23,9 @@ module MLF.Primitive.Inventory
     primitiveValueSpecs,
     primitiveValueElabTypes,
     primitiveValueNames,
+    primitiveValueNameByIdentity,
     primitiveNativeSupport,
+    freePrimitiveTypeVars,
     nativeAndPrimitiveName,
     stringLengthPrimitiveName,
     stringIsEmptyPrimitiveName,
@@ -76,17 +81,24 @@ module MLF.Primitive.Inventory
   )
 where
 
-import Data.List (stripPrefix)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
 import MLF.Constraint.Types.Graph (BaseTy (..))
-import MLF.Elab.Types (ElabType, Ty (..), TypeBinderRef, freshTypeBinderRef)
+import MLF.Elab.Types (ElabType, Ty (..), TypeBinderRef, sourceTypeBinderRefForName)
+import MLF.Frontend.Symbol (SymbolIdentity)
 import MLF.Frontend.Syntax (SrcBound (..), SrcTy (..), SrcType)
 import qualified MLF.Frontend.Syntax.Program as P
-import MLF.Types.Identity (IdentityGenerator, initialIdentityGenerator)
+import qualified MLF.Primitive.Identity as PrimitiveIdentity
+import
+  MLF.Types.Identity
+    ( IdentityGenerator,
+      advanceIdentityGeneratorPast,
+      initialIdentityGenerator,
+      symbolGeneratedIdentities,
+    )
 
 data BuiltinTypeSpec = BuiltinTypeSpec
   { builtinTypeSpecKind :: P.SrcKind,
@@ -179,7 +191,7 @@ data PrimitiveValueSpec = PrimitiveValueSpec
   deriving (Eq, Show)
 
 builtinModuleName :: String
-builtinModuleName = "<builtin>"
+builtinModuleName = PrimitiveIdentity.builtinModuleName
 
 builtinTypeSpecs :: Map String BuiltinTypeSpec
 builtinTypeSpecs =
@@ -193,35 +205,33 @@ builtinTypeSpecs =
     ]
 
 builtinTypeNames :: Set String
-builtinTypeNames = Map.keysSet builtinTypeSpecs
+builtinTypeNames = PrimitiveIdentity.builtinTypeNames
 
 builtinOpaqueTypeNames :: Set String
 builtinOpaqueTypeNames =
   Map.keysSet (Map.filter builtinTypeSpecOpaque builtinTypeSpecs)
 
 isBuiltinTypeName :: String -> Bool
-isBuiltinTypeName = (`Map.member` builtinTypeSpecs)
+isBuiltinTypeName =
+  PrimitiveIdentity.isBuiltinTypeName
 
 isOpaqueBuiltinTypeName :: String -> Bool
-isOpaqueBuiltinTypeName = (`Set.member` builtinOpaqueTypeNames)
+isOpaqueBuiltinTypeName =
+  (`Set.member` builtinOpaqueTypeNames) . normalizeBuiltinTypeReference
 
 builtinTypeKind :: String -> Maybe P.SrcKind
 builtinTypeKind name =
-  builtinTypeSpecKind <$> Map.lookup name builtinTypeSpecs
+  builtinTypeSpecKind <$> Map.lookup (normalizeBuiltinTypeReference name) builtinTypeSpecs
 
 qualifyBuiltinTypeName :: String -> String
 qualifyBuiltinTypeName name = builtinModuleName ++ "." ++ name
 
 normalizeBuiltinTypeReference :: String -> String
-normalizeBuiltinTypeReference name =
-  case stripPrefix (builtinModuleName ++ ".") name of
-    Just builtinName
-      | isBuiltinTypeName builtinName -> builtinName
-    _ -> name
+normalizeBuiltinTypeReference = PrimitiveIdentity.normalizeBuiltinTypeReference
 
 matchesBuiltinTypeName :: String -> String -> Bool
 matchesBuiltinTypeName builtinName referenceName =
-  normalizeBuiltinTypeReference referenceName == builtinName
+  normalizeBuiltinTypeReference referenceName == normalizeBuiltinTypeReference builtinName
 
 primitiveValueSpecs :: Map String PrimitiveValueSpec
 primitiveValueSpecs =
@@ -621,6 +631,17 @@ primitiveValueSpecs =
 primitiveValueNames :: Set String
 primitiveValueNames = Map.keysSet primitiveValueSpecs
 
+primitiveValueNameByIdentity :: SymbolIdentity -> Maybe String
+primitiveValueNameByIdentity identity =
+  Map.lookup identity primitiveValueNamesByIdentity
+
+primitiveValueNamesByIdentity :: Map SymbolIdentity String
+primitiveValueNamesByIdentity =
+  Map.fromList
+    [ (builtinValueIdentity name, name)
+    | name <- Map.keys primitiveValueSpecs
+    ]
+
 primitiveValueElabTypes :: Map String ElabType
 primitiveValueElabTypes =
   snd $
@@ -939,14 +960,20 @@ primitiveTypeToElabTypeFrom generator0 ty =
   let (freeEnv, generator) =
         foldl
           ( \(env, gen) name ->
-              let (ref, gen') = freshTypeBinderRef name gen
+              let (ref, gen') = primitiveTypeBinderRefForName name gen
                in (Map.insert name ref env, gen')
           )
-          (Map.empty, generator0)
+          (Map.empty, generatorAfterHeads)
           (Set.toAscList (freePrimitiveTypeVars ty))
       (ty', generator') = go freeEnv generator ty
    in (ty', generator')
   where
+    generatorAfterHeads =
+      foldr
+        advanceIdentityGeneratorPast
+        generator0
+        (concatMap symbolGeneratedIdentities (primitiveTypeHeadIdentities ty))
+
     go :: Map String TypeBinderRef -> IdentityGenerator -> PrimitiveType -> (ElabType, IdentityGenerator)
     go env generator =
       \case
@@ -954,22 +981,22 @@ primitiveTypeToElabTypeFrom generator0 ty =
           case Map.lookup name env of
             Just ref -> (TVarRef ref, generator)
             Nothing ->
-              let (ref, generator') = freshTypeBinderRef name generator
+              let (ref, generator') = primitiveTypeBinderRefForName name generator
                in (TVarRef ref, generator')
         PrimitiveTypeArrow dom cod ->
           let (dom', generator1) = go env generator dom
               (cod', generator2) = go env generator1 cod
            in (TArrow dom' cod', generator2)
-        PrimitiveTypeBase name -> (TBase (BaseTy name), generator)
+        PrimitiveTypeBase name -> (TBaseWithIdentity (builtinTypeHeadIdentity name) (BaseTy name), generator)
         PrimitiveTypeCon name args ->
           let (args', generator') = mapAccumPrimitiveTypes env generator args
-           in (TCon (BaseTy name) args', generator')
+           in (TConWithIdentity (builtinTypeHeadIdentity name) (BaseTy name) args', generator')
         PrimitiveTypeForall name body ->
-          let (ref, generator1) = freshTypeBinderRef name generator
+          let (ref, generator1) = primitiveTypeBinderRefForName name generator
               (body', generator2) = go (Map.insert name ref env) generator1 body
            in (TForallRef ref Nothing body', generator2)
         PrimitiveTypeMu name body ->
-          let (ref, generator1) = freshTypeBinderRef name generator
+          let (ref, generator1) = primitiveTypeBinderRefForName name generator
               (body', generator2) = go (Map.insert name ref env) generator1 body
            in (TMuRef ref body', generator2)
 
@@ -989,6 +1016,30 @@ primitiveTypeToElabTypeFrom generator0 ty =
               ([], generator1)
               args
        in (arg' :| reverse argsRev, generator')
+
+primitiveTypeHeadIdentities :: PrimitiveType -> [SymbolIdentity]
+primitiveTypeHeadIdentities =
+  \case
+    PrimitiveTypeVar {} -> []
+    PrimitiveTypeArrow dom cod -> primitiveTypeHeadIdentities dom ++ primitiveTypeHeadIdentities cod
+    PrimitiveTypeBase name -> maybe [] pure (builtinTypeHeadIdentity name)
+    PrimitiveTypeCon name (arg :| args) ->
+      maybe [] pure (builtinTypeHeadIdentity name) ++ concatMap primitiveTypeHeadIdentities (arg : args)
+    PrimitiveTypeForall _ body -> primitiveTypeHeadIdentities body
+    PrimitiveTypeMu _ body -> primitiveTypeHeadIdentities body
+
+primitiveTypeBinderRefForName :: String -> IdentityGenerator -> (TypeBinderRef, IdentityGenerator)
+primitiveTypeBinderRefForName =
+  sourceTypeBinderRefForName
+
+builtinTypeIdentity :: String -> SymbolIdentity
+builtinTypeIdentity = PrimitiveIdentity.builtinTypeIdentity
+
+builtinTypeHeadIdentity :: String -> Maybe SymbolIdentity
+builtinTypeHeadIdentity = PrimitiveIdentity.builtinTypeHeadIdentity
+
+builtinValueIdentity :: String -> SymbolIdentity
+builtinValueIdentity = PrimitiveIdentity.builtinValueIdentity
 
 freePrimitiveTypeVars :: PrimitiveType -> Set String
 freePrimitiveTypeVars =
@@ -1013,14 +1064,8 @@ canonicalizeBuiltinSourceType :: SrcType -> SrcType
 canonicalizeBuiltinSourceType =
   \case
     asIs@STVar {} -> asIs
-    STBase name
-      | isBuiltinTypeName name -> STBase (qualifyBuiltinTypeName name)
-      | otherwise -> STBase name
-    STCon name args
-      | isBuiltinTypeName name ->
-          STCon (qualifyBuiltinTypeName name) (fmap canonicalizeBuiltinSourceType args)
-      | otherwise ->
-          STCon name (fmap canonicalizeBuiltinSourceType args)
+    STBase name -> STBase (canonicalBuiltinHead name)
+    STCon name args -> STCon (canonicalBuiltinHead name) (fmap canonicalizeBuiltinSourceType args)
     STVarApp name args ->
       STVarApp name (fmap canonicalizeBuiltinSourceType args)
     STTyLam name body ->
@@ -1062,8 +1107,12 @@ sourceTypeMentionsOpaqueBuiltin =
     STBottom ->
       False
   where
-    isOpaqueBuiltinTypeReference name =
-      isOpaqueBuiltinTypeName name
-        || case stripPrefix (builtinModuleName ++ ".") name of
-          Just builtinName -> isOpaqueBuiltinTypeName builtinName
-          Nothing -> False
+    isOpaqueBuiltinTypeReference =
+      isOpaqueBuiltinTypeName
+
+canonicalBuiltinHead :: String -> String
+canonicalBuiltinHead name
+  | isBuiltinTypeName canonical = qualifyBuiltinTypeName canonical
+  | otherwise = name
+  where
+    canonical = normalizeBuiltinTypeReference name

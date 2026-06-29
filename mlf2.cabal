@@ -91,6 +91,7 @@ library mlf2-internal
                       MLF.Frontend.Program.Finalize,
                       MLF.Frontend.Program.Check,
                       MLF.Frontend.Program.Run,
+                      MLF.Primitive.Identity,
                       MLF.Primitive.Inventory,
                       MLF.Platform.Contract,
                       MLF.Platform.EnvironmentPolicy,
@@ -179,6 +180,7 @@ library mlf2-internal
                       MLF.Elab.Run.Generalize,
                       MLF.Elab.Run.Generalize.Prepare,
                       MLF.Elab.Run.Generalize.Prepare.TestSupport,
+                      MLF.Elab.Run.TypeOps,
                       MLF.Elab.Phi.TestSupport,
                       MLF.Elab.Types
     other-modules:    MLF.Constraint.Normalize.Internal,
@@ -287,7 +289,6 @@ library mlf2-internal
                       MLF.Elab.Run.ResultType.Fallback,
                       MLF.Elab.Run.ResultType.Fallback.Core,
                       MLF.Elab.Run.ResultType.Types,
-                      MLF.Elab.Run.TypeOps,
                       MLF.Elab.Sigma,
                       MLF.Elab.TypeCheck,
                       MLF.Frontend.ConstraintGen.Types,
