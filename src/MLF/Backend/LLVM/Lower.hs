@@ -6048,18 +6048,45 @@ functionFormFromExpectedWithGenerator generator expectedTy expr =
   case freshenFunctionFormMissingTypeBinderIdentities generator (functionFormFromExpr expr) of
     (typedForm, generator0) ->
       case freshenFunctionFormMissingParamIdentities generator0 typedForm of
-        (form, generator')
-          | Just (completed, generator'') <- completeAliasFunctionFormWithGenerator generator' form ->
+        (form0, generator')
+          | let form = alignFunctionFormTypeBindersWithExpected expectedTy form0,
+            Just (completed, generator'') <- completeAliasFunctionFormWithGenerator generator' form ->
               (completed, generator'')
-          | not (null (ffTypeBinders form)) || not (null (ffParams form)) ->
+          | let form = alignFunctionFormTypeBindersWithExpected expectedTy form0,
+            not (null (ffTypeBinders form)) || not (null (ffParams form)) ->
               (form, generator')
           | otherwise ->
               case aliasFunctionFormWithGenerator generator' expectedTy expr of
                 Just result -> result
                 Nothing ->
                   case expectedNullaryReturnType expectedTy of
-                    Just returnTy -> (form {ffReturnType = returnTy}, generator')
-                    Nothing -> (form, generator')
+                    Just returnTy -> (form0 {ffReturnType = returnTy}, generator')
+                    Nothing -> (form0, generator')
+
+alignFunctionFormTypeBindersWithExpected :: BackendType -> FunctionForm -> FunctionForm
+alignFunctionFormTypeBindersWithExpected expectedTy form
+  | length expectedBinders == length formBinders,
+    and (zipWith sameBinderName expectedBinders formBinders) =
+      form
+        { ffTypeBinders = expectedBinders,
+          ffParams = [(name, substituteTy ty) | (name, ty) <- ffParams form],
+          ffBody = substituteExprTypesByKey substitution (ffBody form),
+          ffReturnType = substituteTy (ffReturnType form)
+        }
+  | otherwise = form
+  where
+    (expectedBinders, _) = collectForallsType expectedTy
+    formBinders = ffTypeBinders form
+    substitution =
+      Map.fromList
+        [ (functionTypeBinderKey formBinder, functionTypeBinderVar expectedBinder)
+        | (expectedBinder, formBinder) <- zip expectedBinders formBinders,
+          functionTypeBinderKey expectedBinder /= functionTypeBinderKey formBinder
+        ]
+    substituteTy =
+      substituteBackendTypesByKey substitution
+    sameBinderName left right =
+      backendTypeBinderName left == backendTypeBinderName right
 
 freshenFunctionFormMissingTypeBinderIdentities :: IdentityGenerator -> FunctionForm -> (FunctionForm, IdentityGenerator)
 freshenFunctionFormMissingTypeBinderIdentities generator form =
@@ -7775,11 +7802,6 @@ collectSpecializationRequestsWithBound base substitution bound expr =
       case expr of
         BackendApp {} ->
           case collectCall expr of
-            Just (BackendVarWithIdentity _ mbIdentity _name, typeArgs, _)
-              | Just binding <- lookupSpecializationBinding base mbIdentity,
-                not (null (ffTypeBinders (biForm binding))),
-                length typeArgs == length (ffTypeBinders (biForm binding)) ->
-                  [specRequestForBinding binding (map (substituteBackendTypesByKey substitution) typeArgs)]
             Just (BackendVarWithIdentity _ mbIdentity name, typeArgs, args)
               | Just binding <- lookupSpecializationBinding base mbIdentity,
                 not (null (ffTypeBinders (biForm binding))) ->
@@ -9385,7 +9407,7 @@ lowerGlobalValue env exprEnv context resultTy name binding typeArgs =
       | not (null (ffParams instantiated)) =
           lowerInstantiatedGlobalFunctionValue expectedTy functionContext binding0 resolvedTypeArgs instantiated
       | otherwise =
-          if alphaEqBackendType expectedTy (ffReturnType instantiated)
+          if zeroArityGlobalReturnTypeMatches env expectedTy (ffReturnType instantiated)
             then do
               resultLLVMType <- lowerRuntimeValueTypeM env context expectedTy
               functionName <- globalFunctionName env context binding0 resolvedTypeArgs
@@ -9411,6 +9433,18 @@ lowerGlobalValue env exprEnv context resultTy name binding typeArgs =
       requireEvidenceFunctionType context functionContext expectedTy actualTy
       functionName <- globalFunctionName env context binding0 resolvedTypeArgs
       pure (functionPointerValueForBinding expectedTy binding0 resolvedTypeArgs (LLVMGlobalRef LLVMPtr functionName))
+
+zeroArityGlobalReturnTypeMatches :: ProgramEnv -> BackendType -> BackendType -> Bool
+zeroArityGlobalReturnTypeMatches env expected actual =
+  alphaEqBackendType expected actual || sameRuntimeDataType (peBase env) expected actual
+
+sameRuntimeDataType :: ProgramBase -> BackendType -> BackendType -> Bool
+sameRuntimeDataType base left right =
+  case (nativeDataRuntimeForType base left, nativeDataRuntimeForType base right) of
+    (Just leftRuntime, Just rightRuntime) ->
+      backendDataIdentity (drData leftRuntime) == backendDataIdentity (drData rightRuntime)
+    _ ->
+      False
 
 residualZeroArityPolymorphism :: String -> [BackendType] -> FunctionForm -> Maybe BackendLLVMError
 residualZeroArityPolymorphism context typeArgs form
@@ -11388,13 +11422,179 @@ resolveTypeArguments context form explicitArgs valueArgs
         then Right Map.empty
         else Left (BackendLLVMUnsupportedCall ("unexpected type arguments at " ++ context))
   | length explicitArgs == length binders =
-      Right (Map.fromList (zip (map functionTypeBinderKey binders) explicitArgs))
+      refineExplicitTypeArguments binders form explicitArgs valueArgs
   | null explicitArgs =
       inferTypeArguments context binders (ffParams form) valueArgs
   | otherwise =
       Left (BackendLLVMUnsupportedCall ("partial type application at " ++ context))
   where
     binders = ffTypeBinders form
+
+refineExplicitTypeArguments ::
+  [BackendTypeBinder] ->
+  FunctionForm ->
+  [BackendType] ->
+  [BackendExpr] ->
+  Either BackendLLVMError (Map BackendTypeSubstitutionKey BackendType)
+refineExplicitTypeArguments binders form explicitArgs [] =
+  Right (explicitSubstitutionWithNameAliases binders form explicitArgs)
+refineExplicitTypeArguments binders form explicitArgs args = do
+  residualSubstitution <-
+    foldM
+      ( \acc ((_, expectedTy), actualExpr) ->
+          matchTypeParams residualBinderSet acc expectedTy (backendExprType actualExpr)
+      )
+      Map.empty
+      (zip instantiatedParams args)
+  let refinedExplicitSubstitution =
+        Map.map (substituteBackendTypesByKey residualSubstitution) explicitSubstitution
+  pure (Map.union refinedExplicitSubstitution residualSubstitution)
+  where
+    explicitSubstitution =
+      explicitSubstitutionWithNameAliases binders form explicitArgs
+    instantiatedParams =
+      [(name, substituteBackendTypesByKey explicitSubstitution ty) | (name, ty) <- ffParams form]
+    residualBinderSet =
+      Set.union
+        (Set.unions (map freeBackendTypeVarKeys explicitArgs))
+        residualParamBinderSet
+        `Set.difference` Set.fromList (map functionTypeBinderKey binders)
+    residualParamBinderSet =
+      Set.fromList
+        [ key
+        | (_, ty) <- instantiatedParams,
+          (key, occurrenceName) <- Set.toList (freeBackendTypeVarOccurrences ty),
+          Set.member occurrenceName binderNames
+        ]
+    binderNames =
+      Set.fromList (map backendTypeBinderName binders)
+
+explicitSubstitutionWithNameAliases ::
+  [BackendTypeBinder] ->
+  FunctionForm ->
+  [BackendType] ->
+  Map BackendTypeSubstitutionKey BackendType
+explicitSubstitutionWithNameAliases binders form explicitArgs =
+  Map.union binderSubstitution aliasSubstitution
+  where
+    binderSubstitution =
+      Map.fromList (zip (map functionTypeBinderKey binders) explicitArgs)
+    aliasSubstitution =
+      Map.fromList
+        [ (key, explicitArg)
+        | (binder, explicitArg) <- zip binders explicitArgs,
+          (key, occurrenceName) <- Set.toList freeParamOccurrences,
+          key /= functionTypeBinderKey binder,
+          occurrenceName == backendTypeBinderName binder
+        ]
+    freeParamOccurrences =
+      freeFunctionFormTypeVarOccurrences form
+
+freeFunctionFormTypeVarOccurrences :: FunctionForm -> Set (BackendTypeSubstitutionKey, String)
+freeFunctionFormTypeVarOccurrences form =
+  Set.unions
+    [ Set.unions (map (freeBackendTypeVarOccurrences . snd) (ffParams form)),
+      freeBackendTypeVarOccurrences (ffReturnType form),
+      freeBackendTypeVarOccurrencesInExpr (ffBody form)
+    ]
+
+freeBackendTypeVarOccurrences :: BackendType -> Set (BackendTypeSubstitutionKey, String)
+freeBackendTypeVarOccurrences =
+  \case
+    BTVarWithIdentity identity name ->
+      Set.singleton (backendTypeSubstitutionKeyFor identity name, name)
+    BTArrow dom cod ->
+      Set.union (freeBackendTypeVarOccurrences dom) (freeBackendTypeVarOccurrences cod)
+    BTBaseWithIdentity {} ->
+      Set.empty
+    BTConWithIdentity _ _ args ->
+      Set.unions (map freeBackendTypeVarOccurrences (NE.toList args))
+    BTVarAppWithIdentity identity name args ->
+      Set.insert
+        (backendTypeSubstitutionKeyFor identity name, name)
+        (Set.unions (map freeBackendTypeVarOccurrences (NE.toList args)))
+    BTForallWithIdentity identity name mbBound body ->
+      Set.union
+        (maybe Set.empty freeBackendTypeVarOccurrences mbBound)
+        (Set.filter ((/= backendTypeSubstitutionKeyFor identity name) . fst) (freeBackendTypeVarOccurrences body))
+    BTMuWithIdentity identity name body ->
+      Set.filter ((/= backendTypeSubstitutionKeyFor identity name) . fst) (freeBackendTypeVarOccurrences body)
+    BTBottom ->
+      Set.empty
+
+freeBackendTypeVarOccurrencesInExpr :: BackendExpr -> Set (BackendTypeSubstitutionKey, String)
+freeBackendTypeVarOccurrencesInExpr =
+  \case
+    BackendVarWithIdentity ty _ _ ->
+      freeBackendTypeVarOccurrences ty
+    BackendLit ty _ ->
+      freeBackendTypeVarOccurrences ty
+    BackendLamWithIdentity resultTy _ _ paramTy body ->
+      Set.unions
+        [ freeBackendTypeVarOccurrences resultTy,
+          freeBackendTypeVarOccurrences paramTy,
+          freeBackendTypeVarOccurrencesInExpr body
+        ]
+    BackendApp resultTy fun arg ->
+      Set.unions
+        [ freeBackendTypeVarOccurrences resultTy,
+          freeBackendTypeVarOccurrencesInExpr fun,
+          freeBackendTypeVarOccurrencesInExpr arg
+        ]
+    BackendLetWithIdentity resultTy _ _ bindingTy rhs body ->
+      Set.unions
+        [ freeBackendTypeVarOccurrences resultTy,
+          freeBackendTypeVarOccurrences bindingTy,
+          freeBackendTypeVarOccurrencesInExpr rhs,
+          freeBackendTypeVarOccurrencesInExpr body
+        ]
+    BackendTyAbsWithIdentity resultTy identity name mbBound body ->
+      Set.unions
+        [ freeBackendTypeVarOccurrences resultTy,
+          maybe Set.empty freeBackendTypeVarOccurrences mbBound,
+          Set.filter ((/= backendTypeSubstitutionKeyFor identity name) . fst) (freeBackendTypeVarOccurrencesInExpr body)
+        ]
+    BackendTyApp resultTy fun tyArg ->
+      Set.unions
+        [ freeBackendTypeVarOccurrences resultTy,
+          freeBackendTypeVarOccurrencesInExpr fun,
+          freeBackendTypeVarOccurrences tyArg
+        ]
+    BackendRoll resultTy payload ->
+      Set.union (freeBackendTypeVarOccurrences resultTy) (freeBackendTypeVarOccurrencesInExpr payload)
+    BackendUnroll resultTy payload ->
+      Set.union (freeBackendTypeVarOccurrences resultTy) (freeBackendTypeVarOccurrencesInExpr payload)
+    BackendClosureWithParamIdentities resultTy _ _ captures params body ->
+      Set.unions
+        [ freeBackendTypeVarOccurrences resultTy,
+          Set.unions (map freeBackendTypeVarOccurrencesInClosureCapture captures),
+          Set.unions (map (freeBackendTypeVarOccurrences . backendClosureParamType) params),
+          freeBackendTypeVarOccurrencesInExpr body
+        ]
+    BackendClosureCall resultTy fun args ->
+      Set.unions
+        [ freeBackendTypeVarOccurrences resultTy,
+          freeBackendTypeVarOccurrencesInExpr fun,
+          Set.unions (map freeBackendTypeVarOccurrencesInExpr args)
+        ]
+    BackendConstructWithIdentity resultTy _ _ args ->
+      Set.union (freeBackendTypeVarOccurrences resultTy) (Set.unions (map freeBackendTypeVarOccurrencesInExpr args))
+    BackendCase resultTy scrutinee alternatives ->
+      Set.unions
+        [ freeBackendTypeVarOccurrences resultTy,
+          freeBackendTypeVarOccurrencesInExpr scrutinee,
+          Set.unions (map freeBackendTypeVarOccurrencesInAlternative (NE.toList alternatives))
+        ]
+
+freeBackendTypeVarOccurrencesInClosureCapture :: BackendClosureCapture -> Set (BackendTypeSubstitutionKey, String)
+freeBackendTypeVarOccurrencesInClosureCapture capture =
+  Set.union
+    (freeBackendTypeVarOccurrences (backendClosureCaptureType capture))
+    (freeBackendTypeVarOccurrencesInExpr (backendClosureCaptureExpr capture))
+
+freeBackendTypeVarOccurrencesInAlternative :: BackendAlternative -> Set (BackendTypeSubstitutionKey, String)
+freeBackendTypeVarOccurrencesInAlternative (BackendAlternative _ body) =
+  freeBackendTypeVarOccurrencesInExpr body
 
 inferTypeArguments :: String -> [BackendTypeBinder] -> [(String, BackendType)] -> [BackendExpr] -> Either BackendLLVMError (Map BackendTypeSubstitutionKey BackendType)
 inferTypeArguments context binders params args = do

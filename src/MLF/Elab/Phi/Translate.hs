@@ -60,6 +60,7 @@ import MLF.Constraint.Presolution.Base (CopyMapping(..), InteriorNodes(..), copi
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Elab.Phi.Env (PhiM, askCanonical)
 import MLF.Elab.Phi.Omega (OmegaContext(..), phiWithSchemeOmega)
+import MLF.Elab.Run.Instantiation (varRefsInType)
 import MLF.Util.Trace (TraceConfig(..), traceGeneralize)
 import MLF.Elab.Run.Scope (schemeBodyTarget)
 
@@ -217,12 +218,15 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith readModel mbGaParents mSchemeIn
             debugPhi
                 ("phi traceBinderMapDomain=" ++ show (IntSet.toList traceBinderMapDomainRaw))
                 traceBinderMapDomainRaw
-    phiWithSchemeOmega
-        (omegaCtx (Just siReplay) traceBinderSources traceBinderReplayMap traceBinderMapDomain replayContract)
-        namedSet
-        siReplay
-        introCount
-        ops
+    case emptyOmegaCopyReplay introCount ops siReplay replayContract of
+        Just inst -> pure inst
+        Nothing ->
+            phiWithSchemeOmega
+                (omegaCtx (Just siReplay) traceBinderSources traceBinderReplayMap traceBinderMapDomain replayContract)
+                namedSet
+                siReplay
+                introCount
+                ops
   where
     debugPhi :: String -> a -> a
     debugPhi = traceGeneralize traceCfg
@@ -449,3 +453,83 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith readModel mbGaParents mSchemeIn
         case mTrace of
             Nothing -> IntMap.empty
             Just tr -> getCopyMapping (etCopyMap tr)
+
+    emptyOmegaCopyReplay :: Int -> [InstanceOp] -> SchemeInfo -> ReplayContract -> Maybe Instantiation
+    emptyOmegaCopyReplay introCount0 ops0 si replayContractCtx = do
+        tr <- mTrace
+        if introCount0 == 0
+            && null ops0
+            && replayContractCtx == ReplayContractNone
+            && null (etBinderArgs tr)
+            && IntMap.null (etBinderReplayMap tr)
+            then do
+                let schemeBinders = schemeBinderRefs (siScheme si)
+                    schemeRefs = map fst schemeBinders
+                    referencedRefsAll =
+                        uniqueTypeRefs
+                            [ ref
+                            | ref <- varRefsInType (schemeBody (siScheme si)) ++ concatMap (maybe [] (varRefsInType . tyToElab) . snd) schemeBinders
+                            , not (any (typeBinderRefsSameIdentity ref) schemeRefs)
+                            , Just source <- [typeBinderRefNode ref]
+                            , Just _copy <- [lookupCopySource source]
+                            ]
+                    schemeArgs =
+                        if null referencedRefsAll
+                            then []
+                            else
+                                mapMaybeCopyArgs
+                                    [ ref
+                                    | (ref, Nothing) <- schemeBinders
+                                    ]
+                if null schemeArgs && null referencedRefsAll
+                    then Nothing
+                    else
+                        let referencedRefsOutsideInterior =
+                                [ ref
+                                | ref <- referencedRefsAll
+                                , Just source <- [typeBinderRefNode ref]
+                                , not (sourceInInterior tr source)
+                                ]
+                            referencedArgs = mapMaybeCopyArgs referencedRefsOutsideInterior
+                            args = schemeArgs ++ referencedArgs
+                        in if null args
+                            then Nothing
+                            else Just (instSeqApps args)
+            else Nothing
+
+    uniqueTypeRefs :: [TypeBinderRef] -> [TypeBinderRef]
+    uniqueTypeRefs [] = []
+    uniqueTypeRefs (ref : refs) =
+        ref : uniqueTypeRefs (filter (not . typeBinderRefsSameIdentity ref) refs)
+
+    mapMaybeCopyArgs :: [TypeBinderRef] -> [ElabType]
+    mapMaybeCopyArgs refs =
+        [ copyArgType copy
+        | ref <- refs
+        , Just source <- [typeBinderRefNode ref]
+        , Just copy <- [lookupCopySource source]
+        ]
+
+    lookupCopySource :: NodeId -> Maybe NodeId
+    lookupCopySource source =
+        IntMap.lookup (getNodeId source) copyMap
+            <|> IntMap.lookup (getNodeId (canonicalNode source)) copyMap
+
+    sourceInInterior :: EdgeTrace -> NodeId -> Bool
+    sourceInInterior tr source =
+        case etInterior tr of
+            InteriorNodes interiorNodes ->
+                IntSet.member (getNodeId source) interiorNodes
+                    || IntSet.member (getNodeId (canonicalNode source)) interiorNodes
+
+    copyArgType :: NodeId -> ElabType
+    copyArgType copied =
+        TVarRef $
+            typeBinderRefFromIdentity
+                (typeBinderIdentityFromNode copied)
+                ("t" ++ show (getNodeId copied))
+
+    instSeqApps :: [ElabType] -> Instantiation
+    instSeqApps [] = InstId
+    instSeqApps [arg] = InstApp arg
+    instSeqApps (arg : rest) = InstSeq (InstApp arg) (instSeqApps rest)

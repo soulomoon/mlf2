@@ -370,10 +370,32 @@ finalizeScheme FinalizeInput {..} =
         [ (nameForId k, ref)
           | (k, ref) <- IntMap.toList subst
         ]
+      isOwnedStructuredAliasBinder nidInt =
+        let nid = canonical (NodeId nidInt)
+         in case VarStore.lookupVarBound constraint nid of
+              Just bnd0 ->
+                let bnd = canonical bnd0
+                    binderIsTypeRoot = nid == canonical typeRoot
+                    boundOwnedByBinder =
+                      case IntMap.lookup (nodeRefKey (typeRef bnd)) fiBindParents of
+                        Just (TypeRef parent, _) -> canonical parent == nid
+                        _ -> False
+                    boundIsStructured =
+                      case lookupNodeIn (cNodes constraint) bnd of
+                        Just TyArrow {} -> True
+                        Just TyCon {} -> True
+                        Just TyVarApp {} -> True
+                        Just TyForall {} -> True
+                        Just TyMu {} -> True
+                        Just TyExp {} -> True
+                        _ -> False
+                 in not binderIsTypeRoot && boundOwnedByBinder && boundIsStructured
+              Nothing -> False
       namedBinderRefs =
         [ ref
           | (nidInt, ref) <- IntMap.toList subst,
-            IntSet.member nidInt namedUnderGaSetPlan
+            IntSet.member nidInt namedUnderGaSetPlan,
+            not (isOwnedStructuredAliasBinder nidInt)
         ]
       renameVars = cataIx alg
         where

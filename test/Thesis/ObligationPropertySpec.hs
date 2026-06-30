@@ -1514,6 +1514,7 @@ decideMinimalFor c expNodeId targetNodeId =
 assertNodeAliasTranslation :: Int -> (NodeId -> NodeId -> InstanceOp) -> Property
 assertNodeAliasTranslation size mkOp =
   let (c, root, binderA, binderB, scheme, si, tr) = nodeAliasTranslationFixture size
+      refA = elabTypeRef (getNodeId binderA) "a"
       ew =
         EdgeWitness
           { ewEdgeId = EdgeId size,
@@ -1524,10 +1525,10 @@ assertNodeAliasTranslation size mkOp =
             ewWitness = InstanceWitness [mkOp binderB binderA]
           }
       expected =
-        testTForall
-          "a"
+        Elab.TForallRef
+          refA
           Nothing
-          (Elab.TArrow (testTVar "a") (testTVar "a"))
+          (Elab.TArrow (Elab.TVarRef refA) (Elab.TVarRef refA))
       generalizeAt _ _ _ =
         Left (Elab.InstantiationError "assertNodeAliasTranslation: unexpected generalization")
    in case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAt (identityPresolutionView c) Nothing (Just si) (Just tr) ew of
@@ -1544,8 +1545,10 @@ nodeAliasTranslationFixture size =
     base = max 3 size * 10
     root = NodeId (base + 100)
     binderA = NodeId (base + 1)
+    refA = elabTypeRef (getNodeId binderA) "a"
     forallB = NodeId (base + 102)
     binderB = NodeId (base + 2)
+    refB = elabTypeRef (getNodeId binderB) "b"
     bodyNode = NodeId (base + 103)
     c =
       rootedConstraint
@@ -1568,13 +1571,17 @@ nodeAliasTranslationFixture size =
           }
     scheme =
       Elab.schemeFromType
-        (testTForall "a" Nothing (testTForall "b" Nothing (Elab.TArrow (testTVar "a") (testTVar "b"))))
+        ( Elab.TForallRef
+            refA
+            Nothing
+            (Elab.TForallRef refB Nothing (Elab.TArrow (Elab.TVarRef refA) (Elab.TVarRef refB)))
+        )
     si =
       Elab.schemeInfoFromRefSubst
         scheme
         ( IntMap.fromList
-            [ (getNodeId binderA, elabTypeRef (getNodeId binderA) "a"),
-              (getNodeId binderB, elabTypeRef (getNodeId binderB) "b")
+            [ (getNodeId binderA, refA),
+              (getNodeId binderB, refB)
             ]
         )
     tr =

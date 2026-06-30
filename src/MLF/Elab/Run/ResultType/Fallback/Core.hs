@@ -299,7 +299,9 @@ computeResultTypeFallbackCoreWithRoots ctx viewBase (rootForTypeAnn, rootForType
               _ -> Nothing
       let boundTarget =
             case (baseTargetCandidate, lookupNodeIn nodes rootC) of
-              (Nothing, Just TyVar {tnBound = Nothing}) ->
+              (Nothing, Just TyVar {tnBound = Nothing})
+                | not rootHasMultiInst
+                    && not instArgRootMultiBase ->
                 case IntSet.toList rootBoundCandidates of
                   [baseKey] -> Just (NodeId baseKey)
                   _ -> Nothing
@@ -831,9 +833,15 @@ computeResultTypeFallbackCoreWithRoots ctx viewBase (rootForTypeAnn, rootForType
             ++ " rootFinalInvolvesMu="
             ++ show rootFinalInvolvesMu
         )
-      let ty =
+      let ty0 =
             foldr
               (\(ref, b) t -> TForallRef ref b t)
               (schemeBody sch)
               (schemeBinderRefs sch)
+          ty =
+            case (not rootBindingIsLocalType && (rootHasMultiInst || instArgRootMultiBase), schemeBinderRefs sch, ty0) of
+              (True, [], TVarRef ref) ->
+                TForallRef ref Nothing ty0
+              _ ->
+                ty0
       pure ty

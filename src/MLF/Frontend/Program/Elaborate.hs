@@ -978,7 +978,7 @@ lowerConstructorBinding scope ctorInfo =
 
 constructorBindingSourceTypeView :: ElaborateScope -> ConstructorInfo -> TypeView
 constructorBindingSourceTypeView scope ctorInfo =
-  sourceView
+  ctorView
     { typeViewHeadIdentities =
         mergeSymbolIdentityMaps
           [ typeViewHeadIdentities sourceView,
@@ -992,10 +992,10 @@ constructorBindingSourceTypeView scope ctorInfo =
     }
   where
     sourceView =
-      sourceTypeViewInScope scope (quantifyFreeTypeVars (ctorType ctorInfo))
+      sourceTypeViewInScope scope (typeViewDisplay ctorView)
 
     ctorView =
-      constructorTypeView scope ctorInfo
+      quantifiedConstructorTypeView scope ctorInfo
 
 lowerExprBinding :: ElaborateScope -> LoweredBindingIdentity -> SrcType -> Bool -> P.Expr -> Either ProgramError LoweredBinding
 lowerExprBinding scope identity expectedTy exportedAsMain expr = do
@@ -1163,11 +1163,22 @@ constructorSurfaceExpr scope ctorInfo =
 
 constructorBindingExpectedType :: ElaborateScope -> ConstructorInfo -> SrcType
 constructorBindingExpectedType scope ctorInfo =
-  let loweredTy = lowerType scope (quantifyFreeTypeVars (ctorType ctorInfo))
+  let ctorView = quantifiedConstructorTypeView scope ctorInfo
+      loweredTy = lowerTypeView scope ctorView
    in if constructorOwnerHasVariableHeadApplication (elaborateScopeDataTypesByIdentity scope) ctorInfo
         && srcTypeHasVariableHeadApplication loweredTy
         then constructorStructuralPlaceholderType scope ctorInfo
         else loweredTy
+
+quantifiedConstructorTypeView :: ElaborateScope -> ConstructorInfo -> TypeView
+quantifiedConstructorTypeView scope ctorInfo =
+  view
+    { typeViewDisplay = quantifyFreeTypeVars (typeViewDisplay view),
+      typeViewIdentity = quantifyFreeTypeVars (typeViewIdentity view)
+    }
+  where
+    view =
+      constructorTypeView scope ctorInfo
 
 constructorSurfaceExprRaw :: ElaborateScope -> ConstructorInfo -> SurfaceExpr
 constructorSurfaceExprRaw scope ctorInfo =

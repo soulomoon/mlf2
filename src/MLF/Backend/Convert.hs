@@ -71,6 +71,7 @@ import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
+import Data.Maybe (fromMaybe)
 import qualified Data.Set as Set
 import MLF.Backend.CallableShape
   ( BackendCallableBindingKind (..),
@@ -192,7 +193,7 @@ import MLF.Frontend.Program.Types
 import MLF.Frontend.Symbol (symbolIdentityStableName, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit, SrcBound (..), SrcTy (..), SrcType, TypeParam)
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
-import MLF.Types.Identity (DeferredRef, IdDetails (..), IdentityGenerator, LocalRef, StructuralTypeBinderRole (..), UniqueIdentity (..), deferredRefIdentity, deferredRefName, freshDeferredRef, freshIdentity, freshLocalRef, idDetailsGeneratedIdentities, idDetailsSameIdentity, identityGeneratorAfter, primitiveRefSymbol, symbolGeneratedIdentities, typeBinderGeneratedIdentities, typeBinderIdentityNode, typeBinderIdentityStructural)
+import MLF.Types.Identity (DeferredRef, IdDetails (..), IdentityGenerator, LocalRef, StructuralTypeBinderRole (..), UniqueIdentity (..), deferredRefIdentity, deferredRefName, freshDeferredRef, freshIdentity, freshLocalRef, idDetailsGeneratedIdentities, idDetailsSameIdentity, identityGeneratorAfter, primitiveRefSymbol, symbolGeneratedIdentities, typeBinderGeneratedIdentities, typeBinderIdentityFromStructural, typeBinderIdentityNode, typeBinderIdentityStructural)
 import MLF.Util.Names (freshNameLike)
 
 data BackendConversionError
@@ -4180,12 +4181,17 @@ convertOrdinaryTerm mode context env scope term resultTy0 =
                 convertTermExpectedMode mode context env scope (Just resultTy) body
           ETyInst inner inst ->
             convertTypeInstantiation context env scope resultTy inner inst
-          ERoll _ body -> do
-            let bodyExpected = unfoldBackendRecursiveType resultTy
+          ERoll rollTy body -> do
+            rollBackendTy <- normalizeBackendTypeForContext context <$> liftEitherConvert (convertElabType rollTy)
+            let rollResultTy =
+                  case unfoldBackendRecursiveType rollBackendTy of
+                    Just {} -> rollBackendTy
+                    Nothing -> structuralRollResultType context rollBackendTy
+                bodyExpected = unfoldBackendRecursiveType rollResultTy
             bodyExpr <- convertTermExpectedMode mode context env scope bodyExpected body
             pure
               BackendRoll
-                { backendExprType = resultTy,
+                { backendExprType = rollResultTy,
                   backendRollPayload = bodyExpr
                 }
           EUnroll body -> do
@@ -4902,6 +4908,7 @@ appLikeInstantiationTypes :: Instantiation -> Maybe [ElabType]
 appLikeInstantiationTypes inst =
   case inst of
     InstApp ty -> Just [ty]
+    InstElim -> Just [TBottom]
     InstSeq (InstInside (InstBot ty)) InstElim -> Just [ty]
     InstSeq (InstInside (InstApp ty)) InstElim -> Just [ty]
     InstSeq left right -> (++) <$> appLikeInstantiationTypes left <*> appLikeInstantiationTypes right
@@ -6272,6 +6279,103 @@ backendTypeDataMeta context ty =
       structuralRecursiveDataMetaByIdentity context identity <|> structuralRecursiveDataMetaByFallback context identity name
     _ -> Nothing
 
+structuralRollResultType :: ConvertContext -> BackendType -> BackendType
+structuralRollResultType context ty =
+  fromMaybe ty $ do
+    dataMeta <- backendTypeDataMeta context ty
+    args <- nominalDataTypeArgumentsFor (dmBackend dataMeta) ty
+    pure (structuralRecursiveTypeForData (dmBackend dataMeta) args)
+
+nominalDataTypeArgumentsFor :: BackendData -> BackendType -> Maybe [BackendType]
+nominalDataTypeArgumentsFor dataDecl =
+  \case
+    BTBaseWithIdentity identity (BaseTy name)
+      | dataHeadMatches identity name,
+        null (backendDataParameterRefs dataDecl) ->
+          Just []
+    BTConWithIdentity identity (BaseTy name) args
+      | dataHeadMatches identity name,
+        length (NE.toList args) == length (backendDataParameterRefs dataDecl) ->
+          Just (NE.toList args)
+    _ ->
+      Nothing
+  where
+    dataHeadMatches identity name =
+      case (backendDataIdentity dataDecl, identity) of
+        (Just expected, Just actual) -> expected == actual
+        (Nothing, Nothing) -> backendDataName dataDecl == name
+        _ -> False
+
+structuralRecursiveTypeForData :: BackendData -> [BackendType] -> BackendType
+structuralRecursiveTypeForData dataDecl dataArgs =
+  BTMuWithIdentity
+    selfIdentity
+    selfName
+    ( BTForallWithIdentity
+        resultIdentity
+        resultName
+        Nothing
+        (foldr BTArrow resultVar handlerTypes)
+    )
+  where
+    dataName =
+      backendDataName dataDecl
+    selfName =
+      "$" ++ dataName ++ "_self"
+    resultName =
+      "$" ++ dataName ++ "_result"
+    selfIdentity =
+      structuralTypeBinderIdentity StructuralSelfBinder
+    resultIdentity =
+      structuralTypeBinderIdentity StructuralResultBinder
+    selfVar =
+      BTVarWithIdentity selfIdentity selfName
+    resultVar =
+      BTVarWithIdentity resultIdentity resultName
+    substitution =
+      Map.fromList (zip (backendDataParameterKeys dataDecl) dataArgs)
+    handlerTypes =
+      map constructorHandlerType (backendDataConstructors dataDecl)
+    constructorHandlerType constructor =
+      foldr BTArrow resultVar (map structuralFieldType (backendConstructorFields constructor))
+    structuralFieldType =
+      replaceDataSelf . substituteBackendTypesByKey substitution
+
+    structuralTypeBinderIdentity role =
+      typeBinderIdentityFromStructural . symbolUniqueIdentity <$> backendDataIdentity dataDecl <*> pure role
+
+    replaceDataSelf =
+      \case
+        BTVarWithIdentity identity name ->
+          BTVarWithIdentity identity name
+        BTArrow dom cod ->
+          BTArrow (replaceDataSelf dom) (replaceDataSelf cod)
+        ty@(BTBaseWithIdentity identity (BaseTy name))
+          | dataHeadMatches identity name,
+            null dataArgs ->
+              selfVar
+          | otherwise -> ty
+        BTConWithIdentity identity (BaseTy name) args
+          | dataHeadMatches identity name,
+            length (NE.toList args) == length dataArgs,
+            and (zipWith alphaEqBackendType (NE.toList args) dataArgs) ->
+              selfVar
+          | otherwise -> BTConWithIdentity identity (BaseTy name) (fmap replaceDataSelf args)
+        BTVarAppWithIdentity identity name args ->
+          BTVarAppWithIdentity identity name (fmap replaceDataSelf args)
+        BTForallWithIdentity identity name mb body ->
+          BTForallWithIdentity identity name (fmap replaceDataSelf mb) (replaceDataSelf body)
+        BTMuWithIdentity identity name body ->
+          BTMuWithIdentity identity name (replaceDataSelf body)
+        BTBottom ->
+          BTBottom
+
+    dataHeadMatches identity name =
+      case (backendDataIdentity dataDecl, identity) of
+        (Just expected, Just actual) -> expected == actual
+        (Nothing, Nothing) -> backendDataName dataDecl == name
+        _ -> False
+
 dataMetaByStructuralName :: ConvertContext -> String -> Maybe DataMeta
 dataMetaByStructuralName context name =
   dataMetaByCurrentScopeStructuralName context name
@@ -7104,11 +7208,21 @@ backendTypeContainsMu =
 
 backendTypeCompatibilityVariants :: ConvertContext -> BackendType -> [BackendType]
 backendTypeCompatibilityVariants context ty =
-  [ ty,
-    canonicalizeStructuralMuNames context ty,
-    recoverStructuralBackendType context ty,
-    normalizeBackendTypeForContext context ty
-  ]
+  nub $
+    [ ty,
+      structuralCanonicalTy,
+      normalizedTy
+    ]
+      ++ [ recoveredTy
+         | backendTypeNeedsStructuralRecovery context structuralCanonicalTy
+         ]
+  where
+    structuralCanonicalTy =
+      canonicalizeStructuralMuNames context ty
+    recoveredTy =
+      recoverStructuralBackendType context structuralCanonicalTy
+    normalizedTy =
+      normalizeBackendTypeForContext context ty
 
 nominalStructuralHeadsMatch :: Map String BackendData -> BackendType -> BackendType -> Bool
 nominalStructuralHeadsMatch dataDecls leftTy rightTy =

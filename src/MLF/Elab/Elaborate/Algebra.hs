@@ -1245,8 +1245,13 @@ elabAlg algebraContext layer =
                   _ -> ETyInst fHead funInstValidated
                 fAppForArgInferenceTy = typeCheckLocal fAppForArgInference
                 firstClassPolymorphicArgInst =
-                  case (sourceAnnIsPolymorphic schemeEnv aAnn, argSourceSchemeTy, fAppForArgInferenceTy) of
-                    (True, Just sourceTy, Right (TArrow paramTy _))
+                  case (sourceAnnIsPolymorphic schemeEnv aAnn, fSourceName, aSourceName, argSourceSchemeTy, fAppForArgInferenceTy) of
+                    (True, Just fName, Just argName, Just sourceTy, Right (TArrow paramTy _))
+                      | fName == argName,
+                        alphaEqType paramTy sourceTy || churchAwareEqType paramTy sourceTy,
+                        Right _ <- typeCheckLocal (EApp fAppForArgInference a') ->
+                          Just (InstSeq InstIntro InstElim)
+                    (True, _, _, Just sourceTy, Right (TArrow paramTy _))
                       | alphaEqType paramTy sourceTy || churchAwareEqType paramTy sourceTy,
                         Right _ <- typeCheckLocal (EApp fAppForArgInference a') ->
                           Just InstId

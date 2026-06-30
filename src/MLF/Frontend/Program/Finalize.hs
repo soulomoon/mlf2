@@ -192,7 +192,7 @@ import MLF.Frontend.Program.Types
     unqualifiedSymbolName,
   )
 import MLF.Frontend.Syntax (Expr (..), Lit (..), NormSurfaceExpr, SrcBound (..), SrcTy (..), SrcType, SurfaceExpr, typeParamName)
-import MLF.Reify.TypeOps (alphaEqType, churchAwareEqType, freeTypeVarRefsType, splitForallsRefs)
+import MLF.Reify.TypeOps (alphaEqType, churchAwareEqType, freeTypeVarRefsType, freshNameLike, splitForallsRefs, substTypeCaptureRef)
 import MLF.Types.Identity
   ( DeferredRef,
     deferredRefIdentity,
@@ -3572,7 +3572,7 @@ resolveDeferredMethods scope deferredMethods env0 term0 = do
                       constraintGround
                       (map (applyConstraintInfoSubst methodSubst) (methodValueConstraints methodValue))
               evidenceArgs <- resolveConstraintEvidenceTerms scope (deferredMethodLocalEvidence deferred) Set.empty eagerConstraints
-              methodHead <- instantiateMethodValue scope methodSubst methodValue
+              methodHead <- instantiateMethodValueWithAliasViews scope [methodTypeView methodInfo] methodSubst methodValue
               Right (foldl X.EApp (foldl X.EApp methodHead evidenceArgs) args)
 
     resolveDeferredNullaryMethod headInsts deferred = do
@@ -3616,7 +3616,7 @@ resolveDeferredMethods scope deferredMethods env0 term0 = do
                   constraintGround
                   (map (applyConstraintInfoSubst methodSubst) (methodValueConstraints methodValue))
           evidenceArgs <- resolveConstraintEvidenceTerms scope (deferredMethodLocalEvidence deferred) Set.empty eagerConstraints
-          methodHead <- instantiateMethodValue scope methodSubst methodValue
+          methodHead <- instantiateMethodValueWithAliasViews scope [methodTypeView methodInfo] methodSubst methodValue
           Right (reapplyHeadInsts headInsts (foldl X.EApp methodHead evidenceArgs))
 
     inferDeferredMethodClassArgument methodInfo argViews mbExpectedResult =
@@ -3880,7 +3880,14 @@ noMatchingInstanceError scope constraint =
 
 localEvidenceTypeOverrides :: ElaborateScope -> Map DeferredRef DeferredMethodCall -> Either ProgramError (Map LocalRef ElabType)
 localEvidenceTypeOverrides scope deferredMethods =
-  Map.fromList <$> mapM typeOverrideEntry methods
+  do
+    entries <- mapM typeOverrideEntry methods
+    let reservedTypes = map snd entries
+    pure $
+      Map.fromList
+        [ (ref, freshenElabTypeBindersAgainstTypes reservedTypes ty)
+        | (ref, ty) <- entries
+        ]
   where
     methods =
       [ method
@@ -3933,7 +3940,9 @@ instantiateLocalMethodEvidence scope subst DeferredMethodEvidence {deferredMetho
       subst
       (evidenceMethodTypeView methodEvidence)
       foralls
-  let methodTerm = X.EVarNode resolved
+  let resolved' =
+        freshenResolvedVarTypeAgainstInstantiations (instantiationTypes instantiations) resolved
+      methodTerm = X.EVarNode resolved'
   pure (foldl X.ETyInst methodTerm instantiations)
 
 evidenceMethodResolvedVarOrError :: EvidenceMethod -> Either ProgramError X.ResolvedVar
@@ -3959,20 +3968,146 @@ methodValueConstraints OrdinaryValue {valueConstraintInfos = constraints} = cons
 methodValueConstraints _ = []
 
 instantiateMethodValue :: ElaborateScope -> TypeViewSubst -> ValueInfo -> Either ProgramError XmlfTerm
-instantiateMethodValue scope subst valueInfo@OrdinaryValue {} = do
+instantiateMethodValue scope =
+  instantiateMethodValueWithAliasViews scope []
+
+instantiateMethodValueWithAliasViews :: ElaborateScope -> [TypeView] -> TypeViewSubst -> ValueInfo -> Either ProgramError XmlfTerm
+instantiateMethodValueWithAliasViews scope aliasViews subst valueInfo@OrdinaryValue {} = do
   let sourceView = ordinaryValueTypeView valueInfo
+      substViews = sourceView : aliasViews
   resolved <- resolvedVarFromValueInfo valueInfo <$> typeViewToElabType scope sourceView
-  let foralls = resolvedForallsMatchingSourceOrSubst subst (X.resolvedVarType resolved) sourceView
-  instantiations <- methodForallInstantiationsFromSourceSubst scope subst sourceView foralls
-  pure (foldl X.ETyInst (X.EVarNode resolved) instantiations)
-instantiateMethodValue scope _ valueInfo@ConstructorValue {} =
+  let foralls = resolvedForallsMatchingSourceOrAliasSubst subst substViews (X.resolvedVarType resolved) sourceView
+  instantiations <- methodForallInstantiationsFromAliasSubst scope substViews subst sourceView foralls
+  let resolved' =
+        freshenResolvedVarTypeAgainstInstantiations (instantiationTypes instantiations) resolved
+  pure (foldl X.ETyInst (X.EVarNode resolved') instantiations)
+instantiateMethodValueWithAliasViews scope _ _ valueInfo@ConstructorValue {} =
   X.EVarNode . resolvedVarFromValueInfo valueInfo <$> typeViewToElabType scope (constructorTypeView scope (valueCtorInfo valueInfo))
-instantiateMethodValue _ _ OverloadedMethod {} =
+instantiateMethodValueWithAliasViews _ _ _ OverloadedMethod {} =
   Left (ProgramPipelineError "overloaded method value reached deferred method instantiation")
+
+instantiationTypes :: [X.Instantiation] -> [ElabType]
+instantiationTypes =
+  concatMap go
+  where
+    go inst =
+      case inst of
+        X.InstApp ty -> [ty]
+        X.InstBot ty -> [ty]
+        X.InstSeq left right -> go left ++ go right
+        X.InstInside inner -> go inner
+        X.InstUnderRef _ inner -> go inner
+        _ -> []
+
+freshenResolvedVarTypeAgainstInstantiations :: [ElabType] -> X.ResolvedVar -> X.ResolvedVar
+freshenResolvedVarTypeAgainstInstantiations instTys resolved
+  | null instTys = resolved
+  | otherwise = X.mapResolvedVarType (const (freshenElabTypeBindersAgainstTypes instTys ty0)) resolved
+  where
+    ty0 = X.resolvedVarType resolved
+
+freshenElabTypeBindersAgainstTypes :: [ElabType] -> ElabType -> ElabType
+freshenElabTypeBindersAgainstTypes reservedTys ty
+  | null reservedRefs = ty
+  | otherwise = ty'
+  where
+    reservedRefs = foldMap freeTypeVarRefsType reservedTys
+    reservedNames =
+      Set.fromList (map X.typeBinderRefName reservedRefs)
+    generator0 =
+      X.identityGeneratorAfterType (foldr X.TArrow ty reservedTys)
+    (ty', _) =
+      freshenTypeBindersAgainstRefs reservedRefs reservedNames generator0 ty
+
+freshenTypeBindersAgainstRefs :: [X.TypeBinderRef] -> Set String -> IdentityGenerator -> ElabType -> (ElabType, IdentityGenerator)
+freshenTypeBindersAgainstRefs reservedRefs reservedNames generator0 =
+  go generator0
+  where
+    binderCollides ref =
+      any (X.typeBinderRefsSameIdentity ref) reservedRefs
+
+    go generator ty =
+      case ty of
+        X.TVarRef {} ->
+          (ty, generator)
+        X.TArrow dom cod ->
+          let (dom', generator1) = go generator dom
+              (cod', generator2) = go generator1 cod
+           in (X.TArrow dom' cod', generator2)
+        X.TConWithIdentity identity con args ->
+          let (args', generator') = freshenNonEmpty generator args
+           in (X.TConWithIdentity identity con args', generator')
+        X.TVarAppRef ref args ->
+          let (args', generator') = freshenNonEmpty generator args
+           in (X.TVarAppRef ref args', generator')
+        X.TBaseWithIdentity {} ->
+          (ty, generator)
+        X.TForallRef ref mbBound body ->
+          let (mbBound', generator1) =
+                freshenMaybeBound generator mbBound
+              (ref', bodyForFreshening, generator2) =
+                if binderCollides ref
+                  then
+                    let usedNames =
+                          Set.unions
+                            [ reservedNames,
+                              Set.fromList (map X.typeBinderRefName (freeTypeVarRefsType body)),
+                              maybe Set.empty (Set.fromList . map X.typeBinderRefName . freeTypeVarRefsType) mbBound,
+                              Set.singleton (X.typeBinderRefName ref)
+                            ]
+                        freshName = freshNameLike (X.typeBinderRefName ref) usedNames
+                        (freshRef, generator') = X.freshTypeBinderRef freshName generator1
+                     in (freshRef, substTypeCaptureRef ref (X.TVarRef freshRef) body, generator')
+                  else (ref, body, generator1)
+              (body', generator3) = go generator2 bodyForFreshening
+           in (X.TForallRef ref' mbBound' body', generator3)
+        X.TMuRef ref body ->
+          let (ref', bodyForFreshening, generator1) =
+                if binderCollides ref
+                  then
+                    let usedNames =
+                          Set.unions
+                            [ reservedNames,
+                              Set.fromList (map X.typeBinderRefName (freeTypeVarRefsType body)),
+                              Set.singleton (X.typeBinderRefName ref)
+                            ]
+                        freshName = freshNameLike (X.typeBinderRefName ref) usedNames
+                        (freshRef, generator') = X.freshTypeBinderRef freshName generator
+                     in (freshRef, substTypeCaptureRef ref (X.TVarRef freshRef) body, generator')
+                  else (ref, body, generator)
+              (body', generator2) = go generator1 bodyForFreshening
+           in (X.TMuRef ref' body', generator2)
+        X.TBottom ->
+          (ty, generator)
+
+    freshenMaybeBound generator =
+      \case
+        Nothing -> (Nothing, generator)
+        Just bound ->
+          let (bound', generator') = go generator (X.tyToElab bound)
+           in case X.elabToBound bound' of
+                Right bound'' -> (Just bound'', generator')
+                Left _ -> (Just bound, generator')
+
+    freshenNonEmpty generator (arg :| args) =
+      let (arg', generator1) = go generator arg
+          (argsRev, generator') =
+            foldl
+              ( \(acc, gen) item ->
+                  let (item', gen') = go gen item
+                   in (item' : acc, gen')
+              )
+              ([], generator1)
+              args
+       in (arg' :| reverse argsRev, generator')
 
 methodForallInstantiationsFromSourceSubst :: ElaborateScope -> TypeViewSubst -> TypeView -> [(X.TypeBinderRef, Maybe X.BoundType)] -> Either ProgramError [X.Instantiation]
 methodForallInstantiationsFromSourceSubst scope subst sourceView foralls =
   methodForallInstantiations scope (resolvedForallSubst subst sourceView foralls) foralls
+
+methodForallInstantiationsFromAliasSubst :: ElaborateScope -> [TypeView] -> TypeViewSubst -> TypeView -> [(X.TypeBinderRef, Maybe X.BoundType)] -> Either ProgramError [X.Instantiation]
+methodForallInstantiationsFromAliasSubst scope aliasViews subst sourceView foralls =
+  methodForallInstantiations scope (resolvedForallSubstWithAliasViews subst aliasViews sourceView foralls) foralls
 
 methodForallInstantiations :: ElaborateScope -> Map X.TypeBinderRef TypeView -> [(X.TypeBinderRef, Maybe X.BoundType)] -> Either ProgramError [X.Instantiation]
 methodForallInstantiations scope subst = go
@@ -3989,14 +4124,18 @@ methodForallInstantiations scope subst = go
 
 resolvedForallSubst :: TypeViewSubst -> TypeView -> [(X.TypeBinderRef, Maybe X.BoundType)] -> Map X.TypeBinderRef TypeView
 resolvedForallSubst subst sourceView foralls =
+  resolvedForallSubstWithAliasViews subst [sourceView] sourceView foralls
+
+resolvedForallSubstWithAliasViews :: TypeViewSubst -> [TypeView] -> TypeView -> [(X.TypeBinderRef, Maybe X.BoundType)] -> Map X.TypeBinderRef TypeView
+resolvedForallSubstWithAliasViews subst aliasViews sourceView foralls =
   Map.fromList
     [ (ref, ty)
     | (index, (ref, _)) <- zip [0 :: Int ..] foralls,
-      Just ty <- [lookupResolvedForallSubst subst sourceView index ref]
+      Just ty <- [lookupResolvedForallSubst subst aliasViews sourceView index ref]
     ]
 
-lookupResolvedForallSubst :: TypeViewSubst -> TypeView -> Int -> X.TypeBinderRef -> Maybe TypeView
-lookupResolvedForallSubst subst sourceView index ref =
+lookupResolvedForallSubst :: TypeViewSubst -> [TypeView] -> TypeView -> Int -> X.TypeBinderRef -> Maybe TypeView
+lookupResolvedForallSubst subst aliasViews sourceView index ref =
   firstMatchingKey keys
   where
     candidateNames = resolvedForallCandidateNames sourceView index ref
@@ -4005,8 +4144,9 @@ lookupResolvedForallSubst subst sourceView index ref =
     identityKeys names0 =
       typeViewSubstKeyForIdentity (X.typeBinderRefIdentity ref)
         : [ typeViewSubstKeyForIdentity identity
-          | name <- names0,
-            Just identity <- [typeViewBinderIdentityForAlias sourceView name]
+          | view <- aliasViews,
+            name <- names0,
+            Just identity <- [typeViewBinderIdentityForAlias view name]
           ]
 
     firstMatchingKey [] = Nothing
@@ -4015,6 +4155,10 @@ lookupResolvedForallSubst subst sourceView index ref =
 
 resolvedForallsMatchingSourceOrSubst :: TypeViewSubst -> ElabType -> TypeView -> [(X.TypeBinderRef, Maybe X.BoundType)]
 resolvedForallsMatchingSourceOrSubst subst resolvedTy sourceView =
+  resolvedForallsMatchingSourceOrAliasSubst subst [sourceView] resolvedTy sourceView
+
+resolvedForallsMatchingSourceOrAliasSubst :: TypeViewSubst -> [TypeView] -> ElabType -> TypeView -> [(X.TypeBinderRef, Maybe X.BoundType)]
+resolvedForallsMatchingSourceOrAliasSubst subst aliasViews resolvedTy sourceView =
   sourceForalls ++ extraSubstPrefix
   where
     sourceCount = sourceViewForallCount sourceView
@@ -4034,7 +4178,7 @@ resolvedForallsMatchingSourceOrSubst subst resolvedTy sourceView =
             else go prefix' matched rest
 
     forallEntryHasSubst index (ref, _) =
-      case lookupResolvedForallSubst subst sourceView (sourceCount + index) ref of
+      case lookupResolvedForallSubst subst aliasViews sourceView (sourceCount + index) ref of
         Just _ -> True
         Nothing -> False
 

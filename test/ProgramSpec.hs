@@ -1399,11 +1399,11 @@ spec = do
             (loweredBindingSourceTypeView lowered >>= Map.lookup dataDisplayHead . ProgramTypes.typeViewHeadIdentities)
                 `shouldBe` Just dataIdentity
             (loweredBindingSourceTypeView lowered >>= Map.lookup dataHead . ProgramTypes.typeViewHeadIdentities)
-                `shouldBe` Nothing
+                `shouldBe` Just dataIdentity
             (loweredBindingExpectedTypeView lowered >>= Map.lookup dataDisplayHead . ProgramTypes.typeViewHeadIdentities)
                 `shouldBe` Just dataIdentity
             (loweredBindingExpectedTypeView lowered >>= Map.lookup dataHead . ProgramTypes.typeViewHeadIdentities)
-                `shouldBe` Nothing
+                `shouldBe` Just dataIdentity
 
         it "carries constraint-only type binder identities through resolved lowering" $ do
             program <-
@@ -1588,7 +1588,7 @@ spec = do
                     let sourceBinderIdentities =
                             ProgramTypes.typeViewBinderIdentities (ProgramTypes.checkedBindingSourceTypeView binding)
                     Map.lookup "a" sourceBinderIdentities `shouldBe` Just paramIdentity
-                    Map.lookup (typeBinderIdentityStableName paramIdentity) sourceBinderIdentities `shouldBe` Nothing
+                    Map.lookup (typeBinderIdentityStableName paramIdentity) sourceBinderIdentities `shouldBe` Just paramIdentity
                 identities ->
                     expectationFailure ("expected one data param identity, got " ++ show identities)
             unresolvedTermVarRefs (checkedBindingTerm binding) `shouldBe` []

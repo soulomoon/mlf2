@@ -1504,8 +1504,65 @@ closePipelineTerm initialTcEnv rootSubst rootScheme term termSubst =
                         else closeTermWithSchemeSubstRefsIfNeeded rootSubst rootScheme term
             Left _ -> closeTermWithSchemeSubstRefsIfNeeded rootSubst rootScheme term
    in case preserveRetainedChildAuthoritativeResult termClosed0 of
-        Just termAdjusted -> closeTermWithSchemeSubstRefsIfNeeded rootSubst rootScheme termAdjusted
+        Just termAdjusted ->
+          closeRetainedChildAuthoritativeTerm initialTcEnv rootSubst rootScheme termAdjusted
+        Nothing
+          | retainedChildAuthoritativeCandidate ->
+              closeRetainedChildAuthoritativeTerm initialTcEnv rootSubst rootScheme termClosed0
         Nothing -> termClosed0
+
+closeRetainedChildAuthoritativeTerm :: TypeCheck.Env -> IntMap.IntMap TypeBinderRef -> ElabScheme -> XmlfTerm -> XmlfTerm
+closeRetainedChildAuthoritativeTerm initialTcEnv rootSubst rootScheme termAdjusted =
+  let closed = closeTermWithSchemeSubstRefsIfNeeded rootSubst rootScheme termAdjusted
+   in if retainedChildCanUseRepresentativeScheme rootScheme
+        then case retainedChildRepresentativeTerm initialTcEnv closed of
+          Just representativeClosed -> representativeClosed
+          Nothing
+            | retainedChildIdentityRootScheme rootScheme ->
+                case retainedChildRepresentativeTerm initialTcEnv termAdjusted of
+                  Just representativeAdjusted -> representativeAdjusted
+                  Nothing -> closed
+          Nothing -> closed
+        else closed
+
+retainedChildCanUseRepresentativeScheme :: ElabScheme -> Bool
+retainedChildCanUseRepresentativeScheme rootScheme =
+  null (schemeBinderRefs rootScheme) || retainedChildIdentityRootScheme rootScheme
+
+retainedChildIdentityRootScheme :: ElabScheme -> Bool
+retainedChildIdentityRootScheme rootScheme = case schemeToType rootScheme of
+  TForallRef ref Nothing (TVarRef bodyRef) -> typeBinderRefsSameIdentity ref bodyRef
+  _ -> False
+
+retainedChildRepresentativeTerm :: TypeCheck.Env -> XmlfTerm -> Maybe XmlfTerm
+retainedChildRepresentativeTerm initialTcEnv term =
+  case typeCheckWithEnv initialTcEnv term of
+    Right ty
+      | containsRecursiveType ty,
+        countLeadingUnboundedForalls ty == 0 ->
+          let representativeScheme = retainedChildRepresentativeScheme term ty
+              representativeClosed =
+                closeTermWithSchemeSubstRefsIfNeeded IntMap.empty representativeScheme term
+           in case typeCheckWithEnv initialTcEnv representativeClosed of
+                Right representativeTy
+                  | countLeadingUnboundedForalls representativeTy == 2 ->
+                      Just representativeClosed
+                _ -> Nothing
+    _ -> Nothing
+
+retainedChildRepresentativeScheme :: XmlfTerm -> ElabType -> ElabScheme
+retainedChildRepresentativeScheme term ty =
+  let generator0 = identityGeneratorAfterTerm term
+      used0 = freeTypeVarsType ty
+      (outerRef, generator1) = freshTypeBinderRefFromNames used0 generator0
+      used1 = Set.insert (typeBinderRefName outerRef) used0
+      (innerRef, _generator2) = freshTypeBinderRefFromNames used1 generator1
+   in mkElabSchemeWithRefs [(outerRef, Nothing), (innerRef, Nothing)] ty
+
+countLeadingUnboundedForalls :: ElabType -> Int
+countLeadingUnboundedForalls ty = case ty of
+  TForallRef _ Nothing body -> 1 + countLeadingUnboundedForalls body
+  _ -> 0
 
 freshenTypeAbsAgainstEnv :: TypeCheck.Env -> XmlfTerm -> XmlfTerm
 freshenTypeAbsAgainstEnv env term0 =
