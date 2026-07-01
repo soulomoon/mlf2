@@ -97,6 +97,17 @@ spec = describe "Public surface contracts" $ do
           Pipeline.typeCheck term `shouldBe` Right ty
           ty `shouldSatisfy` hasRecursiveArrow
 
+    it "exposes identity-bearing checked type heads" $ do
+      let identity =
+            Pipeline.symbolIdentityFromParts
+              (Pipeline.UniqueIdentity 991901)
+              Pipeline.SymbolType
+              "Main"
+              "Token"
+              Nothing
+      Pipeline.TBaseWithIdentity (Just identity) (Pipeline.BaseTy "$stale_token")
+        `shouldBe` Pipeline.TBaseWithIdentity (Just identity) (Pipeline.BaseTy "Main.Token")
+
     it "owns checked runtime helpers and pipeline diagnostics" $ do
       expectRight (parseNormEmlfExpr "λ(x) x") $ \expr ->
         expectRight (Pipeline.runPipelineElab Set.empty expr) $ \(term, ty) -> do

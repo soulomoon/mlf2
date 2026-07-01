@@ -29,8 +29,10 @@ module MLF.Pipeline
     , Ty
         ( TVarRef
         , TArrow
+        , TConWithIdentity
         , TCon
         , TVarAppRef
+        , TBaseWithIdentity
         , TBase
         , TForallRef
         , TMuRef
@@ -234,8 +236,10 @@ import MLF.Elab.Pipeline
     , Ty
         ( TVarRef
         , TArrow
+        , TConWithIdentity
         , TCon
         , TVarAppRef
+        , TBaseWithIdentity
         , TBase
         , TForallRef
         , TMuRef

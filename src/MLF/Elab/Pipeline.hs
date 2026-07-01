@@ -3,8 +3,10 @@ module MLF.Elab.Pipeline
     Ty
       ( TVarRef,
         TArrow,
+        TConWithIdentity,
         TCon,
         TVarAppRef,
+        TBaseWithIdentity,
         TBase,
         TForallRef,
         TMuRef,
