@@ -3640,6 +3640,52 @@ spec = do
             concatMap generatedDeferredIdentityValues checked
                 `shouldSatisfy` all (`notElem` bindingIdentities)
 
+        it "does not resolve same-named deferred external bindings by an arbitrary identity" $ do
+            finalizeContext <- requireFinalizeContext (mkElaborateScope Map.empty Map.empty Map.empty [])
+            let placeholder = "$deferred"
+                firstRef = deferredRefFromIdentity (UniqueIdentity 20) placeholder
+                secondRef = deferredRefFromIdentity (UniqueIdentity 21) placeholder
+                bindingIdentity = generatedSymbolIdentity 22 SymbolValue "Main" "main" Nothing
+                dataIdentity = generatedSymbolIdentity 23 SymbolType "Main" "Phantom" Nothing
+                phantomData =
+                    DataInfo
+                        { dataInfoSymbol = dataIdentity
+                        , dataTypeParams = []
+                        , dataConstructors = []
+                        }
+                obligation ref =
+                    DeferredCase
+                        DeferredCaseCall
+                            { deferredCaseRef = ref
+                            , deferredCaseDataInfo = phantomData
+                            , deferredCaseScrutineeType = STBase "Int"
+                            , deferredCaseResultType = STBase "Int"
+                            , deferredCaseExpectedArgCount = 0
+                            }
+                lowered =
+                    LoweredBinding
+                        { loweredBindingIdentity =
+                            ProgramTypes.loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
+                        , loweredBindingSourceType = STBase "Int"
+                        , loweredBindingSourceTypeView = Nothing
+                        , loweredBindingExpectedType = STBase "Int"
+                        , loweredBindingExpectedTypeView = Nothing
+                        , loweredBindingSurfaceExpr = Surface.EVar placeholder
+                        , loweredBindingResolvedLocalIdentities = Map.empty
+                        , loweredBindingDeferredObligations =
+                            Map.fromList [(firstRef, obligation firstRef), (secondRef, obligation secondRef)]
+                        , loweredBindingExternalTypeViews =
+                            Map.singleton placeholder (ProgramTypes.mkTypeView (STBase "Int") (STBase "Int"))
+                        , loweredBindingEvidenceParamCount = 0
+                        , loweredBindingExportedAsMain = False
+                        }
+            checked <-
+                case finalizeBindingsAllowOpaqueWithContext finalizeContext [lowered] of
+                    Right [binding] -> pure binding
+                    Right other -> expectationFailure ("expected one checked binding, got: " ++ show (length other)) >> fail "finalize binding failed"
+                    Left err -> expectationFailure ("finalize binding failed: " ++ show err) >> fail "finalize binding failed"
+            unresolvedTermVarRefs (checkedBindingTerm checked) `shouldBe` []
+
         it "resolves deferred non-nullary constructors named Unit as functions" $ do
             located <-
                 requireLocated $

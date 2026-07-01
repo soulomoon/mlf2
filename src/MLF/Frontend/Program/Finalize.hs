@@ -1911,11 +1911,9 @@ deferredExternalBindingIndex :: DeferredObligations -> DeferredExternalBindingIn
 deferredExternalBindingIndex obligations =
   DeferredExternalBindingIndex
     { deferredExternalBindingRefByName =
-        Map.fromListWith
-          (flip const)
-          [ (deferredRefName ref, ref)
-          | obligation <- Map.elems obligations,
-            let ref = deferredProgramObligationRef obligation
+        Map.fromList
+          [ (name, ref)
+          | (name, [ref]) <- Map.toList refsByName
           ],
       deferredExternalBindingByRef =
         Map.fromList
@@ -1923,6 +1921,14 @@ deferredExternalBindingIndex obligations =
           | obligation <- Map.elems obligations
           ]
     }
+  where
+    refsByName =
+      Map.fromListWith
+        (++)
+        [ (deferredRefName ref, [ref])
+        | obligation <- Map.elems obligations,
+          let ref = deferredProgramObligationRef obligation
+        ]
 
 deferredExternalBindingIdentity :: DeferredExternalBindingIndex -> String -> Maybe ExternalBindingIdentity
 deferredExternalBindingIdentity index name = do
