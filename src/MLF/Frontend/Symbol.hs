@@ -27,10 +27,15 @@ module MLF.Frontend.Symbol
     sameResolvedSymbol,
     symbolRefMatches,
     symbolIdentityStableName,
+    symbolIdentityAliasNames,
+    symbolIdentityAliasMap,
     unqualifiedSymbolName,
   )
 where
 
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import MLF.Types.Unique (UniqueIdentity, uniqueIdentityStableName)
 
 data SymbolNamespace
@@ -189,6 +194,29 @@ symbolRefMatches _ _ _ _ =
 symbolIdentityStableName :: SymbolIdentity -> String
 symbolIdentityStableName identity =
   uniqueIdentityStableName (symbolUniqueIdentity identity)
+
+symbolIdentityAliasNames :: SymbolIdentity -> [String]
+symbolIdentityAliasNames identity =
+  [ symbolIdentityStableName identity,
+    symbolDefiningName identity,
+    symbolDefiningModule identity ++ "." ++ symbolDefiningName identity
+  ]
+
+symbolIdentityAliasMap :: [SymbolIdentity] -> Map String SymbolIdentity
+symbolIdentityAliasMap identities =
+  Map.fromList
+    [ (alias, identity)
+    | (alias, identitiesForAlias) <- Map.toList identitiesByAlias,
+      [identity] <- [Set.toList identitiesForAlias]
+    ]
+  where
+    identitiesByAlias =
+      Map.fromListWith
+        Set.union
+        [ (alias, Set.singleton identity)
+        | identity <- identities,
+          alias <- symbolIdentityAliasNames identity
+        ]
 
 unqualifiedSymbolName :: String -> String
 unqualifiedSymbolName =

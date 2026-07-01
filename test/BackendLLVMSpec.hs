@@ -2126,8 +2126,8 @@ spec = describe "MLF.Backend.LLVM" $ do
       withTempProgram sourceTopLevelRecursiveHigherOrderProgram $ \path ->
         requireRight =<< emitBackendFile path
 
-    output `shouldSatisfy` isInfixOf "define i64 @\"Main__loop\"(ptr %\"$f#"
-    output `shouldSatisfy` isInfixOf "ptr %\"$n#"
+    output `shouldSatisfy` isInfixOf "define i64 @\"Main__loop\"(ptr %\"f\""
+    output `shouldSatisfy` isInfixOf "ptr %\"n\""
     output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
     validateLLVMAssembly output
     validateLLVMObjectCode output

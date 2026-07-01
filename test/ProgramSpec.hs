@@ -290,6 +290,27 @@ spec = do
                         ProgramTypes.emptyTypeBinderSubst
             ProgramTypes.applyTypeBinderSubst subst (STVar stableName) `shouldBe` replacementTy
 
+        it "does not apply ambiguous type-binder display substitutions at the string substitution boundary" $ do
+            let firstIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991630)
+                secondIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991631)
+                firstStableName = typeBinderIdentityStableName firstIdentity
+                secondStableName = typeBinderIdentityStableName secondIdentity
+                subst =
+                    ProgramTypes.insertTypeBinderSubstWithIdentity
+                        secondIdentity
+                        "a"
+                        (STBase "Bool")
+                        ( ProgramTypes.insertTypeBinderSubstWithIdentity
+                            firstIdentity
+                            "a"
+                            (STBase "Int")
+                            ProgramTypes.emptyTypeBinderSubst
+                        )
+            ProgramTypes.applyTypeBinderSubst subst (STVar "a")
+                `shouldBe` STVar "a"
+            ProgramTypes.applyTypeBinderSubst subst (STArrow (STVar firstStableName) (STVar secondStableName))
+                `shouldBe` STArrow (STBase "Int") (STBase "Bool")
+
         it "does not apply identity-keyed type-view display substitutions through metadata-free stable names" $ do
             let identity = typeBinderIdentityFromUnique (UniqueIdentity 991619)
                 stableName = typeBinderIdentityStableName identity
@@ -316,6 +337,79 @@ spec = do
                         source
             ProgramTypes.typeViewDisplay actual `shouldBe` STBase "Int"
             ProgramTypes.typeViewIdentity actual `shouldBe` STBase "Int"
+
+        it "does not apply ambiguous type-view display substitutions by arbitrary identity order" $ do
+            let leftIdentity = typeBinderIdentityFromNode (NodeId 992510)
+                rightIdentity = typeBinderIdentityFromNode (NodeId 992511)
+                leftStableName = typeBinderIdentityStableName leftIdentity
+                rightStableName = typeBinderIdentityStableName rightIdentity
+                source =
+                    ( ProgramTypes.mkTypeView
+                        (STArrow (STVar "a") (STVar "a"))
+                        (STArrow (STVar leftStableName) (STVar rightStableName))
+                    )
+                        { ProgramTypes.typeViewBinderIdentities =
+                            Map.fromList
+                                [ (leftStableName, leftIdentity)
+                                , (rightStableName, rightIdentity)
+                                ]
+                        }
+                subst =
+                    Map.fromList
+                        [ (ProgramTypes.typeViewSubstKeyForIdentity leftIdentity, ProgramTypes.mkTypeView (STBase "Int") (STBase "Int"))
+                        , (ProgramTypes.typeViewSubstKeyForIdentity rightIdentity, ProgramTypes.mkTypeView (STBase "Bool") (STBase "Bool"))
+                        ]
+                actual = ProgramTypes.applyTypeViewSubst subst source
+            ProgramTypes.typeViewDisplay actual `shouldBe` STArrow (STVar "a") (STVar "a")
+            ProgramTypes.typeViewIdentity actual `shouldBe` STArrow (STBase "Int") (STBase "Bool")
+
+        it "does not let ambiguous display pairs overwrite identity substitutions" $ do
+            let leftIdentity = typeBinderIdentityFromNode (NodeId 992512)
+                rightIdentity = typeBinderIdentityFromNode (NodeId 992513)
+                leftStableName = typeBinderIdentityStableName leftIdentity
+                rightStableName = typeBinderIdentityStableName rightIdentity
+                source =
+                    ( ProgramTypes.mkTypeView
+                        (STArrow (STVar "a") (STVar "a"))
+                        (STArrow (STVar leftStableName) (STVar rightStableName))
+                    )
+                        { ProgramTypes.typeViewBinderIdentities =
+                            Map.fromList
+                                [ (leftStableName, leftIdentity)
+                                , ("a", rightIdentity)
+                                ]
+                        }
+                subst =
+                    Map.fromList
+                        [ (ProgramTypes.typeViewSubstKeyForIdentity leftIdentity, ProgramTypes.mkTypeView (STBase "Int") (STBase "Int"))
+                        , (ProgramTypes.typeViewSubstKeyForIdentity rightIdentity, ProgramTypes.mkTypeView (STBase "Bool") (STBase "Bool"))
+                        ]
+                actual = ProgramTypes.applyTypeViewSubst subst source
+            ProgramTypes.typeViewIdentity actual `shouldBe` STArrow (STBase "Int") (STBase "Bool")
+
+        it "does not replace ambiguous display names for a single identity substitution" $ do
+            let leftIdentity = typeBinderIdentityFromNode (NodeId 992514)
+                rightIdentity = typeBinderIdentityFromNode (NodeId 992515)
+                leftStableName = typeBinderIdentityStableName leftIdentity
+                rightStableName = typeBinderIdentityStableName rightIdentity
+                source =
+                    ( ProgramTypes.mkTypeView
+                        (STArrow (STVar "a") (STVar "a"))
+                        (STArrow (STVar leftStableName) (STVar rightStableName))
+                    )
+                        { ProgramTypes.typeViewBinderIdentities =
+                            Map.fromList
+                                [ (leftStableName, leftIdentity)
+                                , ("a", rightIdentity)
+                                ]
+                        }
+                subst =
+                    Map.singleton
+                        (ProgramTypes.typeViewSubstKeyForIdentity leftIdentity)
+                        (ProgramTypes.mkTypeView (STBase "Int") (STBase "Int"))
+                actual = ProgramTypes.applyTypeViewSubst subst source
+            ProgramTypes.typeViewDisplay actual `shouldBe` STArrow (STVar "a") (STVar "a")
+            ProgramTypes.typeViewIdentity actual `shouldBe` STArrow (STBase "Int") (STVar rightStableName)
 
         it "keys type-view substitutions by identity through binder metadata" $ do
             let identity = typeBinderIdentityFromUnique (UniqueIdentity 991621)
@@ -355,6 +449,51 @@ spec = do
             ProgramTypes.typeViewHeadIdentities (ProgramTypes.applyTypeViewSubst subst sourceView)
                 `shouldBe` Map.singleton "Token" headIdentity
 
+        it "keeps replacement type head identities by payload stable name after applying type-view substitutions" $ do
+            let sourceIdentity = typeBinderIdentityFromNode (NodeId 992501)
+                sourceStableName = typeBinderIdentityStableName sourceIdentity
+                headIdentity = generatedSymbolIdentity 992502 SymbolType "Main" "Token" Nothing
+                headStableName = symbolIdentityStableName headIdentity
+                sourceView =
+                    (ProgramTypes.mkTypeView (STVar "x") (STVar sourceStableName))
+                        { ProgramTypes.typeViewBinderIdentities = Map.singleton "x" sourceIdentity
+                        }
+                replacement =
+                    (ProgramTypes.mkTypeView (STBase headStableName) (STBase headStableName))
+                        { ProgramTypes.typeViewHeadIdentities = Map.singleton "Token" headIdentity
+                        }
+                subst =
+                    Map.singleton (ProgramTypes.typeViewSubstKeyForIdentity sourceIdentity) replacement
+            ProgramTypes.typeViewHeadIdentities (ProgramTypes.applyTypeViewSubst subst sourceView)
+                `shouldBe` Map.singleton "Token" headIdentity
+
+        it "keeps replacement type head identities by payload qualified name after applying type-view substitutions" $ do
+            let sourceIdentity = typeBinderIdentityFromNode (NodeId 992507)
+                sourceStableName = typeBinderIdentityStableName sourceIdentity
+                headIdentity = generatedSymbolIdentity 992508 SymbolType "Main" "Token" Nothing
+                qualifiedHeadName = "Main.Token"
+                sourceView =
+                    (ProgramTypes.mkTypeView (STVar "x") (STVar sourceStableName))
+                        { ProgramTypes.typeViewBinderIdentities = Map.singleton "x" sourceIdentity
+                        }
+                replacement =
+                    (ProgramTypes.mkTypeView (STBase qualifiedHeadName) (STBase qualifiedHeadName))
+                        { ProgramTypes.typeViewHeadIdentities = Map.singleton "Token" headIdentity
+                        }
+                subst =
+                    Map.singleton (ProgramTypes.typeViewSubstKeyForIdentity sourceIdentity) replacement
+            ProgramTypes.typeViewHeadIdentities (ProgramTypes.applyTypeViewSubst subst sourceView)
+                `shouldBe` Map.singleton "Token" headIdentity
+
+        it "resolves type head identities through payload qualified aliases" $ do
+            let headIdentity = generatedSymbolIdentity 992509 SymbolType "Main" "Token" Nothing
+                view =
+                    (ProgramTypes.mkTypeView (STBase "Main.Token") (STBase "Main.Token"))
+                        { ProgramTypes.typeViewHeadIdentities = Map.singleton "Token" headIdentity
+                        }
+            ProgramTypes.typeViewHeadIdentityForAlias view "Main.Token"
+                `shouldBe` Just headIdentity
+
         it "keeps replacement binder identities by display key after applying type-view substitutions" $ do
             let sourceIdentity = typeBinderIdentityFromNode (NodeId 991431)
                 sourceStableName = typeBinderIdentityStableName sourceIdentity
@@ -373,12 +512,44 @@ spec = do
             ProgramTypes.typeViewBinderIdentities (ProgramTypes.applyTypeViewSubst subst sourceView)
                 `shouldBe` Map.singleton "y" replacementIdentity
 
+        it "keeps replacement binder identities by payload stable name after applying type-view substitutions" $ do
+            let sourceIdentity = typeBinderIdentityFromNode (NodeId 992503)
+                sourceStableName = typeBinderIdentityStableName sourceIdentity
+                replacementIdentity = typeBinderIdentityFromNode (NodeId 992504)
+                replacementStableName = typeBinderIdentityStableName replacementIdentity
+                sourceView =
+                    (ProgramTypes.mkTypeView (STVar "x") (STVar sourceStableName))
+                        { ProgramTypes.typeViewBinderIdentities = Map.singleton "x" sourceIdentity
+                        }
+                replacement =
+                    (ProgramTypes.mkTypeView (STVar replacementStableName) (STVar replacementStableName))
+                        { ProgramTypes.typeViewBinderIdentities = Map.singleton "y" replacementIdentity
+                        }
+                subst =
+                    Map.singleton (ProgramTypes.typeViewSubstKeyForIdentity sourceIdentity) replacement
+            ProgramTypes.typeViewBinderIdentities (ProgramTypes.applyTypeViewSubst subst sourceView)
+                `shouldBe` Map.singleton "y" replacementIdentity
+
         it "keeps display keys for known type-binder identities" $ do
             let identity = typeBinderIdentityFromNode (NodeId 991617)
                 stableName = typeBinderIdentityStableName identity
                 aliases = ProgramTypes.typeBinderAliasIdentityMap [("a", identity)]
             Map.lookup "a" aliases `shouldBe` Just identity
             Map.lookup stableName aliases `shouldBe` Just identity
+
+        it "drops ambiguous display keys from type-binder identity aliases" $ do
+            let firstIdentity = typeBinderIdentityFromNode (NodeId 991618)
+                secondIdentity = typeBinderIdentityFromNode (NodeId 991619)
+                firstStableName = typeBinderIdentityStableName firstIdentity
+                secondStableName = typeBinderIdentityStableName secondIdentity
+                aliases =
+                    ProgramTypes.typeBinderAliasIdentityMap
+                        [ ("a", firstIdentity)
+                        , ("a", secondIdentity)
+                        ]
+            Map.lookup "a" aliases `shouldBe` Nothing
+            Map.lookup firstStableName aliases `shouldBe` Just firstIdentity
+            Map.lookup secondStableName aliases `shouldBe` Just secondIdentity
 
         it "compares type-binder substitutions by identity targets when alias names are stale" $ do
             let identity = typeBinderIdentityFromUnique (UniqueIdentity 991616)
@@ -405,6 +576,27 @@ spec = do
                 template = ProgramTypes.mkTypeView (STVar "a") (STVar "a")
                 actual = ProgramTypes.mkTypeView (STBase "Int") (STBase "Int")
             matchTypeViewsAgainstIdentity scope Map.empty (template :| []) (actual :| [])
+                `shouldBe` Nothing
+
+        it "rejects repeated type-view substitutions with same display head and different identities" $ do
+            let binderIdentity = typeBinderIdentityFromNode (NodeId 992516)
+                binderStableName = typeBinderIdentityStableName binderIdentity
+                leftHeadIdentity = generatedSymbolIdentity 992517 SymbolType "Left" "Token" Nothing
+                rightHeadIdentity = generatedSymbolIdentity 992518 SymbolType "Right" "Token" Nothing
+                scope = mkElaborateScope Map.empty Map.empty Map.empty []
+                template =
+                    (ProgramTypes.mkTypeView (STVar "a") (STVar binderStableName))
+                        { ProgramTypes.typeViewBinderIdentities = Map.singleton binderStableName binderIdentity
+                        }
+                actual identity =
+                    (ProgramTypes.mkTypeView (STBase "Token") (STBase "Token"))
+                        { ProgramTypes.typeViewHeadIdentities = Map.singleton "Token" identity
+                        }
+            matchTypeViewsAgainstIdentity
+                scope
+                Map.empty
+                (template :| [template])
+                (actual leftHeadIdentity :| [actual rightHeadIdentity])
                 `shouldBe` Nothing
 
         it "keeps replacement binder identities after applying type-view substitutions" $ do
@@ -451,6 +643,34 @@ spec = do
             ProgramTypes.typeViewBinderIdentities (ProgramTypes.applyTypeViewSubst subst sourceView)
                 `shouldBe` Map.empty
 
+        it "keeps stable binder aliases but drops ambiguous direct display keys after applying type-view substitutions" $ do
+            let leftSourceIdentity = typeBinderIdentityFromNode (NodeId 991438)
+                rightSourceIdentity = typeBinderIdentityFromNode (NodeId 991439)
+                leftReplacementIdentity = typeBinderIdentityFromNode (NodeId 991440)
+                rightReplacementIdentity = typeBinderIdentityFromNode (NodeId 991441)
+                leftStableName = typeBinderIdentityStableName leftReplacementIdentity
+                rightStableName = typeBinderIdentityStableName rightReplacementIdentity
+                sourceView =
+                    (ProgramTypes.mkTypeView (STArrow (STVar "x") (STVar "y")) (STArrow (STVar "$x") (STVar "$y")))
+                        { ProgramTypes.typeViewBinderIdentities =
+                            Map.fromList [("$x", leftSourceIdentity), ("$y", rightSourceIdentity)]
+                        }
+                leftReplacement =
+                    (ProgramTypes.mkTypeView (STVar "a") (STVar leftStableName))
+                        { ProgramTypes.typeViewBinderIdentities = Map.singleton "a" leftReplacementIdentity
+                        }
+                rightReplacement =
+                    (ProgramTypes.mkTypeView (STVar "a") (STVar rightStableName))
+                        { ProgramTypes.typeViewBinderIdentities = Map.singleton rightStableName rightReplacementIdentity
+                        }
+                subst =
+                    Map.fromList
+                        [ (ProgramTypes.typeViewSubstKeyForIdentity leftSourceIdentity, leftReplacement)
+                        , (ProgramTypes.typeViewSubstKeyForIdentity rightSourceIdentity, rightReplacement)
+                        ]
+            ProgramTypes.typeViewBinderIdentities (ProgramTypes.applyTypeViewSubst subst sourceView)
+                `shouldBe` Map.fromList [(leftStableName, leftReplacementIdentity), (rightStableName, rightReplacementIdentity)]
+
         it "drops ambiguous replacement type head display identities after applying type-view substitutions" $ do
             let leftSourceIdentity = typeBinderIdentityFromNode (NodeId 991419)
                 rightSourceIdentity = typeBinderIdentityFromNode (NodeId 991420)
@@ -468,6 +688,92 @@ spec = do
                 rightReplacement =
                     (ProgramTypes.mkTypeView (STBase "Token") (STBase "Token"))
                         { ProgramTypes.typeViewHeadIdentities = Map.singleton "Token" rightHeadIdentity
+                        }
+                subst =
+                    Map.fromList
+                        [ (ProgramTypes.typeViewSubstKeyForIdentity leftSourceIdentity, leftReplacement)
+                        , (ProgramTypes.typeViewSubstKeyForIdentity rightSourceIdentity, rightReplacement)
+                        ]
+            ProgramTypes.typeViewHeadIdentities (ProgramTypes.applyTypeViewSubst subst sourceView)
+                `shouldBe` Map.empty
+
+        it "keeps stable type head aliases but drops ambiguous direct display keys after applying type-view substitutions" $ do
+            let leftSourceIdentity = typeBinderIdentityFromNode (NodeId 991442)
+                rightSourceIdentity = typeBinderIdentityFromNode (NodeId 991443)
+                leftHeadIdentity = generatedSymbolIdentity 991444 SymbolType "Left" "Token" Nothing
+                rightHeadIdentity = generatedSymbolIdentity 991445 SymbolType "Right" "Token" Nothing
+                leftStableName = symbolIdentityStableName leftHeadIdentity
+                rightStableName = symbolIdentityStableName rightHeadIdentity
+                sourceView =
+                    (ProgramTypes.mkTypeView (STArrow (STVar "x") (STVar "y")) (STArrow (STVar "$x") (STVar "$y")))
+                        { ProgramTypes.typeViewBinderIdentities =
+                            Map.fromList [("$x", leftSourceIdentity), ("$y", rightSourceIdentity)]
+                        }
+                leftReplacement =
+                    (ProgramTypes.mkTypeView (STBase "Token") (STBase leftStableName))
+                        { ProgramTypes.typeViewHeadIdentities =
+                            Map.singleton "Token" leftHeadIdentity
+                        }
+                rightReplacement =
+                    (ProgramTypes.mkTypeView (STBase "Token") (STBase rightStableName))
+                        { ProgramTypes.typeViewHeadIdentities =
+                            Map.singleton rightStableName rightHeadIdentity
+                        }
+                subst =
+                    Map.fromList
+                        [ (ProgramTypes.typeViewSubstKeyForIdentity leftSourceIdentity, leftReplacement)
+                        , (ProgramTypes.typeViewSubstKeyForIdentity rightSourceIdentity, rightReplacement)
+                        ]
+            ProgramTypes.typeViewHeadIdentities (ProgramTypes.applyTypeViewSubst subst sourceView)
+                `shouldBe` Map.fromList [(leftStableName, leftHeadIdentity), (rightStableName, rightHeadIdentity)]
+
+        it "drops ambiguous replacement type head stable aliases after applying type-view substitutions" $ do
+            let leftSourceIdentity = typeBinderIdentityFromNode (NodeId 991430)
+                rightSourceIdentity = typeBinderIdentityFromNode (NodeId 991431)
+                leftHeadIdentity = generatedSymbolIdentity 991432 SymbolType "Left" "Token" Nothing
+                rightHeadIdentity = generatedSymbolIdentity 991433 SymbolType "Right" "Token" Nothing
+                sourceView =
+                    (ProgramTypes.mkTypeView (STArrow (STVar "x") (STVar "y")) (STArrow (STVar "$x") (STVar "$y")))
+                        { ProgramTypes.typeViewBinderIdentities =
+                            Map.fromList [("$x", leftSourceIdentity), ("$y", rightSourceIdentity)]
+                        }
+                leftReplacement =
+                    (ProgramTypes.mkTypeView (STBase "Token") (STBase "Token"))
+                        { ProgramTypes.typeViewHeadIdentities =
+                            Map.singleton (symbolIdentityStableName leftHeadIdentity) leftHeadIdentity
+                        }
+                rightReplacement =
+                    (ProgramTypes.mkTypeView (STBase "Token") (STBase "Token"))
+                        { ProgramTypes.typeViewHeadIdentities =
+                            Map.singleton (symbolIdentityStableName rightHeadIdentity) rightHeadIdentity
+                        }
+                subst =
+                    Map.fromList
+                        [ (ProgramTypes.typeViewSubstKeyForIdentity leftSourceIdentity, leftReplacement)
+                        , (ProgramTypes.typeViewSubstKeyForIdentity rightSourceIdentity, rightReplacement)
+                        ]
+            ProgramTypes.typeViewHeadIdentities (ProgramTypes.applyTypeViewSubst subst sourceView)
+                `shouldBe` Map.empty
+
+        it "drops mixed direct and stable ambiguous type head aliases after applying type-view substitutions" $ do
+            let leftSourceIdentity = typeBinderIdentityFromNode (NodeId 991434)
+                rightSourceIdentity = typeBinderIdentityFromNode (NodeId 991435)
+                leftHeadIdentity = generatedSymbolIdentity 991436 SymbolType "Left" "Token" Nothing
+                rightHeadIdentity = generatedSymbolIdentity 991437 SymbolType "Right" "Token" Nothing
+                sourceView =
+                    (ProgramTypes.mkTypeView (STArrow (STVar "x") (STVar "y")) (STArrow (STVar "$x") (STVar "$y")))
+                        { ProgramTypes.typeViewBinderIdentities =
+                            Map.fromList [("$x", leftSourceIdentity), ("$y", rightSourceIdentity)]
+                        }
+                leftReplacement =
+                    (ProgramTypes.mkTypeView (STBase "Token") (STBase "Token"))
+                        { ProgramTypes.typeViewHeadIdentities =
+                            Map.singleton "Token" leftHeadIdentity
+                        }
+                rightReplacement =
+                    (ProgramTypes.mkTypeView (STBase "Token") (STBase "Token"))
+                        { ProgramTypes.typeViewHeadIdentities =
+                            Map.singleton (symbolIdentityStableName rightHeadIdentity) rightHeadIdentity
                         }
                 subst =
                     Map.fromList
@@ -645,6 +951,47 @@ spec = do
                 expected = Elab.TForallRef ref Nothing (Elab.TVarRef ref)
             typeViewToElabType scope view `shouldBe` Right expected
 
+        it "does not reuse an outer display binder identity for a same-named missing inner finalization binder" $ do
+            let outerIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991633)
+                scope = mkElaborateScope Map.empty Map.empty Map.empty []
+                displayTy = STForall "a" Nothing (STForall "a" Nothing (STVar "a"))
+                identityTy = STForall "$outer_a" Nothing (STForall "$missing_inner_a" Nothing (STVar "$missing_inner_a"))
+                view =
+                    (ProgramTypes.mkTypeView displayTy identityTy)
+                        { ProgramTypes.typeViewBinderIdentities = Map.singleton "a" outerIdentity
+                        }
+            case typeViewToElabType scope view of
+                Right (Elab.TForallRef outerRef Nothing (Elab.TForallRef innerRef Nothing (Elab.TVarRef bodyRef))) -> do
+                    Elab.typeBinderRefIdentity outerRef `shouldBe` outerIdentity
+                    Elab.typeBinderRefIdentity innerRef `shouldNotBe` outerIdentity
+                    Elab.typeBinderRefIdentity bodyRef `shouldBe` Elab.typeBinderRefIdentity innerRef
+                other ->
+                    expectationFailure ("expected distinct finalized forall refs, got " ++ show other)
+
+        it "does not reuse an outer display binder identity for same-named finalization binders inside bounds" $ do
+            let outerIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991634)
+                scope = mkElaborateScope Map.empty Map.empty Map.empty []
+                displayBound = STForall "a" Nothing (STVar "a")
+                identityBound = STForall "$missing_bound_a" Nothing (STVar "$missing_bound_a")
+                displayTy =
+                    STForall "a" Nothing $
+                        STForall "b" (Just (SrcBound displayBound)) (STVar "b")
+                identityTy =
+                    STForall "$outer_a" Nothing $
+                        STForall "$b" (Just (SrcBound identityBound)) (STVar "$b")
+                view =
+                    (ProgramTypes.mkTypeView displayTy identityTy)
+                        { ProgramTypes.typeViewBinderIdentities = Map.singleton "a" outerIdentity
+                        }
+            case typeViewToElabType scope view of
+                Right (Elab.TForallRef outerRef Nothing (Elab.TForallRef bRef (Just (Elab.TForallRef boundRef Nothing (Elab.TVarRef boundBodyRef))) (Elab.TVarRef bodyRef))) -> do
+                    Elab.typeBinderRefIdentity outerRef `shouldBe` outerIdentity
+                    Elab.typeBinderRefIdentity boundRef `shouldNotBe` outerIdentity
+                    Elab.typeBinderRefIdentity boundBodyRef `shouldBe` Elab.typeBinderRefIdentity boundRef
+                    bodyRef `shouldBe` bRef
+                other ->
+                    expectationFailure ("expected distinct finalized bound refs, got " ++ show other)
+
         it "seeds fresh type-view binders after type head identities while finalizing views" $ do
             let headIdentity = generatedSymbolIdentity 43 SymbolType "Main" "Box" Nothing
                 headName = symbolIdentityStableName headIdentity
@@ -660,6 +1007,34 @@ spec = do
                     Elab.TArrow
                         (Elab.TBaseWithIdentity (Just headIdentity) (BaseTy "Box"))
                         (Elab.TVarRef binderRef)
+            typeViewToElabType scope view `shouldBe` Right expected
+
+        it "finalizes type-view heads through payload stable aliases" $ do
+            let headIdentity = generatedSymbolIdentity 45 SymbolType "Main" "Token" Nothing
+                headName = symbolIdentityStableName headIdentity
+                scope = mkElaborateScope Map.empty Map.empty Map.empty []
+                view =
+                    (ProgramTypes.mkTypeView (STBase headName) (STBase headName))
+                        { ProgramTypes.typeViewHeadIdentities = Map.singleton "Token" headIdentity
+                        }
+                expected =
+                    Elab.TBaseWithIdentity (Just headIdentity) (BaseTy headName)
+            typeViewToElabType scope view `shouldBe` Right expected
+
+        it "does not finalize ambiguous type-view head aliases by display name" $ do
+            let leftIdentity = generatedSymbolIdentity 991620 SymbolType "Left" "Token" Nothing
+                rightIdentity = generatedSymbolIdentity 991621 SymbolType "Right" "Token" Nothing
+                scope = mkElaborateScope Map.empty Map.empty Map.empty []
+                view =
+                    (ProgramTypes.mkTypeView (STBase "Token") (STBase "Token"))
+                        { ProgramTypes.typeViewHeadIdentities =
+                            Map.fromList
+                                [ (symbolIdentityStableName leftIdentity, leftIdentity)
+                                , (symbolIdentityStableName rightIdentity, rightIdentity)
+                                ]
+                        }
+                expected =
+                    Elab.TBaseWithIdentity Nothing (BaseTy "Token")
             typeViewToElabType scope view `shouldBe` Right expected
 
         it "seeds fresh type-view binders after scoped type head identities" $ do
@@ -1185,6 +1560,64 @@ spec = do
             ProgramTypes.constructorShapeResultIdentity (constructorShapeFromInfo nothingCtor) `shouldBe` resultTyIdentity
             map ProgramTypes.constructorShapeResultIdentity (ProgramTypes.constructorOwnerShapes nothingCtor) `shouldBe` [resultTyIdentity, resultTyIdentity]
 
+        it "infers constructor owner params through result head identity metadata" $ do
+            let typeIdentity =
+                    generatedSymbolIdentity 1024 SymbolType "Core" "MaybeF" Nothing
+                ctorIdentity =
+                    generatedSymbolIdentity 1025 SymbolConstructor "Core" "JustF" (Just (SymbolOwnerType typeIdentity))
+                fIdentity = typeBinderIdentityFromNode (NodeId 992505)
+                aIdentity = typeBinderIdentityFromNode (NodeId 992506)
+                fStableName = typeBinderIdentityStableName fIdentity
+                aStableName = typeBinderIdentityStableName aIdentity
+                staleDisplayHead = "$stale_display_maybef"
+                staleIdentityHead = "$stale_identity_maybef"
+                displayResult = STCon staleDisplayHead (STVar "f" :| [STVar "a"])
+                identityResult = STCon staleIdentityHead (STVar fStableName :| [STVar aStableName])
+                ctorView =
+                    ( ProgramTypes.mkTypeView
+                        displayResult
+                        identityResult
+                    )
+                        { ProgramTypes.typeViewHeadIdentities =
+                            Map.fromList
+                                [ (staleDisplayHead, typeIdentity)
+                                , (staleIdentityHead, typeIdentity)
+                                ]
+                        , ProgramTypes.typeViewBinderIdentities =
+                            Map.fromList
+                                [ (fStableName, fIdentity)
+                                , (aStableName, aIdentity)
+                                ]
+                        }
+                forallBinders =
+                    [ ProgramTypes.ConstructorForallBinder "f" fIdentity
+                    , ProgramTypes.ConstructorForallBinder "a" aIdentity
+                    ]
+                shape =
+                    ConstructorShape
+                        { constructorShapeSymbol = ctorIdentity
+                        , constructorShapeRuntimeName = "Core__JustF"
+                        , constructorShapeTypeView = ctorView
+                        , constructorShapeForallBinderInfo = forallBinders
+                        , constructorShapeIndex = 0
+                        , constructorShapeOwnerTypeParams = []
+                        }
+                ctorInfo =
+                    ConstructorInfo
+                        { ctorInfoSymbol = ctorIdentity
+                        , ctorRuntimeName = "Core__JustF"
+                        , ctorTypeView = ctorView
+                        , ctorForallBinderInfo = forallBinders
+                        , ctorOwningTypeIdentity = typeIdentity
+                        , ctorIndex = 0
+                        , ctorOwnerConstructors = [shape]
+                        }
+                ownerInfo = ProgramTypes.constructorOwnerDataInfoFromShapes ctorInfo
+            dataTypeParams ownerInfo
+                `shouldBe` [ ResolvedTypeParam (resolvedTypeBinderRefFromIdentity fIdentity "f") KType
+                           , ResolvedTypeParam (resolvedTypeBinderRefFromIdentity aIdentity "a") KType
+                           ]
+
         it "records constructor bindings with resolved constructor identity" $ do
             program <-
                 requireParsed $
@@ -1632,10 +2065,70 @@ spec = do
             let term = checkedBindingTerm applyBinding
                 binderRefs = resolvedLocalBinders term
                 occurrenceRefs = resolvedLocalOccurrences term
-                binderNames = map localRefName binderRefs
-            binderNames `shouldSatisfy` (not . null)
-            binderRefs `shouldSatisfy` all isGeneratedLocalRef
-            occurrenceRefs `shouldMatchList` binderRefs
+                resolvedRefs =
+                    [ ref
+                    | resolvedModule <- ProgramTypes.resolvedProgramModules (ProgramTypes.checkedProgramResolved checked)
+                    , resolvedModuleName resolvedModule == "Main"
+                    , DeclDef defDecl <- moduleDecls (resolvedModuleSyntax resolvedModule)
+                    , refDisplayName (defDeclName defDecl) == "apply"
+                    , ELam param (ELet letRef _ _ _) <- [defDeclExpr defDecl]
+                    , ref <- [paramName param, letRef]
+                    ]
+            resolvedRefs `shouldSatisfy` (not . null)
+            binderRefs `shouldMatchList` resolvedRefs
+            occurrenceRefs `shouldMatchList` resolvedRefs
+
+        it "does not rename grouped placeholder spellings under resolved local binders" $ do
+            finalizeContext <- requireFinalizeContext (mkElaborateScope Map.empty Map.empty Map.empty [])
+            let firstLocal = localRefFromIdentity (GeneratedLocalId (UniqueIdentity 991801)) "x"
+                secondLocal = localRefFromIdentity (GeneratedLocalId (UniqueIdentity 991802)) "x"
+                firstIdentity = generatedSymbolIdentity 991803 SymbolValue "Main" "first" Nothing
+                secondIdentity = generatedSymbolIdentity 991804 SymbolValue "Main" "second" Nothing
+                firstDeferred = deferredRefFromIdentity (UniqueIdentity 991805) "x"
+                secondDeferred = deferredRefFromIdentity (UniqueIdentity 991806) "x"
+                dataIdentity = generatedSymbolIdentity 991807 SymbolType "Main" "Phantom" Nothing
+                phantomData =
+                    DataInfo
+                        { dataInfoSymbol = dataIdentity
+                        , dataTypeParams = []
+                        , dataConstructors = []
+                        }
+                obligation deferredRef =
+                    DeferredCase
+                        DeferredCaseCall
+                            { deferredCaseRef = deferredRef
+                            , deferredCaseDataInfo = phantomData
+                            , deferredCaseScrutineeType = STBase "Int"
+                            , deferredCaseResultType = STBase "Int"
+                            , deferredCaseExpectedArgCount = 0
+                            }
+                intTy = STBase "Int"
+                functionTy = STArrow intTy intTy
+                localIdentityExpr = Surface.ELamAnn "x" intTy (Surface.EVar "x")
+                lowered name identity localRef deferredRef =
+                    LoweredBinding
+                        { loweredBindingIdentity =
+                            ProgramTypes.loweredBindingIdentityFromDetails name (TopLevelId identity)
+                        , loweredBindingSourceType = functionTy
+                        , loweredBindingSourceTypeView = Nothing
+                        , loweredBindingExpectedType = functionTy
+                        , loweredBindingExpectedTypeView = Nothing
+                        , loweredBindingSurfaceExpr = localIdentityExpr
+                        , loweredBindingResolvedLocalIdentities = Map.singleton "x" localRef
+                        , loweredBindingDeferredObligations = Map.singleton deferredRef (obligation deferredRef)
+                        , loweredBindingExternalTypeViews = Map.empty
+                        , loweredBindingEvidenceParamCount = 0
+                        , loweredBindingExportedAsMain = False
+                        }
+            checked <-
+                case finalizeBindingsAllowOpaqueWithContext finalizeContext
+                    [ lowered "Main__first" firstIdentity firstLocal firstDeferred
+                    , lowered "Main__second" secondIdentity secondLocal secondDeferred
+                    ] of
+                    Right bindings -> pure bindings
+                    Left err -> expectationFailure ("finalize group failed: " ++ show err) >> fail "finalize group failed"
+            map (resolvedLocalBinders . checkedBindingTerm) checked `shouldBe` [[firstLocal], [secondLocal]]
+            map (resolvedLocalOccurrences . checkedBindingTerm) checked `shouldBe` [[firstLocal], [secondLocal]]
 
         it "keeps graph local refs distinct from generated local refs" $ do
             let graphRef = localRefFromNodeId "x" (NodeId 0)
@@ -1786,6 +2279,41 @@ spec = do
                         checked
             (programRunOutput <$> runCheckedProgramOutput checked') `shouldBe` Right "Box None\n"
 
+        it "decodes constructor fields using constructor head identity payloads when metadata keys are stale" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (Option(..), Box(..), main) {"
+                        , "  data Option ="
+                        , "      None : Option;"
+                        , ""
+                        , "  data Box ="
+                        , "      Box : Option -> Box;"
+                        , ""
+                        , "  def main : Box = Box None;"
+                        , "}"
+                        ]
+            checked <- requireChecked (withPrelude program)
+            boxInfo <- requireCheckedData "Main" "Box" checked
+            optionInfo <- requireCheckedData "Main" "Option" checked
+            let boxDisplayHead = ProgramTypes.dataInfoIdentityName boxInfo
+                optionDisplayHead = ProgramTypes.dataInfoIdentityName optionInfo
+                boxStableHead = symbolIdentityStableName (ProgramTypes.dataInfoSymbol boxInfo)
+                optionStableHead = symbolIdentityStableName (ProgramTypes.dataInfoSymbol optionInfo)
+                ctorView =
+                    ( ProgramTypes.mkTypeView
+                        (STArrow (STBase optionStableHead) (STBase boxStableHead))
+                        (STArrow (STBase optionStableHead) (STBase boxStableHead))
+                    )
+                        { ProgramTypes.typeViewHeadIdentities =
+                            Map.fromList
+                                [ (boxDisplayHead, ProgramTypes.dataInfoSymbol boxInfo)
+                                , (optionDisplayHead, ProgramTypes.dataInfoSymbol optionInfo)
+                                ]
+                        }
+                checked' = replaceCheckedConstructorTypeView "Main__Box" ctorView checked
+            (programRunOutput <$> runCheckedProgramOutput checked') `shouldBe` Right "Box None\n"
+
         it "decodes parameterized Church data using constructor field binder identity metadata" $ do
             program <-
                 requireParsed $
@@ -1924,6 +2452,35 @@ spec = do
                 `shouldNotBe` Right "BBox\n"
             (programRunOutput <$> runCheckedProgramOutput checkedByElabIdentity)
                 `shouldBe` Right "BBox\n"
+
+        it "decodes checked main data by source display head identity when identity spelling is stale" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (Option(..), main) {"
+                        , "  data Option ="
+                        , "      None : Option;"
+                        , ""
+                        , "  def main : Option = None;"
+                        , "}"
+                        ]
+            checked <- requireChecked (withPrelude program)
+            optionInfo <- requireCheckedData "Main" "Option" checked
+            let displayHead = ProgramTypes.dataInfoIdentityName optionInfo
+                checked' =
+                    replaceCheckedBindingType
+                        "Main__main"
+                        (Elab.TBaseWithIdentity Nothing (BaseTy "$stale_option"))
+                        ( replaceCheckedBindingSourceTypeView
+                            "Main__main"
+                            ( (ProgramTypes.mkTypeView (STBase displayHead) (STBase "$stale_identity_option"))
+                                { ProgramTypes.typeViewHeadIdentities =
+                                    Map.singleton displayHead (ProgramTypes.dataInfoSymbol optionInfo)
+                                }
+                            )
+                            checked
+                        )
+            (programRunOutput <$> runCheckedProgramOutput checked') `shouldBe` Right "None\n"
 
         it "runs pure primitive calls by resolved primitive identity instead of runtime name" $ do
             program <-
@@ -3066,6 +3623,7 @@ spec = do
                         , loweredBindingExpectedType = STBase "Int"
                         , loweredBindingExpectedTypeView = Nothing
                         , loweredBindingSurfaceExpr = Surface.ELit (LInt value)
+                        , loweredBindingResolvedLocalIdentities = Map.empty
                         , loweredBindingDeferredObligations = Map.singleton duplicateRef obligation
                         , loweredBindingExternalTypeViews = Map.empty
                         , loweredBindingEvidenceParamCount = 0
@@ -5076,6 +5634,29 @@ spec = do
                         [STBase "Token", STVar "a"]
                         [STBase "C.Token", STBase "Bool"]
                     )
+
+        it "does not overlap same-named local and qualified imported instance heads" $ do
+            let programText =
+                    unlines
+                        [ "module Core export (Token(..)) {"
+                        , "  data Token ="
+                        , "      RemoteToken : Token;"
+                        , "}"
+                        , "module Main export (main) {"
+                        , "  import Core as C;"
+                        , "  data Token ="
+                        , "      LocalToken : Token;"
+                        , "  class Rel a b {"
+                        , "  }"
+                        , "  instance Rel Token a {"
+                        , "  }"
+                        , "  instance Rel C.Token Bool {"
+                        , "  }"
+                        , "  def main : Bool = true;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            checkProgram program `shouldSatisfy` isRight
 
         it "keeps alias-only access valid through the resolver pass" $ do
             let programText =

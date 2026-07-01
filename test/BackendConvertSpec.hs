@@ -579,6 +579,62 @@ spec = describe "MLF.Backend.Convert" $ do
     backendBindingType mainBinding
       `shouldBe` BTForallWithIdentity (Just sourceIdentity) "a" Nothing intTy
 
+  it "does not reuse an outer display binder identity for a same-named missing inner binder" $ do
+    checked0 <- requireChecked simpleFunctionProgram
+    let outerIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991632)
+        displayTy = STForall "a" Nothing (STForall "a" Nothing (STBase "Int"))
+        identityTy = STForall "$outer_a" Nothing (STForall "$missing_inner_a" Nothing (STBase "Int"))
+        checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingSourceTypeView =
+                      (mkTypeView displayTy identityTy)
+                        { typeViewBinderIdentities =
+                            Map.singleton "a" outerIdentity
+                        },
+                    checkedBindingType = sameNamedTypeAbsElabTy,
+                    checkedBindingTerm = sameNamedTypeAbsTerm
+                  }
+            )
+            checked0
+    backend <- requireRight (convertCheckedProgram checked)
+
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    case backendBindingType mainBinding of
+      BTForallWithIdentity (Just outerBackendIdentity) _ Nothing (BTForallWithIdentity (Just innerBackendIdentity) _ Nothing _) -> do
+        outerBackendIdentity `shouldBe` outerIdentity
+        innerBackendIdentity `shouldNotBe` outerIdentity
+      other ->
+        expectationFailure ("expected distinct identity-backed backend foralls, got " ++ show other)
+
+  it "does not attach display binder identity to unrelated identity occurrences" $ do
+    checked0 <- requireChecked simpleFunctionProgram
+    let sourceIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991609)
+        checkedIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991610)
+        checkedRef = Elab.typeBinderRefFromIdentity checkedIdentity "a"
+        displayTy = STForall "a" Nothing (STArrow (STVar "a") (STBase "Int"))
+        identityTy = STForall "$stale_a" Nothing (STArrow (STVar "$other") (STBase "Int"))
+        checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingSourceTypeView =
+                      (mkTypeView displayTy identityTy)
+                        { typeViewBinderIdentities =
+                            Map.singleton "a" sourceIdentity
+                        },
+                    checkedBindingType = Elab.TForallRef checkedRef Nothing (Elab.TArrow (Elab.TVarRef checkedRef) intElabTy),
+                    checkedBindingTerm = Elab.ETyAbsRef checkedRef Nothing (mkTestLocalLam "x" (Elab.TVarRef checkedRef) (Elab.ELit (LInt 1)))
+                  }
+            )
+            checked0
+    backend <- requireRight (convertCheckedProgram checked)
+
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    backendBindingType mainBinding
+      `shouldBe` BTForallWithIdentity (Just checkedIdentity) "a" Nothing (BTArrow (BTVarWithIdentity (Just checkedIdentity) "a") intTy)
+
   it "keeps checked source type binder identities through source type view fallback" $ do
     checked0 <- requireChecked simpleFunctionProgram
     let sourceIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991607)
@@ -604,6 +660,35 @@ spec = describe "MLF.Backend.Convert" $ do
     mainBinding <- requireBinding (backendProgramMain backend) backend
     backendBindingType mainBinding
       `shouldBe` BTForallWithIdentity (Just sourceIdentity) "a" Nothing intTy
+
+  it "does not reuse an outer display binder identity in source type view fallback" $ do
+    checked0 <- requireChecked simpleFunctionProgram
+    let outerIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991635)
+        displayTy = STForall "a" Nothing (STForall "a" Nothing (STBase "Int"))
+        identityTy = STBase "Int"
+        checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingSourceTypeView =
+                      (mkTypeView displayTy identityTy)
+                        { typeViewBinderIdentities =
+                            Map.singleton "a" outerIdentity
+                        },
+                    checkedBindingType = sameNamedTypeAbsElabTy,
+                    checkedBindingTerm = sameNamedTypeAbsTerm
+                  }
+            )
+            checked0
+    backend <- requireRight (convertCheckedProgram checked)
+
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    case backendBindingType mainBinding of
+      BTForallWithIdentity (Just outerBackendIdentity) _ Nothing (BTForallWithIdentity innerBackendIdentity _ Nothing _) -> do
+        outerBackendIdentity `shouldBe` outerIdentity
+        innerBackendIdentity `shouldNotBe` Just outerIdentity
+      other ->
+        expectationFailure ("expected distinct source fallback backend foralls, got " ++ show other)
 
   it "synthesizes constructor bindings for checked GADT and existential programs" $ do
     mapM_
@@ -713,6 +798,35 @@ spec = describe "MLF.Backend.Convert" $ do
         stableBackend <- requireRight (convertCheckedProgram checkedByStableHead)
         validateBackendProgram stableBackend `shouldBe` Right ()
         backendDataNames stableBackend `shouldContain` ["Main.Option"]
+      [] -> expectationFailure "expected checked data info"
+
+  it "uses checked source type display head identity maps for binding data hints when identity names are stale" $ do
+    checked0 <- requireChecked parameterizedConstructorProgram
+    case checkedDataInfos checked0 of
+      dataInfo : _ -> do
+        let displayDataHead = symbolDefiningName (dataInfoSymbol dataInfo)
+            checked =
+              mapMainBinding
+                ( \binding ->
+                    binding
+                      { checkedBindingSourceTypeView =
+                          ( mkTypeView
+                              (STCon displayDataHead (STBase "Int" :| []))
+                              (STCon "$stale_identity_option" (STBase "Int" :| []))
+                          )
+                            { typeViewHeadIdentities = Map.singleton displayDataHead (dataInfoSymbol dataInfo)
+                            },
+                        checkedBindingType =
+                          Elab.TConWithIdentity
+                            Nothing
+                            (BaseTy "$stale_elab_option")
+                            (Elab.TBaseWithIdentity (Just (builtinTypeIdentity "Int")) (BaseTy "Int") :| [])
+                      }
+                )
+                checked0
+        backend <- requireRight (convertCheckedProgram checked)
+        validateBackendProgram backend `shouldBe` Right ()
+        backendDataNames backend `shouldContain` ["Main.Option"]
       [] -> expectationFailure "expected checked data info"
 
   it "does not recover source data hints through names when head identity metadata misses" $ do
@@ -3325,9 +3439,8 @@ containsBackendClosureCallFunction expected expr =
     BackendCase {backendScrutinee = scrutinee, backendAlternatives = alternatives} ->
       containsBackendClosureCallFunction expected scrutinee
         || any (containsBackendClosureCallFunction expected . backendAltBody) (toList alternatives)
-    BackendLamWithIdentity {backendParamName = name, backendBody = body}
-      | name == expected -> False
-      | otherwise -> containsBackendClosureCallFunction expected body
+    BackendLamWithIdentity {backendBody = body} ->
+      containsBackendClosureCallFunction expected body
     BackendApp {backendFunction = fun, backendArgument = arg} ->
       containsBackendClosureCallFunction expected fun || containsBackendClosureCallFunction expected arg
     BackendLetWithIdentity {backendLetName = name, backendLetRhs = rhs, backendLetBody = body}

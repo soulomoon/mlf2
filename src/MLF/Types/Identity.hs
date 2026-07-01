@@ -9,6 +9,7 @@ module MLF.Types.Identity
     typeBinderIdentityStructural,
     typeBinderIdentityKey,
     typeBinderIdentityStableName,
+    typeBinderIdentityAliasMap,
     typeBinderIdentityFromUnique,
     typeBinderIdentityFromStructural,
     typeBinderGeneratedIdentities,
@@ -62,6 +63,9 @@ module MLF.Types.Identity
   )
 where
 
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import MLF.Constraint.Types.Graph (NodeId (..))
 import MLF.Frontend.Symbol (SymbolIdentity, SymbolOwnerIdentity (..), symbolDefiningName, symbolOwnerIdentity, symbolUniqueIdentity)
 import MLF.Types.Unique
@@ -123,6 +127,23 @@ typeBinderIdentityStableName identity =
     GeneratedTypeBinderIdentity unique -> "$typevar#" ++ show (uniqueIdentityValue unique)
     StructuralTypeBinderIdentity unique role ->
       "$typevar#structural#" ++ show (uniqueIdentityValue unique) ++ "#" ++ structuralRoleName role
+
+typeBinderIdentityAliasMap :: [(String, TypeBinderIdentity)] -> Map String TypeBinderIdentity
+typeBinderIdentityAliasMap binders =
+  Map.fromList
+    [ (alias, identity)
+    | (alias, identitiesForAlias) <- Map.toList identitiesByAlias,
+      [identity] <- [Set.toList identitiesForAlias]
+    ]
+  where
+    identitiesByAlias =
+      Map.fromListWith
+        Set.union
+        [ (alias, Set.singleton identity)
+        | (name, identity) <- binders,
+          alias <- [name, typeBinderIdentityStableName identity],
+          not (null alias)
+        ]
 
 typeBinderGeneratedIdentities :: TypeBinderIdentity -> [UniqueIdentity]
 typeBinderGeneratedIdentities identity =

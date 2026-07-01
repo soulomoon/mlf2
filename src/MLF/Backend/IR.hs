@@ -237,7 +237,7 @@ import MLF.Backend.StructuralRecursiveData
   )
 import MLF.Constraint.Types.Graph (BaseTy (..))
 import MLF.Frontend.Program.Builtins (builtinTypeHeadIdentity, builtinValueIdentity)
-import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), symbolDefiningModule, symbolDefiningName, symbolIdentityStableName, symbolNamespace, symbolUniqueIdentity)
+import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), symbolDefiningModule, symbolDefiningName, symbolIdentityAliasMap, symbolIdentityStableName, symbolNamespace, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit (..))
 import MLF.Types.Identity
   ( constructorRefSymbol,
@@ -1937,8 +1937,8 @@ primitiveTypeToBackendTypeFromWithHeadIdentities headIdentities0 generator0 ty =
     lookupPrimitiveTypeHeadIdentity headIdentities name =
       Map.lookup name headIdentities <|> Map.lookup name (primitiveTypeHeadStableAliases headIdentities)
 
-    primitiveTypeHeadStableAliases =
-      Map.fromList . map (\identity -> (symbolIdentityStableName identity, identity)) . Map.elems
+    primitiveTypeHeadStableAliases headIdentities =
+      symbolIdentityAliasMap (Map.elems headIdentities)
 
     freshBackendTypeIdentity generator =
       let (unique, generator') = freshIdentity generator

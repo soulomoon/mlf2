@@ -257,6 +257,68 @@ spec = do
                 (PackageInterface [libInterface {moduleInterfaceExports = staleExports}])
                 `shouldBe` Left (ProgramInterfaceIdentityKeySetMismatch libId expectedKeys actualKeys)
 
+        it "requires exported value display identity keys to match exported values" $ do
+            (_graph, _checked, packageInterface) <- requireCheckedPackageInterface interfacePackage
+            let libId = PackageModuleId testPackageId "Lib"
+            libInterface <- requireInterface libId packageInterface
+            let exports = moduleInterfaceExports libInterface
+            case Map.toList (exportedValuesByIdentity exports) of
+                [] -> expectationFailure "expected exported values"
+                (actualKey, _) : _ -> do
+                    let staleKey = symbolIdentityFromParts (UniqueIdentity 900004) SymbolValue "Lib" "Stale" Nothing
+                        staleExports =
+                            exports
+                                { exportedValueDisplaysByIdentity =
+                                    Map.insert staleKey "Stale" (Map.delete actualKey (exportedValueDisplaysByIdentity exports))
+                                }
+                        expectedKeys = Map.keys (exportedValuesByIdentity exports)
+                        actualKeys = Map.keys (exportedValueDisplaysByIdentity staleExports)
+                    validatePackageInterface
+                        (singleInterfaceGraph libInterface)
+                        (PackageInterface [libInterface {moduleInterfaceExports = staleExports}])
+                        `shouldBe` Left (ProgramInterfaceIdentityKeySetMismatch libId expectedKeys actualKeys)
+
+        it "rejects exported display names shared by multiple identities" $ do
+            (_graph, _checked, packageInterface) <- requireCheckedPackageInterface interfacePackage
+            let libId = PackageModuleId testPackageId "Lib"
+            libInterface <- requireInterface libId packageInterface
+            let exports = moduleInterfaceExports libInterface
+            case Map.keys (exportedValueDisplaysByIdentity exports) of
+                firstKey : secondKey : _ -> do
+                    let duplicateName = exportedValueDisplaysByIdentity exports Map.! firstKey
+                        duplicateExports =
+                            exports
+                                { exportedValueDisplaysByIdentity =
+                                    Map.insert secondKey duplicateName (exportedValueDisplaysByIdentity exports)
+                                }
+                    validatePackageInterface
+                        (singleInterfaceGraph libInterface)
+                        (PackageInterface [libInterface {moduleInterfaceExports = duplicateExports}])
+                        `shouldSatisfy` isLeft
+                    Map.member duplicateName (exportedValuesForDisplay duplicateExports) `shouldBe` False
+                _ -> expectationFailure "expected at least two exported values"
+
+        it "does not synthesize a display name when one value identity has multiple visible names" $ do
+            (_graph, _checked, packageInterface) <- requireCheckedPackageInterface interfacePackage
+            let libId = PackageModuleId testPackageId "Lib"
+            libInterface <- requireInterface libId packageInterface
+            let exports = moduleInterfaceExports libInterface
+            case Map.toList (exportedValuesByIdentity exports) of
+                [] -> expectationFailure "expected exported values"
+                (valueIdentity, valueInfo) : _ -> do
+                    let ambiguousExports =
+                            moduleExportsFromMaps
+                                (Map.fromList [("aliasLeft", valueInfo), ("aliasRight", valueInfo)])
+                                Map.empty
+                                Map.empty
+                    Map.keys (exportedValuesByIdentity ambiguousExports) `shouldBe` [valueIdentity]
+                    Map.lookup valueIdentity (exportedValueDisplaysByIdentity ambiguousExports) `shouldBe` Nothing
+                    exportedValuesForDisplay ambiguousExports `shouldBe` Map.empty
+                    validatePackageInterface
+                        (singleInterfaceGraph libInterface)
+                        (PackageInterface [libInterface {moduleInterfaceExports = ambiguousExports}])
+                        `shouldBe` Left (ProgramInterfaceIdentityKeySetMismatch libId [valueIdentity] [])
+
 interfacePackage :: ProgramPackage
 interfacePackage =
     packageFromSourceUnits

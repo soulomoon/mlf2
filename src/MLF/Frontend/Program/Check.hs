@@ -52,7 +52,7 @@ import Control.Monad (foldM, forM, when, zipWithM)
 import Control.Monad.Except (MonadError (throwError))
 import Data.Char (isAlphaNum)
 import Data.Graph (SCC (..), stronglyConnComp)
-import Data.List (find, intercalate, nub, partition, transpose)
+import Data.List (find, intercalate, nub, partition)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
@@ -113,7 +113,7 @@ import MLF.Frontend.Program.Package
     trivialProgramPackage,
   )
 import MLF.Frontend.Program.Resolve (resolveProgram)
-import MLF.Frontend.Symbol (symbolIdentityStableName)
+import MLF.Frontend.Symbol (symbolIdentityAliasNames, symbolIdentityStableName)
 import MLF.Frontend.Program.TypeFamilies (normalizeTypeFamiliesInProgram)
 import MLF.Frontend.Program.Types
   ( CheckedBinding (..),
@@ -166,11 +166,9 @@ import MLF.Frontend.Program.Types
     ctorName,
     ctorType,
     constructorInfoSymbolIdentity,
+    constructorOwnerDataInfoFromShapes,
     constructorOwnerShapes,
     constructorShapeFromInfo,
-    constructorShapeForalls,
-    constructorShapeArgs,
-    constructorShapeResult,
     constructorShapeType,
     dataParamBinders,
     dataInfoIdentityName,
@@ -203,6 +201,7 @@ import MLF.Frontend.Program.Types
     mergeTypeBinderIdentityMaps,
     mkExportedTypeInfo,
     moduleExportsFromMaps,
+    uniqueDisplayByIdentity,
     exportedClassesForDisplay,
     exportedTypesForDisplay,
     exportedTypeConstructorsForDisplay,
@@ -227,6 +226,7 @@ import MLF.Frontend.Program.Types
     typeBinderAliasIdentityMap,
     typeParamBinderIdentity,
     typeViewBinderIdentityForAlias,
+    typeViewHeadIdentityForAlias,
     typeViewFromResolved,
     typeViewMentionedHeadIdentities,
     typeViewsDisplay,
@@ -254,7 +254,6 @@ import MLF.Frontend.Syntax
     SrcTy (..),
     SrcType,
     resolvedSrcTypeBinderName,
-    resolvedTypeBinderRefFromIdentity,
     resolvedSrcTypeToSrcType,
     resolvedTypeBinderTypeIdentity,
   )
@@ -2248,26 +2247,14 @@ importedValueTypeHeadIdentities :: ModuleExports -> TypeView -> Map String Symbo
 importedValueTypeHeadIdentities exports view =
   Map.fromList
     [ (alias, identity)
-    | (identity, typeInfo) <- Map.toList (exportedTypesByIdentity exports),
+    | identity <- Map.keys (exportedTypesByIdentity exports),
       identity `Set.member` mentionedHeadIdentities,
-      alias <- exportedTypeIdentityAliases identity typeInfo,
+      alias <- symbolIdentityAliasNames identity,
       not (null alias)
     ]
   where
     mentionedHeadIdentities =
       typeViewMentionedHeadIdentities view
-
-exportedTypeIdentityAliases :: SymbolIdentity -> ExportedTypeInfo -> [String]
-exportedTypeIdentityAliases identity typeInfo =
-  [ symbolIdentityStableName identity,
-    dataInfoIdentityName dataInfo,
-    dataInfoIdentityQualifiedName dataInfo,
-    symbolDefiningModule identity ++ "." ++ symbolDefiningName identity,
-    symbolDefiningName identity
-  ]
-  where
-    dataInfo =
-      exportedTypeData typeInfo
 
 importedValueClassDependencies :: ModuleExports -> ValueInfo -> Map String ClassInfo
 importedValueClassDependencies exports valueInfo =
@@ -2301,9 +2288,9 @@ hiddenOwnerDataInfo dataInfo =
           [ dataInfoIdentityName dataInfo,
             dataInfoIdentityQualifiedName dataInfo
           ]
-      rewrite = rewriteOwnerTypeHeads ownerNames hiddenName
+      ownerIdentity = dataInfoSymbolIdentity dataInfo
       rewriteTypeView sourceTy view =
-        (view {typeViewDisplay = rewrite sourceTy})
+        (view {typeViewDisplay = rewriteOwnerTypeHeads ownerIdentity ownerNames hiddenName view sourceTy})
           { typeViewBinderIdentities =
               mergeTypeBinderIdentityMaps
                 [ ownerParamBinderIdentities,
@@ -2334,10 +2321,11 @@ hiddenOwnerTypeName dataInfo =
   let identity = dataInfoSymbolIdentity dataInfo
    in "$" ++ symbolDefiningModule identity ++ "." ++ symbolDefiningName identity
 
-rewriteOwnerTypeHeads :: Set.Set String -> String -> SrcType -> SrcType
-rewriteOwnerTypeHeads ownerNames hiddenName = go
+rewriteOwnerTypeHeads :: SymbolIdentity -> Set.Set String -> String -> TypeView -> SrcType -> SrcType
+rewriteOwnerTypeHeads ownerIdentity ownerNames hiddenName view = go
   where
     rewriteHead name
+      | typeViewHeadIdentityForAlias view name == Just ownerIdentity = hiddenName
       | name `Set.member` ownerNames = hiddenName
       | otherwise = name
 
@@ -2368,171 +2356,6 @@ exportedConstructorOwnerType ctorInfo exports =
   case Map.lookup (ctorOwningTypeIdentity ctorInfo) (exportedTypesByIdentity exports) of
     Just typeInfo -> Just (exportedTypeData typeInfo)
     Nothing -> Just (constructorOwnerDataInfoFromShapes ctorInfo)
-
-constructorOwnerDataInfoFromShapes :: ConstructorInfo -> DataInfo
-constructorOwnerDataInfoFromShapes ctorInfo =
-  DataInfo
-    { dataInfoSymbol = ownerIdentity,
-      dataTypeParams = typeParams,
-      dataConstructors = constructors
-    }
-  where
-    ownerIdentity = ctorOwningTypeIdentity ctorInfo
-    ownerShapes = constructorOwnerShapes ctorInfo
-    typeParams =
-      case [params | shape <- ownerShapes, let params = constructorShapeOwnerTypeParams shape, not (null params)] of
-        params : _ -> params
-        [] -> inferredConstructorOwnerTypeParams ctorInfo ownerShapes
-    constructors = map constructorInfoFromShape ownerShapes
-
-    constructorInfoFromShape shape =
-      ConstructorInfo
-        { ctorInfoSymbol = constructorShapeSymbol shape,
-          ctorRuntimeName = constructorShapeRuntimeName shape,
-          ctorTypeView = constructorShapeTypeView shape,
-          ctorForallBinderInfo = constructorShapeForallBinderInfo shape,
-          ctorOwningTypeIdentity = ownerIdentity,
-          ctorIndex = constructorShapeIndex shape,
-          ctorOwnerConstructors = ownerShapes
-        }
-
-inferredConstructorOwnerTypeParams :: ConstructorInfo -> [ConstructorShape] -> [P.TypeParam]
-inferredConstructorOwnerTypeParams ctorInfo ownerShapes =
-  [ maybe (P.TypeParam name kind0) (`P.ResolvedTypeParam` kind0) (Map.lookup name paramRefs)
-    | name <- inferredConstructorOwnerParamNames ctorInfo ownerShapes
-    , let kind0 = kindFromMaxApplicationArity (Map.findWithDefault 0 name paramArities)
-  ]
-  where
-    paramArities = foldMap constructorShapeVariableHeadArities ownerShapes
-    paramRefs = inferredConstructorOwnerParamRefs ctorInfo ownerShapes
-
-inferredConstructorOwnerParamRefs :: ConstructorInfo -> [ConstructorShape] -> Map String ResolvedTypeBinderRef
-inferredConstructorOwnerParamRefs ctorInfo ownerShapes =
-  Map.mapMaybe singleRef refsByName
-  where
-    refsByName =
-      Map.fromListWith
-        Set.union
-        [ (name, Set.singleton ref)
-        | shape <- ownerShapes,
-          (name, ref) <- constructorOwnerResultArgRefs ctorInfo shape
-        ]
-
-    singleRef refs =
-      case Set.toList refs of
-        [ref] -> Just ref
-        _ -> Nothing
-
-constructorOwnerResultArgRefs :: ConstructorInfo -> ConstructorShape -> [(String, ResolvedTypeBinderRef)]
-constructorOwnerResultArgRefs ctorInfo shape =
-  [ (displayName, ref)
-  | (displayName, identity) <-
-      constructorOwnerResultArgPairs ctorInfo (constructorShapeTypeView shape),
-    Just ref <- [Map.lookup identity refsByIdentity]
-  ]
-  where
-    refsByIdentity =
-      Map.fromList
-        [ (constructorForallIdentity binder, resolvedTypeBinderRefFromIdentity (constructorForallIdentity binder) (constructorForallDisplayName binder))
-        | binder <- constructorShapeForallBinderInfo shape
-        ]
-
-constructorOwnerResultArgPairs :: ConstructorInfo -> TypeView -> [(String, TypeBinderIdentity)]
-constructorOwnerResultArgPairs ctorInfo view =
-  case (constructorOwnerResultArgs ctorInfo (typeViewDisplay view), constructorOwnerIdentityResultArgs ctorInfo (typeViewIdentity view)) of
-    (Just displayArgs, Just identityArgs) ->
-      [ (displayName, identity)
-      | (displayArg, identityArg) <- zip (NE.toList displayArgs) (NE.toList identityArgs),
-        Just displayName <- [srcTypeVarName displayArg],
-        Just identityName <- [srcTypeVarName identityArg],
-        Just identity <- [typeViewBinderIdentityForAlias view identityName]
-      ]
-    _ -> []
-
-inferredConstructorOwnerParamNames :: ConstructorInfo -> [ConstructorShape] -> [String]
-inferredConstructorOwnerParamNames ctorInfo ownerShapes =
-  case transpose (map shapeOwnerDisplayArgs ownerShapes) of
-    [] -> map fst (constructorOwnerResultArgPairs ctorInfo (ctorTypeView ctorInfo))
-    columns -> mapMaybe firstName columns
-  where
-    shapeOwnerDisplayArgs shape =
-      map fst (constructorOwnerResultArgPairs ctorInfo (constructorShapeTypeView shape))
-
-    firstName names =
-      case names of
-        name : _ -> Just name
-        [] -> Nothing
-
-constructorOwnerResultArgs :: ConstructorInfo -> SrcType -> Maybe (NonEmpty SrcType)
-constructorOwnerResultArgs ctorInfo ty =
-  case ty of
-    STBase name
-      | ownerHeadMatches name ->
-          Nothing
-    STCon name args
-      | ownerHeadMatches name ->
-          Just args
-    _ -> Nothing
-  where
-    ownerIdentity = ctorOwningTypeIdentity ctorInfo
-    ownerHeadMatches name =
-      name == symbolIdentityStableName ownerIdentity
-        || name == symbolDefiningName ownerIdentity
-        || name == symbolDefiningModule ownerIdentity ++ "." ++ symbolDefiningName ownerIdentity
-
-constructorOwnerIdentityResultArgs :: ConstructorInfo -> SrcType -> Maybe (NonEmpty SrcType)
-constructorOwnerIdentityResultArgs ctorInfo ty =
-  case ty of
-    STBase name
-      | ownerHeadMatches name ->
-          Nothing
-    STCon name args
-      | ownerHeadMatches name ->
-          Just args
-    _ -> Nothing
-  where
-    ownerIdentity = ctorOwningTypeIdentity ctorInfo
-    ownerHeadMatches name =
-      name == symbolIdentityStableName ownerIdentity
-        || name == symbolDefiningName ownerIdentity
-        || name == symbolDefiningModule ownerIdentity ++ "." ++ symbolDefiningName ownerIdentity
-
-srcTypeVarName :: SrcType -> Maybe String
-srcTypeVarName ty =
-  case ty of
-    STVar name -> Just name
-    _ -> Nothing
-
-constructorShapeVariableHeadArities :: ConstructorShape -> Map String Int
-constructorShapeVariableHeadArities shape =
-  foldMap
-    srcTypeVariableHeadArities
-    ( constructorShapeArgs shape
-        ++ [constructorShapeResult shape]
-        ++ [bound | (_, Just bound) <- constructorShapeForalls shape]
-    )
-
-srcTypeVariableHeadArities :: SrcType -> Map String Int
-srcTypeVariableHeadArities ty =
-  case ty of
-    STVar {} -> Map.empty
-    STArrow dom cod -> srcTypeVariableHeadArities dom <> srcTypeVariableHeadArities cod
-    STBase {} -> Map.empty
-    STCon _ args -> foldMap srcTypeVariableHeadArities (NE.toList args)
-    STVarApp name args ->
-      Map.singleton name (NE.length args)
-        <> foldMap srcTypeVariableHeadArities (NE.toList args)
-    STTyLam _ body -> srcTypeVariableHeadArities body
-    STTyApp fun arg -> srcTypeVariableHeadArities fun <> srcTypeVariableHeadArities arg
-    STForall _ mb body ->
-      maybe Map.empty (srcTypeVariableHeadArities . unSrcBound) mb
-        <> srcTypeVariableHeadArities body
-    STMu _ body -> srcTypeVariableHeadArities body
-    STBottom -> Map.empty
-
-kindFromMaxApplicationArity :: Int -> P.SrcKind
-kindFromMaxApplicationArity arity =
-  foldr P.KArrow P.KType (replicate arity P.KType)
 
 exportedValueByIdentity :: SymbolIdentity -> ModuleExports -> Maybe (String, ValueInfo)
 exportedValueByIdentity identity exports =
@@ -3979,23 +3802,15 @@ buildInstanceSkeletons moduleIdentity generator0 displayEnv scope mod0 derived =
           mergeTypeViewHeadIdentities (NE.toList left ++ NE.toList right)
 
     mergeTypeViewHeadIdentities views =
-      Map.fromList
-        [ (name, identity)
-        | (name, identities) <- Map.toList headIdentitiesByName,
-          [identity] <- [Set.toList identities]
+      mergeSymbolIdentityMaps
+        [ Map.singleton name identity
+        | view <- views,
+          (name, identity) <- typeViewHeadIdentityAliases view
         ]
-      where
-        headIdentitiesByName =
-          Map.fromListWith
-            Set.union
-            [ (name, Set.singleton identity)
-            | view <- views,
-              (name, identity) <- typeViewHeadIdentityAliases view
-            ]
 
     typeViewHeadIdentityAliases view =
       concat
-        [ [(name, identity), (symbolIdentityStableName identity, identity)]
+        [ (name, identity) : [(alias, identity) | alias <- symbolIdentityAliasNames identity]
         | (name, identity) <- Map.toList (typeViewHeadIdentities view)
         ]
 
@@ -4276,11 +4091,7 @@ identityExportIndex identityFor values =
       [ (identityFor info, info)
       | (_, info) <- Map.toList values
       ],
-    Map.fromListWith
-      (flip const)
-      [ (identityFor info, name)
-      | (name, info) <- Map.toList values
-      ]
+    uniqueDisplayByIdentity identityFor values
   )
 
 lookupIdentityExport :: SymbolIdentity -> IdentityExportIndex a -> Maybe (String, a)

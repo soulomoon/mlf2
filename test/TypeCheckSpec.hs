@@ -545,6 +545,30 @@ spec = describe "Phase 7 typecheck" $ do
                         typeBinderRefIdentity resultRef `shouldBe` binderIdentity
                     other -> expectationFailure ("Expected identity type with supplied refs, got: " ++ show other)
 
+    it "does not reuse supplied binder identities for shadowed external binding type variables" $ do
+        let binderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 43)
+            externalBinding =
+                ExternalBinding
+                    { externalBindingType =
+                        Surf.STForall
+                            "a"
+                            Nothing
+                            (Surf.STForall "a" Nothing (Surf.STVar "a"))
+                    , externalBindingMode = ExternalBindingScheme
+                    , externalBindingIdentity = Nothing
+                    , externalBindingTypeHeadIdentities = Map.empty
+                    , externalBindingTypeBinderIdentities = Map.singleton "a" binderIdentity
+                    }
+        case prepareExternalBindings (Map.singleton "id" externalBinding) of
+            Left err -> expectationFailure ("Expected external binding preparation, got: " ++ show err)
+            Right prepared ->
+                case [ ty | (resolved, ty) <- resolvedTermEnvEntries (resolvedTermEnv (preparedExternalTypeCheckEnv prepared)), resolvedVarReferenceName resolved == "id" ] of
+                    [TForallRef outerRef Nothing (TForallRef innerRef Nothing (TVarRef bodyRef))] -> do
+                        typeBinderRefIdentity outerRef `shouldBe` binderIdentity
+                        typeBinderRefIdentity innerRef `shouldNotBe` binderIdentity
+                        typeBinderRefIdentity bodyRef `shouldBe` typeBinderRefIdentity innerRef
+                    other -> expectationFailure ("Expected nested forall with distinct shadowed refs, got: " ++ show other)
+
     it "resolves external binding type variables through stable binder identity aliases" $ do
         let binderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 142)
             stableName = typeBinderIdentityStableName binderIdentity
@@ -603,6 +627,128 @@ spec = describe "Phase 7 typecheck" $ do
                         actualIdentity `shouldBe` typeIdentity
                         actualName `shouldBe` stableName
                     other -> expectationFailure ("Expected stable head name to resolve through supplied identity, got: " ++ show other)
+
+    it "preserves supplied type head identities in source annotations" $ do
+        let typeIdentity = generatedSymbolIdentity 45 SymbolType "Main" "Box" Nothing
+            externalBinding =
+                ExternalBinding
+                    { externalBindingType = Surf.STBase "Box"
+                    , externalBindingMode = ExternalBindingScheme
+                    , externalBindingIdentity = Nothing
+                    , externalBindingTypeHeadIdentities = Map.singleton "Box" typeIdentity
+                    , externalBindingTypeBinderIdentities = Map.empty
+                    }
+            expr =
+                unsafeNormalizeExpr
+                    (Surf.EAnn
+                        (Surf.ELam "x" (Surf.EVar "x"))
+                        (Surf.STArrow (Surf.STBase "Box") (Surf.STBase "Box")))
+        case runPipelineElabDetailedWithExternalBindings Set.empty (Map.singleton "box" externalBinding) expr of
+            Left err -> expectationFailure ("Expected annotated elaboration, got: " ++ renderPipelineError err)
+            Right PipelineElabDetailedResult {pedType = ElabTypes.TForallRef _ (Just bound) _} ->
+                bound `shouldBe` ElabTypes.TBaseWithIdentity (Just typeIdentity) (BaseTy "Box")
+            Right other -> expectationFailure ("Expected annotated Box identity bound, got: " ++ show (pedType other))
+
+    it "preserves supplied type binder identities in source annotations" $ do
+        let binderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 146)
+            externalBinding =
+                ExternalBinding
+                    { externalBindingType = Surf.STArrow (Surf.STVar "a") (Surf.STVar "a")
+                    , externalBindingMode = ExternalBindingScheme
+                    , externalBindingIdentity = Nothing
+                    , externalBindingTypeHeadIdentities = Map.empty
+                    , externalBindingTypeBinderIdentities = Map.singleton "a" binderIdentity
+                    }
+            expr =
+                unsafeNormalizeExpr
+                    (Surf.EAnn
+                        (Surf.ELam "x" (Surf.EVar "x"))
+                        (Surf.STForall "a" Nothing (Surf.STArrow (Surf.STVar "a") (Surf.STVar "a"))))
+        case runPipelineElabDetailedWithExternalBindings Set.empty (Map.singleton "id" externalBinding) expr of
+            Left err -> expectationFailure ("Expected annotated elaboration, got: " ++ renderPipelineError err)
+            Right PipelineElabDetailedResult {pedType = ElabTypes.TForallRef ref Nothing (ElabTypes.TArrow (ElabTypes.TVarRef argRef) (ElabTypes.TVarRef resultRef))} -> do
+                typeBinderRefIdentity ref `shouldBe` binderIdentity
+                typeBinderRefIdentity argRef `shouldBe` binderIdentity
+                typeBinderRefIdentity resultRef `shouldBe` binderIdentity
+            Right other -> expectationFailure ("Expected annotated identity type, got: " ++ show (pedType other))
+
+    it "does not reuse supplied binder identities for shadowed source annotation type variables" $ do
+        let binderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 148)
+            externalBinding =
+                ExternalBinding
+                    { externalBindingType = Surf.STArrow (Surf.STVar "a") (Surf.STVar "a")
+                    , externalBindingMode = ExternalBindingScheme
+                    , externalBindingIdentity = Nothing
+                    , externalBindingTypeHeadIdentities = Map.empty
+                    , externalBindingTypeBinderIdentities = Map.singleton "a" binderIdentity
+                    }
+            expr =
+                unsafeNormalizeExpr
+                    (Surf.EAnn
+                        (Surf.ELam "x" (Surf.EVar "x"))
+                        ( Surf.STForall
+                            "a"
+                            Nothing
+                            (Surf.STForall "a" Nothing (Surf.STArrow (Surf.STVar "a") (Surf.STVar "a")))
+                        ))
+        case runPipelineElabDetailedWithExternalBindings Set.empty (Map.singleton "id" externalBinding) expr of
+            Left err -> expectationFailure ("Expected annotated elaboration, got: " ++ renderPipelineError err)
+            Right PipelineElabDetailedResult {pedType = ElabTypes.TForallRef ref Nothing (ElabTypes.TArrow (ElabTypes.TVarRef argRef) (ElabTypes.TVarRef resultRef))} -> do
+                typeBinderRefIdentity ref `shouldNotBe` binderIdentity
+                typeBinderRefIdentity argRef `shouldBe` typeBinderRefIdentity ref
+                typeBinderRefIdentity resultRef `shouldBe` typeBinderRefIdentity ref
+            Right PipelineElabDetailedResult {pedType = ElabTypes.TForallRef outerRef Nothing (ElabTypes.TForallRef innerRef Nothing (ElabTypes.TArrow (ElabTypes.TVarRef argRef) (ElabTypes.TVarRef resultRef)))} -> do
+                typeBinderRefIdentity outerRef `shouldBe` binderIdentity
+                typeBinderRefIdentity innerRef `shouldNotBe` binderIdentity
+                typeBinderRefIdentity argRef `shouldBe` typeBinderRefIdentity innerRef
+                typeBinderRefIdentity resultRef `shouldBe` typeBinderRefIdentity innerRef
+            Right other -> expectationFailure ("Expected annotated nested forall with distinct shadowed refs, got: " ++ show (pedType other))
+
+    it "resolves source annotation type heads through stable symbol identity aliases" $ do
+        let typeIdentity = generatedSymbolIdentity 46 SymbolType "Main" "Box" Nothing
+            stableName = symbolIdentityStableName typeIdentity
+            externalBinding =
+                ExternalBinding
+                    { externalBindingType = Surf.STBase stableName
+                    , externalBindingMode = ExternalBindingScheme
+                    , externalBindingIdentity = Nothing
+                    , externalBindingTypeHeadIdentities = Map.singleton "Box" typeIdentity
+                    , externalBindingTypeBinderIdentities = Map.empty
+                    }
+            expr =
+                unsafeNormalizeExpr
+                    (Surf.EAnn
+                        (Surf.ELam "x" (Surf.EVar "x"))
+                        (Surf.STArrow (Surf.STBase stableName) (Surf.STBase stableName)))
+        case runPipelineElabDetailedWithExternalBindings Set.empty (Map.singleton "box" externalBinding) expr of
+            Left err -> expectationFailure ("Expected annotated elaboration, got: " ++ renderPipelineError err)
+            Right PipelineElabDetailedResult {pedType = ElabTypes.TForallRef _ (Just bound) _} ->
+                bound `shouldBe` ElabTypes.TBaseWithIdentity (Just typeIdentity) (BaseTy stableName)
+            Right other -> expectationFailure ("Expected annotated stable Box identity bound, got: " ++ show (pedType other))
+
+    it "resolves source annotation type variables through stable binder identity aliases" $ do
+        let binderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 147)
+            stableName = typeBinderIdentityStableName binderIdentity
+            externalBinding =
+                ExternalBinding
+                    { externalBindingType = Surf.STArrow (Surf.STVar stableName) (Surf.STVar stableName)
+                    , externalBindingMode = ExternalBindingScheme
+                    , externalBindingIdentity = Nothing
+                    , externalBindingTypeHeadIdentities = Map.empty
+                    , externalBindingTypeBinderIdentities = Map.singleton "a" binderIdentity
+                    }
+            expr =
+                unsafeNormalizeExpr
+                    (Surf.EAnn
+                        (Surf.ELam "x" (Surf.EVar "x"))
+                        (Surf.STForall stableName Nothing (Surf.STArrow (Surf.STVar stableName) (Surf.STVar stableName))))
+        case runPipelineElabDetailedWithExternalBindings Set.empty (Map.singleton "id" externalBinding) expr of
+            Left err -> expectationFailure ("Expected annotated elaboration, got: " ++ renderPipelineError err)
+            Right PipelineElabDetailedResult {pedType = ElabTypes.TForallRef ref Nothing (ElabTypes.TArrow (ElabTypes.TVarRef argRef) (ElabTypes.TVarRef resultRef))} -> do
+                typeBinderRefIdentity ref `shouldBe` binderIdentity
+                typeBinderRefIdentity argRef `shouldBe` binderIdentity
+                typeBinderRefIdentity resultRef `shouldBe` binderIdentity
+            Right other -> expectationFailure ("Expected annotated stable identity type, got: " ++ show (pedType other))
 
     it "seeds generated external identities after supplied type head identities" $ do
         let typeIdentity = generatedSymbolIdentity 43 SymbolType "Main" "Box" Nothing

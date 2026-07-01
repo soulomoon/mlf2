@@ -75,6 +75,7 @@ data ProgramInterfaceError
     | ProgramInterfaceExportOwnerMismatch PackageModuleId SymbolIdentity
     | ProgramInterfaceIdentityKeyMismatch PackageModuleId SymbolIdentity SymbolIdentity
     | ProgramInterfaceIdentityKeySetMismatch PackageModuleId [SymbolIdentity] [SymbolIdentity]
+    | ProgramInterfaceDuplicateDisplayName PackageModuleId String [SymbolIdentity]
     | ProgramInterfaceExportConstructorOwnerMismatch PackageModuleId SymbolIdentity SymbolIdentity
     | ProgramInterfaceClassMethodOwnerMismatch PackageModuleId SymbolIdentity SymbolIdentity
     | ProgramInterfaceInstanceOriginMismatch PackageModuleId SymbolIdentity
@@ -198,6 +199,9 @@ validateModuleAgainstGraph node interface = do
 
 validateModuleInterface :: ModuleInterface -> Either ProgramInterfaceError ()
 validateModuleInterface interface = do
+    requireIdentityDisplayMap moduleId (exportedValuesByIdentity exports0) (exportedValueDisplaysByIdentity exports0)
+    requireIdentityDisplayMap moduleId (exportedTypesByIdentity exports0) (exportedTypeDisplaysByIdentity exports0)
+    requireIdentityDisplayMap moduleId (exportedClassesByIdentity exports0) (exportedClassDisplaysByIdentity exports0)
     validateModuleIdentity (moduleInterfaceIdentity interface)
     forM_ (Map.toList (moduleInterfaceDataByIdentity interface)) $ \(identity, dataInfo) -> do
         requireIdentityKey moduleId identity (dataInfoSymbolIdentity dataInfo)
@@ -245,10 +249,10 @@ validateModuleInterface interface = do
     validateExportedType typeInfo = do
         let dataInfo = exportedTypeData typeInfo
             dataIdentity = dataInfoSymbolIdentity dataInfo
-        requireIdentityKeySet
+        requireIdentityDisplayMap
             moduleId
-            (Map.keysSet (exportedTypeConstructorsByIdentity typeInfo))
-            (Map.keysSet (exportedTypeConstructorDisplaysByIdentity typeInfo))
+            (exportedTypeConstructorsByIdentity typeInfo)
+            (exportedTypeConstructorDisplaysByIdentity typeInfo)
         requireIdentityDefinedHere moduleId moduleName0 dataIdentity
         forM_ (Map.toList (exportedTypeConstructorsByIdentity typeInfo)) $ \(identity, ctorInfo) -> do
             let ctorIdentity = constructorInfoSymbolIdentity dataInfo ctorInfo
@@ -303,6 +307,25 @@ requireIdentityKeySet :: PackageModuleId -> Set.Set SymbolIdentity -> Set.Set Sy
 requireIdentityKeySet moduleId expected actual =
     unless (expected == actual) $
         Left (ProgramInterfaceIdentityKeySetMismatch moduleId (Set.toList expected) (Set.toList actual))
+
+requireIdentityDisplayMap :: PackageModuleId -> Map SymbolIdentity a -> Map SymbolIdentity String -> Either ProgramInterfaceError ()
+requireIdentityDisplayMap moduleId values displays = do
+    requireIdentityKeySet moduleId (Map.keysSet values) (Map.keysSet displays)
+    requireDistinctDisplayNames moduleId displays
+
+requireDistinctDisplayNames :: PackageModuleId -> Map SymbolIdentity String -> Either ProgramInterfaceError ()
+requireDistinctDisplayNames moduleId displays =
+    case find ((> 1) . Set.size . snd) (Map.toList identitiesByDisplay) of
+        Just (displayName, identities) ->
+            Left (ProgramInterfaceDuplicateDisplayName moduleId displayName (Set.toList identities))
+        Nothing -> Right ()
+  where
+    identitiesByDisplay =
+        Map.fromListWith
+            Set.union
+            [ (displayName, Set.singleton identity)
+            | (identity, displayName) <- Map.toList displays
+            ]
 
 requireIdentityDefinedHere ::
     PackageModuleId ->
@@ -369,6 +392,13 @@ renderProgramInterfaceError err =
                 ++ show expected
                 ++ ", got "
                 ++ show actual
+        ProgramInterfaceDuplicateDisplayName moduleId displayName identities ->
+            "duplicate interface display name for "
+                ++ renderPackageModuleId moduleId
+                ++ ": "
+                ++ show displayName
+                ++ " maps to "
+                ++ show identities
         ProgramInterfaceExportConstructorOwnerMismatch moduleId expected actual ->
             "constructor owner mismatch for "
                 ++ renderPackageModuleId moduleId

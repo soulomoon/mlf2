@@ -93,6 +93,7 @@ import MLF.Frontend.Program.Types
     deferredMethodName,
     diagnosticForProgramError,
     emptyTypeBinderSubst,
+    filterHeadIdentitiesByNames,
     freeTypeVarsTypeView,
     freeTypeVarsTypeViews,
     lookupInstanceMethod,
@@ -2749,9 +2750,9 @@ lookupDataInfoForTypeView checked view = do
   Map.lookup identity (allDataInfosByIdentity checked)
 
 sourceTypeDataHeadIdentity :: TypeView -> Maybe SymbolIdentity
-sourceTypeDataHeadIdentity view = do
-  identityName <- sourceTypeDataHeadName (typeViewIdentity view)
-  typeViewHeadIdentityForAlias view identityName
+sourceTypeDataHeadIdentity view =
+  (sourceTypeDataHeadName (typeViewIdentity view) >>= typeViewHeadIdentityForAlias view)
+    <|> (sourceTypeDataHeadName (typeViewDisplay view) >>= typeViewHeadIdentityForAlias view)
 
 sourceTypeDataHeadName :: SrcType -> Maybe String
 sourceTypeDataHeadName =
@@ -2861,8 +2862,8 @@ constructorInfoArgViews ctorInfo =
         { typeViewDisplay = displayTy,
           typeViewIdentity = identityTy,
           typeViewHeadIdentities =
-            Map.filterWithKey
-              (\name _ -> Set.member name (typeHeadNamesSrcType identityTy) || Set.member name (typeHeadNamesSrcType displayTy))
+            filterHeadIdentitiesByNames
+              (typeHeadNamesSrcType identityTy <> typeHeadNamesSrcType displayTy)
               (typeViewHeadIdentities view),
           typeViewBinderIdentities = typeViewBinderIdentities view
         }
@@ -2873,8 +2874,8 @@ constructorInfoResultView ctorInfo =
     { typeViewDisplay = displayResult,
       typeViewIdentity = identityResult,
       typeViewHeadIdentities =
-        Map.filterWithKey
-          (\name _ -> Set.member name (typeHeadNamesSrcType identityResult) || Set.member name (typeHeadNamesSrcType displayResult))
+        filterHeadIdentitiesByNames
+          (typeHeadNamesSrcType identityResult <> typeHeadNamesSrcType displayResult)
           (typeViewHeadIdentities view)
     }
   where
@@ -2910,8 +2911,8 @@ substDataParamView sourceView subst view =
     identityTy = typeViewIdentity substitutedView
     identityHeadNames = typeHeadNamesSrcType identityTy
     sourceHeadIdentitiesFor names =
-      Map.filterWithKey
-        (\name _ -> Set.member name names || Set.member name (pairedSourceHeadNames names))
+      filterHeadIdentitiesByNames
+        (names <> pairedSourceHeadNames names)
         sourceHeadIdentities
     pairedSourceHeadNames names =
       Set.fromList

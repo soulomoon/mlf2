@@ -6066,7 +6066,7 @@ functionFormFromExpectedWithGenerator generator expectedTy expr =
 alignFunctionFormTypeBindersWithExpected :: BackendType -> FunctionForm -> FunctionForm
 alignFunctionFormTypeBindersWithExpected expectedTy form
   | length expectedBinders == length formBinders,
-    and (zipWith sameBinderName expectedBinders formBinders) =
+    alphaEqBackendType expectedTy (functionFormType form) =
       form
         { ffTypeBinders = expectedBinders,
           ffParams = [(name, substituteTy ty) | (name, ty) <- ffParams form],
@@ -6085,8 +6085,6 @@ alignFunctionFormTypeBindersWithExpected expectedTy form
         ]
     substituteTy =
       substituteBackendTypesByKey substitution
-    sameBinderName left right =
-      backendTypeBinderName left == backendTypeBinderName right
 
 freshenFunctionFormMissingTypeBinderIdentities :: IdentityGenerator -> FunctionForm -> (FunctionForm, IdentityGenerator)
 freshenFunctionFormMissingTypeBinderIdentities generator form =

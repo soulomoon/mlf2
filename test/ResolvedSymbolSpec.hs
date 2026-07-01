@@ -241,6 +241,36 @@ spec = do
       typeViewHeadIdentities (methodResultTypeView methodInfo)
         `shouldBe` Map.singleton stableToken tokenTypeIdentity
 
+    it "keeps method result head identities by payload stable name" $ do
+      let stableToken = symbolIdentityStableName tokenTypeIdentity
+          methodInfo =
+            eqMethodInfo
+              { methodTypeViewRaw =
+                  (methodTypeViewRaw eqMethodInfo)
+                    { typeViewDisplay = STBase stableToken,
+                      typeViewIdentity = STBase stableToken,
+                      typeViewHeadIdentities = Map.singleton "Token" tokenTypeIdentity
+                    }
+              }
+
+      typeViewHeadIdentities (methodResultTypeView methodInfo)
+        `shouldBe` Map.singleton "Token" tokenTypeIdentity
+
+    it "keeps method parameter head identities by payload stable name" $ do
+      let stableToken = symbolIdentityStableName tokenTypeIdentity
+          methodInfo =
+            eqMethodInfo
+              { methodTypeViewRaw =
+                  (methodTypeViewRaw eqMethodInfo)
+                    { typeViewDisplay = STArrow (STBase stableToken) (STBase "Bool"),
+                      typeViewIdentity = STArrow (STBase stableToken) (STBase "Bool"),
+                      typeViewHeadIdentities = Map.singleton "Token" tokenTypeIdentity
+                    }
+              }
+
+      map typeViewHeadIdentities (methodParamTypeViews (methodTypeView methodInfo))
+        `shouldBe` [Map.singleton "Token" tokenTypeIdentity]
+
     it "keys method parameter binder identities by stable names" $ do
       let bodyIdentity = typeBinderIdentityFromUnique (UniqueIdentity 206)
           paramIdentity = typeBinderIdentityFromUnique (UniqueIdentity 207)
@@ -273,12 +303,14 @@ spec = do
           rightIdentity = generatedSymbolIdentity 131 SymbolType "Right" "Token" Nothing
           leftSymbol = mkResolvedSymbol leftIdentity "L.Token" "L.Token" (SymbolQualifiedImport "Left" "L")
           rightSymbol = mkResolvedSymbol rightIdentity "R.Token" "R.Token" (SymbolQualifiedImport "Right" "R")
-          heads = typeViewHeadIdentities (typeViewFromResolved (RSTArrow (RSTBase leftSymbol) (RSTBase rightSymbol)))
+          view = typeViewFromResolved (RSTArrow (RSTBase leftSymbol) (RSTBase rightSymbol))
+          heads = typeViewHeadIdentities view
       Map.lookup (symbolIdentityStableName leftIdentity) heads `shouldBe` Just leftIdentity
       Map.lookup (symbolIdentityStableName rightIdentity) heads `shouldBe` Just rightIdentity
       Map.lookup "L.Token" heads `shouldBe` Just leftIdentity
       Map.lookup "R.Token" heads `shouldBe` Just rightIdentity
       Map.lookup "Token" heads `shouldBe` Nothing
+      typeViewHeadIdentityForAlias view "Token" `shouldBe` Nothing
 
     it "keys scope type head identities by stable and source names" $ do
       let stableToken = symbolIdentityStableName tokenTypeIdentity

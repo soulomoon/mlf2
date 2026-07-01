@@ -186,11 +186,12 @@ import MLF.Frontend.Program.Types
     resolvedModuleScope,
     splitArrows,
     splitForalls,
+    typeBinderAliasIdentityMap,
     typeViewBinderIdentityForAlias,
     typeViewHeadIdentityForAlias,
     typeViewMentionedHeadIdentities,
   )
-import MLF.Frontend.Symbol (symbolIdentityStableName, symbolUniqueIdentity)
+import MLF.Frontend.Symbol (symbolIdentityAliasMap, symbolIdentityAliasNames, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit, SrcBound (..), SrcTy (..), SrcType, TypeParam)
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
 import MLF.Types.Identity (DeferredRef, IdDetails (..), IdentityGenerator, LocalRef, StructuralTypeBinderRole (..), UniqueIdentity (..), deferredRefIdentity, deferredRefName, freshDeferredRef, freshIdentity, freshLocalRef, idDetailsGeneratedIdentities, idDetailsSameIdentity, identityGeneratorAfter, primitiveRefSymbol, symbolGeneratedIdentities, typeBinderGeneratedIdentities, typeBinderIdentityFromStructural, typeBinderIdentityNode, typeBinderIdentityStructural)
@@ -2403,7 +2404,7 @@ bindingDataHint dataMetasByIdentity binding =
 sourceBindingDataHint :: Map SymbolIdentity DataMeta -> CheckedBinding -> Maybe DataMeta
 sourceBindingDataHint dataMetasByIdentity binding =
   case splitSourceArrows (dropSourceForalls (typeViewIdentity sourceView)) of
-    ([], resultTy) -> sourceTypeDataMetaView dataMetasByIdentity sourceView resultTy
+    ([], _) -> sourceTypeDataMetaForView dataMetasByIdentity sourceView
     _ -> Nothing
   where
     sourceView = checkedBindingSourceTypeView binding
@@ -2424,25 +2425,17 @@ dropElabForalls =
     TForallRef _ _ body -> dropElabForalls body
     ty -> ty
 
-sourceTypeDataMetaView :: Map SymbolIdentity DataMeta -> TypeView -> SrcType -> Maybe DataMeta
-sourceTypeDataMetaView dataMetasByIdentity view ty =
-  sourceTypeDataHead ty >>= \name ->
-    sourceTypeHeadIdentityFromView view name >>= (`Map.lookup` dataMetasByIdentity)
-
 sourceTypeDataMetaForView :: Map SymbolIdentity DataMeta -> TypeView -> Maybe DataMeta
 sourceTypeDataMetaForView dataMetasByIdentity view =
   case (sourceTypeDataHead (sourceTypeResult (typeViewDisplay view)), sourceTypeDataHead (sourceTypeResult (typeViewIdentity view))) of
-    (Just _, Just identityName) ->
-      typeViewHeadIdentityForAlias view identityName >>= (`Map.lookup` dataMetasByIdentity)
-    _ ->
-      Nothing
+    (displayHead, identityHead) ->
+      firstMaybe
+        [ identityHead >>= typeViewHeadIdentityForAlias view >>= (`Map.lookup` dataMetasByIdentity),
+          displayHead >>= typeViewHeadIdentityForAlias view >>= (`Map.lookup` dataMetasByIdentity)
+        ]
   where
     sourceTypeResult =
       snd . splitSourceArrows . dropSourceForalls
-
-sourceTypeHeadIdentityFromView :: TypeView -> String -> Maybe SymbolIdentity
-sourceTypeHeadIdentityFromView view name =
-  typeViewHeadIdentityForAlias view name <|> builtinTypeHeadIdentity name
 
 applySourceTypeIdentity :: ConvertContext -> ElaborateScope -> TypeView -> BackendType -> BackendType
 applySourceTypeIdentity context scope view =
@@ -3130,7 +3123,7 @@ convertSourceTypeViewWithIdentities view =
     go binderNames binderIdentities display identityTy0 =
       case (display, identityTy0) of
         (STVar displayName, STVar identityName) ->
-          Right (BTVarWithIdentity (lookupBinderIdentity binderIdentities identityName displayName) (binderDisplayName binderNames identityName displayName))
+          Right (BTVarWithIdentity (lookupBinderOccurrenceIdentity binderNames binderIdentities identityName displayName) (binderDisplayName binderNames identityName displayName))
         (STArrow displayDom displayCod, STArrow identityDom identityCod) ->
           BTArrow
             <$> go binderNames binderIdentities displayDom identityDom
@@ -3141,17 +3134,17 @@ convertSourceTypeViewWithIdentities view =
           BTConWithIdentity (sourceTypeHeadIdentityFromNames identityName displayName) (backendBaseTy displayName)
             <$> zipWithNEEither (go binderNames binderIdentities) displayArgs identityArgs
         (STVarApp displayName displayArgs, STVarApp identityName identityArgs) ->
-          BTVarAppWithIdentity (lookupBinderIdentity binderIdentities identityName displayName) (binderDisplayName binderNames identityName displayName)
+          BTVarAppWithIdentity (lookupBinderOccurrenceIdentity binderNames binderIdentities identityName displayName) (binderDisplayName binderNames identityName displayName)
             <$> zipWithNEEither (go binderNames binderIdentities) displayArgs identityArgs
         (STForall displayName displayBound displayBody, STForall identityName identityBound identityBody) ->
-          let identity = lookupBinderIdentity binderIdentities identityName displayName
+          let identity = lookupBinderDeclarationIdentity binderNames identityName displayName
               binderNames' = Map.insert identityName displayName binderNames
               binderIdentities' = insertBinderIdentityAliases identityName displayName identity binderIdentities
            in BTForallWithIdentity identity displayName
                 <$> zipMaybeBounds (go binderNames binderIdentities) displayBound identityBound
                 <*> go binderNames' binderIdentities' displayBody identityBody
         (STMu displayName displayBody, STMu identityName identityBody) ->
-          let identity = lookupBinderIdentity binderIdentities identityName displayName
+          let identity = lookupBinderDeclarationIdentity binderNames identityName displayName
               binderNames' = Map.insert identityName displayName binderNames
               binderIdentities' = insertBinderIdentityAliases identityName displayName identity binderIdentities
            in BTMuWithIdentity identity displayName <$> go binderNames' binderIdentities' displayBody identityBody
@@ -3162,9 +3155,26 @@ convertSourceTypeViewWithIdentities view =
 
     lookupBinderIdentity binderIdentities identityName displayName =
       Map.lookup identityName binderIdentities
-        <|> Map.lookup displayName binderIdentities
         <|> typeViewBinderIdentityForAlias view identityName
-        <|> typeViewBinderIdentityForAlias view displayName
+        <|> if identityName == displayName
+          then Map.lookup displayName binderIdentities <|> typeViewBinderIdentityForAlias view displayName
+          else Nothing
+
+    lookupBinderOccurrenceIdentity binderNames binderIdentities identityName displayName =
+      Map.lookup identityName binderIdentities
+        <|> if displayName `elem` Map.elems binderNames
+          then Nothing
+          else lookupBinderIdentity binderIdentities identityName displayName
+
+    lookupBinderDeclarationIdentity binderNames identityName displayName =
+      lookupBinderIdentityByMetadata identityName
+        <|> if displayName `elem` Map.elems binderNames
+          then Nothing
+          else lookupBinderIdentityByMetadata displayName
+
+    lookupBinderIdentityByMetadata name =
+      Map.lookup name (typeViewBinderIdentities view)
+        <|> Map.lookup name (typeBinderAliasIdentityMap (Map.toList (typeViewBinderIdentities view)))
 
     insertBinderIdentityAliases identityName displayName identity binderIdentities =
       case identity of
@@ -3212,20 +3222,8 @@ typeHeadIdentitiesInScope scope =
     dataTypes = elaborateScopeDataTypes scope
 
 unambiguousDataTypeHeadIdentities :: Map String DataInfo -> Map String SymbolIdentity
-unambiguousDataTypeHeadIdentities dataTypes =
-  Map.fromList
-    [ (name, identity)
-    | (name, identities) <- Map.toList identitiesByHeadName,
-      [identity] <- [Set.toList identities]
-    ]
-  where
-    identitiesByHeadName =
-      Map.fromListWith
-        Set.union
-        [ (name, Set.singleton (dataInfoSymbol info))
-        | info <- Map.elems dataTypes,
-          name <- [dataInfoIdentityName info, dataInfoIdentityQualifiedName info]
-        ]
+unambiguousDataTypeHeadIdentities =
+  symbolIdentityAliasMap . map dataInfoSymbol . Map.elems
 
 convertSourceType :: SrcType -> Either BackendConversionError BackendType
 convertSourceType =
@@ -3233,34 +3231,48 @@ convertSourceType =
 
 convertSourceTypeWithTypeViewIdentities :: TypeView -> SrcType -> Either BackendConversionError BackendType
 convertSourceTypeWithTypeViewIdentities view =
-  \case
-    STVar name -> Right (BTVarWithIdentity (sourceTypeBinderIdentity name) name)
-    STArrow dom cod ->
-      BTArrow
-        <$> convertSourceTypeWithTypeViewIdentities view dom
-        <*> convertSourceTypeWithTypeViewIdentities view cod
-    STBase name ->
-      Right (BTBaseWithIdentity (sourceTypeHeadIdentity name) (backendBaseTy name))
-    STCon name args ->
-      BTConWithIdentity (sourceTypeHeadIdentity name) (backendBaseTy name)
-        <$> traverse (convertSourceTypeWithTypeViewIdentities view) args
-    STVarApp name args ->
-      BTVarAppWithIdentity (sourceTypeBinderIdentity name) name
-        <$> traverse (convertSourceTypeWithTypeViewIdentities view) args
-    STTyLam {} -> Left (BackendUnsupportedCaseShape "residual type lambda reached backend type conversion")
-    STTyApp {} -> Left (BackendUnsupportedCaseShape "residual type application reached backend type conversion")
-    STForall name mb body ->
-      BTForallWithIdentity (sourceTypeBinderIdentity name) name
-        <$> traverse (convertSourceTypeWithTypeViewIdentities view . unSrcBound) mb
-        <*> convertSourceTypeWithTypeViewIdentities view body
-    STMu name body -> BTMuWithIdentity (sourceTypeBinderIdentity name) name <$> convertSourceTypeWithTypeViewIdentities view body
-    STBottom -> Right BTBottom
+  go Map.empty
   where
+    go binderIdentities =
+      \case
+        STVar name -> Right (BTVarWithIdentity (sourceTypeBinderIdentity binderIdentities name) name)
+        STArrow dom cod ->
+          BTArrow
+            <$> go binderIdentities dom
+            <*> go binderIdentities cod
+        STBase name ->
+          Right (BTBaseWithIdentity (sourceTypeHeadIdentity name) (backendBaseTy name))
+        STCon name args ->
+          BTConWithIdentity (sourceTypeHeadIdentity name) (backendBaseTy name)
+            <$> traverse (go binderIdentities) args
+        STVarApp name args ->
+          BTVarAppWithIdentity (sourceTypeBinderIdentity binderIdentities name) name
+            <$> traverse (go binderIdentities) args
+        STTyLam {} -> Left (BackendUnsupportedCaseShape "residual type lambda reached backend type conversion")
+        STTyApp {} -> Left (BackendUnsupportedCaseShape "residual type application reached backend type conversion")
+        STForall name mb body ->
+          let identity = sourceTypeBinderDeclarationIdentity binderIdentities name
+              binderIdentities' = Map.insert name identity binderIdentities
+           in BTForallWithIdentity identity name
+                <$> traverse (go binderIdentities . unSrcBound) mb
+                <*> go binderIdentities' body
+        STMu name body ->
+          let identity = sourceTypeBinderDeclarationIdentity binderIdentities name
+              binderIdentities' = Map.insert name identity binderIdentities
+           in BTMuWithIdentity identity name <$> go binderIdentities' body
+        STBottom -> Right BTBottom
     sourceTypeHeadIdentity name =
       typeViewHeadIdentityForAlias view name <|> builtinTypeHeadIdentity name
 
-    sourceTypeBinderIdentity name =
-      typeViewBinderIdentityForAlias view name
+    sourceTypeBinderIdentity binderIdentities name =
+      case Map.lookup name binderIdentities of
+        Just identity -> identity
+        Nothing -> typeViewBinderIdentityForAlias view name
+
+    sourceTypeBinderDeclarationIdentity binderIdentities name =
+      if Map.member name binderIdentities
+        then Nothing
+        else typeViewBinderIdentityForAlias view name
 
 convertSourceTypeWithHeadIdentities :: Map String SymbolIdentity -> SrcType -> Either BackendConversionError BackendType
 convertSourceTypeWithHeadIdentities headIdentities0 =
@@ -3298,7 +3310,7 @@ lookupSourceTypeHeadIdentity headIdentities0 name =
 
 sourceTypeHeadStableAliases :: Map String SymbolIdentity -> Map String SymbolIdentity
 sourceTypeHeadStableAliases =
-  Map.fromList . map (\identity -> (symbolIdentityStableName identity, identity)) . Map.elems
+  symbolIdentityAliasMap . Map.elems
 
 type BackendTypeBinderNames = Map TypeBinderIdentity String
 
@@ -6405,10 +6417,9 @@ uniqueDataMetaByStructuralName context name =
 dataMetaStructuralNames :: DataMeta -> [String]
 dataMetaStructuralNames dataMeta =
   nub
-    [ dataInfoIdentityName info,
-      dataInfoIdentityQualifiedName info,
-      backendDataName (dmBackend dataMeta)
-    ]
+    ( symbolIdentityAliasNames (dataInfoSymbol info)
+        ++ [backendDataName (dmBackend dataMeta)]
+    )
   where
     info =
       dmInfo dataMeta

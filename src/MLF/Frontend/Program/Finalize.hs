@@ -69,7 +69,7 @@ import qualified MLF.Elab.TypeCheck as TypeCheck
 import MLF.Frontend.ConstraintGen (ExternalBinding (..), ExternalBindingIdentity, ExternalBindingMode (..), externalBindingIdentityFromDetails)
 import MLF.Frontend.Normalize (normalizeExpr, normalizeType)
 import qualified MLF.Frontend.Program.Builtins as Builtins
-import MLF.Frontend.Symbol (symbolIdentityStableName)
+import MLF.Frontend.Symbol (symbolIdentityAliasMap, symbolIdentityAliasNames, symbolIdentityStableName)
 import MLF.Frontend.Program.Elaborate
   ( ElaborateScope,
     elaborateScopeDataTypes,
@@ -173,7 +173,6 @@ import MLF.Frontend.Program.Types
     resolvedVarFromValueInfo,
     ordinaryValueTypeView,
     SymbolIdentity,
-    symbolDefiningModule,
     symbolDefiningName,
     splitArrows,
     splitForalls,
@@ -1260,17 +1259,21 @@ renameDeferredPlaceholdersForGroup index lowered =
 
 renameSurfaceVars :: (String -> String) -> SurfaceExpr -> SurfaceExpr
 renameSurfaceVars renameName =
-  go
+  go Set.empty
   where
-    go expr =
+    go bound expr =
       case expr of
-        EVar name -> EVar (renameName name)
+        EVar name
+          | name `Set.member` bound -> EVar name
+          | otherwise -> EVar (renameName name)
         ELit {} -> expr
-        ELam name body -> ELam name (go body)
-        EApp fun arg -> EApp (go fun) (go arg)
-        ELet name rhs body -> ELet name (go rhs) (go body)
-        ELamAnn name ty body -> ELamAnn name ty (go body)
-        EAnn inner ty -> EAnn (go inner) ty
+        ELam name body -> ELam name (go (Set.insert name bound) body)
+        EApp fun arg -> EApp (go bound fun) (go bound arg)
+        ELet name rhs body ->
+          let bound' = Set.insert name bound
+           in ELet name (go bound' rhs) (go bound' body)
+        ELamAnn name ty body -> ELamAnn name ty (go (Set.insert name bound) body)
+        EAnn inner ty -> EAnn (go bound inner) ty
 
 renameDeferredObligation :: (String -> String) -> DeferredProgramObligation -> DeferredProgramObligation
 renameDeferredObligation renameName obligation =
@@ -1527,6 +1530,7 @@ annotateResolvedTermVars _context lowered term0 =
   annotateResolvedTermVarsWithEvidenceCounts
     Map.empty
     (loweredBindingEvidenceParamCount lowered)
+    (loweredBindingResolvedLocalIdentities lowered)
     (X.generatedIdentitiesInTerm term0 ++ generatedIdentitiesInDeferredObligations lowered)
     term0
 
@@ -1535,9 +1539,13 @@ annotateResolvedTermVarsForGroup _context lowereds deferredObligations term0 =
   annotateResolvedTermVarsWithEvidenceCounts
     evidenceCountsByBinding
     0
+    resolvedLocalIdentities
     (X.generatedIdentitiesInTerm term0 ++ generatedIdentitiesInDeferredObligationsMap deferredObligations)
     term0
   where
+    resolvedLocalIdentities =
+      Map.unions (map loweredBindingResolvedLocalIdentities lowereds)
+
     evidenceCountsByBinding =
       Map.fromList
         ( [ (key, loweredBindingEvidenceParamCount lowered)
@@ -1561,8 +1569,8 @@ annotateResolvedTermVarsForGroup _context lowereds deferredObligations term0 =
         _ ->
           []
 
-annotateResolvedTermVarsWithEvidenceCounts :: Map ModuleBindingReadKey Int -> Int -> [UniqueIdentity] -> XmlfTerm -> XmlfTerm
-annotateResolvedTermVarsWithEvidenceCounts evidenceCountsByBinding initialEvidenceParamCount generatedIdentities term0 =
+annotateResolvedTermVarsWithEvidenceCounts :: Map ModuleBindingReadKey Int -> Int -> Map String LocalRef -> [UniqueIdentity] -> XmlfTerm -> XmlfTerm
+annotateResolvedTermVarsWithEvidenceCounts evidenceCountsByBinding initialEvidenceParamCount resolvedLocalIdentities generatedIdentities term0 =
   let (term, _, _) = go Map.empty initialEvidenceParamCount initialGenerator term0
    in term
   where
@@ -1622,10 +1630,16 @@ annotateResolvedTermVarsWithEvidenceCounts evidenceCountsByBinding initialEviden
 
     freshenLocalResolvedVar allowEvidence evidenceParamsLeft generator resolved
       | X.resolvedVarIsLocal resolved =
-          let (localRef, generator') =
-                freshLocalRef (X.resolvedVarReferenceName resolved) generator
-              isEvidenceParam =
+          let isEvidenceParam =
                 allowEvidence && evidenceParamsLeft > 0
+              mbResolvedLocalRef =
+                if isEvidenceParam
+                  then Nothing
+                  else Map.lookup (X.resolvedVarRuntimeName resolved) resolvedLocalIdentities
+              (localRef, generator') =
+                case mbResolvedLocalRef of
+                  Just ref -> (ref, generator)
+                  Nothing -> freshLocalRef (X.resolvedVarReferenceName resolved) generator
               details =
                 if isEvidenceParam
                   then EvidenceId localRef
@@ -4666,12 +4680,7 @@ elabTypeHeadIdentities =
     identityHead (Graph.BaseTy name) (Just identity) =
       Map.fromList
         [ (alias, identity)
-        | alias <-
-            [ name,
-              symbolIdentityStableName identity,
-              symbolDefiningModule identity ++ "." ++ symbolDefiningName identity,
-              symbolDefiningName identity
-            ],
+        | alias <- name : symbolIdentityAliasNames identity,
           not (null alias)
         ]
 
@@ -4894,15 +4903,7 @@ typeViewHeadIdentityLookupAliases view =
   mergeSymbolIdentityMaps [typeViewHeadIdentities view, aliases]
   where
     aliases =
-      Map.fromList
-        [ (name, identity)
-        | identity <- Map.elems (typeViewHeadIdentities view),
-          name <-
-            [ symbolDefiningModule identity ++ "." ++ symbolDefiningName identity,
-              symbolDefiningName identity
-            ],
-          not (null name)
-        ]
+      symbolIdentityAliasMap (Map.elems (typeViewHeadIdentities view))
 
 typeBinderIdentityRefs :: Map String TypeBinderIdentity -> Map String X.TypeBinderRef
 typeBinderIdentityRefs identities =
@@ -4953,14 +4954,24 @@ srcTypeToElabTypeWithHeadIdentities ::
   IdentityGenerator ->
   SrcTy n v ->
   Either ProgramError (ElabType, IdentityGenerator)
-srcTypeToElabTypeWithHeadIdentities headIdentities refs generator ty = case ty of
+srcTypeToElabTypeWithHeadIdentities =
+  srcTypeToElabTypeWithHeadIdentitiesBound Set.empty
+
+srcTypeToElabTypeWithHeadIdentitiesBound ::
+  Set String ->
+  Map String SymbolIdentity ->
+  Map String X.TypeBinderRef ->
+  IdentityGenerator ->
+  SrcTy n v ->
+  Either ProgramError (ElabType, IdentityGenerator)
+srcTypeToElabTypeWithHeadIdentitiesBound boundNames headIdentities refs generator ty = case ty of
   STVar name -> do
     ref <- sourceTypeBinderRef refs name
     Right (X.TVarRef ref, generator)
   STArrow dom cod ->
     do
-      (dom', generator1) <- srcTypeToElabTypeWithHeadIdentities headIdentities refs generator dom
-      (cod', generator2) <- srcTypeToElabTypeWithHeadIdentities headIdentities refs generator1 cod
+      (dom', generator1) <- go refs generator dom
+      (cod', generator2) <- go refs generator1 cod
       Right (X.TArrow dom' cod', generator2)
   STBase name ->
     Right (X.TBaseWithIdentity (sourceTypeHeadIdentity name) (Graph.BaseTy (Builtins.normalizeBuiltinTypeReference name)), generator)
@@ -4978,20 +4989,26 @@ srcTypeToElabTypeWithHeadIdentities headIdentities refs generator ty = case ty o
   STTyApp {} ->
     Left (ProgramPipelineError "residual type application reached finalization")
   STForall name mb body ->
-    let (ref, generator1) = sourceTypeBinderRefOrFresh refs name generator
+    let (ref, generator1) = sourceTypeBinderRefOrFresh (Set.member name boundNames) refs name generator
         refs' = Map.insert name ref refs
+        boundNames' = Set.insert name boundNames
      in do
-          (mb', generator2) <- maybe (Right (Nothing, generator1)) (srcBoundToElabBoundWithHeadIdentities headIdentities refs generator1) mb
-          (body', generator3) <- srcTypeToElabTypeWithHeadIdentities headIdentities refs' generator2 body
+          (mb', generator2) <- maybe (Right (Nothing, generator1)) (srcBoundToElabBoundWithHeadIdentitiesBound boundNames headIdentities refs generator1) mb
+          (body', generator3) <- srcTypeToElabTypeWithHeadIdentitiesBound boundNames' headIdentities refs' generator2 body
           Right (X.TForallRef ref mb' body', generator3)
   STMu name body ->
-    let (ref, generator1) = sourceTypeBinderRefOrFresh refs name generator
+    let (ref, generator1) = sourceTypeBinderRefOrFresh (Set.member name boundNames) refs name generator
+        refs' = Map.insert name ref refs
+        boundNames' = Set.insert name boundNames
      in do
-          (body', generator2) <- srcTypeToElabTypeWithHeadIdentities headIdentities (Map.insert name ref refs) generator1 body
+          (body', generator2) <- srcTypeToElabTypeWithHeadIdentitiesBound boundNames' headIdentities refs' generator1 body
           Right (X.TMuRef ref body', generator2)
   STBottom ->
     Right (X.TBottom, generator)
   where
+    go =
+      srcTypeToElabTypeWithHeadIdentitiesBound boundNames headIdentities
+
     sourceTypeHeadIdentity name =
       lookupSourceTypeHeadIdentity headIdentities name <|> Builtins.builtinTypeHeadIdentity name
 
@@ -5000,17 +5017,20 @@ srcTypeToElabTypeWithHeadIdentities headIdentities refs generator ty = case ty o
         Just ref -> Right ref
         Nothing -> Left (ProgramPipelineError ("unresolved source type binder `" ++ name ++ "` reached finalization"))
 
-    sourceTypeBinderRefOrFresh env name gen =
-      case Map.lookup name env of
-        Just ref -> (ref, gen)
-        Nothing -> X.sourceTypeBinderRefForName name gen
+    sourceTypeBinderRefOrFresh shadowed env name gen =
+      if shadowed
+        then X.sourceTypeBinderRefForName name gen
+        else
+          case Map.lookup name env of
+            Just ref -> (ref, gen)
+            Nothing -> X.sourceTypeBinderRefForName name gen
 
     mapAccumSrcTypes refs0 generator0 (arg :| args) = do
-      (arg', generator1) <- srcTypeToElabTypeWithHeadIdentities headIdentities refs0 generator0 arg
+      (arg', generator1) <- go refs0 generator0 arg
       (argsRev, generator') <-
         foldM
           ( \(acc, gen) next -> do
-              (next', gen') <- srcTypeToElabTypeWithHeadIdentities headIdentities refs0 gen next
+              (next', gen') <- go refs0 gen next
               Right (next' : acc, gen')
           )
           ([], generator1)
@@ -5018,14 +5038,15 @@ srcTypeToElabTypeWithHeadIdentities headIdentities refs generator ty = case ty o
       Right (arg' :| reverse argsRev, generator')
 
 
-srcBoundToElabBoundWithHeadIdentities ::
+srcBoundToElabBoundWithHeadIdentitiesBound ::
+  Set String ->
   Map String SymbolIdentity ->
   Map String X.TypeBinderRef ->
   IdentityGenerator ->
   SrcBound n ->
   Either ProgramError (Maybe X.BoundType, IdentityGenerator)
-srcBoundToElabBoundWithHeadIdentities headIdentities refs generator (SrcBound boundTy) =
-  case srcTypeToElabTypeWithHeadIdentities headIdentities refs generator boundTy of
+srcBoundToElabBoundWithHeadIdentitiesBound boundNames headIdentities refs generator (SrcBound boundTy) =
+  case srcTypeToElabTypeWithHeadIdentitiesBound boundNames headIdentities refs generator boundTy of
     Left err -> Left err
     Right (X.TVarRef {}, generator') -> Right (Nothing, generator')
     Right (X.TBottom, generator') -> Right (Nothing, generator')
@@ -5044,7 +5065,7 @@ lookupSourceTypeHeadIdentity headIdentities name =
 
 sourceTypeHeadStableAliases :: Map String SymbolIdentity -> Map String SymbolIdentity
 sourceTypeHeadStableAliases =
-  Map.fromList . map (\identity -> (symbolIdentityStableName identity, identity)) . Map.elems
+  symbolIdentityAliasMap . Map.elems
 
 typeHeadIdentitiesInScope :: ElaborateScope -> Map String SymbolIdentity
 typeHeadIdentitiesInScope scope =
@@ -5057,21 +5078,8 @@ typeHeadIdentitiesInScope scope =
     dataTypes = elaborateScopeDataTypes scope
 
 unambiguousDataTypeHeadIdentities :: Map String DataInfo -> Map String SymbolIdentity
-unambiguousDataTypeHeadIdentities dataTypes =
-  Map.fromList
-    [ (name, identity)
-    | (name, identities) <- Map.toList identitiesByHeadName,
-      [identity] <- [Set.toList identities]
-    ]
-  where
-    identitiesByHeadName =
-      Map.fromListWith
-        Set.union
-        [ (name, Set.singleton identity)
-        | info <- Map.elems dataTypes,
-          let identity = dataInfoSymbol info,
-          name <- [dataInfoIdentityName info, symbolIdentityStableName identity]
-        ]
+unambiguousDataTypeHeadIdentities =
+  symbolIdentityAliasMap . map dataInfoSymbol . Map.elems
 
 builtinTypeHeadIdentities :: Map String SymbolIdentity
 builtinTypeHeadIdentities =

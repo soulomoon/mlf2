@@ -108,7 +108,7 @@ import MLF.Elab.Types
   )
 import MLF.Frontend.ConstraintGen.Types (AnnExpr (..), AnnExprF (..))
 import qualified MLF.Frontend.Program.Builtins as Builtins
-import MLF.Frontend.Symbol (SymbolIdentity, symbolIdentityStableName)
+import MLF.Frontend.Symbol (SymbolIdentity, symbolIdentityAliasMap)
 import MLF.Frontend.Syntax (NormSrcType, SrcBound (..), SrcNorm (..), SrcTy (..), StructBound, VarName)
 import MLF.Reify.TypeOps
   ( alphaEqType,
@@ -134,7 +134,7 @@ import MLF.Types.Identity
     localRefFromNodeId,
     symbolGeneratedIdentities,
     typeBinderGeneratedIdentities,
-    typeBinderIdentityStableName,
+    typeBinderIdentityAliasMap,
   )
 import MLF.Util.Trace (TraceConfig, traceGeneralize)
 
@@ -3097,6 +3097,11 @@ sourceTypeBinderRefOrFresh binderIdentities name generator =
     Just identity -> (typeBinderRefFromIdentity identity name, generator)
     Nothing -> sourceTypeBinderRefForName name generator
 
+sourceTypeBinderRefOrFreshInScope :: Bool -> Map.Map String TypeBinderIdentity -> String -> IdentityGenerator -> (TypeBinderRef, IdentityGenerator)
+sourceTypeBinderRefOrFreshInScope shadowed binderIdentities name generator
+  | shadowed = sourceTypeBinderRefForName name generator
+  | otherwise = sourceTypeBinderRefOrFresh binderIdentities name generator
+
 lookupSourceTypeBinderIdentity :: Map.Map String TypeBinderIdentity -> String -> Maybe TypeBinderIdentity
 lookupSourceTypeBinderIdentity binderIdentities name =
   case Map.lookup name binderIdentities of
@@ -3105,7 +3110,7 @@ lookupSourceTypeBinderIdentity binderIdentities name =
 
 sourceTypeBinderStableAliases :: Map.Map String TypeBinderIdentity -> Map.Map String TypeBinderIdentity
 sourceTypeBinderStableAliases =
-  Map.fromList . map (\identity -> (typeBinderIdentityStableName identity, identity)) . Map.elems
+  typeBinderIdentityAliasMap . Map.toList
 
 lookupSourceTypeHeadIdentity :: Map.Map String SymbolIdentity -> String -> Maybe SymbolIdentity
 lookupSourceTypeHeadIdentity headIdentities name =
@@ -3115,23 +3120,33 @@ lookupSourceTypeHeadIdentity headIdentities name =
 
 sourceTypeHeadStableAliases :: Map.Map String SymbolIdentity -> Map.Map String SymbolIdentity
 sourceTypeHeadStableAliases =
-  Map.fromList . map (\identity -> (symbolIdentityStableName identity, identity)) . Map.elems
+  symbolIdentityAliasMap . Map.elems
 
 srcTypeToElabTypeWith :: AlgebraContext p -> Map.Map String TypeBinderRef -> IdentityGenerator -> NormSrcType -> Either ElabError (ElabType, IdentityGenerator)
-srcTypeToElabTypeWith algebraContext refs generator ty = case ty of
+srcTypeToElabTypeWith =
+  srcTypeToElabTypeWithBound Set.empty
+
+srcTypeToElabTypeWithBound ::
+  Set.Set String ->
+  AlgebraContext p ->
+  Map.Map String TypeBinderRef ->
+  IdentityGenerator ->
+  NormSrcType ->
+  Either ElabError (ElabType, IdentityGenerator)
+srcTypeToElabTypeWithBound boundNames algebraContext refs generator ty = case ty of
   STVar name -> do
     ref <- sourceTypeBinderRef refs name
     Right (TVarRef ref, generator)
   STArrow dom cod -> do
-    (dom', generator1) <- srcTypeToElabTypeWith algebraContext refs generator dom
-    (cod', generator2) <- srcTypeToElabTypeWith algebraContext refs generator1 cod
+    (dom', generator1) <- srcTypeToElabTypeWithBound boundNames algebraContext refs generator dom
+    (cod', generator2) <- srcTypeToElabTypeWithBound boundNames algebraContext refs generator1 cod
     Right (TArrow dom' cod', generator2)
   STBase name -> Right (TBaseWithIdentity (sourceTypeHeadIdentity name) (builtinBaseTy name), generator)
   STCon name args -> do
-    (args', generator') <- srcTypesToElabTypesWith refs generator args
+    (args', generator') <- srcTypesToElabTypesWith boundNames refs generator args
     Right (TConWithIdentity (sourceTypeHeadIdentity name) (builtinBaseTy name) args', generator')
   STVarApp name args -> do
-    (args', generator') <- srcTypesToElabTypesWith refs generator args
+    (args', generator') <- srcTypesToElabTypesWith boundNames refs generator args
     ref <- sourceTypeBinderRef refs name
     Right (TVarAppRef ref args', generator')
   STTyLam {} ->
@@ -3139,16 +3154,18 @@ srcTypeToElabTypeWith algebraContext refs generator ty = case ty of
   STTyApp {} ->
     Left (InstantiationError "residual type application reached elaboration")
   STForall name mb body ->
-    let (ref, generator1) = sourceTypeBinderRefOrFresh (algSourceTypeBinderIdentities algebraContext) name generator
+    let (ref, generator1) = sourceTypeBinderRefOrFreshInScope (Set.member name boundNames) (algSourceTypeBinderIdentities algebraContext) name generator
         refs' = Map.insert name ref refs
+        boundNames' = Set.insert name boundNames
      in do
-          (mb', generator2) <- maybe (Right (Nothing, generator1)) (srcBoundToElabBoundWith refs generator1) mb
-          (body', generator3) <- srcTypeToElabTypeWith algebraContext refs' generator2 body
+          (mb', generator2) <- maybe (Right (Nothing, generator1)) (srcBoundToElabBoundWith boundNames refs generator1) mb
+          (body', generator3) <- srcTypeToElabTypeWithBound boundNames' algebraContext refs' generator2 body
           Right (TForallRef ref mb' body', generator3)
   STMu name body ->
-    let (ref, generator1) = sourceTypeBinderRefOrFresh (algSourceTypeBinderIdentities algebraContext) name generator
+    let (ref, generator1) = sourceTypeBinderRefOrFreshInScope (Set.member name boundNames) (algSourceTypeBinderIdentities algebraContext) name generator
+        boundNames' = Set.insert name boundNames
      in do
-          (body', generator2) <- srcTypeToElabTypeWith algebraContext (Map.insert name ref refs) generator1 body
+          (body', generator2) <- srcTypeToElabTypeWithBound boundNames' algebraContext (Map.insert name ref refs) generator1 body
           Right (TMuRef ref body', generator2)
   STBottom -> Right (TBottom, generator)
   where
@@ -3160,33 +3177,33 @@ srcTypeToElabTypeWith algebraContext refs generator ty = case ty of
         Just ref -> Right ref
         Nothing -> Left (InstantiationError ("unresolved source type binder `" ++ name ++ "` reached algebra elaboration"))
 
-    srcTypesToElabTypesWith refs0 generator0 (arg :| args) = do
-      (arg', generator1) <- srcTypeToElabTypeWith algebraContext refs0 generator0 arg
+    srcTypesToElabTypesWith boundNames' refs0 generator0 (arg :| args) = do
+      (arg', generator1) <- srcTypeToElabTypeWithBound boundNames' algebraContext refs0 generator0 arg
       (argsRev, generator') <-
         foldM
           ( \(acc, gen) next -> do
-              (next', gen') <- srcTypeToElabTypeWith algebraContext refs0 gen next
+              (next', gen') <- srcTypeToElabTypeWithBound boundNames' algebraContext refs0 gen next
               Right (next' : acc, gen')
           )
           ([], generator1)
           args
       Right (arg' :| reverse argsRev, generator')
 
-    srcBoundToElabBoundWith :: Map.Map String TypeBinderRef -> IdentityGenerator -> SrcBound 'NormN -> Either ElabError (Maybe BoundType, IdentityGenerator)
-    srcBoundToElabBoundWith refs' generator0 (SrcBound boundTy) = structBoundToElabBoundWith refs' generator0 boundTy
+    srcBoundToElabBoundWith :: Set.Set String -> Map.Map String TypeBinderRef -> IdentityGenerator -> SrcBound 'NormN -> Either ElabError (Maybe BoundType, IdentityGenerator)
+    srcBoundToElabBoundWith boundNames' refs' generator0 (SrcBound boundTy) = structBoundToElabBoundWith boundNames' refs' generator0 boundTy
 
-    structBoundToElabBoundWith :: Map.Map String TypeBinderRef -> IdentityGenerator -> StructBound -> Either ElabError (Maybe BoundType, IdentityGenerator)
-    structBoundToElabBoundWith refs' generator0 bTy = case bTy of
+    structBoundToElabBoundWith :: Set.Set String -> Map.Map String TypeBinderRef -> IdentityGenerator -> StructBound -> Either ElabError (Maybe BoundType, IdentityGenerator)
+    structBoundToElabBoundWith boundNames' refs' generator0 bTy = case bTy of
       STArrow dom cod -> do
-        (dom', generator1) <- srcTypeToElabTypeWith algebraContext refs' generator0 dom
-        (cod', generator2) <- srcTypeToElabTypeWith algebraContext refs' generator1 cod
+        (dom', generator1) <- srcTypeToElabTypeWithBound boundNames' algebraContext refs' generator0 dom
+        (cod', generator2) <- srcTypeToElabTypeWithBound boundNames' algebraContext refs' generator1 cod
         Right (Just (TArrow dom' cod'), generator2)
       STBase name -> Right (Just (TBaseWithIdentity (sourceTypeHeadIdentity name) (builtinBaseTy name)), generator0)
       STCon name args -> do
-        (args', generator1) <- srcTypesToElabTypesWith refs' generator0 args
+        (args', generator1) <- srcTypesToElabTypesWith boundNames' refs' generator0 args
         Right (Just (TConWithIdentity (sourceTypeHeadIdentity name) (builtinBaseTy name) args'), generator1)
       STVarApp name args -> do
-        (args', generator1) <- srcTypesToElabTypesWith refs' generator0 args
+        (args', generator1) <- srcTypesToElabTypesWith boundNames' refs' generator0 args
         ref <- sourceTypeBinderRef refs' name
         Right (Just (TVarAppRef ref args'), generator1)
       STTyLam {} ->
@@ -3194,16 +3211,18 @@ srcTypeToElabTypeWith algebraContext refs generator ty = case ty of
       STTyApp {} ->
         Left (InstantiationError "residual type application reached elaboration")
       STForall name mb body ->
-        let (ref, generator1) = sourceTypeBinderRefOrFresh (algSourceTypeBinderIdentities algebraContext) name generator0
+        let (ref, generator1) = sourceTypeBinderRefOrFreshInScope (Set.member name boundNames') (algSourceTypeBinderIdentities algebraContext) name generator0
             refs'' = Map.insert name ref refs'
+            boundNames'' = Set.insert name boundNames'
          in do
-              (mb', generator2) <- maybe (Right (Nothing, generator1)) (srcBoundToElabBoundWith refs' generator1) mb
-              (body', generator3) <- srcTypeToElabTypeWith algebraContext refs'' generator2 body
+              (mb', generator2) <- maybe (Right (Nothing, generator1)) (srcBoundToElabBoundWith boundNames' refs' generator1) mb
+              (body', generator3) <- srcTypeToElabTypeWithBound boundNames'' algebraContext refs'' generator2 body
               Right (Just (TForallRef ref mb' body'), generator3)
       STMu name body ->
-        let (ref, generator1) = sourceTypeBinderRefOrFresh (algSourceTypeBinderIdentities algebraContext) name generator0
+        let (ref, generator1) = sourceTypeBinderRefOrFreshInScope (Set.member name boundNames') (algSourceTypeBinderIdentities algebraContext) name generator0
+            boundNames'' = Set.insert name boundNames'
          in do
-              (body', generator2) <- srcTypeToElabTypeWith algebraContext (Map.insert name ref refs') generator1 body
+              (body', generator2) <- srcTypeToElabTypeWithBound boundNames'' algebraContext (Map.insert name ref refs') generator1 body
               Right (Just (TMuRef ref body'), generator2)
       STBottom -> Right (Nothing, generator0)
 

@@ -132,7 +132,7 @@ import MLF.Frontend.ConstraintGen
     generateModuleConstraintsKeyedWithExternalBindings,
   )
 import qualified MLF.Frontend.Program.Builtins as Builtins
-import MLF.Frontend.Symbol (SymbolIdentity, symbolDefiningModule, symbolDefiningName, symbolIdentityStableName, symbolUniqueIdentity)
+import MLF.Frontend.Symbol (SymbolIdentity, symbolIdentityAliasMap, symbolIdentityAliasNames, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (NormSrcType, NormSurfaceExpr, StructBound, VarName)
 import qualified MLF.Frontend.Syntax as Surface
 import MLF.Reify.TypeOps (freeTypeVarRefsType, freeTypeVarsType, freshNameLike, substTypeCaptureRef)
@@ -154,9 +154,9 @@ import MLF.Types.Identity
     identityGeneratorAfter,
     localRefMatchesNodeId,
     typeBinderIdentityFromStructural,
+    typeBinderIdentityAliasMap,
     symbolGeneratedIdentities,
     StructuralTypeBinderRole (..),
-    typeBinderIdentityStableName,
     typeBinderGeneratedIdentities,
   )
 
@@ -231,10 +231,7 @@ structuralTypeBinderIdentitiesFromHeads headIdentities =
     ]
   where
     structuralHeadNames identity =
-      [ symbolDefiningModule identity ++ "." ++ symbolDefiningName identity,
-        symbolDefiningName identity,
-        symbolIdentityStableName identity
-      ]
+      symbolIdentityAliasNames identity
 
 mergeIdentityMaps :: (Ord a) => [Map.Map String a] -> Map.Map String a
 mergeIdentityMaps maps =
@@ -1939,7 +1936,7 @@ lookupSourceTypeBinderIdentity binderIdentities name =
 
 sourceTypeBinderStableAliases :: Map.Map String TypeBinderIdentity -> Map.Map String TypeBinderIdentity
 sourceTypeBinderStableAliases =
-  Map.fromList . map (\identity -> (typeBinderIdentityStableName identity, identity)) . Map.elems
+  typeBinderIdentityAliasMap . Map.toList
 
 lookupSourceTypeHeadIdentity :: Map.Map String SymbolIdentity -> String -> Maybe SymbolIdentity
 lookupSourceTypeHeadIdentity headIdentities name =
@@ -1949,23 +1946,34 @@ lookupSourceTypeHeadIdentity headIdentities name =
 
 sourceTypeHeadStableAliases :: Map.Map String SymbolIdentity -> Map.Map String SymbolIdentity
 sourceTypeHeadStableAliases =
-  Map.fromList . map (\identity -> (symbolIdentityStableName identity, identity)) . Map.elems
+  symbolIdentityAliasMap . Map.elems
 
 srcTypeToElabTypeWith :: Map.Map String SymbolIdentity -> Map.Map String TypeBinderIdentity -> Map.Map String TypeBinderRef -> IdentityGenerator -> NormSrcType -> Either ConstraintError (ElabType, IdentityGenerator)
-srcTypeToElabTypeWith headIdentities binderIdentities refs generator ty = case ty of
+srcTypeToElabTypeWith =
+  srcTypeToElabTypeWithBound Set.empty
+
+srcTypeToElabTypeWithBound ::
+  Set.Set String ->
+  Map.Map String SymbolIdentity ->
+  Map.Map String TypeBinderIdentity ->
+  Map.Map String TypeBinderRef ->
+  IdentityGenerator ->
+  NormSrcType ->
+  Either ConstraintError (ElabType, IdentityGenerator)
+srcTypeToElabTypeWithBound boundNames headIdentities binderIdentities refs generator ty = case ty of
   Surface.STVar name -> do
     ref <- sourceTypeBinderRef refs name
     Right (TVarRef ref, generator)
   Surface.STArrow dom cod -> do
-    (dom', generator1) <- srcTypeToElabTypeWith headIdentities binderIdentities refs generator dom
-    (cod', generator2) <- srcTypeToElabTypeWith headIdentities binderIdentities refs generator1 cod
+    (dom', generator1) <- srcTypeToElabTypeWithBound boundNames headIdentities binderIdentities refs generator dom
+    (cod', generator2) <- srcTypeToElabTypeWithBound boundNames headIdentities binderIdentities refs generator1 cod
     Right (TArrow dom' cod', generator2)
   Surface.STBase name -> Right (TBaseWithIdentity (sourceTypeHeadIdentity name) (builtinBaseTy name), generator)
   Surface.STCon name args -> do
-    (args', generator') <- srcTypesToElabTypesWith refs generator args
+    (args', generator') <- srcTypesToElabTypesWith boundNames refs generator args
     Right (TConWithIdentity (sourceTypeHeadIdentity name) (builtinBaseTy name) args', generator')
   Surface.STVarApp name args -> do
-    (args', generator') <- srcTypesToElabTypesWith refs generator args
+    (args', generator') <- srcTypesToElabTypesWith boundNames refs generator args
     ref <- sourceTypeBinderRef refs name
     Right (TVarAppRef ref args', generator')
   Surface.STTyLam {} ->
@@ -1973,19 +1981,25 @@ srcTypeToElabTypeWith headIdentities binderIdentities refs generator ty = case t
   Surface.STTyApp {} ->
     Left (InternalConstraintError "residual type application reached elaboration")
   Surface.STForall name mb body ->
-    let (ref, generator1) = sourceTypeBinderRefOrFresh binderIdentities name generator
+    let (ref, generator1) = sourceTypeBinderRefOrFreshInScope (Set.member name boundNames) binderIdentities name generator
         refs' = Map.insert name ref refs
+        boundNames' = Set.insert name boundNames
      in do
-          (mb', generator2) <- maybe (Right (Nothing, generator1)) (srcBoundToElabBoundWith refs generator1) mb
-          (body', generator3) <- srcTypeToElabTypeWith headIdentities binderIdentities refs' generator2 body
+          (mb', generator2) <- maybe (Right (Nothing, generator1)) (srcBoundToElabBoundWith boundNames refs generator1) mb
+          (body', generator3) <- srcTypeToElabTypeWithBound boundNames' headIdentities binderIdentities refs' generator2 body
           Right (TForallRef ref mb' body', generator3)
   Surface.STMu name body ->
-    let (ref, generator1) = sourceTypeBinderRefOrFresh binderIdentities name generator
+    let (ref, generator1) = sourceTypeBinderRefOrFreshInScope (Set.member name boundNames) binderIdentities name generator
+        boundNames' = Set.insert name boundNames
      in do
-          (body', generator2) <- srcTypeToElabTypeWith headIdentities binderIdentities (Map.insert name ref refs) generator1 body
+          (body', generator2) <- srcTypeToElabTypeWithBound boundNames' headIdentities binderIdentities (Map.insert name ref refs) generator1 body
           Right (TMuRef ref body', generator2)
   Surface.STBottom -> Right (TBottom, generator)
   where
+    sourceTypeBinderRefOrFreshInScope shadowed binderIdentities' name' generator'
+      | shadowed = sourceTypeBinderRefForName name' generator'
+      | otherwise = sourceTypeBinderRefOrFresh binderIdentities' name' generator'
+
     sourceTypeBinderRef env name =
       case Map.lookup name env of
         Just ref -> Right ref
@@ -1996,33 +2010,33 @@ srcTypeToElabTypeWith headIdentities binderIdentities refs generator ty = case t
         Just identity -> Just identity
         Nothing -> Builtins.builtinTypeHeadIdentity name
 
-    srcTypesToElabTypesWith refs0 generator0 (arg :| args) = do
-      (arg', generator1) <- srcTypeToElabTypeWith headIdentities binderIdentities refs0 generator0 arg
+    srcTypesToElabTypesWith boundNames' refs0 generator0 (arg :| args) = do
+      (arg', generator1) <- srcTypeToElabTypeWithBound boundNames' headIdentities binderIdentities refs0 generator0 arg
       (argsRev, generator') <-
         foldM
           ( \(acc, gen) next -> do
-              (next', gen') <- srcTypeToElabTypeWith headIdentities binderIdentities refs0 gen next
+              (next', gen') <- srcTypeToElabTypeWithBound boundNames' headIdentities binderIdentities refs0 gen next
               Right (next' : acc, gen')
           )
           ([], generator1)
           args
       Right (arg' :| reverse argsRev, generator')
 
-    srcBoundToElabBoundWith :: Map.Map String TypeBinderRef -> IdentityGenerator -> Surface.SrcBound 'Surface.NormN -> Either ConstraintError (Maybe BoundType, IdentityGenerator)
-    srcBoundToElabBoundWith refs' generator0 (Surface.SrcBound boundTy) = structBoundToElabBoundWith refs' generator0 boundTy
+    srcBoundToElabBoundWith :: Set.Set String -> Map.Map String TypeBinderRef -> IdentityGenerator -> Surface.SrcBound 'Surface.NormN -> Either ConstraintError (Maybe BoundType, IdentityGenerator)
+    srcBoundToElabBoundWith boundNames' refs' generator0 (Surface.SrcBound boundTy) = structBoundToElabBoundWith boundNames' refs' generator0 boundTy
 
-    structBoundToElabBoundWith :: Map.Map String TypeBinderRef -> IdentityGenerator -> StructBound -> Either ConstraintError (Maybe BoundType, IdentityGenerator)
-    structBoundToElabBoundWith refs' generator0 bTy = case bTy of
+    structBoundToElabBoundWith :: Set.Set String -> Map.Map String TypeBinderRef -> IdentityGenerator -> StructBound -> Either ConstraintError (Maybe BoundType, IdentityGenerator)
+    structBoundToElabBoundWith boundNames' refs' generator0 bTy = case bTy of
       Surface.STArrow dom cod -> do
-        (dom', generator1) <- srcTypeToElabTypeWith headIdentities binderIdentities refs' generator0 dom
-        (cod', generator2) <- srcTypeToElabTypeWith headIdentities binderIdentities refs' generator1 cod
+        (dom', generator1) <- srcTypeToElabTypeWithBound boundNames' headIdentities binderIdentities refs' generator0 dom
+        (cod', generator2) <- srcTypeToElabTypeWithBound boundNames' headIdentities binderIdentities refs' generator1 cod
         Right (Just (TArrow dom' cod'), generator2)
       Surface.STBase name -> Right (Just (TBaseWithIdentity (sourceTypeHeadIdentity name) (builtinBaseTy name)), generator0)
       Surface.STCon name args -> do
-        (args', generator1) <- srcTypesToElabTypesWith refs' generator0 args
+        (args', generator1) <- srcTypesToElabTypesWith boundNames' refs' generator0 args
         Right (Just (TConWithIdentity (sourceTypeHeadIdentity name) (builtinBaseTy name) args'), generator1)
       Surface.STVarApp name args -> do
-        (args', generator1) <- srcTypesToElabTypesWith refs' generator0 args
+        (args', generator1) <- srcTypesToElabTypesWith boundNames' refs' generator0 args
         ref <- sourceTypeBinderRef refs' name
         Right (Just (TVarAppRef ref args'), generator1)
       Surface.STTyLam {} ->
@@ -2030,16 +2044,18 @@ srcTypeToElabTypeWith headIdentities binderIdentities refs generator ty = case t
       Surface.STTyApp {} ->
         Left (InternalConstraintError "residual type application reached elaboration")
       Surface.STForall name mb body ->
-        let (ref, generator1) = sourceTypeBinderRefOrFresh binderIdentities name generator0
+        let (ref, generator1) = sourceTypeBinderRefOrFreshInScope (Set.member name boundNames') binderIdentities name generator0
             refs'' = Map.insert name ref refs'
+            boundNames'' = Set.insert name boundNames'
          in do
-              (mb', generator2) <- maybe (Right (Nothing, generator1)) (srcBoundToElabBoundWith refs' generator1) mb
-              (body', generator3) <- srcTypeToElabTypeWith headIdentities binderIdentities refs'' generator2 body
+              (mb', generator2) <- maybe (Right (Nothing, generator1)) (srcBoundToElabBoundWith boundNames' refs' generator1) mb
+              (body', generator3) <- srcTypeToElabTypeWithBound boundNames'' headIdentities binderIdentities refs'' generator2 body
               Right (Just (TForallRef ref mb' body'), generator3)
       Surface.STMu name body ->
-        let (ref, generator1) = sourceTypeBinderRefOrFresh binderIdentities name generator0
+        let (ref, generator1) = sourceTypeBinderRefOrFreshInScope (Set.member name boundNames') binderIdentities name generator0
+            boundNames'' = Set.insert name boundNames'
          in do
-              (body', generator2) <- srcTypeToElabTypeWith headIdentities binderIdentities (Map.insert name ref refs') generator1 body
+              (body', generator2) <- srcTypeToElabTypeWithBound boundNames'' headIdentities binderIdentities (Map.insert name ref refs') generator1 body
               Right (Just (TMuRef ref body'), generator2)
       Surface.STBottom -> Right (Nothing, generator0)
 

@@ -169,6 +169,22 @@ spec = describe "MLF.Backend.IR" $ do
       _ ->
         expectationFailure ("expected stable-name primitive backend type to carry identity metadata, got " ++ show ty)
 
+  it "does not resolve ambiguous primitive type head aliases by display name" $ do
+    let leftIdentity =
+          testSymbolIdentity 991622 SymbolType "Left" "Token"
+        rightIdentity =
+          testSymbolIdentity 991623 SymbolType "Right" "Token"
+        (ty, _) =
+          primitiveTypeToBackendTypeFromWithHeadIdentities
+            ( Map.fromList
+                [ (symbolIdentityStableName leftIdentity, leftIdentity),
+                  (symbolIdentityStableName rightIdentity, rightIdentity)
+                ]
+            )
+            initialIdentityGenerator
+            (PrimitiveInventory.PrimitiveTypeBase "Token")
+    ty `shouldBe` BTBaseWithIdentity Nothing (BaseTy "Token")
+
   it "generates backend primitive type binder identities for stable-looking names" $ do
     let stableName = "$typevar#991621"
         stableIdentity = typeBinderIdentityFromUnique (UniqueIdentity 0)
