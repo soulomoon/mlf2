@@ -1865,7 +1865,11 @@ runtimeExternalBindingIndexFromScope :: ElaborateScope -> Map String ElabType ->
 runtimeExternalBindingIndexFromScope scope runtimeTypes =
   RuntimeExternalBindingIndex
     { runtimeExternalBindingKeyByName =
-        Map.fromList [(runtimeName, key) | (runtimeName, key, _) <- entries],
+        Map.fromList
+          [ (runtimeName, key)
+          | (runtimeName, keys) <- Map.toList keysByRuntimeName
+          , [key] <- [Set.toList keys]
+          ],
       runtimeExternalBindingByKey =
         Map.fromList [(key, resolved) | (_, key, resolved) <- entries]
     }
@@ -1901,6 +1905,13 @@ runtimeExternalBindingIndexFromScope scope runtimeTypes =
             Just (runtimeName, ConstructorId (constructorRefFromInfo ctorInfo))
         OverloadedMethod {} ->
           Nothing
+
+    keysByRuntimeName =
+      Map.fromListWith
+        Set.union
+        [ (runtimeName, Set.singleton key)
+        | (runtimeName, key, _) <- entries
+        ]
 
 runtimeExternalBindingIdentity :: RuntimeExternalBindingIndex -> String -> Maybe ExternalBindingIdentity
 runtimeExternalBindingIdentity index name = do
