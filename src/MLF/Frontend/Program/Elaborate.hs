@@ -162,11 +162,7 @@ mkElaborateScope values0 dataTypes0 classes0 instances0 =
         { esValues = values1,
           esLocalValues = Map.empty,
           esValuesByIdentity = indexInfoByIdentity valueInfoSymbolIdentity values1,
-          esRuntimeTypeViews =
-            Map.fromList
-              [ (runtimeName, valueRuntimeTypeViewFor info)
-              | (runtimeName, info) <- runtimeTypeInfos
-              ],
+          esRuntimeTypeViews = runtimeTypeViews,
           esTypes = dataTypes,
           esTypesByIdentity = dataTypesByIdentity,
           esTypeHeadIdentities = dataTypeHeadIdentities,
@@ -211,6 +207,25 @@ mkElaborateScope values0 dataTypes0 classes0 instances0 =
              methodInfo <- Map.elems (instanceMethodsByIdentity instanceInfo),
              shouldTrackRuntimeType methodInfo
            ]
+
+    runtimeTypeViews =
+      Map.fromList
+        [ (runtimeName, valueRuntimeTypeViewFor info)
+        | (runtimeName, infos) <- Map.toList runtimeTypeInfosByName,
+          Just info <- [uniqueRuntimeTypeInfo infos]
+        ]
+
+    runtimeTypeInfosByName =
+      Map.fromListWith
+        (++)
+        [ (runtimeName, [info])
+        | (runtimeName, info) <- runtimeTypeInfos
+        ]
+
+    uniqueRuntimeTypeInfo infos =
+      case (Set.toList (Set.fromList (map valueInfoSymbolIdentity infos)), infos) of
+        ([_], info : _) -> Just info
+        _ -> Nothing
 
     instanceMethodValueIdentities =
       Set.fromList

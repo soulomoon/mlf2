@@ -886,6 +886,30 @@ spec = do
             (Map.lookup "Main__box" (elaborateScopeRuntimeTypeViews scope) >>= Map.lookup staleHead . ProgramTypes.typeViewHeadIdentities)
                 `shouldBe` Just typeIdentity
 
+        it "does not keep an arbitrary runtime type view for duplicate runtime-name values" $ do
+            let runtimeName = "Main__shared"
+                leftIdentity = generatedSymbolIdentity 991438 SymbolValue "Main" "left" Nothing
+                rightIdentity = generatedSymbolIdentity 991439 SymbolValue "Main" "right" Nothing
+                valueInfo identity ty =
+                    OrdinaryValue
+                        { valueInfoSymbol = identity
+                        , valueRuntimeName = runtimeName
+                        , valueTypeView = ProgramTypes.mkTypeView ty ty
+                        , valueConstraints = []
+                        , valueConstraintInfos = []
+                        }
+                scope =
+                    mkElaborateScope
+                        ( Map.fromList
+                            [ ("left", valueInfo leftIdentity (STBase "Int"))
+                            , ("right", valueInfo rightIdentity (STBase "Bool"))
+                            ]
+                        )
+                        Map.empty
+                        Map.empty
+                        []
+            Map.member runtimeName (elaborateScopeRuntimeTypeViews scope) `shouldBe` False
+
         it "does not resolve duplicate runtime-name external bindings by an arbitrary identity" $ do
             let runtimeName = "Main__shared"
                 leftIdentity = generatedSymbolIdentity 991435 SymbolValue "Main" "left" Nothing
@@ -921,15 +945,7 @@ spec = do
                         , loweredBindingExportedAsMain = False
                         }
             finalizeContext <- requireFinalizeContext scope
-            checked <-
-                case finalizeBindingWithContext finalizeContext lowered of
-                    Right binding -> pure binding
-                    Left err -> expectationFailure ("finalize binding failed: " ++ show err) >> fail "finalize binding failed"
-            case checkedBindingTerm checked of
-                Elab.EVarNode ResolvedVar {resolvedVarDetails = EnvId {}} ->
-                    pure ()
-                other ->
-                    expectationFailure ("expected resolved external var, got: " ++ show other)
+            finalizeBindingWithContext finalizeContext lowered `shouldBe` Left (ProgramUnknownValue runtimeName)
 
         it "generates source type binder identities while finalizing stable-looking names" $ do
             let stableName = "$typevar#991607"
