@@ -910,6 +910,57 @@ spec = do
                         []
             Map.member runtimeName (elaborateScopeRuntimeTypeViews scope) `shouldBe` False
 
+        it "resolves duplicate runtime-name instance methods by identity" $ do
+            let runtimeName = "Main__method"
+                classIdentity = generatedSymbolIdentity 991440 SymbolClass "Main" "C" Nothing
+                originIdentity = generatedSymbolIdentity 991441 SymbolModule "Main" "Main" Nothing
+                methodIdentity = generatedSymbolIdentity 991442 SymbolMethod "Main" "method" (Just (SymbolOwnerClass classIdentity))
+                leftIdentity = generatedSymbolIdentity 991443 SymbolValue "Main" "method" Nothing
+                rightIdentity = generatedSymbolIdentity 991444 SymbolValue "Other" "method" Nothing
+                valueInfo identity =
+                    OrdinaryValue
+                        { valueInfoSymbol = identity
+                        , valueRuntimeName = runtimeName
+                        , valueTypeView = ProgramTypes.mkTypeView (STBase "Int") (STBase "Int")
+                        , valueConstraints = []
+                        , valueConstraintInfos = []
+                        }
+                instanceInfo identity headTy =
+                    InstanceInfo
+                        { instanceClassSymbol = classIdentity
+                        , instanceOriginModuleIdentity = originIdentity
+                        , instanceConstraints = []
+                        , instanceConstraintInfos = []
+                        , instanceHeadTypeViews = ProgramTypes.mkTypeView headTy headTy :| []
+                        , instanceMethodsByIdentity = Map.singleton methodIdentity (valueInfo identity)
+                        }
+                scope =
+                    mkElaborateScope
+                        Map.empty
+                        Map.empty
+                        Map.empty
+                        [ instanceInfo leftIdentity (STBase "Int")
+                        , instanceInfo rightIdentity (STBase "Bool")
+                        ]
+                bindingIdentity = generatedSymbolIdentity 991445 SymbolValue "Main" "main" Nothing
+                expr =
+                    EVar
+                        ( ResolvedGlobalValue
+                            (ProgramTypes.resolvedValueInfoSymbol (SymbolLocal "Main") "method" (valueInfo leftIdentity))
+                        )
+            lowered <-
+                case
+                    lowerResolvedConstrainedExprBinding
+                        scope
+                        (ProgramTypes.loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity))
+                        (resolvedUnconstrainedType (RSTBase (Builtins.builtinTypeSymbol "Int")))
+                        False
+                        expr
+                  of
+                    Left err -> expectationFailure ("resolved instance method lowering failed: " ++ show err) >> fail "resolved instance method lowering failed"
+                    Right lowered0 -> pure lowered0
+            loweredBindingSurfaceExpr lowered `shouldBe` Surface.EVar runtimeName
+
         it "does not resolve duplicate runtime-name external bindings by an arbitrary identity" $ do
             let runtimeName = "Main__shared"
                 leftIdentity = generatedSymbolIdentity 991435 SymbolValue "Main" "left" Nothing

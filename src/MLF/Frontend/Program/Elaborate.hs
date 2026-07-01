@@ -161,7 +161,7 @@ mkElaborateScope values0 dataTypes0 classes0 instances0 =
    in ElaborateScope
         { esValues = values1,
           esLocalValues = Map.empty,
-          esValuesByIdentity = indexInfoByIdentity valueInfoSymbolIdentity values1,
+          esValuesByIdentity = indexInfoListByIdentity valueInfoSymbolIdentity valueIdentityInfos,
           esRuntimeTypeViews = runtimeTypeViews,
           esTypes = dataTypes,
           esTypesByIdentity = dataTypesByIdentity,
@@ -203,8 +203,7 @@ mkElaborateScope values0 dataTypes0 classes0 instances0 =
         shouldTrackRuntimeType info
       ]
         ++ [ (runtimeNameFor methodInfo, methodInfo)
-           | instanceInfo <- instances0,
-             methodInfo <- Map.elems (instanceMethodsByIdentity instanceInfo),
+           | methodInfo <- instanceMethodValues,
              shouldTrackRuntimeType methodInfo
            ]
 
@@ -230,8 +229,7 @@ mkElaborateScope values0 dataTypes0 classes0 instances0 =
     instanceMethodValueIdentities =
       Set.fromList
         [ valueInfoSymbolIdentity methodInfo
-        | instanceInfo <- instances0,
-          methodInfo <- Map.elems (instanceMethodsByIdentity instanceInfo)
+        | methodInfo <- instanceMethodValues
         ]
 
     runtimeNameFor OrdinaryValue {valueRuntimeName = runtimeName} = runtimeName
@@ -306,9 +304,17 @@ mkElaborateScope values0 dataTypes0 classes0 instances0 =
     instanceRuntimeValues =
       Map.fromList
         [ (runtimeName, methodValue)
-          | instanceInfo <- instances0,
-            methodValue@OrdinaryValue {valueRuntimeName = runtimeName} <- Map.elems (instanceMethodsByIdentity instanceInfo)
+          | methodValue@OrdinaryValue {valueRuntimeName = runtimeName} <- instanceMethodValues
         ]
+
+    valueIdentityInfos =
+      Map.elems values0 ++ instanceMethodValues
+
+    instanceMethodValues =
+      [ methodValue
+        | instanceInfo <- instances0,
+          methodValue <- Map.elems (instanceMethodsByIdentity instanceInfo)
+      ]
 
 addIdentityTypeAliases :: Map String DataInfo -> Map String DataInfo
 addIdentityTypeAliases dataTypes =
@@ -332,7 +338,11 @@ addIdentityTypeAliases dataTypes =
 
 indexInfoByIdentity :: (a -> SymbolIdentity) -> Map String a -> Map SymbolIdentity a
 indexInfoByIdentity identityOf =
-  Map.fromList . map (\info -> (identityOf info, info)) . Map.elems
+  indexInfoListByIdentity identityOf . Map.elems
+
+indexInfoListByIdentity :: (a -> SymbolIdentity) -> [a] -> Map SymbolIdentity a
+indexInfoListByIdentity identityOf =
+  Map.fromList . map (\info -> (identityOf info, info))
 
 indexDisplayNamesByIdentity :: (a -> SymbolIdentity) -> Map String a -> Map SymbolIdentity [String]
 indexDisplayNamesByIdentity identityOf =
