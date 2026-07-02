@@ -882,7 +882,7 @@ liftRecursiveLetsInTerm context lexicalTerms lexicalTypes term =
       (resolved :) . removeLexicalResolvedTerm resolved
 
     removeLexicalResolvedTerm resolved =
-      filter (not . resolvedVarSameIdentity resolved)
+      filter ((/= resolvedVarIdentityKey resolved) . resolvedVarIdentityKey)
 
 type TermCapture = (ResolvedVar, ElabType)
 type TypeCapture = (TypeBinderRef, Maybe BoundType)
@@ -1344,7 +1344,8 @@ replaceFreeTermVariable needle replacement =
   go
   where
     needleName = termVarKeyReferenceName needle
-    replacementFreeTerms = freeResolvedTermVariables replacement
+    replacementFreeTermKeys =
+      Set.fromList (map resolvedVarIdentityKey (freeResolvedTermVariables replacement))
     replacementFreeTypes = freeXmlfTermTypeVarRefs replacement
 
     go =
@@ -1413,7 +1414,7 @@ replaceFreeTermVariable needle replacement =
           EUnroll (go body)
 
     shouldRenameTermBinder resolved body =
-      any (resolvedVarSameIdentity resolved) replacementFreeTerms && termMentionsFreeVariable needle body
+      Set.member (resolvedVarIdentityKey resolved) replacementFreeTermKeys && termMentionsFreeVariable needle body
 
     shouldRenameTypeBinder ref body =
       typeRefMember ref replacementFreeTypes && termMentionsFreeVariable needle body
@@ -7014,7 +7015,7 @@ collectApps =
 
 collectAliasedApps :: XmlfTerm -> (XmlfTerm, [XmlfTerm])
 collectAliasedApps =
-  go []
+  go Set.empty
   where
     go seen term =
       let (headTerm, args) = collectApps (stripAdministrativeTermWrappers term)
@@ -7024,8 +7025,8 @@ collectAliasedApps =
     resolveHead seen term =
       case stripAdministrativeTermWrappers term of
         ELet resolved _ rhs body
-          | not (any (resolvedVarSameIdentity resolved) seen) ->
-              let seen' = resolved : seen
+          | not (Set.member key seen) ->
+              let seen' = Set.insert key seen
                   (bodyHead, bodyArgs) = go seen' body
                in case stripClosureHeadTypeInsts bodyHead of
                     EVarNode bodyResolved
@@ -7034,6 +7035,8 @@ collectAliasedApps =
                            in (rhsHead, rhsArgs ++ bodyArgs)
                     _ ->
                       (term, [])
+          where
+            key = resolvedVarIdentityKey resolved
         other
           | Just etaHead <- etaAliasHead other ->
               resolveHead seen etaHead
