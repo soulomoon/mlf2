@@ -1827,9 +1827,9 @@ buildConvertContext checked = do
   _modulesByIdentity <- uniqueModulesByIdentity checked
   _bindingsByIdentity <- uniqueBindingsByIdentity checked
   dataByIdentity <- uniqueDataInfosByIdentity dataInfos
+  termRuntimeNames <- checkedProgramTermRuntimeNamesByIdentity checked
   let dataModuleIdentities = dataInfoModuleIdentityMap checked
       moduleScopes = moduleElaborateScopes checked dataByIdentity
-      termRuntimeNames = checkedProgramTermRuntimeNamesByIdentity checked
   dataMetas <- mapM (buildDataMetaForDataInfo moduleScopes dataModuleIdentities dataInfos) dataInfos
   constructorMetasByIdentity <-
     uniqueConstructorMetasByIdentity
@@ -2352,9 +2352,10 @@ allDataInfos checked =
       dataInfo <- Map.elems (checkedModuleData checkedModule)
   ]
 
-checkedProgramTermRuntimeNamesByIdentity :: CheckedProgram -> Map SymbolIdentity String
+checkedProgramTermRuntimeNamesByIdentity :: CheckedProgram -> Either BackendConversionError (Map SymbolIdentity String)
 checkedProgramTermRuntimeNamesByIdentity checked =
-  Map.fromList checkedBindings `Map.union` builtinBindings
+  Map.map snd
+    <$> uniqueCheckedInfoByIdentity BackendDuplicateBinding fst (checkedBindings ++ builtinBindings)
   where
     checkedBindings =
       [ (symbol, checkedBindingRuntimeName binding)
@@ -2364,10 +2365,9 @@ checkedProgramTermRuntimeNamesByIdentity checked =
       ]
 
     builtinBindings =
-      Map.fromList
-        [ (builtinValueIdentity name, name)
-        | name <- Map.keys PrimitiveInventory.primitiveValueSpecs
-        ]
+      [ (builtinValueIdentity name, name)
+      | name <- Map.keys PrimitiveInventory.primitiveValueSpecs
+      ]
 
 dataInfoModuleIdentityMap :: CheckedProgram -> Map SymbolIdentity SymbolIdentity
 dataInfoModuleIdentityMap checked =

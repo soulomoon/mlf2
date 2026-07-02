@@ -27,7 +27,7 @@ import qualified MLF.Backend.LLVM.Lower as Lower
 import MLF.Constraint.Types.Graph (BaseTy (..), NodeId (..))
 import MLF.Elab.Types (schemeFromType)
 import qualified MLF.Types.Elab as Elab
-import MLF.Frontend.Program.Builtins (builtinTypeIdentity)
+import MLF.Frontend.Program.Builtins (builtinTypeIdentity, builtinValueIdentity)
 import MLF.Frontend.Program.Prelude (withPrelude)
 import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), SymbolOrigin (..), symbolDefiningName, symbolIdentityFromParts, symbolIdentityStableName, symbolUniqueIdentity)
 import MLF.Frontend.Program.Types
@@ -66,6 +66,7 @@ import MLF.Frontend.Program.Types
 import MLF.Frontend.Syntax (Lit (..), SrcBound (..), SrcTy (..), SrcType)
 import MLF.Frontend.Syntax.Program (Program)
 import MLF.Pipeline (checkProgram)
+import qualified MLF.Primitive.Inventory as PrimitiveInventory
 import MLF.Types.Identity (deferredRefFromIdentity, deferredRefName, UniqueIdentity (..), typeBinderIdentityFromUnique, typeBinderIdentityStableName)
 import System.Directory (createDirectoryIfMissing)
 import System.Environment (lookupEnv)
@@ -1558,6 +1559,17 @@ spec = describe "MLF.Backend.Convert" $ do
             checked0
     convertCheckedProgram checked
       `shouldBe` Left (BackendValidationFailed (BackendDuplicateBinding (symbolIdentityStableName duplicateIdentity)))
+
+  it "rejects checked binding identities that collide with primitive identities" $ do
+    checked0 <- requireChecked duplicateBindingIdentityProgram
+    let primitiveIdentity = builtinValueIdentity PrimitiveInventory.stringFromIntPrimitiveName
+        checked =
+          replaceBindingTopLevelIdentity
+            "Main__helper"
+            primitiveIdentity
+            checked0
+    convertCheckedProgram checked
+      `shouldBe` Left (BackendValidationFailed (BackendDuplicateBinding (symbolIdentityStableName primitiveIdentity)))
 
   it "rejects duplicate checked constructor identities before building backend context maps" $ do
     checked0 <- requireChecked parameterizedConstructorProgram
