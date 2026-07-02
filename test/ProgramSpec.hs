@@ -2165,11 +2165,12 @@ spec = do
                             ProgramTypes.typeViewBinderIdentities (ProgramTypes.checkedBindingSourceTypeView binding)
                     Map.lookup "a" sourceBinderIdentities `shouldBe` Just paramIdentity
                     Map.lookup (typeBinderIdentityStableName paramIdentity) sourceBinderIdentities `shouldBe` Just paramIdentity
+                    leadingTypeAbsIdentities (checkedBindingTerm binding) `shouldBe` [paramIdentity]
                 identities ->
                     expectationFailure ("expected one data param identity, got " ++ show identities)
             unresolvedTermVarRefs (checkedBindingTerm binding) `shouldBe` []
 
-        it "keeps parameterized nullary constructor bindings on the surface pipeline" $ do
+        it "finalizes parameterized nullary constructor bindings from metadata without the surface pipeline" $ do
             program <-
                 requireParsed $
                     unlines
@@ -2189,10 +2190,22 @@ spec = do
                     (lowerConstructorBinding scope ctorInfo)
                         { loweredBindingSurfaceExpr = Surface.EVar "$missing_constructor_pipeline_input"
                         }
-            case finalizeBindingWithContext finalizeContext poisonedLowered of
-                Left (ProgramUnknownValue "$missing_constructor_pipeline_input") -> pure ()
-                Left err -> expectationFailure ("expected surface-pipeline failure, got: " ++ show err)
-                Right _ -> expectationFailure "parameterized nullary constructor unexpectedly used metadata fast path"
+            binding <-
+                case finalizeBindingWithContext finalizeContext poisonedLowered of
+                    Left err -> expectationFailure ("metadata constructor finalization failed: " ++ show err) >> fail "metadata constructor finalization failed"
+                    Right checkedBinding -> pure checkedBinding
+            checkedBindingName binding `shouldBe` "Main__None"
+            fmap (symbolDefiningName . constructorRefSymbol) (ProgramTypes.checkedBindingConstructorRef binding)
+                `shouldBe` Just "None"
+            case ProgramTypes.dataParamBinderIdentities dataInfo of
+                [paramIdentity] -> do
+                    let sourceBinderIdentities =
+                            ProgramTypes.typeViewBinderIdentities (ProgramTypes.checkedBindingSourceTypeView binding)
+                    Map.lookup "a" sourceBinderIdentities `shouldBe` Just paramIdentity
+                    Map.lookup (typeBinderIdentityStableName paramIdentity) sourceBinderIdentities `shouldBe` Just paramIdentity
+                identities ->
+                    expectationFailure ("expected one data param identity, got " ++ show identities)
+            unresolvedTermVarRefs (checkedBindingTerm binding) `shouldBe` []
 
         it "records lambda and let binders with resolved local identity" $ do
             program <-
@@ -6688,6 +6701,14 @@ isPolymorphicIdentityType ty =
             Elab.typeBinderRefsSameIdentity argRef ref
                 && Elab.typeBinderRefsSameIdentity resultRef ref
         _ -> False
+
+leadingTypeAbsIdentities :: Elab.XmlfTerm -> [TypeBinderIdentity]
+leadingTypeAbsIdentities term =
+    case term of
+        Elab.ETyAbsRef ref _ body ->
+            Elab.typeBinderRefIdentity ref : leadingTypeAbsIdentities body
+        _ ->
+            []
 
 elabTypeMentionsBinder :: TypeBinderIdentity -> Elab.Ty v -> Bool
 elabTypeMentionsBinder identity ty =

@@ -140,6 +140,7 @@ import MLF.Frontend.Program.Types
     dataInfoIdentityName,
     dataInfoIdentityQualifiedName,
     dataParams,
+    dataParamBinders,
     deferredCasePlaceholder,
     deferredConstructorPlaceholder,
     deferredMethodPlaceholder,
@@ -1048,7 +1049,7 @@ metadataConstructorTerm context lowered = do
     then pure ()
     else Left (ProgramPipelineError ("constructor metadata fast path unsupported for `" ++ loweredBindingName lowered ++ "`"))
   expectedTy <- srcTypeToElabTypeInScope scope (loweredBindingExpectedType lowered)
-  term0 <- inlineConstructorHead scope Map.empty ctorInfo emptyTypeBinderSubst
+  term0 <- inlineConstructorHead scope Map.empty (constructorBindingQuantifiedOwnerParams lowered dataInfo) ctorInfo emptyTypeBinderSubst
   let term = closeTermWithSchemeSubstRefsIfNeeded IntMap.empty (schemeFromType expectedTy) term0
   Right (term, expectedTy)
   where
@@ -1057,9 +1058,19 @@ metadataConstructorTerm context lowered = do
 constructorMetadataFastPathSupported :: ElaborateScope -> DataInfo -> ConstructorInfo -> Bool
 constructorMetadataFastPathSupported scope dataInfo ctorInfo =
   null (ctorForalls ctorInfo)
-    && (null (dataParams dataInfo) || not (null (ctorArgs ctorInfo)))
     && dataInfoSymbol dataInfo == ctorOwningTypeIdentity ctorInfo
     && constructorOwnerRuntimeTypeTrackable (elaborateScopeDataTypesByIdentity scope) ctorInfo
+
+constructorBindingQuantifiedOwnerParams :: LoweredBinding -> DataInfo -> [(String, TypeBinderIdentity)]
+constructorBindingQuantifiedOwnerParams lowered dataInfo =
+  filter quantifiedOwnerParam (dataParamBinders dataInfo)
+  where
+    quantifiedNames =
+      Set.fromList (map fst (fst (splitForalls (loweredBindingExpectedType lowered))))
+
+    quantifiedOwnerParam (name, identity) =
+      name `Set.member` quantifiedNames
+        || typeBinderIdentityStableName identity `Set.member` quantifiedNames
 
 loweredBindingIsConstructor :: LoweredBinding -> Bool
 loweredBindingIsConstructor lowered =
@@ -3034,7 +3045,7 @@ resolveDeferredConstructors scope env deferredConstructors = go env
                   )
                   (X.EVarNode (resolvedVarFromConstructorInfo ctorInfo))
                   instBinders
-              else inlineConstructorHead scope constructorHeadIdentities ctorInfo substFinal
+              else inlineConstructorHead scope constructorHeadIdentities [] ctorInfo substFinal
           Right (foldl X.EApp ctorHead args)
         _ ->
           Left (ProgramAmbiguousConstructorUse (ctorName ctorInfo))
@@ -3134,8 +3145,8 @@ bindTypeBinderSubstViewInScope scope (name, identity) actualView subst =
     actual =
       typeViewDisplay actualView
 
-inlineConstructorHead :: ElaborateScope -> Map String SymbolIdentity -> ConstructorInfo -> TypeBinderSubst -> Either ProgramError XmlfTerm
-inlineConstructorHead scope extraHeadIdentities ctorInfo subst = do
+inlineConstructorHead :: ElaborateScope -> Map String SymbolIdentity -> [(String, TypeBinderIdentity)] -> ConstructorInfo -> TypeBinderSubst -> Either ProgramError XmlfTerm
+inlineConstructorHead scope extraHeadIdentities ownerParamBinders ctorInfo subst = do
   let resultSrcTy = applyConstructorSubst subst (ctorResult ctorInfo)
       argSrcTys = map (applyConstructorSubst subst) (ctorArgs ctorInfo)
       resultVar = "$" ++ symbolDefiningName (ctorOwningTypeIdentity ctorInfo) ++ "_result"
@@ -3170,13 +3181,30 @@ inlineConstructorHead scope extraHeadIdentities ctorInfo subst = do
             Set.unions (map freeSrcTypeVars (loweredResultSrcTy : loweredArgSrcTys ++ loweredHandlerSrcTys))
       headIdentities =
         Map.union extraHeadIdentities (typeHeadIdentitiesInScope scope)
-      (sharedRefs, generator0) =
-        freshTypeBinderRefsAfterHeadIdentities headIdentities sharedFreeNames
+      ownerParamRefsByAlias =
+        Map.fromList
+          [ (alias, ref)
+          | (name, identity) <- ownerParamBinders,
+            let ref = X.typeBinderRefFromIdentity identity name,
+            alias <- [name, typeBinderIdentityStableName identity]
+          ]
+      ownerParamRefs =
+        [ X.typeBinderRefFromIdentity identity name
+        | (name, identity) <- ownerParamBinders
+        ]
+      missingSharedFreeNames =
+        filter (`Map.notMember` ownerParamRefsByAlias) sharedFreeNames
+      (freshSharedRefs, generator0) =
+        freshTypeBinderRefsAfterHeadAndOwnerParamIdentities headIdentities ownerParamBinders missingSharedFreeNames
+      sharedRefs =
+        Map.union ownerParamRefsByAlias freshSharedRefs
       sharedTypeAbsRefs =
         [ ref
         | name <- sharedFreeNames,
           Just ref <- [Map.lookup name sharedRefs]
         ]
+      topTypeAbsRefs =
+        ownerParamRefs ++ filter (not . refIdentityIn ownerParamRefs) sharedTypeAbsRefs
       (resultRef, generator1) = X.sourceTypeBinderRefForName resultVar generator0
       handlerRefs = Map.insert resultVar resultRef sharedRefs
   (resultTy, generator2) <- srcTypeToElabTypeWithHeadIdentities headIdentities sharedRefs generator1 loweredResultSrcTy
@@ -3192,8 +3220,20 @@ inlineConstructorHead scope extraHeadIdentities ctorInfo subst = do
       handlerBody = foldr X.ELam selectedBody handlerResolved
       rolled = X.ERoll resultTy (X.eTyAbsWithRef resultRef Nothing handlerBody)
       valueBody = foldr X.ELam rolled argResolved
-  pure (foldr (`X.ETyAbsRef` Nothing) valueBody sharedTypeAbsRefs)
+  pure (foldr (`X.ETyAbsRef` Nothing) valueBody topTypeAbsRefs)
   where
+    refIdentityIn refs ref =
+      any (X.typeBinderRefsSameIdentity ref) refs
+
+    freshTypeBinderRefsAfterHeadAndOwnerParamIdentities headIdentities ownerBinders names =
+      freshTypeBinderRefs names generator0
+      where
+        generator0 =
+          identityGeneratorAfter
+            ( concatMap symbolGeneratedIdentities (Map.elems headIdentities)
+                ++ concatMap (typeBinderGeneratedIdentities . snd) ownerBinders
+            )
+
     srcTypesToElabTypesWith headIdentities refs generator tys =
       go [] generator tys
       where
