@@ -2698,6 +2698,19 @@ spec = do
             let checked' = renameCheckedDataIdentityNamesWhere (== "List") "$stale_list_data_name" checked
             (programRunOutput <$> runCheckedProgramOutput checked') `shouldBe` Right "\"\"\n"
 
+        it "indexes runtime Prelude constructors by owner identity instead of exported type display" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (List(..), stringFromList);"
+                        , "  def main : String = stringFromList Nil;"
+                        , "}"
+                        ]
+            checked <- requireCheckedLocated (withPreludeLocated located)
+            let checked' = renameCheckedExportedTypeDisplaysWhere (== "List") "$stale_list_export_display" checked
+            (programRunOutput <$> runCheckedProgramOutput checked') `shouldBe` Right "\"\"\n"
+
         it "runs checked IO terms by resolved identity instead of retained surface names" $ do
             located <-
                 requireLocated $
@@ -6428,6 +6441,26 @@ renameCheckedDataIdentityNamesWhere predicate replacement checked =
                     renameSymbolDefiningName replacement (dataInfoSymbol dataInfo)
                 }
         | otherwise = dataInfo
+
+renameCheckedExportedTypeDisplaysWhere :: (String -> Bool) -> String -> CheckedProgram -> CheckedProgram
+renameCheckedExportedTypeDisplaysWhere predicate replacement checked =
+    checked
+        { checkedProgramModules =
+            map renameModule (checkedProgramModules checked)
+        }
+  where
+    renameModule checkedModule =
+        checkedModule
+            { checkedModuleExports =
+                (checkedModuleExports checkedModule)
+                    { ProgramTypes.exportedTypeDisplaysByIdentity =
+                        fmap renameDisplay (ProgramTypes.exportedTypeDisplaysByIdentity (checkedModuleExports checkedModule))
+                    }
+            }
+
+    renameDisplay name
+        | predicate name = replacement
+        | otherwise = name
 
 renameCheckedConstructorRuntimeNamesWhere :: (String -> Bool) -> String -> CheckedProgram -> CheckedProgram
 renameCheckedConstructorRuntimeNamesWhere predicate replacement checked =

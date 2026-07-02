@@ -70,7 +70,6 @@ import MLF.Frontend.Program.Types
     EvidenceInfo (..),
     InstanceInfo (..),
     MethodInfo (..),
-    ModuleExports (..),
     ProgramDiagnostic,
     ProgramError (..),
     SymbolIdentity,
@@ -595,18 +594,22 @@ preludeBindingKey binding =
 preludeConstructorKey :: CheckedModule -> DataInfo -> ConstructorInfo -> Maybe PreludeConstructorKey
 preludeConstructorKey checkedModule dataInfo ctor =
   if ctorOwningTypeIdentity ctor == dataInfoSymbol dataInfo
-    then do
-      typeName <- Map.lookup (dataInfoSymbol dataInfo) (exportedTypeDisplaysByIdentity (checkedModuleExports checkedModule))
-      case (typeName, ctorIndex ctor) of
-        ("Unit", 0) -> Just PreludeUnitUnit
-        ("Nat", 0) -> Just PreludeNatZero
-        ("Nat", 1) -> Just PreludeNatSucc
-        ("Option", 0) -> Just PreludeOptionNone
-        ("Option", 1) -> Just PreludeOptionSome
-        ("List", 0) -> Just PreludeListNil
-        ("List", 1) -> Just PreludeListCons
-        _ -> Nothing
+    then case (preludeDataNameByIdentity checkedModule (dataInfoSymbol dataInfo), ctorIndex ctor) of
+      (Just "Unit", 0) -> Just PreludeUnitUnit
+      (Just "Nat", 0) -> Just PreludeNatZero
+      (Just "Nat", 1) -> Just PreludeNatSucc
+      (Just "Option", 0) -> Just PreludeOptionNone
+      (Just "Option", 1) -> Just PreludeOptionSome
+      (Just "List", 0) -> Just PreludeListNil
+      (Just "List", 1) -> Just PreludeListCons
+      _ -> Nothing
     else Nothing
+
+preludeDataNameByIdentity :: CheckedModule -> SymbolIdentity -> Maybe String
+preludeDataNameByIdentity checkedModule identity =
+  case [symbolDefiningName storedIdentity | storedIdentity <- Map.keys (checkedModuleData checkedModule), storedIdentity == identity] of
+    name : _ -> Just name
+    [] -> Nothing
 
 preludeConstructorLabel :: PreludeConstructorKey -> String
 preludeConstructorLabel key =
