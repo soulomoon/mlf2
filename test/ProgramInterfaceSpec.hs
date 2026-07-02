@@ -34,9 +34,12 @@ import MLF.Frontend.Program.Prelude (withPreludePackage)
 import MLF.Frontend.Program.Types
     ( CheckedModule (..)
     , CheckedProgram (..)
+    , ConstructorInfo (..)
+    , DataInfo (..)
     , ExportedTypeInfo (..)
     , ModuleExports (..)
     , ProgramError (..)
+    , SymbolIdentity
     , symbolIdentityFromParts
     , SymbolNamespace (..)
     , ValueInfo (..)
@@ -231,6 +234,19 @@ spec = do
                         (PackageInterface [staleInterface])
                         `shouldBe` Left (ProgramInterfaceIdentityKeyMismatch libId staleKey (dataInfoSymbolIdentity dataInfo))
 
+        it "rejects duplicate constructor identities inside interface data metadata" $ do
+            (_graph, _checked, packageInterface) <- requireCheckedPackageInterface constructorInterfacePackage
+            let libId = PackageModuleId testPackageId "Lib"
+            libInterface <- requireInterface libId packageInterface
+            case duplicateFirstTwoConstructorIdentities libInterface of
+                Nothing ->
+                    expectationFailure "expected interface data with at least two constructors"
+                Just (duplicateIdentity, duplicateInterface) ->
+                    validatePackageInterface
+                        (singleInterfaceGraph duplicateInterface)
+                        (PackageInterface [duplicateInterface])
+                        `shouldBe` Left (ProgramInterfaceDuplicateMetadataIdentity libId "constructor" duplicateIdentity)
+
         it "requires constructor display identity keys to match exported constructors" $ do
             (_graph, _checked, packageInterface) <- requireCheckedPackageInterface interfacePackage
             let libId = PackageModuleId testPackageId "Lib"
@@ -392,6 +408,32 @@ mainSource =
         , "}"
         ]
 
+constructorInterfacePackage :: ProgramPackage
+constructorInterfacePackage =
+    packageFromSourceUnits
+        [ ("src/Lib.mlfp", constructorInterfaceSource)
+        , ("app/Main.mlfp", constructorInterfaceMainSource)
+        ]
+
+constructorInterfaceSource :: String
+constructorInterfaceSource =
+    unlines
+        [ "module Lib export (Choice(..)) {"
+        , "  data Choice ="
+        , "      First : Choice"
+        , "    | Second : Choice;"
+        , "}"
+        ]
+
+constructorInterfaceMainSource :: String
+constructorInterfaceMainSource =
+    unlines
+        [ "module Main export (main) {"
+        , "  import Lib exposing (Choice(..));"
+        , "  def main : Choice = First;"
+        , "}"
+        ]
+
 testPackageId :: PackageId
 testPackageId = PackageId "test-package"
 
@@ -458,6 +500,29 @@ poisonExportOwner interface =
                 symbolIdentityFromParts (UniqueIdentity 900003) SymbolValue "Other" (valueInfoIdentityName valueInfo) Nothing
             }
     poisonValueOwner valueInfo = valueInfo
+
+duplicateFirstTwoConstructorIdentities :: ModuleInterface -> Maybe (SymbolIdentity, ModuleInterface)
+duplicateFirstTwoConstructorIdentities interface =
+    case
+        [ (dataIdentity, dataInfo, firstCtor, secondCtor, rest)
+        | (dataIdentity, dataInfo) <- Map.toList (moduleInterfaceDataByIdentity interface)
+        , firstCtor : secondCtor : rest <- [dataConstructors dataInfo]
+        ]
+    of
+        (dataIdentity, dataInfo, firstCtor, secondCtor, rest) : _ ->
+            let duplicateIdentity = ctorInfoSymbol firstCtor
+                duplicateData =
+                    dataInfo
+                        { dataConstructors =
+                            firstCtor : secondCtor {ctorInfoSymbol = duplicateIdentity} : rest
+                        }
+                duplicateInterface =
+                    interface
+                        { moduleInterfaceDataByIdentity =
+                            Map.insert dataIdentity duplicateData (moduleInterfaceDataByIdentity interface)
+                        }
+             in Just (duplicateIdentity, duplicateInterface)
+        [] -> Nothing
 
 singleInterfaceGraph :: ModuleInterface -> PackageModuleGraph
 singleInterfaceGraph interface =

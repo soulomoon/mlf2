@@ -15,6 +15,7 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
+import MLF.Frontend.Symbol (symbolIdentityStableName)
 import qualified MLF.Frontend.Program.Builtins as Builtins
 import MLF.Frontend.Program.Package
     ( PackageId (..)
@@ -76,6 +77,7 @@ data ProgramInterfaceError
     | ProgramInterfaceIdentityKeyMismatch PackageModuleId SymbolIdentity SymbolIdentity
     | ProgramInterfaceIdentityKeySetMismatch PackageModuleId [SymbolIdentity] [SymbolIdentity]
     | ProgramInterfaceDuplicateDisplayName PackageModuleId String [SymbolIdentity]
+    | ProgramInterfaceDuplicateMetadataIdentity PackageModuleId String SymbolIdentity
     | ProgramInterfaceExportConstructorOwnerMismatch PackageModuleId SymbolIdentity SymbolIdentity
     | ProgramInterfaceClassMethodOwnerMismatch PackageModuleId SymbolIdentity SymbolIdentity
     | ProgramInterfaceInstanceOriginMismatch PackageModuleId SymbolIdentity
@@ -234,6 +236,7 @@ validateModuleInterface interface = do
 
     validateData dataInfo = do
         let dataIdentity = dataInfoSymbolIdentity dataInfo
+        requireUniqueIdentities moduleId "constructor" (map ctorInfoSymbol (dataConstructors dataInfo))
         requireIdentityDefinedHere moduleId moduleName0 dataIdentity
         forM_ (dataConstructors dataInfo) $ \ctorInfo -> do
             let ctorIdentity = constructorInfoSymbolIdentity dataInfo ctorInfo
@@ -327,6 +330,18 @@ requireDistinctDisplayNames moduleId displays =
             | (identity, displayName) <- Map.toList displays
             ]
 
+requireUniqueIdentities :: PackageModuleId -> String -> [SymbolIdentity] -> Either ProgramInterfaceError ()
+requireUniqueIdentities moduleId label identities =
+    case find ((> 1) . snd) (Map.toList countsByIdentity) of
+        Just (identity, _) ->
+            Left (ProgramInterfaceDuplicateMetadataIdentity moduleId label identity)
+        Nothing -> Right ()
+  where
+    countsByIdentity =
+        Map.fromListWith
+            (+)
+            [(identity, 1 :: Int) | identity <- identities]
+
 requireIdentityDefinedHere ::
     PackageModuleId ->
     P.ModuleName ->
@@ -399,6 +414,13 @@ renderProgramInterfaceError err =
                 ++ show displayName
                 ++ " maps to "
                 ++ show identities
+        ProgramInterfaceDuplicateMetadataIdentity moduleId label identity ->
+            "duplicate interface "
+                ++ label
+                ++ " identity for "
+                ++ renderPackageModuleId moduleId
+                ++ ": "
+                ++ symbolIdentityStableName identity
         ProgramInterfaceExportConstructorOwnerMismatch moduleId expected actual ->
             "constructor owner mismatch for "
                 ++ renderPackageModuleId moduleId
