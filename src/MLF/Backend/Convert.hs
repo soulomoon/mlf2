@@ -5889,10 +5889,10 @@ constructorDataNameMatches context constructorMeta (BackendStructuralDataHeadByS
     Just unique ->
       unique == symbolUniqueIdentity (dataInfoSymbol (dmInfo dataMeta))
     Nothing ->
-      case typeBinderIdentityGeneratedUnique resultIdentity of
-        Just {} ->
+      if structuralIdentityAllowsNameFallback (Just resultIdentity)
+        then
           constructorDataNameMatches context constructorMeta (BackendStructuralDataHeadByName resultDataName)
-        Nothing ->
+        else
           False
   where
     dataMeta = cmData constructorMeta
@@ -6488,8 +6488,16 @@ structuralRecursiveDataMetaByIdentity context identity = do
 
 structuralRecursiveDataMetaByFallback :: ConvertContext -> Maybe TypeBinderIdentity -> String -> Maybe DataMeta
 structuralRecursiveDataMetaByFallback context identity name
-  | Just {} <- structuralSelfIdentityUnique identity = Nothing
-  | otherwise = structuralRecursiveDataMeta context name
+  | structuralIdentityAllowsNameFallback identity = structuralRecursiveDataMeta context name
+  | otherwise = Nothing
+
+structuralIdentityAllowsNameFallback :: Maybe TypeBinderIdentity -> Bool
+structuralIdentityAllowsNameFallback Nothing =
+  True
+structuralIdentityAllowsNameFallback (Just identity) =
+  case typeBinderIdentityGeneratedUnique identity of
+    Just {} -> True
+    Nothing -> False
 
 structuralSelfIdentityUnique :: Maybe TypeBinderIdentity -> Maybe UniqueIdentity
 structuralSelfIdentityUnique identity = do

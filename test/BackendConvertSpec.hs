@@ -1592,10 +1592,12 @@ spec = describe "MLF.Backend.Convert" $ do
                   }
             )
             checked0
-    backend <- requireRight (convertCheckedProgram checked)
-
-    mainBinding <- requireBinding (backendProgramMain backend) backend
-    collectConstructNames (backendBindingExpr mainBinding) `shouldNotContain` ["Main__T"]
+    case convertCheckedProgram checked of
+      Left (BackendValidationFailed (BackendBindingTypeMismatch "Main__main" _ (BTMuWithIdentity (Just identity) name _))) -> do
+        identity `shouldBe` Elab.typeBinderRefIdentity (backendFixtureTypeRef 9110 "$T_self")
+        name `shouldBe` "$T_self"
+      other ->
+        expectationFailure ("expected non-recovered structural roll rejection, got " ++ show other)
 
   it "treats stale app-like instantiations on non-forall terms as no-ops" $ do
     checked0 <- requireChecked simpleFunctionProgram
