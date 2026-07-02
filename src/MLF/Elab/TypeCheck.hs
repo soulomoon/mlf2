@@ -476,7 +476,14 @@ lookupResolvedTermEnv resolvedEnv resolved =
 
 insertResolvedTermEnv :: ResolvedVar -> ElabType -> ResolvedTermEnv -> ResolvedTermEnv
 insertResolvedTermEnv resolved ty (ResolvedTermEnv resolvedEnv) =
-  ResolvedTermEnv (Map.insert (resolvedVarIdentityKey resolved) (resolved, ty) resolvedEnv)
+  ResolvedTermEnv $
+    Map.insertWith
+      keepExisting
+      (resolvedVarIdentityKey resolved)
+      (resolved, ty)
+      resolvedEnv
+  where
+    keepExisting _new existing = existing
 
 emptyResolvedTermEnv :: ResolvedTermEnv
 emptyResolvedTermEnv = ResolvedTermEnv Map.empty

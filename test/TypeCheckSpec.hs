@@ -256,6 +256,12 @@ spec = describe "Phase 7 typecheck" $ do
             term = ELam outer (ELam inner (EVarNode outer))
         typeCheck term `shouldBe` Right (TArrow intTy (TArrow boolTy intTy))
 
+    it "does not overwrite an existing resolved local binder identity" $ do
+        let outer = generatedResolvedLocal 0 "x" "runtime-x" intTy
+            inner = generatedResolvedLocal 0 "x" "runtime-y" boolTy
+            term = ELam outer (ELam inner (EVarNode inner))
+        typeCheck term `shouldBe` Left (TCResolvedVarTypeMismatch "x" intTy boolTy)
+
     it "preserves same-spelled resolved identities across typecheck env union" $ do
         let outer = generatedResolvedLocal 0 "x" "runtime-x" intTy
             inner = generatedResolvedLocal 1 "x" "runtime-x" boolTy
