@@ -737,9 +737,11 @@ constraintInfoDeterminedByTypeVars :: Set String -> ConstraintInfo -> Bool
 constraintInfoDeterminedByTypeVars typeVars constraint =
   freeTypeVarsTypeViews (constraintTypeViews constraint) `Set.isSubsetOf` typeVars
 
-constraintInfoGround :: ConstraintInfo -> Bool
-constraintInfoGround constraint =
-  Set.null (freeTypeVarsTypeViews (constraintTypeViews constraint))
+constraintInfoGroundByTypeBinderIdentitiesFailClosed :: ConstraintInfo -> Bool
+constraintInfoGroundByTypeBinderIdentitiesFailClosed constraint =
+  case freeTypeBinderIdentitiesTypeViews (constraintTypeViews constraint) of
+    Right identities -> Set.null identities
+    Left _ -> False
 
 constraintInfoDeterminedByTypeBinderIdentities :: Set TypeBinderIdentity -> ConstraintInfo -> ElaborateM Bool
 constraintInfoDeterminedByTypeBinderIdentities typeVars constraint =
@@ -2537,7 +2539,7 @@ sourceTypeHeadIsVisibleData scope name =
 
 resolveMethodHeadExprInfo :: ElaborateScope -> Set (SymbolIdentity, [SrcType]) -> MethodInfo -> NonEmpty TypeView -> ElaborateM SurfaceExpr
 resolveMethodHeadExprInfo scope seen methodInfo classArgViews =
-  resolveMethodHeadExprInfoWith (pure . constraintInfoGround) scope seen methodInfo classArgViews
+  resolveMethodHeadExprInfoWith (pure . constraintInfoGroundByTypeBinderIdentitiesFailClosed) scope seen methodInfo classArgViews
 
 resolveResolvedMethodHeadExprInfo :: ElaborateScope -> Set (SymbolIdentity, [SrcType]) -> MethodInfo -> NonEmpty TypeView -> ElaborateM SurfaceExpr
 resolveResolvedMethodHeadExprInfo scope seen methodInfo classArgViews =
