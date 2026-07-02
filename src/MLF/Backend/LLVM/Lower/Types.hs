@@ -331,13 +331,14 @@ data LowerValue = LowerValueWithIdentity
     lvOperand :: LLVMOperand,
     lvValueKind :: LowerValueKind,
     lvConstructedValue :: Maybe ConstructedValue,
-    lvSymbolIdentity :: Maybe SymbolIdentity
+    lvSymbolIdentity :: Maybe SymbolIdentity,
+    lvBindingRef :: Maybe BackendBindingRef
   }
   deriving (Eq, Show)
 
 pattern LowerValue :: BackendType -> LLVMType -> LLVMOperand -> LowerValueKind -> Maybe ConstructedValue -> LowerValue
 pattern LowerValue backendType llvmType operand valueKind constructedValue =
-  LowerValueWithIdentity backendType llvmType operand valueKind constructedValue Nothing
+  LowerValueWithIdentity backendType llvmType operand valueKind constructedValue Nothing Nothing
 
 {-# COMPLETE LowerValue #-}
 

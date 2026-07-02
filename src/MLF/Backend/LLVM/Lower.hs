@@ -9445,8 +9445,8 @@ lowerGlobalValue env exprEnv context resultTy name binding typeArgs =
         liftEither (BackendLLVMUnsupportedExpression context ("escaping function " ++ show functionContext))
       let actualTy = functionTypeFromForm instantiated
       requireEvidenceFunctionType context functionContext expectedTy actualTy
-      functionName <- globalFunctionName env context binding0 resolvedTypeArgs
-      pure (functionPointerValueForBinding expectedTy binding0 resolvedTypeArgs (LLVMGlobalRef LLVMPtr functionName))
+      (functionRef, functionName) <- globalFunctionTarget env context binding0 resolvedTypeArgs
+      pure (functionPointerValueForGlobalTarget expectedTy binding0 resolvedTypeArgs functionRef (LLVMGlobalRef LLVMPtr functionName))
 
 zeroArityGlobalReturnTypeMatches :: ProgramEnv -> BackendType -> BackendType -> Bool
 zeroArityGlobalReturnTypeMatches env expected actual =
@@ -9753,28 +9753,19 @@ lowerIndirectValueCall env exprEnv context name callee typeArgs args = do
 
 indirectCalleeFunctionForm :: ProgramEnv -> LowerValue -> Maybe FunctionForm
 indirectCalleeFunctionForm env callee =
-  case lookupFunctionFormByIdentity env (lvSymbolIdentity callee) of
-    Just form -> Just form
-    Nothing ->
-      case lvOperand callee of
-        LLVMGlobalRef _ functionName -> lookupFunctionFormByName env functionName
-        _ -> Nothing
+  lookupFunctionFormByRef env (lvBindingRef callee) <|> lookupFunctionFormByIdentity env (lvSymbolIdentity callee)
+
+lookupFunctionFormByRef :: ProgramEnv -> Maybe BackendBindingRef -> Maybe FunctionForm
+lookupFunctionFormByRef env mbRef =
+  mbRef >>= \ref ->
+    (biForm <$> lookupBindingRef (peBase env) ref)
+      <|> (qualifiedSpecializationForm <$> find ((== ref) . spBindingRef) (Map.elems (peSpecializations env)))
+      <|> (qualifiedEvidenceWrapperForm <$> find ((== ref) . wrapperBindingRef) (Map.elems (peEvidenceWrappers env)))
+      <|> (qualifiedFunctionWrapperForm <$> find ((== ref) . wrapperBindingRef) (Map.elems (peFunctionWrappers env)))
 
 lookupFunctionFormByIdentity :: ProgramEnv -> Maybe SymbolIdentity -> Maybe FunctionForm
 lookupFunctionFormByIdentity env mbIdentity =
   biForm <$> (mbIdentity >>= (`Map.lookup` pbBindingsByIdentity (peBase env)))
-
-lookupFunctionFormByName :: ProgramEnv -> String -> Maybe FunctionForm
-lookupFunctionFormByName env functionName =
-  case [qualifiedSpecializationForm specialization | specialization <- Map.elems (peSpecializations env), spFunctionName specialization == functionName] of
-    form : _ -> Just form
-    [] ->
-      case [qualifiedEvidenceWrapperForm wrapper | wrapper <- Map.elems (peEvidenceWrappers env), wrapperFunctionName wrapper == functionName] of
-        form : _ -> Just form
-        [] ->
-          case [qualifiedFunctionWrapperForm wrapper | wrapper <- Map.elems (peFunctionWrappers env), wrapperFunctionName wrapper == functionName] of
-            form : _ -> Just form
-            [] -> Nothing
 
 functionFormFromType :: BackendType -> FunctionForm
 functionFormFromType ty =
@@ -9811,7 +9802,7 @@ lowerExprForIndirectArgument env exprEnv context evidenceParams (index0, (_, par
   | isFunctionLikeBackendType paramTy =
       case Map.lookup (wrapperKey' paramTy arg) (peEvidenceWrappers env) of
         Just wrapper ->
-          pure (functionPointerValue paramTy (LLVMGlobalRef LLVMPtr (wrapperFunctionName wrapper)))
+          pure (functionPointerValueForBindingRef paramTy (wrapperBindingRef wrapper) (LLVMGlobalRef LLVMPtr (wrapperFunctionName wrapper)))
         Nothing ->
           lowerFunctionArgument env exprEnv context paramTy arg
   | otherwise =
@@ -9833,7 +9824,7 @@ lowerStoredFunctionArgument env exprEnv context expectedTy arg =
     _ ->
       case Map.lookup (wrapperKey' expectedTy arg) (peFunctionWrappers env) of
         Just wrapper ->
-          pure (functionPointerValue expectedTy (LLVMGlobalRef LLVMPtr (wrapperFunctionName wrapper)))
+          pure (functionPointerValueForBindingRef expectedTy (wrapperBindingRef wrapper) (LLVMGlobalRef LLVMPtr (wrapperFunctionName wrapper)))
         Nothing ->
           liftEither (BackendLLVMUnsupportedExpression context "unsupported function argument")
 
@@ -9845,7 +9836,7 @@ lowerEvidenceArgument env exprEnv context expectedTy arg =
     _ ->
       case Map.lookup (wrapperKey' expectedTy arg) (peEvidenceWrappers env) of
         Just wrapper ->
-          pure (functionPointerValue expectedTy (LLVMGlobalRef LLVMPtr (wrapperFunctionName wrapper)))
+          pure (functionPointerValueForBindingRef expectedTy (wrapperBindingRef wrapper) (LLVMGlobalRef LLVMPtr (wrapperFunctionName wrapper)))
         Nothing ->
           liftEither (BackendLLVMUnsupportedExpression context "unsupported evidence function argument")
 
@@ -9903,7 +9894,7 @@ lowerLocalFunctionStoredReference env context expectedTy localFunction typeArgs 
       sourceExpr <- storedReferenceSourceExpr context sourceExpr0 typeArgs
       case Map.lookup (wrapperKey' expectedTy sourceExpr) (peFunctionWrappers env) of
         Just wrapper ->
-          pure (Just (functionPointerValue expectedTy (LLVMGlobalRef LLVMPtr (wrapperFunctionName wrapper))))
+          pure (Just (functionPointerValueForBindingRef expectedTy (wrapperBindingRef wrapper) (LLVMGlobalRef LLVMPtr (wrapperFunctionName wrapper))))
         Nothing ->
           pure Nothing
     Nothing ->
@@ -9974,8 +9965,8 @@ lowerNonLocalFunctionReference env exprEnv context expectedTy mbIdentity name ty
           (resolvedTypeArgs, form) <- instantiateFunctionFormWithTypeArgsM context (biForm binding) typeArgs []
           let actualTy = functionTypeFromForm form
           requireEvidenceFunctionType context (biName binding) expectedTy actualTy
-          functionName <- globalFunctionName env context binding resolvedTypeArgs
-          pure (functionPointerValueForBinding expectedTy binding resolvedTypeArgs (LLVMGlobalRef LLVMPtr functionName))
+          (functionRef, functionName) <- globalFunctionTarget env context binding resolvedTypeArgs
+          pure (functionPointerValueForGlobalTarget expectedTy binding resolvedTypeArgs functionRef (LLVMGlobalRef LLVMPtr functionName))
         Nothing ->
           liftEither (BackendLLVMUnknownFunction name)
 
@@ -11163,12 +11154,16 @@ functionArgumentRequiresInline env exprEnv arg =
     _ -> False
 
 globalFunctionName :: ProgramEnv -> String -> BindingInfo -> [BackendType] -> LowerM String
-globalFunctionName env context binding typeArgs
+globalFunctionName env context binding typeArgs =
+  snd <$> globalFunctionTarget env context binding typeArgs
+
+globalFunctionTarget :: ProgramEnv -> String -> BindingInfo -> [BackendType] -> LowerM (BackendBindingRef, String)
+globalFunctionTarget env context binding typeArgs
   | null (ffTypeBinders (biForm binding)) =
-      pure (biName binding)
+      pure (bindingInfoRef binding, biName binding)
   | otherwise =
       case Map.lookup (specializationKey request) (peSpecializations env) of
-        Just specialization -> pure (spFunctionName specialization)
+        Just specialization -> pure (spBindingRef specialization, spFunctionName specialization)
         Nothing ->
           liftEither (BackendLLVMInternalError ("missing specialization for " ++ biName binding ++ " at " ++ context))
   where
@@ -12364,9 +12359,13 @@ functionPointerValue :: BackendType -> LLVMOperand -> LowerValue
 functionPointerValue ty operand =
   LowerValue ty LLVMPtr operand LowerFunctionPointer Nothing
 
-functionPointerValueForBinding :: BackendType -> BindingInfo -> [BackendType] -> LLVMOperand -> LowerValue
-functionPointerValueForBinding ty binding resolvedTypeArgs operand =
-  (functionPointerValue ty operand) {lvSymbolIdentity = mbIdentity}
+functionPointerValueForBindingRef :: BackendType -> BackendBindingRef -> LLVMOperand -> LowerValue
+functionPointerValueForBindingRef ty ref operand =
+  (functionPointerValue ty operand) {lvBindingRef = Just ref}
+
+functionPointerValueForGlobalTarget :: BackendType -> BindingInfo -> [BackendType] -> BackendBindingRef -> LLVMOperand -> LowerValue
+functionPointerValueForGlobalTarget ty binding resolvedTypeArgs ref operand =
+  (functionPointerValueForBindingRef ty ref operand) {lvSymbolIdentity = mbIdentity}
   where
     mbIdentity
       | null resolvedTypeArgs = biIdentity binding
