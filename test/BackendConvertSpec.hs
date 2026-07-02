@@ -1532,6 +1532,18 @@ spec = describe "MLF.Backend.Convert" $ do
       _ ->
         expectationFailure "expected at least two checked data infos"
 
+  it "rejects duplicate checked binding identities before building backend context maps" $ do
+    checked0 <- requireChecked duplicateBindingIdentityProgram
+    mainBinding <- requireCheckedBinding "Main__main" checked0
+    duplicateIdentity <- requireTopLevelBindingIdentity mainBinding
+    let checked =
+          replaceBindingTopLevelIdentity
+            "Main__helper"
+            duplicateIdentity
+            checked0
+    convertCheckedProgram checked
+      `shouldBe` Left (BackendValidationFailed (BackendDuplicateBinding (symbolIdentityStableName duplicateIdentity)))
+
   it "rejects duplicate checked constructor identities before building backend context maps" $ do
     checked0 <- requireChecked parameterizedConstructorProgram
     case [ctors | dataInfo <- checkedDataInfos checked0, let ctors = dataConstructors dataInfo, length ctors >= 2] of
@@ -2818,6 +2830,15 @@ repeatedPolymorphicParameterProgram =
       "      Pair : a -> a -> Pair a;",
       "",
       "  def main : Bool = true;",
+      "}"
+    ]
+
+duplicateBindingIdentityProgram :: String
+duplicateBindingIdentityProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def helper : Int = 0;",
+      "  def main : Int = helper;",
       "}"
     ]
 
@@ -4798,6 +4819,28 @@ mapBinding target f checked =
     updateBinding binding
       | checkedBindingName binding == target = f binding
       | otherwise = binding
+
+requireCheckedBinding :: String -> CheckedProgram -> IO CheckedBinding
+requireCheckedBinding bindingName checked =
+  case findCheckedBinding bindingName checked of
+    Just binding -> pure binding
+    Nothing -> expectationFailure ("missing checked binding " ++ show bindingName) >> fail "missing checked binding"
+
+requireTopLevelBindingIdentity :: CheckedBinding -> IO SymbolIdentity
+requireTopLevelBindingIdentity binding =
+  case Elab.resolvedVarDetails (checkedBindingResolvedVar binding) of
+    TopLevelId identity -> pure identity
+    other -> expectationFailure ("expected top-level binding identity, got " ++ show other) >> fail "missing top-level identity"
+
+replaceBindingTopLevelIdentity :: String -> SymbolIdentity -> CheckedProgram -> CheckedProgram
+replaceBindingTopLevelIdentity bindingName replacement =
+  mapBinding bindingName $ \binding ->
+    binding
+      { checkedBindingResolvedVar =
+          (checkedBindingResolvedVar binding)
+            { Elab.resolvedVarDetails = TopLevelId replacement
+            }
+      }
 
 renameCheckedModuleName :: String -> String -> CheckedProgram -> CheckedProgram
 renameCheckedModuleName oldName newName checked =

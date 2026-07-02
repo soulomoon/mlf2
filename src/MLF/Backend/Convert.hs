@@ -1824,6 +1824,7 @@ wrapBackendLams params body =
 buildConvertContext :: CheckedProgram -> Either BackendConversionError ConvertContext
 buildConvertContext checked = do
   let dataInfos = allDataInfos checked
+  _bindingsByIdentity <- uniqueBindingsByIdentity checked
   dataByIdentity <- uniqueDataInfosByIdentity dataInfos
   let dataModuleIdentities = dataInfoModuleIdentityMap checked
       moduleScopes = moduleElaborateScopes checked dataByIdentity
@@ -1872,6 +1873,16 @@ buildConvertContext checked = do
       { ccClosureValueArgumentsByIdentity = closureValueArguments,
         ccEvidenceValueArgumentsByIdentity = evidenceValueArguments
       }
+
+uniqueBindingsByIdentity :: CheckedProgram -> Either BackendConversionError (Map SymbolIdentity CheckedBinding)
+uniqueBindingsByIdentity checked =
+  Map.map snd
+    <$> uniqueCheckedInfoByIdentity BackendDuplicateBinding fst
+      [ (symbol, binding)
+      | checkedModule <- checkedProgramModules checked,
+        binding <- checkedModuleBindings checkedModule,
+        Just symbol <- [checkedBindingSymbolIdentity binding]
+      ]
 
 uniqueDataInfosByIdentity :: [DataInfo] -> Either BackendConversionError (Map SymbolIdentity DataInfo)
 uniqueDataInfosByIdentity =
