@@ -8170,16 +8170,16 @@ assignGeneratedClosureEntryIdentities =
   where
     assignEntry generator entry
       | returnedPartialClosureEntry entry || ceEntryIdentity entry == Nothing =
-          let captureNames = map ccsName (ceCaptures entry)
-              paramNames = map fst (ceParams entry)
-              (generator', captureIdentities) = generatedLocalIdentities generator captureNames
-              (generator'', paramIdentities) = generatedLocalIdentities generator' paramNames
+          let captureInputs = [(ccsName capture, ccsIdentity capture) | capture <- ceCaptures entry]
+              paramInputs = zip (map fst (ceParams entry)) (ceParamIdentities entry ++ repeat Nothing)
+              (generator', captureIdentities, generatedCaptures) = completeLocalIdentities generator captureInputs
+              (generator'', paramIdentities, generatedParams) = completeLocalIdentities generator' paramInputs
               (entryIdentity, generator''') =
                 case ceEntryIdentity entry of
                   Just identity -> (identity, generator'')
                   Nothing -> freshIdentity generator''
               identities =
-                generatedBackendTermEnv (zip (captureNames ++ paramNames) (captureIdentities ++ paramIdentities))
+                generatedBackendTermEnv (generatedCaptures ++ generatedParams)
            in ( generator''',
                 entry
                   { ceEntryIdentity = Just entryIdentity,
@@ -8196,6 +8196,22 @@ assignGeneratedClosureEntryIdentities =
 
     setCaptureIdentity identity capture =
       capture {ccsIdentity = identity}
+
+    completeLocalIdentities generator [] =
+      (generator, [], [])
+    completeLocalIdentities generator ((name, mbIdentity) : rest) =
+      let (identity, generator') =
+            case mbIdentity of
+              Just existing -> (existing, generator)
+              Nothing ->
+                let (localRef, nextGenerator) = freshLocalRef name generator
+                 in (LocalId localRef, nextGenerator)
+          (generator'', identities, generated) = completeLocalIdentities generator' rest
+          generated' =
+            case mbIdentity of
+              Just _ -> generated
+              Nothing -> (name, Just identity) : generated
+       in (generator'', Just identity : identities, generated')
 
 qualifiedSpecializationForm :: Specialization -> FunctionForm
 qualifiedSpecializationForm specialization =

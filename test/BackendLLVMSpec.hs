@@ -1991,6 +1991,14 @@ spec = describe "MLF.Backend.LLVM" $ do
     runLLVMNativeExecutable output
       `shouldReturn` NativeRunResult ExitSuccess "99\n" ""
 
+  it "preserves identity-bearing returned-partial closure slots while assigning entry identity" $ do
+    output <- requireRight (renderBackendProgramNativeLLVM returnedPartialClosureSlotIdentityProgram)
+
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    runLLVMNativeExecutable output
+      `shouldReturn` NativeRunResult ExitSuccess "99\n" ""
+
   it "freshens same-named closure parameters while resolving by identity" $ do
     output <- requireRight (renderBackendProgramNativeLLVM closureParamIdentityDuplicateDisplayProgram)
 
@@ -7540,6 +7548,14 @@ casePatternNameOnlyFieldTypeProgram =
 
 closureParamIdentityStaleNameProgram :: BackendProgram
 closureParamIdentityStaleNameProgram =
+  closureParamIdentityStaleNameProgramWithEntry "__mlfp_closure$stale_param_identity"
+
+returnedPartialClosureSlotIdentityProgram :: BackendProgram
+returnedPartialClosureSlotIdentityProgram =
+  closureParamIdentityStaleNameProgramWithEntry "__mlfp_returned_partial$stale_param_identity"
+
+closureParamIdentityStaleNameProgramWithEntry :: String -> BackendProgram
+closureParamIdentityStaleNameProgramWithEntry entryName =
   BackendProgram
     { backendProgramModules =
         [ BackendModule
@@ -7560,8 +7576,8 @@ closureParamIdentityStaleNameProgram =
                               intTy
                               ( BackendClosureWithParamIdentities
                                   { backendExprType = unaryIntTy,
-              backendClosureEntryIdentity = Nothing,
-              backendClosureEntryName = "__mlfp_closure$stale_param_identity",
+                                    backendClosureEntryIdentity = Nothing,
+                                    backendClosureEntryName = entryName,
                                     backendClosureCaptures =
                                       [ BackendClosureCapture
                                           (Just outerIdentity)
