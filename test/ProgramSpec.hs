@@ -5654,7 +5654,7 @@ spec = do
                                 )
                 Left err -> expectationFailure ("expected check success, got " ++ show err)
 
-        it "does not choose an arbitrary checked class payload when one identity has conflicting metadata" $ do
+        it "rejects duplicate resolved class identities before choosing local metadata" $ do
             let programText =
                     unlines
                         [ "module Main export (main) {"
@@ -5707,19 +5707,13 @@ spec = do
                 Right resolved -> do
                     let poisoned = poisonResolvedClassIdentity "C" "D" resolved
                     case checkResolvedProgram poisoned of
-                        Left err -> expectationFailure ("expected check success, got " ++ show err)
-                        Right checked -> do
-                            let poisonedIdentity =
-                                    resolvedClassIdentity "C" resolved
-                                mainClasses =
-                                    Map.unions
-                                        [ ProgramTypes.checkedModuleClasses checkedModule
-                                        | checkedModule <- ProgramTypes.checkedProgramModules checked
-                                        , ProgramTypes.checkedModuleName checkedModule == "Main"
-                                        ]
-                            Map.lookup poisonedIdentity mainClasses `shouldBe` Nothing
+                        Left (ProgramPipelineError message) -> do
+                            message `shouldSatisfy` isInfixOf "duplicate resolved symbol identity"
+                            message `shouldSatisfy` isInfixOf (symbolIdentityStableName (resolvedClassIdentity "C" resolved))
+                        other ->
+                            expectationFailure ("expected duplicate resolved class identity rejection, got " ++ show other)
 
-        it "does not choose an arbitrary checked class method payload when one identity has conflicting metadata" $ do
+        it "rejects duplicate resolved class method identities before choosing local metadata" $ do
             let programText =
                     unlines
                         [ "module Main export (main) {"
@@ -5775,22 +5769,11 @@ spec = do
                 Right resolved -> do
                     let poisoned = poisonResolvedMethodIdentity "m" "n" resolved
                     case checkResolvedProgram poisoned of
-                        Left err -> expectationFailure ("expected check success, got " ++ show err)
-                        Right checked -> do
-                            let poisonedIdentity =
-                                    resolvedMethodIdentity "m" resolved
-                                mainClasses =
-                                    [ classInfo
-                                    | checkedModule <- ProgramTypes.checkedProgramModules checked
-                                    , ProgramTypes.checkedModuleName checkedModule == "Main"
-                                    , classInfo <- Map.elems (ProgramTypes.checkedModuleClasses checkedModule)
-                                    , ProgramTypes.className classInfo == "C"
-                                    ]
-                            case mainClasses of
-                                [classInfo] ->
-                                    Map.lookup poisonedIdentity (classMethodsByIdentity classInfo) `shouldBe` Nothing
-                                other ->
-                                    expectationFailure ("expected one Main.C class, got " ++ show (length other))
+                        Left (ProgramPipelineError message) -> do
+                            message `shouldSatisfy` isInfixOf "duplicate resolved symbol identity"
+                            message `shouldSatisfy` isInfixOf (symbolIdentityStableName (resolvedMethodIdentity "m" resolved))
+                        other ->
+                            expectationFailure ("expected duplicate resolved class method identity rejection, got " ++ show other)
 
         it "checks the semantic artifact independently of diagnostic reference adapters" $ do
             let programText =

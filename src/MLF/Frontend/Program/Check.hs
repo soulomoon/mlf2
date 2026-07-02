@@ -4321,8 +4321,9 @@ resolvedSemanticModuleSymbolIdentities resolvedModule =
 
     declIdentities decl =
       case decl of
-        P.DeclClass {} ->
-          []
+        P.DeclClass classDecl ->
+          resolvedSymbolIdentity (P.classDeclName classDecl)
+            : [resolvedSymbolIdentity (P.methodSigName methodSig) | methodSig <- P.classDeclMethods classDecl]
         P.DeclInstance {} ->
           []
         P.DeclData dataDecl ->
