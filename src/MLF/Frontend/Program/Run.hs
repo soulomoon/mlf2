@@ -27,7 +27,7 @@ import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import MLF.Elab.Pipeline (XmlfTerm (..), Pretty (..), Ty (TForallRef), normalize, schemeFromType, typeCheck)
-import MLF.Elab.Types (ElabType, ResolvedVar (..), resolvedVarBoundBy, resolvedVarConstructorRef, resolvedVarReferenceName, resolvedVarSameIdentity)
+import MLF.Elab.Types (ElabType, ResolvedTermIdentityKey, ResolvedVar (..), resolvedVarBoundBy, resolvedVarConstructorRef, resolvedVarIdentityKey, resolvedVarReferenceName, resolvedVarSameIdentity)
 import qualified MLF.Elab.Types as X
 import MLF.Frontend.Program.Check (checkLocatedProgram, checkLocatedProgramPackage, checkLocatedProgramPackageWithTiming, checkProgram, checkProgramPackage)
 import MLF.Frontend.Program.Elaborate
@@ -2455,43 +2455,46 @@ reachableCheckedBindings :: CheckedProgram -> [CheckedBinding]
 reachableCheckedBindings checked =
   [ binding
     | binding <- bindings,
-      any (sameCheckedBindingIdentity binding) reachable
+      Set.member (checkedBindingIdentityKey binding) reachableKeys
   ]
   where
     bindings = allCheckedBindings checked
+    bindingByKey =
+      Map.fromList [(checkedBindingIdentityKey binding, binding) | binding <- bindings]
     roots =
       [ binding
         | binding <- bindings,
           resolvedVarMatchesCheckedBinding (checkedProgramMainResolvedVar checked) binding
       ]
-    reachable = collectReachableCheckedBindings bindings [] roots
+    reachableKeys = collectReachableCheckedBindingKeys bindingByKey Set.empty roots
 
-collectReachableCheckedBindings :: [CheckedBinding] -> [CheckedBinding] -> [CheckedBinding] -> [CheckedBinding]
-collectReachableCheckedBindings bindings visited pending =
+collectReachableCheckedBindingKeys :: Map.Map ResolvedTermIdentityKey CheckedBinding -> Set.Set ResolvedTermIdentityKey -> [CheckedBinding] -> Set.Set ResolvedTermIdentityKey
+collectReachableCheckedBindingKeys bindingByKey visited pending =
   case pending of
     [] -> visited
     binding : rest
-      | any (sameCheckedBindingIdentity binding) visited ->
-          collectReachableCheckedBindings bindings visited rest
+      | Set.member key visited ->
+          collectReachableCheckedBindingKeys bindingByKey visited rest
       | otherwise ->
-          let deps = checkedBindingDependencyBindings bindings binding
-           in collectReachableCheckedBindings bindings (binding : visited) (deps ++ rest)
+          let deps = checkedBindingDependencyBindings bindingByKey binding
+           in collectReachableCheckedBindingKeys bindingByKey (Set.insert key visited) (deps ++ rest)
+      where
+        key = checkedBindingIdentityKey binding
 
-checkedBindingDependencyBindings :: [CheckedBinding] -> CheckedBinding -> [CheckedBinding]
-checkedBindingDependencyBindings bindings binding =
+checkedBindingDependencyBindings :: Map.Map ResolvedTermIdentityKey CheckedBinding -> CheckedBinding -> [CheckedBinding]
+checkedBindingDependencyBindings bindingByKey binding =
   [ candidate
     | freeResolved <- freeResolvedTermVars (checkedBindingTerm binding),
-      candidate <- bindings,
-      resolvedVarMatchesCheckedBinding freeResolved candidate
+      Just candidate <- [Map.lookup (resolvedVarIdentityKey freeResolved) bindingByKey]
   ]
+
+checkedBindingIdentityKey :: CheckedBinding -> ResolvedTermIdentityKey
+checkedBindingIdentityKey =
+  resolvedVarIdentityKey . checkedBindingResolvedVar
 
 resolvedVarMatchesCheckedBinding :: ResolvedVar -> CheckedBinding -> Bool
 resolvedVarMatchesCheckedBinding resolved binding =
-  resolvedVarSameIdentity resolved (checkedBindingResolvedVar binding)
-
-sameCheckedBindingIdentity :: CheckedBinding -> CheckedBinding -> Bool
-sameCheckedBindingIdentity left right =
-  resolvedVarSameIdentity (checkedBindingResolvedVar left) (checkedBindingResolvedVar right)
+  resolvedVarIdentityKey resolved == checkedBindingIdentityKey binding
 
 allCheckedBindings :: CheckedProgram -> [CheckedBinding]
 allCheckedBindings checked =
