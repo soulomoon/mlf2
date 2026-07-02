@@ -317,6 +317,21 @@ spec = do
             ProgramTypes.lookupTypeViewSubst (ProgramTypes.typeViewSubstKeyForIdentity identity) subst
                 `shouldBe` Just replacement
 
+        it "hydrates type-binder substitutions from replacement identity payloads" $ do
+            let sourceIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991632)
+                replacementIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991633)
+                replacementStableName = typeBinderIdentityStableName replacementIdentity
+                replacement =
+                    (ProgramTypes.mkTypeView (STVar "display") (STVar replacementStableName))
+                        { ProgramTypes.typeViewBinderIdentities = Map.singleton "display" replacementIdentity
+                        }
+                subst =
+                    ProgramTypes.typeBinderSubstFromTypeViewSubst
+                        [("source", sourceIdentity)]
+                        (Map.singleton (ProgramTypes.typeViewSubstKeyForIdentity sourceIdentity) replacement)
+            ProgramTypes.lookupTypeBinderSubstByIdentity sourceIdentity subst
+                `shouldBe` Just (STVar replacementStableName)
+
         it "does not key generated stable binder names without metadata" $ do
             let identity = typeBinderIdentityFromUnique (UniqueIdentity 991601)
                 stableName = typeBinderIdentityStableName identity

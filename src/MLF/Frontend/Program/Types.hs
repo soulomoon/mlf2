@@ -1761,7 +1761,7 @@ typeBinderSubstFromTypeViewSubst binders subst =
           insertTypeBinderSubstByIdentity
             identity
             (Map.findWithDefault Set.empty identity bindersByIdentity)
-            (typeViewDisplay view)
+            (typeViewIdentity view)
             acc
 
 applyTypeBinderSubst :: TypeBinderSubst -> SrcType -> SrcType
