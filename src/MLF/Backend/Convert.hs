@@ -194,7 +194,7 @@ import MLF.Frontend.Program.Types
 import MLF.Frontend.Symbol (symbolIdentityAliasMap, symbolIdentityAliasNames, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit, SrcBound (..), SrcTy (..), SrcType, TypeParam)
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
-import MLF.Types.Identity (DeferredRef, IdDetails (..), IdentityGenerator, LocalRef, StructuralTypeBinderRole (..), UniqueIdentity (..), deferredRefIdentity, deferredRefName, freshDeferredRef, freshIdentity, freshLocalRef, idDetailsGeneratedIdentities, idDetailsSameIdentity, identityGeneratorAfter, primitiveRefSymbol, symbolGeneratedIdentities, typeBinderGeneratedIdentities, typeBinderIdentityFromStructural, typeBinderIdentityGeneratedUnique, typeBinderIdentityNode, typeBinderIdentityStructural)
+import MLF.Types.Identity (DeferredRef, EnvRef, IdDetails (..), IdentityGenerator, LocalRef, StructuralTypeBinderRole (..), UniqueIdentity (..), deferredRefIdentity, deferredRefName, freshDeferredRef, freshIdentity, freshLocalRef, idDetailsGeneratedIdentities, identityGeneratorAfter, primitiveRefSymbol, symbolGeneratedIdentities, typeBinderGeneratedIdentities, typeBinderIdentityFromStructural, typeBinderIdentityGeneratedUnique, typeBinderIdentityNode, typeBinderIdentityStructural)
 import MLF.Util.Names (freshNameLike)
 
 data BackendConversionError
@@ -235,11 +235,37 @@ data ConvertContext = ConvertContext
     ccEvidenceValueArgumentsByIdentity :: Map SymbolIdentity (Set.Set Int),
     ccClosureValueArgumentsByDeferred :: Map DeferredRef (Set.Set Int),
     ccEvidenceValueArgumentsByDeferred :: Map DeferredRef (Set.Set Int),
-    ccEvidenceResolvedVars :: [ResolvedVar],
+    ccEvidenceResolvedVarKeys :: Set.Set ResolvedTermIdentityKey,
     ccIdentityGenerator :: IdentityGenerator,
     ccCurrentModuleIdentity :: Maybe SymbolIdentity,
     ccCurrentBindingName :: String
   }
+
+data ResolvedTermIdentityKey
+  = ResolvedTermLocalKey LocalRef
+  | ResolvedTermEnvKey EnvRef
+  | ResolvedTermTopLevelKey SymbolIdentity
+  | ResolvedTermConstructorKey SymbolIdentity
+  | ResolvedTermMethodKey SymbolIdentity
+  | ResolvedTermPrimitiveKey SymbolIdentity
+  | ResolvedTermDeferredKey DeferredRef
+  deriving (Eq, Ord, Show)
+
+idDetailsIdentityKey :: IdDetails -> ResolvedTermIdentityKey
+idDetailsIdentityKey =
+  \case
+    LocalId ref -> ResolvedTermLocalKey ref
+    EvidenceId ref -> ResolvedTermLocalKey ref
+    EnvId ref -> ResolvedTermEnvKey ref
+    TopLevelId symbol -> ResolvedTermTopLevelKey symbol
+    ConstructorId ref -> ResolvedTermConstructorKey (constructorRefSymbol ref)
+    MethodId symbol -> ResolvedTermMethodKey symbol
+    PrimitiveId ref -> ResolvedTermPrimitiveKey (primitiveRefSymbol ref)
+    DeferredId ref -> ResolvedTermDeferredKey ref
+
+resolvedVarIdentityKey :: ResolvedVar -> ResolvedTermIdentityKey
+resolvedVarIdentityKey =
+  idDetailsIdentityKey . resolvedVarDetails
 
 data ConstructorMeta = ConstructorMeta
   { cmInfo :: ConstructorInfo,
@@ -298,6 +324,9 @@ data ClosureScope = ClosureScope
   { closureScopeResolvedTerms :: [ResolvedVar],
     closureScopeBoundResolvedTerms :: [ResolvedVar],
     closureScopeLocalResolvedTerms :: [ResolvedVar],
+    closureScopeResolvedTermKeys :: Set.Set ResolvedTermIdentityKey,
+    closureScopeBoundResolvedTermKeys :: Set.Set ResolvedTermIdentityKey,
+    closureScopeLocalResolvedTermKeys :: Set.Set ResolvedTermIdentityKey,
     closureScopeClosureValueArgumentsByLocal :: Map LocalRef (Set.Set Int),
     closureScopeEvidenceValueArgumentsByLocal :: Map LocalRef (Set.Set Int)
   }
@@ -316,6 +345,9 @@ emptyClosureScope =
     { closureScopeResolvedTerms = [],
       closureScopeBoundResolvedTerms = [],
       closureScopeLocalResolvedTerms = [],
+      closureScopeResolvedTermKeys = Set.empty,
+      closureScopeBoundResolvedTermKeys = Set.empty,
+      closureScopeLocalResolvedTermKeys = Set.empty,
       closureScopeClosureValueArgumentsByLocal = Map.empty,
       closureScopeEvidenceValueArgumentsByLocal = Map.empty
     }
@@ -323,20 +355,48 @@ emptyClosureScope =
 extendClosureScopeResolvedTerm :: ResolvedVar -> ElabType -> Bool -> ClosureScope -> ClosureScope
 extendClosureScopeResolvedTerm resolved ty isClosure scope =
   let resolved' = mapResolvedVarType (const ty) resolved
+      key = resolvedVarIdentityKey resolved'
    in scope
         { closureScopeResolvedTerms =
-            resolved' : filter (not . resolvedVarSameIdentity resolved') (closureScopeResolvedTerms scope),
+            resolved' : removeResolvedTermKey key (closureScopeResolvedTerms scope),
           closureScopeBoundResolvedTerms =
-            resolved' : filter (not . resolvedVarSameIdentity resolved') (closureScopeBoundResolvedTerms scope),
+            resolved' : removeResolvedTermKey key (closureScopeBoundResolvedTerms scope),
           closureScopeLocalResolvedTerms =
             if isClosure
-              then resolved' : filter (not . resolvedVarSameIdentity resolved') (closureScopeLocalResolvedTerms scope)
-              else filter (not . resolvedVarSameIdentity resolved') (closureScopeLocalResolvedTerms scope),
+              then resolved' : removeResolvedTermKey key (closureScopeLocalResolvedTerms scope)
+              else removeResolvedTermKey key (closureScopeLocalResolvedTerms scope),
+          closureScopeResolvedTermKeys =
+            Set.insert key (closureScopeResolvedTermKeys scope),
+          closureScopeBoundResolvedTermKeys =
+            Set.insert key (closureScopeBoundResolvedTermKeys scope),
+          closureScopeLocalResolvedTermKeys =
+            if isClosure
+              then Set.insert key (closureScopeLocalResolvedTermKeys scope)
+              else Set.delete key (closureScopeLocalResolvedTermKeys scope),
           closureScopeClosureValueArgumentsByLocal =
             maybe id Map.delete (resolvedVarLocalRef resolved') (closureScopeClosureValueArgumentsByLocal scope),
           closureScopeEvidenceValueArgumentsByLocal =
             maybe id Map.delete (resolvedVarLocalRef resolved') (closureScopeEvidenceValueArgumentsByLocal scope)
         }
+  where
+    removeResolvedTermKey key =
+      filter ((/= key) . resolvedVarIdentityKey)
+
+closureScopeHasBoundTerm :: ResolvedVar -> ClosureScope -> Bool
+closureScopeHasBoundTerm resolved scope =
+  Set.member (resolvedVarIdentityKey resolved) (closureScopeBoundResolvedTermKeys scope)
+
+closureScopeHasLocalTerm :: ResolvedVar -> ClosureScope -> Bool
+closureScopeHasLocalTerm resolved scope =
+  Set.member (resolvedVarIdentityKey resolved) (closureScopeLocalResolvedTermKeys scope)
+
+closureScopeHasLocalDetails :: IdDetails -> ClosureScope -> Bool
+closureScopeHasLocalDetails details scope =
+  Set.member (idDetailsIdentityKey details) (closureScopeLocalResolvedTermKeys scope)
+
+closureScopeHasBoundDetails :: IdDetails -> ClosureScope -> Bool
+closureScopeHasBoundDetails details scope =
+  Set.member (idDetailsIdentityKey details) (closureScopeBoundResolvedTermKeys scope)
 
 extendClosureScopeValueArguments :: ResolvedVar -> Set.Set Int -> ClosureScope -> ClosureScope
 extendClosureScopeValueArguments resolved demanded scope =
@@ -392,7 +452,7 @@ isClosureConvertibleResolvedBinding context resolved ty =
 
 isEvidenceCapture :: ConvertContext -> ResolvedVar -> Bool
 isEvidenceCapture context resolved =
-  any (resolvedVarSameIdentity resolved) (ccEvidenceResolvedVars context)
+  Set.member (resolvedVarIdentityKey resolved) (ccEvidenceResolvedVarKeys context)
 
 runConvertMWithGenerator :: IdentityGenerator -> ConvertM a -> Either BackendConversionError (a, IdentityGenerator)
 runConvertMWithGenerator generator action = do
@@ -858,8 +918,11 @@ capturedTermBindingsIn :: [ResolvedVar] -> XmlfTerm -> [TermCapture]
 capturedTermBindingsIn lexicalTerms rhs =
   [ (resolved, resolvedVarType resolved)
   | resolved <- lexicalTerms,
-    termMentionsFreeVariable (TermVarResolved resolved) rhs
+    Set.member (resolvedVarIdentityKey resolved) freeKeys
   ]
+  where
+    freeKeys =
+      Set.fromList (map resolvedVarIdentityKey (freeResolvedTermVariables rhs))
 
 insertLexicalTypeBinding :: TypeBinderRef -> Maybe BoundType -> [TypeCapture] -> [TypeCapture]
 insertLexicalTypeBinding ref mbBound lexicalTypes =
@@ -1809,7 +1872,7 @@ buildConvertContext checked = do
             ccEvidenceValueArgumentsByIdentity = Map.empty,
             ccClosureValueArgumentsByDeferred = Map.empty,
             ccEvidenceValueArgumentsByDeferred = Map.empty,
-            ccEvidenceResolvedVars = [],
+            ccEvidenceResolvedVarKeys = Set.empty,
             ccIdentityGenerator = checkedProgramIdentityGenerator checked,
             ccCurrentModuleIdentity = Nothing,
             ccCurrentBindingName = ""
@@ -1817,7 +1880,7 @@ buildConvertContext checked = do
   evidenceResolvedVars <- checkedProgramEvidenceResolvedVars context0 checked
   let contextWithEvidence =
         context0
-          { ccEvidenceResolvedVars = evidenceResolvedVars
+          { ccEvidenceResolvedVarKeys = Set.fromList (map resolvedVarIdentityKey evidenceResolvedVars)
           }
   evidenceValueArguments <- checkedProgramEvidenceValueArguments contextWithEvidence checked
   closureValueArguments <- checkedProgramClosureValueArguments contextWithEvidence checked
@@ -2664,7 +2727,7 @@ buildDataMeta moduleIdentity scope info = do
             ccEvidenceValueArgumentsByIdentity = Map.empty,
             ccClosureValueArgumentsByDeferred = Map.empty,
             ccEvidenceValueArgumentsByDeferred = Map.empty,
-            ccEvidenceResolvedVars = [],
+            ccEvidenceResolvedVarKeys = Set.empty,
             ccIdentityGenerator = identityGeneratorAfter (dataInfoGeneratedIdentities info),
             ccCurrentModuleIdentity = moduleIdentity,
             ccCurrentBindingName = ""
@@ -3976,7 +4039,7 @@ directLocalCalleeCapture :: ConvertContext -> ClosureScope -> XmlfTerm -> Maybe 
 directLocalCalleeCapture context scope term =
   case stripClosureHeadTypeInsts term of
     EVarNode resolved
-      | any (resolvedVarSameIdentity resolved) (closureScopeBoundResolvedTerms scope),
+      | closureScopeHasBoundTerm resolved scope,
         not (resolvedIsGlobalTerm context resolved) ->
           Just resolved
     _ -> Nothing
@@ -3996,13 +4059,13 @@ localClosureCapturesForTerm context scope term = do
             backendClosureCaptureExpr = BackendVarWithIdentity captureTy (Just (resolvedVarDetails resolved)) name
           }
 
-    freeResolvedVars =
-      freeResolvedTermVariables term
+    freeResolvedVarKeys =
+      Set.fromList (map resolvedVarIdentityKey (freeResolvedTermVariables term))
 
     resolvedLocalCaptures =
       [ (resolved, resolvedVarType resolved)
       | resolved <- closureScopeResolvedTerms scope,
-        any (resolvedVarSameIdentity resolved) freeResolvedVars,
+        Set.member (resolvedVarIdentityKey resolved) freeResolvedVarKeys,
         not (resolvedIsGlobalTerm context resolved)
       ]
 
@@ -4536,9 +4599,9 @@ callableBindingKindInClosureScope context scope mbIdentity _name =
 
 callableBindingKindByIdentity :: ConvertContext -> ClosureScope -> IdDetails -> Maybe BackendCallableBindingKind
 callableBindingKindByIdentity context scope details
-  | any (idDetailsMatchesResolved details) (closureScopeLocalResolvedTerms scope) =
+  | closureScopeHasLocalDetails details scope =
       Just BackendCallableBindingClosure
-  | any (idDetailsMatchesResolved details) (closureScopeBoundResolvedTerms scope) =
+  | closureScopeHasBoundDetails details scope =
       Just BackendCallableBindingDirect
   | Just symbol <- idDetailsTermSymbolIdentity details,
     Set.member symbol (ccClosureGlobalsByIdentity context) =
@@ -4548,10 +4611,6 @@ callableBindingKindByIdentity context scope details
       Just BackendCallableBindingDirect
   | otherwise =
       Nothing
-
-idDetailsMatchesResolved :: IdDetails -> ResolvedVar -> Bool
-idDetailsMatchesResolved details resolved =
-  idDetailsSameIdentity details (resolvedVarDetails resolved)
 
 idDetailsTermSymbolIdentity :: IdDetails -> Maybe SymbolIdentity
 idDetailsTermSymbolIdentity =
@@ -4579,9 +4638,9 @@ termUsesClosureCallPath context scope headTerm =
     localClosurePath =
       case headTerm of
         EVarNode resolved
-          | any (resolvedVarSameIdentity resolved) (closureScopeLocalResolvedTerms scope) ->
+          | closureScopeHasLocalTerm resolved scope ->
               Just True
-          | any (resolvedVarSameIdentity resolved) (closureScopeBoundResolvedTerms scope) ->
+          | closureScopeHasBoundTerm resolved scope ->
               Just False
         _ ->
           Nothing
@@ -4664,7 +4723,7 @@ convertLambdaClosure mode context env scope resultTy term = do
               extendClosureScopeResolvedTerm
                 resolved
                 ty
-                ( any (resolvedVarSameIdentity resolved) (closureScopeLocalResolvedTerms scope)
+                ( closureScopeHasLocalTerm resolved scope
                     || isClosureConvertibleResolvedBinding context resolved ty
                 )
                 acc
