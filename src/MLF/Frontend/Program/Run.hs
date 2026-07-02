@@ -2918,7 +2918,8 @@ substDataParamView sourceView subst view =
           typeViewIdentity = ty,
           typeViewHeadIdentities =
             sourceHeadIdentitiesFor (typeHeadNamesSrcType ty),
-          typeViewBinderIdentities = Map.empty
+          typeViewBinderIdentities =
+            sourceBinderIdentitiesFor (freeTypeVarsRuntimeSrcType ty)
         }
 
     identityTy = typeViewIdentity substitutedView
@@ -2936,6 +2937,20 @@ substDataParamView sourceView subst view =
     sourceHeadPairs =
       typeViewHeadPairs sourceView
     sourceHeadIdentities = typeViewHeadIdentities sourceView
+    sourceBinderIdentitiesFor names =
+      typeBinderAliasIdentityMap
+        [ (name, identity)
+        | name <- Set.toList (names <> pairedSourceBinderNames names),
+          Just identity <- [typeViewBinderIdentityForAlias sourceView name]
+        ]
+    pairedSourceBinderNames names =
+      Set.fromList
+        [ displayName
+        | identityName <- Set.toList names,
+          Just displayName <- [Map.lookup identityName sourceBinderPairs]
+        ]
+    sourceBinderPairs =
+      typeViewRuntimeVarPairs sourceView
 
 displayTypeFromRuntimeHeadPairs :: Map.Map String String -> SrcType -> SrcType
 displayTypeFromRuntimeHeadPairs pairs =
