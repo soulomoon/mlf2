@@ -387,6 +387,11 @@ data PreludeBindingKey
   = PreludeStringFromList
   deriving (Eq, Ord, Show)
 
+preludeBindingLabel :: PreludeBindingKey -> String
+preludeBindingLabel key =
+  case key of
+    PreludeStringFromList -> "stringFromList"
+
 data PreludeConstructorKey
   = PreludeUnitUnit
   | PreludeNatZero
@@ -561,27 +566,33 @@ mkRuntimeContext checked = do
     uniqueRuntimeInfoByIdentity
       "constructor"
       [(ctorInfoSymbol ctor, ctor) | dataInfo <- allDataInfos checked, ctor <- dataConstructors dataInfo]
+  preludeConstructorsByKey <-
+    uniqueRuntimeInfoByKey
+      "Prelude constructor key"
+      preludeConstructorLabel
+      [ (key, ctor)
+      | checkedModule <- checkedProgramModules checked,
+        isRuntimePreludeModule checkedModule,
+        dataInfo <- Map.elems (checkedModuleData checkedModule),
+        ctor <- dataConstructors dataInfo,
+        Just key <- [preludeConstructorKey checkedModule dataInfo ctor]
+      ]
+  preludeBindingsByKey <-
+    uniqueRuntimeInfoByKey
+      "Prelude binding key"
+      preludeBindingLabel
+      [ (key, binding)
+      | checkedModule <- checkedProgramModules checked,
+        isRuntimePreludeModule checkedModule,
+        binding <- checkedModuleBindings checkedModule,
+        Just key <- [preludeBindingKey binding]
+      ]
   Right
     RuntimeContext
       { runtimeBindingsByIdentity = bindingsByIdentity,
         runtimeConstructorsByIdentity = constructorsByIdentity,
-        runtimePreludeConstructorsByKey =
-          Map.fromList
-            [ (key, ctor)
-            | checkedModule <- checkedProgramModules checked,
-              isRuntimePreludeModule checkedModule,
-              dataInfo <- Map.elems (checkedModuleData checkedModule),
-              ctor <- dataConstructors dataInfo,
-              Just key <- [preludeConstructorKey checkedModule dataInfo ctor]
-            ],
-        runtimePreludeBindingsByKey =
-          Map.fromList
-            [ (key, binding)
-            | checkedModule <- checkedProgramModules checked,
-              isRuntimePreludeModule checkedModule,
-              binding <- checkedModuleBindings checkedModule,
-              Just key <- [preludeBindingKey binding]
-            ],
+        runtimePreludeConstructorsByKey = preludeConstructorsByKey,
+        runtimePreludeBindingsByKey = preludeBindingsByKey,
         runtimeElaborateScope = programElaborateScope checked
       }
 
@@ -595,6 +606,17 @@ uniqueRuntimeInfoByIdentity label =
           Left (ProgramPipelineError ("run-program duplicate checked " ++ label ++ " identity: " ++ symbolIdentityStableName identity))
       | otherwise =
           go (Map.insert identity info entries) rest
+
+uniqueRuntimeInfoByKey :: (Ord key) => String -> (key -> String) -> [(key, a)] -> Either ProgramError (Map.Map key a)
+uniqueRuntimeInfoByKey label keyName =
+  go Map.empty
+  where
+    go entries [] = Right entries
+    go entries ((key, info) : rest)
+      | Map.member key entries =
+          Left (ProgramPipelineError ("run-program duplicate checked " ++ label ++ ": " ++ keyName key))
+      | otherwise =
+          go (Map.insert key info entries) rest
 
 isRuntimePreludeModule :: CheckedModule -> Bool
 isRuntimePreludeModule checkedModule =

@@ -3410,6 +3410,27 @@ spec = do
                 _ ->
                     expectationFailure "expected two constructors"
 
+        it "rejects duplicate runtime Prelude constructor keys before support lookup" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (List(..), stringFromList);"
+                        , "  def main : String = stringFromList Nil;"
+                        , "}"
+                        ]
+            checked <- requireCheckedLocated (withPreludeLocated located)
+            listData <- requireCheckedData "Prelude" "List" checked
+            nilCtor <- requireDataConstructor "Nil" listData
+            consCtor <- requireDataConstructor "Cons" listData
+            let checked' = replaceCheckedConstructorIndex (ctorInfoSymbol consCtor) (ctorIndex nilCtor) checked
+            case runCheckedProgramOutput checked' of
+                Left (ProgramPipelineError message) -> do
+                    message `shouldSatisfy` isInfixOf "duplicate checked Prelude constructor key"
+                    message `shouldSatisfy` isInfixOf "List.Nil"
+                other ->
+                    expectationFailure ("expected duplicate Prelude constructor key rejection, got " ++ show other)
+
         it "runs checked IO local environments by resolved local identity instead of binder spelling" $ do
             located <-
                 requireLocated $
@@ -7296,6 +7317,30 @@ replaceCheckedConstructorSymbol target replacement checked =
     replaceConstructor ctorInfo
         | ctorInfoSymbol ctorInfo == target =
             ctorInfo {ctorInfoSymbol = replacement}
+        | otherwise = ctorInfo
+
+replaceCheckedConstructorIndex :: SymbolIdentity -> Int -> CheckedProgram -> CheckedProgram
+replaceCheckedConstructorIndex target replacement checked =
+    checked
+        { checkedProgramModules =
+            map replaceModule (checkedProgramModules checked)
+        }
+  where
+    replaceModule checkedModule =
+        checkedModule
+            { checkedModuleData =
+                fmap replaceData (checkedModuleData checkedModule)
+            }
+
+    replaceData dataInfo =
+        dataInfo
+            { dataConstructors =
+                map replaceConstructor (dataConstructors dataInfo)
+            }
+
+    replaceConstructor ctorInfo
+        | ctorInfoSymbol ctorInfo == target =
+            ctorInfo {ctorIndex = replacement}
         | otherwise = ctorInfo
 
 renameCheckedModuleName :: String -> String -> CheckedProgram -> CheckedProgram
