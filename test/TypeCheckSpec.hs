@@ -265,6 +265,12 @@ spec = describe "Phase 7 typecheck" $ do
         typeCheckWithEnv merged (EVarNode outer) `shouldBe` Right intTy
         typeCheckWithEnv merged (EVarNode inner) `shouldBe` Right boolTy
 
+    it "does not choose an arbitrary initial resolved term binding when one identity has conflicting types" $ do
+        let actual = generatedResolvedLocal 0 "x" "runtime-x" intTy
+            conflicting = generatedResolvedLocal 0 "x" "runtime-x" boolTy
+            env = mkTypeCheckEnvWithResolvedTerms [(actual, intTy), (conflicting, boolTy), (actual, intTy)] Map.empty
+        typeCheckWithEnv env (EVarNode actual) `shouldBe` Left (TCUnboundVar "x")
+
     it "restricts resolved term bindings by identity when requested" $ do
         let outer = generatedResolvedLocal 0 "x" "runtime-x" intTy
             inner = generatedResolvedLocal 1 "x" "runtime-x" boolTy

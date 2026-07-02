@@ -65,10 +65,7 @@ emptyEnv = mkTypeCheckEnvWithResolvedTerms [] Map.empty
 
 mkTypeCheckEnvWithResolvedTerms :: [(ResolvedVar, ElabType)] -> Map.Map TypeBinderRef ElabType -> Env
 mkTypeCheckEnvWithResolvedTerms terms types =
-  foldl'
-    (\env (resolved, ty) -> insertResolvedTermBinding resolved ty env)
-    (Env types emptyResolvedTermEnv)
-    terms
+  Env types (resolvedTermEnvFromList terms)
 
 insertResolvedTermBinding :: ResolvedVar -> ElabType -> Env -> Env
 insertResolvedTermBinding resolved ty env =
@@ -485,8 +482,21 @@ emptyResolvedTermEnv :: ResolvedTermEnv
 emptyResolvedTermEnv = ResolvedTermEnv Map.empty
 
 resolvedTermEnvFromList :: [(ResolvedVar, ElabType)] -> ResolvedTermEnv
-resolvedTermEnvFromList =
-  foldr (uncurry insertResolvedTermEnv) emptyResolvedTermEnv
+resolvedTermEnvFromList entries =
+  ResolvedTermEnv
+    ( Map.fromList
+        [ (identity, entry)
+        | (identity, entry : rest) <- Map.toList entriesByIdentity,
+          all (== entry) rest
+        ]
+    )
+  where
+    entriesByIdentity =
+      Map.fromListWith
+        (++)
+        [ (resolvedVarIdentityKey resolved, [(mapResolvedVarType (const ty) resolved, ty)])
+        | (resolved, ty) <- entries
+        ]
 
 overlayResolvedTermEnv :: ResolvedTermEnv -> ResolvedTermEnv -> ResolvedTermEnv
 overlayResolvedTermEnv (ResolvedTermEnv preferred) (ResolvedTermEnv fallback) =
