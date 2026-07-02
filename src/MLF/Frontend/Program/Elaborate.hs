@@ -755,16 +755,16 @@ constraintInfoHasFreeTypeBinderIdentities constraint =
 
 freeTypeBinderIdentitiesTypeViewsOrThrow :: NonEmpty TypeView -> ElaborateM (Set TypeBinderIdentity)
 freeTypeBinderIdentitiesTypeViewsOrThrow views =
-  Set.unions <$> mapM freeTypeBinderIdentitiesTypeViewOrThrow views
-
-freeTypeBinderIdentitiesTypeViewOrThrow :: TypeView -> ElaborateM (Set TypeBinderIdentity)
-freeTypeBinderIdentitiesTypeViewOrThrow view =
-  case freeTypeBinderIdentitiesTypeView view of
+  case freeTypeBinderIdentitiesTypeViews views of
     Right identities -> pure identities
     Left name ->
       throwError $
         ProgramPipelineError
           ("elaborate resolved type variable `" ++ name ++ "` is missing binder identity")
+
+freeTypeBinderIdentitiesTypeViews :: NonEmpty TypeView -> Either String (Set TypeBinderIdentity)
+freeTypeBinderIdentitiesTypeViews views =
+  Set.unions <$> mapM freeTypeBinderIdentitiesTypeView views
 
 quantifyMethodLocalVarsInfoView :: Set String -> [ConstraintInfo] -> TypeView -> TypeView
 quantifyMethodLocalVarsInfoView headVars constraints view =
@@ -3338,7 +3338,7 @@ closeFunctionalDependencies scope classInfo subst0 =
             Just matchSubst <- [matchDeterminers determiners subst headViews],
             Just determinedViews <- [projectClassHeadViews determined headViews],
             let candidate = fmap (applyTypeViewSubst matchSubst) determinedViews,
-            Set.null (freeTypeVarsTypeViews candidate)
+            typeViewsClosedByTypeBinderIdentities candidate
         ]
 
     candidateClassHeadViews =
@@ -3407,6 +3407,11 @@ closeFunctionalDependencies scope classInfo subst0 =
       indices <- traverse (`Map.lookup` classParamIndicesByIdentity) refs
       let values = NE.toList headViews
       pure (fmap (values !!) indices)
+
+    typeViewsClosedByTypeBinderIdentities views =
+      case freeTypeBinderIdentitiesTypeViews views of
+        Right identities -> Set.null identities
+        Left _ -> False
 
 quantifiedMethodType :: MethodInfo -> SrcType
 quantifiedMethodType methodInfo =
