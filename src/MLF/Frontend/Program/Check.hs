@@ -2496,11 +2496,7 @@ displayClassName env symbol =
 
 displayNameForSymbol :: Map SymbolIdentity [String] -> ResolvedSymbol -> Maybe String
 displayNameForSymbol namesByIdentity symbol =
-  case Map.lookup (resolvedSymbolIdentity symbol) namesByIdentity of
-    Just names
-      | resolvedSymbolDisplayName symbol `elem` names -> Just (resolvedSymbolDisplayName symbol)
-      | name : _ <- names -> Just name
-    _ -> Nothing
+  resolvedSymbolDisplayName symbol <$ Map.lookup (resolvedSymbolIdentity symbol) namesByIdentity
 
 -- Source kind checking -------------------------------------------------------
 

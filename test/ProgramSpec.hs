@@ -6314,6 +6314,26 @@ spec = do
             program <- requireParsed programText
             checkProgram program `shouldSatisfy` isRight
 
+        it "keeps resolved qualified type spelling in checked source display" $ do
+            let programText =
+                    unlines
+                        [ "module Core export (Token(..)) {"
+                        , "  data Token ="
+                        , "      Token : Token;"
+                        , "}"
+                        , "module Main export (main) {"
+                        , "  import Core as C exposing (Token(..));"
+                        , "  def left : Token = Token;"
+                        , "  def right : C.Token = C.Token;"
+                        , "  def main : C.Token = right;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            checked <- requireChecked program
+            rightBinding <- requireCheckedBinding "Main__right" checked
+            ProgramTypes.typeViewDisplay (ProgramTypes.checkedBindingSourceTypeView rightBinding)
+                `shouldBe` STBase "C.Token"
+
         it "rejects hidden qualified types at the resolver boundary" $ do
             let programText =
                     unlines
