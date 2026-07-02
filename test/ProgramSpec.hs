@@ -449,6 +449,25 @@ spec = do
             ProgramTypes.typeViewHeadIdentities (ProgramTypes.applyTypeViewSubst subst sourceView)
                 `shouldBe` Map.singleton "Token" headIdentity
 
+        it "keeps replacement type head identities by display pair after applying type-view substitutions" $ do
+            let sourceIdentity = typeBinderIdentityFromNode (NodeId 991650)
+                sourceStableName = typeBinderIdentityStableName sourceIdentity
+                headIdentity = generatedSymbolIdentity 991651 SymbolType "Main" "Token" Nothing
+                headStableName = symbolIdentityStableName headIdentity
+                sourceView =
+                    (ProgramTypes.mkTypeView (STVar "x") (STVar sourceStableName))
+                        { ProgramTypes.typeViewBinderIdentities = Map.singleton "x" sourceIdentity
+                        }
+                replacement =
+                    (ProgramTypes.mkTypeView (STBase "DisplayToken") (STBase headStableName))
+                        { ProgramTypes.typeViewHeadIdentities = Map.singleton headStableName headIdentity
+                        }
+                subst =
+                    Map.singleton (ProgramTypes.typeViewSubstKeyForIdentity sourceIdentity) replacement
+                actual =
+                    ProgramTypes.typeViewHeadIdentities (ProgramTypes.applyTypeViewSubst subst sourceView)
+            Map.lookup "DisplayToken" actual `shouldBe` Just headIdentity
+
         it "keeps replacement type head identities by payload stable name after applying type-view substitutions" $ do
             let sourceIdentity = typeBinderIdentityFromNode (NodeId 992501)
                 sourceStableName = typeBinderIdentityStableName sourceIdentity

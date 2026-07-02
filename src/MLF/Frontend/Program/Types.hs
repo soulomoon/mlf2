@@ -1314,9 +1314,7 @@ applyTypeViewSubst subst view =
     { typeViewDisplay = displayTy,
       typeViewIdentity = identityTy,
       typeViewHeadIdentities =
-        filterHeadIdentitiesByNames
-          (identityHeadNames <> displayHeadNames)
-          substitutedHeadIdentities,
+        filterHeadIdentitiesByTypeNames displayTy identityTy substitutedHeadIdentities,
       typeViewBinderIdentities =
         filterBinderIdentitiesByNames
           (freeIdentityNames <> freeDisplayNames)
@@ -1328,8 +1326,6 @@ applyTypeViewSubst subst view =
     identitySubst = typeViewIdentitySubstTypesFor view subst
     displayTy = Map.foldrWithKey substituteTypeVar (typeViewDisplay view) displaySubst
     identityTy = Map.foldrWithKey substituteTypeVar (typeViewIdentity view) identitySubst
-    displayHeadNames = typeHeadNamesSrcType displayTy
-    identityHeadNames = typeHeadNamesSrcType identityTy
     freeDisplayNames = freeTypeVarsSrcType displayTy
     freeIdentityNames = freeTypeVarsSrcType identityTy
     substitutedHeadIdentities =
@@ -1368,6 +1364,31 @@ filterHeadIdentitiesByNames names identities =
 
     mentioned identity =
       any (\name -> Map.lookup name identityByName == Just identity) (Set.toList names)
+
+filterHeadIdentitiesByTypeNames :: SrcType -> SrcType -> Map String SymbolIdentity -> Map String SymbolIdentity
+filterHeadIdentitiesByTypeNames displayTy identityTy identities =
+  mergeSymbolIdentityMaps [filtered, pairedDisplayAliases]
+  where
+    names =
+      typeHeadNamesSrcType identityTy <> typeHeadNamesSrcType displayTy
+
+    filtered =
+      filterHeadIdentitiesByNames names identities
+
+    filteredAliases =
+      symbolIdentityAliasMap (Map.elems filtered)
+
+    lookupFiltered name =
+      Map.lookup name filtered <|> Map.lookup name filteredAliases
+
+    pairedDisplayAliases =
+      mergeSymbolIdentityMaps
+        [ Map.singleton displayName identity
+        | (identityName, displayName) <- Map.toList (srcTypeHeadPairs displayTy identityTy),
+          displayName /= identityName,
+          Set.member displayName names,
+          Just identity <- [lookupFiltered identityName]
+        ]
 
 filterBinderIdentitiesByNames :: Set String -> [(String, TypeBinderIdentity)] -> Map String TypeBinderIdentity -> Map String TypeBinderIdentity
 filterBinderIdentitiesByNames names aliases identities =
@@ -3039,9 +3060,7 @@ specializeQuantifiedTypeView subst view =
     { typeViewDisplay = displayTy,
       typeViewIdentity = identityTy,
       typeViewHeadIdentities =
-        filterHeadIdentitiesByNames
-          (identityHeadNames <> displayHeadNames)
-          substitutedHeadIdentities,
+        filterHeadIdentitiesByTypeNames displayTy identityTy substitutedHeadIdentities,
       typeViewBinderIdentities =
         filterBinderIdentitiesByNames
           (freeIdentityNames <> freeDisplayNames)
@@ -3051,8 +3070,6 @@ specializeQuantifiedTypeView subst view =
   where
     displayTy = specialize (typeViewDisplay view) (typeViewSubstDisplayTypes view subst)
     identityTy = specialize (typeViewIdentity view) (typeViewIdentitySubstTypesFor view subst)
-    displayHeadNames = typeHeadNamesSrcType displayTy
-    identityHeadNames = typeHeadNamesSrcType identityTy
     freeDisplayNames = freeTypeVarsSrcType displayTy
     freeIdentityNames = freeTypeVarsSrcType identityTy
     substitutedHeadIdentities =
