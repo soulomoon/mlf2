@@ -196,7 +196,7 @@ import MLF.Frontend.Program.Types
     typeViewHeadIdentityForAlias,
     typeViewMentionedHeadIdentities,
   )
-import MLF.Frontend.Symbol (lookupSymbolIdentityAlias, symbolIdentityAliasMap, symbolIdentityAliasNames, symbolUniqueIdentity)
+import MLF.Frontend.Symbol (lookupSymbolIdentityAlias, symbolIdentityAliasMap, symbolIdentityAliasNames, symbolIdentityStableName, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit, SrcBound (..), SrcTy (..), SrcType, TypeParam)
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
 import MLF.Types.Identity (DeferredRef, IdDetails (..), IdentityGenerator, LocalRef, StructuralTypeBinderRole (..), UniqueIdentity (..), deferredRefIdentity, deferredRefName, freshDeferredRef, freshIdentity, freshLocalRef, idDetailsGeneratedIdentities, idDetailsSymbolIdentity, identityGeneratorAfter, symbolGeneratedIdentities, typeBinderGeneratedIdentities, typeBinderIdentityFromStructural, typeBinderIdentityNode, typeBinderIdentityStructural)
@@ -1822,17 +1822,18 @@ wrapBackendLams params body =
 buildConvertContext :: CheckedProgram -> Either BackendConversionError ConvertContext
 buildConvertContext checked = do
   let dataInfos = allDataInfos checked
-      dataByIdentity = dataInfoIdentityMap dataInfos
-      dataModuleIdentities = dataInfoModuleIdentityMap checked
+  dataByIdentity <- uniqueDataInfosByIdentity dataInfos
+  let dataModuleIdentities = dataInfoModuleIdentityMap checked
       moduleScopes = moduleElaborateScopes checked dataByIdentity
       termRuntimeNames = checkedProgramTermRuntimeNamesByIdentity checked
   dataMetas <- mapM (buildDataMetaForDataInfo moduleScopes dataModuleIdentities dataInfos) dataInfos
-  let constructorMetasByIdentity =
-        [ (ctorInfoSymbol (cmInfo constructorMeta), constructorMeta)
-          | dataMeta <- dataMetas,
-            constructorMeta <- constructorMetasForData dataMeta
-        ]
-      dataMetasByIdentity =
+  constructorMetasByIdentity <-
+    uniqueConstructorMetasByIdentity
+      [ constructorMeta
+        | dataMeta <- dataMetas,
+          constructorMeta <- constructorMetasForData dataMeta
+      ]
+  let dataMetasByIdentity =
         Map.fromList
           [ (dataInfoSymbol (dmInfo dataMeta), dataMeta)
           | dataMeta <- dataMetas
@@ -1841,7 +1842,7 @@ buildConvertContext checked = do
   let context0 =
         ConvertContext
           { ccModuleScopes = moduleScopes,
-            ccConstructorsByIdentity = Map.fromList constructorMetasByIdentity,
+            ccConstructorsByIdentity = constructorMetasByIdentity,
             ccTermRuntimeNamesByIdentity = termRuntimeNames,
             ccBindingData = bindingData,
             ccDataByIdentity = dataMetasByIdentity,
@@ -1869,6 +1870,31 @@ buildConvertContext checked = do
       { ccClosureValueArgumentsByIdentity = closureValueArguments,
         ccEvidenceValueArgumentsByIdentity = evidenceValueArguments
       }
+
+uniqueDataInfosByIdentity :: [DataInfo] -> Either BackendConversionError (Map SymbolIdentity DataInfo)
+uniqueDataInfosByIdentity =
+  uniqueCheckedInfoByIdentity BackendDuplicateData dataInfoSymbol
+
+uniqueConstructorMetasByIdentity :: [ConstructorMeta] -> Either BackendConversionError (Map SymbolIdentity ConstructorMeta)
+uniqueConstructorMetasByIdentity =
+  uniqueCheckedInfoByIdentity BackendDuplicateConstructor (ctorInfoSymbol . cmInfo)
+
+uniqueCheckedInfoByIdentity ::
+  (String -> BackendValidationError) ->
+  (a -> SymbolIdentity) ->
+  [a] ->
+  Either BackendConversionError (Map SymbolIdentity a)
+uniqueCheckedInfoByIdentity mkError identityFor =
+  go Map.empty
+  where
+    go entries [] = Right entries
+    go entries (info : rest) =
+      let identity = identityFor info
+       in case Map.lookup identity entries of
+            Just _ ->
+              Left (BackendValidationFailed (mkError (symbolIdentityStableName identity)))
+            Nothing ->
+              go (Map.insert identity info entries) rest
 
 checkedProgramIdentityGenerator :: CheckedProgram -> IdentityGenerator
 checkedProgramIdentityGenerator checked =
@@ -2323,10 +2349,6 @@ checkedProgramTermRuntimeNamesByIdentity checked =
         [ (builtinValueIdentity name, name)
         | name <- Map.keys PrimitiveInventory.primitiveValueSpecs
         ]
-
-dataInfoIdentityMap :: [DataInfo] -> Map SymbolIdentity DataInfo
-dataInfoIdentityMap dataInfos =
-  Map.fromList [(dataInfoSymbol info, info) | info <- dataInfos]
 
 dataInfoModuleIdentityMap :: CheckedProgram -> Map SymbolIdentity SymbolIdentity
 dataInfoModuleIdentityMap checked =

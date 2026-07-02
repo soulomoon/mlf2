@@ -1512,6 +1512,36 @@ spec = describe "MLF.Backend.Convert" $ do
       Right backend ->
         expectationFailure ("expected constructor shape rejection, got backend:\n" ++ show backend)
 
+  it "rejects duplicate checked data identities before building backend context maps" $ do
+    checked0 <- requireChecked duplicateDataNameProgram
+    case checkedDataInfos checked0 of
+      firstData : secondData : _ -> do
+        let duplicateIdentity = dataInfoSymbol firstData
+            checked =
+              replaceDataInfoSymbol
+                (dataInfoSymbol secondData)
+                duplicateIdentity
+                checked0
+        convertCheckedProgram checked
+          `shouldBe` Left (BackendValidationFailed (BackendDuplicateData (symbolIdentityStableName duplicateIdentity)))
+      _ ->
+        expectationFailure "expected at least two checked data infos"
+
+  it "rejects duplicate checked constructor identities before building backend context maps" $ do
+    checked0 <- requireChecked parameterizedConstructorProgram
+    case [ctors | dataInfo <- checkedDataInfos checked0, let ctors = dataConstructors dataInfo, length ctors >= 2] of
+      (firstCtor : secondCtor : _) : _ -> do
+        let duplicateIdentity = ctorInfoSymbol firstCtor
+            checked =
+              replaceConstructorInfoSymbol
+                (ctorInfoSymbol secondCtor)
+                duplicateIdentity
+                checked0
+        convertCheckedProgram checked
+          `shouldBe` Left (BackendValidationFailed (BackendDuplicateConstructor (symbolIdentityStableName duplicateIdentity)))
+      _ ->
+        expectationFailure "expected data info with at least two constructors"
+
   it "keeps same-name data declarations module-scoped during type lowering" $ do
     checked <- requireChecked duplicateDataNameProgram
     backend <- requireRight (convertCheckedProgram checked)
@@ -4632,6 +4662,45 @@ addDataInfo dataInfo checked =
               }
               : rest
     }
+
+replaceDataInfoSymbol :: SymbolIdentity -> SymbolIdentity -> CheckedProgram -> CheckedProgram
+replaceDataInfoSymbol target replacement checked =
+  checked
+    { checkedProgramModules =
+        map updateModule (checkedProgramModules checked)
+    }
+  where
+    updateModule checkedModule =
+      checkedModule
+        { checkedModuleData = fmap updateDataInfo (checkedModuleData checkedModule)
+        }
+
+    updateDataInfo dataInfo
+      | dataInfoSymbol dataInfo == target =
+          dataInfo {dataInfoSymbol = replacement}
+      | otherwise =
+          dataInfo
+
+replaceConstructorInfoSymbol :: SymbolIdentity -> SymbolIdentity -> CheckedProgram -> CheckedProgram
+replaceConstructorInfoSymbol target replacement checked =
+  checked
+    { checkedProgramModules =
+        map updateModule (checkedProgramModules checked)
+    }
+  where
+    updateModule checkedModule =
+      checkedModule
+        { checkedModuleData = fmap updateDataInfo (checkedModuleData checkedModule)
+        }
+
+    updateDataInfo dataInfo =
+      dataInfo {dataConstructors = map updateConstructorInfo (dataConstructors dataInfo)}
+
+    updateConstructorInfo constructorInfo
+      | ctorInfoSymbol constructorInfo == target =
+          constructorInfo {ctorInfoSymbol = replacement}
+      | otherwise =
+          constructorInfo
 
 mapBinding :: String -> (CheckedBinding -> CheckedBinding) -> CheckedProgram -> CheckedProgram
 mapBinding target f checked =
