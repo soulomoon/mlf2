@@ -53,6 +53,10 @@ spec = describe "MLF.Backend.StructuralRecursiveData" $ do
     structuralMuAsDataType (Just listIdentity) (backendDataParameterRefs listData) (Just listSelfIdentity) "$List_self"
       `shouldBe` Just (BTConWithIdentity (Just listIdentity) (BaseTy "List") (BTVar "a" :| []))
 
+  it "does not rebuild identity-bearing structural mu heads from names alone" $
+    structuralMuAsDataType (Just listIdentity) (backendDataParameterRefs listData) Nothing "$List_self"
+      `shouldBe` Nothing
+
   it "rejects same-name structural mu recovery when self identity belongs to another data type" $ do
     let wrongSelfIdentity =
           typeBinderIdentityFromStructural (UniqueIdentity 990102) StructuralSelfBinder

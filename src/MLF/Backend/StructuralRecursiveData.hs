@@ -834,6 +834,8 @@ structuralMuAsActualDataType dataIdentity muIdentity muName actual =
 structuralMuIdentityCompatible :: Maybe SymbolIdentity -> Maybe TypeBinderIdentity -> Bool
 structuralMuIdentityCompatible (Just dataIdentity) (Just muIdentity) =
   structuralMuIdentityMatches (Just dataIdentity) (Just muIdentity)
+structuralMuIdentityCompatible (Just {}) Nothing =
+  False
 structuralMuIdentityCompatible _ _ =
   True
 
