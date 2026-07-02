@@ -226,6 +226,7 @@ import MLF.Backend.StructuralRecursiveData
     isVacuousRecursiveBinderWithIdentity,
     matchBackendTypeParametersWithTypeBounds,
     metadataLightStructuralDataMatchesWithIdentity,
+    structuralIdentityAllowsNameFallback,
     structuralBackendHandlerFields,
     structuralDataArgumentSubstitution,
     structuralDataDeclarationMatches,
@@ -2060,7 +2061,7 @@ canonicalizeBackendTypeDataHeadsWith dataDecls dataDeclsByIdentity =
             _ -> Nothing
 
         structuralDataByFallback
-          | Just {} <- structuralSelfIdentityUnique identity = Nothing
+          | not (structuralIdentityAllowsNameFallback identity) = Nothing
           | otherwise = structuralDataByName <|> structuralDataByBody
 
         structuralDataByName =
@@ -2437,8 +2438,24 @@ validateBackendConstructorStructuralPayload ::
   BackendValidationError ->
   Either BackendValidationError ()
 validateBackendConstructorStructuralPayload typeBounds constructorInfo substitution ty mismatchError =
-  unless (structuralDataDeclarationMatches typeBounds (constructorInfoDataDecl constructorInfo) substitution ty) $
+  unless (constructorStructuralPayloadIdentityAllowed dataDecl ty && structuralDataDeclarationMatches typeBounds dataDecl substitution ty) $
     Left mismatchError
+  where
+    dataDecl =
+      constructorInfoDataDecl constructorInfo
+
+constructorStructuralPayloadIdentityAllowed :: BackendData -> BackendType -> Bool
+constructorStructuralPayloadIdentityAllowed dataDecl =
+  \case
+    BTMuWithIdentity identity _ _ ->
+      structuralIdentityAllowsNameFallback identity || structuralSelfIdentityPinsData (backendDataIdentity dataDecl) identity
+    _ ->
+      True
+  where
+    structuralSelfIdentityPinsData dataIdentity muIdentity =
+      case (dataIdentity, structuralSelfIdentityUnique muIdentity) of
+        (Just identity, Just unique) -> symbolUniqueIdentity identity == unique
+        _ -> False
 
 constructorInfoDataDecl :: BackendConstructorInfo -> BackendData
 constructorInfoDataDecl constructorInfo =

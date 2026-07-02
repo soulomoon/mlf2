@@ -29,6 +29,7 @@ module MLF.Backend.StructuralRecursiveData
     matchStructuralDataDeclaration,
     metadataLightStructuralDataMatches,
     metadataLightStructuralDataMatchesWithIdentity,
+    structuralIdentityAllowsNameFallback,
     structuralBackendHandlerFields,
     structuralDataArgumentSubstitution,
     structuralDataDeclarationMatches,
@@ -231,6 +232,14 @@ metadataLightStructuralDataMatchesAgainstHead mbDataIdentity base args muIdentit
           False
     Nothing ->
       metadataLightStructuralDataMatchesWithIdentity base args muIdentity muName body
+
+structuralIdentityAllowsNameFallback :: Maybe TypeBinderIdentity -> Bool
+structuralIdentityAllowsNameFallback Nothing =
+  True
+structuralIdentityAllowsNameFallback (Just identity) =
+  case typeBinderIdentityGeneratedUnique identity of
+    Just {} -> True
+    Nothing -> False
 
 matchStructuralDataLightWithIdentity ::
   BaseTy ->

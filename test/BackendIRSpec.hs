@@ -1483,6 +1483,9 @@ spec = describe "MLF.Backend.IR" $ do
     validateBackendProgram (programWithMainExpr mismatchedStructuralBoxConstructExpr)
       `shouldBe` Left (BackendConstructorResultMismatch "Box" boxTy mismatchedStructuralBoxTy)
 
+    validateBackendProgram (programWithMainExpr graphIdentityStructuralBoxConstructExpr)
+      `shouldBe` Left (BackendConstructorResultMismatch "Box" boxTy graphIdentityStructuralBoxTy)
+
     validateBackendProgram mismatchedStructuralBoxCaseProgram
       `shouldBe` Left (BackendCaseConstructorScrutineeMismatch "Box" mismatchedStructuralBoxTy boxTy)
 
@@ -2924,6 +2927,14 @@ mismatchedStructuralBoxTy =
 mismatchedStructuralBoxConstructExpr :: BackendExpr
 mismatchedStructuralBoxConstructExpr =
   BackendConstruct mismatchedStructuralBoxTy "Box" [intLit 1]
+
+graphIdentityStructuralBoxTy :: BackendType
+graphIdentityStructuralBoxTy =
+  BTMuWithIdentity (Just (typeBinderIdentityFromNode (NodeId 991365))) "$Box_self" (singleFieldStructuralBody intTy)
+
+graphIdentityStructuralBoxConstructExpr :: BackendExpr
+graphIdentityStructuralBoxConstructExpr =
+  BackendConstruct graphIdentityStructuralBoxTy "Box" [intLit 1]
 
 mismatchedStructuralBoxCaseProgram :: BackendProgram
 mismatchedStructuralBoxCaseProgram =
