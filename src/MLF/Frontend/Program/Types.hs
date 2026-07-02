@@ -16,6 +16,7 @@ module MLF.Frontend.Program.Types
     applyConstraintInfoSubst,
     freeTypeVarsTypeView,
     freeTypeVarsTypeViews,
+    freeTypeBinderIdentitiesTypeView,
     typeViewHeadIdentityForAlias,
     typeViewBinderIdentityForAlias,
     filterHeadIdentitiesByNames,
@@ -1671,6 +1672,19 @@ freeTypeVarsTypeView = freeTypeVarsSrcType . typeViewIdentity
 
 freeTypeVarsTypeViews :: NonEmpty TypeView -> Set String
 freeTypeVarsTypeViews = foldMap freeTypeVarsTypeView
+
+freeTypeBinderIdentitiesTypeView :: TypeView -> Either String (Set TypeBinderIdentity)
+freeTypeBinderIdentitiesTypeView view =
+  Set.fromList <$> traverse requireBinderIdentity (Set.toList freeNames)
+  where
+    freeNames =
+      freeTypeVarsSrcType (typeViewDisplay view)
+        <> freeTypeVarsSrcType (typeViewIdentity view)
+
+    requireBinderIdentity name =
+      case typeViewBinderIdentityForAlias view name of
+        Just identity -> Right identity
+        Nothing -> Left name
 
 typeViewsDisplay :: NonEmpty TypeView -> NonEmpty SrcType
 typeViewsDisplay = fmap typeViewDisplay

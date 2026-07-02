@@ -179,6 +179,7 @@ import MLF.Frontend.Program.Types
     instanceInfoClassSymbolIdentity,
     instanceHeadTypes,
     instanceHeadIdentityTypes,
+    freeTypeBinderIdentitiesTypeView,
     loweredBindingIdentityFromDetails,
     loweredBindingIdentityFromValueInfo,
     loweredIdentityDetails,
@@ -3503,7 +3504,8 @@ buildInstanceSkeletons moduleIdentity generator0 displayEnv scope mod0 derived =
   case duplicateExistingInstances infos of
     info : _ -> throwError (duplicateInstanceError info)
     [] -> pure ()
-  case ambiguousFunctionalDependencyInstances infos of
+  ambiguousInstances <- ambiguousFunctionalDependencyInstances infos
+  case ambiguousInstances of
     info : _ -> throwError (ambiguousFunctionalDependencyInstanceError info)
     [] -> pure ()
   case conflictingFunctionalDependencyInstances infos of
@@ -3636,16 +3638,29 @@ buildInstanceSkeletons moduleIdentity generator0 displayEnv scope mod0 derived =
     ambiguousFunctionalDependencyInstanceError info =
       ProgramAmbiguousFunctionalDependencyInstance (instanceClassName info) (NE.toList (instanceHeadTypes info))
 
+    ambiguousFunctionalDependencyInstances :: [InstanceInfo] -> TcM [InstanceInfo]
     ambiguousFunctionalDependencyInstances infos =
-      [ info
-        | info <- infos,
-          Just classInfo <- [classInfoForInstance info],
-          fundep <- classFunctionalDependencies classInfo,
-          Just (determinerIndices, determinedIndices) <- [functionalDependencyIndices classInfo fundep],
-          let determinerVars = freeProjectedTypeVars determinerIndices (instanceHeadIdentityTypes info)
-              determinedVars = freeProjectedTypeVars determinedIndices (instanceHeadIdentityTypes info),
-          not (determinedVars `Set.isSubsetOf` determinerVars)
-      ]
+      concat <$> mapM ambiguousFunctionalDependencyInstance infos
+
+    ambiguousFunctionalDependencyInstance :: InstanceInfo -> TcM [InstanceInfo]
+    ambiguousFunctionalDependencyInstance info =
+      concat
+        <$> traverse
+          (ambiguousFunctionalDependencyFor info)
+          [ (classInfo, fundep, indices)
+          | Just classInfo <- [classInfoForInstance info],
+            fundep <- classFunctionalDependencies classInfo,
+            Just indices <- [functionalDependencyIndices classInfo fundep]
+          ]
+
+    ambiguousFunctionalDependencyFor ::
+      InstanceInfo ->
+      (ClassInfo, FunctionalDependencyInfo, (NonEmpty Int, NonEmpty Int)) ->
+      TcM [InstanceInfo]
+    ambiguousFunctionalDependencyFor info (_, _, (determinerIndices, determinedIndices)) = do
+      determinerVars <- freeProjectedTypeBinderIdentities determinerIndices (instanceHeadTypeViews info)
+      determinedVars <- freeProjectedTypeBinderIdentities determinedIndices (instanceHeadTypeViews info)
+      pure [info | not (determinedVars `Set.isSubsetOf` determinerVars)]
 
     conflictingFunctionalDependencyInstances infos =
       [ conflict
@@ -3712,8 +3727,18 @@ buildInstanceSkeletons moduleIdentity generator0 displayEnv scope mod0 derived =
       | length left /= length right = Nothing
       | otherwise = foldM (\acc (leftTy, rightTy) -> unifyOverlap headIdentities acc leftTy rightTy) subst (zip left right)
 
-    freeProjectedTypeVars indices tys =
-      foldMap freeTypeVarsInType (projectInstanceTypes indices tys)
+    freeProjectedTypeBinderIdentities :: NonEmpty Int -> NonEmpty TypeView -> TcM (Set.Set TypeBinderIdentity)
+    freeProjectedTypeBinderIdentities indices views =
+      Set.unions <$> mapM requireFreeTypeBinderIdentities (projectInstanceTypes indices views)
+
+    requireFreeTypeBinderIdentities :: TypeView -> TcM (Set.Set TypeBinderIdentity)
+    requireFreeTypeBinderIdentities view =
+      case freeTypeBinderIdentitiesTypeView view of
+        Right identities -> pure identities
+        Left name ->
+          throwError $
+            ProgramPipelineError
+              ("resolved instance head type variable `" ++ name ++ "` is missing binder identity")
 
     functionalDependencyIndices classInfo fundep =
       (,) <$> traverse lookupParamIndex (functionalDependencyDeterminerRefs fundep) <*> traverse lookupParamIndex (functionalDependencyDeterminedRefs fundep)

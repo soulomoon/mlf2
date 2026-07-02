@@ -462,6 +462,29 @@ spec = do
             ProgramTypes.typeViewSubstKeyFor source stableName
                 `shouldBe` Just (ProgramTypes.typeViewSubstKeyForIdentity identity)
 
+        it "collects free type-view variables by binder identity through paired aliases" $ do
+            let leftIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991624)
+                rightIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991625)
+                leftStableName = typeBinderIdentityStableName leftIdentity
+                rightStableName = typeBinderIdentityStableName rightIdentity
+                source =
+                    ( ProgramTypes.mkTypeView
+                        (STArrow (STVar "a") (STVar "b"))
+                        (STArrow (STVar leftStableName) (STVar rightStableName))
+                    )
+                        { ProgramTypes.typeViewBinderIdentities =
+                            Map.fromList
+                                [ ("a", leftIdentity)
+                                , (rightStableName, rightIdentity)
+                                ]
+                        }
+            ProgramTypes.freeTypeBinderIdentitiesTypeView source
+                `shouldBe` Right (Set.fromList [leftIdentity, rightIdentity])
+
+        it "rejects free type-view variable collection without binder metadata" $ do
+            ProgramTypes.freeTypeBinderIdentitiesTypeView (ProgramTypes.mkTypeView (STVar "a") (STVar "a"))
+                `shouldBe` Left "a"
+
         it "keeps replacement type head identities by display key after applying type-view substitutions" $ do
             let sourceIdentity = typeBinderIdentityFromNode (NodeId 991429)
                 sourceStableName = typeBinderIdentityStableName sourceIdentity
