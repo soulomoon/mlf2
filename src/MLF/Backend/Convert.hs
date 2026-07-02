@@ -116,6 +116,7 @@ import MLF.Elab.Types
     typeBinderRefsSameIdentity,
     sourceTypeBinderRefForName,
     TypeCheckError,
+    deferredResolvedVarRef,
     elabToBound,
     identityGeneratorAfterType,
     identityGeneratorAfterTerm,
@@ -2290,10 +2291,7 @@ termHeadSymbolIdentity _context term =
 termHeadDeferredRef :: XmlfTerm -> Maybe DeferredRef
 termHeadDeferredRef term =
   case term of
-    EVarNode resolved ->
-      case resolvedVarDetails resolved of
-        DeferredId ref -> Just ref
-        _ -> Nothing
+    EVarNode resolved -> deferredResolvedVarRef resolved
     _ ->
       Nothing
 

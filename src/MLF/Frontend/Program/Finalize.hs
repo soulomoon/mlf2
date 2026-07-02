@@ -4336,7 +4336,7 @@ collectElabApps = go []
 deferredPlaceholderHeadRef :: XmlfTerm -> Maybe DeferredRef
 deferredPlaceholderHeadRef term =
   case term of
-    X.EVarNode resolved -> resolvedVarDeferredRef resolved
+    X.EVarNode resolved -> X.deferredResolvedVarRef resolved
     X.ETyInst inner _ -> deferredPlaceholderHeadRef inner
     _ -> Nothing
 
@@ -4345,16 +4345,10 @@ deferredPlaceholderHeadRefWithInsts = go []
   where
     go insts term =
       case term of
-        X.EVarNode resolved -> fmap (\ref -> (ref, insts)) (resolvedVarDeferredRef resolved)
+        X.EVarNode resolved -> fmap (\ref -> (ref, insts)) (X.deferredResolvedVarRef resolved)
         X.ETyInst inner (X.InstApp ty) -> go (ty : insts) inner
         X.ETyInst inner _ -> go insts inner
         _ -> Nothing
-
-resolvedVarDeferredRef :: X.ResolvedVar -> Maybe DeferredRef
-resolvedVarDeferredRef resolved =
-  case X.resolvedVarDetails resolved of
-    DeferredId ref -> Just ref
-    _ -> Nothing
 
 resolvedVarFromConstructorInfo :: ConstructorInfo -> X.ResolvedVar
 resolvedVarFromConstructorInfo ctorInfo =
