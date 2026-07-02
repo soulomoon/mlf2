@@ -416,6 +416,27 @@ spec = do
                     Map.lookup constructorIdentity (exportedTypeConstructorDisplaysByIdentity ambiguousTypeInfo) `shouldBe` Nothing
                     exportedTypeConstructorsForDisplay ambiguousTypeInfo `shouldBe` Map.empty
 
+        it "keeps an exported constructor display when duplicate entries share identity and display" $ do
+            (_graph, _checked, packageInterface) <- requireCheckedPackageInterface constructorInterfacePackage
+            let libId = PackageModuleId testPackageId "Lib"
+            libInterface <- requireInterface libId packageInterface
+            case [ (dataInfo, ctor)
+                 | dataInfo <- Map.elems (moduleInterfaceDataByIdentity libInterface)
+                 , ctor <- dataConstructors dataInfo
+                 ] of
+                [] ->
+                    expectationFailure "expected interface data with constructors"
+                (dataInfo, ctor) : _ -> do
+                    let constructorIdentity = ctorInfoSymbol ctor
+                        typeInfo =
+                            mkExportedTypeInfo
+                                dataInfo
+                                [ ("First", ctor)
+                                , ("First", ctor)
+                                ]
+                    Map.lookup constructorIdentity (exportedTypeConstructorDisplaysByIdentity typeInfo) `shouldBe` Just "First"
+                    Map.lookup "First" (exportedTypeConstructorsForDisplay typeInfo) `shouldBe` Just ctor
+
 interfacePackage :: ProgramPackage
 interfacePackage =
     packageFromSourceUnits

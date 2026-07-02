@@ -2426,7 +2426,8 @@ uniqueDisplayEntriesByIdentity :: [(SymbolIdentity, String)] -> Map SymbolIdenti
 uniqueDisplayEntriesByIdentity entries =
   Map.fromList
     [ (identity, displayName)
-    | (identity, [displayName]) <- Map.toList displayNamesByIdentity
+    | (identity, displayName : rest) <- Map.toList displayNamesByIdentity,
+      all (== displayName) rest
     ]
   where
     displayNamesByIdentity =
