@@ -3314,29 +3314,29 @@ synthesizeDerivedInstances moduleIdentity displayEnv scope mod0 = do
             ProgramPipelineError
               ("resolved data parameter `" ++ P.typeParamName param ++ "` is missing identity")
 
-    derivedConstraintParams dataDecl =
-      let params = Set.fromList (P.typeParamNames (P.dataDeclParams dataDecl))
+    derivedConstraintParams dataDecl ownerHeadTy paramRefs =
+      let params = Set.fromList (map resolvedTypeBinderTypeIdentity paramRefs)
           fieldTypes =
             filter
-              (not . isRecursiveOwnerField dataDecl)
-              (concatMap constructorFieldTypes (P.dataDeclConstructors dataDecl))
-          usedParams = Set.intersection params (foldMap freeTypeVars fieldTypes)
-       in [paramName | paramName <- P.typeParamNames (P.dataDeclParams dataDecl), paramName `Set.member` usedParams]
+              (not . isRecursiveOwnerResolvedField ownerHeadTy)
+              (concatMap (resolvedConstructorFieldTypes . P.constructorDeclType) (P.dataDeclConstructors dataDecl))
+          usedParams = Set.intersection params (foldMap freeTypeBinderIdentities fieldTypes)
+       in usedParams
 
-    freeTypeVars ty =
+    freeTypeBinderIdentities ty =
       case ty of
-        STVar name -> Set.singleton name
-        STArrow dom cod -> Set.union (freeTypeVars dom) (freeTypeVars cod)
-        STBase {} -> Set.empty
-        STCon _ args -> foldMap freeTypeVars args
-        STVarApp name args -> Set.insert name (foldMap freeTypeVars args)
-        STTyLam name body -> Set.delete name (freeTypeVars body)
-        STTyApp fun arg -> Set.union (freeTypeVars fun) (freeTypeVars arg)
-        STForall name mb body ->
-          maybe Set.empty (freeTypeVars . unSrcBound) mb
-            `Set.union` Set.delete name (freeTypeVars body)
-        STMu name body -> Set.delete name (freeTypeVars body)
-        STBottom -> Set.empty
+        RSTVar ref -> Set.singleton (resolvedTypeBinderTypeIdentity ref)
+        RSTArrow dom cod -> Set.union (freeTypeBinderIdentities dom) (freeTypeBinderIdentities cod)
+        RSTBase {} -> Set.empty
+        RSTCon _ args -> foldMap freeTypeBinderIdentities args
+        RSTVarApp ref args -> Set.insert (resolvedTypeBinderTypeIdentity ref) (foldMap freeTypeBinderIdentities args)
+        RSTTyLam ref body -> Set.delete (resolvedTypeBinderTypeIdentity ref) (freeTypeBinderIdentities body)
+        RSTTyApp fun arg -> Set.union (freeTypeBinderIdentities fun) (freeTypeBinderIdentities arg)
+        RSTForall ref mb body ->
+          maybe Set.empty (freeTypeBinderIdentities . unResolvedSrcBound) mb
+            `Set.union` Set.delete (resolvedTypeBinderTypeIdentity ref) (freeTypeBinderIdentities body)
+        RSTMu ref body -> Set.delete (resolvedTypeBinderTypeIdentity ref) (freeTypeBinderIdentities body)
+        RSTBottom -> Set.empty
 
     scopeToElaborateScope scope0 =
       mkElaborateScope (scopeValues scope0) (scopeElaborateTypes scope0) (scopeClasses scope0) (scopeInstances scope0)
@@ -3357,8 +3357,8 @@ synthesizeDerivedInstances moduleIdentity displayEnv scope mod0 = do
               ( concatMap resolvedTypeBinderGeneratedIdentities paramRefs
                   ++ resolvedDeclGeneratedIdentities (P.DeclData resolvedDataDecl)
               )
-          derivedConstraintParamNames = Set.fromList (derivedConstraintParams displayDataDecl)
           headTy = dataDeclHeadResolvedType dataSymbol paramRefs
+          derivedConstraintParamIdentities = derivedConstraintParams resolvedDataDecl headTy paramRefs
           (leftRef, deriveGen1) = freshLocalRef "left" deriveGen0
           (rightRef, deriveGen2) = freshLocalRef "right" deriveGen1
           left = P.Param leftRef (Just headTy)
@@ -3388,7 +3388,7 @@ synthesizeDerivedInstances moduleIdentity displayEnv scope mod0 = do
                       P.constraintTypes = RSTVar paramRef :| []
                     }
                   | paramRef <- paramRefs,
-                    resolvedSrcTypeBinderName paramRef `Set.member` derivedConstraintParamNames
+                    resolvedTypeBinderTypeIdentity paramRef `Set.member` derivedConstraintParamIdentities
                 ],
               P.instanceDeclTypes = headTy :| [],
               P.instanceDeclMethods = [P.MethodDef eqMethodSymbol methodBody]

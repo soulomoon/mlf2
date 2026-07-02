@@ -170,6 +170,37 @@ poisonResolvedEqIdentityNames resolved =
             (\identity -> symbolNamespace identity == SymbolMethod && symbolDefiningName identity == "eq")
             "$stale_eq_method_identity_name"
 
+poisonResolvedDataParamBinderName :: String -> String -> ResolvedProgram -> ResolvedProgram
+poisonResolvedDataParamBinderName targetDataName replacement resolved =
+    resolved {resolvedProgramModules = map poisonModule (resolvedProgramModules resolved)}
+  where
+    poisonModule resolvedModule =
+        resolvedModule
+            { resolvedModuleSemantic =
+                (resolvedModuleSemantic resolvedModule)
+                    { resolvedSemanticModuleSyntax =
+                        poisonSyntax (resolvedSemanticModuleSyntax (resolvedModuleSemantic resolvedModule))
+                    }
+            }
+
+    poisonSyntax syntax =
+        syntax {moduleDecls = map poisonDecl (moduleDecls syntax)}
+
+    poisonDecl decl =
+        case decl of
+            DeclData dataDecl
+                | dataDeclDisplayName dataDecl == targetDataName ->
+                    DeclData dataDecl {dataDeclParams = map poisonParam (dataDeclParams dataDecl)}
+            _ -> decl
+
+    poisonParam param =
+        case param of
+            ResolvedTypeParam ref kind0 ->
+                ResolvedTypeParam
+                    (resolvedTypeBinderRefFromIdentity (resolvedTypeBinderIdentity ref) replacement)
+                    kind0
+            _ -> param
+
 poisonSymbolIdentityName :: (SymbolIdentity -> Bool) -> String -> ResolvedSymbol -> ResolvedSymbol
 poisonSymbolIdentityName predicate replacement symbol
     | predicate identity =
@@ -4945,6 +4976,30 @@ spec = do
                 Left err -> expectationFailure ("expected resolve success, got " ++ show err)
                 Right resolved ->
                     checkResolvedProgram (poisonResolvedEqIdentityNames resolved) `shouldSatisfy` isRight
+
+        it "derives Eq constraints by type-parameter identity when binder names are stale" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (Eq, eq, Box(..), main) {"
+                        , "  class Eq a {"
+                        , "    eq : a -> a -> Bool;"
+                        , "  }"
+                        , "  instance Eq Int {"
+                        , "    eq = λx λy true;"
+                        , "  }"
+                        , ""
+                        , "  data Box a ="
+                        , "      Box : a -> Box a"
+                        , "    deriving Eq;"
+                        , ""
+                        , "  def main : Bool = eq (Box 1) (Box 2);"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            case resolveProgram program of
+                Left err -> expectationFailure ("expected resolve success, got " ++ show err)
+                Right resolved ->
+                    checkResolvedProgram (poisonResolvedDataParamBinderName "Box" "$stale_box_param" resolved) `shouldSatisfy` isRight
 
         it "records one resolved identity for mixed spellings across values, types, constructors, classes, and methods" $ do
             let programText =

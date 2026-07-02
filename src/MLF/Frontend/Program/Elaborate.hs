@@ -2819,7 +2819,11 @@ constructorInstBinders scope ctorInfo quantifiedTy =
           Left (ProgramPipelineError ("constructor instantiation binder `" ++ name ++ "` is missing identity"))
 
     binderIdentities =
-      mergeTypeBinderIdentityMaps [explicitForallIdentities, ownerParamIdentities]
+      mergeTypeBinderIdentityMaps
+        [ typeViewBinderIdentities (constructorTypeView scope ctorInfo),
+          explicitForallIdentities,
+          ownerParamIdentities
+        ]
 
     explicitForallIdentities =
       mergeTypeBinderIdentityMaps
