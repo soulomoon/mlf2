@@ -69,7 +69,7 @@ import qualified MLF.Elab.TypeCheck as TypeCheck
 import MLF.Frontend.ConstraintGen (ExternalBinding (..), ExternalBindingIdentity, ExternalBindingMode (..), externalBindingIdentityFromDetails)
 import MLF.Frontend.Normalize (normalizeExpr, normalizeType)
 import qualified MLF.Frontend.Program.Builtins as Builtins
-import MLF.Frontend.Symbol (symbolIdentityAliasMap, symbolIdentityAliasNames, symbolIdentityStableName)
+import MLF.Frontend.Symbol (lookupSymbolIdentityAlias, symbolIdentityAliasMap, symbolIdentityAliasNames, symbolIdentityStableName)
 import MLF.Frontend.Program.Elaborate
   ( ElaborateScope,
     elaborateScopeDataTypes,
@@ -3338,7 +3338,7 @@ inlineConstructorHead scope extraHeadIdentities ownerParamBinders ctorInfo subst
             STBottom -> STBottom
 
         headName name =
-          case lookupSourceTypeHeadIdentity headIdentities name of
+          case lookupSymbolIdentityAlias headIdentities name of
             Just identity -> symbolIdentityStableName identity
             Nothing -> name
 
@@ -5105,7 +5105,7 @@ srcTypeToElabTypeWithHeadIdentitiesBound boundNames headIdentities refs generato
       srcTypeToElabTypeWithHeadIdentitiesBound boundNames headIdentities
 
     sourceTypeHeadIdentity name =
-      lookupSourceTypeHeadIdentity headIdentities name <|> Builtins.builtinTypeHeadIdentity name
+      lookupSymbolIdentityAlias headIdentities name <|> Builtins.builtinTypeHeadIdentity name
 
     sourceTypeBinderRef env name =
       case Map.lookup name env of
@@ -5151,16 +5151,6 @@ srcBoundToElabBoundWithHeadIdentitiesBound boundNames headIdentities refs genera
     Right (X.TVarAppRef ref args, generator') -> Right (Just (X.TVarAppRef ref args), generator')
     Right (X.TForallRef ref mb body, generator') -> Right (Just (X.TForallRef ref mb body), generator')
     Right (X.TMuRef ref body, generator') -> Right (Just (X.TMuRef ref body), generator')
-
-lookupSourceTypeHeadIdentity :: Map String SymbolIdentity -> String -> Maybe SymbolIdentity
-lookupSourceTypeHeadIdentity headIdentities name =
-  case Map.lookup name headIdentities of
-    Just identity -> Just identity
-    Nothing -> Map.lookup name (sourceTypeHeadStableAliases headIdentities)
-
-sourceTypeHeadStableAliases :: Map String SymbolIdentity -> Map String SymbolIdentity
-sourceTypeHeadStableAliases =
-  symbolIdentityAliasMap . Map.elems
 
 typeHeadIdentitiesInScope :: ElaborateScope -> Map String SymbolIdentity
 typeHeadIdentitiesInScope scope =

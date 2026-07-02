@@ -29,6 +29,7 @@ module MLF.Frontend.Symbol
     symbolIdentityStableName,
     symbolIdentityAliasNames,
     symbolIdentityAliasMap,
+    lookupSymbolIdentityAlias,
     unqualifiedSymbolName,
   )
 where
@@ -217,6 +218,12 @@ symbolIdentityAliasMap identities =
         | identity <- identities,
           alias <- symbolIdentityAliasNames identity
         ]
+
+lookupSymbolIdentityAlias :: Map String SymbolIdentity -> String -> Maybe SymbolIdentity
+lookupSymbolIdentityAlias identities name =
+  case Map.lookup name identities of
+    Just identity -> Just identity
+    Nothing -> Map.lookup name (symbolIdentityAliasMap (Map.elems identities))
 
 unqualifiedSymbolName :: String -> String
 unqualifiedSymbolName =

@@ -192,12 +192,11 @@ import MLF.Frontend.Program.Types
     resolvedModuleScope,
     splitArrows,
     splitForalls,
-    typeBinderAliasIdentityMap,
     typeViewBinderIdentityForAlias,
     typeViewHeadIdentityForAlias,
     typeViewMentionedHeadIdentities,
   )
-import MLF.Frontend.Symbol (symbolIdentityAliasMap, symbolIdentityAliasNames, symbolUniqueIdentity)
+import MLF.Frontend.Symbol (lookupSymbolIdentityAlias, symbolIdentityAliasMap, symbolIdentityAliasNames, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit, SrcBound (..), SrcTy (..), SrcType, TypeParam)
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
 import MLF.Types.Identity (DeferredRef, IdDetails (..), IdentityGenerator, LocalRef, StructuralTypeBinderRole (..), UniqueIdentity (..), deferredRefIdentity, deferredRefName, freshDeferredRef, freshIdentity, freshLocalRef, idDetailsGeneratedIdentities, idDetailsSymbolIdentity, identityGeneratorAfter, symbolGeneratedIdentities, typeBinderGeneratedIdentities, typeBinderIdentityFromStructural, typeBinderIdentityGeneratedUnique, typeBinderIdentityNode, typeBinderIdentityStructural)
@@ -3200,8 +3199,7 @@ convertSourceTypeViewWithIdentities view =
           else lookupBinderIdentityByMetadata displayName
 
     lookupBinderIdentityByMetadata name =
-      Map.lookup name (typeViewBinderIdentities view)
-        <|> Map.lookup name (typeBinderAliasIdentityMap (Map.toList (typeViewBinderIdentities view)))
+      typeViewBinderIdentityForAlias view name
 
     insertBinderIdentityAliases identityName displayName identity binderIdentities =
       case identity of
@@ -3326,18 +3324,10 @@ convertSourceTypeWithHeadIdentities headIdentities0 =
     STBottom -> Right BTBottom
   where
     sourceTypeHeadIdentity name =
-      lookupSourceTypeHeadIdentity headIdentities0 name <|> builtinTypeHeadIdentity name
+      lookupSymbolIdentityAlias headIdentities0 name <|> builtinTypeHeadIdentity name
 
     sourceTypeBinderIdentity _ =
       Nothing
-
-lookupSourceTypeHeadIdentity :: Map String SymbolIdentity -> String -> Maybe SymbolIdentity
-lookupSourceTypeHeadIdentity headIdentities0 name =
-  Map.lookup name headIdentities0 <|> Map.lookup name (sourceTypeHeadStableAliases headIdentities0)
-
-sourceTypeHeadStableAliases :: Map String SymbolIdentity -> Map String SymbolIdentity
-sourceTypeHeadStableAliases =
-  symbolIdentityAliasMap . Map.elems
 
 type BackendTypeBinderNames = Map TypeBinderIdentity String
 

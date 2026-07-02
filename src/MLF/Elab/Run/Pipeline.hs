@@ -132,7 +132,7 @@ import MLF.Frontend.ConstraintGen
     generateModuleConstraintsKeyedWithExternalBindings,
   )
 import qualified MLF.Frontend.Program.Builtins as Builtins
-import MLF.Frontend.Symbol (SymbolIdentity, symbolIdentityAliasMap, symbolIdentityAliasNames, symbolUniqueIdentity)
+import MLF.Frontend.Symbol (SymbolIdentity, lookupSymbolIdentityAlias, symbolIdentityAliasNames, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (NormSrcType, NormSurfaceExpr, StructBound, VarName)
 import qualified MLF.Frontend.Syntax as Surface
 import MLF.Reify.TypeOps (freeTypeVarRefsType, freeTypeVarsType, freshNameLike, substTypeCaptureRef)
@@ -152,8 +152,8 @@ import MLF.Types.Identity
     idDetailsGeneratedIdentities,
     identityGeneratorAfter,
     localRefMatchesNodeId,
+    lookupTypeBinderIdentityAlias,
     typeBinderIdentityFromStructural,
-    typeBinderIdentityAliasMap,
     symbolGeneratedIdentities,
     StructuralTypeBinderRole (..),
     typeBinderGeneratedIdentities,
@@ -1925,29 +1925,9 @@ sourceTypeBinderRefs binderIdentities names generator0 =
 
 sourceTypeBinderRefOrFresh :: Map.Map String TypeBinderIdentity -> String -> IdentityGenerator -> (TypeBinderRef, IdentityGenerator)
 sourceTypeBinderRefOrFresh binderIdentities name generator =
-  case lookupSourceTypeBinderIdentity binderIdentities name of
+  case lookupTypeBinderIdentityAlias binderIdentities name of
     Just identity -> (typeBinderRefFromIdentity identity name, generator)
     Nothing -> sourceTypeBinderRefForName name generator
-
-lookupSourceTypeBinderIdentity :: Map.Map String TypeBinderIdentity -> String -> Maybe TypeBinderIdentity
-lookupSourceTypeBinderIdentity binderIdentities name =
-  case Map.lookup name binderIdentities of
-    Just identity -> Just identity
-    Nothing -> Map.lookup name (sourceTypeBinderStableAliases binderIdentities)
-
-sourceTypeBinderStableAliases :: Map.Map String TypeBinderIdentity -> Map.Map String TypeBinderIdentity
-sourceTypeBinderStableAliases =
-  typeBinderIdentityAliasMap . Map.toList
-
-lookupSourceTypeHeadIdentity :: Map.Map String SymbolIdentity -> String -> Maybe SymbolIdentity
-lookupSourceTypeHeadIdentity headIdentities name =
-  case Map.lookup name headIdentities of
-    Just identity -> Just identity
-    Nothing -> Map.lookup name (sourceTypeHeadStableAliases headIdentities)
-
-sourceTypeHeadStableAliases :: Map.Map String SymbolIdentity -> Map.Map String SymbolIdentity
-sourceTypeHeadStableAliases =
-  symbolIdentityAliasMap . Map.elems
 
 srcTypeToElabTypeWith :: Map.Map String SymbolIdentity -> Map.Map String TypeBinderIdentity -> Map.Map String TypeBinderRef -> IdentityGenerator -> NormSrcType -> Either ConstraintError (ElabType, IdentityGenerator)
 srcTypeToElabTypeWith =
@@ -2007,7 +1987,7 @@ srcTypeToElabTypeWithBound boundNames headIdentities binderIdentities refs gener
         Nothing -> Left (InternalConstraintError ("unresolved source type binder `" ++ name ++ "` reached pipeline external binding preparation"))
 
     sourceTypeHeadIdentity name =
-      case lookupSourceTypeHeadIdentity headIdentities name of
+      case lookupSymbolIdentityAlias headIdentities name of
         Just identity -> Just identity
         Nothing -> Builtins.builtinTypeHeadIdentity name
 

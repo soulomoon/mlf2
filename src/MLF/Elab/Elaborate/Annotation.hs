@@ -89,7 +89,7 @@ import MLF.Elab.Types
   )
 import MLF.Frontend.ConstraintGen.Types (AnnExpr (..))
 import qualified MLF.Frontend.Program.Builtins as Builtins
-import MLF.Frontend.Symbol (SymbolIdentity, symbolIdentityAliasMap)
+import MLF.Frontend.Symbol (SymbolIdentity, lookupSymbolIdentityAlias)
 import MLF.Frontend.Syntax (NormSrcType, SrcBound (..), SrcNorm (NormN), SrcTy (..), StructBound, VarName)
 import MLF.Reify.Type (reifyTypeWithNamedSetRefsNoFallbackReadModel)
 import MLF.Reify.TypeOps
@@ -101,7 +101,7 @@ import MLF.Reify.TypeOps
     resolveBaseBoundForInstConstraint,
     substTypeCaptureRef,
   )
-import MLF.Types.Identity (IdentityGenerator, TypeBinderIdentity, identityGeneratorAfter, symbolGeneratedIdentities, typeBinderGeneratedIdentities, typeBinderIdentityAliasMap)
+import MLF.Types.Identity (IdentityGenerator, TypeBinderIdentity, identityGeneratorAfter, lookupTypeBinderIdentityAlias, symbolGeneratedIdentities, typeBinderGeneratedIdentities)
 import MLF.Util.Trace (TraceConfig, traceGeneralize)
 
 data AnnotationContext (p :: Phase) = AnnotationContext
@@ -984,7 +984,7 @@ sourceTypeBinderRefs binderIdentities names generator0 =
 
 sourceTypeBinderRefOrFresh :: Map.Map String TypeBinderIdentity -> String -> IdentityGenerator -> (TypeBinderRef, IdentityGenerator)
 sourceTypeBinderRefOrFresh binderIdentities name generator =
-  case lookupSourceTypeBinderIdentity binderIdentities name of
+  case lookupTypeBinderIdentityAlias binderIdentities name of
     Just identity -> (typeBinderRefFromIdentity identity name, generator)
     Nothing -> sourceTypeBinderRefForName name generator
 
@@ -992,26 +992,6 @@ sourceTypeBinderRefOrFreshInScope :: Bool -> Map.Map String TypeBinderIdentity -
 sourceTypeBinderRefOrFreshInScope shadowed binderIdentities name generator
   | shadowed = sourceTypeBinderRefForName name generator
   | otherwise = sourceTypeBinderRefOrFresh binderIdentities name generator
-
-lookupSourceTypeBinderIdentity :: Map.Map String TypeBinderIdentity -> String -> Maybe TypeBinderIdentity
-lookupSourceTypeBinderIdentity binderIdentities name =
-  case Map.lookup name binderIdentities of
-    Just identity -> Just identity
-    Nothing -> Map.lookup name (sourceTypeBinderStableAliases binderIdentities)
-
-sourceTypeBinderStableAliases :: Map.Map String TypeBinderIdentity -> Map.Map String TypeBinderIdentity
-sourceTypeBinderStableAliases =
-  typeBinderIdentityAliasMap . Map.toList
-
-lookupSourceTypeHeadIdentity :: Map.Map String SymbolIdentity -> String -> Maybe SymbolIdentity
-lookupSourceTypeHeadIdentity headIdentities name =
-  case Map.lookup name headIdentities of
-    Just identity -> Just identity
-    Nothing -> Map.lookup name (sourceTypeHeadStableAliases headIdentities)
-
-sourceTypeHeadStableAliases :: Map.Map String SymbolIdentity -> Map.Map String SymbolIdentity
-sourceTypeHeadStableAliases =
-  symbolIdentityAliasMap . Map.elems
 
 srcTypeToElabTypeWith :: Map.Map String SymbolIdentity -> Map.Map String TypeBinderIdentity -> Map.Map String TypeBinderRef -> IdentityGenerator -> NormSrcType -> Either ElabError (ElabType, IdentityGenerator)
 srcTypeToElabTypeWith =
@@ -1067,7 +1047,7 @@ srcTypeToElabTypeWithBound boundNames headIdentities binderIdentities refs gener
         Nothing -> Left (InstantiationError ("unresolved source type binder `" ++ name ++ "` reached annotation elaboration"))
 
     sourceTypeHeadIdentity name =
-      lookupSourceTypeHeadIdentity headIdentities name <|> Builtins.builtinTypeHeadIdentity name
+      lookupSymbolIdentityAlias headIdentities name <|> Builtins.builtinTypeHeadIdentity name
 
     srcTypesToElabTypesWith boundNames' refs0 generator0 (arg :| args) = do
       (arg', generator1) <- srcTypeToElabTypeWithBound boundNames' headIdentities binderIdentities refs0 generator0 arg
@@ -1139,7 +1119,7 @@ structBoundToElabBoundWithBound boundNames headIdentities binderIdentities refs 
         Nothing -> Left (InstantiationError ("unresolved source type binder `" ++ name ++ "` reached annotation elaboration"))
 
     sourceTypeHeadIdentity name =
-      lookupSourceTypeHeadIdentity headIdentities name <|> Builtins.builtinTypeHeadIdentity name
+      lookupSymbolIdentityAlias headIdentities name <|> Builtins.builtinTypeHeadIdentity name
 
     srcTypesToElabTypesWith refs0 generator0 (arg :| args) = do
       (arg', generator1) <- srcTypeToElabTypeWith headIdentities binderIdentities refs0 generator0 arg

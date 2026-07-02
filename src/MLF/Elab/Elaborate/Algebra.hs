@@ -108,7 +108,7 @@ import MLF.Elab.Types
   )
 import MLF.Frontend.ConstraintGen.Types (AnnExpr (..), AnnExprF (..))
 import qualified MLF.Frontend.Program.Builtins as Builtins
-import MLF.Frontend.Symbol (SymbolIdentity, symbolIdentityAliasMap)
+import MLF.Frontend.Symbol (SymbolIdentity, lookupSymbolIdentityAlias)
 import MLF.Frontend.Syntax (NormSrcType, SrcBound (..), SrcNorm (..), SrcTy (..), StructBound, VarName)
 import MLF.Reify.TypeOps
   ( alphaEqType,
@@ -135,10 +135,10 @@ import MLF.Types.Identity
     idDetailsIsDiscard,
     identityGeneratorAfter,
     localRefFromNodeId,
+    lookupTypeBinderIdentityAlias,
     primitiveRefSymbol,
     symbolGeneratedIdentities,
     typeBinderGeneratedIdentities,
-    typeBinderIdentityAliasMap,
   )
 import MLF.Util.Trace (TraceConfig, traceGeneralize)
 
@@ -3136,7 +3136,7 @@ sourceTypeBinderRefs binderIdentities names generator0 =
 
 sourceTypeBinderRefOrFresh :: Map.Map String TypeBinderIdentity -> String -> IdentityGenerator -> (TypeBinderRef, IdentityGenerator)
 sourceTypeBinderRefOrFresh binderIdentities name generator =
-  case lookupSourceTypeBinderIdentity binderIdentities name of
+  case lookupTypeBinderIdentityAlias binderIdentities name of
     Just identity -> (typeBinderRefFromIdentity identity name, generator)
     Nothing -> sourceTypeBinderRefForName name generator
 
@@ -3144,26 +3144,6 @@ sourceTypeBinderRefOrFreshInScope :: Bool -> Map.Map String TypeBinderIdentity -
 sourceTypeBinderRefOrFreshInScope shadowed binderIdentities name generator
   | shadowed = sourceTypeBinderRefForName name generator
   | otherwise = sourceTypeBinderRefOrFresh binderIdentities name generator
-
-lookupSourceTypeBinderIdentity :: Map.Map String TypeBinderIdentity -> String -> Maybe TypeBinderIdentity
-lookupSourceTypeBinderIdentity binderIdentities name =
-  case Map.lookup name binderIdentities of
-    Just identity -> Just identity
-    Nothing -> Map.lookup name (sourceTypeBinderStableAliases binderIdentities)
-
-sourceTypeBinderStableAliases :: Map.Map String TypeBinderIdentity -> Map.Map String TypeBinderIdentity
-sourceTypeBinderStableAliases =
-  typeBinderIdentityAliasMap . Map.toList
-
-lookupSourceTypeHeadIdentity :: Map.Map String SymbolIdentity -> String -> Maybe SymbolIdentity
-lookupSourceTypeHeadIdentity headIdentities name =
-  case Map.lookup name headIdentities of
-    Just identity -> Just identity
-    Nothing -> Map.lookup name (sourceTypeHeadStableAliases headIdentities)
-
-sourceTypeHeadStableAliases :: Map.Map String SymbolIdentity -> Map.Map String SymbolIdentity
-sourceTypeHeadStableAliases =
-  symbolIdentityAliasMap . Map.elems
 
 srcTypeToElabTypeWith :: AlgebraContext p -> Map.Map String TypeBinderRef -> IdentityGenerator -> NormSrcType -> Either ElabError (ElabType, IdentityGenerator)
 srcTypeToElabTypeWith =
@@ -3213,7 +3193,7 @@ srcTypeToElabTypeWithBound boundNames algebraContext refs generator ty = case ty
   STBottom -> Right (TBottom, generator)
   where
     sourceTypeHeadIdentity name =
-      lookupSourceTypeHeadIdentity (algSourceTypeHeadIdentities algebraContext) name <|> Builtins.builtinTypeHeadIdentity name
+      lookupSymbolIdentityAlias (algSourceTypeHeadIdentities algebraContext) name <|> Builtins.builtinTypeHeadIdentity name
 
     sourceTypeBinderRef env name =
       case Map.lookup name env of

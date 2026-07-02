@@ -10,6 +10,7 @@ module MLF.Types.Identity
     typeBinderIdentityKey,
     typeBinderIdentityStableName,
     typeBinderIdentityAliasMap,
+    lookupTypeBinderIdentityAlias,
     typeBinderIdentityFromUnique,
     typeBinderIdentityFromStructural,
     typeBinderGeneratedIdentities,
@@ -147,6 +148,12 @@ typeBinderIdentityAliasMap binders =
           alias <- [name, typeBinderIdentityStableName identity],
           not (null alias)
         ]
+
+lookupTypeBinderIdentityAlias :: Map String TypeBinderIdentity -> String -> Maybe TypeBinderIdentity
+lookupTypeBinderIdentityAlias identities name =
+  case Map.lookup name identities of
+    Just identity -> Just identity
+    Nothing -> Map.lookup name (typeBinderIdentityAliasMap (Map.toList identities))
 
 typeBinderGeneratedIdentities :: TypeBinderIdentity -> [UniqueIdentity]
 typeBinderGeneratedIdentities identity =
