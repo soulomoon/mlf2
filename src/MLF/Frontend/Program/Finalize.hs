@@ -148,7 +148,7 @@ import MLF.Frontend.Program.Types
     deferredMethodName,
     deferredProgramObligationRef,
     emptyTypeBinderSubst,
-    freeTypeBinderIdentitiesTypeView,
+    freeTypeBinderIdentitiesTypeViews,
     constraintTypeView,
     lookupInstanceMethod,
     ctorName,
@@ -3790,7 +3790,7 @@ resolveDeferredMethods scope deferredMethods env0 term0 = do
           pure (evidence {deferredMethodEvidenceClassArg = classArgView, deferredMethodEvidenceClassArgs = targetViews}, subst)
 
     methodLocalConstraints methodInfo classArgView methodSubst = do
-      headVars <- freeTypeBinderIdentitiesTypeViewOrError classArgView
+      headVars <- freeTypeBinderIdentitiesTypeViewsOrError (classArgView :| [])
       methodLocal <-
         filterM
           (fmap not . constraintDeterminedByTypeBinderIdentities headVars)
@@ -4075,11 +4075,7 @@ filterConstraintGround =
 
 freeTypeBinderIdentitiesTypeViewsOrError :: NonEmpty TypeView -> Either ProgramError (Set TypeBinderIdentity)
 freeTypeBinderIdentitiesTypeViewsOrError views =
-  Set.unions <$> mapM freeTypeBinderIdentitiesTypeViewOrError views
-
-freeTypeBinderIdentitiesTypeViewOrError :: TypeView -> Either ProgramError (Set TypeBinderIdentity)
-freeTypeBinderIdentitiesTypeViewOrError view =
-  case freeTypeBinderIdentitiesTypeView view of
+  case freeTypeBinderIdentitiesTypeViews views of
     Right identities -> Right identities
     Left name ->
       Left $

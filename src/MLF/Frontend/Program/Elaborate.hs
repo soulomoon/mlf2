@@ -764,10 +764,6 @@ freeTypeBinderIdentitiesTypeViewsOrThrow views =
         ProgramPipelineError
           ("elaborate resolved type variable `" ++ name ++ "` is missing binder identity")
 
-freeTypeBinderIdentitiesTypeViews :: NonEmpty TypeView -> Either String (Set TypeBinderIdentity)
-freeTypeBinderIdentitiesTypeViews views =
-  Set.unions <$> mapM freeTypeBinderIdentitiesTypeView views
-
 quantifyMethodLocalVarsInfoView :: Set String -> [ConstraintInfo] -> TypeView -> TypeView
 quantifyMethodLocalVarsInfoView headVars constraints view =
   TypeView

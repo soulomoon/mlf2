@@ -93,7 +93,7 @@ import MLF.Frontend.Program.Types
     diagnosticForProgramError,
     emptyTypeBinderSubst,
     filterHeadIdentitiesByNames,
-    freeTypeBinderIdentitiesTypeView,
+    freeTypeBinderIdentitiesTypeViews,
     freeTypeVarsTypeView,
     lookupInstanceMethod,
     lookupMethodParamViewSubst,
@@ -1449,7 +1449,7 @@ lookupRuntimeMethodEvidence context deferred classArgView =
 
 runtimeMethodLocalConstraints :: MethodInfo -> TypeView -> TypeViewSubst -> Either ProgramError [ConstraintInfo]
 runtimeMethodLocalConstraints methodInfo classArgView methodSubst = do
-  headVars <- freeTypeBinderIdentitiesTypeViewOrError classArgView
+  headVars <- freeTypeBinderIdentitiesTypeViewsOrError (NE.singleton classArgView)
   methodLocal <-
     filterM
       (fmap not . constraintDeterminedByTypeBinderIdentities headVars)
@@ -1665,11 +1665,7 @@ constraintDeterminedByTypeBinderIdentities typeVars constraint =
 
 freeTypeBinderIdentitiesTypeViewsOrError :: NE.NonEmpty TypeView -> Either ProgramError (Set.Set TypeBinderIdentity)
 freeTypeBinderIdentitiesTypeViewsOrError views =
-  Set.unions <$> mapM freeTypeBinderIdentitiesTypeViewOrError views
-
-freeTypeBinderIdentitiesTypeViewOrError :: TypeView -> Either ProgramError (Set.Set TypeBinderIdentity)
-freeTypeBinderIdentitiesTypeViewOrError view =
-  case freeTypeBinderIdentitiesTypeView view of
+  case freeTypeBinderIdentitiesTypeViews views of
     Right identities -> Right identities
     Left name ->
       Left $

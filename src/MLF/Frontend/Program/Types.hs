@@ -17,6 +17,7 @@ module MLF.Frontend.Program.Types
     freeTypeVarsTypeView,
     freeTypeVarsTypeViews,
     freeTypeBinderIdentitiesTypeView,
+    freeTypeBinderIdentitiesTypeViews,
     typeViewHeadIdentityForAlias,
     typeViewBinderIdentityForAlias,
     filterHeadIdentitiesByNames,
@@ -1685,6 +1686,10 @@ freeTypeBinderIdentitiesTypeView view =
       case typeViewBinderIdentityForAlias view name of
         Just identity -> Right identity
         Nothing -> Left name
+
+freeTypeBinderIdentitiesTypeViews :: NonEmpty TypeView -> Either String (Set TypeBinderIdentity)
+freeTypeBinderIdentitiesTypeViews views =
+  Set.unions <$> mapM freeTypeBinderIdentitiesTypeView views
 
 typeViewsDisplay :: NonEmpty TypeView -> NonEmpty SrcType
 typeViewsDisplay = fmap typeViewDisplay
