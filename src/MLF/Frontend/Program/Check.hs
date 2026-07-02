@@ -704,6 +704,7 @@ checkModules :: Maybe PackageModuleGraph -> ResolvedSemanticProgramArtifact -> T
 checkModules mbGraph artifact@(ResolvedSemanticProgramArtifact resolvedModules) = do
   ensureDistinctBy ProgramDuplicateModule resolvedSemanticModuleName resolvedModules
   ensureDistinctModuleIdentities "resolved module" resolvedSemanticModuleIdentity resolvedModules
+  mapM_ ensureDistinctResolvedModuleSymbolIdentities resolvedModules
   go (resolvedProgramIdentityGenerator artifact) [] [] resolvedModules
   where
     nodesByModule =
@@ -732,6 +733,7 @@ checkModulesWithTiming timing mbGraph artifact@(ResolvedSemanticProgramArtifact 
       ( evaluate $ do
           ensureDistinctBy ProgramDuplicateModule resolvedSemanticModuleName resolvedModules
           ensureDistinctModuleIdentities "resolved module" resolvedSemanticModuleIdentity resolvedModules
+          mapM_ ensureDistinctResolvedModuleSymbolIdentities resolvedModules
       )
   case distinctResult of
     Left err ->
@@ -4304,9 +4306,46 @@ ensureDistinctBy mkErr project values = ensureDistinctPlain mkErr (map project v
 
 ensureDistinctModuleIdentities :: String -> (a -> SymbolIdentity) -> [a] -> TcM ()
 ensureDistinctModuleIdentities label project =
-  ensureDistinctPlain duplicateModuleIdentityError . map project
+  ensureDistinctSymbolIdentities label . map project
+
+ensureDistinctResolvedModuleSymbolIdentities :: ResolvedSemanticModule -> TcM ()
+ensureDistinctResolvedModuleSymbolIdentities resolvedModule =
+  ensureDistinctSymbolIdentities "resolved symbol" (resolvedSemanticModuleSymbolIdentities resolvedModule)
+
+resolvedSemanticModuleSymbolIdentities :: ResolvedSemanticModule -> [SymbolIdentity]
+resolvedSemanticModuleSymbolIdentities resolvedModule =
+  resolvedSemanticModuleIdentity resolvedModule : concatMap declIdentities (P.moduleDecls syntax)
   where
-    duplicateModuleIdentityError identity =
+    syntax =
+      resolvedSemanticModuleSyntax resolvedModule
+
+    declIdentities decl =
+      case decl of
+        P.DeclClass {} ->
+          []
+        P.DeclInstance {} ->
+          []
+        P.DeclData dataDecl ->
+          resolvedSymbolIdentity (P.dataDeclName dataDecl)
+            : [resolvedSymbolIdentity (P.constructorDeclName constructor) | constructor <- P.dataDeclConstructors dataDecl]
+        P.DeclTypeFamily {} ->
+          []
+        P.DeclDef defDecl ->
+          [resolvedSymbolIdentity (P.defDeclName defDecl)]
+
+ensureDistinctSymbolIdentities :: String -> [SymbolIdentity] -> TcM ()
+ensureDistinctSymbolIdentities label =
+  go Set.empty
+  where
+    go _ [] =
+      pure ()
+    go seen (identity : rest)
+      | identity `Set.member` seen =
+          throwError (duplicateIdentityError identity)
+      | otherwise =
+          go (Set.insert identity seen) rest
+
+    duplicateIdentityError identity =
       ProgramPipelineError ("duplicate " ++ label ++ " identity: " ++ symbolIdentityStableName identity)
 
 ensureDistinctImportAliases :: [P.ImportF p] -> TcM ()

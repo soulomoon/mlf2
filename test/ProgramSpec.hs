@@ -6276,6 +6276,102 @@ spec = do
                         [] ->
                             expectationFailure "expected resolved modules"
 
+        it "rejects duplicate resolved symbol identities before checking local metadata" $ do
+            let boxType =
+                    mkResolvedSymbol
+                        (generatedSymbolIdentity 9401 SymbolType "Main" "Box" Nothing)
+                        "Box"
+                        "Box"
+                        (SymbolLocal "Main")
+                sharedCtorIdentity =
+                    generatedSymbolIdentity
+                        9402
+                        SymbolConstructor
+                        "Main"
+                        "A"
+                        (Just (generatedSymbolOwnerType 9401 "Main" "Box"))
+                ctorA =
+                    mkResolvedSymbol
+                        sharedCtorIdentity
+                        "A"
+                        "A"
+                        (SymbolLocal "Main")
+                ctorB =
+                    mkResolvedSymbol
+                        sharedCtorIdentity
+                        "B"
+                        "B"
+                        (SymbolLocal "Main")
+                mainValue =
+                    mkResolvedSymbol
+                        (generatedSymbolIdentity 9403 SymbolValue "Main" "main" Nothing)
+                        "main"
+                        "main"
+                        (SymbolLocal "Main")
+                resolvedScope =
+                    ResolvedScope
+                        { resolvedScopeValues = Map.fromList [("A", ctorA), ("B", ctorB), ("main", mainValue)]
+                        , resolvedScopeTypes = Map.singleton "Box" boxType
+                        , resolvedScopeClasses = Map.empty
+                        , resolvedScopeModules = Map.empty
+                        }
+                resolvedModule =
+                    ResolvedModule
+                        { resolvedModuleSemantic =
+                            ResolvedSemanticModule
+                                { resolvedSemanticModuleName = "Main"
+                                , resolvedSemanticModuleIdentity = ProgramTypes.moduleSymbolIdentity (UniqueIdentity 9400) "Main"
+                                , resolvedSemanticModuleSyntax =
+                                    Module
+                                        { moduleName = "Main"
+                                        , moduleExports = Nothing
+                                        , moduleImports = []
+                                        , moduleDecls =
+                                            [ DeclData
+                                                DataDecl
+                                                    { dataDeclName = boxType
+                                                    , dataDeclParams = []
+                                                    , dataDeclConstructors =
+                                                        [ ConstructorDecl
+                                                            { constructorDeclName = ctorA
+                                                            , constructorDeclType = RSTBase boxType
+                                                            }
+                                                        , ConstructorDecl
+                                                            { constructorDeclName = ctorB
+                                                            , constructorDeclType = RSTBase boxType
+                                                            }
+                                                        ]
+                                                    , dataDeclDeriving = []
+                                                    }
+                                            , DeclDef
+                                                DefDecl
+                                                    { defDeclName = mainValue
+                                                    , defDeclType = ConstrainedType [] (RSTBase boxType)
+                                                    , defDeclExpr = EVar (ResolvedGlobalValue ctorA)
+                                                    }
+                                            ]
+                                        }
+                                , resolvedSemanticModuleLocalSymbols =
+                                    ResolvedLocalSymbols
+                                        { resolvedLocalValues = Map.fromList [("A", [ctorA]), ("B", [ctorB]), ("main", [mainValue])]
+                                        , resolvedLocalTypes = Map.singleton "Box" [boxType]
+                                        , resolvedLocalClasses = Map.empty
+                                        }
+                                , resolvedSemanticModuleScope = resolvedScope
+                                , resolvedSemanticModuleExports = resolvedScope
+                                }
+                        , resolvedModuleDiagnosticAdapter =
+                            ResolvedModuleDiagnosticAdapter
+                                { resolvedDiagnosticReferences = []
+                                }
+                        }
+            case checkResolvedProgram (ResolvedProgram [resolvedModule]) of
+                Left (ProgramPipelineError message) -> do
+                    message `shouldSatisfy` isInfixOf "duplicate resolved symbol identity"
+                    message `shouldSatisfy` isInfixOf (symbolIdentityStableName sharedCtorIdentity)
+                other ->
+                    expectationFailure ("expected duplicate resolved symbol identity rejection, got " ++ show other)
+
         it "assigns generated identity layer ids to checked instance method values" $ do
             let programText =
                     unlines
