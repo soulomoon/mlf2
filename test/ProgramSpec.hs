@@ -4414,6 +4414,52 @@ spec = do
                 Right _ ->
                     expectationFailure "expected duplicate binding identity rejection"
 
+        it "rejects mismatched deferred obligation identities before checked binding storage" $ do
+            finalizeContext <- requireFinalizeContext (mkElaborateScope Map.empty Map.empty Map.empty [])
+            let keyRef = deferredRefFromIdentity (UniqueIdentity 30) "$deferred"
+                payloadRef = deferredRefFromIdentity (UniqueIdentity 31) "$deferred"
+                bindingIdentity = generatedSymbolIdentity 32 SymbolValue "Main" "main" Nothing
+                dataIdentity = generatedSymbolIdentity 33 SymbolType "Main" "Phantom" Nothing
+                phantomData =
+                    DataInfo
+                        { dataInfoSymbol = dataIdentity
+                        , dataTypeParams = []
+                        , dataConstructors = []
+                        }
+                obligation =
+                    DeferredCase
+                        DeferredCaseCall
+                            { deferredCaseRef = payloadRef
+                            , deferredCaseDataInfo = phantomData
+                            , deferredCaseScrutineeType = STBase "Int"
+                            , deferredCaseResultType = STBase "Int"
+                            , deferredCaseExpectedArgCount = 0
+                            }
+                lowered =
+                    LoweredBinding
+                        { loweredBindingIdentity =
+                            ProgramTypes.loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
+                        , loweredBindingSourceType = STBase "Int"
+                        , loweredBindingSourceTypeView = Nothing
+                        , loweredBindingExpectedType = STBase "Int"
+                        , loweredBindingExpectedTypeView = Nothing
+                        , loweredBindingSurfaceExpr = Surface.EVar "$deferred"
+                        , loweredBindingResolvedLocalIdentities = []
+                        , loweredBindingDeferredObligations = Map.singleton keyRef obligation
+                        , loweredBindingExternalTypeViews =
+                            Map.singleton "$deferred" (ProgramTypes.mkTypeView (STBase "Int") (STBase "Int"))
+                        , loweredBindingEvidenceParamCount = 0
+                        , loweredBindingExportedAsMain = False
+                        }
+            case finalizeBindingWithContext finalizeContext lowered of
+                Left (ProgramPipelineError message) -> do
+                    message `shouldSatisfy` isInfixOf "mismatched deferred obligation identity"
+                    message `shouldSatisfy` isInfixOf "Main__main"
+                Left err ->
+                    expectationFailure ("expected mismatched deferred identity rejection, got " ++ show err)
+                Right _ ->
+                    expectationFailure "expected mismatched deferred identity rejection"
+
         it "does not resolve same-named deferred external bindings by an arbitrary identity" $ do
             finalizeContext <- requireFinalizeContext (mkElaborateScope Map.empty Map.empty Map.empty [])
             let placeholder = "$deferred"

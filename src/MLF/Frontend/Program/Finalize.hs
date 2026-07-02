@@ -216,6 +216,7 @@ import MLF.Types.Identity
     symbolGeneratedIdentities,
     typeBinderGeneratedIdentities,
     typeBinderIdentityStableName,
+    uniqueIdentityStableName,
   )
 import MLF.Util.Timing (TimingConfig(..), defaultTimingConfig, timeProgramOperationIO)
 
@@ -310,6 +311,7 @@ mkFinalizeContext scope = do
 
 mkModuleFinalizeContext :: FinalizeContext -> [LoweredBinding] -> Either ProgramError ModuleFinalizeContext
 mkModuleFinalizeContext context lowereds0 = do
+  mapM_ validateLoweredDeferredObligations lowereds0
   let lowereds = stampLoweredBindingsDeferredIdentities lowereds0
       schemeExternalTypeViews = Map.unions (map loweredBindingExternalTypeViews lowereds)
       schemeExternalTypes = Map.map typeViewDisplay schemeExternalTypeViews
@@ -334,6 +336,9 @@ mkModuleFinalizeContext context lowereds0 = do
       { moduleFinalizeContextBase = context,
         moduleFinalizeContextBindingReads = Map.fromList bindingReads
       }
+  where
+    validateLoweredDeferredObligations lowered =
+      validateDeferredObligationIdentities (loweredBindingName lowered) (loweredBindingDeferredObligations lowered)
 
 mkModuleBindingReadContext ::
   FinalizeContext ->
@@ -427,6 +432,7 @@ finalizeBindingAllowOpaqueWithContext context lowered
 
 finalizeOpaqueUncheckedBindingWithContext :: FinalizeContext -> LoweredBinding -> ElabType -> Either ProgramError CheckedBinding
 finalizeOpaqueUncheckedBindingWithContext context lowered0 placeholderTy = do
+  validateDeferredObligationIdentities (loweredBindingName lowered0) (loweredBindingDeferredObligations lowered0)
   let lowered = stampLoweredBindingDeferredIdentities lowered0
   PipelineElabDetailedResult {pedTerm = term0, pedTypeCheckEnv = tcEnv} <-
     runSurfacePipelineWithContext
@@ -441,6 +447,7 @@ finalizeOpaqueUncheckedBindingWithContext context lowered0 placeholderTy = do
         annotateDeferredEvidenceResolvedVars resolvedTerm (loweredBindingDeferredObligations lowered)
   let sourceTypeView =
         sourceTypeViewForLoweredBinding context lowered
+  validateDeferredObligationIdentities (loweredBindingName lowered) resolvedDeferredObligations
   Right
     CheckedBinding
       { checkedBindingResolvedVar = resolvedVarFromLoweredBinding lowered placeholderTy,
@@ -604,6 +611,7 @@ finalizeBinding scope lowered = do
 
 finalizeBindingWithContext :: FinalizeContext -> LoweredBinding -> Either ProgramError CheckedBinding
 finalizeBindingWithContext context lowered0 = do
+  validateDeferredObligationIdentities (loweredBindingName lowered0) (loweredBindingDeferredObligations lowered0)
   let lowered = stampLoweredBindingDeferredIdentities lowered0
   metadataBinding <- finalizeConstructorBindingFromMetadata context lowered
   case metadataBinding of
@@ -696,25 +704,28 @@ finalizeBindingWithContextWithTiming ::
   LoweredBinding ->
   IO (Either ProgramError CheckedBinding)
 finalizeBindingWithContextWithTiming timing label context forceUnchecked lowered0 = do
-  let lowered = stampLoweredBindingDeferredIdentities lowered0
-  metadataResult <-
-    timeProgramOperationIO timing (label ++ ".constructor_metadata") $
-      evaluate (finalizeConstructorBindingFromMetadata context lowered)
-  case metadataResult of
-    Right (Just checked) -> pure (Right checked)
-    Right Nothing -> do
-      pipelineResult <-
-        timeProgramOperationIO timing (label ++ ".pipeline") $
-          runSurfacePipelineWithContextWithTiming
-            timing
-            (label ++ ".pipeline")
-            context
-            (forceUnchecked || constructorBindingNeedsUnchecked scope lowered)
-            (loweredBindingDeferredObligations lowered)
-            (loweredBindingExternalTypeViews lowered)
-            (loweredBindingSurfaceExpr lowered)
-      finalizePipelineBindingResult timing label context lowered pipelineResult
+  case validateDeferredObligationIdentities (loweredBindingName lowered0) (loweredBindingDeferredObligations lowered0) of
     Left err -> pure (Left err)
+    Right () -> do
+      let lowered = stampLoweredBindingDeferredIdentities lowered0
+      metadataResult <-
+        timeProgramOperationIO timing (label ++ ".constructor_metadata") $
+          evaluate (finalizeConstructorBindingFromMetadata context lowered)
+      case metadataResult of
+        Right (Just checked) -> pure (Right checked)
+        Right Nothing -> do
+          pipelineResult <-
+            timeProgramOperationIO timing (label ++ ".pipeline") $
+              runSurfacePipelineWithContextWithTiming
+                timing
+                (label ++ ".pipeline")
+                context
+                (forceUnchecked || constructorBindingNeedsUnchecked scope lowered)
+                (loweredBindingDeferredObligations lowered)
+                (loweredBindingExternalTypeViews lowered)
+                (loweredBindingSurfaceExpr lowered)
+          finalizePipelineBindingResult timing label context lowered pipelineResult
+        Left err -> pure (Left err)
   where
     scope = finalizeContextScope context
 
@@ -1538,8 +1549,28 @@ finalizeCheckedBindingFromTermWithReadContext context mbCheckContext lowered ter
         _ -> 0
 
 validateDeferredObligationIdentities :: String -> DeferredObligations -> Either ProgramError ()
-validateDeferredObligationIdentities _bindingName _obligations =
-  Right ()
+validateDeferredObligationIdentities bindingName obligations =
+  mapM_ validateEntry (Map.toList obligations)
+  where
+    validateEntry (expectedRef, obligation)
+      | expectedRef == actualRef =
+          Right ()
+      | otherwise =
+          Left
+            ( ProgramPipelineError
+                ( "checked binding `"
+                    ++ bindingName
+                    ++ "` has mismatched deferred obligation identity: map key "
+                    ++ deferredRefLabel expectedRef
+                    ++ ", payload "
+                    ++ deferredRefLabel actualRef
+                )
+            )
+      where
+        actualRef = deferredProgramObligationRef obligation
+
+    deferredRefLabel ref =
+      deferredRefName ref ++ "#" ++ uniqueIdentityStableName (deferredRefIdentity ref)
 
 annotateResolvedTermVars :: FinalizeContext -> LoweredBinding -> XmlfTerm -> XmlfTerm
 annotateResolvedTermVars _context lowered term0 =
