@@ -6231,6 +6231,51 @@ spec = do
                             ]
                     map symbolUniqueIdentity importIdentity `shouldBe` map symbolUniqueIdentity libIdentity
 
+        it "rejects duplicate resolved module identities before checking imports" $ do
+            let programText =
+                    unlines
+                        [ "module A export (value) {"
+                        , "  def value : Int = 1;"
+                        , "}"
+                        , "module B export (value) {"
+                        , "  def value : Int = 2;"
+                        , "}"
+                        , "module Main export (main) {"
+                        , "  def main : Bool = true;"
+                        , "}"
+                        ]
+                replaceModuleIdentity target replacement resolvedModule
+                    | resolvedModuleName resolvedModule == target =
+                        resolvedModule
+                            { resolvedModuleSemantic =
+                                (resolvedModuleSemantic resolvedModule)
+                                    { resolvedSemanticModuleIdentity = replacement
+                                    }
+                            }
+                replaceModuleIdentity _ _ resolvedModule = resolvedModule
+            program <- requireParsed programText
+            case resolveProgram program of
+                Left err -> expectationFailure ("expected resolve success, got " ++ show err)
+                Right resolved ->
+                    case resolvedProgramModules resolved of
+                        firstModule : _ -> do
+                            let duplicateIdentity = ProgramTypes.resolvedModuleIdentity firstModule
+                                poisoned =
+                                    resolved
+                                        { resolvedProgramModules =
+                                            map
+                                                (replaceModuleIdentity "B" duplicateIdentity)
+                                                (resolvedProgramModules resolved)
+                                        }
+                            case checkResolvedProgram poisoned of
+                                Left (ProgramPipelineError message) -> do
+                                    message `shouldSatisfy` isInfixOf "duplicate resolved module identity"
+                                    message `shouldSatisfy` isInfixOf (symbolIdentityStableName duplicateIdentity)
+                                other ->
+                                    expectationFailure ("expected duplicate resolved module identity rejection, got " ++ show other)
+                        [] ->
+                            expectationFailure "expected resolved modules"
+
         it "assigns generated identity layer ids to checked instance method values" $ do
             let programText =
                     unlines

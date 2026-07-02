@@ -703,6 +703,7 @@ liftEitherWithInterface =
 checkModules :: Maybe PackageModuleGraph -> ResolvedSemanticProgramArtifact -> TcM [CheckedModule]
 checkModules mbGraph artifact@(ResolvedSemanticProgramArtifact resolvedModules) = do
   ensureDistinctBy ProgramDuplicateModule resolvedSemanticModuleName resolvedModules
+  ensureDistinctModuleIdentities "resolved module" resolvedSemanticModuleIdentity resolvedModules
   go (resolvedProgramIdentityGenerator artifact) [] [] resolvedModules
   where
     nodesByModule =
@@ -728,7 +729,10 @@ checkModulesWithTiming timing mbGraph artifact@(ResolvedSemanticProgramArtifact 
     timeProgramDetailIO
       timing
       "program.check.modules.distinct"
-      (evaluate (ensureDistinctBy ProgramDuplicateModule resolvedSemanticModuleName resolvedModules))
+      ( evaluate $ do
+          ensureDistinctBy ProgramDuplicateModule resolvedSemanticModuleName resolvedModules
+          ensureDistinctModuleIdentities "resolved module" resolvedSemanticModuleIdentity resolvedModules
+      )
   case distinctResult of
     Left err ->
       pure (Left err)
@@ -851,12 +855,19 @@ moduleInterfaceNodeForResolved nodesByModule mbGraph resolvedModule =
   where
     moduleName0 = resolvedSemanticModuleName resolvedModule
 
+priorInterfaceMaps :: [ModuleInterface] -> TcM (Map SymbolIdentity ModuleExports, Map SymbolIdentity (Map SymbolIdentity DataInfo))
+priorInterfaceMaps priorInterfaces = do
+  ensureDistinctModuleIdentities "prior interface module" moduleInterfaceIdentity priorInterfaces
+  pure
+    ( Map.fromList [(moduleInterfaceIdentity interface, moduleInterfaceExports interface) | interface <- priorInterfaces],
+      Map.fromList [(moduleInterfaceIdentity interface, moduleInterfaceDataByIdentity interface) | interface <- priorInterfaces]
+    )
+
 checkModule :: IdentityGenerator -> ResolvedSemanticModule -> [ModuleInterface] -> TcM (CheckedModule, IdentityGenerator)
 checkModule generator0 resolvedModule priorInterfaces = do
+  (priorExportsByIdentity, priorData) <- priorInterfaceMaps priorInterfaces
   let resolvedSyntax = resolvedSemanticModuleSyntax resolvedModule
       moduleName0 = resolvedSemanticModuleName resolvedModule
-      priorExportsByIdentity = Map.fromList [(moduleInterfaceIdentity interface, moduleInterfaceExports interface) | interface <- priorInterfaces]
-      priorData = Map.fromList [(moduleInterfaceIdentity interface, moduleInterfaceDataByIdentity interface) | interface <- priorInterfaces]
       priorInstances = concatMap moduleInterfaceInstances priorInterfaces
       unqualifiedClassIdentities = importedUnqualifiedClassIdentities priorExportsByIdentity (P.moduleImports resolvedSyntax)
       visibleImportedInstances =
@@ -934,22 +945,22 @@ checkModuleWithTiming :: TimingConfig -> IdentityGenerator -> ResolvedSemanticMo
 checkModuleWithTiming timing generator0 resolvedModule priorInterfaces = do
   let resolvedSyntax = resolvedSemanticModuleSyntax resolvedModule
       moduleName0 = resolvedSemanticModuleName resolvedModule
-      priorExportsByIdentity = Map.fromList [(moduleInterfaceIdentity interface, moduleInterfaceExports interface) | interface <- priorInterfaces]
-      priorData = Map.fromList [(moduleInterfaceIdentity interface, moduleInterfaceDataByIdentity interface) | interface <- priorInterfaces]
       priorInstances = concatMap moduleInterfaceInstances priorInterfaces
-      unqualifiedClassIdentities = importedUnqualifiedClassIdentities priorExportsByIdentity (P.moduleImports resolvedSyntax)
-      visibleImportedInstances =
-        visibleInstancesForImports priorExportsByIdentity priorData priorInstances unqualifiedClassIdentities (P.moduleImports resolvedSyntax)
       timePhase :: String -> TcM a -> IO (TcM a)
       timePhase = timeCheckModulePhase timing moduleName0
   preflightResult <-
     timePhase "preflight" $ do
+      priorMaps <- priorInterfaceMaps priorInterfaces
       ensureDistinctImportAliases (P.moduleImports resolvedSyntax)
       rejectUnsupportedTypeFamilies resolvedSyntax
       rejectUnsupportedGeneralizedClassFeaturesModule P.refDisplayName resolvedSrcTypeToSrcType resolvedSyntax
+      pure priorMaps
   case preflightResult of
     Left err -> pure (Left err)
-    Right () -> do
+    Right (priorExportsByIdentity, priorData) -> do
+      let unqualifiedClassIdentities = importedUnqualifiedClassIdentities priorExportsByIdentity (P.moduleImports resolvedSyntax)
+          visibleImportedInstances =
+            visibleInstancesForImports priorExportsByIdentity priorData priorInstances unqualifiedClassIdentities (P.moduleImports resolvedSyntax)
       importScopeResult <- timePhase "import-scope" (buildImportScopeResolved priorExportsByIdentity (P.moduleImports resolvedSyntax))
       case importScopeResult of
         Left err -> pure (Left err)
@@ -4290,6 +4301,13 @@ qualify moduleName0 name = moduleName0 ++ "__" ++ name
 
 ensureDistinctBy :: (Eq a) => (a -> ProgramError) -> (b -> a) -> [b] -> TcM ()
 ensureDistinctBy mkErr project values = ensureDistinctPlain mkErr (map project values)
+
+ensureDistinctModuleIdentities :: String -> (a -> SymbolIdentity) -> [a] -> TcM ()
+ensureDistinctModuleIdentities label project =
+  ensureDistinctPlain duplicateModuleIdentityError . map project
+  where
+    duplicateModuleIdentityError identity =
+      ProgramPipelineError ("duplicate " ++ label ++ " identity: " ++ symbolIdentityStableName identity)
 
 ensureDistinctImportAliases :: [P.ImportF p] -> TcM ()
 ensureDistinctImportAliases imports0 =
