@@ -102,6 +102,7 @@ import MLF.Elab.TypeCheck
 import MLF.Elab.Types
   ( XmlfTerm (..),
     ResolvedVar (..),
+    ResolvedTermIdentityKey,
     ElabScheme,
     ElabType,
     BoundType,
@@ -123,10 +124,12 @@ import MLF.Elab.Types
     localResolvedVarFromRef,
     mapResolvedVarType,
     freshenResolvedLocalVar,
+    idDetailsIdentityKey,
     renameResolvedLocalVar,
     renameTypeBinderRef,
     resolvedVarBoundBy,
     resolvedVarConstructorRef,
+    resolvedVarIdentityKey,
     resolvedVarIsLocal,
     resolvedVarReferenceName,
     resolvedVarSameIdentity,
@@ -194,7 +197,7 @@ import MLF.Frontend.Program.Types
 import MLF.Frontend.Symbol (symbolIdentityAliasMap, symbolIdentityAliasNames, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit, SrcBound (..), SrcTy (..), SrcType, TypeParam)
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
-import MLF.Types.Identity (DeferredRef, EnvRef, IdDetails (..), IdentityGenerator, LocalRef, StructuralTypeBinderRole (..), UniqueIdentity (..), deferredRefIdentity, deferredRefName, freshDeferredRef, freshIdentity, freshLocalRef, idDetailsGeneratedIdentities, identityGeneratorAfter, primitiveRefSymbol, symbolGeneratedIdentities, typeBinderGeneratedIdentities, typeBinderIdentityFromStructural, typeBinderIdentityGeneratedUnique, typeBinderIdentityNode, typeBinderIdentityStructural)
+import MLF.Types.Identity (DeferredRef, IdDetails (..), IdentityGenerator, LocalRef, StructuralTypeBinderRole (..), UniqueIdentity (..), deferredRefIdentity, deferredRefName, freshDeferredRef, freshIdentity, freshLocalRef, idDetailsGeneratedIdentities, identityGeneratorAfter, primitiveRefSymbol, symbolGeneratedIdentities, typeBinderGeneratedIdentities, typeBinderIdentityFromStructural, typeBinderIdentityGeneratedUnique, typeBinderIdentityNode, typeBinderIdentityStructural)
 import MLF.Util.Names (freshNameLike)
 
 data BackendConversionError
@@ -240,32 +243,6 @@ data ConvertContext = ConvertContext
     ccCurrentModuleIdentity :: Maybe SymbolIdentity,
     ccCurrentBindingName :: String
   }
-
-data ResolvedTermIdentityKey
-  = ResolvedTermLocalKey LocalRef
-  | ResolvedTermEnvKey EnvRef
-  | ResolvedTermTopLevelKey SymbolIdentity
-  | ResolvedTermConstructorKey SymbolIdentity
-  | ResolvedTermMethodKey SymbolIdentity
-  | ResolvedTermPrimitiveKey SymbolIdentity
-  | ResolvedTermDeferredKey DeferredRef
-  deriving (Eq, Ord, Show)
-
-idDetailsIdentityKey :: IdDetails -> ResolvedTermIdentityKey
-idDetailsIdentityKey =
-  \case
-    LocalId ref -> ResolvedTermLocalKey ref
-    EvidenceId ref -> ResolvedTermLocalKey ref
-    EnvId ref -> ResolvedTermEnvKey ref
-    TopLevelId symbol -> ResolvedTermTopLevelKey symbol
-    ConstructorId ref -> ResolvedTermConstructorKey (constructorRefSymbol ref)
-    MethodId symbol -> ResolvedTermMethodKey symbol
-    PrimitiveId ref -> ResolvedTermPrimitiveKey (primitiveRefSymbol ref)
-    DeferredId ref -> ResolvedTermDeferredKey ref
-
-resolvedVarIdentityKey :: ResolvedVar -> ResolvedTermIdentityKey
-resolvedVarIdentityKey =
-  idDetailsIdentityKey . resolvedVarDetails
 
 data ConstructorMeta = ConstructorMeta
   { cmInfo :: ConstructorInfo,

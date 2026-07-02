@@ -85,6 +85,9 @@ module MLF.Types.Elab (
     schemeInfoFromRefSubst,
     schemeInfoBinderRefSubst,
     ResolvedVar(..),
+    ResolvedTermIdentityKey,
+    idDetailsIdentityKey,
+    resolvedVarIdentityKey,
     deferredResolvedVarFromRef,
     deferredResolvedVarRef,
     localResolvedVarFromRef,
@@ -171,6 +174,7 @@ import qualified MLF.Primitive.Identity as PrimitiveIdentity
 import MLF.Types.Identity
     ( ConstructorRef
     , DeferredRef
+    , EnvRef
     , IdDetails(..)
     , IdentityGenerator
     , LocalRef
@@ -185,11 +189,13 @@ import MLF.Types.Identity
     , idDetailsRenameLocal
     , idDetailsReferenceName
     , idDetailsSameIdentity
+    , constructorRefSymbol
     , freshIdentity
     , freshenLocalRef
     , identityGeneratorAfter
     , deferredRefName
     , localRefName
+    , primitiveRefSymbol
     , renameDeferredRef
     , symbolGeneratedIdentities
     , typeBinderGeneratedIdentities
@@ -590,6 +596,32 @@ data ResolvedVar = ResolvedVar
       resolvedVarDetails :: IdDetails
     }
     deriving (Show)
+
+data ResolvedTermIdentityKey
+    = ResolvedTermLocalKey LocalRef
+    | ResolvedTermEnvKey EnvRef
+    | ResolvedTermTopLevelKey SymbolIdentity
+    | ResolvedTermConstructorKey SymbolIdentity
+    | ResolvedTermMethodKey SymbolIdentity
+    | ResolvedTermPrimitiveKey SymbolIdentity
+    | ResolvedTermDeferredKey DeferredRef
+    deriving (Eq, Ord, Show)
+
+idDetailsIdentityKey :: IdDetails -> ResolvedTermIdentityKey
+idDetailsIdentityKey details =
+    case details of
+        LocalId ref -> ResolvedTermLocalKey ref
+        EvidenceId ref -> ResolvedTermLocalKey ref
+        EnvId ref -> ResolvedTermEnvKey ref
+        TopLevelId symbol -> ResolvedTermTopLevelKey symbol
+        ConstructorId ref -> ResolvedTermConstructorKey (constructorRefSymbol ref)
+        MethodId symbol -> ResolvedTermMethodKey symbol
+        PrimitiveId ref -> ResolvedTermPrimitiveKey (primitiveRefSymbol ref)
+        DeferredId ref -> ResolvedTermDeferredKey ref
+
+resolvedVarIdentityKey :: ResolvedVar -> ResolvedTermIdentityKey
+resolvedVarIdentityKey =
+    idDetailsIdentityKey . resolvedVarDetails
 
 instance Eq ResolvedVar where
     left == right =

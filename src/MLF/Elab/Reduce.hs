@@ -244,12 +244,13 @@ freeResolvedTermReferenceNames :: XmlfTerm -> Set.Set String
 freeResolvedTermReferenceNames =
   Set.fromList . map resolvedVarReferenceName . freeResolvedTermVars
 
+freeResolvedTermIdentityKeys :: XmlfTerm -> Set.Set ResolvedTermIdentityKey
+freeResolvedTermIdentityKeys =
+  Set.fromList . map resolvedVarIdentityKey . freeResolvedTermVars
+
 termMentionsFreeResolvedVar :: ResolvedVar -> XmlfTerm -> Bool
-termMentionsFreeResolvedVar expected =
-  any matches . freeResolvedTermVars
-  where
-    matches resolved =
-      resolvedVarSameIdentity expected resolved
+termMentionsFreeResolvedVar expected term =
+  Set.member (resolvedVarIdentityKey expected) (freeResolvedTermIdentityKeys term)
 
 valueHasLeadingTyAbs :: XmlfTerm -> Bool
 valueHasLeadingTyAbs term = case term of
@@ -343,7 +344,7 @@ substTermVarWithKey :: TermVarKey -> XmlfTerm -> XmlfTerm -> XmlfTerm
 substTermVarWithKey key s = goSub
   where
     x = termVarKeyName key
-    freeSVars = freeResolvedTermVars s
+    freeSVarKeys = freeResolvedTermIdentityKeys s
     replacementFreeNames = freeResolvedTermReferenceNames s
     termVarKeyName target =
       case target of
@@ -361,7 +362,7 @@ substTermVarWithKey key s = goSub
           ELitF l -> ELit l
           ELamF resolved body
             | resolvedMatches key resolved -> ELam resolved (fst body)
-            | any (resolvedVarSameIdentity resolved) freeSVars ->
+            | Set.member (resolvedVarIdentityKey resolved) freeSVarKeys ->
                 let used = Set.unions [replacementFreeNames, freeResolvedTermReferenceNames (fst body), Set.singleton x]
                     v' = freshTermNameFrom binderName used
                     (resolved', _) = freshenResolvedLocalVar v' (identityGeneratorAfterTerm (EApp s (fst body))) resolved
@@ -373,7 +374,7 @@ substTermVarWithKey key s = goSub
           EAppF f a -> EApp (snd f) (snd a)
           ELetF resolved sch rhs body
             | resolvedMatches key resolved -> ELet resolved sch (snd rhs) (fst body)
-            | any (resolvedVarSameIdentity resolved) freeSVars ->
+            | Set.member (resolvedVarIdentityKey resolved) freeSVarKeys ->
                 let used = Set.unions [replacementFreeNames, freeResolvedTermReferenceNames (fst body), Set.singleton x]
                     v' = freshTermNameFrom binderName used
                     (resolved', _) = freshenResolvedLocalVar v' (identityGeneratorAfterTerm (EApp s (ELet resolved sch (fst rhs) (fst body)))) resolved

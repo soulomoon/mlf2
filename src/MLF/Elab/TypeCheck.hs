@@ -32,13 +32,7 @@ import qualified MLF.Frontend.Program.Builtins as Builtins
 import MLF.Frontend.Symbol (SymbolIdentity, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit (..))
 import MLF.Types.Identity
-  ( constructorRefSymbol,
-    DeferredRef,
-    EnvRef,
-    IdDetails (..),
-    LocalRef,
-    primitiveRefSymbol,
-    StructuralTypeBinderRole (..),
+  ( StructuralTypeBinderRole (..),
     typeBinderIdentityStructural,
   )
 import MLF.Reify.TypeOps
@@ -63,18 +57,8 @@ data TypeCheckEnvSummary = TypeCheckEnvSummary
     tcesTypeFreeVars :: FreeVarCounts
   }
 
-newtype ResolvedTermEnv = ResolvedTermEnv (Map.Map ResolvedTermKey (ResolvedVar, ElabType))
+newtype ResolvedTermEnv = ResolvedTermEnv (Map.Map ResolvedTermIdentityKey (ResolvedVar, ElabType))
   deriving (Eq, Show)
-
-data ResolvedTermKey
-  = ResolvedLocalKey LocalRef
-  | ResolvedEnvKey EnvRef
-  | ResolvedTopLevelKey SymbolIdentity
-  | ResolvedConstructorKey SymbolIdentity
-  | ResolvedMethodKey SymbolIdentity
-  | ResolvedPrimitiveKey SymbolIdentity
-  | ResolvedDeferredKey DeferredRef
-  deriving (Eq, Ord, Show)
 
 emptyEnv :: Env
 emptyEnv = mkTypeCheckEnvWithResolvedTerms [] Map.empty
@@ -117,7 +101,7 @@ restrictResolvedTermEnv allowed (ResolvedTermEnv resolvedEnv) =
   ResolvedTermEnv (Map.restrictKeys resolvedEnv allowedKeys)
   where
     allowedKeys =
-      Set.fromList [key | Just key <- map resolvedTermKey allowed]
+      Set.fromList (map resolvedVarIdentityKey allowed)
 
 insertTypeEnvBinding :: TypeBinderRef -> ElabType -> Map.Map TypeBinderRef ElabType -> Map.Map TypeBinderRef ElabType
 insertTypeEnvBinding ref ty =
@@ -474,7 +458,7 @@ inlineTypeEnvBounds env = go []
 
 lookupResolvedTermEnvEntry :: ResolvedTermEnv -> ResolvedVar -> Maybe (ResolvedVar, ElabType)
 lookupResolvedTermEnvEntry (ResolvedTermEnv resolvedEnv) resolved =
-  resolvedTermKey resolved >>= (`Map.lookup` resolvedEnv)
+  Map.lookup (resolvedVarIdentityKey resolved) resolvedEnv
 
 lookupResolvedTermEnv :: ResolvedTermEnv -> ResolvedVar -> Either TypeCheckError ElabType
 lookupResolvedTermEnv resolvedEnv resolved =
@@ -495,9 +479,7 @@ lookupResolvedTermEnv resolvedEnv resolved =
 
 insertResolvedTermEnv :: ResolvedVar -> ElabType -> ResolvedTermEnv -> ResolvedTermEnv
 insertResolvedTermEnv resolved ty (ResolvedTermEnv resolvedEnv) =
-  case resolvedTermKey resolved of
-    Just key -> ResolvedTermEnv (Map.insert key (resolved, ty) resolvedEnv)
-    Nothing -> ResolvedTermEnv resolvedEnv
+  ResolvedTermEnv (Map.insert (resolvedVarIdentityKey resolved) (resolved, ty) resolvedEnv)
 
 emptyResolvedTermEnv :: ResolvedTermEnv
 emptyResolvedTermEnv = ResolvedTermEnv Map.empty
@@ -513,18 +495,6 @@ overlayResolvedTermEnv (ResolvedTermEnv preferred) (ResolvedTermEnv fallback) =
 resolvedTermEnvEntries :: ResolvedTermEnv -> [(ResolvedVar, ElabType)]
 resolvedTermEnvEntries (ResolvedTermEnv resolvedEnv) =
   Map.elems resolvedEnv
-
-resolvedTermKey :: ResolvedVar -> Maybe ResolvedTermKey
-resolvedTermKey resolved =
-  case resolvedVarDetails resolved of
-    LocalId ref -> Just (ResolvedLocalKey ref)
-    EvidenceId ref -> Just (ResolvedLocalKey ref)
-    EnvId ref -> Just (ResolvedEnvKey ref)
-    TopLevelId symbol -> Just (ResolvedTopLevelKey symbol)
-    ConstructorId ref -> Just (ResolvedConstructorKey (constructorRefSymbol ref))
-    MethodId symbol -> Just (ResolvedMethodKey symbol)
-    PrimitiveId ref -> Just (ResolvedPrimitiveKey (primitiveRefSymbol ref))
-    DeferredId ref -> Just (ResolvedDeferredKey ref)
 
 specializeFlexibleArgumentResult :: Env -> ElabType -> ElabType -> ElabType -> Maybe ElabType
 specializeFlexibleArgumentResult env expected actual result =
