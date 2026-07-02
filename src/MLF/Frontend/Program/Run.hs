@@ -110,6 +110,7 @@ import MLF.Frontend.Program.Types
     splitForalls,
     typeBinderAliasIdentityMap,
     typeHeadNamesSrcType,
+    typeViewVarPairs,
     typeViewBinderIdentityForAlias,
     typeViewHeadPairs,
     typeViewHeadIdentityForAlias,
@@ -958,7 +959,7 @@ runtimeConstructorBinders context ctor
       Map.toList (typeViewBinderIdentities (ctorTypeView ctor))
     pairedViewBinders =
       [ (identityName, identity)
-      | (identityName, _) <- Map.toList (typeViewRuntimeVarPairs (ctorTypeView ctor)),
+      | (identityName, _) <- Map.toList (typeViewVarPairs (ctorTypeView ctor)),
         Just identity <- [typeViewBinderIdentityForAlias ctorView identityName]
       ]
     ctorView =
@@ -1030,52 +1031,6 @@ freeTypeVarsTypeViewDisplayAndIdentity :: TypeView -> Set.Set String
 freeTypeVarsTypeViewDisplayAndIdentity view =
   freeTypeVarsRuntimeSrcType (typeViewDisplay view)
     <> freeTypeVarsRuntimeSrcType (typeViewIdentity view)
-
-typeViewRuntimeVarPairs :: TypeView -> Map.Map String String
-typeViewRuntimeVarPairs view =
-  srcTypeRuntimeVarPairs (typeViewDisplay view) (typeViewIdentity view)
-
-srcTypeRuntimeVarPairs :: SrcType -> SrcType -> Map.Map String String
-srcTypeRuntimeVarPairs =
-  go Set.empty Set.empty
-  where
-    go displayBound identityBound display identityTy =
-      case (display, identityTy) of
-        (STVar displayName, STVar identityName)
-          | identityName `Set.notMember` identityBound ->
-              Map.singleton identityName displayName
-        (STArrow displayDom displayCod, STArrow identityDom identityCod) ->
-          go displayBound identityBound displayDom identityDom
-            `Map.union` go displayBound identityBound displayCod identityCod
-        (STCon _ displayArgs, STCon _ identityArgs) ->
-          pairsFromArgs displayBound identityBound displayArgs identityArgs
-        (STVarApp displayName displayArgs, STVarApp identityName identityArgs) ->
-          let headPair =
-                if identityName `Set.member` identityBound
-                  then Map.empty
-                  else Map.singleton identityName displayName
-           in headPair `Map.union` pairsFromArgs displayBound identityBound displayArgs identityArgs
-        (STForall displayName displayMb displayBody, STForall identityName identityMb identityBody) ->
-          boundPairs displayBound identityBound displayMb identityMb
-            `Map.union` go
-              (Set.insert displayName displayBound)
-              (Set.insert identityName identityBound)
-              displayBody
-              identityBody
-        (STMu displayName displayBody, STMu identityName identityBody) ->
-          go (Set.insert displayName displayBound) (Set.insert identityName identityBound) displayBody identityBody
-        _ -> Map.empty
-
-    boundPairs displayBound identityBound displayMb identityMb =
-      case (displayMb, identityMb) of
-        (Just (SrcBound displayBoundTy), Just (SrcBound identityBoundTy)) ->
-          go displayBound identityBound displayBoundTy identityBoundTy
-        _ -> Map.empty
-
-    pairsFromArgs displayBound identityBound displayArgs identityArgs =
-      Map.unionsWith
-        const
-        (zipWith (go displayBound identityBound) (NE.toList displayArgs) (NE.toList identityArgs))
 
 dropSourceArrows :: Int -> SrcType -> SrcType
 dropSourceArrows count ty
@@ -2950,7 +2905,7 @@ substDataParamView sourceView subst view =
           Just displayName <- [Map.lookup identityName sourceBinderPairs]
         ]
     sourceBinderPairs =
-      typeViewRuntimeVarPairs sourceView
+      typeViewVarPairs sourceView
 
 displayTypeFromRuntimeHeadPairs :: Map.Map String String -> SrcType -> SrcType
 displayTypeFromRuntimeHeadPairs pairs =
