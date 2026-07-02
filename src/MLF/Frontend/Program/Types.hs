@@ -2336,9 +2336,9 @@ mkExportedTypeInfo dataInfo constructors =
   ExportedTypeInfo
     { exportedTypeData = dataInfo,
       exportedTypeConstructorsByIdentity =
-        Map.fromList [(ctorInfoSymbol ctorInfo, ctorInfo) | (_, ctorInfo) <- constructors],
+        uniqueInfoEntriesByIdentity [(ctorInfoSymbol ctorInfo, ctorInfo) | (_, ctorInfo) <- constructors],
       exportedTypeConstructorDisplaysByIdentity =
-        Map.fromList [(ctorInfoSymbol ctorInfo, displayName) | (displayName, ctorInfo) <- constructors]
+        uniqueDisplayEntriesByIdentity [(ctorInfoSymbol ctorInfo, displayName) | (displayName, ctorInfo) <- constructors]
     }
 
 exportedTypeConstructorsForDisplay :: ExportedTypeInfo -> Map String ConstructorInfo
@@ -2417,6 +2417,13 @@ uniqueInfoEntriesByIdentity entries =
 
 uniqueDisplayByIdentity :: (a -> SymbolIdentity) -> Map String a -> Map SymbolIdentity String
 uniqueDisplayByIdentity identityFor values =
+  uniqueDisplayEntriesByIdentity
+    [ (identityFor info, displayName)
+    | (displayName, info) <- Map.toList values
+    ]
+
+uniqueDisplayEntriesByIdentity :: [(SymbolIdentity, String)] -> Map SymbolIdentity String
+uniqueDisplayEntriesByIdentity entries =
   Map.fromList
     [ (identity, displayName)
     | (identity, [displayName]) <- Map.toList displayNamesByIdentity
@@ -2425,9 +2432,7 @@ uniqueDisplayByIdentity identityFor values =
     displayNamesByIdentity =
       Map.fromListWith
         (++)
-        [ (identityFor info, [displayName])
-        | (displayName, info) <- Map.toList values
-        ]
+        [(identity, [displayName]) | (identity, displayName) <- entries]
 
 displayMap :: Map SymbolIdentity a -> Map SymbolIdentity String -> Map String a
 displayMap values displays =

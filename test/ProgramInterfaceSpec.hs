@@ -46,8 +46,10 @@ import MLF.Frontend.Program.Types
     , ctorName
     , dataInfoSymbolIdentity
     , exportedClassesForDisplay
+    , exportedTypeConstructorsForDisplay
     , exportedTypesForDisplay
     , exportedValuesForDisplay
+    , mkExportedTypeInfo
     , mkTypeView
     , moduleExportsFromMaps
     , valueInfoIdentityName
@@ -373,6 +375,29 @@ spec = do
                     Map.lookup valueIdentity (exportedValuesByIdentity ambiguousExports) `shouldBe` Nothing
                     Map.lookup valueIdentity (exportedValueDisplaysByIdentity ambiguousExports) `shouldBe` Nothing
                     exportedValuesForDisplay ambiguousExports `shouldBe` Map.empty
+
+        it "does not choose an arbitrary exported constructor payload when one constructor identity has conflicting metadata" $ do
+            (_graph, _checked, packageInterface) <- requireCheckedPackageInterface constructorInterfacePackage
+            let libId = PackageModuleId testPackageId "Lib"
+            libInterface <- requireInterface libId packageInterface
+            case [ (dataInfo, firstCtor, secondCtor)
+                 | dataInfo <- Map.elems (moduleInterfaceDataByIdentity libInterface)
+                 , firstCtor : secondCtor : _ <- [dataConstructors dataInfo]
+                 ] of
+                [] ->
+                    expectationFailure "expected interface data with at least two constructors"
+                (dataInfo, firstCtor, secondCtor) : _ -> do
+                    let constructorIdentity = ctorInfoSymbol firstCtor
+                        conflictingCtor = secondCtor {ctorInfoSymbol = constructorIdentity}
+                        ambiguousTypeInfo =
+                            mkExportedTypeInfo
+                                dataInfo
+                                [ ("aliasLeft", firstCtor)
+                                , ("aliasRight", conflictingCtor)
+                                ]
+                    Map.lookup constructorIdentity (exportedTypeConstructorsByIdentity ambiguousTypeInfo) `shouldBe` Nothing
+                    Map.lookup constructorIdentity (exportedTypeConstructorDisplaysByIdentity ambiguousTypeInfo) `shouldBe` Nothing
+                    exportedTypeConstructorsForDisplay ambiguousTypeInfo `shouldBe` Map.empty
 
 interfacePackage :: ProgramPackage
 interfacePackage =
