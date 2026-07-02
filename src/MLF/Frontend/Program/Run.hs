@@ -231,7 +231,7 @@ runCheckedPureMain context checked = do
   let normalizedTerm = normalizeProgramTerm (programMainTerm checked)
   if termMentionsRuntimePurePrimitive normalizedTerm
     then runtimeValueToValue <$> mainRuntimeValue context checked
-    else pure (toValueWithProgram checked normalizedTerm)
+    else pure (toValueWithProgram context checked normalizedTerm)
 
 runCheckedProgramOutput :: CheckedProgram -> Either ProgramError ProgramRunResult
 runCheckedProgramOutput checked = do
@@ -349,7 +349,7 @@ preludeUnitTypeView context = do
 preludeUnitDataInfo :: RuntimeContext -> Maybe DataInfo
 preludeUnitDataInfo context = do
   ctor <- lookupPreludeUnitConstructor context
-  Map.lookup (ctorOwningTypeIdentity ctor) (elaborateScopeDataTypesByIdentity (runtimeElaborateScope context))
+  Map.lookup (ctorOwningTypeIdentity ctor) (runtimeDataByIdentity context)
 
 unsupportedIOMainError :: SrcType -> ProgramError
 unsupportedIOMainError ty =
@@ -381,6 +381,8 @@ rejectOpaqueDependencies checked =
 
 data RuntimeContext = RuntimeContext
   { runtimeBindingsByIdentity :: Map.Map SymbolIdentity CheckedBinding,
+    runtimeDataByIdentity :: Map.Map SymbolIdentity DataInfo,
+    runtimeDataInfos :: [DataInfo],
     runtimeConstructorsByIdentity :: Map.Map SymbolIdentity ConstructorInfo,
     runtimePreludeConstructorsByKey :: Map.Map PreludeConstructorKey ConstructorInfo,
     runtimePreludeBindingsByKey :: Map.Map PreludeBindingKey CheckedBinding,
@@ -551,6 +553,7 @@ mainRuntimeValue context checked = do
 
 mkRuntimeContext :: CheckedProgram -> Either ProgramError RuntimeContext
 mkRuntimeContext checked = do
+  let dataInfos = allDataInfos checked
   _modulesByIdentity <-
     uniqueRuntimeInfoByIdentity
       "module"
@@ -562,14 +565,14 @@ mkRuntimeContext checked = do
       | binding <- allCheckedBindings checked,
         Just symbol <- [resolvedVarBindingSymbolIdentity (checkedBindingResolvedVar binding)]
       ]
-  _dataByIdentity <-
+  dataByIdentity <-
     uniqueRuntimeInfoByIdentity
       "data"
-      [(dataInfoSymbol dataInfo, dataInfo) | dataInfo <- allDataInfos checked]
+      [(dataInfoSymbol dataInfo, dataInfo) | dataInfo <- dataInfos]
   constructorsByIdentity <-
     uniqueRuntimeInfoByIdentity
       "constructor"
-      [(ctorInfoSymbol ctor, ctor) | dataInfo <- allDataInfos checked, ctor <- dataConstructors dataInfo]
+      [(ctorInfoSymbol ctor, ctor) | dataInfo <- dataInfos, ctor <- dataConstructors dataInfo]
   preludeConstructorsByKey <-
     uniqueRuntimeInfoByKey
       "Prelude constructor key"
@@ -594,6 +597,8 @@ mkRuntimeContext checked = do
   Right
     RuntimeContext
       { runtimeBindingsByIdentity = bindingsByIdentity,
+        runtimeDataByIdentity = dataByIdentity,
+        runtimeDataInfos = dataInfos,
         runtimeConstructorsByIdentity = constructorsByIdentity,
         runtimePreludeConstructorsByKey = preludeConstructorsByKey,
         runtimePreludeBindingsByKey = preludeBindingsByKey,
@@ -2662,22 +2667,22 @@ typeBinderRefOccursInType :: X.TypeBinderRef -> ElabType -> Bool
 typeBinderRefOccursInType ref ty =
   any (X.typeBinderRefsSameIdentity ref) (freeTypeVarRefsType ty)
 
-toValueWithProgram :: CheckedProgram -> XmlfTerm -> Value
-toValueWithProgram checked term =
+toValueWithProgram :: RuntimeContext -> CheckedProgram -> XmlfTerm -> Value
+toValueWithProgram context checked term =
   case mainBinding checked of
     Just binding ->
-      let mbDataInfo = lookupDataInfoForBinding checked binding
-       in case decodeSourceValueWithDataInfo checked (checkedBindingSourceTypeView binding) mbDataInfo term of
+      let mbDataInfo = lookupDataInfoForBinding context binding
+       in case decodeSourceValueWithDataInfo context (checkedBindingSourceTypeView binding) mbDataInfo term of
             Just value -> value
             Nothing ->
               case mbDataInfo of
                 Just {} ->
-                  case decodeAnyData checked term of
+                  case decodeAnyData context term of
                     Just value -> value
                     Nothing -> toValue term
                 Nothing -> toValue term
     Nothing ->
-      case decodeAnyData checked term of
+      case decodeAnyData context term of
         Just value -> value
         Nothing -> toValue term
 
@@ -2727,41 +2732,41 @@ programElaborateScope checked =
     (Map.fromList [(qualifiedClassName info, info) | info <- allClassInfos checked])
     (allInstanceInfos checked)
 
-decodeSourceValueWithDataInfo :: CheckedProgram -> TypeView -> Maybe DataInfo -> XmlfTerm -> Maybe Value
-decodeSourceValueWithDataInfo checked view mbDataInfo term =
+decodeSourceValueWithDataInfo :: RuntimeContext -> TypeView -> Maybe DataInfo -> XmlfTerm -> Maybe Value
+decodeSourceValueWithDataInfo context view mbDataInfo term =
   case mbDataInfo of
     Nothing ->
       case stripRuntimeWrappers term of
         ELit lit -> Just (VLit lit)
         _ -> Nothing
     Just dataInfo ->
-      decodeChurchData checked view dataInfo (dataTypeSubst dataInfo view) term
+      decodeChurchData context view dataInfo (dataTypeSubst dataInfo view) term
 
-lookupDataInfoForBinding :: CheckedProgram -> CheckedBinding -> Maybe DataInfo
-lookupDataInfoForBinding checked binding =
-  lookupDataInfoByElabTypeIdentity checked (checkedBindingType binding)
-    <|> sourceTypeDataInfo checked binding
+lookupDataInfoForBinding :: RuntimeContext -> CheckedBinding -> Maybe DataInfo
+lookupDataInfoForBinding context binding =
+  lookupDataInfoByElabTypeIdentity context (checkedBindingType binding)
+    <|> sourceTypeDataInfo context binding
 
-lookupDataInfoByElabTypeIdentity :: CheckedProgram -> ElabType -> Maybe DataInfo
-lookupDataInfoByElabTypeIdentity checked ty =
+lookupDataInfoByElabTypeIdentity :: RuntimeContext -> ElabType -> Maybe DataInfo
+lookupDataInfoByElabTypeIdentity context ty =
   case ty of
     X.TBaseWithIdentity (Just identity) _ ->
-      Map.lookup identity (allDataInfosByIdentity checked)
+      Map.lookup identity (runtimeDataByIdentity context)
     X.TConWithIdentity (Just identity) _ _ ->
-      Map.lookup identity (allDataInfosByIdentity checked)
+      Map.lookup identity (runtimeDataByIdentity context)
     X.TForallRef _ _ body ->
-      lookupDataInfoByElabTypeIdentity checked body
+      lookupDataInfoByElabTypeIdentity context body
     _ ->
       Nothing
 
-sourceTypeDataInfo :: CheckedProgram -> CheckedBinding -> Maybe DataInfo
-sourceTypeDataInfo checked binding =
-  lookupDataInfoForTypeView checked (checkedBindingSourceTypeView binding)
+sourceTypeDataInfo :: RuntimeContext -> CheckedBinding -> Maybe DataInfo
+sourceTypeDataInfo context binding =
+  lookupDataInfoForTypeView context (checkedBindingSourceTypeView binding)
 
-lookupDataInfoForTypeView :: CheckedProgram -> TypeView -> Maybe DataInfo
-lookupDataInfoForTypeView checked view = do
+lookupDataInfoForTypeView :: RuntimeContext -> TypeView -> Maybe DataInfo
+lookupDataInfoForTypeView context view = do
   identity <- sourceTypeDataHeadIdentity view
-  Map.lookup identity (allDataInfosByIdentity checked)
+  Map.lookup identity (runtimeDataByIdentity context)
 
 sourceTypeDataHeadIdentity :: TypeView -> Maybe SymbolIdentity
 sourceTypeDataHeadIdentity view =
@@ -2775,9 +2780,9 @@ sourceTypeDataHeadName =
     STCon name _ -> Just name
     _ -> Nothing
 
-sourceTypeIsDataView :: CheckedProgram -> TypeView -> Bool
-sourceTypeIsDataView checked view =
-  case lookupDataInfoForTypeView checked view of
+sourceTypeIsDataView :: RuntimeContext -> TypeView -> Bool
+sourceTypeIsDataView context view =
+  case lookupDataInfoForTypeView context view of
     Just {} -> True
     Nothing -> False
 
@@ -2796,10 +2801,6 @@ allDataInfos checked =
       dataInfo <- Map.elems (checkedModuleData checkedModule)
   ]
 
-allDataInfosByIdentity :: CheckedProgram -> Map.Map SymbolIdentity DataInfo
-allDataInfosByIdentity checked =
-  Map.fromList [(dataInfoSymbol dataInfo, dataInfo) | dataInfo <- allDataInfos checked]
-
 allClassInfos :: CheckedProgram -> [ClassInfo]
 allClassInfos checked =
   [ classInfo
@@ -2811,9 +2812,9 @@ allInstanceInfos :: CheckedProgram -> [InstanceInfo]
 allInstanceInfos checked =
   concatMap checkedModuleInstances (checkedProgramModules checked)
 
-decodeAnyData :: CheckedProgram -> XmlfTerm -> Maybe Value
-decodeAnyData checked term =
-  case [value | dataInfo <- allDataInfos checked, Just value <- [decodeChurchData checked emptyView dataInfo emptyTypeBinderSubst term]] of
+decodeAnyData :: RuntimeContext -> XmlfTerm -> Maybe Value
+decodeAnyData context term =
+  case [value | dataInfo <- runtimeDataInfos context, Just value <- [decodeChurchData context emptyView dataInfo emptyTypeBinderSubst term]] of
     value : _ -> Just value
     [] -> Nothing
   where
@@ -2825,8 +2826,8 @@ decodeAnyData checked term =
           typeViewBinderIdentities = Map.empty
         }
 
-decodeChurchData :: CheckedProgram -> TypeView -> DataInfo -> TypeBinderSubst -> XmlfTerm -> Maybe Value
-decodeChurchData checked sourceView dataInfo subst term = do
+decodeChurchData :: RuntimeContext -> TypeView -> DataInfo -> TypeBinderSubst -> XmlfTerm -> Maybe Value
+decodeChurchData context sourceView dataInfo subst term = do
   let stripped = stripRuntimeWrappers term
       (handlerNames, body) = collectLeadingLams stripped
       constructors = dataConstructors dataInfo
@@ -2843,8 +2844,8 @@ decodeChurchData checked sourceView dataInfo subst term = do
       if length args /= length ctorArgViews
         then Nothing
         else
-          let argViews = map (canonicalFieldTypeView checked dataInfo . substDataParamView sourceView subst) ctorArgViews
-           in Just (VData (ctorName ctorInfo) (zipWith (decodeArg checked) argViews args))
+          let argViews = map (canonicalFieldTypeView context dataInfo . substDataParamView sourceView subst) ctorArgViews
+           in Just (VData (ctorName ctorInfo) (zipWith (decodeArg context) argViews args))
 
 dataTypeSubst :: DataInfo -> TypeView -> TypeBinderSubst
 dataTypeSubst dataInfo view =
@@ -2973,8 +2974,8 @@ displayTypeFromRuntimeHeadPairs pairs =
         STMu name body -> STMu name (go body)
         STBottom -> STBottom
 
-canonicalFieldTypeView :: CheckedProgram -> DataInfo -> TypeView -> TypeView
-canonicalFieldTypeView checked _ownerInfo view =
+canonicalFieldTypeView :: RuntimeContext -> DataInfo -> TypeView -> TypeView
+canonicalFieldTypeView context _ownerInfo view =
   view
     { typeViewIdentity = identityTy,
       typeViewHeadIdentities =
@@ -3043,17 +3044,17 @@ canonicalFieldTypeView checked _ownerInfo view =
        in (arg' NE.:| reverse argsRev, identities)
 
     lookupDataInfoByViewHead name =
-      case typeViewHeadIdentityForAlias view name >>= (`Map.lookup` allDataInfosByIdentity checked) of
+      case typeViewHeadIdentityForAlias view name >>= (`Map.lookup` runtimeDataByIdentity context) of
         Just info -> Just info
         Nothing -> Nothing
 
-decodeArg :: CheckedProgram -> TypeView -> XmlfTerm -> Value
-decodeArg checked view term =
-  case decodeSourceValueWithDataInfo checked view (lookupDataInfoForTypeView checked view) term of
+decodeArg :: RuntimeContext -> TypeView -> XmlfTerm -> Value
+decodeArg context view term =
+  case decodeSourceValueWithDataInfo context view (lookupDataInfoForTypeView context view) term of
     Just value -> value
     Nothing
-      | sourceTypeIsDataView checked view ->
-          case decodeAnyData checked term of
+      | sourceTypeIsDataView context view ->
+          case decodeAnyData context term of
             Just value -> value
             Nothing -> toValue term
       | otherwise -> toValue term
