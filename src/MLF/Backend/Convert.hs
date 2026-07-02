@@ -6597,11 +6597,7 @@ structuralBackendDataArguments muIdentity _muName recoverFieldTy dataMeta body =
           ty
       where
         structuralDataSelfField fieldIdentity fieldName =
-          case (muIdentity, fieldIdentity) of
-            (Just {}, Just {}) ->
-              fieldIdentity == muIdentity
-            _ ->
-              Structural.structuralRecursiveDataName fieldName == Just (backendDataName dataDecl)
+          Structural.structuralDataSelfFieldMatches (backendDataName dataDecl) muIdentity fieldIdentity fieldName
 
         dataSelfArgs =
           map backendDataParameterRefType (backendDataParameterRefs dataDecl)

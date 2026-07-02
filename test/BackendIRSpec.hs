@@ -9,7 +9,7 @@ import MLF.Backend.IR
 import MLF.Backend.StructuralRecursiveData (structuralDataDeclarationMatches)
 import MLF.Constraint.Types.Graph (BaseTy (..), NodeId (..))
 import MLF.Frontend.Program.Builtins (builtinTypeIdentity, builtinValueIdentity)
-import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), symbolIdentityFromParts, symbolIdentityStableName)
+import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), symbolIdentityFromParts, symbolIdentityStableName, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit (..))
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
 import MLF.Types.Identity (deferredRefFromIdentity, IdDetails (DeferredId, LocalId, PrimitiveId, TopLevelId), LocalIdentity (GeneratedLocalId), localRefFromIdentity, StructuralTypeBinderRole (..), TypeBinderIdentity, initialIdentityGenerator, primitiveRefFromSymbol, typeBinderIdentityFromNode, typeBinderIdentityFromStructural, typeBinderIdentityFromUnique, typeBinderIdentityStableName, uniqueIdentityStableName)
@@ -1614,6 +1614,16 @@ spec = describe "MLF.Backend.IR" $ do
     structuralDataDeclarationMatches Map.empty dataIdentityBoxData Map.empty dataIdentityBoxMismatchedStructuralTy
       `shouldBe` False
 
+  it "does not match identity-bearing nominal data to name-only structural data" $
+    alphaEqBackendType dataIdentityBoxCanonicalTy dataIdentityBoxStructuralTy
+      `shouldBe` False
+
+  it "does not treat name-only self fields as identity-bearing structural self occurrences" $ do
+    alphaEqBackendType dataIdentityRecursiveBoxCanonicalTy dataIdentityRecursiveBoxNameOnlySelfTy
+      `shouldBe` False
+    structuralDataDeclarationMatches Map.empty dataIdentityRecursiveBoxData Map.empty dataIdentityRecursiveBoxNameOnlySelfTy
+      `shouldBe` False
+
   it "accepts stale constructor result type heads when data identity is carried" $ do
     validateBackendProgram dataIdentityConstructorStaleResultProgram
       `shouldBe` Right ()
@@ -2542,6 +2552,35 @@ otherDataIdentityBoxIdentity =
 dataIdentityBoxOtherSelfIdentity :: TypeBinderIdentity
 dataIdentityBoxOtherSelfIdentity =
   typeBinderIdentityFromStructural (UniqueIdentity 991700) StructuralSelfBinder
+
+dataIdentityRecursiveBoxIdentity :: SymbolIdentity
+dataIdentityRecursiveBoxIdentity =
+  testSymbolIdentity 991007 SymbolType "Main" "IdentityRecursiveBox"
+
+dataIdentityRecursiveBoxData :: BackendData
+dataIdentityRecursiveBoxData =
+  BackendDataWithIdentity
+    { backendDataIdentity = Just dataIdentityRecursiveBoxIdentity,
+      backendDataNameWithIdentity = "IdentityRecursiveBox",
+      backendDataParameterRefsWithIdentity = [],
+      backendDataConstructorsWithIdentity =
+        [BackendConstructor "IdentityRecursiveBox" [] [dataIdentityRecursiveBoxCanonicalTy] dataIdentityRecursiveBoxCanonicalTy]
+    }
+
+dataIdentityRecursiveBoxCanonicalTy :: BackendType
+dataIdentityRecursiveBoxCanonicalTy =
+  BTBaseWithIdentity (Just dataIdentityRecursiveBoxIdentity) (BaseTy "IdentityRecursiveBox")
+
+dataIdentityRecursiveBoxSelfIdentity :: TypeBinderIdentity
+dataIdentityRecursiveBoxSelfIdentity =
+  typeBinderIdentityFromStructural (symbolUniqueIdentity dataIdentityRecursiveBoxIdentity) StructuralSelfBinder
+
+dataIdentityRecursiveBoxNameOnlySelfTy :: BackendType
+dataIdentityRecursiveBoxNameOnlySelfTy =
+  BTMuWithIdentity
+    (Just dataIdentityRecursiveBoxSelfIdentity)
+    "$IdentityRecursiveBox_self"
+    (singleFieldStructuralBody (BTVar "$IdentityRecursiveBox_self"))
 
 fnBoxData :: BackendData
 fnBoxData =

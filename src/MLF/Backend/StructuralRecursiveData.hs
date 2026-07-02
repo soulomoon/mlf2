@@ -32,6 +32,7 @@ module MLF.Backend.StructuralRecursiveData
     structuralBackendHandlerFields,
     structuralDataArgumentSubstitution,
     structuralDataDeclarationMatches,
+    structuralDataSelfFieldMatches,
     structuralMuAsActualDataType,
     structuralMuAsDataType,
     structuralMuHandlerTypes,
@@ -128,17 +129,17 @@ alphaEqBackendType =
           go leftEnv rightEnv leftDom rightDom && go leftEnv rightEnv leftCod rightCod
         (BTBaseWithIdentity leftIdentity leftBase, BTBaseWithIdentity rightIdentity rightBase) ->
           backendTypeHeadMatches leftIdentity leftBase rightIdentity rightBase
-        (BTBaseWithIdentity _ leftBase, BTMuWithIdentity rightIdentity rightName rightBody) ->
-          metadataLightStructuralDataMatchesWithIdentity leftBase [] rightIdentity rightName rightBody
-        (BTMuWithIdentity leftIdentity leftName leftBody, BTBaseWithIdentity _ rightBase) ->
-          metadataLightStructuralDataMatchesWithIdentity rightBase [] leftIdentity leftName leftBody
+        (BTBaseWithIdentity leftIdentity leftBase, BTMuWithIdentity rightIdentity rightName rightBody) ->
+          metadataLightStructuralDataMatchesAgainstHead leftIdentity leftBase [] rightIdentity rightName rightBody
+        (BTMuWithIdentity leftIdentity leftName leftBody, BTBaseWithIdentity rightIdentity rightBase) ->
+          metadataLightStructuralDataMatchesAgainstHead rightIdentity rightBase [] leftIdentity leftName leftBody
         (BTConWithIdentity leftIdentity leftCon leftArgs, BTConWithIdentity rightIdentity rightCon rightArgs) ->
           backendTypeHeadMatches leftIdentity leftCon rightIdentity rightCon
             && zipAllWith (go leftEnv rightEnv) (NE.toList leftArgs) (NE.toList rightArgs)
-        (BTConWithIdentity _ leftCon leftArgs, BTMuWithIdentity rightIdentity rightName rightBody) ->
-          metadataLightStructuralDataMatchesWithIdentity leftCon (NE.toList leftArgs) rightIdentity rightName rightBody
-        (BTMuWithIdentity leftIdentity leftName leftBody, BTConWithIdentity _ rightCon rightArgs) ->
-          metadataLightStructuralDataMatchesWithIdentity rightCon (NE.toList rightArgs) leftIdentity leftName leftBody
+        (BTConWithIdentity leftIdentity leftCon leftArgs, BTMuWithIdentity rightIdentity rightName rightBody) ->
+          metadataLightStructuralDataMatchesAgainstHead leftIdentity leftCon (NE.toList leftArgs) rightIdentity rightName rightBody
+        (BTMuWithIdentity leftIdentity leftName leftBody, BTConWithIdentity rightIdentity rightCon rightArgs) ->
+          metadataLightStructuralDataMatchesAgainstHead rightIdentity rightCon (NE.toList rightArgs) leftIdentity leftName leftBody
         (BTVarAppWithIdentity leftIdentity leftName leftArgs, BTVarAppWithIdentity rightIdentity rightName rightArgs) ->
           typeVarMatches leftEnv rightEnv leftIdentity leftName rightIdentity rightName
             && zipAllWith (go leftEnv rightEnv) (NE.toList leftArgs) (NE.toList rightArgs)
@@ -220,6 +221,17 @@ metadataLightStructuralDataMatchesWithIdentity base@(BaseTy dataName) args muIde
         Right _ -> True
         Left _ -> False
 
+metadataLightStructuralDataMatchesAgainstHead :: Maybe SymbolIdentity -> BaseTy -> [BackendType] -> Maybe TypeBinderIdentity -> String -> BackendType -> Bool
+metadataLightStructuralDataMatchesAgainstHead mbDataIdentity base args muIdentity muName body =
+  case mbDataIdentity of
+    Just dataIdentity
+      | structuralMuIdentityMatches (Just dataIdentity) muIdentity ->
+          metadataLightStructuralDataMatchesWithIdentity base args muIdentity muName body
+      | otherwise ->
+          False
+    Nothing ->
+      metadataLightStructuralDataMatchesWithIdentity base args muIdentity muName body
+
 matchStructuralDataLightWithIdentity ::
   BaseTy ->
   [BackendType] ->
@@ -268,14 +280,27 @@ metadataLightPayloadTypeMatches left right =
 
 recursiveSelfField :: Maybe TypeBinderIdentity -> String -> BackendType -> Bool
 recursiveSelfField muIdentity muName ty =
-  backendTypeVarMatches muIdentity muName ty
-    || case ty of
-      BTVarWithIdentity fieldIdentity fieldName ->
-        case (muIdentity, fieldIdentity) of
-          (Just {}, Just {}) ->
-            fieldIdentity == muIdentity
-          _ ->
-            structuralRecursiveDataName fieldName == structuralRecursiveDataName muName
+  case ty of
+    BTVarWithIdentity fieldIdentity fieldName ->
+      structuralSelfFieldMatches muIdentity muName fieldIdentity fieldName
+    _ ->
+      False
+
+structuralSelfFieldMatches :: Maybe TypeBinderIdentity -> String -> Maybe TypeBinderIdentity -> String -> Bool
+structuralSelfFieldMatches muIdentity muName fieldIdentity fieldName =
+  typeBinderRefMatches fieldIdentity fieldName muIdentity muName
+    || case (muIdentity, fieldIdentity) of
+      (Nothing, Nothing) ->
+        structuralRecursiveDataName fieldName == structuralRecursiveDataName muName
+      _ ->
+        False
+
+structuralDataSelfFieldMatches :: String -> Maybe TypeBinderIdentity -> Maybe TypeBinderIdentity -> String -> Bool
+structuralDataSelfFieldMatches dataName muIdentity fieldIdentity fieldName =
+  typeBinderRefMatches fieldIdentity fieldName muIdentity ("$" ++ dataName ++ "_self")
+    || case (muIdentity, fieldIdentity) of
+      (Nothing, Nothing) ->
+        structuralRecursiveDataName fieldName == Just dataName
       _ ->
         False
 

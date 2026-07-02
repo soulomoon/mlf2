@@ -229,6 +229,7 @@ import MLF.Backend.StructuralRecursiveData
     structuralBackendHandlerFields,
     structuralDataArgumentSubstitution,
     structuralDataDeclarationMatches,
+    structuralDataSelfFieldMatches,
     structuralMuPayloadTypes,
     structuralMuTypesHaveBinderIdentityMismatch,
     structuralPayloadsMayInstantiate,
@@ -2135,11 +2136,7 @@ canonicalizeBackendTypeDataHeadsWith dataDecls dataDeclsByIdentity =
           ty
       where
         structuralDataSelfField fieldIdentity fieldName =
-          case (muIdentity, fieldIdentity) of
-            (Just {}, Just {}) ->
-              fieldIdentity == muIdentity
-            _ ->
-              structuralRecursiveDataName fieldName == Just (backendDataName dataDecl)
+          structuralDataSelfFieldMatches (backendDataName dataDecl) muIdentity fieldIdentity fieldName
 
         dataSelfArgs =
           map backendDataParameterRefType (backendDataParameterRefs dataDecl)
