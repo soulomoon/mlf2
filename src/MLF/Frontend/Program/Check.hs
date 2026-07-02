@@ -61,6 +61,7 @@ import Data.Maybe (mapMaybe)
 import qualified Data.Set as Set
 import System.Environment (lookupEnv)
 import Text.Read (readMaybe)
+import MLF.Frontend.Normalize (freeVarsSrcType)
 import qualified MLF.Frontend.Program.Builtins as Builtins
 import MLF.Frontend.Program.Elaborate
   ( ElaborateScope,
@@ -2459,6 +2460,34 @@ constraintInfoForDisplayEnv env constraint = do
     <*> pure (resolvedSymbolIdentity (P.constraintClassName constraint))
     <*> pure views
 
+hydrateConstraintBinderIdentitiesFromView :: TypeView -> ConstraintInfo -> ConstraintInfo
+hydrateConstraintBinderIdentitiesFromView sourceView constraint =
+  constraint
+    { constraintTypeViews =
+        fmap
+          (hydrateTypeViewBinderIdentitiesFromView sourceView)
+          (constraintTypeViews constraint)
+    }
+
+hydrateTypeViewBinderIdentitiesFromView :: TypeView -> TypeView -> TypeView
+hydrateTypeViewBinderIdentitiesFromView sourceView view =
+  view
+    { typeViewBinderIdentities =
+        mergeTypeBinderIdentityMaps
+          [ typeViewBinderIdentities view,
+            typeBinderAliasIdentityMap binderAliases
+          ]
+    }
+  where
+    freeNames =
+      freeVarsSrcType (typeViewDisplay view)
+        <> freeVarsSrcType (typeViewIdentity view)
+    binderAliases =
+      [ (name, identity)
+      | name <- Set.toList freeNames,
+        Just identity <- [typeViewBinderIdentityForAlias sourceView name]
+      ]
+
 displayClassName :: DisplayNameEnv -> ResolvedSymbol -> TcM String
 displayClassName env symbol =
   case displayNameForSymbol (dneClasses env) symbol of
@@ -3000,8 +3029,12 @@ buildLocalClassInfo displayEnv mod0 = do
               let methodSymbol = P.methodSigName sig
                   methodIdentity = resolvedSymbolIdentity methodSymbol
                   methodName0 = P.refDisplayName methodSymbol
-              methodConstraintInfos0 <- mapM (constraintInfoForDisplayEnv displayEnv) (P.constrainedConstraints (P.methodSigType sig))
+              methodConstraintInfosRaw <- mapM (constraintInfoForDisplayEnv displayEnv) (P.constrainedConstraints (P.methodSigType sig))
               methodBodyView <- typeViewForDisplayEnv displayEnv (P.constrainedBody (P.methodSigType sig))
+              let methodConstraintInfos0 =
+                    map
+                      (hydrateConstraintBinderIdentitiesFromView methodBodyView)
+                      methodConstraintInfosRaw
               let methodConstraints0 = map displayConstraint methodConstraintInfos0
                   methodInfo =
                     MethodInfo
@@ -3580,15 +3613,17 @@ buildInstanceSkeletons moduleIdentity generator0 displayEnv scope mod0 derived =
                 Just info -> pure info
                 Nothing -> throwError (ProgramUnexpectedInstanceMethod instanceClassName0 (P.refDisplayName (P.methodDefName methodDef)))
             let (methodIdentity, generator1') = freshIdentity generator
+                methodValueView =
+                  specializeMethodTypeView methodInfo instanceHeadViews0
                 methodValueConstraintInfos =
                   declaredInstanceConstraintInfos0
                     ++ map
-                      (applyConstraintInfoSubst (typeViewSubstFromParamIdentities (classParamBinderIdentities classInfo) instanceHeadViews0))
+                      ( hydrateConstraintBinderIdentitiesFromView methodValueView
+                          . applyConstraintInfoSubst (typeViewSubstFromParamIdentities (classParamBinderIdentities classInfo) instanceHeadViews0)
+                      )
                       (methodConstraintInfos methodInfo)
                 methodValueConstraints =
                   map displayConstraint methodValueConstraintInfos
-                methodValueView =
-                  specializeMethodTypeView methodInfo instanceHeadViews0
                 constrainedMethodValueView =
                   constrainedVisibleTypeView methodValueConstraintInfos methodValueView
                 methodName0 = methodName methodInfo

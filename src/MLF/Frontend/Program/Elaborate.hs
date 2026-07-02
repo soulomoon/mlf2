@@ -39,7 +39,7 @@ module MLF.Frontend.Program.Elaborate
 where
 
 import Control.Applicative ((<|>))
-import Control.Monad ((>=>), foldM, replicateM, when, zipWithM)
+import Control.Monad ((>=>), filterM, foldM, replicateM, when, zipWithM)
 import Control.Monad.Except (ExceptT, MonadError (throwError), runExceptT)
 import Control.Monad.State.Strict (State, get, modify, runState)
 import Data.List (partition, sort)
@@ -741,6 +741,27 @@ constraintInfoGround :: ConstraintInfo -> Bool
 constraintInfoGround constraint =
   Set.null (freeTypeVarsTypeViews (constraintTypeViews constraint))
 
+constraintInfoDeterminedByTypeBinderIdentities :: Set TypeBinderIdentity -> ConstraintInfo -> ElaborateM Bool
+constraintInfoDeterminedByTypeBinderIdentities typeVars constraint =
+  (`Set.isSubsetOf` typeVars) <$> freeTypeBinderIdentitiesTypeViewsOrThrow (constraintTypeViews constraint)
+
+constraintInfoGroundByTypeBinderIdentities :: ConstraintInfo -> ElaborateM Bool
+constraintInfoGroundByTypeBinderIdentities constraint =
+  Set.null <$> freeTypeBinderIdentitiesTypeViewsOrThrow (constraintTypeViews constraint)
+
+freeTypeBinderIdentitiesTypeViewsOrThrow :: NonEmpty TypeView -> ElaborateM (Set TypeBinderIdentity)
+freeTypeBinderIdentitiesTypeViewsOrThrow views =
+  Set.unions <$> mapM freeTypeBinderIdentitiesTypeViewOrThrow views
+
+freeTypeBinderIdentitiesTypeViewOrThrow :: TypeView -> ElaborateM (Set TypeBinderIdentity)
+freeTypeBinderIdentitiesTypeViewOrThrow view =
+  case freeTypeBinderIdentitiesTypeView view of
+    Right identities -> pure identities
+    Left name ->
+      throwError $
+        ProgramPipelineError
+          ("elaborate resolved type variable `" ++ name ++ "` is missing binder identity")
+
 quantifyMethodLocalVarsInfoView :: Set String -> [ConstraintInfo] -> TypeView -> TypeView
 quantifyMethodLocalVarsInfoView headVars constraints view =
   TypeView
@@ -1316,7 +1337,8 @@ compileResolvedExpr scope mbExpected expr = case expr of
         Nothing -> surfaceLam runtimeName bodyExpr
   EApp _ _ -> compileResolvedApp scope mbExpected expr
   ELet localRef mbTy rhs body -> do
-    mbDisplayTy <- traverse (liftEitherElab . displaySrcTypeForResolved scope) mbTy
+    mbTypeView <- traverse (liftEitherElab . resolvedTypeViewForScope scope) mbTy
+    let mbDisplayTy = typeViewDisplay <$> mbTypeView
     if localRef `notElem` collectFreeResolvedValues Set.empty body && mbDisplayTy == Nothing
       then compileResolvedExpr scope mbExpected body
       else do
@@ -1332,25 +1354,35 @@ compileResolvedExpr scope mbExpected expr = case expr of
               (True, Nothing) -> Just <$> freshTypeName
               _ -> pure mbDisplayTy
             selfScope <-
-              if recursive
-                then extendResolvedLocal scope localRef runtimeName provisionalTy
-                else pure scope
-            rhsExpr <- compileResolvedExpr selfScope provisionalTy rhs
+              case (recursive, mbTypeView, provisionalTy) of
+                (True, Just view, _) -> extendResolvedLocalView scope localRef runtimeName (Just view)
+                (True, Nothing, _) -> extendResolvedLocal scope localRef runtimeName provisionalTy
+                _ -> pure scope
+            rhsExpr <-
+              case mbTypeView of
+                Just view -> compileResolvedExprWithExpectedView selfScope (Just view) rhs
+                Nothing -> compileResolvedExpr selfScope provisionalTy rhs
             bindingTy <- case mbDisplayTy of
-              Just ty -> pure (lowerType scope ty)
+              Just ty ->
+                case mbTypeView of
+                  Just view -> pure (lowerTypeView scope view)
+                  Nothing -> pure (lowerType scope ty)
               Nothing
                 | Just rhsTy <- explicitResolvedExprAnnotation scope rhs -> pure (lowerType scope rhsTy)
                 | Just rhsTy <- inferKnownResolvedExprType selfScope rhs -> pure (lowerType scope rhsTy)
                 | Just ty <- provisionalTy -> pure (lowerType scope ty)
               Nothing -> freshTypeName
             let rhsExpr' =
-                  case mbDisplayTy of
-                    Just ty -> surfaceAnn rhsExpr (lowerType scope ty)
+                  case mbTypeView of
+                    Just view -> surfaceAnn rhsExpr (lowerTypeView scope view)
                     Nothing ->
                       case inferKnownResolvedExprType selfScope rhs of
                         Just ty -> surfaceAnn rhsExpr (lowerType scope ty)
                         Nothing -> rhsExpr
-            bodyScope <- extendResolvedLocalLowered scope localRef runtimeName bindingTy
+            bodyScope <-
+              case mbTypeView of
+                Just view -> extendResolvedLocalView scope localRef runtimeName (Just view)
+                Nothing -> extendResolvedLocalLowered scope localRef runtimeName bindingTy
             bodyExpr <- compileResolvedExpr bodyScope mbExpected body
             pure (surfaceLet runtimeName rhsExpr' bodyExpr)
   EAnn inner annTy -> do
@@ -1385,10 +1417,58 @@ compileResolvedExprWithExpectedView scope mbExpectedView expr =
           compileConstructorHead scope ctorInfo 0 (constructorInitialViewSubst scope ctorInfo 0 mbExpectedView)
     EApp _ _ ->
       compileResolvedAppWithExpectedView scope mbExpectedView expr
+    ELam param body -> do
+      let paramRef = P.paramName param
+          paramSourceName = localRefName paramRef
+      runtimeName <- freshRuntimeName paramSourceName
+      recordResolvedLocalIdentity runtimeName paramRef
+      paramAnn <- traverse (liftEitherElab . resolvedTypeViewForScope scope) (P.paramType param)
+      let paramView = case (paramAnn, mbExpectedView) of
+            (Just view, _) -> Just view
+            (Nothing, Just expectedView) -> expectedDomainTypeView expectedView
+            _ -> Nothing
+      scope' <- extendResolvedLocalView scope paramRef runtimeName paramView
+      bodyExpr0 <- compileResolvedExprWithExpectedView scope' (mbExpectedView >>= expectedCodomainTypeView) body
+      let bodyExpr =
+            case typeViewDisplay <$> (mbExpectedView >>= expectedCodomainTypeView) of
+              Just codTy | isRecursiveResultType codTy -> surfaceAnn bodyExpr0 (lowerType scope codTy)
+              _ -> bodyExpr0
+      pure $
+        case paramView of
+          Just view -> surfaceLamAnn runtimeName (lowerTypeView scope view) bodyExpr
+          Nothing -> surfaceLam runtimeName bodyExpr
     _ ->
       compileResolvedExpr scope mbExpected expr
   where
     mbExpected = typeViewDisplay <$> mbExpectedView
+
+expectedDomainTypeView :: TypeView -> Maybe TypeView
+expectedDomainTypeView view =
+  case (typeViewDisplay view, typeViewIdentity view) of
+    (STArrow displayDom _, STArrow identityDom _) ->
+      Just
+        ( TypeView
+            { typeViewDisplay = displayDom,
+              typeViewIdentity = identityDom,
+              typeViewHeadIdentities = typeViewHeadIdentities view,
+              typeViewBinderIdentities = typeViewBinderIdentities view
+            }
+        )
+    _ -> Nothing
+
+expectedCodomainTypeView :: TypeView -> Maybe TypeView
+expectedCodomainTypeView view =
+  case (typeViewDisplay view, typeViewIdentity view) of
+    (STArrow _ displayCod, STArrow _ identityCod) ->
+      Just
+        ( TypeView
+            { typeViewDisplay = displayCod,
+              typeViewIdentity = identityCod,
+              typeViewHeadIdentities = typeViewHeadIdentities view,
+              typeViewBinderIdentities = typeViewBinderIdentities view
+            }
+        )
+    _ -> Nothing
 
 compileApp :: ElaborateScope -> Maybe SrcType -> P.Expr -> ElaborateM SurfaceExpr
 compileApp scope mbExpected expr =
@@ -2439,6 +2519,20 @@ sourceTypeHeadIsVisibleData scope name =
 
 resolveMethodHeadExprInfo :: ElaborateScope -> Set (SymbolIdentity, [SrcType]) -> MethodInfo -> NonEmpty TypeView -> ElaborateM SurfaceExpr
 resolveMethodHeadExprInfo scope seen methodInfo classArgViews =
+  resolveMethodHeadExprInfoWith (pure . constraintInfoGround) scope seen methodInfo classArgViews
+
+resolveResolvedMethodHeadExprInfo :: ElaborateScope -> Set (SymbolIdentity, [SrcType]) -> MethodInfo -> NonEmpty TypeView -> ElaborateM SurfaceExpr
+resolveResolvedMethodHeadExprInfo scope seen methodInfo classArgViews =
+  resolveMethodHeadExprInfoWith constraintInfoGroundByTypeBinderIdentities scope seen methodInfo classArgViews
+
+resolveMethodHeadExprInfoWith ::
+  (ConstraintInfo -> ElaborateM Bool) ->
+  ElaborateScope ->
+  Set (SymbolIdentity, [SrcType]) ->
+  MethodInfo ->
+  NonEmpty TypeView ->
+  ElaborateM SurfaceExpr
+resolveMethodHeadExprInfoWith groundPredicate scope seen methodInfo classArgViews =
   case lookupEvidenceMethodByClassViews scope (methodInfoClassIdentity methodInfo) classArgViews (methodInfoSymbolIdentity methodInfo) of
     Just methodEvidence ->
       pure (surfaceVar (evidenceMethodRuntimeName methodEvidence))
@@ -2446,10 +2540,10 @@ resolveMethodHeadExprInfo scope seen methodInfo classArgViews =
       (instanceInfo, subst) <- liftEitherElab (resolveMethodInstanceInfoByTypeViews scope methodInfo classArgViews)
       case lookupInstanceMethod methodInfo instanceInfo of
         Just OrdinaryValue {valueRuntimeName = runtimeName, valueConstraintInfos = constraints} -> do
-          let eagerConstraints =
-                filter
-                  constraintInfoGround
-                  (map (applyConstraintInfoSubst subst) constraints)
+          eagerConstraints <-
+            filterM
+              groundPredicate
+              (map (applyConstraintInfoSubst subst) constraints)
           evidenceArgs <-
             concat
               <$> mapM
@@ -2473,7 +2567,7 @@ resolveResolvedMethodHeadForCall scope seen methodInfo classArgViews args =
     Just methodEvidence -> do
       evidenceArgs <- methodLocalEvidenceArgsForResolvedCall scope methodInfo classArgViews args
       pure (foldl surfaceApp (surfaceVar (evidenceMethodRuntimeName methodEvidence)) evidenceArgs)
-    Nothing -> resolveMethodHeadExprInfo scope seen methodInfo classArgViews
+    Nothing -> resolveResolvedMethodHeadExprInfo scope seen methodInfo classArgViews
 
 methodLocalEvidenceArgsForCall :: ElaborateScope -> MethodInfo -> NonEmpty SrcType -> [P.Expr] -> ElaborateM [SurfaceExpr]
 methodLocalEvidenceArgsForCall scope methodInfo classArgTys args = do
@@ -2496,13 +2590,15 @@ methodLocalEvidenceArgsForResolvedCall scope methodInfo classArgViews args = do
     case inferResolvedMethodCallSubstWithViews scope methodInfo classArgViews args of
       Just subst0 -> pure subst0
       Nothing -> pure Map.empty
-  let classArgSubst = typeViewSubstFromParamIdentities (methodParamBinderIdentities methodInfo) classArgViews
-      methodLocalConstraintInfos =
-        filter
-          (not . constraintInfoDeterminedByTypeVars (freeTypeVarsTypeViews classArgViews))
-          (map (applyConstraintInfoSubst classArgSubst) (methodConstraintInfos methodInfo))
-      specializedConstraints = map (applyConstraintInfoSubst subst) methodLocalConstraintInfos
+  headVars <- freeTypeBinderIdentitiesTypeViewsOrThrow classArgViews
+  methodLocalConstraintInfos <-
+    filterM
+      (fmap not . constraintInfoDeterminedByTypeBinderIdentities headVars)
+      (map (applyConstraintInfoSubst classArgSubst) (methodConstraintInfos methodInfo))
+  let specializedConstraints = map (applyConstraintInfoSubst subst) methodLocalConstraintInfos
   concat <$> mapM (constraintEvidenceArgExprsInfo scope) specializedConstraints
+  where
+    classArgSubst = typeViewSubstFromParamIdentities (methodParamBinderIdentities methodInfo) classArgViews
 
 inferMethodCallSubst :: ElaborateScope -> MethodInfo -> NonEmpty SrcType -> [P.Expr] -> Maybe TypeViewSubst
 inferMethodCallSubst scope methodInfo classArgTys args = do
@@ -3526,10 +3622,11 @@ compileResolvedCase scope mbExpected scrutinee alts = do
     owners -> do
       dataInfo <- requireSingleResolvedDataOwner scope owners
       let headTy = dataHeadType dataInfo
-          scrutineeTy =
-            case inferKnownResolvedExprType scope scrutinee of
-              Just knownTy -> knownTy
-              Nothing -> headTy
+          scrutineeView =
+            case inferKnownResolvedExprTypeView scope scrutinee of
+              Just knownView -> knownView
+              Nothing -> sourceTypeViewInScope scope headTy
+          scrutineeTy = typeViewDisplay scrutineeView
       validateResolvedOrderedPatterns scope alts
       mapM_ (validateResolvedPatternType scope scrutineeTy . P.altPattern) alts
       (resultTy, _quantifyResult) <-
@@ -3541,9 +3638,9 @@ compileResolvedCase scope mbExpected scrutinee alts = do
       case localResolvedIdentityScrutinee scrutinee of
         Just inner -> compileResolvedCase scope mbExpected inner alts
         Nothing -> do
-          scrutineeExpr <- compileResolvedExpr scope (Just scrutineeTy) scrutinee
+          scrutineeExpr <- compileResolvedExprWithExpectedView scope (Just scrutineeView) scrutinee
           let forceAnnotateHandlers = any (not . null . ctorForalls) (dataConstructors dataInfo)
-          handlers <- mapM (compileResolvedHandler scope scrutineeExpr scrutineeTy resultTy dataInfo alts forceAnnotateHandlers) (dataConstructors dataInfo)
+          handlers <- mapM (compileResolvedHandler scope scrutineeExpr scrutineeView resultTy dataInfo alts forceAnnotateHandlers) (dataConstructors dataInfo)
           placeholder <- deferCaseCall scope dataInfo scrutineeTy resultTy
           pure (foldl surfaceApp (surfaceVar placeholder) (scrutineeExpr : handlers))
 
@@ -3735,19 +3832,20 @@ compileHandler scope scrutineeExpr scrutineeTy resultTy dataInfo alts forceAnnot
     specializeConstructorArgsForScrutinee =
       specializeConstructorArgsForScrutineeType scope
 
-compileResolvedHandler :: ElaborateScope -> SurfaceExpr -> SrcType -> SrcType -> DataInfo -> [P.ResolvedAlt] -> Bool -> ConstructorInfo -> ElaborateM SurfaceExpr
-compileResolvedHandler scope scrutineeExpr scrutineeTy resultTy dataInfo alts forceAnnotateHandlers ctorInfo = do
-  let ctorArgTys = specializeConstructorArgsForScrutinee scrutineeTy ctorInfo
+compileResolvedHandler :: ElaborateScope -> SurfaceExpr -> TypeView -> SrcType -> DataInfo -> [P.ResolvedAlt] -> Bool -> ConstructorInfo -> ElaborateM SurfaceExpr
+compileResolvedHandler scope scrutineeExpr scrutineeView resultTy dataInfo alts forceAnnotateHandlers ctorInfo = do
+  let ctorArgViews = specializeConstructorArgViewsForScrutineeView scope scrutineeView ctorInfo
+      ctorArgTys = map typeViewDisplay ctorArgViews
       specializedCtorInfo = constructorInfoWithArgs ctorInfo ctorArgTys
-  runtimeNames <- mapM freshRuntimeName ["case" ++ show ix | ix <- [1 .. length ctorArgTys]]
-  let topArgs = zip3 (map (const P.PatWildcard) ctorArgTys) runtimeNames ctorArgTys
+  runtimeNames <- mapM freshRuntimeName ["case" ++ show ix | ix <- [1 .. length ctorArgViews]]
+  let topArgs = zip3 (map (const P.PatWildcard) ctorArgViews) runtimeNames ctorArgViews
       candidates = matchingCandidates ctorInfo
   bodyExpr <- compileCandidates topArgs candidates
   let handlerBody =
         foldr
-          (\(name, argTy) acc -> surfaceLamAnn name (lowerType scope argTy) acc)
+          (\(name, argView) acc -> surfaceLamAnn name (lowerTypeView scope argView) acc)
           bodyExpr
-          (zip runtimeNames ctorArgTys)
+          (zip runtimeNames ctorArgViews)
   if not forceAnnotateHandlers && null (ctorForalls ctorInfo)
     then pure handlerBody
     else do
@@ -3769,7 +3867,7 @@ compileResolvedHandler scope scrutineeExpr scrutineeTy resultTy dataInfo alts fo
         P.PatWildcard -> compileResolvedExpr scope (Just resultTy) body
         P.PatVar name -> do
           scrutineeName <- freshRuntimeName (localRefName name)
-          scope' <- extendResolvedLocalLowered scope name scrutineeName (lowerType scope scrutineeTy)
+          scope' <- extendResolvedLocalView scope name scrutineeName (Just scrutineeView)
           bodyExpr <- compileResolvedExpr scope' (Just resultTy) body
           pure (surfaceLet scrutineeName scrutineeExpr bodyExpr)
         P.PatCtor ctorSymbol patterns
@@ -3788,22 +3886,22 @@ compileResolvedHandler scope scrutineeExpr scrutineeTy resultTy dataInfo alts fo
 
     compilePatternSequence scope0 [] body _ =
       compileResolvedExpr scope0 (Just resultTy) body
-    compilePatternSequence scope0 ((pattern0, runtimeName, argTy) : rest) body mbFallback =
+    compilePatternSequence scope0 ((pattern0, runtimeName, argView) : rest) body mbFallback =
       case pattern0 of
         P.PatWildcard -> compilePatternSequence scope0 rest body mbFallback
         P.PatVar sourceName -> do
-          scope' <- extendResolvedLocal scope0 sourceName runtimeName (Just argTy)
+          scope' <- extendResolvedLocalView scope0 sourceName runtimeName (Just argView)
           compilePatternSequence scope' rest body mbFallback
         P.PatCtor nestedCtorSymbol nestedPatterns -> do
           nestedCtorInfo <- lookupConstructorInfoBySymbol scope nestedCtorSymbol
           nestedDataInfo <- lookupDataInfoForConstructor scope nestedCtorInfo
           if length nestedPatterns /= length (ctorArgs nestedCtorInfo)
-            then throwError (ProgramPatternConstructorMismatch (P.refDisplayName nestedCtorSymbol) argTy)
+            then throwError (ProgramPatternConstructorMismatch (P.refDisplayName nestedCtorSymbol) (typeViewDisplay argView))
             else do
               nestedRuntimeNames <- mapM freshRuntimeName ["pat" ++ show ix | ix <- [1 .. length (ctorArgs nestedCtorInfo)]]
               let forceNestedAnnotations = any (not . null . ctorForalls) (dataConstructors nestedDataInfo)
-                  nestedArgTys = specializeConstructorArgsForScrutinee argTy nestedCtorInfo
-              matchingBody <- compilePatternSequence scope0 (zip3 nestedPatterns nestedRuntimeNames nestedArgTys ++ rest) body mbFallback
+                  nestedArgViews = specializeConstructorArgViewsForScrutineeView scope argView nestedCtorInfo
+              matchingBody <- compilePatternSequence scope0 (zip3 nestedPatterns nestedRuntimeNames nestedArgViews ++ rest) body mbFallback
               fallback <-
                 case mbFallback of
                   Just fallback0 -> pure (Just fallback0)
@@ -3811,21 +3909,22 @@ compileResolvedHandler scope scrutineeExpr scrutineeTy resultTy dataInfo alts fo
                     | nestedPatternNeedsFallback nestedDataInfo nestedCtorInfo ->
                         throwError (ProgramNonExhaustiveCase [ctorName ctorInfo])
                   Nothing -> pure Nothing
-              handlers <- mapM (nestedHandler forceNestedAnnotations argTy nestedCtorInfo nestedRuntimeNames matchingBody fallback) (dataConstructors nestedDataInfo)
-              placeholder <- deferCaseCall scope0 nestedDataInfo argTy resultTy
+              handlers <- mapM (nestedHandler forceNestedAnnotations argView nestedCtorInfo nestedRuntimeNames matchingBody fallback) (dataConstructors nestedDataInfo)
+              placeholder <- deferCaseCall scope0 nestedDataInfo (typeViewDisplay argView) resultTy
               pure (foldl surfaceApp (surfaceVar placeholder) (surfaceVar runtimeName : handlers))
         P.PatAnn inner annTy -> do
-          annDisplayTy <- liftEitherElab (displaySrcTypeForResolved scope annTy)
-          compilePatternSequence scope0 ((inner, runtimeName, annDisplayTy) : rest) body mbFallback
+          annView <- liftEitherElab (resolvedTypeViewForScope scope annTy)
+          compilePatternSequence scope0 ((inner, runtimeName, annView) : rest) body mbFallback
 
     nestedPatternNeedsFallback nestedDataInfo targetCtor =
       any (not . sameConstructorInfo targetCtor) (dataConstructors nestedDataInfo)
 
-    nestedHandler forceNestedAnnotations nestedScrutineeTy targetCtor nestedRuntimeNames matchingBody mbFallback ctor =
-      let ctorArgTys = specializeConstructorArgsForScrutinee nestedScrutineeTy ctor
+    nestedHandler forceNestedAnnotations nestedScrutineeView targetCtor nestedRuntimeNames matchingBody mbFallback ctor =
+      let ctorArgViews = specializeConstructorArgViewsForScrutineeView scope nestedScrutineeView ctor
+          ctorArgTys = map typeViewDisplay ctorArgViews
           specializedCtor = constructorInfoWithArgs ctor ctorArgTys
           targetSelected = sameConstructorInfo ctor targetCtor
-          argNames = if targetSelected then nestedRuntimeNames else ["unused" ++ show ix | ix <- [1 .. length ctorArgTys]]
+          argNames = if targetSelected then nestedRuntimeNames else ["unused" ++ show ix | ix <- [1 .. length ctorArgViews]]
           selectedBody =
             case (targetSelected, mbFallback) of
               (True, _) -> matchingBody
@@ -3833,23 +3932,26 @@ compileResolvedHandler scope scrutineeExpr scrutineeTy resultTy dataInfo alts fo
               (False, Nothing) -> matchingBody
           handlerBody =
             foldr
-              (\(name, argTy) acc -> surfaceLamAnn name (lowerType scope argTy) acc)
+              (\(name, argView) acc -> surfaceLamAnn name (lowerTypeView scope argView) acc)
               selectedBody
-              (zip argNames ctorArgTys)
+              (zip argNames ctorArgViews)
        in if not forceNestedAnnotations && null (ctorForalls ctor)
             then pure handlerBody
             else do
               let handlerTy = handlerSurfaceType scope specializedCtor (lowerType scope resultTy)
               pure (surfaceAnn handlerBody handlerTy)
 
-    specializeConstructorArgsForScrutinee =
-      specializeConstructorArgsForScrutineeType scope
-
 specializeConstructorArgsForScrutineeType :: ElaborateScope -> SrcType -> ConstructorInfo -> [SrcType]
 specializeConstructorArgsForScrutineeType scope actualScrutineeTy ctor =
   case matchTypesInScope scope Map.empty (ctorResult ctor) actualScrutineeTy of
     Just subst -> map (specializeSrcType subst) (ctorArgs ctor)
     Nothing -> ctorArgs ctor
+
+specializeConstructorArgViewsForScrutineeView :: ElaborateScope -> TypeView -> ConstructorInfo -> [TypeView]
+specializeConstructorArgViewsForScrutineeView scope actualScrutineeView ctor =
+  case matchTypeViewAgainstIdentity scope Map.empty (constructorResultTypeView scope ctor) actualScrutineeView of
+    Just subst -> map (applyTypeViewSubst subst) (constructorArgTypeViews scope ctor)
+    Nothing -> constructorArgTypeViews scope ctor
 
 ctorOwners :: [P.Alt] -> [String]
 ctorOwners = foldr go []
@@ -4826,6 +4928,14 @@ extendResolvedLocal scope localRef runtimeName mbTy =
       loweredTy <- freshTypeName
       pure (extendResolvedLocalLoweredPure scope localRef runtimeName loweredTy)
 
+extendResolvedLocalView :: ElaborateScope -> LocalRef -> String -> Maybe TypeView -> ElaborateM ElaborateScope
+extendResolvedLocalView scope localRef runtimeName mbView =
+  case mbView of
+    Just sourceView -> pure (extendResolvedLocalTypeViewPure scope localRef runtimeName sourceView)
+    Nothing -> do
+      loweredTy <- freshTypeName
+      pure (extendResolvedLocalLoweredPure scope localRef runtimeName loweredTy)
+
 extendResolvedLocalLowered :: ElaborateScope -> LocalRef -> String -> SrcType -> ElaborateM ElaborateScope
 extendResolvedLocalLowered scope localRef runtimeName loweredTy =
   pure (extendResolvedLocalLoweredPure scope localRef runtimeName loweredTy)
@@ -4905,6 +5015,10 @@ extendLocalSourceTypePure scope localRef sourceName runtimeName sourceTy =
 
 extendResolvedLocalSourceTypePure :: ElaborateScope -> LocalRef -> String -> SrcType -> ElaborateScope
 extendResolvedLocalSourceTypePure scope localRef runtimeName sourceTy =
+  extendResolvedLocalTypeViewPure scope localRef runtimeName (sourceTypeViewInScope scope sourceTy)
+
+extendResolvedLocalTypeViewPure :: ElaborateScope -> LocalRef -> String -> TypeView -> ElaborateScope
+extendResolvedLocalTypeViewPure scope localRef runtimeName sourceView =
   insertResolvedLocalValue localRef valueInfo $
     insertRuntimeTypeView runtimeName (lowerRuntimeTypeView scope sourceView) scope
   where
@@ -4916,8 +5030,6 @@ extendResolvedLocalSourceTypePure scope localRef runtimeName sourceTy =
           valueConstraints = [],
           valueConstraintInfos = []
         }
-    sourceView =
-      sourceTypeViewInScope scope sourceTy
 
 insertRuntimeTypeView :: String -> TypeView -> ElaborateScope -> ElaborateScope
 insertRuntimeTypeView runtimeName view scope =
