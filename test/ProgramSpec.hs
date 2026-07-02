@@ -23,6 +23,7 @@ import MLF.Frontend.Program.Finalize
     ( finalizeBindingWithContext
     , finalizeBindingsAllowOpaqueWithContext
     , mkFinalizeContext
+    , mkModuleFinalizeContext
     , recoverSourceType
     , resolvedForallSubst
     , sourceForallMatches
@@ -4289,6 +4290,32 @@ spec = do
             let bindingIdentities = map symbolUniqueIdentity [firstIdentity, secondIdentity, dataIdentity]
             concatMap generatedDeferredIdentityValues checked
                 `shouldSatisfy` all (`notElem` bindingIdentities)
+
+        it "rejects duplicate lowered binding identities before caching read contexts" $ do
+            finalizeContext <- requireFinalizeContext (mkElaborateScope Map.empty Map.empty Map.empty [])
+            let duplicateIdentity = generatedSymbolIdentity 7 SymbolValue "Main" "dup" Nothing
+                lowered name value =
+                    LoweredBinding
+                        { loweredBindingIdentity =
+                            ProgramTypes.loweredBindingIdentityFromDetails name (TopLevelId duplicateIdentity)
+                        , loweredBindingSourceType = STBase "Int"
+                        , loweredBindingSourceTypeView = Nothing
+                        , loweredBindingExpectedType = STBase "Int"
+                        , loweredBindingExpectedTypeView = Nothing
+                        , loweredBindingSurfaceExpr = Surface.ELit (LInt value)
+                        , loweredBindingResolvedLocalIdentities = []
+                        , loweredBindingDeferredObligations = Map.empty
+                        , loweredBindingExternalTypeViews = Map.empty
+                        , loweredBindingEvidenceParamCount = 0
+                        , loweredBindingExportedAsMain = False
+                        }
+            case mkModuleFinalizeContext finalizeContext [lowered "Main__first" 1, lowered "Main__second" 2] of
+                Left (ProgramPipelineError message) ->
+                    message `shouldSatisfy` isInfixOf "duplicate binding identities"
+                Left err ->
+                    expectationFailure ("expected duplicate binding identity rejection, got " ++ show err)
+                Right _ ->
+                    expectationFailure "expected duplicate binding identity rejection"
 
         it "does not resolve same-named deferred external bindings by an arbitrary identity" $ do
             finalizeContext <- requireFinalizeContext (mkElaborateScope Map.empty Map.empty Map.empty [])

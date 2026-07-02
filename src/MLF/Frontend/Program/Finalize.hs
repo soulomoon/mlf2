@@ -326,6 +326,9 @@ mkModuleFinalizeContext context lowereds0 = do
         pure (key, mkModuleBindingReadContext context schemeExternalTypes schemeExternalBindings lowered)
   bindingReads <-
     traverse keyedBindingRead lowereds
+  if Set.size (Set.fromList (map fst bindingReads)) == length bindingReads
+    then pure ()
+    else Left (ProgramPipelineError "module finalize context received duplicate binding identities")
   pure
     ModuleFinalizeContext
       { moduleFinalizeContextBase = context,
