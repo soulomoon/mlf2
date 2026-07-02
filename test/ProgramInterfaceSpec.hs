@@ -45,9 +45,11 @@ import MLF.Frontend.Program.Types
     , exportedClassesForDisplay
     , exportedTypesForDisplay
     , exportedValuesForDisplay
+    , mkTypeView
     , moduleExportsFromMaps
     , valueInfoIdentityName
     )
+import MLF.Frontend.Syntax (SrcTy (..))
 import MLF.Frontend.Syntax.Program qualified as P
 import MLF.Types.Identity (UniqueIdentity (..))
 
@@ -318,6 +320,43 @@ spec = do
                         (singleInterfaceGraph libInterface)
                         (PackageInterface [libInterface {moduleInterfaceExports = ambiguousExports}])
                         `shouldBe` Left (ProgramInterfaceIdentityKeySetMismatch libId [valueIdentity] [])
+
+        it "does not choose an arbitrary exported payload when one value identity has conflicting metadata" $ do
+            (_graph, _checked, packageInterface) <- requireCheckedPackageInterface interfacePackage
+            let libId = PackageModuleId testPackageId "Lib"
+            libInterface <- requireInterface libId packageInterface
+            let exports = moduleInterfaceExports libInterface
+                ordinaryExports =
+                    [ (valueIdentity, valueInfo, symbol, runtimeName, constraints, constraintInfos)
+                    | ( valueIdentity,
+                        valueInfo@OrdinaryValue
+                            { valueInfoSymbol = symbol
+                            , valueRuntimeName = runtimeName
+                            , valueConstraints = constraints
+                            , valueConstraintInfos = constraintInfos
+                            }
+                        ) <-
+                        Map.toList (exportedValuesByIdentity exports)
+                    ]
+            case ordinaryExports of
+                [] -> expectationFailure "expected an ordinary exported value"
+                (valueIdentity, valueInfo, symbol, runtimeName, constraints, constraintInfos) : _ -> do
+                    let conflictingValueInfo =
+                            OrdinaryValue
+                                { valueInfoSymbol = symbol
+                                , valueRuntimeName = runtimeName
+                                , valueTypeView = mkTypeView (STBase "Bool") (STBase "Bool")
+                                , valueConstraints = constraints
+                                , valueConstraintInfos = constraintInfos
+                                }
+                        ambiguousExports =
+                            moduleExportsFromMaps
+                                (Map.fromList [("aliasLeft", valueInfo), ("aliasRight", conflictingValueInfo)])
+                                Map.empty
+                                Map.empty
+                    Map.lookup valueIdentity (exportedValuesByIdentity ambiguousExports) `shouldBe` Nothing
+                    Map.lookup valueIdentity (exportedValueDisplaysByIdentity ambiguousExports) `shouldBe` Nothing
+                    exportedValuesForDisplay ambiguousExports `shouldBe` Map.empty
 
 interfacePackage :: ProgramPackage
 interfacePackage =

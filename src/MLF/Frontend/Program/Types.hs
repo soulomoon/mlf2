@@ -227,6 +227,7 @@ module MLF.Frontend.Program.Types
     exportedTypeConstructorsForDisplay,
     ModuleExports (..),
     moduleExportsFromMaps,
+    uniqueInfoByIdentity,
     uniqueDisplayByIdentity,
     exportedValuesForDisplay,
     exportedTypesForDisplay,
@@ -2374,11 +2375,7 @@ moduleExportsFromMaps values0 types0 classes0 =
     }
   where
     indexInfo identityFor values =
-      Map.fromListWith
-        (flip const)
-        [ (identityFor info, info)
-        | (_, info) <- Map.toList values
-        ]
+      uniqueInfoByIdentity identityFor values
 
     indexDisplay identityFor values =
       uniqueDisplayByIdentity identityFor values
@@ -2394,6 +2391,21 @@ exportedTypesForDisplay exports =
 exportedClassesForDisplay :: ModuleExports -> Map String ClassInfo
 exportedClassesForDisplay exports =
   displayMap (exportedClassesByIdentity exports) (exportedClassDisplaysByIdentity exports)
+
+uniqueInfoByIdentity :: (Eq a) => (a -> SymbolIdentity) -> Map String a -> Map SymbolIdentity a
+uniqueInfoByIdentity identityFor values =
+  Map.fromList
+    [ (identity, info)
+    | (identity, info : rest) <- Map.toList infosByIdentity,
+      all (== info) rest
+    ]
+  where
+    infosByIdentity =
+      Map.fromListWith
+        (++)
+        [ (identityFor info, [info])
+        | (_, info) <- Map.toList values
+        ]
 
 uniqueDisplayByIdentity :: (a -> SymbolIdentity) -> Map String a -> Map SymbolIdentity String
 uniqueDisplayByIdentity identityFor values =

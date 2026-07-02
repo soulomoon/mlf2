@@ -204,6 +204,7 @@ import MLF.Frontend.Program.Types
     mkExportedTypeInfo,
     moduleExportsFromMaps,
     uniqueDisplayByIdentity,
+    uniqueInfoByIdentity,
     exportedClassesForDisplay,
     exportedTypesForDisplay,
     exportedTypeConstructorsForDisplay,
@@ -4140,13 +4141,9 @@ buildExports mod0 localData localClasses localValues = do
 
 type IdentityExportIndex a = (Map SymbolIdentity a, Map SymbolIdentity String)
 
-identityExportIndex :: (a -> SymbolIdentity) -> Map String a -> IdentityExportIndex a
+identityExportIndex :: (Eq a) => (a -> SymbolIdentity) -> Map String a -> IdentityExportIndex a
 identityExportIndex identityFor values =
-  ( Map.fromListWith
-      (flip const)
-      [ (identityFor info, info)
-      | (_, info) <- Map.toList values
-      ],
+  ( uniqueInfoByIdentity identityFor values,
     uniqueDisplayByIdentity identityFor values
   )
 
