@@ -726,22 +726,28 @@ methodEvidenceSourceTypeInfoViewRaw dataTypes classesByIdentity classInfo classA
         map
           (applyConstraintInfoSubst (typeViewSubstFromParamIdentities (classParamBinderIdentities classInfo) classArgViews))
           (methodConstraintInfos methodInfo)
-      headVars = freeTypeVarsTypeViews classArgViews
+      headVars = freeTypeBinderIdentitiesTypeViewsFailClosed classArgViews
       deferredConstraints =
-        filter (not . constraintInfoDeterminedByTypeVars headVars) specializedConstraints
+        filter (not . constraintInfoDeterminedByTypeBinderIdentitiesFailClosed headVars) specializedConstraints
       evidenceVisibleView =
         quantifyMethodLocalVarsInfoView headVars specializedConstraints specializedMethodView
    in constrainedRuntimeTypeInfoViewRaw dataTypes classesByIdentity deferredConstraints evidenceVisibleView
 
-constraintInfoDeterminedByTypeVars :: Set String -> ConstraintInfo -> Bool
-constraintInfoDeterminedByTypeVars typeVars constraint =
-  freeTypeVarsTypeViews (constraintTypeViews constraint) `Set.isSubsetOf` typeVars
+freeTypeBinderIdentitiesTypeViewsFailClosed :: NonEmpty TypeView -> Set TypeBinderIdentity
+freeTypeBinderIdentitiesTypeViewsFailClosed views =
+  case freeTypeBinderIdentitiesTypeViews views of
+    Right identities -> identities
+    Left _ -> Set.empty
+
+constraintInfoDeterminedByTypeBinderIdentitiesFailClosed :: Set TypeBinderIdentity -> ConstraintInfo -> Bool
+constraintInfoDeterminedByTypeBinderIdentitiesFailClosed typeVars constraint =
+  case freeTypeBinderIdentitiesTypeViews (constraintTypeViews constraint) of
+    Right identities -> identities `Set.isSubsetOf` typeVars
+    Left _ -> False
 
 constraintInfoGroundByTypeBinderIdentitiesFailClosed :: ConstraintInfo -> Bool
 constraintInfoGroundByTypeBinderIdentitiesFailClosed constraint =
-  case freeTypeBinderIdentitiesTypeViews (constraintTypeViews constraint) of
-    Right identities -> Set.null identities
-    Left _ -> False
+  constraintInfoDeterminedByTypeBinderIdentitiesFailClosed Set.empty constraint
 
 constraintInfoDeterminedByTypeBinderIdentities :: Set TypeBinderIdentity -> ConstraintInfo -> ElaborateM Bool
 constraintInfoDeterminedByTypeBinderIdentities typeVars constraint =
@@ -764,7 +770,7 @@ freeTypeBinderIdentitiesTypeViewsOrThrow views =
         ProgramPipelineError
           ("elaborate resolved type variable `" ++ name ++ "` is missing binder identity")
 
-quantifyMethodLocalVarsInfoView :: Set String -> [ConstraintInfo] -> TypeView -> TypeView
+quantifyMethodLocalVarsInfoView :: Set TypeBinderIdentity -> [ConstraintInfo] -> TypeView -> TypeView
 quantifyMethodLocalVarsInfoView headVars constraints view =
   TypeView
     { typeViewDisplay = foldr quantifyDisplay (typeViewDisplay view) localVarPairs,
@@ -781,10 +787,13 @@ quantifyMethodLocalVarsInfoView headVars constraints view =
     constraintVars = foldMap (freeTypeVarsTypeViews . constraintTypeViews) constraints
     localIdentityVars =
       sort $
-        Set.toList $
-          (freeTypeVarsSrcType identityBody `Set.union` constraintVars)
-            Set.\\ headVars
-            Set.\\ alreadyQuantified
+        [ identityName
+        | identityName <-
+            Set.toList $
+              (freeTypeVarsSrcType identityBody `Set.union` constraintVars)
+                Set.\\ alreadyQuantified,
+          not (isHeadBinderIdentity identityName)
+        ]
 
     localVarPairs =
       [ (Map.findWithDefault identityName identityName displayNamesByIdentityName, identityName)
@@ -796,6 +805,24 @@ quantifyMethodLocalVarsInfoView headVars constraints view =
 
     constraintBinderIdentities =
       foldMap typeViewBinderIdentities . constraintTypeViews
+
+    allViews =
+      view : concatMap (NE.toList . constraintTypeViews) constraints
+
+    isHeadBinderIdentity name =
+      case uniqueBinderIdentityForName name of
+        Just identity -> identity `Set.member` headVars
+        Nothing -> False
+
+    uniqueBinderIdentityForName name =
+      case Set.toList $
+        Set.fromList
+          [ identity
+          | view0 <- allViews,
+            Just identity <- [typeViewBinderIdentityForAlias view0 name]
+          ] of
+        [identity] -> Just identity
+        _ -> Nothing
 
     quantifyDisplay (displayName, _) acc = STForall displayName Nothing acc
     quantifyIdentity (_, identityName) acc = STForall identityName Nothing acc
@@ -2593,9 +2620,10 @@ methodLocalEvidenceArgsForCall scope methodInfo classArgTys args = do
       Nothing -> pure Map.empty
   let classArgViews = fmap (sourceTypeViewInScope scope) classArgTys
       classArgSubst = typeViewSubstFromParamIdentities (methodParamBinderIdentities methodInfo) classArgViews
+      headVars = freeTypeBinderIdentitiesTypeViewsFailClosed classArgViews
       methodLocalConstraintInfos =
         filter
-          (not . constraintInfoDeterminedByTypeVars (freeTypeVarsTypeViews classArgViews))
+          (not . constraintInfoDeterminedByTypeBinderIdentitiesFailClosed headVars)
           (map (applyConstraintInfoSubst classArgSubst) (methodConstraintInfos methodInfo))
       specializedConstraints = map (applyConstraintInfoSubst subst) methodLocalConstraintInfos
   concat <$> mapM (constraintEvidenceArgExprsInfo scope) specializedConstraints
