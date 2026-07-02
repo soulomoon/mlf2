@@ -20,7 +20,7 @@ where
 
 import Control.Exception (evaluate)
 import Control.Applicative ((<|>))
-import Control.Monad (foldM)
+import Control.Monad (filterM, foldM)
 import Data.Foldable (toList)
 import Data.List (elemIndex, find, findIndex, intercalate, isInfixOf, isPrefixOf, isSuffixOf, stripPrefix, tails)
 import qualified Data.List.NonEmpty as NE
@@ -93,8 +93,8 @@ import MLF.Frontend.Program.Types
     diagnosticForProgramError,
     emptyTypeBinderSubst,
     filterHeadIdentitiesByNames,
+    freeTypeBinderIdentitiesTypeView,
     freeTypeVarsTypeView,
-    freeTypeVarsTypeViews,
     lookupInstanceMethod,
     lookupMethodParamViewSubst,
     methodType,
@@ -1274,6 +1274,7 @@ resolveRuntimeEvidenceMethod context stack deferredValues env deferred classArgV
       Just subst -> Right subst
       Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
   let methodSubst' = methodSubst `Map.union` evidenceSubst
+  methodLocalConstraints <- runtimeMethodLocalConstraints (deferredMethodInfo deferred) classArgView methodSubst'
   evidenceArgs <-
     resolveRuntimeConstraintEvidenceValues
       context
@@ -1282,7 +1283,7 @@ resolveRuntimeEvidenceMethod context stack deferredValues env deferred classArgV
       env
       (deferredMethodLocalEvidence deferred)
       Set.empty
-      (runtimeMethodLocalConstraints (deferredMethodInfo deferred) classArgView methodSubst')
+      methodLocalConstraints
   methodHead <- lookupRuntimeEvidenceMethodValue context stack deferredValues env (deferredMethodEvidenceMethod evidence)
   foldM (applyRuntimeValue context) methodHead (evidenceArgs ++ args)
 
@@ -1306,10 +1307,9 @@ resolveRuntimeInstanceMethod context stack deferredValues env deferred classArgV
     case inferRuntimeMethodArgumentSubst context (deferredMethodInfo deferred) classArgView instanceSubst argViews of
       Just subst -> Right subst
       Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
-  let eagerConstraints =
-        filter
-          constraintGround
-          (map (applyConstraintInfoSubst methodSubst) (methodValueConstraints methodValueInfo))
+  eagerConstraints <-
+    filterRuntimeConstraintGround
+      (map (applyConstraintInfoSubst methodSubst) (methodValueConstraints methodValueInfo))
   evidenceArgs <-
     resolveRuntimeConstraintEvidenceValues
       context
@@ -1362,6 +1362,7 @@ resolveRuntimeNullaryEvidenceMethod context stack deferredValues env deferred cl
       Just subst -> Right subst
       Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
   let methodSubst' = methodSubst `Map.union` evidenceSubst
+  methodLocalConstraints <- runtimeMethodLocalConstraints (deferredMethodInfo deferred) classArgView methodSubst'
   evidenceArgs <-
     resolveRuntimeConstraintEvidenceValues
       context
@@ -1370,7 +1371,7 @@ resolveRuntimeNullaryEvidenceMethod context stack deferredValues env deferred cl
       env
       (deferredMethodLocalEvidence deferred)
       Set.empty
-      (runtimeMethodLocalConstraints (deferredMethodInfo deferred) classArgView methodSubst')
+      methodLocalConstraints
   methodHead <- lookupRuntimeEvidenceMethodValue context stack deferredValues env (deferredMethodEvidenceMethod evidence)
   foldM (applyRuntimeValue context) methodHead evidenceArgs
 
@@ -1393,10 +1394,9 @@ resolveRuntimeNullaryInstanceMethod context stack deferredValues env deferred cl
     case inferRuntimeNullaryMethodSubst context (deferredMethodInfo deferred) classArgView instanceSubst expectedView of
       Just subst -> Right subst
       Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
-  let eagerConstraints =
-        filter
-          constraintGround
-          (map (applyConstraintInfoSubst methodSubst) (methodValueConstraints methodValueInfo))
+  eagerConstraints <-
+    filterRuntimeConstraintGround
+      (map (applyConstraintInfoSubst methodSubst) (methodValueConstraints methodValueInfo))
   evidenceArgs <-
     resolveRuntimeConstraintEvidenceValues
       context
@@ -1447,19 +1447,23 @@ lookupRuntimeMethodEvidence context deferred classArgView =
       subst <- matchMethodTypeViews scope Map.empty (deferredMethodEvidenceClassArgs evidence) targetViews
       pure (evidence {deferredMethodEvidenceClassArg = classArgView, deferredMethodEvidenceClassArgs = targetViews}, subst)
 
-runtimeMethodLocalConstraints :: MethodInfo -> TypeView -> TypeViewSubst -> [ConstraintInfo]
-runtimeMethodLocalConstraints methodInfo classArgView methodSubst =
-  let headVars = freeTypeVarsTypeView classArgView
-      classArgSubst = typeViewSubstFromParamIdentities (methodParamBinderIdentities methodInfo) (NE.singleton classArgView)
-      specializedForClass =
-        map
-          (applyConstraintInfoSubst classArgSubst)
-          (methodConstraintInfos methodInfo)
-      methodLocal =
-        filter
-          (not . constraintDeterminedByTypeVars headVars)
-          specializedForClass
-   in map (applyConstraintInfoSubst methodSubst) methodLocal
+runtimeMethodLocalConstraints :: MethodInfo -> TypeView -> TypeViewSubst -> Either ProgramError [ConstraintInfo]
+runtimeMethodLocalConstraints methodInfo classArgView methodSubst = do
+  headVars <- freeTypeBinderIdentitiesTypeViewOrError classArgView
+  methodLocal <-
+    filterM
+      (fmap not . constraintDeterminedByTypeBinderIdentities headVars)
+      specializedForClass
+  pure (map (applyConstraintInfoSubst methodSubst) methodLocal)
+  where
+    classArgSubst =
+      typeViewSubstFromParamIdentities
+        (methodParamBinderIdentities methodInfo)
+        (NE.singleton classArgView)
+    specializedForClass =
+      map
+        (applyConstraintInfoSubst classArgSubst)
+        (methodConstraintInfos methodInfo)
 
 runtimeMethodValueResolved :: RuntimeContext -> String -> ValueInfo -> Either ProgramError ResolvedVar
 runtimeMethodValueResolved context _ valueInfo@OrdinaryValue {} = do
@@ -1474,9 +1478,13 @@ methodValueConstraints :: ValueInfo -> [ConstraintInfo]
 methodValueConstraints OrdinaryValue {valueConstraintInfos = constraints} = constraints
 methodValueConstraints _ = []
 
-constraintGround :: ConstraintInfo -> Bool
+constraintGround :: ConstraintInfo -> Either ProgramError Bool
 constraintGround constraint =
-  Set.null (freeTypeVarsTypeViews (constraintTypeViews constraint))
+  Set.null <$> freeTypeBinderIdentitiesTypeViewsOrError (constraintTypeViews constraint)
+
+filterRuntimeConstraintGround :: [ConstraintInfo] -> Either ProgramError [ConstraintInfo]
+filterRuntimeConstraintGround =
+  filterM constraintGround
 
 resolveRuntimeConstraintEvidenceValues ::
   RuntimeContext ->
@@ -1537,10 +1545,9 @@ materializeRuntimeMethodEvidence ::
   ValueInfo ->
   Either ProgramError RuntimeValue
 materializeRuntimeMethodEvidence context stack deferredValues env localEvidence seen subst constraint valueInfo = do
-  let eagerConstraints =
-        filter
-          constraintGround
-          (map (applyConstraintInfoSubst subst) (methodValueConstraints valueInfo))
+  eagerConstraints <-
+    filterRuntimeConstraintGround
+      (map (applyConstraintInfoSubst subst) (methodValueConstraints valueInfo))
   nestedEvidence <-
     resolveRuntimeConstraintEvidenceValues
       context
@@ -1652,9 +1659,22 @@ zeroMethodConstraintCoveredByRuntimeEvidence scope evidenceInfos constraint =
     )
     evidenceInfos
 
-constraintDeterminedByTypeVars :: Set.Set String -> ConstraintInfo -> Bool
-constraintDeterminedByTypeVars typeVars constraint =
-  freeTypeVarsTypeViews (constraintTypeViews constraint) `Set.isSubsetOf` typeVars
+constraintDeterminedByTypeBinderIdentities :: Set.Set TypeBinderIdentity -> ConstraintInfo -> Either ProgramError Bool
+constraintDeterminedByTypeBinderIdentities typeVars constraint =
+  (`Set.isSubsetOf` typeVars) <$> freeTypeBinderIdentitiesTypeViewsOrError (constraintTypeViews constraint)
+
+freeTypeBinderIdentitiesTypeViewsOrError :: NE.NonEmpty TypeView -> Either ProgramError (Set.Set TypeBinderIdentity)
+freeTypeBinderIdentitiesTypeViewsOrError views =
+  Set.unions <$> mapM freeTypeBinderIdentitiesTypeViewOrError views
+
+freeTypeBinderIdentitiesTypeViewOrError :: TypeView -> Either ProgramError (Set.Set TypeBinderIdentity)
+freeTypeBinderIdentitiesTypeViewOrError view =
+  case freeTypeBinderIdentitiesTypeView view of
+    Right identities -> Right identities
+    Left name ->
+      Left $
+        ProgramPipelineError
+          ("run-program resolved type variable `" ++ name ++ "` is missing binder identity")
 
 runtimeValueTypeView :: RuntimeContext -> RuntimeValue -> Either ProgramError TypeView
 runtimeValueTypeView context value =
