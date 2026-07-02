@@ -1309,6 +1309,29 @@ spec = do
                         []
             Map.member runtimeName (elaborateScopeRuntimeTypeViews scope) `shouldBe` False
 
+        it "does not keep an arbitrary runtime type view when one value identity has conflicting payloads" $ do
+            let runtimeName = "Main__shared"
+                sharedIdentity = generatedSymbolIdentity 991652 SymbolValue "Main" "shared" Nothing
+                valueInfo ty =
+                    OrdinaryValue
+                        { valueInfoSymbol = sharedIdentity
+                        , valueRuntimeName = runtimeName
+                        , valueTypeView = ProgramTypes.mkTypeView ty ty
+                        , valueConstraints = []
+                        , valueConstraintInfos = []
+                        }
+                scope =
+                    mkElaborateScope
+                        ( Map.fromList
+                            [ ("left", valueInfo (STBase "Int"))
+                            , ("right", valueInfo (STBase "Bool"))
+                            ]
+                        )
+                        Map.empty
+                        Map.empty
+                        []
+            Map.member runtimeName (elaborateScopeRuntimeTypeViews scope) `shouldBe` False
+
         it "does not resolve conflicting value payloads by identity in elaborate scope" $ do
             let sharedIdentity = generatedSymbolIdentity 991446 SymbolValue "Main" "shared" Nothing
                 bindingIdentity = generatedSymbolIdentity 991447 SymbolValue "Main" "main" Nothing

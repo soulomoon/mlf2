@@ -222,7 +222,8 @@ mkElaborateScope values0 dataTypes0 classes0 instances0 =
 
     uniqueRuntimeTypeInfo infos =
       case (Set.toList (Set.fromList (map valueInfoSymbolIdentity infos)), infos) of
-        ([_], info : _) -> Just info
+        ([_], info : rest)
+          | all (== info) rest -> Just info
         _ -> Nothing
 
     instanceMethodValueIdentities =
