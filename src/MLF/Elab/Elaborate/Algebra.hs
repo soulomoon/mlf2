@@ -125,13 +125,17 @@ import MLF.Types.Identity
   ( EnvRef,
     IdDetails (..),
     IdentityGenerator,
+    LocalRef,
     TypeBinderIdentity,
+    DeferredRef,
+    constructorRefSymbol,
     freshEnvRef,
     freshLocalRef,
     idDetailsGeneratedIdentities,
     idDetailsIsDiscard,
     identityGeneratorAfter,
     localRefFromNodeId,
+    primitiveRefSymbol,
     symbolGeneratedIdentities,
     typeBinderGeneratedIdentities,
     typeBinderIdentityAliasMap,
@@ -170,8 +174,19 @@ pattern AmbiguousStructuralRecursiveCandidate = AmbiguousCandidateSelection
 
 data Env = Env
   { envBindings :: Map.Map VarName EnvBinding,
+    envBindingsByIdentity :: Map.Map EnvBindingIdentityKey EnvBinding,
     envTypeCheck :: TypeCheck.Env
   }
+
+data EnvBindingIdentityKey
+  = EnvBindingLocalKey LocalRef
+  | EnvBindingEnvKey EnvRef
+  | EnvBindingTopLevelKey SymbolIdentity
+  | EnvBindingConstructorKey SymbolIdentity
+  | EnvBindingMethodKey SymbolIdentity
+  | EnvBindingPrimitiveKey SymbolIdentity
+  | EnvBindingDeferredKey DeferredRef
+  deriving (Eq, Ord, Show)
 
 data ElabOut = ElabOut
   { elabTerm :: Env -> Either ElabError XmlfTerm,
@@ -319,8 +334,18 @@ mkEnvFromBindings :: Map.Map VarName EnvBinding -> Env
 mkEnvFromBindings bindings =
   Env
     { envBindings = bindings,
+      envBindingsByIdentity = envBindingIdentityIndex bindings,
       envTypeCheck = typeCheckEnvFromBindings bindings
     }
+
+envBindingIdentityIndex :: Map.Map VarName EnvBinding -> Map.Map EnvBindingIdentityKey EnvBinding
+envBindingIdentityIndex bindings =
+  foldr
+    ( \(_, binding) ->
+        Map.insert (envBindingIdentityKey binding) binding
+    )
+    Map.empty
+    (Map.toList bindings)
 
 typeCheckEnvFromBindings :: Map.Map VarName EnvBinding -> TypeCheck.Env
 typeCheckEnvFromBindings bindings =
@@ -354,12 +379,18 @@ insertEnvBinding :: VarName -> EnvBinding -> Env -> Env
 insertEnvBinding name binding env =
   env
     { envBindings = Map.insert name binding (envBindings env),
+      envBindingsByIdentity =
+        Map.insert newKey binding $
+          maybe id Map.delete oldKey (envBindingsByIdentity env),
       envTypeCheck =
         TypeCheck.insertResolvedTermBinding
           (resolvedEnvBindingVar name binding)
           (ebSchemeType binding)
           (envTypeCheck env)
     }
+  where
+    oldKey = envBindingIdentityKey <$> Map.lookup name (envBindings env)
+    newKey = envBindingIdentityKey binding
 
 adjustEnvBinding :: (EnvBinding -> EnvBinding) -> VarName -> Env -> Env
 adjustEnvBinding f name env =
@@ -372,14 +403,26 @@ lookupSchemeInfo name env = ebSchemeInfo <$> lookupEnvBinding name env
 
 lookupSchemeInfoForResolved :: ResolvedVar -> Env -> Maybe SchemeInfo
 lookupSchemeInfoForResolved resolved env =
-  ebSchemeInfo . snd <$> find matches (Map.toList (envBindings env))
-  where
-    -- ponytail: O(n) scan; add an identity index only if profiles show this lookup matters.
-    matches (name, binding) =
-      resolvedVarSameIdentity resolved (resolvedEnvBindingVar name binding)
+  ebSchemeInfo <$> Map.lookup (envBindingDetailsKey (resolvedVarDetails resolved)) (envBindingsByIdentity env)
 
 lookupSchemeType :: VarName -> Env -> Maybe ElabType
 lookupSchemeType name env = ebSchemeType <$> lookupEnvBinding name env
+
+envBindingIdentityKey :: EnvBinding -> EnvBindingIdentityKey
+envBindingIdentityKey =
+  envBindingDetailsKey . ebIdentityDetails
+
+envBindingDetailsKey :: IdDetails -> EnvBindingIdentityKey
+envBindingDetailsKey details =
+  case details of
+    LocalId ref -> EnvBindingLocalKey ref
+    EvidenceId ref -> EnvBindingLocalKey ref
+    EnvId ref -> EnvBindingEnvKey ref
+    TopLevelId symbol -> EnvBindingTopLevelKey symbol
+    ConstructorId ref -> EnvBindingConstructorKey (constructorRefSymbol ref)
+    MethodId symbol -> EnvBindingMethodKey symbol
+    PrimitiveId ref -> EnvBindingPrimitiveKey (primitiveRefSymbol ref)
+    DeferredId ref -> EnvBindingDeferredKey ref
 
 resolvedEnvBindingVar :: VarName -> EnvBinding -> ResolvedVar
 resolvedEnvBindingVar name binding =

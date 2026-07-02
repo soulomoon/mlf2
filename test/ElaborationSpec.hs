@@ -4802,6 +4802,23 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 }
         Algebra.lookupSchemeInfoForResolved resolved env `shouldBe` Just targetSchemeInfo
 
+      it "looks up SchemeInfo across local evidence identity aliases" $ do
+        let targetSchemeInfo =
+              Elab.schemeInfoFromRefSubst
+                (Elab.schemeFromType (Elab.TBase (BaseTy "Int")))
+                IntMap.empty
+            localRef = localRefFromNodeId "x" (NodeId 991902)
+            env =
+              Algebra.mkEnvWithBindingDetails
+                (Map.singleton "x" (targetSchemeInfo, LocalId localRef))
+            resolved =
+              ResolvedVar
+                { resolvedVarRuntimeName = "$stale_x",
+                  resolvedVarType = Elab.TBase (BaseTy "Int"),
+                  resolvedVarDetails = EvidenceId localRef
+                }
+        Algebra.lookupSchemeInfoForResolved resolved env `shouldBe` Just targetSchemeInfo
+
       it "freshens later SchemeInfo binders by identity when only later names collide" $ do
         let refA =
               ElabTypes.typeBinderRefFromIdentity
