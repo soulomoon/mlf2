@@ -360,9 +360,9 @@ scopeElaborateTypes :: Scope -> Map String DataInfo
 scopeElaborateTypes scope =
   scopeTypes scope `Map.union` scopeHiddenTypes scope
 
-indexByIdentity :: (a -> SymbolIdentity) -> Map String a -> Map SymbolIdentity a
+indexByIdentity :: (Eq a) => (a -> SymbolIdentity) -> Map String a -> Map SymbolIdentity a
 indexByIdentity identityOf =
-  Map.fromList . map (\info -> (identityOf info, info)) . Map.elems
+  uniqueInfoByIdentity identityOf
 
 emptyDisplayNameEnv :: DisplayNameEnv
 emptyDisplayNameEnv =
@@ -464,11 +464,11 @@ displayNameEnvFromValues values0 =
 
 checkedDataByIdentity :: Map String DataInfo -> Map SymbolIdentity DataInfo
 checkedDataByIdentity =
-  Map.fromList . map (\dataInfo -> (dataInfoSymbolIdentity dataInfo, dataInfo)) . Map.elems
+  indexByIdentity dataInfoSymbolIdentity
 
 checkedClassesByIdentity :: Map String ClassInfo -> Map SymbolIdentity ClassInfo
 checkedClassesByIdentity =
-  Map.fromList . map (\classInfo -> (classInfoSymbolIdentity classInfo, classInfo)) . Map.elems
+  indexByIdentity classInfoSymbolIdentity
 
 addValues :: Map String ValueInfo -> Map String ValueInfo -> Either ProgramError (Map String ValueInfo)
 addValues base incoming =

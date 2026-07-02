@@ -5264,6 +5264,71 @@ spec = do
                                 )
                 Left err -> expectationFailure ("expected check success, got " ++ show err)
 
+        it "does not choose an arbitrary checked class payload when one identity has conflicting metadata" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  class C a {"
+                        , "  }"
+                        , "  class D a {"
+                        , "  }"
+                        , "  def main : Int = 1;"
+                        , "}"
+                        ]
+                poisonResolvedClassIdentity target replacement resolved =
+                    resolved {resolvedProgramModules = map poisonModule (resolvedProgramModules resolved)}
+                  where
+                    targetIdentity = resolvedClassIdentity target resolved
+
+                    poisonModule resolvedModule =
+                        resolvedModule
+                            { resolvedModuleSemantic =
+                                (resolvedModuleSemantic resolvedModule)
+                                    { resolvedSemanticModuleSyntax =
+                                        poisonSyntax (resolvedSemanticModuleSyntax (resolvedModuleSemantic resolvedModule))
+                                    }
+                            }
+
+                    poisonSyntax syntax =
+                        syntax {moduleDecls = map poisonDecl (moduleDecls syntax)}
+
+                    poisonDecl decl =
+                        case decl of
+                            DeclClass classDecl
+                                | classDeclDisplayName classDecl == replacement ->
+                                    DeclClass
+                                        classDecl
+                                            { classDeclName = mapResolvedSymbolIdentity (const targetIdentity) (classDeclName classDecl)
+                                            }
+                            _ -> decl
+                resolvedClassIdentity name resolved =
+                    case
+                        [ resolvedSymbolIdentity (classDeclName classDecl)
+                        | resolvedModule <- resolvedProgramModules resolved
+                        , DeclClass classDecl <- moduleDecls (resolvedModuleSyntax resolvedModule)
+                        , classDeclDisplayName classDecl == name
+                        ]
+                    of
+                        identity : _ -> identity
+                        [] -> error ("missing resolved class identity: " ++ name)
+            program <- requireParsed programText
+            case resolveProgram program of
+                Left err -> expectationFailure ("expected resolve success, got " ++ show err)
+                Right resolved -> do
+                    let poisoned = poisonResolvedClassIdentity "C" "D" resolved
+                    case checkResolvedProgram poisoned of
+                        Left err -> expectationFailure ("expected check success, got " ++ show err)
+                        Right checked -> do
+                            let poisonedIdentity =
+                                    resolvedClassIdentity "C" resolved
+                                mainClasses =
+                                    Map.unions
+                                        [ ProgramTypes.checkedModuleClasses checkedModule
+                                        | checkedModule <- ProgramTypes.checkedProgramModules checked
+                                        , ProgramTypes.checkedModuleName checkedModule == "Main"
+                                        ]
+                            Map.lookup poisonedIdentity mainClasses `shouldBe` Nothing
+
         it "checks the semantic artifact independently of diagnostic reference adapters" $ do
             let programText =
                     unlines
