@@ -227,6 +227,8 @@ module MLF.Frontend.Program.Types
     exportedTypeConstructorsForDisplay,
     ModuleExports (..),
     moduleExportsFromMaps,
+    uniqueInfoEntriesByIdentity,
+    uniqueInfoListByIdentity,
     uniqueInfoByIdentity,
     uniqueDisplayByIdentity,
     exportedValuesForDisplay,
@@ -2394,6 +2396,14 @@ exportedClassesForDisplay exports =
 
 uniqueInfoByIdentity :: (Eq a) => (a -> SymbolIdentity) -> Map String a -> Map SymbolIdentity a
 uniqueInfoByIdentity identityFor values =
+  uniqueInfoListByIdentity identityFor (Map.elems values)
+
+uniqueInfoListByIdentity :: (Eq a) => (a -> SymbolIdentity) -> [a] -> Map SymbolIdentity a
+uniqueInfoListByIdentity identityFor values =
+  uniqueInfoEntriesByIdentity [(identityFor info, info) | info <- values]
+
+uniqueInfoEntriesByIdentity :: (Eq a) => [(SymbolIdentity, a)] -> Map SymbolIdentity a
+uniqueInfoEntriesByIdentity entries =
   Map.fromList
     [ (identity, info)
     | (identity, info : rest) <- Map.toList infosByIdentity,
@@ -2403,9 +2413,7 @@ uniqueInfoByIdentity identityFor values =
     infosByIdentity =
       Map.fromListWith
         (++)
-        [ (identityFor info, [info])
-        | (_, info) <- Map.toList values
-        ]
+        [(identity, [info]) | (identity, info) <- entries]
 
 uniqueDisplayByIdentity :: (a -> SymbolIdentity) -> Map String a -> Map SymbolIdentity String
 uniqueDisplayByIdentity identityFor values =

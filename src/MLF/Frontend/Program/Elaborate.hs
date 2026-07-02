@@ -335,13 +335,13 @@ addIdentityTypeAliases dataTypes =
         Nothing -> Map.insert name info acc
     insertAlias acc _ = acc
 
-indexInfoByIdentity :: (a -> SymbolIdentity) -> Map String a -> Map SymbolIdentity a
+indexInfoByIdentity :: (Eq a) => (a -> SymbolIdentity) -> Map String a -> Map SymbolIdentity a
 indexInfoByIdentity identityOf =
-  indexInfoListByIdentity identityOf . Map.elems
+  uniqueInfoByIdentity identityOf
 
-indexInfoListByIdentity :: (a -> SymbolIdentity) -> [a] -> Map SymbolIdentity a
+indexInfoListByIdentity :: (Eq a) => (a -> SymbolIdentity) -> [a] -> Map SymbolIdentity a
 indexInfoListByIdentity identityOf =
-  Map.fromList . map (\info -> (identityOf info, info))
+  uniqueInfoListByIdentity identityOf
 
 indexDisplayNamesByIdentity :: (a -> SymbolIdentity) -> Map String a -> Map SymbolIdentity [String]
 indexDisplayNamesByIdentity identityOf =
@@ -5002,7 +5002,8 @@ extendConstraintEvidenceInfo scope constraints = do
           )
           (Map.elems (classMethodsByIdentity classInfo))
       let evidenceMethodsByIdentity0 =
-            Map.fromList [(evidenceMethodSymbol methodEvidence, methodEvidence) | (_, methodEvidence) <- methodEntries]
+            uniqueInfoEntriesByIdentity
+              [(evidenceMethodSymbol methodEvidence, methodEvidence) | (_, methodEvidence) <- methodEntries]
       let evidenceInfo =
             EvidenceInfo
               { evidenceClassSymbol = constraintClassSymbol constraint,

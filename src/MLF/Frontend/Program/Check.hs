@@ -204,6 +204,8 @@ import MLF.Frontend.Program.Types
     mkExportedTypeInfo,
     moduleExportsFromMaps,
     uniqueDisplayByIdentity,
+    uniqueInfoEntriesByIdentity,
+    uniqueInfoListByIdentity,
     uniqueInfoByIdentity,
     exportedClassesForDisplay,
     exportedTypesForDisplay,
@@ -361,19 +363,8 @@ scopeElaborateTypes scope =
   scopeTypes scope `Map.union` scopeHiddenTypes scope
 
 indexByIdentity :: (Eq a) => (a -> SymbolIdentity) -> Map String a -> Map SymbolIdentity a
-indexByIdentity identityOf values =
-  uniqueMapByKey [(identityOf info, info) | info <- Map.elems values]
-
-uniqueMapByKey :: (Ord k, Eq a) => [(k, a)] -> Map k a
-uniqueMapByKey entries =
-  Map.fromList
-    [ (key, value)
-    | (key, value : rest) <- Map.toList entriesByKey,
-      all (== value) rest
-    ]
-  where
-    entriesByKey =
-      Map.fromListWith (++) [(key, [value]) | (key, value) <- entries]
+indexByIdentity =
+  uniqueInfoByIdentity
 
 emptyDisplayNameEnv :: DisplayNameEnv
 emptyDisplayNameEnv =
@@ -3056,10 +3047,7 @@ buildLocalClassInfo displayEnv mod0 = do
               pure (methodName0, methodInfo)
           )
       let methodsByIdentity =
-            uniqueMapByKey
-              [ (methodInfoSymbolIdentity methodInfo, methodInfo)
-              | (_, methodInfo) <- methodEntries
-              ]
+            uniqueInfoListByIdentity methodInfoSymbolIdentity (map snd methodEntries)
       pure
         ( className0,
           ClassInfo
@@ -3653,7 +3641,7 @@ buildInstanceSkeletons moduleIdentity generator0 displayEnv scope mod0 derived =
             pure ((methodName0, methodInfo, methodValue), generator1')
       (instanceMethodEntries, generator1') <- buildInstanceMethodEntries generator0' (P.instanceDeclMethods instDecl)
       let instanceMethodInfosByIdentity =
-            uniqueMapByKey
+            uniqueInfoEntriesByIdentity
               [ (methodInfoSymbolIdentity methodInfo, valueInfo)
               | (_, methodInfo, valueInfo) <- instanceMethodEntries
               ]

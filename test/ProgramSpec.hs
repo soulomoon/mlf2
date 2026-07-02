@@ -1307,6 +1307,38 @@ spec = do
                         []
             Map.member runtimeName (elaborateScopeRuntimeTypeViews scope) `shouldBe` False
 
+        it "does not resolve conflicting value payloads by identity in elaborate scope" $ do
+            let sharedIdentity = generatedSymbolIdentity 991446 SymbolValue "Main" "shared" Nothing
+                bindingIdentity = generatedSymbolIdentity 991447 SymbolValue "Main" "main" Nothing
+                valueInfo runtimeName ty =
+                    OrdinaryValue
+                        { valueInfoSymbol = sharedIdentity
+                        , valueRuntimeName = runtimeName
+                        , valueTypeView = ProgramTypes.mkTypeView ty ty
+                        , valueConstraints = []
+                        , valueConstraintInfos = []
+                        }
+                leftValue = valueInfo "Main__left" (STBase "Int")
+                rightValue = valueInfo "Main__right" (STBase "Bool")
+                scope =
+                    mkElaborateScope
+                        (Map.fromList [("left", leftValue), ("right", rightValue)])
+                        Map.empty
+                        Map.empty
+                        []
+                expr =
+                    EVar
+                        ( ResolvedGlobalValue
+                            (ProgramTypes.resolvedValueInfoSymbol (SymbolLocal "Main") "left" leftValue)
+                        )
+            lowerResolvedConstrainedExprBinding
+                scope
+                (ProgramTypes.loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity))
+                (resolvedUnconstrainedType (RSTBase (Builtins.builtinTypeSymbol "Bool")))
+                False
+                expr
+                `shouldBe` Left (ProgramUnknownValue "left")
+
         it "resolves duplicate runtime-name instance methods by identity" $ do
             let runtimeName = "Main__method"
                 classIdentity = generatedSymbolIdentity 991440 SymbolClass "Main" "C" Nothing
