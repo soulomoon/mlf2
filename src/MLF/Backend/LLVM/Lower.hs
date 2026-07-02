@@ -6178,9 +6178,8 @@ rewriteBackendVarsByName identities0 =
   where
     go identities =
       \case
-        BackendVarWithIdentity ty mbIdentity name
-          | not (resolvedNonLocalReference mbIdentity),
-            Just (Just identity) <- Map.lookup name identities ->
+        BackendVarWithIdentity ty Nothing name
+          | Just (Just identity) <- Map.lookup name identities ->
               BackendVarWithIdentity ty (Just identity) name
         BackendVarWithIdentity ty mbIdentity name ->
           BackendVarWithIdentity ty mbIdentity name
