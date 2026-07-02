@@ -1169,6 +1169,101 @@ spec = do
             fmap ProgramTypes.typeViewDisplay (Map.lookup "Main__use" (elaborateScopeRuntimeTypeViews scope))
                 `shouldBe` Just expected
 
+        it "does not choose arbitrary method evidence constraint display vars" $ do
+            let classIdentity = generatedSymbolIdentity 991458 SymbolClass "Main" "C2" Nothing
+                methodIdentity = generatedSymbolIdentity 991459 SymbolMethod "Main" "method" (Just (SymbolOwnerClass classIdentity))
+                evidenceClassIdentity = generatedSymbolIdentity 991460 SymbolClass "Main" "D2" Nothing
+                evidenceMethodIdentity = generatedSymbolIdentity 991461 SymbolMethod "Main" "witness" (Just (SymbolOwnerClass evidenceClassIdentity))
+                valueIdentity = generatedSymbolIdentity 991464 SymbolValue "Main" "ambiguous" Nothing
+                classParamIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991465)
+                localIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991466)
+                evidenceParamIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991467)
+                localStableName = typeBinderIdentityStableName localIdentity
+                localBinderView displayName =
+                    (ProgramTypes.mkTypeView (STVar displayName) (STVar localStableName))
+                        { ProgramTypes.typeViewBinderIdentities = Map.singleton localStableName localIdentity
+                        }
+                methodConstraint displayName =
+                    ProgramTypes.ConstraintInfo
+                        { ProgramTypes.constraintDisplayClass = "D2"
+                        , ProgramTypes.constraintClassSymbol = evidenceClassIdentity
+                        , ProgramTypes.constraintTypeViews = localBinderView displayName :| []
+                        }
+                methodInfo =
+                    MethodInfo
+                        { methodInfoSymbol = methodIdentity
+                        , methodDisplayName = "method"
+                        , methodTypeViewRaw = ProgramTypes.mkTypeView (STBase "Bool") (STBase "Bool")
+                        , methodConstraints = []
+                        , methodConstraintInfos = [methodConstraint "c", methodConstraint "d"]
+                        , methodParamBinders = ("a", classParamIdentity) :| []
+                        }
+                classInfo =
+                    ClassInfo
+                        { classInfoSymbol = classIdentity
+                        , classTypeParams = ResolvedTypeParam (resolvedTypeBinderRefFromIdentity classParamIdentity "a") KType :| []
+                        , classSuperclasses = []
+                        , classSuperclassInfos = []
+                        , classFunctionalDependencies = []
+                        , classMethodsByIdentity = Map.singleton methodIdentity methodInfo
+                        }
+                evidenceParamStableName = typeBinderIdentityStableName evidenceParamIdentity
+                evidenceMethodInfo =
+                    MethodInfo
+                        { methodInfoSymbol = evidenceMethodIdentity
+                        , methodDisplayName = "witness"
+                        , methodTypeViewRaw =
+                            (ProgramTypes.mkTypeView (STVar "e") (STVar evidenceParamStableName))
+                                { ProgramTypes.typeViewBinderIdentities = Map.singleton evidenceParamStableName evidenceParamIdentity
+                                }
+                        , methodConstraints = []
+                        , methodConstraintInfos = []
+                        , methodParamBinders = ("e", evidenceParamIdentity) :| []
+                        }
+                evidenceClassInfo =
+                    ClassInfo
+                        { classInfoSymbol = evidenceClassIdentity
+                        , classTypeParams = ResolvedTypeParam (resolvedTypeBinderRefFromIdentity evidenceParamIdentity "e") KType :| []
+                        , classSuperclasses = []
+                        , classSuperclassInfos = []
+                        , classFunctionalDependencies = []
+                        , classMethodsByIdentity = Map.singleton evidenceMethodIdentity evidenceMethodInfo
+                        }
+                valueConstraint =
+                    ProgramTypes.ConstraintInfo
+                        { ProgramTypes.constraintDisplayClass = "C2"
+                        , ProgramTypes.constraintClassSymbol = classIdentity
+                        , ProgramTypes.constraintTypeViews = ProgramTypes.mkTypeView (STBase "Int") (STBase "Int") :| []
+                        }
+                valueInfo =
+                    OrdinaryValue
+                        { valueInfoSymbol = valueIdentity
+                        , valueRuntimeName = "Main__ambiguous"
+                        , valueTypeView = ProgramTypes.mkTypeView (STBase "Bool") (STBase "Bool")
+                        , valueConstraints = []
+                        , valueConstraintInfos = [valueConstraint]
+                        }
+                scope =
+                    mkElaborateScope
+                        (Map.singleton "ambiguous" valueInfo)
+                        Map.empty
+                        ( Map.fromList
+                            [ ("C2", classInfo)
+                            , ("D2", evidenceClassInfo)
+                            ]
+                        )
+                        []
+                expected =
+                    STArrow
+                        ( STForall
+                            localStableName
+                            Nothing
+                            (STArrow (STVar localStableName) (STArrow (STVar localStableName) (STBase "Bool")))
+                        )
+                        (STBase "Bool")
+            fmap ProgramTypes.typeViewDisplay (Map.lookup "Main__ambiguous" (elaborateScopeRuntimeTypeViews scope))
+                `shouldBe` Just expected
+
         it "carries runtime type head identities in elaborate scope" $ do
             let valueIdentity = generatedSymbolIdentity 991433 SymbolValue "Main" "box" Nothing
                 typeIdentity = generatedSymbolIdentity 991434 SymbolType "Main" "Box" Nothing

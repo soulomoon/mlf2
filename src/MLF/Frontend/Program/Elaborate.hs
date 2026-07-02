@@ -802,7 +802,7 @@ quantifyMethodLocalVarsInfoView headVars constraints view =
       ]
 
     displayNamesByIdentityName =
-      Map.unionsWith const (typeViewVarPairs view : map constraintVarPairs constraints)
+      typeViewVarPairs view `Map.union` mergeUniquePairMaps (map constraintVarPairs constraints)
 
     canonicalDisplayNamesByIdentityName =
       Map.fromList
