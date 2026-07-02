@@ -726,10 +726,10 @@ methodEvidenceSourceTypeInfoViewRaw dataTypes classesByIdentity classInfo classA
           (applyConstraintInfoSubst (typeViewSubstFromParamIdentities (classParamBinderIdentities classInfo) classArgViews))
           (methodConstraintInfos methodInfo)
       headVars = freeTypeBinderIdentitiesTypeViewsFailClosed classArgViews
-      deferredConstraints =
-        filter (not . constraintInfoDeterminedByTypeBinderIdentitiesFailClosed headVars) specializedConstraints
-      evidenceVisibleView =
+      (evidenceVisibleView, specializedConstraints') =
         quantifyMethodLocalVarsInfoView headVars specializedConstraints specializedMethodView
+      deferredConstraints =
+        filter (not . constraintInfoDeterminedByTypeBinderIdentitiesFailClosed headVars) specializedConstraints'
    in constrainedRuntimeTypeInfoViewRaw dataTypes classesByIdentity deferredConstraints evidenceVisibleView
 
 freeTypeBinderIdentitiesTypeViewsFailClosed :: NonEmpty TypeView -> Set TypeBinderIdentity
@@ -769,16 +769,18 @@ freeTypeBinderIdentitiesTypeViewsOrThrow views =
         ProgramPipelineError
           ("elaborate resolved type variable `" ++ name ++ "` is missing binder identity")
 
-quantifyMethodLocalVarsInfoView :: Set TypeBinderIdentity -> [ConstraintInfo] -> TypeView -> TypeView
+quantifyMethodLocalVarsInfoView :: Set TypeBinderIdentity -> [ConstraintInfo] -> TypeView -> (TypeView, [ConstraintInfo])
 quantifyMethodLocalVarsInfoView headVars constraints view =
-  TypeView
-    { typeViewDisplay = foldr quantifyDisplay (typeViewDisplay view) localVarPairs,
-      typeViewIdentity = foldr quantifyIdentity (typeViewIdentity view) localVarPairs,
-      typeViewHeadIdentities = typeViewHeadIdentities view,
-      typeViewBinderIdentities =
-        mergeTypeBinderIdentityMaps
-          (typeViewBinderIdentities view : map constraintBinderIdentities constraints)
-    }
+  ( TypeView
+      { typeViewDisplay = foldr quantifyDisplay (typeViewDisplay canonicalView) localVarPairs,
+        typeViewIdentity = foldr quantifyIdentity (typeViewIdentity canonicalView) localVarPairs,
+        typeViewHeadIdentities = typeViewHeadIdentities canonicalView,
+        typeViewBinderIdentities =
+          mergeTypeBinderIdentityMaps
+            (typeViewBinderIdentities canonicalView : map constraintBinderIdentities canonicalConstraints)
+      },
+    canonicalConstraints
+  )
   where
     (identityForalls, identityBody) = splitForalls (typeViewIdentity view)
     alreadyQuantified =
@@ -801,6 +803,18 @@ quantifyMethodLocalVarsInfoView headVars constraints view =
 
     displayNamesByIdentityName =
       Map.unionsWith const (typeViewVarPairs view : map constraintVarPairs constraints)
+
+    canonicalDisplayNamesByIdentityName =
+      Map.fromList
+        [ (identityName, displayName)
+        | (displayName, identityName) <- localVarPairs
+        ]
+
+    canonicalView =
+      canonicalizeTypeViewVarDisplays canonicalDisplayNamesByIdentityName view
+
+    canonicalConstraints =
+      map (canonicalizeConstraintVarDisplays canonicalDisplayNamesByIdentityName) constraints
 
     constraintBinderIdentities =
       foldMap typeViewBinderIdentities . constraintTypeViews
@@ -825,6 +839,65 @@ quantifyMethodLocalVarsInfoView headVars constraints view =
 
     quantifyDisplay (displayName, _) acc = STForall displayName Nothing acc
     quantifyIdentity (_, identityName) acc = STForall identityName Nothing acc
+
+canonicalizeConstraintVarDisplays :: Map String String -> ConstraintInfo -> ConstraintInfo
+canonicalizeConstraintVarDisplays displayNamesByIdentityName constraint =
+  constraint
+    { constraintTypeViews =
+        fmap
+          (canonicalizeTypeViewVarDisplays displayNamesByIdentityName)
+          (constraintTypeViews constraint)
+    }
+
+canonicalizeTypeViewVarDisplays :: Map String String -> TypeView -> TypeView
+canonicalizeTypeViewVarDisplays displayNamesByIdentityName view =
+  view
+    { typeViewDisplay =
+        canonicalizeSrcTypeVarDisplays displayNamesByIdentityName (typeViewDisplay view) (typeViewIdentity view)
+    }
+
+canonicalizeSrcTypeVarDisplays :: Map String String -> SrcType -> SrcType -> SrcType
+canonicalizeSrcTypeVarDisplays displayNamesByIdentityName =
+  go Set.empty
+  where
+    go identityBoundNames display identityTy =
+      case (display, identityTy) of
+        (STVar displayName, STVar identityName) ->
+          STVar (displayNameFor identityBoundNames identityName displayName)
+        (STArrow displayDom displayCod, STArrow identityDom identityCod) ->
+          STArrow
+            (go identityBoundNames displayDom identityDom)
+            (go identityBoundNames displayCod identityCod)
+        (STCon displayName displayArgs, STCon _ identityArgs) ->
+          STCon displayName (NE.zipWith (go identityBoundNames) displayArgs identityArgs)
+        (STVarApp displayName displayArgs, STVarApp identityName identityArgs) ->
+          STVarApp
+            (displayNameFor identityBoundNames identityName displayName)
+            (NE.zipWith (go identityBoundNames) displayArgs identityArgs)
+        (STTyLam displayName displayBody, STTyLam identityName identityBody) ->
+          STTyLam displayName (go (Set.insert identityName identityBoundNames) displayBody identityBody)
+        (STTyApp displayFun displayArg, STTyApp identityFun identityArg) ->
+          STTyApp
+            (go identityBoundNames displayFun identityFun)
+            (go identityBoundNames displayArg identityArg)
+        (STForall displayName displayBound displayBody, STForall identityName identityBound identityBody) ->
+          STForall
+            displayName
+            (canonicalizeBound identityBoundNames displayBound identityBound)
+            (go (Set.insert identityName identityBoundNames) displayBody identityBody)
+        (STMu displayName displayBody, STMu identityName identityBody) ->
+          STMu displayName (go (Set.insert identityName identityBoundNames) displayBody identityBody)
+        _ ->
+          display
+
+    canonicalizeBound identityBound (Just (SrcBound displayBound)) (Just (SrcBound identityBoundTy)) =
+      Just (SrcBound (go identityBound displayBound identityBoundTy))
+    canonicalizeBound _ displayBound _ =
+      displayBound
+
+    displayNameFor identityBound identityName displayName
+      | identityName `Set.member` identityBound = displayName
+      | otherwise = Map.findWithDefault displayName identityName displayNamesByIdentityName
 
 constraintVarPairs :: ConstraintInfo -> Map String String
 constraintVarPairs constraint =
