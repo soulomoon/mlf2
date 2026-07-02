@@ -1994,7 +1994,7 @@ valueResolvedEvidenceArgs scope valueInfo@OrdinaryValue {valueConstraints = disp
       hasLocalPolymorphicEvidence <- or <$> mapM usesLocalPolymorphicEvidence specializedConstraints
       if hasLocalPolymorphicEvidence
         then throwError (ProgramAmbiguousConstrainedValueUse (valueInfoIdentityName valueInfo))
-        else concat <$> mapM (constraintEvidenceArgExprsInfo scope) specializedConstraints
+        else concat <$> mapM (constraintResolvedEvidenceArgExprsInfo scope) specializedConstraints
   where
     usesLocalPolymorphicEvidence constraint =
       (&& constraintCoveredByEvidenceInfo scope constraint)
@@ -2023,7 +2023,7 @@ valueResolvedEvidenceArgsWithExpectedView scope valueInfo@OrdinaryValue {valueCo
       hasLocalPolymorphicEvidence <- or <$> mapM usesLocalPolymorphicEvidence specializedConstraints
       if hasLocalPolymorphicEvidence
         then throwError (ProgramAmbiguousConstrainedValueUse (valueInfoIdentityName valueInfo))
-        else concat <$> mapM (constraintEvidenceArgExprsInfo scope) specializedConstraints
+        else concat <$> mapM (constraintResolvedEvidenceArgExprsInfo scope) specializedConstraints
   where
     usesLocalPolymorphicEvidence constraint =
       (&& constraintCoveredByEvidenceInfo scope constraint)
@@ -2056,10 +2056,22 @@ constraintEvidenceArgExprsInfo scope constraint
   | otherwise =
       resolveConstraintEvidenceExpr scope Set.empty constraint
 
+constraintResolvedEvidenceArgExprsInfo :: ElaborateScope -> ConstraintInfo -> ElaborateM [SurfaceExpr]
+constraintResolvedEvidenceArgExprsInfo scope constraint = do
+  shouldDefer <- shouldDeferResolvedConstraintEvidenceInfo scope constraint
+  if shouldDefer
+    then deferConstraintEvidenceExprsInfo scope constraint
+    else resolveConstraintEvidenceExpr scope Set.empty constraint
+
 shouldDeferConstraintEvidenceInfo :: ElaborateScope -> ConstraintInfo -> Bool
 shouldDeferConstraintEvidenceInfo scope constraint =
   not (Set.null (freeTypeVarsTypeViews (constraintTypeViews constraint)))
     && not (constraintCoveredByEvidenceInfo scope constraint)
+
+shouldDeferResolvedConstraintEvidenceInfo :: ElaborateScope -> ConstraintInfo -> ElaborateM Bool
+shouldDeferResolvedConstraintEvidenceInfo scope constraint =
+  (&& not (constraintCoveredByEvidenceInfo scope constraint))
+    <$> constraintInfoHasFreeTypeBinderIdentities constraint
 
 constraintCoveredByEvidenceInfo :: ElaborateScope -> ConstraintInfo -> Bool
 constraintCoveredByEvidenceInfo scope constraint =
@@ -2602,7 +2614,7 @@ methodLocalEvidenceArgsForResolvedCall scope methodInfo classArgViews args = do
       (fmap not . constraintInfoDeterminedByTypeBinderIdentities headVars)
       (map (applyConstraintInfoSubst classArgSubst) (methodConstraintInfos methodInfo))
   let specializedConstraints = map (applyConstraintInfoSubst subst) methodLocalConstraintInfos
-  concat <$> mapM (constraintEvidenceArgExprsInfo scope) specializedConstraints
+  concat <$> mapM (constraintResolvedEvidenceArgExprsInfo scope) specializedConstraints
   where
     classArgSubst = typeViewSubstFromParamIdentities (methodParamBinderIdentities methodInfo) classArgViews
 
