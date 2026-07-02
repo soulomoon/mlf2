@@ -267,6 +267,7 @@ data BackendValidationError
   = BackendDuplicateModule String
   | BackendDuplicateData String
   | BackendDataParameterIdentityMissing String String
+  | BackendDuplicateDataParameter String String
   | BackendConstructorUnknownTypeVariable String String
   | BackendConstructorTypeBinderIdentityMissing String String
   | BackendDuplicateBinding String
@@ -482,7 +483,13 @@ validateBackendProgram program = do
         }
 
 validateBackendDataParameterIdentities :: BackendData -> Either BackendValidationError ()
-validateBackendDataParameterIdentities dataDecl =
+validateBackendDataParameterIdentities dataDecl = do
+  requireUniqueBy
+    (BackendDuplicateDataParameter (backendDataName dataDecl))
+    [ (key, backendTypeSubstitutionKeyName key)
+    | ref <- backendDataParameterRefs dataDecl,
+      let key = backendDataParameterRefKey ref
+    ]
   case backendDataIdentity dataDecl of
     Just {} -> mapM_ requireIdentity (backendDataParameterRefs dataDecl)
     Nothing -> pure ()

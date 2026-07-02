@@ -45,6 +45,29 @@ spec = describe "MLF.Backend.IR" $ do
     validateBackendProgram identityDataWithNameOnlyParameterProgram
       `shouldBe` Left (BackendDataParameterIdentityMissing "NamedBox" "a")
 
+  it "rejects duplicate backend data parameter keys" $ do
+    let parameterIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991666)
+        dataIdentity =
+          testSymbolIdentity 991667 SymbolType "Main" "DupParams"
+        duplicateParameterData =
+          BackendDataWithIdentity
+            (Just dataIdentity)
+            "DupParams"
+            [ backendDataParameterRefFromIdentity parameterIdentity "a",
+              backendDataParameterRefFromIdentity parameterIdentity "stale-a"
+            ]
+            []
+        program =
+          BackendProgram
+            [ (emptyModule "Main")
+                { backendModuleData = [duplicateParameterData],
+                  backendModuleBindings = [mainLiteralBinding]
+                }
+            ]
+            "main"
+    validateBackendProgram program
+      `shouldBe` Left (BackendDuplicateDataParameter "DupParams" (typeBinderIdentityStableName parameterIdentity))
+
   it "rejects identity-bearing constructor signatures with name-only parameter references" $
     validateBackendProgram identityDataWithNameOnlyConstructorParameterProgram
       `shouldBe` Left (BackendConstructorUnknownTypeVariable "NamedBox" "a")
