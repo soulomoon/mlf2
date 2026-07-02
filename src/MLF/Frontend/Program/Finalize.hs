@@ -1590,6 +1590,9 @@ annotateResolvedTermVarsWithEvidenceCounts evidenceCountsByBinding initialEviden
     initialGenerator =
       identityGeneratorAfter generatedIdentities
 
+    resolvedLocalIdentityOverrides =
+      collectResolvedLocalIdentityOverrides resolvedLocalIdentities term0
+
     go identityLocals evidenceParamsLeft generator current =
       case current of
         X.EVarNode resolved
@@ -1648,7 +1651,7 @@ annotateResolvedTermVarsWithEvidenceCounts evidenceCountsByBinding initialEviden
               mbResolvedLocalRef =
                 if isEvidenceParam
                   then Nothing
-                  else Map.lookup (X.resolvedVarRuntimeName resolved) resolvedLocalIdentities
+                  else Map.lookup (X.resolvedVarIdentityKey resolved) resolvedLocalIdentityOverrides
               (localRef, generator') =
                 case mbResolvedLocalRef of
                   Just ref -> (ref, generator)
@@ -1669,6 +1672,36 @@ annotateResolvedTermVarsWithEvidenceCounts evidenceCountsByBinding initialEviden
         LocalId localRef -> Just localRef
         EvidenceId localRef -> Just localRef
         _ -> Nothing
+
+collectResolvedLocalIdentityOverrides :: Map String LocalRef -> XmlfTerm -> Map X.ResolvedTermIdentityKey LocalRef
+collectResolvedLocalIdentityOverrides resolvedLocalIdentities =
+  go
+  where
+    go term =
+      case term of
+        X.EVarNode {} -> Map.empty
+        X.ELit {} -> Map.empty
+        X.ELam resolved body ->
+          resolvedLocalEntry resolved <> go body
+        X.EApp fun arg ->
+          go fun <> go arg
+        X.ELet resolved _ rhs body ->
+          resolvedLocalEntry resolved <> go rhs <> go body
+        X.ETyAbsRef _ _ body ->
+          go body
+        X.ETyInst inner _ ->
+          go inner
+        X.ERoll _ body ->
+          go body
+        X.EUnroll body ->
+          go body
+
+    resolvedLocalEntry resolved
+      | X.resolvedVarIsLocal resolved,
+        Just localRef <- Map.lookup (X.resolvedVarRuntimeName resolved) resolvedLocalIdentities =
+          Map.singleton (X.resolvedVarIdentityKey resolved) localRef
+      | otherwise =
+          Map.empty
 
 type EvidenceMethodKey = (SymbolIdentity, [SrcType], SymbolIdentity)
 
