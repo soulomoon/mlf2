@@ -9,7 +9,7 @@ import MLF.Backend.IR
 import MLF.Backend.StructuralRecursiveData
 import MLF.Constraint.Types.Graph (BaseTy (..), NodeId (..))
 import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), symbolIdentityFromParts, symbolIdentityStableName, symbolIdentityWithUnique)
-import MLF.Types.Identity (StructuralTypeBinderRole (..), TypeBinderIdentity, typeBinderIdentityFromNode, typeBinderIdentityFromStructural, typeBinderIdentityStableName)
+import MLF.Types.Identity (StructuralTypeBinderRole (..), TypeBinderIdentity, typeBinderIdentityFromNode, typeBinderIdentityFromStructural, typeBinderIdentityFromUnique, typeBinderIdentityStableName)
 import MLF.Types.Unique (UniqueIdentity (..))
 import Test.Hspec
 
@@ -44,6 +44,15 @@ spec = describe "MLF.Backend.StructuralRecursiveData" $ do
   it "matches metadata-light recursive payload parameters without counting self fields" $
     metadataLightStructuralDataMatches (BaseTy "List") [intTy] "$List_self" (listStructuralBody intTy)
       `shouldBe` True
+
+  it "rejects metadata-light payload variables with the same spelling but different generated identities" $ do
+    let expectedIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991357)
+        actualIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991358)
+        expected = BTVarWithIdentity (Just expectedIdentity) "a"
+        actual = BTVarWithIdentity (Just actualIdentity) "a"
+
+    metadataLightStructuralDataMatches (BaseTy "List") [expected] "$List_self" (listStructuralBody actual)
+      `shouldBe` False
 
   it "treats freshened recursive self fields as self payloads" $
     metadataLightStructuralDataMatches (BaseTy "List") [intTy] "$List_self" (freshenedSelfListStructuralBody intTy)

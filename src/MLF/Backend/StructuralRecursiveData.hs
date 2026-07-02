@@ -278,14 +278,6 @@ matchStructuralDataLightWithIdentity (BaseTy dataName) args muIdentity muName bo
 metadataLightPayloadTypeMatches :: BackendType -> BackendType -> Bool
 metadataLightPayloadTypeMatches left right =
   alphaEqBackendType left right
-    || case (left, right) of
-      (BTVarWithIdentity leftIdentity leftName, BTVarWithIdentity rightIdentity rightName) ->
-        leftName == rightName && isGenerated leftIdentity && isGenerated rightIdentity
-      _ ->
-        False
-  where
-    isGenerated =
-      maybe False (maybe False (const True) . typeBinderIdentityGeneratedUnique)
 
 recursiveSelfField :: Maybe TypeBinderIdentity -> String -> BackendType -> Bool
 recursiveSelfField muIdentity muName ty =
