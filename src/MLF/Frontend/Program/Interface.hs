@@ -162,6 +162,7 @@ validatePackageInterface graph packageInterface = do
             Left (ProgramInterfaceUnexpectedModule moduleId)
     unless (actualIds == expectedIds) $
         Left (ProgramInterfaceModuleOrderMismatch expectedIds actualIds)
+    requireUniqueModuleIdentities (packageInterfaceModules packageInterface)
     forM_ (packageInterfaceModules packageInterface) $ \interface -> do
         node <-
             maybe
@@ -183,6 +184,19 @@ validatePackageInterface graph packageInterface = do
             [ (packageModuleGraphNodeId node, node)
             | node <- packageModuleGraphNodes graph
             ]
+
+requireUniqueModuleIdentities :: [ModuleInterface] -> Either ProgramInterfaceError ()
+requireUniqueModuleIdentities =
+    go Set.empty
+  where
+    go _ [] = Right ()
+    go seen (interface : rest)
+        | identity `Set.member` seen =
+            Left (ProgramInterfaceDuplicateMetadataIdentity (moduleInterfaceId interface) "module" identity)
+        | otherwise =
+            go (Set.insert identity seen) rest
+      where
+        identity = moduleInterfaceIdentity interface
 
 validateModuleAgainstGraph ::
     PackageModuleGraphNode ->

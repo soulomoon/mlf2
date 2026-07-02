@@ -42,6 +42,7 @@ import MLF.Frontend.Program.Types
     , SymbolIdentity
     , symbolIdentityFromParts
     , SymbolNamespace (..)
+    , symbolUniqueIdentity
     , ValueInfo (..)
     , ctorName
     , dataInfoSymbolIdentity
@@ -157,6 +158,20 @@ spec = do
                             , mainInterface
                             ]
                         }
+                duplicateModuleIdentity =
+                    symbolIdentityFromParts
+                        (symbolUniqueIdentity (moduleInterfaceIdentity libInterface))
+                        SymbolModule
+                        "Main"
+                        "Main"
+                        Nothing
+                duplicateModuleInterfaceIdentity =
+                    packageInterface
+                        { packageInterfaceModules =
+                            [ libInterface
+                            , mainInterface {moduleInterfaceIdentity = duplicateModuleIdentity}
+                            ]
+                        }
                 missingDependency =
                     packageInterface
                         { packageInterfaceModules = [mainInterface]
@@ -168,6 +183,8 @@ spec = do
             validatePackageInterface graph wrongSourcePath
                 `shouldBe` Left (ProgramInterfaceSourcePathMismatch libId (Just "src/Lib.mlfp") (Just "wrong/Lib.mlfp"))
             validatePackageInterface graph wrongOwner `shouldSatisfy` isLeft
+            validatePackageInterface graph duplicateModuleInterfaceIdentity
+                `shouldBe` Left (ProgramInterfaceDuplicateMetadataIdentity mainId "module" duplicateModuleIdentity)
             validatePackageInterface graph missingDependency
                 `shouldBe` Left (ProgramInterfaceModuleMissing libId)
 
