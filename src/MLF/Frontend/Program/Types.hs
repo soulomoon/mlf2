@@ -39,6 +39,7 @@ module MLF.Frontend.Program.Types
     typeViewSubstDisplayTypes,
     typeViewSubstFromParamIdentities,
     typeParamBinderIdentity,
+    mergeUniquePairMaps,
     TypeBinderSubst,
     emptyTypeBinderSubst,
     typeBinderSubstFromTypeViewSubst,

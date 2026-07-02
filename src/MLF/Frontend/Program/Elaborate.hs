@@ -828,7 +828,7 @@ quantifyMethodLocalVarsInfoView headVars constraints view =
 
 constraintVarPairs :: ConstraintInfo -> Map String String
 constraintVarPairs constraint =
-  Map.unionsWith const (map typeViewVarPairs (NE.toList (constraintTypeViews constraint)))
+  mergeUniquePairMaps (map typeViewVarPairs (NE.toList (constraintTypeViews constraint)))
 
 lowerTypeRaw :: Map String DataInfo -> SrcType -> SrcType
 lowerTypeRaw dataTypes = lower Map.empty Nothing
