@@ -213,13 +213,14 @@ programRunOutput result =
     ++ maybe "" ((++ "\n") . prettyValue) (programRunValue result)
 
 runCheckedPureProgram :: CheckedProgram -> Either ProgramError Value
-runCheckedPureProgram checked =
-  case classifyMainMode (mkRuntimeContext checked) checked of
+runCheckedPureProgram checked = do
+  context <- mkRuntimeContext checked
+  case classifyMainMode context checked of
     MainPure -> do
       rejectOpaqueDependencies checked
       let normalizedTerm = normalizeProgramTerm (programMainTerm checked)
       if termMentionsRuntimePurePrimitive normalizedTerm
-        then runtimeValueToValue <$> mainRuntimeValue checked
+        then runtimeValueToValue <$> mainRuntimeValue context checked
         else pure (toValueWithProgram checked normalizedTerm)
     MainIOUnit ->
       Left (ProgramPipelineError "runProgram value API does not return IO main output")
@@ -229,7 +230,8 @@ runCheckedPureProgram checked =
       Left (unsupportedIOMainError ty)
 
 runCheckedProgramOutput :: CheckedProgram -> Either ProgramError ProgramRunResult
-runCheckedProgramOutput checked =
+runCheckedProgramOutput checked = do
+  context <- mkRuntimeContext checked
   case classifyMainMode context checked of
     MainPure -> do
       value <- runCheckedPureProgram checked
@@ -239,7 +241,7 @@ runCheckedProgramOutput checked =
             programRunValue = Just value
           }
     MainIOUnit -> do
-      action <- mainIOAction checked
+      action <- mainIOAction context checked
       (stdoutText, result) <- executeIOAction context action
       if isRuntimeUnit context result
         then
@@ -250,7 +252,7 @@ runCheckedProgramOutput checked =
               }
         else Left (ProgramPipelineError "run-program IO main did not finish with Unit")
     MainIOOther _ty -> do
-      action <- mainIOAction checked
+      action <- mainIOAction context checked
       (stdoutText, result) <- executeIOAction context action
       pure
         ProgramRunResult
@@ -259,8 +261,6 @@ runCheckedProgramOutput checked =
           }
     MainUnsupportedIO ty ->
       Left (unsupportedIOMainError ty)
-  where
-    context = mkRuntimeContext checked
 
 data MainMode
   = MainPure
@@ -521,8 +521,8 @@ data RuntimeIOAction
   | RuntimeWriteIORef RuntimeValue RuntimeValue
   | RuntimeGetArgs
 
-mainIOAction :: CheckedProgram -> Either ProgramError RuntimeIOAction
-mainIOAction checked = do
+mainIOAction :: RuntimeContext -> CheckedProgram -> Either ProgramError RuntimeIOAction
+mainIOAction context checked = do
   binding <-
     case lookupRuntimeBindingResolved context (checkedProgramMainResolvedVar checked) of
       Just found -> Right found
@@ -531,50 +531,66 @@ mainIOAction checked = do
   case value of
     RuntimeIO action -> Right action
     _ -> Left (ProgramPipelineError "run-program IO main did not evaluate to an IO action")
-  where
-    context = mkRuntimeContext checked
 
-mainRuntimeValue :: CheckedProgram -> Either ProgramError RuntimeValue
-mainRuntimeValue checked = do
+mainRuntimeValue :: RuntimeContext -> CheckedProgram -> Either ProgramError RuntimeValue
+mainRuntimeValue context checked = do
   binding <-
     case lookupRuntimeBindingResolved context (checkedProgramMainResolvedVar checked) of
       Just found -> Right found
       Nothing -> Left ProgramMainNotFound
   evalRuntimeBinding context [] binding
-  where
-    context = mkRuntimeContext checked
 
-mkRuntimeContext :: CheckedProgram -> RuntimeContext
-mkRuntimeContext checked =
-  RuntimeContext
-    { runtimeBindingsByIdentity =
-        Map.fromList
-          [ (symbol, binding)
-          | binding <- allCheckedBindings checked,
-            Just symbol <- [resolvedVarBindingSymbolIdentity (checkedBindingResolvedVar binding)]
-          ],
-      runtimeConstructorsByIdentity =
-        Map.fromList
-          [(ctorInfoSymbol ctor, ctor) | dataInfo <- allDataInfos checked, ctor <- dataConstructors dataInfo],
-      runtimePreludeConstructorsByKey =
-        Map.fromList
-          [ (key, ctor)
-          | checkedModule <- checkedProgramModules checked,
-            isRuntimePreludeModule checkedModule,
-            dataInfo <- Map.elems (checkedModuleData checkedModule),
-            ctor <- dataConstructors dataInfo,
-            Just key <- [preludeConstructorKey checkedModule dataInfo ctor]
-          ],
-      runtimePreludeBindingsByKey =
-        Map.fromList
-          [ (key, binding)
-          | checkedModule <- checkedProgramModules checked,
-            isRuntimePreludeModule checkedModule,
-            binding <- checkedModuleBindings checkedModule,
-            Just key <- [preludeBindingKey binding]
-          ],
-      runtimeElaborateScope = programElaborateScope checked
-    }
+mkRuntimeContext :: CheckedProgram -> Either ProgramError RuntimeContext
+mkRuntimeContext checked = do
+  bindingsByIdentity <-
+    uniqueRuntimeInfoByIdentity
+      "binding"
+      [ (symbol, binding)
+      | binding <- allCheckedBindings checked,
+        Just symbol <- [resolvedVarBindingSymbolIdentity (checkedBindingResolvedVar binding)]
+      ]
+  _dataByIdentity <-
+    uniqueRuntimeInfoByIdentity
+      "data"
+      [(dataInfoSymbol dataInfo, dataInfo) | dataInfo <- allDataInfos checked]
+  constructorsByIdentity <-
+    uniqueRuntimeInfoByIdentity
+      "constructor"
+      [(ctorInfoSymbol ctor, ctor) | dataInfo <- allDataInfos checked, ctor <- dataConstructors dataInfo]
+  Right
+    RuntimeContext
+      { runtimeBindingsByIdentity = bindingsByIdentity,
+        runtimeConstructorsByIdentity = constructorsByIdentity,
+        runtimePreludeConstructorsByKey =
+          Map.fromList
+            [ (key, ctor)
+            | checkedModule <- checkedProgramModules checked,
+              isRuntimePreludeModule checkedModule,
+              dataInfo <- Map.elems (checkedModuleData checkedModule),
+              ctor <- dataConstructors dataInfo,
+              Just key <- [preludeConstructorKey checkedModule dataInfo ctor]
+            ],
+        runtimePreludeBindingsByKey =
+          Map.fromList
+            [ (key, binding)
+            | checkedModule <- checkedProgramModules checked,
+              isRuntimePreludeModule checkedModule,
+              binding <- checkedModuleBindings checkedModule,
+              Just key <- [preludeBindingKey binding]
+            ],
+        runtimeElaborateScope = programElaborateScope checked
+      }
+
+uniqueRuntimeInfoByIdentity :: String -> [(SymbolIdentity, a)] -> Either ProgramError (Map.Map SymbolIdentity a)
+uniqueRuntimeInfoByIdentity label =
+  go Map.empty
+  where
+    go entries [] = Right entries
+    go entries ((identity, info) : rest)
+      | Map.member identity entries =
+          Left (ProgramPipelineError ("run-program duplicate checked " ++ label ++ " identity: " ++ symbolIdentityStableName identity))
+      | otherwise =
+          go (Map.insert identity info entries) rest
 
 isRuntimePreludeModule :: CheckedModule -> Bool
 isRuntimePreludeModule checkedModule =

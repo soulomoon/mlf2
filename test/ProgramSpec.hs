@@ -3263,6 +3263,76 @@ spec = do
                         checked
             (programRunOutput <$> runCheckedProgramOutput checked') `shouldBe` Right "ctor-identity\n"
 
+        it "rejects duplicate checked runtime binding identities before run context lookup" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  def helper : Int = 0;"
+                        , "  def main : Int = helper;"
+                        , "}"
+                        ]
+            checked <- requireChecked program
+            mainBinding <- requireCheckedBinding "Main__main" checked
+            duplicateIdentity <- requireTopLevelIdentity mainBinding
+            let checked' = replaceCheckedBindingTopLevelIdentity "Main__helper" duplicateIdentity checked
+            case runCheckedProgramOutput checked' of
+                Left (ProgramPipelineError message) -> do
+                    message `shouldSatisfy` isInfixOf "duplicate checked binding identity"
+                    message `shouldSatisfy` isInfixOf (symbolIdentityStableName duplicateIdentity)
+                other ->
+                    expectationFailure ("expected duplicate binding identity rejection, got " ++ show other)
+
+        it "rejects duplicate checked runtime data identities before run context lookup" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  data ABox ="
+                        , "      MkABox : ABox;"
+                        , "  data BBox ="
+                        , "      MkBBox : BBox;"
+                        , "  def main : ABox = MkABox;"
+                        , "}"
+                        ]
+            checked <- requireChecked program
+            aData <- requireCheckedData "Main" "ABox" checked
+            bData <- requireCheckedData "Main" "BBox" checked
+            let duplicateIdentity = dataInfoSymbol aData
+                checked' = replaceCheckedDataSymbol (dataInfoSymbol bData) duplicateIdentity checked
+            case runCheckedProgramOutput checked' of
+                Left (ProgramPipelineError message) -> do
+                    message `shouldSatisfy` isInfixOf "duplicate checked data identity"
+                    message `shouldSatisfy` isInfixOf (symbolIdentityStableName duplicateIdentity)
+                other ->
+                    expectationFailure ("expected duplicate data identity rejection, got " ++ show other)
+
+        it "rejects duplicate checked runtime constructor identities before run context lookup" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  data Option ="
+                        , "      None : Option"
+                        , "    | Some : Int -> Option;"
+                        , "  def main : Option = None;"
+                        , "}"
+                        ]
+            checked <- requireChecked program
+            dataInfo <- requireCheckedData "Main" "Option" checked
+            case dataConstructors dataInfo of
+                firstCtor : secondCtor : _ -> do
+                    let duplicateIdentity = ctorInfoSymbol firstCtor
+                        checked' = replaceCheckedConstructorSymbol (ctorInfoSymbol secondCtor) duplicateIdentity checked
+                    case runCheckedProgramOutput checked' of
+                        Left (ProgramPipelineError message) -> do
+                            message `shouldSatisfy` isInfixOf "duplicate checked constructor identity"
+                            message `shouldSatisfy` isInfixOf (symbolIdentityStableName duplicateIdentity)
+                        other ->
+                            expectationFailure ("expected duplicate constructor identity rejection, got " ++ show other)
+                _ ->
+                    expectationFailure "expected two constructors"
+
         it "runs checked IO local environments by resolved local identity instead of binder spelling" $ do
             located <-
                 requireLocated $
@@ -7041,6 +7111,77 @@ renameCheckedBindingName oldName newName checked =
                         }
                 }
         | otherwise = binding
+
+requireTopLevelIdentity :: CheckedBinding -> IO SymbolIdentity
+requireTopLevelIdentity binding =
+    case resolvedVarDetails (checkedBindingResolvedVar binding) of
+        TopLevelId identity -> pure identity
+        other -> expectationFailure ("expected top-level binding identity, got " ++ show other) >> fail "missing top-level identity"
+
+replaceCheckedBindingTopLevelIdentity :: String -> SymbolIdentity -> CheckedProgram -> CheckedProgram
+replaceCheckedBindingTopLevelIdentity name replacement checked =
+    checked
+        { checkedProgramModules =
+            map replaceModule (checkedProgramModules checked)
+        }
+  where
+    replaceModule checkedModule =
+        checkedModule
+            { checkedModuleBindings =
+                map replaceBinding (checkedModuleBindings checkedModule)
+            }
+
+    replaceBinding binding
+        | checkedBindingName binding == name =
+            binding
+                { checkedBindingResolvedVar =
+                    (checkedBindingResolvedVar binding)
+                        { resolvedVarDetails = TopLevelId replacement
+                        }
+                }
+        | otherwise = binding
+
+replaceCheckedDataSymbol :: SymbolIdentity -> SymbolIdentity -> CheckedProgram -> CheckedProgram
+replaceCheckedDataSymbol target replacement checked =
+    checked
+        { checkedProgramModules =
+            map replaceModule (checkedProgramModules checked)
+        }
+  where
+    replaceModule checkedModule =
+        checkedModule
+            { checkedModuleData =
+                fmap replaceData (checkedModuleData checkedModule)
+            }
+
+    replaceData dataInfo
+        | dataInfoSymbol dataInfo == target =
+            dataInfo {dataInfoSymbol = replacement}
+        | otherwise = dataInfo
+
+replaceCheckedConstructorSymbol :: SymbolIdentity -> SymbolIdentity -> CheckedProgram -> CheckedProgram
+replaceCheckedConstructorSymbol target replacement checked =
+    checked
+        { checkedProgramModules =
+            map replaceModule (checkedProgramModules checked)
+        }
+  where
+    replaceModule checkedModule =
+        checkedModule
+            { checkedModuleData =
+                fmap replaceData (checkedModuleData checkedModule)
+            }
+
+    replaceData dataInfo =
+        dataInfo
+            { dataConstructors =
+                map replaceConstructor (dataConstructors dataInfo)
+            }
+
+    replaceConstructor ctorInfo
+        | ctorInfoSymbol ctorInfo == target =
+            ctorInfo {ctorInfoSymbol = replacement}
+        | otherwise = ctorInfo
 
 renameCheckedModuleName :: String -> String -> CheckedProgram -> CheckedProgram
 renameCheckedModuleName oldName newName checked =
