@@ -749,6 +749,10 @@ constraintInfoGroundByTypeBinderIdentities :: ConstraintInfo -> ElaborateM Bool
 constraintInfoGroundByTypeBinderIdentities constraint =
   Set.null <$> freeTypeBinderIdentitiesTypeViewsOrThrow (constraintTypeViews constraint)
 
+constraintInfoHasFreeTypeBinderIdentities :: ConstraintInfo -> ElaborateM Bool
+constraintInfoHasFreeTypeBinderIdentities constraint =
+  not . Set.null <$> freeTypeBinderIdentitiesTypeViewsOrThrow (constraintTypeViews constraint)
+
 freeTypeBinderIdentitiesTypeViewsOrThrow :: NonEmpty TypeView -> ElaborateM (Set TypeBinderIdentity)
 freeTypeBinderIdentitiesTypeViewsOrThrow views =
   Set.unions <$> mapM freeTypeBinderIdentitiesTypeViewOrThrow views
@@ -1987,13 +1991,14 @@ valueResolvedEvidenceArgs scope valueInfo@OrdinaryValue {valueConstraints = disp
               constraint : _ -> throwError (noMatchingDisplayConstraintError constraint)
               [] -> pure Map.empty
       let specializedConstraints = map (applyConstraintInfoSubst subst) constraints
-      if any usesLocalPolymorphicEvidence specializedConstraints
+      hasLocalPolymorphicEvidence <- or <$> mapM usesLocalPolymorphicEvidence specializedConstraints
+      if hasLocalPolymorphicEvidence
         then throwError (ProgramAmbiguousConstrainedValueUse (valueInfoIdentityName valueInfo))
         else concat <$> mapM (constraintEvidenceArgExprsInfo scope) specializedConstraints
   where
     usesLocalPolymorphicEvidence constraint =
-      not (Set.null (freeTypeVarsTypeViews (constraintTypeViews constraint)))
-        && constraintCoveredByEvidenceInfo scope constraint
+      (&& constraintCoveredByEvidenceInfo scope constraint)
+        <$> constraintInfoHasFreeTypeBinderIdentities constraint
 valueResolvedEvidenceArgs _ _ _ _ = pure []
 
 valueResolvedEvidenceArgsWithExpectedView :: ElaborateScope -> ValueInfo -> Maybe TypeView -> [P.ResolvedExpr] -> ElaborateM [SurfaceExpr]
@@ -2015,13 +2020,14 @@ valueResolvedEvidenceArgsWithExpectedView scope valueInfo@OrdinaryValue {valueCo
               constraint : _ -> throwError (noMatchingDisplayConstraintError constraint)
               [] -> pure Map.empty
       let specializedConstraints = map (applyConstraintInfoSubst subst) constraints
-      if any usesLocalPolymorphicEvidence specializedConstraints
+      hasLocalPolymorphicEvidence <- or <$> mapM usesLocalPolymorphicEvidence specializedConstraints
+      if hasLocalPolymorphicEvidence
         then throwError (ProgramAmbiguousConstrainedValueUse (valueInfoIdentityName valueInfo))
         else concat <$> mapM (constraintEvidenceArgExprsInfo scope) specializedConstraints
   where
     usesLocalPolymorphicEvidence constraint =
-      not (Set.null (freeTypeVarsTypeViews (constraintTypeViews constraint)))
-        && constraintCoveredByEvidenceInfo scope constraint
+      (&& constraintCoveredByEvidenceInfo scope constraint)
+        <$> constraintInfoHasFreeTypeBinderIdentities constraint
 valueResolvedEvidenceArgsWithExpectedView _ _ _ _ = pure []
 
 refineValueEvidenceViewSubst :: ElaborateScope -> ValueInfo -> Maybe TypeView -> [arg] -> TypeViewSubst -> TypeViewSubst
