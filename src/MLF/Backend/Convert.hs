@@ -5635,11 +5635,7 @@ convertConstructorApplication _mode context env scope term resultTy =
           False
 
     backendDataHeadMatches expectedIdentity expectedName dataDecl =
-      case expectedIdentity of
-        Just identity ->
-          backendDataIdentity dataDecl == Just identity
-        Nothing ->
-          backendDataIdentity dataDecl == Nothing && backendDataName dataDecl == expectedName
+      backendTypeHeadMatches expectedIdentity (BaseTy expectedName) (backendDataIdentity dataDecl) (BaseTy (backendDataName dataDecl))
 
     nominalDataTypeArgs =
       \case
@@ -6331,10 +6327,7 @@ nominalDataTypeArgumentsFor dataDecl =
       Nothing
   where
     dataHeadMatches identity name =
-      case (backendDataIdentity dataDecl, identity) of
-        (Just expected, Just actual) -> expected == actual
-        (Nothing, Nothing) -> backendDataName dataDecl == name
-        _ -> False
+      backendTypeHeadMatches identity (BaseTy name) (backendDataIdentity dataDecl) (BaseTy (backendDataName dataDecl))
 
 structuralRecursiveTypeForData :: BackendData -> [BackendType] -> BackendType
 structuralRecursiveTypeForData dataDecl dataArgs =
@@ -6401,10 +6394,7 @@ structuralRecursiveTypeForData dataDecl dataArgs =
           BTBottom
 
     dataHeadMatches identity name =
-      case (backendDataIdentity dataDecl, identity) of
-        (Just expected, Just actual) -> expected == actual
-        (Nothing, Nothing) -> backendDataName dataDecl == name
-        _ -> False
+      backendTypeHeadMatches identity (BaseTy name) (backendDataIdentity dataDecl) (BaseTy (backendDataName dataDecl))
 
 dataMetaByStructuralName :: ConvertContext -> String -> Maybe DataMeta
 dataMetaByStructuralName context name =
