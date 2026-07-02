@@ -1517,6 +1517,21 @@ spec = describe "MLF.Backend.Convert" $ do
       Right backend ->
         expectationFailure ("expected constructor shape rejection, got backend:\n" ++ show backend)
 
+  it "rejects duplicate checked module identities before building backend context maps" $ do
+    checked0 <- requireChecked duplicateDataNameProgram
+    case checkedProgramModules checked0 of
+      firstModule : secondModule : _ -> do
+        let duplicateIdentity = checkedModuleIdentity firstModule
+            checked =
+              replaceCheckedModuleIdentity
+                (checkedModuleName secondModule)
+                duplicateIdentity
+                checked0
+        convertCheckedProgram checked
+          `shouldBe` Left (BackendValidationFailed (BackendDuplicateModule (symbolIdentityStableName duplicateIdentity)))
+      _ ->
+        expectationFailure "expected at least two checked modules"
+
   it "rejects duplicate checked data identities before building backend context maps" $ do
     checked0 <- requireChecked duplicateDataNameProgram
     case checkedDataInfos checked0 of
@@ -4841,6 +4856,19 @@ replaceBindingTopLevelIdentity bindingName replacement =
             { Elab.resolvedVarDetails = TopLevelId replacement
             }
       }
+
+replaceCheckedModuleIdentity :: String -> SymbolIdentity -> CheckedProgram -> CheckedProgram
+replaceCheckedModuleIdentity moduleName0 replacement checked =
+  checked
+    { checkedProgramModules =
+        map updateModule (checkedProgramModules checked)
+    }
+  where
+    updateModule checkedModule
+      | checkedModuleName checkedModule == moduleName0 =
+          checkedModule {checkedModuleIdentity = replacement}
+      | otherwise =
+          checkedModule
 
 renameCheckedModuleName :: String -> String -> CheckedProgram -> CheckedProgram
 renameCheckedModuleName oldName newName checked =
