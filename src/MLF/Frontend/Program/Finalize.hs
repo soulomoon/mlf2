@@ -3179,7 +3179,7 @@ bindTypeBinderSubstViewInScope scope (name, identity) actualView subst =
       | otherwise -> Nothing
   where
     actual =
-      typeViewDisplay actualView
+      typeViewIdentity actualView
 
 inlineConstructorHead :: ElaborateScope -> Map String SymbolIdentity -> [(String, TypeBinderIdentity)] -> ConstructorInfo -> TypeBinderSubst -> Either ProgramError XmlfTerm
 inlineConstructorHead scope extraHeadIdentities ownerParamBinders ctorInfo subst = do
