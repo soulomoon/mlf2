@@ -201,6 +201,37 @@ poisonResolvedDataParamBinderName targetDataName replacement resolved =
                     kind0
             _ -> param
 
+poisonResolvedClassParamBinderName :: String -> String -> ResolvedProgram -> ResolvedProgram
+poisonResolvedClassParamBinderName targetClassName replacement resolved =
+    resolved {resolvedProgramModules = map poisonModule (resolvedProgramModules resolved)}
+  where
+    poisonModule resolvedModule =
+        resolvedModule
+            { resolvedModuleSemantic =
+                (resolvedModuleSemantic resolvedModule)
+                    { resolvedSemanticModuleSyntax =
+                        poisonSyntax (resolvedSemanticModuleSyntax (resolvedModuleSemantic resolvedModule))
+                    }
+            }
+
+    poisonSyntax syntax =
+        syntax {moduleDecls = map poisonDecl (moduleDecls syntax)}
+
+    poisonDecl decl =
+        case decl of
+            DeclClass classDecl
+                | classDeclDisplayName classDecl == targetClassName ->
+                    DeclClass classDecl {classDeclParams = fmap poisonParam (classDeclParams classDecl)}
+            _ -> decl
+
+    poisonParam param =
+        case param of
+            ResolvedTypeParam ref kind0 ->
+                ResolvedTypeParam
+                    (resolvedTypeBinderRefFromIdentity (resolvedTypeBinderIdentity ref) replacement)
+                    kind0
+            _ -> param
+
 poisonSymbolIdentityName :: (SymbolIdentity -> Bool) -> String -> ResolvedSymbol -> ResolvedSymbol
 poisonSymbolIdentityName predicate replacement symbol
     | predicate identity =
@@ -5023,6 +5054,29 @@ spec = do
                 Left err -> expectationFailure ("expected resolve success, got " ++ show err)
                 Right resolved ->
                     checkResolvedProgram (poisonResolvedDataParamBinderName "Box" "$stale_box_param" resolved) `shouldSatisfy` isRight
+
+        it "finalizes nullary method evidence by class parameter identity when binder names are stale" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (Default, default, main) {"
+                        , "  class Default a {"
+                        , "    default : a;"
+                        , "  }"
+                        , "  instance Default Int {"
+                        , "    default = 7;"
+                        , "  }"
+                        , "  def choose : Default a => a = default;"
+                        , "  def main : Int = choose;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            case resolveProgram program of
+                Left err -> expectationFailure ("expected resolve success, got " ++ show err)
+                Right resolved ->
+                    case checkResolvedProgram (poisonResolvedClassParamBinderName "Default" "$stale_default_param" resolved) of
+                        Left err -> expectationFailure ("expected check success, got " ++ show err)
+                        Right checked ->
+                            programRunOutput <$> runCheckedProgramOutput checked `shouldBe` Right "7\n"
 
         it "records one resolved identity for mixed spellings across values, types, constructors, classes, and methods" $ do
             let programText =

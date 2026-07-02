@@ -164,7 +164,6 @@ import MLF.Frontend.Program.Types
     methodInfoOwnerClassSymbolIdentity,
     methodInfoSymbolIdentity,
     methodParamBinderIdentities,
-    methodParamName,
     mergeTypeBinderIdentityMaps,
     mergeSymbolIdentityMaps,
     loweredBindingConstructorRef,
@@ -178,9 +177,9 @@ import MLF.Frontend.Program.Types
     splitArrows,
     splitForalls,
     specializeMethodTypeView,
+    typeViewBinderIdentityForAlias,
     substituteTypeVar,
     typeViewSubstFromParamIdentities,
-    typeViewBinderIdentityForAlias,
     typeViewHeadIdentityForAlias,
     typeHeadNamesSrcType,
     typeViewSubstKeyForIdentity,
@@ -3818,9 +3817,13 @@ resolveDeferredMethods scope deferredMethods env0 term0 = do
        in matchMethodTypeViews scope subst (methodResultView specializedMethodView :| []) (expectedView :| [])
 
     nullaryMethodResultIsClassParameter methodInfo =
-      let (_, bodyTy) = splitForalls (methodType methodInfo)
-          (_, resultTy) = splitArrows bodyTy
-       in resultTy == STVar (methodParamName methodInfo)
+      case typeViewIdentity resultView of
+        STVar name ->
+          typeViewBinderIdentityForAlias resultView name
+            == Just (NE.head (methodParamBinderIdentities methodInfo))
+        _ -> False
+      where
+        resultView = methodResultTypeView methodInfo
 
     deferredMethodFullArityFromInfo methodInfo =
       length (fst (splitArrows (snd (splitForalls (methodType methodInfo)))))
