@@ -1948,6 +1948,7 @@ deferredProgramObligationGeneratedIdentities obligation =
     DeferredConstructor deferred ->
       idDetailsGeneratedIdentities (DeferredId (deferredConstructorRef deferred))
         ++ constructorInfoGeneratedIdentities (deferredConstructorInfo deferred)
+        ++ concatMap symbolGeneratedIdentities (Map.elems (deferredConstructorTypeHeadIdentities deferred))
         ++ concatMap (typeBinderIdentityGeneratedIdentities . Just . snd) (deferredConstructorInstBinders deferred)
     DeferredCase deferred ->
       idDetailsGeneratedIdentities (DeferredId (deferredCaseRef deferred))

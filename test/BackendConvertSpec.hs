@@ -35,6 +35,9 @@ import MLF.Frontend.Program.Types
     CheckedModule (..),
     CheckedProgram (..),
     ClassInfo (..),
+    DeferredBindingMode (..),
+    DeferredConstructorCall (..),
+    DeferredProgramObligation (..),
     TypeView (..),
     ValueInfo (..),
     checkedBindingName,
@@ -46,6 +49,7 @@ import MLF.Frontend.Program.Types
     ConstructorInfo (..),
     DataInfo (..),
     dataInfoIdentityQualifiedName,
+    emptyTypeBinderSubst,
     IdDetails (..),
     instanceHeadIdentityTypes,
     instanceInfoClassSymbolIdentity,
@@ -57,7 +61,7 @@ import MLF.Frontend.Program.Types
 import MLF.Frontend.Syntax (Lit (..), SrcBound (..), SrcTy (..), SrcType)
 import MLF.Frontend.Syntax.Program (Program)
 import MLF.Pipeline (checkProgram)
-import MLF.Types.Identity (deferredRefName, UniqueIdentity (..), typeBinderIdentityFromUnique, typeBinderIdentityStableName)
+import MLF.Types.Identity (deferredRefFromIdentity, deferredRefName, UniqueIdentity (..), typeBinderIdentityFromUnique, typeBinderIdentityStableName)
 import System.Directory (createDirectoryIfMissing)
 import System.Environment (lookupEnv)
 import System.FilePath (takeDirectory)
@@ -1713,6 +1717,51 @@ spec = describe "MLF.Backend.Convert" $ do
       of
       [UniqueIdentity helperUnique] ->
         helperUnique `shouldSatisfy` (> 2000000000)
+      helperUniques ->
+        expectationFailure ("expected one lifted helper identity, got " ++ show helperUniques)
+
+  it "seeds lifted helper identities from deferred constructor type head identities" $ do
+    checked0 <- requireChecked parameterizedConstructorProgram
+    ctorInfo <- requireCheckedConstructor "Main__Some" checked0
+    let reservedUnique = UniqueIdentity 2000000010
+        reservedHeadIdentity =
+          symbolIdentityFromParts reservedUnique SymbolType "Main" "ReservedHead" Nothing
+        deferredRef = deferredRefFromIdentity (UniqueIdentity 2000000000) "$deferred"
+        deferredConstructor =
+          DeferredConstructorCall
+            { deferredConstructorRef = deferredRef,
+              deferredConstructorInfo = ctorInfo,
+              deferredConstructorArgCount = 0,
+              deferredConstructorSourceType = STBase "Main.Option",
+              deferredConstructorOccurrenceType = STBase "Main.Option",
+              deferredConstructorTypeHeadIdentities = Map.singleton "ReservedHead" reservedHeadIdentity,
+              deferredConstructorInstBinders = [],
+              deferredConstructorInitialSubst = emptyTypeBinderSubst,
+              deferredConstructorBindingMode = DeferredBindingMonomorphic
+            }
+        checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingDeferredObligations =
+                      Map.insert deferredRef (DeferredConstructor deferredConstructor) (checkedBindingDeferredObligations binding),
+                    checkedBindingSourceTypeView = mkTypeView (STBase "Int") (STBase "Int"),
+                    checkedBindingType = intElabTy,
+                    checkedBindingTerm = recursiveIntLiftTerm
+                  }
+            )
+            checked0
+    backend <- requireRight (convertCheckedProgram checked)
+
+    case
+      [ symbolUniqueIdentity identity
+      | binding <- backendBindings backend,
+        "$letrec$" `isInfixOf` backendBindingName binding,
+        Just identity <- [backendBindingIdentity binding]
+      ]
+      of
+      [UniqueIdentity helperUnique] ->
+        helperUnique `shouldSatisfy` (> 2000000010)
       helperUniques ->
         expectationFailure ("expected one lifted helper identity, got " ++ show helperUniques)
 
