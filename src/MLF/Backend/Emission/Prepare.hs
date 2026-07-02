@@ -14,7 +14,7 @@ import qualified Data.Map.Strict as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
 
-import MLF.Elab.Types (ElabType, ResolvedVar (..), Ty (..), XmlfTerm (..), resolvedVarBoundBy)
+import MLF.Elab.Types (ElabType, Ty (..), XmlfTerm (..), resolvedVarBoundBy, resolvedVarSymbolIdentity)
 import MLF.Frontend.Parse.Program
     ( ProgramParseError
     , parseLocatedProgramWithFile
@@ -36,7 +36,6 @@ import MLF.Frontend.Program.Types
     , CheckedProgram (..)
     , ConstructorInfo (..)
     , DataInfo (..)
-    , IdDetails (..)
     , ProgramDiagnostic
     , ProgramError
     , ResolvedProgram (..)
@@ -47,7 +46,6 @@ import MLF.Frontend.Program.Types
     , TypeView (..)
     , symbolDefiningName
     , symbolNamespace
-    , constructorRefSymbol
     , resolvedModuleIdentity
     , resolvedModuleReferences
     , resolvedReferenceKind
@@ -142,14 +140,6 @@ retainedPreludeBinding retainedPreludeBindings binding =
 checkedBindingSymbolIdentity :: CheckedBinding -> Maybe SymbolIdentity
 checkedBindingSymbolIdentity =
     resolvedVarSymbolIdentity . checkedBindingResolvedVar
-
-resolvedVarSymbolIdentity :: ResolvedVar -> Maybe SymbolIdentity
-resolvedVarSymbolIdentity resolved =
-    case resolvedVarDetails resolved of
-        TopLevelId symbol -> Just symbol
-        ConstructorId ref -> Just (constructorRefSymbol ref)
-        MethodId symbol -> Just symbol
-        _ -> Nothing
 
 preludeBindingDependencyClosure :: Maybe SymbolIdentity -> [CheckedModule] -> Set SymbolIdentity
 preludeBindingDependencyClosure preludeIdentity modules0 =

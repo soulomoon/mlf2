@@ -114,6 +114,8 @@ module MLF.Elab.Types (
     resolvedVarName,
     resolvedVarReferenceName,
     resolvedVarConstructorRef,
+    resolvedVarLocalRef,
+    resolvedVarSymbolIdentity,
     resolvedVarIsLocal,
     resolvedVarIsEvidence,
     resolvedVarIsDiscard,

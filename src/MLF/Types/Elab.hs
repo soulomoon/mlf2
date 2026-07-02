@@ -103,6 +103,8 @@ module MLF.Types.Elab (
     resolvedVarName,
     resolvedVarReferenceName,
     resolvedVarConstructorRef,
+    resolvedVarLocalRef,
+    resolvedVarSymbolIdentity,
     resolvedVarIsLocal,
     resolvedVarIsEvidence,
     resolvedVarIsDiscard,
@@ -183,12 +185,14 @@ import MLF.Types.Identity
     , idDetailsConstructorRef
     , idDetailsDisplayName
     , idDetailsGeneratedIdentities
+    , idDetailsLocalRef
     , idDetailsIsEvidence
     , idDetailsIsDiscard
     , idDetailsIsLocal
     , idDetailsRenameLocal
     , idDetailsReferenceName
     , idDetailsSameIdentity
+    , idDetailsSymbolIdentity
     , constructorRefSymbol
     , freshIdentity
     , freshenLocalRef
@@ -638,6 +642,12 @@ resolvedVarName resolved =
 
 resolvedVarConstructorRef :: ResolvedVar -> Maybe ConstructorRef
 resolvedVarConstructorRef = idDetailsConstructorRef . resolvedVarDetails
+
+resolvedVarLocalRef :: ResolvedVar -> Maybe LocalRef
+resolvedVarLocalRef = idDetailsLocalRef . resolvedVarDetails
+
+resolvedVarSymbolIdentity :: ResolvedVar -> Maybe SymbolIdentity
+resolvedVarSymbolIdentity = idDetailsSymbolIdentity . resolvedVarDetails
 
 resolvedVarIsLocal :: ResolvedVar -> Bool
 resolvedVarIsLocal = idDetailsIsLocal . resolvedVarDetails

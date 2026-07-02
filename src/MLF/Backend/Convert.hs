@@ -131,8 +131,10 @@ import MLF.Elab.Types
     resolvedVarConstructorRef,
     resolvedVarIdentityKey,
     resolvedVarIsLocal,
+    resolvedVarLocalRef,
     resolvedVarReferenceName,
     resolvedVarSameIdentity,
+    resolvedVarSymbolIdentity,
     resolvedVarType,
     schemeFromType,
     tyToElab,
@@ -197,7 +199,7 @@ import MLF.Frontend.Program.Types
 import MLF.Frontend.Symbol (symbolIdentityAliasMap, symbolIdentityAliasNames, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit, SrcBound (..), SrcTy (..), SrcType, TypeParam)
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
-import MLF.Types.Identity (DeferredRef, IdDetails (..), IdentityGenerator, LocalRef, StructuralTypeBinderRole (..), UniqueIdentity (..), deferredRefIdentity, deferredRefName, freshDeferredRef, freshIdentity, freshLocalRef, idDetailsGeneratedIdentities, identityGeneratorAfter, primitiveRefSymbol, symbolGeneratedIdentities, typeBinderGeneratedIdentities, typeBinderIdentityFromStructural, typeBinderIdentityGeneratedUnique, typeBinderIdentityNode, typeBinderIdentityStructural)
+import MLF.Types.Identity (DeferredRef, IdDetails (..), IdentityGenerator, LocalRef, StructuralTypeBinderRole (..), UniqueIdentity (..), deferredRefIdentity, deferredRefName, freshDeferredRef, freshIdentity, freshLocalRef, idDetailsGeneratedIdentities, idDetailsSymbolIdentity, identityGeneratorAfter, symbolGeneratedIdentities, typeBinderGeneratedIdentities, typeBinderIdentityFromStructural, typeBinderIdentityGeneratedUnique, typeBinderIdentityNode, typeBinderIdentityStructural)
 import MLF.Util.Names (freshNameLike)
 
 data BackendConversionError
@@ -2423,22 +2425,6 @@ checkedBindingRuntimeName :: CheckedBinding -> String
 checkedBindingRuntimeName =
   resolvedVarRuntimeName . checkedBindingResolvedVar
 
-resolvedVarSymbolIdentity :: ResolvedVar -> Maybe SymbolIdentity
-resolvedVarSymbolIdentity resolved =
-  case resolvedVarDetails resolved of
-    TopLevelId symbol -> Just symbol
-    ConstructorId ref -> Just (constructorRefSymbol ref)
-    MethodId symbol -> Just symbol
-    PrimitiveId ref -> Just (primitiveRefSymbol ref)
-    _ -> Nothing
-
-resolvedVarLocalRef :: ResolvedVar -> Maybe LocalRef
-resolvedVarLocalRef resolved =
-  case resolvedVarDetails resolved of
-    LocalId localRef -> Just localRef
-    EvidenceId localRef -> Just localRef
-    _ -> Nothing
-
 bindingDataHint :: Map SymbolIdentity DataMeta -> CheckedBinding -> Maybe DataMeta
 bindingDataHint dataMetasByIdentity binding =
   elabTypeDataMeta dataMetasByIdentity (checkedBindingType binding)
@@ -4581,23 +4567,14 @@ callableBindingKindByIdentity context scope details
       Just BackendCallableBindingClosure
   | closureScopeHasBoundDetails details scope =
       Just BackendCallableBindingDirect
-  | Just symbol <- idDetailsTermSymbolIdentity details,
+  | Just symbol <- idDetailsSymbolIdentity details,
     Set.member symbol (ccClosureGlobalsByIdentity context) =
       Just BackendCallableBindingClosure
-  | Just symbol <- idDetailsTermSymbolIdentity details,
+  | Just symbol <- idDetailsSymbolIdentity details,
     Map.member symbol (ccTermRuntimeNamesByIdentity context) =
       Just BackendCallableBindingDirect
   | otherwise =
       Nothing
-
-idDetailsTermSymbolIdentity :: IdDetails -> Maybe SymbolIdentity
-idDetailsTermSymbolIdentity =
-  \case
-    TopLevelId symbol -> Just symbol
-    ConstructorId ref -> Just (constructorRefSymbol ref)
-    MethodId symbol -> Just symbol
-    PrimitiveId ref -> Just (primitiveRefSymbol ref)
-    _ -> Nothing
 
 isClosureHeadTerm :: ConvertContext -> ClosureScope -> XmlfTerm -> Bool
 isClosureHeadTerm context scope term =

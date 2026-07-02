@@ -4010,7 +4010,7 @@ localEvidenceTypeOverrides scope deferredMethods =
       [ method
       | deferred <- Map.elems deferredMethods,
         method <- deferredEvidenceMethods deferred,
-        Just _ <- [evidenceMethodResolvedVar method >>= resolvedVarLocalRef]
+        Just _ <- [evidenceMethodResolvedVar method >>= X.resolvedVarLocalRef]
       ]
 
     deferredEvidenceMethods deferred =
@@ -4020,22 +4020,15 @@ localEvidenceTypeOverrides scope deferredMethods =
     typeOverrideEntry method = do
       resolved <- evidenceMethodResolvedVarOrError method
       ty <- typeViewToElabType scope (evidenceMethodTypeView method)
-      case resolvedVarLocalRef resolved of
+      case X.resolvedVarLocalRef resolved of
         Just ref -> Right (ref, ty)
         Nothing -> Left (ProgramPipelineError ("deferred evidence method is not a local binder `" ++ evidenceMethodRuntimeName method ++ "`"))
 
 applyEvidenceTypeOverride :: Map LocalRef ElabType -> X.ResolvedVar -> X.ResolvedVar
 applyEvidenceTypeOverride overrides resolved =
-  case resolvedVarLocalRef resolved >>= (`Map.lookup` overrides) of
+  case X.resolvedVarLocalRef resolved >>= (`Map.lookup` overrides) of
     Just ty -> X.mapResolvedVarType (const ty) resolved
     Nothing -> resolved
-
-resolvedVarLocalRef :: X.ResolvedVar -> Maybe LocalRef
-resolvedVarLocalRef resolved =
-  case X.resolvedVarDetails resolved of
-    LocalId ref -> Just ref
-    EvidenceId ref -> Just ref
-    _ -> Nothing
 
 evidenceMethodResolvedVarWithMetadataType :: ElaborateScope -> EvidenceMethod -> Either ProgramError X.ResolvedVar
 evidenceMethodResolvedVarWithMetadataType scope methodEvidence = do

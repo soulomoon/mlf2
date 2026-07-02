@@ -242,19 +242,18 @@ import MLF.Frontend.Program.Builtins (builtinTypeHeadIdentity, builtinValueIdent
 import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), symbolDefiningModule, symbolDefiningName, symbolIdentityAliasMap, symbolIdentityStableName, symbolNamespace, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit (..))
 import MLF.Types.Identity
-  ( constructorRefSymbol,
-    DeferredRef,
+  ( DeferredRef,
     EnvRef,
     IdDetails (..),
     IdentityGenerator,
     LocalRef,
-    primitiveRefSymbol,
     StructuralTypeBinderRole (..),
     TypeBinderIdentity,
     UniqueIdentity,
     advanceIdentityGeneratorPast,
     freshIdentity,
     idDetailsReferenceName,
+    idDetailsSymbolIdentity,
     initialIdentityGenerator,
     symbolGeneratedIdentities,
     typeBinderIdentityGeneratedUnique,
@@ -1703,15 +1702,6 @@ lookupBackendVariable context0 mbIdentity name =
   where
     lookupByName =
       Map.lookup name (bvcLocals context0) <|> Map.lookup name (bvcGlobals context0)
-
-idDetailsSymbolIdentity :: IdDetails -> Maybe SymbolIdentity
-idDetailsSymbolIdentity =
-  \case
-    TopLevelId symbol -> Just symbol
-    ConstructorId ref -> Just (constructorRefSymbol ref)
-    MethodId symbol -> Just symbol
-    PrimitiveId ref -> Just (primitiveRefSymbol ref)
-    _ -> Nothing
 
 idDetailsLocalKey :: IdDetails -> Maybe BackendLocalKey
 idDetailsLocalKey =

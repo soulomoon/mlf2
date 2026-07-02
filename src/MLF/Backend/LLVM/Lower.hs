@@ -175,7 +175,7 @@ import MLF.Constraint.Types.Graph (BaseTy (..))
 import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), SymbolOwnerIdentity (..), symbolIdentityFromParts, symbolIdentityStableName, symbolRefMatches, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit (..))
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
-import MLF.Types.Identity (constructorRefSymbol, deferredRefIdentity, envRefIdentity, IdDetails (..), IdentityGenerator, LocalRef, localRefIdentity, primitiveRefSymbol, StructuralTypeBinderRole (..), TypeBinderIdentity, UniqueIdentity (..), freshIdentity, freshLocalRef, identityGeneratorAfter, initialIdentityGenerator, localIdentityStableUnique, typeBinderIdentityFromUnique, typeBinderIdentityStableName, typeBinderIdentityStructural)
+import MLF.Types.Identity (constructorRefSymbol, deferredRefIdentity, envRefIdentity, IdDetails (..), IdentityGenerator, LocalRef, localRefIdentity, primitiveRefSymbol, idDetailsSymbolIdentity, StructuralTypeBinderRole (..), TypeBinderIdentity, UniqueIdentity (..), freshIdentity, freshLocalRef, identityGeneratorAfter, initialIdentityGenerator, localIdentityStableUnique, typeBinderIdentityFromUnique, typeBinderIdentityStableName, typeBinderIdentityStructural)
 import MLF.Util.Names (freshNameLike)
 
 lowerBackendProgram :: BackendProgram -> Either BackendLLVMError LLVMModule
@@ -5938,15 +5938,6 @@ lookupNonLocalBindingInfo base mbIdentity =
       Map.lookup identity (pbBindingsByIdentity base)
     _ ->
       Nothing
-
-idDetailsSymbolIdentity :: IdDetails -> Maybe SymbolIdentity
-idDetailsSymbolIdentity =
-  \case
-    TopLevelId symbol -> Just symbol
-    ConstructorId ref -> Just (constructorRefSymbol ref)
-    MethodId symbol -> Just symbol
-    PrimitiveId ref -> Just (primitiveRefSymbol ref)
-    _ -> Nothing
 
 backendVarSymbolIdentity :: Maybe IdDetails -> Maybe SymbolIdentity
 backendVarSymbolIdentity =
