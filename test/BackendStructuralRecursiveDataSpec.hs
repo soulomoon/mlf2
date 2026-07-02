@@ -123,6 +123,21 @@ spec = describe "MLF.Backend.StructuralRecursiveData" $ do
     backendStructuralDataBoundaryMatches Map.empty (Just dataScope) stableNominalTy structuralTy
       `shouldBe` False
 
+  it "does not match identity-bearing scoped data through graph structural mu identities" $ do
+    let dataScope =
+          backendDataScope
+            (Map.singleton (backendDataName identityListData) identityListData)
+            (Map.singleton listIdentity identityListData)
+        staleNominalTy =
+          BTConWithIdentity (Just listIdentity) (BaseTy "$stale_List") (intTy :| [])
+        graphSelfIdentity =
+          typeBinderIdentityFromNode (NodeId 991351)
+        structuralTy =
+          BTMuWithIdentity (Just graphSelfIdentity) "$List_self" (listStructuralBody intTy)
+
+    backendStructuralDataBoundaryMatches Map.empty (Just dataScope) staleNominalTy structuralTy
+      `shouldBe` False
+
   it "recovers structural mu owners by self identity before binder spelling" $ do
     let selfIdentity =
           typeBinderIdentityFromStructural (UniqueIdentity 990100) StructuralSelfBinder

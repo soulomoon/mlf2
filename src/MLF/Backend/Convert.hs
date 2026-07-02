@@ -194,7 +194,7 @@ import MLF.Frontend.Program.Types
 import MLF.Frontend.Symbol (symbolIdentityAliasMap, symbolIdentityAliasNames, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit, SrcBound (..), SrcTy (..), SrcType, TypeParam)
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
-import MLF.Types.Identity (DeferredRef, IdDetails (..), IdentityGenerator, LocalRef, StructuralTypeBinderRole (..), UniqueIdentity (..), deferredRefIdentity, deferredRefName, freshDeferredRef, freshIdentity, freshLocalRef, idDetailsGeneratedIdentities, idDetailsSameIdentity, identityGeneratorAfter, primitiveRefSymbol, symbolGeneratedIdentities, typeBinderGeneratedIdentities, typeBinderIdentityFromStructural, typeBinderIdentityNode, typeBinderIdentityStructural)
+import MLF.Types.Identity (DeferredRef, IdDetails (..), IdentityGenerator, LocalRef, StructuralTypeBinderRole (..), UniqueIdentity (..), deferredRefIdentity, deferredRefName, freshDeferredRef, freshIdentity, freshLocalRef, idDetailsGeneratedIdentities, idDetailsSameIdentity, identityGeneratorAfter, primitiveRefSymbol, symbolGeneratedIdentities, typeBinderGeneratedIdentities, typeBinderIdentityFromStructural, typeBinderIdentityGeneratedUnique, typeBinderIdentityNode, typeBinderIdentityStructural)
 import MLF.Util.Names (freshNameLike)
 
 data BackendConversionError
@@ -5889,7 +5889,11 @@ constructorDataNameMatches context constructorMeta (BackendStructuralDataHeadByS
     Just unique ->
       unique == symbolUniqueIdentity (dataInfoSymbol (dmInfo dataMeta))
     Nothing ->
-      constructorDataNameMatches context constructorMeta (BackendStructuralDataHeadByName resultDataName)
+      case typeBinderIdentityGeneratedUnique resultIdentity of
+        Just {} ->
+          constructorDataNameMatches context constructorMeta (BackendStructuralDataHeadByName resultDataName)
+        Nothing ->
+          False
   where
     dataMeta = cmData constructorMeta
 constructorDataNameMatches context constructorMeta (BackendStructuralDataHeadByName resultDataName) =
