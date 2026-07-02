@@ -28,7 +28,7 @@ where
 
 import Control.Applicative ((<|>))
 import Control.Exception (evaluate)
-import Control.Monad (foldM, zipWithM)
+import Control.Monad (filterM, foldM, zipWithM)
 import Control.Monad.Except (ExceptT (..), runExceptT)
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.IntMap.Strict as IntMap
@@ -148,8 +148,7 @@ import MLF.Frontend.Program.Types
     deferredMethodName,
     deferredProgramObligationRef,
     emptyTypeBinderSubst,
-    freeTypeVarsTypeView,
-    freeTypeVarsTypeViews,
+    freeTypeBinderIdentitiesTypeView,
     constraintTypeView,
     lookupInstanceMethod,
     ctorName,
@@ -3664,12 +3663,13 @@ resolveDeferredMethods scope deferredMethods env0 term0 = do
                   Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
               let methodSubst' = methodSubst `Map.union` evidenceSubst
               evidenceHead <- instantiateLocalMethodEvidence scope methodSubst' evidence
+              methodLocalConstraintInfos <- methodLocalConstraints methodInfo classArgView methodSubst'
               evidenceArgs <-
                 resolveConstraintEvidenceTerms
                   scope
                   (deferredMethodLocalEvidence deferred)
                   Set.empty
-                  (methodLocalConstraints methodInfo classArgView methodSubst')
+                  methodLocalConstraintInfos
               Right (foldl X.EApp (foldl X.EApp evidenceHead evidenceArgs) args)
             Nothing -> do
               (instanceInfo, subst) <- resolveMethodInstanceInfoByTypeView scope methodInfo classArgView
@@ -3679,10 +3679,9 @@ resolveDeferredMethods scope deferredMethods env0 term0 = do
                   Just subst' -> Right subst'
                   Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
               let eagerConstraints =
-                    filter
-                      constraintGround
-                      (map (applyConstraintInfoSubst methodSubst) (methodValueConstraints methodValue))
-              evidenceArgs <- resolveConstraintEvidenceTerms scope (deferredMethodLocalEvidence deferred) Set.empty eagerConstraints
+                    map (applyConstraintInfoSubst methodSubst) (methodValueConstraints methodValue)
+              eagerConstraints' <- filterConstraintGround eagerConstraints
+              evidenceArgs <- resolveConstraintEvidenceTerms scope (deferredMethodLocalEvidence deferred) Set.empty eagerConstraints'
               methodHead <- instantiateMethodValueWithAliasViews scope [methodTypeView methodInfo] methodSubst methodValue
               Right (foldl X.EApp (foldl X.EApp methodHead evidenceArgs) args)
 
@@ -3704,12 +3703,13 @@ resolveDeferredMethods scope deferredMethods env0 term0 = do
               Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
           let methodSubst' = methodSubst `Map.union` evidenceSubst
           evidenceHead <- instantiateLocalMethodEvidence scope methodSubst' evidence
+          methodLocalConstraintInfos <- methodLocalConstraints methodInfo classArgView methodSubst'
           evidenceArgs <-
             resolveConstraintEvidenceTerms
               scope
               (deferredMethodLocalEvidence deferred)
               Set.empty
-              (methodLocalConstraints methodInfo classArgView methodSubst')
+              methodLocalConstraintInfos
           let evidenceTerm = foldl X.EApp evidenceHead evidenceArgs
           Right $
             if nullaryMethodResultIsClassParameter methodInfo
@@ -3723,10 +3723,9 @@ resolveDeferredMethods scope deferredMethods env0 term0 = do
               Just subst' -> Right subst'
               Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
           let eagerConstraints =
-                filter
-                  constraintGround
-                  (map (applyConstraintInfoSubst methodSubst) (methodValueConstraints methodValue))
-          evidenceArgs <- resolveConstraintEvidenceTerms scope (deferredMethodLocalEvidence deferred) Set.empty eagerConstraints
+                map (applyConstraintInfoSubst methodSubst) (methodValueConstraints methodValue)
+          eagerConstraints' <- filterConstraintGround eagerConstraints
+          evidenceArgs <- resolveConstraintEvidenceTerms scope (deferredMethodLocalEvidence deferred) Set.empty eagerConstraints'
           methodHead <- instantiateMethodValueWithAliasViews scope [methodTypeView methodInfo] methodSubst methodValue
           Right (reapplyHeadInsts headInsts (foldl X.EApp methodHead evidenceArgs))
 
@@ -3790,18 +3789,22 @@ resolveDeferredMethods scope deferredMethods env0 term0 = do
           subst <- matchMethodTypeViews scope Map.empty (deferredMethodEvidenceClassArgs evidence) targetViews
           pure (evidence {deferredMethodEvidenceClassArg = classArgView, deferredMethodEvidenceClassArgs = targetViews}, subst)
 
-    methodLocalConstraints methodInfo classArgView methodSubst =
-      let headVars = freeTypeVarsTypeView classArgView
-          classArgSubst = typeViewSubstFromParamIdentities (methodParamBinderIdentities methodInfo) (classArgView :| [])
-          specializedForClass =
-            map
-              (applyConstraintInfoSubst classArgSubst)
-              (methodConstraintInfos methodInfo)
-          methodLocal =
-            filter
-              (not . constraintDeterminedByTypeVars headVars)
-              specializedForClass
-       in map (applyConstraintInfoSubst methodSubst) methodLocal
+    methodLocalConstraints methodInfo classArgView methodSubst = do
+      headVars <- freeTypeBinderIdentitiesTypeViewOrError classArgView
+      methodLocal <-
+        filterM
+          (fmap not . constraintDeterminedByTypeBinderIdentities headVars)
+          specializedForClass
+      pure (map (applyConstraintInfoSubst methodSubst) methodLocal)
+      where
+        classArgSubst =
+          typeViewSubstFromParamIdentities
+            (methodParamBinderIdentities methodInfo)
+            (classArgView :| [])
+        specializedForClass =
+          map
+            (applyConstraintInfoSubst classArgSubst)
+            (methodConstraintInfos methodInfo)
 
     inferNullaryMethodClassArgument methodInfo expectedView
       | deferredMethodFullArityFromInfo methodInfo /= 0 = Nothing
@@ -3898,15 +3901,14 @@ resolveConstraintEvidenceTerm scope localEvidence seen constraint = do
 
     materializeMethodEvidence seen' subst valueInfo = do
       let eagerConstraints =
-            filter
-              constraintGround
-              (map (applyConstraintInfoSubst subst) (methodValueConstraints valueInfo))
+            map (applyConstraintInfoSubst subst) (methodValueConstraints valueInfo)
+      eagerConstraints' <- filterConstraintGround eagerConstraints
       nestedEvidence <-
         resolveConstraintEvidenceTerms
           scope
           localEvidence
           seen'
-          eagerConstraints
+          eagerConstraints'
       methodHead <- instantiateMethodValue scope subst valueInfo
       pure (foldl X.EApp methodHead nestedEvidence)
 
@@ -4059,13 +4061,30 @@ evidenceMethodResolvedVarOrError methodEvidence =
             ("deferred evidence method missing resolved identity `" ++ evidenceMethodRuntimeName methodEvidence ++ "`")
         )
 
-constraintDeterminedByTypeVars :: Set String -> ConstraintInfo -> Bool
-constraintDeterminedByTypeVars typeVars constraint =
-  freeTypeVarsTypeViews (constraintTypeViews constraint) `Set.isSubsetOf` typeVars
+constraintDeterminedByTypeBinderIdentities :: Set TypeBinderIdentity -> ConstraintInfo -> Either ProgramError Bool
+constraintDeterminedByTypeBinderIdentities typeVars constraint =
+  (`Set.isSubsetOf` typeVars) <$> freeTypeBinderIdentitiesTypeViewsOrError (constraintTypeViews constraint)
 
-constraintGround :: ConstraintInfo -> Bool
+constraintGround :: ConstraintInfo -> Either ProgramError Bool
 constraintGround constraint =
-  Set.null (freeTypeVarsTypeViews (constraintTypeViews constraint))
+  Set.null <$> freeTypeBinderIdentitiesTypeViewsOrError (constraintTypeViews constraint)
+
+filterConstraintGround :: [ConstraintInfo] -> Either ProgramError [ConstraintInfo]
+filterConstraintGround =
+  filterM constraintGround
+
+freeTypeBinderIdentitiesTypeViewsOrError :: NonEmpty TypeView -> Either ProgramError (Set TypeBinderIdentity)
+freeTypeBinderIdentitiesTypeViewsOrError views =
+  Set.unions <$> mapM freeTypeBinderIdentitiesTypeViewOrError views
+
+freeTypeBinderIdentitiesTypeViewOrError :: TypeView -> Either ProgramError (Set TypeBinderIdentity)
+freeTypeBinderIdentitiesTypeViewOrError view =
+  case freeTypeBinderIdentitiesTypeView view of
+    Right identities -> Right identities
+    Left name ->
+      Left $
+        ProgramPipelineError
+          ("finalize resolved type variable `" ++ name ++ "` is missing binder identity")
 
 methodValueConstraints :: ValueInfo -> [ConstraintInfo]
 methodValueConstraints OrdinaryValue {valueConstraintInfos = constraints} = constraints
