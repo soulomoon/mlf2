@@ -508,6 +508,21 @@ spec = do
             ProgramTypes.typeViewSubstKeyFor source stableName
                 `shouldBe` Just (ProgramTypes.typeViewSubstKeyForIdentity identity)
 
+        it "drops ambiguous paired display aliases for one binder identity" $ do
+            let identity = typeBinderIdentityFromNode (NodeId 992520)
+                stableName = typeBinderIdentityStableName identity
+                source =
+                    ( ProgramTypes.mkTypeView
+                        (STArrow (STVar "a") (STVar "b"))
+                        (STArrow (STVar stableName) (STVar stableName))
+                    )
+                        { ProgramTypes.typeViewBinderIdentities = Map.singleton stableName identity
+                        }
+            ProgramTypes.typeViewSubstKeyFor source "a" `shouldBe` Nothing
+            ProgramTypes.typeViewSubstKeyFor source "b" `shouldBe` Nothing
+            ProgramTypes.typeViewSubstKeyFor source stableName
+                `shouldBe` Just (ProgramTypes.typeViewSubstKeyForIdentity identity)
+
         it "collects free type-view variables by binder identity through paired aliases" $ do
             let leftIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991624)
                 rightIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991625)
@@ -611,6 +626,21 @@ spec = do
                         { ProgramTypes.typeViewHeadIdentities = Map.singleton "Token" headIdentity
                         }
             ProgramTypes.typeViewHeadIdentityForAlias view "Main.Token"
+                `shouldBe` Just headIdentity
+
+        it "drops ambiguous paired display aliases for one type head identity" $ do
+            let headIdentity = generatedSymbolIdentity 992521 SymbolType "Main" "Token" Nothing
+                headStableName = symbolIdentityStableName headIdentity
+                view =
+                    ( ProgramTypes.mkTypeView
+                        (STArrow (STBase "LeftToken") (STBase "RightToken"))
+                        (STArrow (STBase headStableName) (STBase headStableName))
+                    )
+                        { ProgramTypes.typeViewHeadIdentities = Map.singleton headStableName headIdentity
+                        }
+            ProgramTypes.typeViewHeadIdentityForAlias view "LeftToken" `shouldBe` Nothing
+            ProgramTypes.typeViewHeadIdentityForAlias view "RightToken" `shouldBe` Nothing
+            ProgramTypes.typeViewHeadIdentityForAlias view headStableName
                 `shouldBe` Just headIdentity
 
         it "keeps replacement binder identities by display key after applying type-view substitutions" $ do

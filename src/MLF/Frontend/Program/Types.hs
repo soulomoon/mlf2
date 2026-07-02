@@ -1583,6 +1583,22 @@ uniqueReverseMap pairs =
         | (key, value) <- Map.toList pairs
         ]
 
+mergeUniquePairMaps :: (Ord k, Ord v) => [Map k v] -> Map k v
+mergeUniquePairMaps maps =
+  Map.fromList
+    [ (key, value)
+    | (key, values) <- Map.toList valuesByKey,
+      [value] <- [Set.toList values]
+    ]
+  where
+    valuesByKey =
+      Map.fromListWith
+        Set.union
+        [ (key, Set.singleton value)
+        | pairMap <- maps,
+          (key, value) <- Map.toList pairMap
+        ]
+
 srcTypeVarPairs :: SrcType -> SrcType -> Map String String
 srcTypeVarPairs =
   go Set.empty Set.empty
@@ -1593,8 +1609,10 @@ srcTypeVarPairs =
           | identityName `Set.notMember` identityBound ->
               Map.singleton identityName displayName
         (STArrow displayDom displayCod, STArrow identityDom identityCod) ->
-          go displayBound identityBound displayDom identityDom
-            `Map.union` go displayBound identityBound displayCod identityCod
+          mergeUniquePairMaps
+            [ go displayBound identityBound displayDom identityDom
+            , go displayBound identityBound displayCod identityCod
+            ]
         (STCon _ displayArgs, STCon _ identityArgs) ->
           pairsFromArgs displayBound identityBound displayArgs identityArgs
         (STVarApp displayName displayArgs, STVarApp identityName identityArgs) ->
@@ -1602,21 +1620,28 @@ srcTypeVarPairs =
                 if identityName `Set.member` identityBound
                   then Map.empty
                   else Map.singleton identityName displayName
-           in headPair `Map.union` pairsFromArgs displayBound identityBound displayArgs identityArgs
+           in mergeUniquePairMaps
+                [ headPair
+                , pairsFromArgs displayBound identityBound displayArgs identityArgs
+                ]
         (STTyLam displayName displayBody, STTyLam identityName identityBody) ->
           go (Set.insert displayName displayBound) (Set.insert identityName identityBound) displayBody identityBody
         (STTyApp displayFun displayArg, STTyApp identityFun identityArg) ->
-          go displayBound identityBound displayFun identityFun
-            `Map.union` go displayBound identityBound displayArg identityArg
+          mergeUniquePairMaps
+            [ go displayBound identityBound displayFun identityFun
+            , go displayBound identityBound displayArg identityArg
+            ]
         (STForall displayName displayMb displayBody, STForall identityName identityMb identityBody) ->
-          boundPairs displayBound identityBound displayMb identityMb
-            `Map.union` go (Set.insert displayName displayBound) (Set.insert identityName identityBound) displayBody identityBody
+          mergeUniquePairMaps
+            [ boundPairs displayBound identityBound displayMb identityMb
+            , go (Set.insert displayName displayBound) (Set.insert identityName identityBound) displayBody identityBody
+            ]
         (STMu displayName displayBody, STMu identityName identityBody) ->
           go (Set.insert displayName displayBound) (Set.insert identityName identityBound) displayBody identityBody
         _ -> Map.empty
 
     pairsFromArgs displayBound identityBound displayArgs identityArgs =
-      Map.unionsWith const (zipWith (go displayBound identityBound) (NE.toList displayArgs) (NE.toList identityArgs))
+      mergeUniquePairMaps (zipWith (go displayBound identityBound) (NE.toList displayArgs) (NE.toList identityArgs))
 
     boundPairs displayBound identityBound displayMb identityMb =
       case (displayMb, identityMb) of
@@ -1633,24 +1658,27 @@ srcTypeHeadPairs =
         (STBase displayName, STBase identityName) ->
           Map.singleton identityName displayName
         (STCon displayName displayArgs, STCon identityName identityArgs) ->
-          Map.insert identityName displayName (pairsFromArgs displayArgs identityArgs)
+          mergeUniquePairMaps
+            [ Map.singleton identityName displayName
+            , pairsFromArgs displayArgs identityArgs
+            ]
         (STVarApp _ displayArgs, STVarApp _ identityArgs) ->
           pairsFromArgs displayArgs identityArgs
         (STArrow displayDom displayCod, STArrow identityDom identityCod) ->
-          go displayDom identityDom `Map.union` go displayCod identityCod
+          mergeUniquePairMaps [go displayDom identityDom, go displayCod identityCod]
         (STTyLam _ displayBody, STTyLam _ identityBody) ->
           go displayBody identityBody
         (STTyApp displayFun displayArg, STTyApp identityFun identityArg) ->
-          go displayFun identityFun `Map.union` go displayArg identityArg
+          mergeUniquePairMaps [go displayFun identityFun, go displayArg identityArg]
         (STForall _ displayMb displayBody, STForall _ identityMb identityBody) ->
-          boundPairs displayMb identityMb `Map.union` go displayBody identityBody
+          mergeUniquePairMaps [boundPairs displayMb identityMb, go displayBody identityBody]
         (STMu _ displayBody, STMu _ identityBody) ->
           go displayBody identityBody
         _ ->
           Map.empty
 
     pairsFromArgs displayArgs identityArgs =
-      Map.unionsWith const (zipWith go (NE.toList displayArgs) (NE.toList identityArgs))
+      mergeUniquePairMaps (zipWith go (NE.toList displayArgs) (NE.toList identityArgs))
 
     boundPairs displayMb identityMb =
       case (displayMb, identityMb) of
