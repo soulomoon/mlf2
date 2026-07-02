@@ -150,6 +150,12 @@ spec =
             Set.fromList (map dataInfoSymbol (Map.elems (checkedModuleData preludeModule)))
                 `shouldBe` Set.fromList [typeIdentity "Prelude" "Unit", boxTypeIdentity]
 
+        it "does not retain arbitrary Prelude data when one constructor identity has conflicting owners" $ do
+            let checked = prepareCheckedProgramForBackendEmission conflictingPreludeConstructorOwnerProgram
+            preludeModule <- requirePreludeModule checked
+
+            Map.keysSet (checkedModuleData preludeModule) `shouldBe` Set.empty
+
 identityHead :: SymbolIdentity -> (SymbolNamespace, String, String)
 identityHead identity =
     (symbolNamespace identity, symbolDefiningModule identity, symbolDefiningName identity)
@@ -414,6 +420,61 @@ stalePreludeConstructorTypeProgram =
                             , ("$stale_box", boxTypeIdentity)
                             ]
                     }
+            , ctorForallBinderInfo = []
+            , ctorOwningTypeIdentity = boxTypeIdentity
+            , ctorIndex = 0
+            , ctorOwnerConstructors = []
+            }
+
+conflictingPreludeConstructorOwnerProgram :: CheckedProgram
+conflictingPreludeConstructorOwnerProgram =
+    CheckedProgram
+        { checkedProgramModules =
+            [ (checkedModule "Prelude" [])
+                { checkedModuleData =
+                    Map.fromList
+                        [ (dataInfoSymbol unitData, unitData)
+                        , (dataInfoSymbol boxData, boxData)
+                        ]
+                }
+            , checkedModule "Main" [testBinding "Main__main" mainVar (Elab.ELit (Surface.LInt 1))]
+            ]
+        , checkedProgramMainResolvedVar = mainVar
+        , checkedProgramResolved =
+            ResolvedProgram
+                [ resolvedModuleWithReferences "Main" [constructorReference unitConstructor]
+                ]
+        }
+  where
+    intTy = Elab.TBase (BaseTy "Int")
+    mainVar = topLevelVar 61 "Main__main" "Main" "main" intTy
+    unitData =
+        DataInfo
+            { dataInfoSymbol = typeIdentity "Prelude" "Unit"
+            , dataTypeParams = []
+            , dataConstructors = [unitConstructor]
+            }
+    boxData =
+        DataInfo
+            { dataInfoSymbol = boxTypeIdentity
+            , dataTypeParams = []
+            , dataConstructors = [boxConstructor]
+            }
+    unitConstructor =
+        ConstructorInfo
+            { ctorInfoSymbol = constructorIdentity "Prelude" "Unit" "Shared"
+            , ctorRuntimeName = "Prelude__SharedUnit"
+            , ctorTypeView = mkTypeView (Surface.STBase "Unit") (Surface.STBase "Prelude.Unit")
+            , ctorForallBinderInfo = []
+            , ctorOwningTypeIdentity = typeIdentity "Prelude" "Unit"
+            , ctorIndex = 0
+            , ctorOwnerConstructors = []
+            }
+    boxConstructor =
+        ConstructorInfo
+            { ctorInfoSymbol = constructorIdentity "Prelude" "Box" "Shared"
+            , ctorRuntimeName = "Prelude__SharedBox"
+            , ctorTypeView = mkTypeView (Surface.STBase "Box") (Surface.STBase "Prelude.Box")
             , ctorForallBinderInfo = []
             , ctorOwningTypeIdentity = boxTypeIdentity
             , ctorIndex = 0

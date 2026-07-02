@@ -51,6 +51,7 @@ import MLF.Frontend.Program.Types
     , resolvedReferenceKind
     , resolvedReferenceSymbol
     , resolvedSymbolIdentity
+    , uniqueInfoEntriesByIdentity
     , diagnosticForProgramError
     , renderProgramDiagnostic
     )
@@ -146,7 +147,7 @@ preludeBindingDependencyClosure preludeIdentity modules0 =
     close (referencedBindingSymbols nonPreludeBindings) Set.empty
   where
     preludeBindingsByIdentity =
-        Map.fromList
+        uniqueInfoEntriesByIdentity
             [ (symbol, binding)
             | binding <- preludeBindings
             , Just symbol <- [checkedBindingSymbolIdentity binding]
@@ -201,10 +202,10 @@ preludeDataDependencyClosure preludeIdentity checked retainedPreludeBindings =
         ]
 
     preludeDataByIdentity =
-        Map.fromList [(dataInfoSymbol dataInfo, dataInfo) | dataInfo <- preludeData]
+        uniqueInfoEntriesByIdentity [(dataInfoSymbol dataInfo, dataInfo) | dataInfo <- preludeData]
 
     preludeDataByConstructorBinding =
-        Map.fromList
+        uniqueInfoEntriesByIdentity
             [ (ctorInfoSymbol constructorInfo, dataInfoSymbol dataInfo)
             | dataInfo <- preludeData
             , constructorInfo <- dataConstructors dataInfo
