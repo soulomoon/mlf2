@@ -20,7 +20,8 @@ import MLF.API
 import MLF.Frontend.Program.Check (checkResolvedProgram)
 import MLF.Frontend.Program.Elaborate (ElaborateScope, constructorTypeView, elaborateScopeRuntimeTypeViews, lowerConstructorBinding, lowerExprBinding, lowerResolvedConstrainedExprBinding, lowerType, matchTypeViewsAgainstIdentity, mkElaborateScope, sourceTypeIdentityInScope, sourceTypeViewInScope)
 import MLF.Frontend.Program.Finalize
-    ( finalizeBindingWithContext
+    ( finalizeBindingAllowOpaqueWithModuleContext
+    , finalizeBindingWithContext
     , finalizeBindingsAllowOpaqueWithContext
     , mkFinalizeContext
     , mkModuleFinalizeContext
@@ -4521,6 +4522,61 @@ spec = do
                     expectationFailure ("expected grouped mismatched deferred identity rejection, got " ++ show err)
                 Right _ ->
                     expectationFailure "expected grouped mismatched deferred identity rejection"
+
+        it "rejects mismatched deferred obligation identities before module context cache lookup" $ do
+            finalizeContext <- requireFinalizeContext (mkElaborateScope Map.empty Map.empty Map.empty [])
+            let keyRef = deferredRefFromIdentity (UniqueIdentity 39) "$deferred"
+                payloadRef = deferredRefFromIdentity (UniqueIdentity 40) "$deferred"
+                bindingIdentity = generatedSymbolIdentity 41 SymbolValue "Main" "main" Nothing
+                dataIdentity = generatedSymbolIdentity 42 SymbolType "Main" "Phantom" Nothing
+                phantomData =
+                    DataInfo
+                        { dataInfoSymbol = dataIdentity
+                        , dataTypeParams = []
+                        , dataConstructors = []
+                        }
+                obligation =
+                    DeferredCase
+                        DeferredCaseCall
+                            { deferredCaseRef = payloadRef
+                            , deferredCaseDataInfo = phantomData
+                            , deferredCaseScrutineeType = STBase "Int"
+                            , deferredCaseResultType = STBase "Int"
+                            , deferredCaseExpectedArgCount = 0
+                            }
+                lowered surfaceExpr obligations externalTypeViews =
+                    LoweredBinding
+                        { loweredBindingIdentity =
+                            ProgramTypes.loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
+                        , loweredBindingSourceType = STBase "Int"
+                        , loweredBindingSourceTypeView = Nothing
+                        , loweredBindingExpectedType = STBase "Int"
+                        , loweredBindingExpectedTypeView = Nothing
+                        , loweredBindingSurfaceExpr = surfaceExpr
+                        , loweredBindingResolvedLocalIdentities = []
+                        , loweredBindingDeferredObligations = obligations
+                        , loweredBindingExternalTypeViews = externalTypeViews
+                        , loweredBindingEvidenceParamCount = 0
+                        , loweredBindingExportedAsMain = False
+                        }
+                cachedLowered = lowered (Surface.ELit (LInt 1)) Map.empty Map.empty
+                staleLowered =
+                    lowered
+                        (Surface.EVar "$deferred")
+                        (Map.singleton keyRef obligation)
+                        (Map.singleton "$deferred" (ProgramTypes.mkTypeView (STBase "Int") (STBase "Int")))
+            moduleContext <-
+                case mkModuleFinalizeContext finalizeContext [cachedLowered] of
+                    Right value -> pure value
+                    Left err -> expectationFailure ("module finalize context failed: " ++ show err) >> fail "module finalize context failed"
+            case finalizeBindingAllowOpaqueWithModuleContext moduleContext staleLowered of
+                Left (ProgramPipelineError message) -> do
+                    message `shouldSatisfy` isInfixOf "mismatched deferred obligation identity"
+                    message `shouldSatisfy` isInfixOf "Main__main"
+                Left err ->
+                    expectationFailure ("expected module-context mismatched deferred identity rejection, got " ++ show err)
+                Right _ ->
+                    expectationFailure "expected module-context mismatched deferred identity rejection"
 
         it "does not resolve same-named deferred external bindings by an arbitrary identity" $ do
             finalizeContext <- requireFinalizeContext (mkElaborateScope Map.empty Map.empty Map.empty [])

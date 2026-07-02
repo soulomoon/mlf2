@@ -670,6 +670,7 @@ finalizeBindingAllowOpaqueWithModuleContextWithTiming timing label moduleContext
 
 finalizeBindingWithModuleContext :: ModuleFinalizeContext -> LoweredBinding -> Either ProgramError CheckedBinding
 finalizeBindingWithModuleContext moduleContext lowered0 = do
+  validateLoweredBindingDeferredObligations lowered0
   let mbReadContext = lookupModuleBindingReadContext moduleContext lowered0
       lowered =
         case mbReadContext of
@@ -734,31 +735,34 @@ finalizeBindingWithModuleContextWithTiming ::
   LoweredBinding ->
   IO (Either ProgramError CheckedBinding)
 finalizeBindingWithModuleContextWithTiming timing label moduleContext forceUnchecked lowered0 = do
-  let mbReadContext = lookupModuleBindingReadContext moduleContext lowered0
-      lowered =
-        case mbReadContext of
-          Right readContext -> moduleBindingReadLowered readContext
-          Left _ -> lowered0
-  metadataResult <-
-    timeProgramOperationIO timing (label ++ ".constructor_metadata") $
-      evaluate (finalizeConstructorBindingFromMetadata context lowered)
-  case metadataResult of
-    Right (Just checked) -> pure (Right checked)
-    Right Nothing -> do
-      pipelineResult <-
-        timeProgramOperationIO timing (label ++ ".pipeline") $
-          runLoweredSurfacePipelineWithModuleContextWithTiming
-            timing
-            (label ++ ".pipeline")
-            moduleContext
-            (forceUnchecked || constructorBindingNeedsUnchecked scope lowered)
-            lowered
-      let mbCheckContext =
-            case mbReadContext of
-              Right readContext -> Just (moduleBindingReadCheckContext readContext)
-              Left _ -> Nothing
-      finalizePipelineBindingResultWithReadContext timing label context mbCheckContext lowered pipelineResult
+  case validateLoweredBindingDeferredObligations lowered0 of
     Left err -> pure (Left err)
+    Right () -> do
+      let mbReadContext = lookupModuleBindingReadContext moduleContext lowered0
+          lowered =
+            case mbReadContext of
+              Right readContext -> moduleBindingReadLowered readContext
+              Left _ -> lowered0
+      metadataResult <-
+        timeProgramOperationIO timing (label ++ ".constructor_metadata") $
+          evaluate (finalizeConstructorBindingFromMetadata context lowered)
+      case metadataResult of
+        Right (Just checked) -> pure (Right checked)
+        Right Nothing -> do
+          pipelineResult <-
+            timeProgramOperationIO timing (label ++ ".pipeline") $
+              runLoweredSurfacePipelineWithModuleContextWithTiming
+                timing
+                (label ++ ".pipeline")
+                moduleContext
+                (forceUnchecked || constructorBindingNeedsUnchecked scope lowered)
+                lowered
+          let mbCheckContext =
+                case mbReadContext of
+                  Right readContext -> Just (moduleBindingReadCheckContext readContext)
+                  Left _ -> Nothing
+          finalizePipelineBindingResultWithReadContext timing label context mbCheckContext lowered pipelineResult
+        Left err -> pure (Left err)
   where
     context = moduleFinalizeContextBase moduleContext
     scope = finalizeContextScope context
