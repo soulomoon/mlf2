@@ -5329,6 +5329,79 @@ spec = do
                                         ]
                             Map.lookup poisonedIdentity mainClasses `shouldBe` Nothing
 
+        it "does not choose an arbitrary checked class method payload when one identity has conflicting metadata" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  class C a {"
+                        , "    m : a -> a;"
+                        , "    n : a -> Bool;"
+                        , "  }"
+                        , "  def main : Int = 1;"
+                        , "}"
+                        ]
+                poisonResolvedMethodIdentity target replacement resolved =
+                    resolved {resolvedProgramModules = map poisonModule (resolvedProgramModules resolved)}
+                  where
+                    targetIdentity = resolvedMethodIdentity target resolved
+
+                    poisonModule resolvedModule =
+                        resolvedModule
+                            { resolvedModuleSemantic =
+                                (resolvedModuleSemantic resolvedModule)
+                                    { resolvedSemanticModuleSyntax =
+                                        poisonSyntax (resolvedSemanticModuleSyntax (resolvedModuleSemantic resolvedModule))
+                                    }
+                            }
+
+                    poisonSyntax syntax =
+                        syntax {moduleDecls = map poisonDecl (moduleDecls syntax)}
+
+                    poisonDecl decl =
+                        case decl of
+                            DeclClass classDecl ->
+                                DeclClass classDecl {classDeclMethods = map poisonMethod (classDeclMethods classDecl)}
+                            _ -> decl
+
+                    poisonMethod sig
+                        | methodSigDisplayName sig == replacement =
+                            sig {methodSigName = mapResolvedSymbolIdentity (const targetIdentity) (methodSigName sig)}
+                    poisonMethod sig = sig
+
+                resolvedMethodIdentity name resolved =
+                    case
+                        [ resolvedSymbolIdentity (methodSigName methodSig)
+                        | resolvedModule <- resolvedProgramModules resolved
+                        , DeclClass classDecl <- moduleDecls (resolvedModuleSyntax resolvedModule)
+                        , methodSig <- classDeclMethods classDecl
+                        , methodSigDisplayName methodSig == name
+                        ]
+                    of
+                        identity : _ -> identity
+                        [] -> error ("missing resolved method identity: " ++ name)
+            program <- requireParsed programText
+            case resolveProgram program of
+                Left err -> expectationFailure ("expected resolve success, got " ++ show err)
+                Right resolved -> do
+                    let poisoned = poisonResolvedMethodIdentity "m" "n" resolved
+                    case checkResolvedProgram poisoned of
+                        Left err -> expectationFailure ("expected check success, got " ++ show err)
+                        Right checked -> do
+                            let poisonedIdentity =
+                                    resolvedMethodIdentity "m" resolved
+                                mainClasses =
+                                    [ classInfo
+                                    | checkedModule <- ProgramTypes.checkedProgramModules checked
+                                    , ProgramTypes.checkedModuleName checkedModule == "Main"
+                                    , classInfo <- Map.elems (ProgramTypes.checkedModuleClasses checkedModule)
+                                    , ProgramTypes.className classInfo == "C"
+                                    ]
+                            case mainClasses of
+                                [classInfo] ->
+                                    Map.lookup poisonedIdentity (classMethodsByIdentity classInfo) `shouldBe` Nothing
+                                other ->
+                                    expectationFailure ("expected one Main.C class, got " ++ show (length other))
+
         it "checks the semantic artifact independently of diagnostic reference adapters" $ do
             let programText =
                     unlines
