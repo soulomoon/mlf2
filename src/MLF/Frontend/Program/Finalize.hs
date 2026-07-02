@@ -1924,7 +1924,11 @@ runtimeExternalBindingIndexFromScope scope runtimeTypes =
           , [key] <- [Set.toList keys]
           ],
       runtimeExternalBindingByKey =
-        Map.fromList [(key, resolved) | (_, key, resolved) <- entries]
+        Map.fromList
+          [ (key, resolved)
+          | (key, resolved : rest) <- Map.toList resolvedByKey,
+            all (sameRuntimeExternalBinding resolved) rest
+          ]
     }
   where
     entries =
@@ -1965,6 +1969,18 @@ runtimeExternalBindingIndexFromScope scope runtimeTypes =
         [ (runtimeName, Set.singleton key)
         | (runtimeName, key, _) <- entries
         ]
+
+    resolvedByKey =
+      Map.fromListWith
+        (++)
+        [ (key, [resolved])
+        | (_, key, resolved) <- entries
+        ]
+
+    sameRuntimeExternalBinding left right =
+      X.resolvedVarRuntimeName left == X.resolvedVarRuntimeName right
+        && X.resolvedVarType left == X.resolvedVarType right
+        && X.resolvedVarDetails left == X.resolvedVarDetails right
 
 runtimeExternalBindingIdentity :: RuntimeExternalBindingIndex -> String -> Maybe ExternalBindingIdentity
 runtimeExternalBindingIdentity index name = do

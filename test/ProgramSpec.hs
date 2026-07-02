@@ -1428,6 +1428,56 @@ spec = do
             finalizeContext <- requireFinalizeContext scope
             finalizeBindingWithContext finalizeContext lowered `shouldBe` Left (ProgramUnknownValue runtimeName)
 
+        it "does not resolve conflicting runtime external payloads by an arbitrary identity" $ do
+            let sharedIdentity = generatedSymbolIdentity 991650 SymbolValue "Main" "shared" Nothing
+                bindingIdentity = generatedSymbolIdentity 991651 SymbolValue "Main" "main" Nothing
+                valueInfo runtimeName =
+                    OrdinaryValue
+                        { valueInfoSymbol = sharedIdentity
+                        , valueRuntimeName = runtimeName
+                        , valueTypeView = ProgramTypes.mkTypeView (STBase "Int") (STBase "Int")
+                        , valueConstraints = []
+                        , valueConstraintInfos = []
+                        }
+                scope =
+                    mkElaborateScope
+                        ( Map.fromList
+                            [ ("left", valueInfo "Main__left")
+                            , ("right", valueInfo "Main__right")
+                            ]
+                        )
+                        Map.empty
+                        Map.empty
+                        []
+                lowered =
+                    LoweredBinding
+                        { loweredBindingIdentity =
+                            ProgramTypes.loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
+                        , loweredBindingSourceType = STBase "Int"
+                        , loweredBindingSourceTypeView = Nothing
+                        , loweredBindingExpectedType = STBase "Int"
+                        , loweredBindingExpectedTypeView = Nothing
+                        , loweredBindingSurfaceExpr = Surface.EVar "Main__left"
+                        , loweredBindingResolvedLocalIdentities = []
+                        , loweredBindingDeferredObligations = Map.empty
+                        , loweredBindingExternalTypeViews = Map.empty
+                        , loweredBindingEvidenceParamCount = 0
+                        , loweredBindingExportedAsMain = False
+                        }
+            finalizeContext <- requireFinalizeContext scope
+            case finalizeBindingWithContext finalizeContext lowered of
+                Right binding ->
+                    case checkedBindingTerm binding of
+                        Elab.EVarNode resolved -> do
+                            Elab.resolvedVarRuntimeName resolved `shouldBe` "Main__left"
+                            case Elab.resolvedVarDetails resolved of
+                                EnvId {} -> pure ()
+                                other -> expectationFailure ("expected generated EnvId, got " ++ show other)
+                        other ->
+                            expectationFailure ("expected external variable term, got " ++ show other)
+                Left err ->
+                    expectationFailure ("expected generated external identity, got " ++ show err)
+
         it "generates source type binder identities while finalizing stable-looking names" $ do
             let stableName = "$typevar#991607"
                 stableRef = Elab.typeBinderRefFromIdentity (typeBinderIdentityFromUnique (UniqueIdentity 0)) stableName
