@@ -150,7 +150,6 @@ import MLF.Types.Identity
     IdentityGenerator,
     freshEnvRef,
     idDetailsGeneratedIdentities,
-    idDetailsSameIdentity,
     identityGeneratorAfter,
     localRefMatchesNodeId,
     typeBinderIdentityFromStructural,
@@ -593,11 +592,13 @@ restrictTypeCheckEnv :: Map.Map VarName (SchemeInfo, IdDetails) -> TypeCheck.Env
 restrictTypeCheckEnv bindings env =
   TypeCheck.restrictResolvedTermBindings allowed env
   where
-    wanted = map snd (Map.elems bindings)
     allowed =
-      [ resolved
-      | (resolved, _) <- TypeCheck.resolvedTermEnvEntries (TypeCheck.resolvedTermEnv env),
-        any (idDetailsSameIdentity (resolvedVarDetails resolved)) wanted
+      [ ResolvedVar
+          { resolvedVarRuntimeName = name,
+            resolvedVarType = schemeToType (siScheme schemeInfo),
+            resolvedVarDetails = details
+          }
+      | (name, (schemeInfo, details)) <- Map.toList bindings
       ]
 
 unionTypeCheckEnv :: TypeCheck.Env -> TypeCheck.Env -> TypeCheck.Env
