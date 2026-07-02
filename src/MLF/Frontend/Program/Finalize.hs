@@ -114,6 +114,7 @@ import MLF.Frontend.Program.Types
     InstanceInfo (..),
     IdDetails (..),
     LoweredBinding (..),
+    LoweredResolvedLocalIdentity (..),
     MethodInfo (..),
     ProgramError (..),
     ConstraintInfo (..),
@@ -1557,7 +1558,7 @@ annotateResolvedTermVarsForGroup _context lowereds deferredObligations term0 =
     term0
   where
     resolvedLocalIdentities =
-      Map.unions (map loweredBindingResolvedLocalIdentities lowereds)
+      concatMap loweredBindingResolvedLocalIdentities lowereds
 
     evidenceCountsByBinding =
       Map.fromList
@@ -1582,7 +1583,7 @@ annotateResolvedTermVarsForGroup _context lowereds deferredObligations term0 =
         _ ->
           []
 
-annotateResolvedTermVarsWithEvidenceCounts :: Map ModuleBindingReadKey Int -> Int -> Map String LocalRef -> [UniqueIdentity] -> XmlfTerm -> XmlfTerm
+annotateResolvedTermVarsWithEvidenceCounts :: Map ModuleBindingReadKey Int -> Int -> [LoweredResolvedLocalIdentity] -> [UniqueIdentity] -> XmlfTerm -> XmlfTerm
 annotateResolvedTermVarsWithEvidenceCounts evidenceCountsByBinding initialEvidenceParamCount resolvedLocalIdentities generatedIdentities term0 =
   let (term, _, _) = go Map.empty initialEvidenceParamCount initialGenerator term0
    in term
@@ -1673,35 +1674,45 @@ annotateResolvedTermVarsWithEvidenceCounts evidenceCountsByBinding initialEviden
         EvidenceId localRef -> Just localRef
         _ -> Nothing
 
-collectResolvedLocalIdentityOverrides :: Map String LocalRef -> XmlfTerm -> Map X.ResolvedTermIdentityKey LocalRef
+collectResolvedLocalIdentityOverrides :: [LoweredResolvedLocalIdentity] -> XmlfTerm -> Map X.ResolvedTermIdentityKey LocalRef
 collectResolvedLocalIdentityOverrides resolvedLocalIdentities =
-  go
+  fst . go resolvedLocalIdentities
   where
-    go term =
+    go overrides term =
       case term of
-        X.EVarNode {} -> Map.empty
-        X.ELit {} -> Map.empty
+        X.EVarNode {} -> (Map.empty, overrides)
+        X.ELit {} -> (Map.empty, overrides)
         X.ELam resolved body ->
-          resolvedLocalEntry resolved <> go body
+          let (entry, overrides') = resolvedLocalEntry resolved overrides
+              (bodyEntries, overrides'') = go overrides' body
+           in (entry <> bodyEntries, overrides'')
         X.EApp fun arg ->
-          go fun <> go arg
+          let (funEntries, overrides') = go overrides fun
+              (argEntries, overrides'') = go overrides' arg
+           in (funEntries <> argEntries, overrides'')
         X.ELet resolved _ rhs body ->
-          resolvedLocalEntry resolved <> go rhs <> go body
+          let (entry, overrides') = resolvedLocalEntry resolved overrides
+              (rhsEntries, overrides'') = go overrides' rhs
+              (bodyEntries, overrides''') = go overrides'' body
+           in (entry <> rhsEntries <> bodyEntries, overrides''')
         X.ETyAbsRef _ _ body ->
-          go body
+          go overrides body
         X.ETyInst inner _ ->
-          go inner
+          go overrides inner
         X.ERoll _ body ->
-          go body
+          go overrides body
         X.EUnroll body ->
-          go body
+          go overrides body
 
-    resolvedLocalEntry resolved
+    resolvedLocalEntry resolved overrides
       | X.resolvedVarIsLocal resolved,
-        Just localRef <- Map.lookup (X.resolvedVarRuntimeName resolved) resolvedLocalIdentities =
-          Map.singleton (X.resolvedVarIdentityKey resolved) localRef
+        let runtimeName = X.resolvedVarRuntimeName resolved,
+        (before, match : after) <- break ((== runtimeName) . loweredResolvedLocalRuntimeName) overrides =
+          ( Map.singleton (X.resolvedVarIdentityKey resolved) (loweredResolvedLocalRef match),
+            before ++ after
+          )
       | otherwise =
-          Map.empty
+          (Map.empty, overrides)
 
 type EvidenceMethodKey = (SymbolIdentity, [SrcType], SymbolIdentity)
 

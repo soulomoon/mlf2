@@ -204,6 +204,7 @@ module MLF.Frontend.Program.Types
     resolvedVarFromLoweredBinding,
     loweredBindingConstructorRef,
     checkedBindingConstructorRef,
+    LoweredResolvedLocalIdentity (..),
     DeferredBindingMode (..),
     DeferredMethodEvidence (..),
     DeferredMethodCall (..),
@@ -2362,11 +2363,17 @@ data LoweredBinding = LoweredBinding
     loweredBindingExpectedType :: SrcType,
     loweredBindingExpectedTypeView :: Maybe TypeView,
     loweredBindingSurfaceExpr :: SurfaceExpr,
-    loweredBindingResolvedLocalIdentities :: Map String LocalRef,
+    loweredBindingResolvedLocalIdentities :: [LoweredResolvedLocalIdentity],
     loweredBindingDeferredObligations :: DeferredObligations,
     loweredBindingExternalTypeViews :: Map String TypeView,
     loweredBindingEvidenceParamCount :: Int,
     loweredBindingExportedAsMain :: Bool
+  }
+  deriving (Eq, Show)
+
+data LoweredResolvedLocalIdentity = LoweredResolvedLocalIdentity
+  { loweredResolvedLocalRuntimeName :: String,
+    loweredResolvedLocalRef :: LocalRef
   }
   deriving (Eq, Show)
 

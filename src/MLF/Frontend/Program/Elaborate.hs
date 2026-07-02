@@ -115,7 +115,7 @@ data ElaborateState = ElaborateState
     elaborateIdentityGenerator :: IdentityGenerator,
     elaborateDeferredObligations :: DeferredObligations,
     elaborateExternalTypeViews :: Map String TypeView,
-    elaborateResolvedLocalIdentities :: Map String LocalRef
+    elaborateResolvedLocalIdentities :: [LoweredResolvedLocalIdentity]
   }
 
 type ElaborateM a = ExceptT ProgramError (State ElaborateState) a
@@ -124,7 +124,7 @@ data ElaborateResult a = ElaborateResult
   { elaborateResultValue :: a,
     elaborateResultDeferredObligations :: DeferredObligations,
     elaborateResultExternalTypeViews :: Map String TypeView,
-    elaborateResultResolvedLocalIdentities :: Map String LocalRef
+    elaborateResultResolvedLocalIdentities :: [LoweredResolvedLocalIdentity]
   }
 
 type ClassIdentity = SymbolIdentity
@@ -141,7 +141,7 @@ runElaborateMWithSeed seedIdentities action =
             elaborateIdentityGenerator = identityGeneratorAfter seedIdentities,
             elaborateDeferredObligations = Map.empty,
             elaborateExternalTypeViews = Map.empty,
-            elaborateResolvedLocalIdentities = Map.empty
+            elaborateResolvedLocalIdentities = []
           }
       (result, finalState) = runState (runExceptT action) initialState
    in case result of
@@ -935,7 +935,7 @@ lowerConstructorBinding scope ctorInfo =
       loweredBindingExpectedType = constructorBindingExpectedType scope ctorInfo,
       loweredBindingExpectedTypeView = Nothing,
       loweredBindingSurfaceExpr = constructorSurfaceExpr scope ctorInfo,
-      loweredBindingResolvedLocalIdentities = Map.empty,
+      loweredBindingResolvedLocalIdentities = [],
       loweredBindingDeferredObligations = Map.empty,
       loweredBindingExternalTypeViews = Map.empty,
       loweredBindingEvidenceParamCount = 0,
@@ -991,7 +991,7 @@ lowerConstrainedResolvedExprBinding scope identity constraints visibleView bodyE
       (surfaceExpr, evidenceParamCount) = elaborateResultValue result
       resolvedLocalIdentities
         | null constraints = elaborateResultResolvedLocalIdentities result
-        | otherwise = Map.empty
+        | otherwise = []
   pure
     LoweredBinding
       { loweredBindingIdentity = identity,
@@ -4832,7 +4832,8 @@ recordResolvedLocalIdentity runtimeName localRef =
     ( \state ->
         state
           { elaborateResolvedLocalIdentities =
-              Map.insert runtimeName localRef (elaborateResolvedLocalIdentities state)
+              elaborateResolvedLocalIdentities state
+                ++ [LoweredResolvedLocalIdentity runtimeName localRef]
           }
     )
 
