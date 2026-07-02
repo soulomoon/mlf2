@@ -23,6 +23,7 @@ module MLF.Elab.TypeCheck
 where
 
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import Data.List.NonEmpty (NonEmpty (..))
 import MLF.Constraint.Types.Graph (BaseTy (..))
 import MLF.Elab.Inst (InstEvalSpec (..), evalInstantiationWith, renameInstBoundRef, schemeToType)
@@ -100,35 +101,23 @@ lookupTypeBindingRef ref env =
 
 restrictResolvedTermBindings :: [ResolvedVar] -> Env -> Env
 restrictResolvedTermBindings allowed env =
-  env {resolvedTermEnv = resolvedTermEnvFromList entries}
-  where
-    entries = filter (resolvedEntryAllowed allowed) (resolvedTermEnvEntries (resolvedTermEnv env))
+  env {resolvedTermEnv = restrictResolvedTermEnv allowed (resolvedTermEnv env)}
 
 unionEnvs :: Env -> Env -> Env
 unionEnvs preferred fallback =
   Env
     { typeEnv = types,
-      resolvedTermEnv = resolvedTermEnvFromList resolvedEntries
+      resolvedTermEnv = overlayResolvedTermEnv (resolvedTermEnv preferred) (resolvedTermEnv fallback)
     }
   where
-    resolvedEntries =
-      mergeResolvedEntries
-        (resolvedTermEnvEntries (resolvedTermEnv preferred))
-        (resolvedTermEnvEntries (resolvedTermEnv fallback))
     types = mergeTypeEnvs (typeEnv preferred) (typeEnv fallback)
 
-resolvedEntryAllowed :: [ResolvedVar] -> (ResolvedVar, ElabType) -> Bool
-resolvedEntryAllowed allowed (resolved, _) =
-  any (resolvedVarSameIdentity resolved) allowed
-
-mergeResolvedEntries :: [(ResolvedVar, ElabType)] -> [(ResolvedVar, ElabType)] -> [(ResolvedVar, ElabType)]
-mergeResolvedEntries preferred fallback =
-  preferred
-    ++ filter
-      ( \(resolved, _) ->
-          not (any (resolvedVarSameIdentity resolved . fst) preferred)
-      )
-      fallback
+restrictResolvedTermEnv :: [ResolvedVar] -> ResolvedTermEnv -> ResolvedTermEnv
+restrictResolvedTermEnv allowed (ResolvedTermEnv resolvedEnv) =
+  ResolvedTermEnv (Map.restrictKeys resolvedEnv allowedKeys)
+  where
+    allowedKeys =
+      Set.fromList [key | Just key <- map resolvedTermKey allowed]
 
 insertTypeEnvBinding :: TypeBinderRef -> ElabType -> Map.Map TypeBinderRef ElabType -> Map.Map TypeBinderRef ElabType
 insertTypeEnvBinding ref ty =
