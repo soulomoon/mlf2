@@ -703,6 +703,36 @@ spec = do
                 (actual leftHeadIdentity :| [actual rightHeadIdentity])
                 `shouldBe` Nothing
 
+        it "skips type-view head self-substitutions by binder identity when names are stale" $ do
+            let headIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991626)
+                argIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991627)
+                headStableName = typeBinderIdentityStableName headIdentity
+                argStableName = typeBinderIdentityStableName argIdentity
+                scope = mkElaborateScope Map.empty Map.empty Map.empty []
+                template =
+                    ( ProgramTypes.mkTypeView
+                        (STVarApp "f" (STVar "a" :| []))
+                        (STVarApp headStableName (STVar argStableName :| []))
+                    )
+                        { ProgramTypes.typeViewBinderIdentities =
+                            Map.fromList [("f", headIdentity), ("a", argIdentity)]
+                        }
+                actual =
+                    ( ProgramTypes.mkTypeView
+                        (STVarApp "g" (STBase "Int" :| []))
+                        (STVarApp "$stale_f" (STBase "Int" :| []))
+                    )
+                        { ProgramTypes.typeViewBinderIdentities = Map.singleton "$stale_f" headIdentity
+                        }
+                headKey = ProgramTypes.typeViewSubstKeyForIdentity headIdentity
+                argKey = ProgramTypes.typeViewSubstKeyForIdentity argIdentity
+            case matchTypeViewsAgainstIdentity scope Map.empty (template :| []) (actual :| []) of
+                Just subst -> do
+                    Map.member headKey subst `shouldBe` False
+                    fmap ProgramTypes.typeViewIdentity (Map.lookup argKey subst) `shouldBe` Just (STBase "Int")
+                Nothing ->
+                    expectationFailure "expected argument substitution"
+
         it "keeps replacement binder identities after applying type-view substitutions" $ do
             let originalIdentity = typeBinderIdentityFromNode (NodeId 991411)
                 replacementIdentity = typeBinderIdentityFromNode (NodeId 991412)

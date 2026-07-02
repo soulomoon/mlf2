@@ -88,7 +88,6 @@ import MLF.Types.Identity
     initialIdentityGenerator,
     localIdentityStableUnique,
     typeBinderIdentityFromStructural,
-    typeBinderIdentityStableName,
   )
 
 data ElaborateScope = ElaborateScope
@@ -4693,12 +4692,12 @@ bindTypeViewHeadVariable scope subst key view =
       | semanticTypeViewEqual scope existing view -> Just subst
       | otherwise -> Nothing
     Nothing
-      | typeViewIdentity view == STVar keyIdentityName -> Just subst
-      | keyIdentityName `Set.member` freeTypeVarsTypeView view -> Nothing
+      | typeViewIsBareBinderIdentity keyIdentity view -> Just subst
+      | typeViewMentionsFreeBinderIdentity keyIdentity view -> Nothing
       | otherwise -> Just (insertTypeViewSubst key view subst)
   where
-    keyIdentityName =
-      typeBinderIdentityStableName (typeViewSubstKeyIdentity key)
+    keyIdentity =
+      typeViewSubstKeyIdentity key
 
 preferVisibleSourceType :: ElaborateScope -> SrcType -> SrcType
 preferVisibleSourceType scope = go

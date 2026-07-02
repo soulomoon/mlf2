@@ -18,6 +18,8 @@ module MLF.Frontend.Program.Types
     freeTypeVarsTypeViews,
     freeTypeBinderIdentitiesTypeView,
     freeTypeBinderIdentitiesTypeViews,
+    typeViewIsBareBinderIdentity,
+    typeViewMentionsFreeBinderIdentity,
     typeViewHeadIdentityForAlias,
     typeViewBinderIdentityForAlias,
     filterHeadIdentitiesByNames,
@@ -1690,6 +1692,24 @@ freeTypeBinderIdentitiesTypeView view =
 freeTypeBinderIdentitiesTypeViews :: NonEmpty TypeView -> Either String (Set TypeBinderIdentity)
 freeTypeBinderIdentitiesTypeViews views =
   Set.unions <$> mapM freeTypeBinderIdentitiesTypeView views
+
+typeViewIsBareBinderIdentity :: TypeBinderIdentity -> TypeView -> Bool
+typeViewIsBareBinderIdentity identity view =
+  case typeViewIdentity view of
+    STVar name -> typeViewFreeVarMatchesBinderIdentity identity view name
+    _ -> False
+
+typeViewMentionsFreeBinderIdentity :: TypeBinderIdentity -> TypeView -> Bool
+typeViewMentionsFreeBinderIdentity identity view =
+  case freeTypeBinderIdentitiesTypeView view of
+    Right identities -> Set.member identity identities
+    Left _ -> typeBinderIdentityStableName identity `Set.member` freeTypeVarsTypeView view
+
+typeViewFreeVarMatchesBinderIdentity :: TypeBinderIdentity -> TypeView -> String -> Bool
+typeViewFreeVarMatchesBinderIdentity identity view name =
+  case typeViewBinderIdentityForAlias view name of
+    Just actualIdentity -> actualIdentity == identity
+    Nothing -> name == typeBinderIdentityStableName identity
 
 typeViewsDisplay :: NonEmpty TypeView -> NonEmpty SrcType
 typeViewsDisplay = fmap typeViewDisplay
