@@ -4460,6 +4460,68 @@ spec = do
                 Right _ ->
                     expectationFailure "expected mismatched deferred identity rejection"
 
+        it "rejects mismatched deferred obligation identities before grouped binding storage" $ do
+            finalizeContext <- requireFinalizeContext (mkElaborateScope Map.empty Map.empty Map.empty [])
+            let keyRef = deferredRefFromIdentity (UniqueIdentity 34) "$deferred"
+                payloadRef = deferredRefFromIdentity (UniqueIdentity 35) "$deferred"
+                firstIdentity = generatedSymbolIdentity 36 SymbolValue "Main" "first" Nothing
+                secondIdentity = generatedSymbolIdentity 37 SymbolValue "Main" "second" Nothing
+                dataIdentity = generatedSymbolIdentity 38 SymbolType "Main" "Phantom" Nothing
+                phantomData =
+                    DataInfo
+                        { dataInfoSymbol = dataIdentity
+                        , dataTypeParams = []
+                        , dataConstructors = []
+                        }
+                obligation =
+                    DeferredCase
+                        DeferredCaseCall
+                            { deferredCaseRef = payloadRef
+                            , deferredCaseDataInfo = phantomData
+                            , deferredCaseScrutineeType = STBase "Int"
+                            , deferredCaseResultType = STBase "Int"
+                            , deferredCaseExpectedArgCount = 0
+                            }
+                firstLowered =
+                    LoweredBinding
+                        { loweredBindingIdentity =
+                            ProgramTypes.loweredBindingIdentityFromDetails "Main__first" (TopLevelId firstIdentity)
+                        , loweredBindingSourceType = STBase "Int"
+                        , loweredBindingSourceTypeView = Nothing
+                        , loweredBindingExpectedType = STBase "Int"
+                        , loweredBindingExpectedTypeView = Nothing
+                        , loweredBindingSurfaceExpr = Surface.EVar "$deferred"
+                        , loweredBindingResolvedLocalIdentities = []
+                        , loweredBindingDeferredObligations = Map.singleton keyRef obligation
+                        , loweredBindingExternalTypeViews =
+                            Map.singleton "$deferred" (ProgramTypes.mkTypeView (STBase "Int") (STBase "Int"))
+                        , loweredBindingEvidenceParamCount = 0
+                        , loweredBindingExportedAsMain = False
+                        }
+                secondLowered =
+                    LoweredBinding
+                        { loweredBindingIdentity =
+                            ProgramTypes.loweredBindingIdentityFromDetails "Main__second" (TopLevelId secondIdentity)
+                        , loweredBindingSourceType = STBase "Int"
+                        , loweredBindingSourceTypeView = Nothing
+                        , loweredBindingExpectedType = STBase "Int"
+                        , loweredBindingExpectedTypeView = Nothing
+                        , loweredBindingSurfaceExpr = Surface.ELit (LInt 1)
+                        , loweredBindingResolvedLocalIdentities = []
+                        , loweredBindingDeferredObligations = Map.empty
+                        , loweredBindingExternalTypeViews = Map.empty
+                        , loweredBindingEvidenceParamCount = 0
+                        , loweredBindingExportedAsMain = False
+                        }
+            case finalizeBindingsAllowOpaqueWithContext finalizeContext [firstLowered, secondLowered] of
+                Left (ProgramPipelineError message) -> do
+                    message `shouldSatisfy` isInfixOf "mismatched deferred obligation identity"
+                    message `shouldSatisfy` isInfixOf "Main__first"
+                Left err ->
+                    expectationFailure ("expected grouped mismatched deferred identity rejection, got " ++ show err)
+                Right _ ->
+                    expectationFailure "expected grouped mismatched deferred identity rejection"
+
         it "does not resolve same-named deferred external bindings by an arbitrary identity" $ do
             finalizeContext <- requireFinalizeContext (mkElaborateScope Map.empty Map.empty Map.empty [])
             let placeholder = "$deferred"

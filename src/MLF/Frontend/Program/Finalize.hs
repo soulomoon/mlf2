@@ -311,7 +311,7 @@ mkFinalizeContext scope = do
 
 mkModuleFinalizeContext :: FinalizeContext -> [LoweredBinding] -> Either ProgramError ModuleFinalizeContext
 mkModuleFinalizeContext context lowereds0 = do
-  mapM_ validateLoweredDeferredObligations lowereds0
+  mapM_ validateLoweredBindingDeferredObligations lowereds0
   let lowereds = stampLoweredBindingsDeferredIdentities lowereds0
       schemeExternalTypeViews = Map.unions (map loweredBindingExternalTypeViews lowereds)
       schemeExternalTypes = Map.map typeViewDisplay schemeExternalTypeViews
@@ -336,9 +336,6 @@ mkModuleFinalizeContext context lowereds0 = do
       { moduleFinalizeContextBase = context,
         moduleFinalizeContextBindingReads = Map.fromList bindingReads
       }
-  where
-    validateLoweredDeferredObligations lowered =
-      validateDeferredObligationIdentities (loweredBindingName lowered) (loweredBindingDeferredObligations lowered)
 
 mkModuleBindingReadContext ::
   FinalizeContext ->
@@ -1141,6 +1138,7 @@ finalizeBindingsAllowOpaqueWithContextWithTiming timing label context lowereds =
 finalizeBindingGroupWithContext :: FinalizeContext -> [LoweredBinding] -> Either ProgramError [CheckedBinding]
 finalizeBindingGroupWithContext _ [] = Right []
 finalizeBindingGroupWithContext context lowereds0 = do
+  mapM_ validateLoweredBindingDeferredObligations lowereds0
   let lowereds =
         stampLoweredBindingsDeferredIdentities $
           zipWith renameDeferredPlaceholdersForGroup [(1 :: Int) ..] lowereds0
@@ -1170,6 +1168,7 @@ finalizeBindingGroupWithContextWithTiming ::
 finalizeBindingGroupWithContextWithTiming _ _ _ [] = pure (Right [])
 finalizeBindingGroupWithContextWithTiming timing label context lowereds0 =
   runExceptT $ do
+    fromProgramEither (mapM_ validateLoweredBindingDeferredObligations lowereds0)
     let lowereds =
           stampLoweredBindingsDeferredIdentities $
             zipWith renameDeferredPlaceholdersForGroup [(1 :: Int) ..] lowereds0
@@ -1571,6 +1570,10 @@ validateDeferredObligationIdentities bindingName obligations =
 
     deferredRefLabel ref =
       deferredRefName ref ++ "#" ++ uniqueIdentityStableName (deferredRefIdentity ref)
+
+validateLoweredBindingDeferredObligations :: LoweredBinding -> Either ProgramError ()
+validateLoweredBindingDeferredObligations lowered =
+  validateDeferredObligationIdentities (loweredBindingName lowered) (loweredBindingDeferredObligations lowered)
 
 annotateResolvedTermVars :: FinalizeContext -> LoweredBinding -> XmlfTerm -> XmlfTerm
 annotateResolvedTermVars _context lowered term0 =
