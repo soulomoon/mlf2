@@ -217,11 +217,7 @@ runCheckedPureProgram checked = do
   context <- mkRuntimeContext checked
   case classifyMainMode context checked of
     MainPure -> do
-      rejectOpaqueDependencies checked
-      let normalizedTerm = normalizeProgramTerm (programMainTerm checked)
-      if termMentionsRuntimePurePrimitive normalizedTerm
-        then runtimeValueToValue <$> mainRuntimeValue context checked
-        else pure (toValueWithProgram checked normalizedTerm)
+      runCheckedPureMain context checked
     MainIOUnit ->
       Left (ProgramPipelineError "runProgram value API does not return IO main output")
     MainIOOther ty ->
@@ -229,12 +225,20 @@ runCheckedPureProgram checked = do
     MainUnsupportedIO ty ->
       Left (unsupportedIOMainError ty)
 
+runCheckedPureMain :: RuntimeContext -> CheckedProgram -> Either ProgramError Value
+runCheckedPureMain context checked = do
+  rejectOpaqueDependencies checked
+  let normalizedTerm = normalizeProgramTerm (programMainTerm checked)
+  if termMentionsRuntimePurePrimitive normalizedTerm
+    then runtimeValueToValue <$> mainRuntimeValue context checked
+    else pure (toValueWithProgram checked normalizedTerm)
+
 runCheckedProgramOutput :: CheckedProgram -> Either ProgramError ProgramRunResult
 runCheckedProgramOutput checked = do
   context <- mkRuntimeContext checked
   case classifyMainMode context checked of
     MainPure -> do
-      value <- runCheckedPureProgram checked
+      value <- runCheckedPureMain context checked
       pure
         ProgramRunResult
           { programRunStdout = "",
