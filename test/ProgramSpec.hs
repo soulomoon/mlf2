@@ -1133,6 +1133,18 @@ spec = do
                     Elab.TBaseWithIdentity (Just headIdentity) (BaseTy headName)
             typeViewToElabType scope view `shouldBe` Right expected
 
+        it "finalizes type-view heads through display identity pairs" $ do
+            let headIdentity = generatedSymbolIdentity 991650 SymbolType "Main" "Token" Nothing
+                headName = symbolIdentityStableName headIdentity
+                scope = mkElaborateScope Map.empty Map.empty Map.empty []
+                view =
+                    (ProgramTypes.mkTypeView (STBase "DisplayToken") (STBase headName))
+                        { ProgramTypes.typeViewHeadIdentities = Map.singleton headName headIdentity
+                        }
+                expected =
+                    Elab.TBaseWithIdentity (Just headIdentity) (BaseTy "DisplayToken")
+            typeViewToElabType scope view `shouldBe` Right expected
+
         it "does not finalize ambiguous type-view head aliases by display name" $ do
             let leftIdentity = generatedSymbolIdentity 991620 SymbolType "Left" "Token" Nothing
                 rightIdentity = generatedSymbolIdentity 991621 SymbolType "Right" "Token" Nothing

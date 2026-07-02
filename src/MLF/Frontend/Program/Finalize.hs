@@ -180,6 +180,8 @@ import MLF.Frontend.Program.Types
     substituteTypeVar,
     typeViewSubstFromParamIdentities,
     typeViewBinderIdentityForAlias,
+    typeViewHeadIdentityForAlias,
+    typeHeadNamesSrcType,
     typeViewSubstKeyForIdentity,
     typeParamBinderIdentity,
     typeBinderSubstFromTypeViewSubst,
@@ -4917,10 +4919,21 @@ freshTypeBinderRefsAfterHeadIdentities headIdentities names =
 
 typeViewHeadIdentityLookupAliases :: TypeView -> Map String SymbolIdentity
 typeViewHeadIdentityLookupAliases view =
-  mergeSymbolIdentityMaps [typeViewHeadIdentities view, aliases]
+  mergeSymbolIdentityMaps [typeViewHeadIdentities view, aliases, pairedAliases]
   where
     aliases =
       symbolIdentityAliasMap (Map.elems (typeViewHeadIdentities view))
+
+    pairedAliases =
+      Map.fromList
+        [ (name, identity)
+        | name <- Set.toList mentionedHeadNames,
+          Just identity <- [typeViewHeadIdentityForAlias view name]
+        ]
+
+    mentionedHeadNames =
+      typeHeadNamesSrcType (typeViewIdentity view)
+        <> typeHeadNamesSrcType (typeViewDisplay view)
 
 typeBinderIdentityRefs :: Map String TypeBinderIdentity -> Map String X.TypeBinderRef
 typeBinderIdentityRefs identities =
