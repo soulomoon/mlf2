@@ -199,7 +199,7 @@ import MLF.Frontend.Program.Types
 import MLF.Frontend.Symbol (lookupSymbolIdentityAlias, symbolIdentityAliasMap, symbolIdentityAliasNames, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit, SrcBound (..), SrcTy (..), SrcType, TypeParam)
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
-import MLF.Types.Identity (DeferredRef, IdDetails (..), IdentityGenerator, LocalRef, StructuralTypeBinderRole (..), UniqueIdentity (..), deferredRefIdentity, deferredRefName, freshDeferredRef, freshIdentity, freshLocalRef, idDetailsGeneratedIdentities, idDetailsSymbolIdentity, identityGeneratorAfter, symbolGeneratedIdentities, typeBinderGeneratedIdentities, typeBinderIdentityFromStructural, typeBinderIdentityGeneratedUnique, typeBinderIdentityNode, typeBinderIdentityStructural)
+import MLF.Types.Identity (DeferredRef, IdDetails (..), IdentityGenerator, LocalRef, StructuralTypeBinderRole (..), UniqueIdentity (..), deferredRefIdentity, deferredRefName, freshDeferredRef, freshIdentity, freshLocalRef, idDetailsGeneratedIdentities, idDetailsSymbolIdentity, identityGeneratorAfter, symbolGeneratedIdentities, typeBinderGeneratedIdentities, typeBinderIdentityFromStructural, typeBinderIdentityNode, typeBinderIdentityStructural)
 import MLF.Util.Names (freshNameLike)
 
 data BackendConversionError
@@ -5889,7 +5889,7 @@ constructorDataNameMatches context constructorMeta (BackendStructuralDataHeadByS
     Just unique ->
       unique == symbolUniqueIdentity (dataInfoSymbol (dmInfo dataMeta))
     Nothing ->
-      if structuralIdentityAllowsNameFallback (Just resultIdentity)
+      if Structural.structuralIdentityAllowsNameFallback (Just resultIdentity)
         then
           constructorDataNameMatches context constructorMeta (BackendStructuralDataHeadByName resultDataName)
         else
@@ -6482,16 +6482,8 @@ structuralRecursiveDataMetaByIdentity context identity = do
 
 structuralRecursiveDataMetaByFallback :: ConvertContext -> Maybe TypeBinderIdentity -> String -> Maybe DataMeta
 structuralRecursiveDataMetaByFallback context identity name
-  | structuralIdentityAllowsNameFallback identity = structuralRecursiveDataMeta context name
+  | Structural.structuralIdentityAllowsNameFallback identity = structuralRecursiveDataMeta context name
   | otherwise = Nothing
-
-structuralIdentityAllowsNameFallback :: Maybe TypeBinderIdentity -> Bool
-structuralIdentityAllowsNameFallback Nothing =
-  True
-structuralIdentityAllowsNameFallback (Just identity) =
-  case typeBinderIdentityGeneratedUnique identity of
-    Just {} -> True
-    Nothing -> False
 
 structuralSelfIdentityUnique :: Maybe TypeBinderIdentity -> Maybe UniqueIdentity
 structuralSelfIdentityUnique identity = do
