@@ -1638,10 +1638,10 @@ annotateResolvedTermVarsWithEvidenceCounts evidenceCountsByBinding initialEviden
            in (X.EUnroll body', evidenceParamsLeft', generator')
 
     lookupLocalByIdentity resolved locals =
-      localRefFromDetails (X.resolvedVarDetails resolved) >>= (`Map.lookup` locals)
+      X.resolvedVarLocalRef resolved >>= (`Map.lookup` locals)
 
     insertLocalIdentity original resolved =
-      case localRefFromDetails (X.resolvedVarDetails original) of
+      case X.resolvedVarLocalRef original of
         Just localRef -> Map.insert localRef resolved
         Nothing -> id
 
@@ -1667,12 +1667,6 @@ annotateResolvedTermVarsWithEvidenceCounts evidenceCountsByBinding initialEviden
                   else evidenceParamsLeft
            in (resolved {X.resolvedVarDetails = details}, evidenceParamsLeft', generator')
       | otherwise = (resolved, evidenceParamsLeft, generator)
-
-    localRefFromDetails details =
-      case details of
-        LocalId localRef -> Just localRef
-        EvidenceId localRef -> Just localRef
-        _ -> Nothing
 
 collectResolvedLocalIdentityOverrides :: [LoweredResolvedLocalIdentity] -> XmlfTerm -> Map X.ResolvedTermIdentityKey LocalRef
 collectResolvedLocalIdentityOverrides resolvedLocalIdentities =

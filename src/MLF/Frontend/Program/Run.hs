@@ -27,7 +27,7 @@ import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import MLF.Elab.Pipeline (XmlfTerm (..), Pretty (..), Ty (TForallRef), normalize, schemeFromType, typeCheck)
-import MLF.Elab.Types (ElabType, ResolvedTermIdentityKey, ResolvedVar (..), resolvedVarBoundBy, resolvedVarConstructorRef, resolvedVarIdentityKey, resolvedVarReferenceName, resolvedVarSameIdentity)
+import MLF.Elab.Types (ElabType, ResolvedTermIdentityKey, ResolvedVar (..), deferredResolvedVarRef, resolvedVarBoundBy, resolvedVarConstructorRef, resolvedVarIdentityKey, resolvedVarReferenceName, resolvedVarSameIdentity)
 import qualified MLF.Elab.Types as X
 import MLF.Frontend.Program.Check (checkLocatedProgram, checkLocatedProgramPackage, checkLocatedProgramPackageWithTiming, checkProgram, checkProgramPackage)
 import MLF.Frontend.Program.Elaborate
@@ -720,9 +720,7 @@ lookupRuntimeEnvResolved resolved env =
 
 lookupRuntimeDeferredResolved :: ResolvedVar -> RuntimeDeferredValues -> Maybe RuntimeDeferredValue
 lookupRuntimeDeferredResolved resolved deferredValues =
-  case resolvedVarDetails resolved of
-    DeferredId ref -> Map.lookup ref deferredValues
-    _ -> Nothing
+  deferredResolvedVarRef resolved >>= (`Map.lookup` deferredValues)
 
 insertRuntimeEnv :: ResolvedVar -> RuntimeValue -> RuntimeEnv -> RuntimeEnv
 insertRuntimeEnv resolved value =
