@@ -181,6 +181,7 @@ import MLF.Frontend.Program.Types
     substituteTypeVar,
     typeViewSubstFromParamIdentities,
     typeViewHeadIdentityForAlias,
+    typeViewVarPairs,
     typeHeadNamesSrcType,
     typeViewSubstKeyForIdentity,
     typeParamBinderIdentity,
@@ -4900,7 +4901,7 @@ typeViewBinderRefs headIdentities view ty =
     pairedBinderIdentities =
       Map.fromList
         [ (identityName, identity)
-        | (identityName, _) <- Map.toList (typeViewLocalVarPairs view),
+        | (identityName, _) <- Map.toList (typeViewVarPairs view),
           Just identity <- [typeViewBinderIdentityForAlias view identityName]
         ]
 
@@ -4941,57 +4942,6 @@ sourceTypeBinderRefsInScope headIdentities scope baseRefs ty =
 
     (freshRefs, generator) =
       freshTypeBinderRefs missingFreeNames generator0
-
-typeViewLocalVarPairs :: TypeView -> Map String String
-typeViewLocalVarPairs view =
-  srcTypeLocalVarPairs (typeViewDisplay view) (typeViewIdentity view)
-
-srcTypeLocalVarPairs :: SrcType -> SrcType -> Map String String
-srcTypeLocalVarPairs =
-  go Set.empty Set.empty
-  where
-    go displayBound identityBound display identityTy =
-      case (display, identityTy) of
-        (STVar displayName, STVar identityName)
-          | identityName `Set.notMember` identityBound ->
-              Map.singleton identityName displayName
-        (STArrow displayDom displayCod, STArrow identityDom identityCod) ->
-          go displayBound identityBound displayDom identityDom
-            `Map.union` go displayBound identityBound displayCod identityCod
-        (STCon _ displayArgs, STCon _ identityArgs) ->
-          pairsFromArgs displayBound identityBound displayArgs identityArgs
-        (STVarApp displayName displayArgs, STVarApp identityName identityArgs) ->
-          let headPair =
-                if identityName `Set.member` identityBound
-                  then Map.empty
-                  else Map.singleton identityName displayName
-           in headPair `Map.union` pairsFromArgs displayBound identityBound displayArgs identityArgs
-        (STTyLam displayName displayBody, STTyLam identityName identityBody) ->
-          go (Set.insert displayName displayBound) (Set.insert identityName identityBound) displayBody identityBody
-        (STTyApp displayFun displayArg, STTyApp identityFun identityArg) ->
-          go displayBound identityBound displayFun identityFun
-            `Map.union` go displayBound identityBound displayArg identityArg
-        (STForall displayName displayMb displayBody, STForall identityName identityMb identityBody) ->
-          boundPairs displayBound identityBound displayMb identityMb
-            `Map.union` go
-              (Set.insert displayName displayBound)
-              (Set.insert identityName identityBound)
-              displayBody
-              identityBody
-        (STMu displayName displayBody, STMu identityName identityBody) ->
-          go (Set.insert displayName displayBound) (Set.insert identityName identityBound) displayBody identityBody
-        _ -> Map.empty
-
-    boundPairs displayBound identityBound displayMb identityMb =
-      case (displayMb, identityMb) of
-        (Just (SrcBound displayBoundTy), Just (SrcBound identityBoundTy)) ->
-          go displayBound identityBound displayBoundTy identityBoundTy
-        _ -> Map.empty
-
-    pairsFromArgs displayBound identityBound displayArgs identityArgs =
-      Map.unionsWith
-        const
-        (zipWith (go displayBound identityBound) (NE.toList displayArgs) (NE.toList identityArgs))
 
 freshTypeBinderRefsAfterHeadIdentities :: Map String SymbolIdentity -> [String] -> (Map String X.TypeBinderRef, IdentityGenerator)
 freshTypeBinderRefsAfterHeadIdentities headIdentities names =
