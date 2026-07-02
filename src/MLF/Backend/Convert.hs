@@ -1848,6 +1848,7 @@ checkedBindingGeneratedIdentities :: CheckedBinding -> [UniqueIdentity]
 checkedBindingGeneratedIdentities binding =
   idDetailsGeneratedIdentities (resolvedVarDetails resolved)
     ++ generatedIdentitiesInType (resolvedVarType resolved)
+    ++ typeViewGeneratedIdentities (checkedBindingSourceTypeView binding)
     ++ generatedIdentitiesInType (checkedBindingType binding)
     ++ generatedIdentitiesInTerm (checkedBindingTerm binding)
     ++ concatMap (idDetailsGeneratedIdentities . DeferredId) (Map.keys (checkedBindingDeferredObligations binding))

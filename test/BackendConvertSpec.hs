@@ -1684,6 +1684,38 @@ spec = describe "MLF.Backend.Convert" $ do
       helperUniques ->
         expectationFailure ("expected one lifted helper identity, got " ++ show helperUniques)
 
+  it "seeds lifted helper identities from checked source type view metadata identities" $ do
+    checked0 <- requireChecked simpleFunctionProgram
+    let reservedUnique = UniqueIdentity 2000000000
+        reservedSourceIdentity = typeBinderIdentityFromUnique reservedUnique
+        sourceView =
+          (mkTypeView (STBase "Int") (STBase "Int"))
+            { typeViewBinderIdentities = Map.singleton "reserved" reservedSourceIdentity
+            }
+        checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingSourceTypeView = sourceView,
+                    checkedBindingType = intElabTy,
+                    checkedBindingTerm = recursiveIntLiftTerm
+                  }
+            )
+            checked0
+    backend <- requireRight (convertCheckedProgram checked)
+
+    case
+      [ symbolUniqueIdentity identity
+      | binding <- backendBindings backend,
+        "$letrec$" `isInfixOf` backendBindingName binding,
+        Just identity <- [backendBindingIdentity binding]
+      ]
+      of
+      [UniqueIdentity helperUnique] ->
+        helperUnique `shouldSatisfy` (> 2000000000)
+      helperUniques ->
+        expectationFailure ("expected one lifted helper identity, got " ++ show helperUniques)
+
   it "renames binders that would capture recursive helper evidence" $ do
     checked0 <- requireChecked simpleFunctionProgram
     let checked =
