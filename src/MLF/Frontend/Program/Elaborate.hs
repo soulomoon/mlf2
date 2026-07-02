@@ -4499,8 +4499,13 @@ matchTypeViewAgainstIdentity scope subst template actual =
   case typeViewIdentity template of
     STVar name -> do
       key <- typeViewSubstKeyForTemplateName template name
+      let keyIdentity =
+            typeViewSubstKeyIdentity key
       case lookupTypeViewSubst key subst of
-        Nothing -> Just (insertTypeViewSubst key actual subst)
+        Nothing
+          | typeViewIsBareBinderIdentity keyIdentity actual -> Just subst
+          | typeViewMentionsFreeBinderIdentity keyIdentity actual -> Nothing
+          | otherwise -> Just (insertTypeViewSubst key actual subst)
         Just existing
           | semanticTypeViewEqual scope existing actual -> Just subst
           | otherwise -> Nothing

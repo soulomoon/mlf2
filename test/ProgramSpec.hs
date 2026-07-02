@@ -682,6 +682,39 @@ spec = do
             matchTypeViewsAgainstIdentity scope Map.empty (template :| []) (actual :| [])
                 `shouldBe` Nothing
 
+        it "skips bare type-view self-substitutions by binder identity when names are stale" $ do
+            let binderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991628)
+                stableName = typeBinderIdentityStableName binderIdentity
+                scope = mkElaborateScope Map.empty Map.empty Map.empty []
+                template =
+                    (ProgramTypes.mkTypeView (STVar "a") (STVar stableName))
+                        { ProgramTypes.typeViewBinderIdentities = Map.singleton "a" binderIdentity
+                        }
+                actual =
+                    (ProgramTypes.mkTypeView (STVar "b") (STVar "$stale_b"))
+                        { ProgramTypes.typeViewBinderIdentities = Map.singleton "$stale_b" binderIdentity
+                        }
+            matchTypeViewsAgainstIdentity scope Map.empty (template :| []) (actual :| [])
+                `shouldBe` Just Map.empty
+
+        it "rejects recursive bare type-view substitutions by binder identity when names are stale" $ do
+            let binderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991629)
+                stableName = typeBinderIdentityStableName binderIdentity
+                scope = mkElaborateScope Map.empty Map.empty Map.empty []
+                template =
+                    (ProgramTypes.mkTypeView (STVar "a") (STVar stableName))
+                        { ProgramTypes.typeViewBinderIdentities = Map.singleton "a" binderIdentity
+                        }
+                actual =
+                    ( ProgramTypes.mkTypeView
+                        (STVarApp "f" (STBase "Int" :| []))
+                        (STVarApp "$stale_f" (STBase "Int" :| []))
+                    )
+                        { ProgramTypes.typeViewBinderIdentities = Map.singleton "$stale_f" binderIdentity
+                        }
+            matchTypeViewsAgainstIdentity scope Map.empty (template :| []) (actual :| [])
+                `shouldBe` Nothing
+
         it "rejects repeated type-view substitutions with same display head and different identities" $ do
             let binderIdentity = typeBinderIdentityFromNode (NodeId 992516)
                 binderStableName = typeBinderIdentityStableName binderIdentity
