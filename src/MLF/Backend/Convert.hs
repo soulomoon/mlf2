@@ -167,6 +167,8 @@ import MLF.Frontend.Program.Types
     ResolvedProgram (..),
     ResolvedScope (..),
     ResolvedSymbol,
+    resolvedProgramGeneratedIdentities,
+    resolvedProgramSemanticArtifact,
     resolvedSymbolIdentity,
     SymbolNamespace (..),
     SymbolIdentity,
@@ -1902,7 +1904,8 @@ checkedProgramIdentityGenerator checked =
 
 checkedProgramGeneratedIdentities :: CheckedProgram -> [UniqueIdentity]
 checkedProgramGeneratedIdentities checked =
-  idDetailsGeneratedIdentities (resolvedVarDetails (checkedProgramMainResolvedVar checked))
+  resolvedProgramGeneratedIdentities (resolvedProgramSemanticArtifact (checkedProgramResolved checked))
+    ++ idDetailsGeneratedIdentities (resolvedVarDetails (checkedProgramMainResolvedVar checked))
     ++ concatMap checkedModuleGeneratedIdentities (checkedProgramModules checked)
 
 checkedModuleGeneratedIdentities :: CheckedModule -> [UniqueIdentity]

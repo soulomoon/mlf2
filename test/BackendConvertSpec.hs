@@ -29,7 +29,7 @@ import MLF.Elab.Types (schemeFromType)
 import qualified MLF.Types.Elab as Elab
 import MLF.Frontend.Program.Builtins (builtinTypeIdentity)
 import MLF.Frontend.Program.Prelude (withPrelude)
-import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), symbolDefiningName, symbolIdentityFromParts, symbolIdentityStableName, symbolUniqueIdentity)
+import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), SymbolOrigin (..), symbolDefiningName, symbolIdentityFromParts, symbolIdentityStableName, symbolUniqueIdentity)
 import MLF.Frontend.Program.Types
   ( CheckedBinding (..),
     CheckedModule (..),
@@ -38,6 +38,10 @@ import MLF.Frontend.Program.Types
     DeferredBindingMode (..),
     DeferredConstructorCall (..),
     DeferredProgramObligation (..),
+    ResolvedLocalSymbols (..),
+    ResolvedModule (..),
+    ResolvedProgram (..),
+    ResolvedSemanticModule (..),
     TypeView (..),
     ValueInfo (..),
     checkedBindingName,
@@ -56,6 +60,7 @@ import MLF.Frontend.Program.Types
     lookupInstanceMethod,
     methodName,
     mkTypeView,
+    resolvedValueInfoSymbol,
     typeHeadNamesSrcType,
   )
 import MLF.Frontend.Syntax (Lit (..), SrcBound (..), SrcTy (..), SrcType)
@@ -1792,6 +1797,34 @@ spec = describe "MLF.Backend.Convert" $ do
       of
       [UniqueIdentity helperUnique] ->
         helperUnique `shouldSatisfy` (> 2000000010)
+      helperUniques ->
+        expectationFailure ("expected one lifted helper identity, got " ++ show helperUniques)
+
+  it "seeds lifted helper identities from resolved artifact identities" $ do
+    checked0 <- requireChecked simpleFunctionProgram
+    let reservedUnique = UniqueIdentity 2000000020
+        checked =
+          injectResolvedLocalValueIdentity reservedUnique $
+            mapMainBinding
+              ( \binding ->
+                  binding
+                    { checkedBindingSourceTypeView = mkTypeView (STBase "Int") (STBase "Int"),
+                      checkedBindingType = intElabTy,
+                      checkedBindingTerm = recursiveIntLiftTerm
+                    }
+              )
+              checked0
+    backend <- requireRight (convertCheckedProgram checked)
+
+    case
+      [ symbolUniqueIdentity identity
+      | binding <- backendBindings backend,
+        "$letrec$" `isInfixOf` backendBindingName binding,
+        Just identity <- [backendBindingIdentity binding]
+      ]
+      of
+      [UniqueIdentity helperUnique] ->
+        helperUnique `shouldSatisfy` (> 2000000020)
       helperUniques ->
         expectationFailure ("expected one lifted helper identity, got " ++ show helperUniques)
 
@@ -4662,6 +4695,53 @@ addDataInfo dataInfo checked =
               }
               : rest
     }
+
+injectResolvedLocalValueIdentity :: UniqueIdentity -> CheckedProgram -> CheckedProgram
+injectResolvedLocalValueIdentity reservedUnique checked =
+  checked
+    { checkedProgramResolved =
+        injectProgram (checkedProgramResolved checked)
+    }
+  where
+    reservedSymbol =
+      symbolIdentityFromParts reservedUnique SymbolValue "Main" "resolvedReserved" Nothing
+    reservedValue =
+      OrdinaryValue
+        { valueInfoSymbol = reservedSymbol,
+          valueRuntimeName = "Main__resolvedReserved",
+          valueTypeView = mkTypeView (STBase "Int") (STBase "Int"),
+          valueConstraints = [],
+          valueConstraintInfos = []
+        }
+    reservedResolvedSymbol =
+      resolvedValueInfoSymbol (SymbolLocal "Main") "resolvedReserved" reservedValue
+
+    injectProgram (ResolvedProgram modules0) =
+      ResolvedProgram $
+        case modules0 of
+          [] -> []
+          resolvedModule : rest -> injectModule resolvedModule : rest
+
+    injectModule resolvedModule =
+      resolvedModule
+        { resolvedModuleSemantic = injectSemantic (resolvedModuleSemantic resolvedModule)
+        }
+
+    injectSemantic semantic =
+      semantic
+        { resolvedSemanticModuleLocalSymbols =
+            injectLocalSymbols (resolvedSemanticModuleLocalSymbols semantic)
+        }
+
+    injectLocalSymbols localSymbols =
+      localSymbols
+        { resolvedLocalValues =
+            Map.insertWith
+              (++)
+              "resolvedReserved"
+              [reservedResolvedSymbol]
+              (resolvedLocalValues localSymbols)
+        }
 
 replaceDataInfoSymbol :: SymbolIdentity -> SymbolIdentity -> CheckedProgram -> CheckedProgram
 replaceDataInfoSymbol target replacement checked =
