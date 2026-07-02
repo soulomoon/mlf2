@@ -53,6 +53,7 @@ module MLF.Types.Identity
     idDetailsDisplayName,
     idDetailsConstructorRef,
     idDetailsLocalRef,
+    idDetailsBindingSymbolIdentity,
     idDetailsSymbolIdentity,
     idDetailsIsLocal,
     idDetailsIsEvidence,
@@ -362,6 +363,13 @@ idDetailsLocalRef details =
   case details of
     LocalId ref -> Just ref
     EvidenceId ref -> Just ref
+    _ -> Nothing
+
+idDetailsBindingSymbolIdentity :: IdDetails -> Maybe SymbolIdentity
+idDetailsBindingSymbolIdentity details =
+  case details of
+    TopLevelId symbol -> Just symbol
+    MethodId symbol -> Just symbol
     _ -> Nothing
 
 idDetailsSymbolIdentity :: IdDetails -> Maybe SymbolIdentity

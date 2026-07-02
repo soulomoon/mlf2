@@ -27,7 +27,7 @@ import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import MLF.Elab.Pipeline (XmlfTerm (..), Pretty (..), Ty (TForallRef), normalize, schemeFromType, typeCheck)
-import MLF.Elab.Types (ElabType, ResolvedTermIdentityKey, ResolvedVar (..), deferredResolvedVarRef, resolvedVarBoundBy, resolvedVarConstructorRef, resolvedVarIdentityKey, resolvedVarReferenceName, resolvedVarSameIdentity)
+import MLF.Elab.Types (ElabType, ResolvedTermIdentityKey, ResolvedVar (..), deferredResolvedVarRef, resolvedVarBindingSymbolIdentity, resolvedVarBoundBy, resolvedVarConstructorRef, resolvedVarIdentityKey, resolvedVarReferenceName, resolvedVarSameIdentity)
 import qualified MLF.Elab.Types as X
 import MLF.Frontend.Program.Check (checkLocatedProgram, checkLocatedProgramPackage, checkLocatedProgramPackageWithTiming, checkProgram, checkProgramPackage)
 import MLF.Frontend.Program.Elaborate
@@ -550,7 +550,7 @@ mkRuntimeContext checked =
         Map.fromList
           [ (symbol, binding)
           | binding <- allCheckedBindings checked,
-            Just symbol <- [resolvedVarTopLevelSymbol (checkedBindingResolvedVar binding)]
+            Just symbol <- [resolvedVarBindingSymbolIdentity (checkedBindingResolvedVar binding)]
           ],
       runtimeConstructorsByIdentity =
         Map.fromList
@@ -586,7 +586,7 @@ isRuntimePreludeModuleIdentity identity =
 
 preludeBindingKey :: CheckedBinding -> Maybe PreludeBindingKey
 preludeBindingKey binding =
-  case resolvedVarTopLevelSymbol (checkedBindingResolvedVar binding) of
+  case resolvedVarBindingSymbolIdentity (checkedBindingResolvedVar binding) of
     Just symbol
       | symbol == Builtins.builtinValueIdentity PrimitiveInventory.stringFromListPrimitiveName -> Just PreludeStringFromList
     _ -> Nothing
@@ -746,14 +746,7 @@ lookupRuntimeConstructorResolved context resolved =
 
 lookupRuntimeBindingResolved :: RuntimeContext -> ResolvedVar -> Maybe CheckedBinding
 lookupRuntimeBindingResolved context resolved =
-  resolvedVarTopLevelSymbol resolved >>= (`Map.lookup` runtimeBindingsByIdentity context)
-
-resolvedVarTopLevelSymbol :: ResolvedVar -> Maybe SymbolIdentity
-resolvedVarTopLevelSymbol resolved =
-  case resolvedVarDetails resolved of
-    TopLevelId symbol -> Just symbol
-    MethodId symbol -> Just symbol
-    _ -> Nothing
+  resolvedVarBindingSymbolIdentity resolved >>= (`Map.lookup` runtimeBindingsByIdentity context)
 
 evalRuntimeBindingByIdentity :: RuntimeContext -> RuntimeLookupStack -> CheckedBinding -> Either ProgramError RuntimeValue
 evalRuntimeBindingByIdentity context stack binding
