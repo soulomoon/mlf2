@@ -542,6 +542,10 @@ mainRuntimeValue context checked = do
 
 mkRuntimeContext :: CheckedProgram -> Either ProgramError RuntimeContext
 mkRuntimeContext checked = do
+  _modulesByIdentity <-
+    uniqueRuntimeInfoByIdentity
+      "module"
+      [(checkedModuleIdentity checkedModule, checkedModule) | checkedModule <- checkedProgramModules checked]
   bindingsByIdentity <-
     uniqueRuntimeInfoByIdentity
       "binding"

@@ -3284,6 +3284,32 @@ spec = do
                 other ->
                     expectationFailure ("expected duplicate binding identity rejection, got " ++ show other)
 
+        it "rejects duplicate checked runtime module identities before run context lookup" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Lib export (helper) {"
+                        , "  def helper : Int = 0;"
+                        , "}"
+                        , "module Main export (main) {"
+                        , "  import Lib exposing (helper);"
+                        , "  def main : Int = helper;"
+                        , "}"
+                        ]
+            checked <- requireChecked program
+            case checkedProgramModules checked of
+                firstModule : secondModule : _ -> do
+                    let duplicateIdentity = checkedModuleIdentity firstModule
+                        checked' = replaceCheckedModuleIdentity (checkedModuleName secondModule) duplicateIdentity checked
+                    case runCheckedProgramOutput checked' of
+                        Left (ProgramPipelineError message) -> do
+                            message `shouldSatisfy` isInfixOf "duplicate checked module identity"
+                            message `shouldSatisfy` isInfixOf (symbolIdentityStableName duplicateIdentity)
+                        other ->
+                            expectationFailure ("expected duplicate module identity rejection, got " ++ show other)
+                _ ->
+                    expectationFailure "expected two checked modules"
+
         it "rejects duplicate checked runtime data identities before run context lookup" $ do
             program <-
                 requireParsed $
@@ -7167,6 +7193,18 @@ replaceCheckedBindingTopLevelIdentity name replacement checked =
                         }
                 }
         | otherwise = binding
+
+replaceCheckedModuleIdentity :: String -> SymbolIdentity -> CheckedProgram -> CheckedProgram
+replaceCheckedModuleIdentity moduleName replacement checked =
+    checked
+        { checkedProgramModules =
+            map replaceModule (checkedProgramModules checked)
+        }
+  where
+    replaceModule checkedModule
+        | checkedModuleName checkedModule == moduleName =
+            checkedModule {checkedModuleIdentity = replacement}
+        | otherwise = checkedModule
 
 replaceCheckedDataSymbol :: SymbolIdentity -> SymbolIdentity -> CheckedProgram -> CheckedProgram
 replaceCheckedDataSymbol target replacement checked =
