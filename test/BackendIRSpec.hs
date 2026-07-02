@@ -6,6 +6,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import MLF.Backend.CallableShape (backendCallableRef)
 import MLF.Backend.IR
+import MLF.Backend.StructuralRecursiveData (structuralDataDeclarationMatches)
 import MLF.Constraint.Types.Graph (BaseTy (..), NodeId (..))
 import MLF.Frontend.Program.Builtins (builtinTypeIdentity, builtinValueIdentity)
 import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), symbolIdentityFromParts, symbolIdentityStableName)
@@ -1608,6 +1609,10 @@ spec = describe "MLF.Backend.IR" $ do
   it "rejects structural self identities that point away from same-named data" $ do
     validateBackendProgram dataIdentityStructuralMismatchedSelfProgram
       `shouldBe` Left (BackendBindingTypeMismatch "main" dataIdentityBoxCanonicalFunctionTy dataIdentityBoxMismatchedStructuralFunctionTy)
+
+  it "does not match structural data declarations by name when self identity differs" $
+    structuralDataDeclarationMatches Map.empty dataIdentityBoxData Map.empty dataIdentityBoxMismatchedStructuralTy
+      `shouldBe` False
 
   it "accepts stale constructor result type heads when data identity is carried" $ do
     validateBackendProgram dataIdentityConstructorStaleResultProgram

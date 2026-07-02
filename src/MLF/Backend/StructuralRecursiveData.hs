@@ -759,8 +759,14 @@ structuralMuNameMatches dataName muName =
 
 structuralMuMatchesDataDecl :: BackendData -> Maybe TypeBinderIdentity -> String -> Bool
 structuralMuMatchesDataDecl dataDecl muIdentity muName =
-  structuralMuNameMatches (backendDataName dataDecl) muName
-    || structuralMuIdentityMatches (backendDataIdentity dataDecl) muIdentity
+  case (backendDataIdentity dataDecl, muIdentity >>= typeBinderIdentityStructural) of
+    (Just dataIdentity, Just (unique, StructuralSelfBinder)) ->
+      unique == symbolUniqueIdentity dataIdentity
+    (Just {}, Just {}) ->
+      False
+    _ ->
+      structuralMuNameMatches (backendDataName dataDecl) muName
+        || structuralMuIdentityMatches (backendDataIdentity dataDecl) muIdentity
 
 structuralMuIdentityMatches :: Maybe SymbolIdentity -> Maybe TypeBinderIdentity -> Bool
 structuralMuIdentityMatches (Just dataIdentity) (Just identity)
