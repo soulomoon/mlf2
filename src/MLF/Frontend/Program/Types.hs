@@ -48,6 +48,7 @@ module MLF.Frontend.Program.Types
     lookupTypeBinderSubstByIdentity,
     insertTypeBinderSubstWithIdentity,
     EvidenceMethod (..),
+    uniqueEvidenceMethod,
     EvidenceInfo (..),
     SymbolNamespace (..),
     SymbolOwnerIdentity (..),
@@ -280,7 +281,7 @@ where
 
 import Control.Applicative ((<|>))
 import Data.Foldable (toList)
-import Data.List (transpose)
+import Data.List (nub, transpose)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
@@ -1875,6 +1876,12 @@ instance Eq EvidenceMethod where
     evidenceMethodSymbol left == evidenceMethodSymbol right
       && evidenceMethodResolvedVar left == evidenceMethodResolvedVar right
       && evidenceMethodTypeView left == evidenceMethodTypeView right
+
+uniqueEvidenceMethod :: [EvidenceMethod] -> Maybe EvidenceMethod
+uniqueEvidenceMethod methods =
+  case nub methods of
+    [method] -> Just method
+    _ -> Nothing
 
 data EvidenceInfo = EvidenceInfo
   { evidenceClassSymbol :: SymbolIdentity,

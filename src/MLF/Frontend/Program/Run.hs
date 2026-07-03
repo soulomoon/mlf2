@@ -116,6 +116,7 @@ import MLF.Frontend.Program.Types
     typeViewHeadIdentityForAlias,
     typeViewSubstFromParamIdentities,
     typeViewsIdentity,
+    uniqueEvidenceMethod,
     typeBinderSubstFromTypeViewSubst,
     typeBinderSubstToTypeViewSubstWith,
     insertTypeBinderSubstWithIdentity,
@@ -1612,16 +1613,13 @@ resolveRuntimeLocalConstraintEvidenceValues context stack deferredValues env loc
 
 lookupRuntimeEvidenceMethod :: ElaborateScope -> [EvidenceInfo] -> SymbolIdentity -> NE.NonEmpty TypeView -> SymbolIdentity -> Maybe EvidenceMethod
 lookupRuntimeEvidenceMethod scope evidenceInfos classIdentity headViews methodIdentity =
-  case
+  uniqueEvidenceMethod
     [ methodEvidence
       | evidence <- evidenceInfos,
         evidenceClassSymbol evidence == classIdentity,
         Just _ <- [matchMethodTypeViews scope Map.empty (evidenceTypeViews evidence) headViews],
         methodEvidence <- maybe [] (: []) (Map.lookup methodIdentity (evidenceMethodsByIdentity evidence))
     ]
-  of
-    methodEvidence : _ -> Just methodEvidence
-    [] -> Nothing
 
 lookupRuntimeEvidenceMethodValue ::
   RuntimeContext ->

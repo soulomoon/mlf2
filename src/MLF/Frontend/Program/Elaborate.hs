@@ -2831,16 +2831,13 @@ lookupEvidenceMethodByClassTypes scope classIdentity0 headIdentityTys methodIden
 
 lookupEvidenceMethodByClassViews :: ElaborateScope -> SymbolIdentity -> NonEmpty TypeView -> SymbolIdentity -> Maybe EvidenceMethod
 lookupEvidenceMethodByClassViews scope classIdentity0 headViews methodIdentity =
-  case
+  uniqueEvidenceMethod
     [ methodEvidence
       | evidence <- esEvidence scope,
         evidenceClassSymbol evidence == classIdentity0,
         Just _ <- [matchMethodTypeViews scope Map.empty (evidenceTypeViews evidence) headViews],
         methodEvidence <- maybe [] (: []) (Map.lookup methodIdentity (evidenceMethodsByIdentity evidence))
     ]
-  of
-    methodEvidence : _ -> Just methodEvidence
-    [] -> Nothing
 
 classInfoForConstraint :: ElaborateScope -> ConstraintInfo -> Maybe ClassInfo
 classInfoForConstraint scope constraint =

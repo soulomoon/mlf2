@@ -488,6 +488,23 @@ spec = do
       evidence "Lib__eq" eqMethodIdentity
         `shouldNotBe` evidence "Lib__eq" someCtorIdentity
 
+    it "does not choose arbitrary evidence methods after duplicate collapse" $ do
+      let methodView = methodTypeView eqMethodInfo
+          conflictingView = mkTypeView (STBase "Bool") (STBase "Bool")
+          evidence runtimeName view =
+            EvidenceMethod
+              { evidenceMethodRuntimeName = runtimeName,
+                evidenceMethodSymbol = eqMethodIdentity,
+                evidenceMethodResolvedVar = Nothing,
+                evidenceMethodTypeView = view
+              }
+          first = evidence "Lib__eq_first" methodView
+          duplicate = evidence "Lib__eq_second" methodView
+          conflicting = evidence "Lib__eq_conflicting" conflictingView
+      fmap evidenceMethodRuntimeName (uniqueEvidenceMethod [first, duplicate])
+        `shouldBe` Just "Lib__eq_first"
+      uniqueEvidenceMethod [first, conflicting] `shouldBe` Nothing
+
     it "compares method infos by symbol identity when display names are stale" $ do
       eqMethodInfo
         `shouldBe` eqMethodInfo {methodDisplayName = "$stale.eq"}
