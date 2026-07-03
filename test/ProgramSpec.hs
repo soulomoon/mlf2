@@ -131,6 +131,15 @@ resolvedTypeBinderRef :: UniqueIdentity -> String -> ResolvedTypeBinderRef
 resolvedTypeBinderRef identity name =
     resolvedTypeBinderRefFromIdentity (typeBinderIdentityFromUnique identity) name
 
+loweredBindingIdentityFromDetails :: String -> IdDetails -> ProgramTypes.LoweredBindingIdentity
+loweredBindingIdentityFromDetails runtimeName details =
+    ProgramTypes.loweredBindingIdentityFromResolvedVar
+        ResolvedVar
+            { resolvedVarRuntimeName = runtimeName
+            , resolvedVarType = Elab.TBottom
+            , resolvedVarDetails = details
+            }
+
 poisonResolvedEqIdentityNames :: ResolvedProgram -> ResolvedProgram
 poisonResolvedEqIdentityNames resolved =
     resolved {resolvedProgramModules = map poisonModule (resolvedProgramModules resolved)}
@@ -1511,7 +1520,7 @@ spec = do
                         )
             lowerResolvedConstrainedExprBinding
                 scope
-                (ProgramTypes.loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity))
+                (loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity))
                 (resolvedUnconstrainedType (RSTBase (Builtins.builtinTypeSymbol "Bool")))
                 False
                 expr
@@ -1559,7 +1568,7 @@ spec = do
                 case
                     lowerResolvedConstrainedExprBinding
                         scope
-                        (ProgramTypes.loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity))
+                        (loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity))
                         (resolvedUnconstrainedType (RSTBase (Builtins.builtinTypeSymbol "Int")))
                         False
                         expr
@@ -1590,7 +1599,7 @@ spec = do
                 lowered =
                     LoweredBinding
                         { loweredBindingIdentity =
-                            ProgramTypes.loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
+                            loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
                         , loweredBindingSourceType = STBase "Int"
                         , loweredBindingSourceTypeView = Nothing
                         , loweredBindingExpectedType = STBase "Int"
@@ -1629,7 +1638,7 @@ spec = do
                 lowered =
                     LoweredBinding
                         { loweredBindingIdentity =
-                            ProgramTypes.loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
+                            loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
                         , loweredBindingSourceType = STBase "Int"
                         , loweredBindingSourceTypeView = Nothing
                         , loweredBindingExpectedType = STBase "Int"
@@ -1674,7 +1683,7 @@ spec = do
                 lowered =
                     LoweredBinding
                         { loweredBindingIdentity =
-                            ProgramTypes.loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
+                            loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
                         , loweredBindingSourceType = STBase "Int"
                         , loweredBindingSourceTypeView = Nothing
                         , loweredBindingExpectedType = STBase "Int"
@@ -1722,7 +1731,7 @@ spec = do
                 lowered =
                     LoweredBinding
                         { loweredBindingIdentity =
-                            ProgramTypes.loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
+                            loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
                         , loweredBindingSourceType = STBase "Int"
                         , loweredBindingSourceTypeView = Nothing
                         , loweredBindingExpectedType = STBase "Int"
@@ -2825,7 +2834,7 @@ spec = do
                         Map.empty
                         []
                 binding =
-                    ProgramTypes.loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
+                    loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
                 expr =
                     EVar (ResolvedGlobalValue (ProgramTypes.resolvedConstructorInfoSymbol (SymbolLocal "Box") "Box" dataInfo ctorInfo))
                 ty =
@@ -3236,7 +3245,7 @@ spec = do
                 lowered =
                     LoweredBinding
                         { loweredBindingIdentity =
-                            ProgramTypes.loweredBindingIdentityFromDetails "Main__identity" (TopLevelId bindingIdentity)
+                            loweredBindingIdentityFromDetails "Main__identity" (TopLevelId bindingIdentity)
                         , loweredBindingSourceType = functionTy
                         , loweredBindingSourceTypeView = Nothing
                         , loweredBindingExpectedType = functionTy
@@ -3288,7 +3297,7 @@ spec = do
                 lowered name identity localRef deferredRef =
                     LoweredBinding
                         { loweredBindingIdentity =
-                            ProgramTypes.loweredBindingIdentityFromDetails name (TopLevelId identity)
+                            loweredBindingIdentityFromDetails name (TopLevelId identity)
                         , loweredBindingSourceType = functionTy
                         , loweredBindingSourceTypeView = Nothing
                         , loweredBindingExpectedType = functionTy
@@ -5085,7 +5094,7 @@ spec = do
                 lowered name identity value =
                     LoweredBinding
                         { loweredBindingIdentity =
-                            ProgramTypes.loweredBindingIdentityFromDetails name (TopLevelId identity)
+                            loweredBindingIdentityFromDetails name (TopLevelId identity)
                         , loweredBindingSourceType = STBase "Int"
                         , loweredBindingSourceTypeView = Nothing
                         , loweredBindingExpectedType = STBase "Int"
@@ -5134,7 +5143,7 @@ spec = do
                 lowered name identity value locals =
                     LoweredBinding
                         { loweredBindingIdentity =
-                            ProgramTypes.loweredBindingIdentityFromDetails name (TopLevelId identity)
+                            loweredBindingIdentityFromDetails name (TopLevelId identity)
                         , loweredBindingSourceType = STBase "Int"
                         , loweredBindingSourceTypeView = Nothing
                         , loweredBindingExpectedType = STBase "Int"
@@ -5201,7 +5210,7 @@ spec = do
                 lowered name identity value =
                     LoweredBinding
                         { loweredBindingIdentity =
-                            ProgramTypes.loweredBindingIdentityFromDetails name (TopLevelId identity)
+                            loweredBindingIdentityFromDetails name (TopLevelId identity)
                         , loweredBindingSourceType = STBase "Int"
                         , loweredBindingSourceTypeView = Nothing
                         , loweredBindingExpectedType = STBase "Int"
@@ -5229,7 +5238,7 @@ spec = do
                 lowered name value =
                     LoweredBinding
                         { loweredBindingIdentity =
-                            ProgramTypes.loweredBindingIdentityFromDetails name (TopLevelId duplicateIdentity)
+                            loweredBindingIdentityFromDetails name (TopLevelId duplicateIdentity)
                         , loweredBindingSourceType = STBase "Int"
                         , loweredBindingSourceTypeView = Nothing
                         , loweredBindingExpectedType = STBase "Int"
@@ -5273,7 +5282,7 @@ spec = do
                 lowered =
                     LoweredBinding
                         { loweredBindingIdentity =
-                            ProgramTypes.loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
+                            loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
                         , loweredBindingSourceType = STBase "Int"
                         , loweredBindingSourceTypeView = Nothing
                         , loweredBindingExpectedType = STBase "Int"
@@ -5320,7 +5329,7 @@ spec = do
                 firstLowered =
                     LoweredBinding
                         { loweredBindingIdentity =
-                            ProgramTypes.loweredBindingIdentityFromDetails "Main__first" (TopLevelId firstIdentity)
+                            loweredBindingIdentityFromDetails "Main__first" (TopLevelId firstIdentity)
                         , loweredBindingSourceType = STBase "Int"
                         , loweredBindingSourceTypeView = Nothing
                         , loweredBindingExpectedType = STBase "Int"
@@ -5336,7 +5345,7 @@ spec = do
                 secondLowered =
                     LoweredBinding
                         { loweredBindingIdentity =
-                            ProgramTypes.loweredBindingIdentityFromDetails "Main__second" (TopLevelId secondIdentity)
+                            loweredBindingIdentityFromDetails "Main__second" (TopLevelId secondIdentity)
                         , loweredBindingSourceType = STBase "Int"
                         , loweredBindingSourceTypeView = Nothing
                         , loweredBindingExpectedType = STBase "Int"
@@ -5381,7 +5390,7 @@ spec = do
                 lowered surfaceExpr obligations externalTypeViews =
                     LoweredBinding
                         { loweredBindingIdentity =
-                            ProgramTypes.loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
+                            loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
                         , loweredBindingSourceType = STBase "Int"
                         , loweredBindingSourceTypeView = Nothing
                         , loweredBindingExpectedType = STBase "Int"
@@ -5437,7 +5446,7 @@ spec = do
                 lowered =
                     LoweredBinding
                         { loweredBindingIdentity =
-                            ProgramTypes.loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
+                            loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
                         , loweredBindingSourceType = STBase "Int"
                         , loweredBindingSourceTypeView = Nothing
                         , loweredBindingExpectedType = STBase "Int"

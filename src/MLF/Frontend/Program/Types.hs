@@ -226,7 +226,7 @@ module MLF.Frontend.Program.Types
     LoweredBindingIdentity,
     loweredIdentityRuntimeName,
     loweredIdentityDetails,
-    loweredBindingIdentityFromDetails,
+    loweredBindingIdentityFromResolvedVar,
     ResolvedVar (..),
     constructorRefFromInfo,
     loweredBindingIdentityFromConstructorInfo,
@@ -2338,6 +2338,12 @@ loweredBindingIdentityFromDetails runtimeName details =
     { loweredIdentityRuntimeName = runtimeName,
       loweredIdentityDetails = details
     }
+
+loweredBindingIdentityFromResolvedVar :: ResolvedVar -> LoweredBindingIdentity
+loweredBindingIdentityFromResolvedVar resolved =
+  loweredBindingIdentityFromDetails
+    (resolvedVarRuntimeName resolved)
+    (resolvedVarDetails resolved)
 
 instance Eq LoweredBindingIdentity where
   left == right =

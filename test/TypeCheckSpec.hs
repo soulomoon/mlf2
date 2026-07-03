@@ -72,7 +72,7 @@ import qualified MLF.Types.Elab as ElabTypes
 import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace(..), SymbolOwnerIdentity(..), symbolIdentityFromParts, symbolIdentityStableName, symbolUniqueIdentity)
 import MLF.Frontend.ConstraintGen (ExternalBinding(..), ExternalBindingMode(..), externalBindingIdentityFromDetails)
 import MLF.Frontend.Program.Builtins (builtinTypeIdentity, builtinValueIdentity)
-import MLF.Frontend.Program.Types (loweredBindingIdentityFromDetails)
+import MLF.Frontend.Program.Types (LoweredBindingIdentity, loweredBindingIdentityFromResolvedVar)
 import MLF.Frontend.Syntax (Lit(..), SrcBound(..))
 import qualified MLF.Frontend.Syntax as Surf (Expr(..), SrcTy(..))
 import MLF.Primitive.Inventory (stringLengthPrimitiveName)
@@ -127,6 +127,15 @@ shouldBeRightAlphaEq actual expected =
     case actual of
         Right ty | TypeOps.alphaEqType ty expected -> pure ()
         other -> other `shouldBe` Right expected
+
+loweredBindingIdentityFromDetails :: String -> IdDetails -> LoweredBindingIdentity
+loweredBindingIdentityFromDetails runtimeName details =
+    loweredBindingIdentityFromResolvedVar
+        ResolvedVar
+            { resolvedVarRuntimeName = runtimeName
+            , resolvedVarType = TBottom
+            , resolvedVarDetails = details
+            }
 
 spec :: Spec
 spec = describe "Phase 7 typecheck" $ do
