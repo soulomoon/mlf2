@@ -69,7 +69,7 @@ import MLF.Frontend.Syntax (Lit (..), SrcBound (..), SrcTy (..), SrcType)
 import MLF.Frontend.Syntax.Program (Program)
 import MLF.Pipeline (checkProgram)
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
-import MLF.Types.Identity (deferredRefFromIdentity, deferredRefName, UniqueIdentity (..), typeBinderIdentityFromUnique, typeBinderIdentityStableName)
+import MLF.Types.Identity (deferredRefFromIdentity, deferredRefName, UniqueIdentity (..), typeBinderIdentityFromUnique, typeBinderIdentityGeneratedUnique, typeBinderIdentityStableName)
 import System.Directory (createDirectoryIfMissing)
 import System.Environment (lookupEnv)
 import System.FilePath (takeDirectory)
@@ -672,6 +672,35 @@ spec = describe "MLF.Backend.Convert" $ do
     mainBinding <- requireBinding (backendProgramMain backend) backend
     backendBindingType mainBinding
       `shouldBe` BTForallWithIdentity (Just sourceIdentity) "a" Nothing intTy
+
+  it "seeds source type fallback binders after source view metadata identities" $ do
+    checked0 <- requireChecked simpleFunctionProgram
+    let reservedUnique = UniqueIdentity 2000000040
+        reservedHeadIdentity =
+          symbolIdentityFromParts reservedUnique SymbolType "Main" "ReservedSourceMeta" Nothing
+        sourceTy = STForall "a" Nothing (STBase "Int")
+        sourceView =
+          (mkTypeView sourceTy sourceTy)
+            { typeViewHeadIdentities = Map.singleton "ReservedSourceMeta" reservedHeadIdentity
+            }
+        checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingSourceTypeView = sourceView,
+                    checkedBindingType = Elab.TForallRef sameNamedOuterTypeRef Nothing intElabTy,
+                    checkedBindingTerm = Elab.ETyAbsRef sameNamedOuterTypeRef Nothing (Elab.ELit (LInt 1))
+                  }
+            )
+            checked0
+    backend <- requireRight (convertCheckedProgram checked)
+
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    case backendBindingType mainBinding of
+      BTForallWithIdentity (Just identity) "a" Nothing _ ->
+        typeBinderIdentityGeneratedUnique identity `shouldBe` Just (UniqueIdentity 2000000041)
+      other ->
+        expectationFailure ("expected generated source fallback binder, got " ++ show other)
 
   it "does not reuse an outer display binder identity in source type view fallback" $ do
     checked0 <- requireChecked simpleFunctionProgram

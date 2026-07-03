@@ -201,7 +201,7 @@ import MLF.Frontend.Program.Types
 import MLF.Frontend.Symbol (lookupSymbolIdentityAlias, symbolIdentityAliasMap, symbolIdentityAliasNames, symbolIdentityStableName, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit, SrcBound (..), SrcTy (..), SrcType, TypeParam)
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
-import MLF.Types.Identity (DeferredRef, IdDetails (..), IdentityGenerator, LocalRef, StructuralTypeBinderRole (..), UniqueIdentity (..), deferredRefIdentity, deferredRefName, freshDeferredRef, freshIdentity, freshLocalRef, idDetailsGeneratedIdentities, idDetailsSymbolIdentity, identityGeneratorAfter, symbolGeneratedIdentities, typeBinderGeneratedIdentities, typeBinderIdentityFromStructural, typeBinderIdentityNode, typeBinderIdentityStructural)
+import MLF.Types.Identity (DeferredRef, IdDetails (..), IdentityGenerator, LocalRef, StructuralTypeBinderRole (..), UniqueIdentity (..), advanceIdentityGeneratorPast, deferredRefIdentity, deferredRefName, freshDeferredRef, freshIdentity, freshLocalRef, idDetailsGeneratedIdentities, idDetailsSymbolIdentity, identityGeneratorAfter, symbolGeneratedIdentities, typeBinderGeneratedIdentities, typeBinderIdentityFromStructural, typeBinderIdentityNode, typeBinderIdentityStructural)
 import MLF.Util.Names (freshNameLike)
 
 data BackendConversionError
@@ -561,7 +561,7 @@ checkedBindingEnvType context checkedModule binding = do
                 constructorBackendBindingType constructorMeta
           _ ->
             sourceBindingTy
-  case backendTypeToElabTypeWithGenerator (identityGeneratorAfterType canonicalElabTy) finalBindingTy of
+  case backendTypeToElabTypeSeededByElabType canonicalElabTy finalBindingTy of
     Just envTy -> Right envTy
     Nothing -> Right canonicalElabTy
 
@@ -582,7 +582,7 @@ canonicalizeBuiltinEnvType :: ConvertContext -> ElabType -> ElabType
 canonicalizeBuiltinEnvType context ty =
   case convertElabType ty of
     Right backendTy ->
-      case backendTypeToElabTypeWithGenerator (identityGeneratorAfterType ty) (normalizeBackendTypeForContext context backendTy) of
+      case backendTypeToElabTypeSeededByElabType ty (normalizeBackendTypeForContext context backendTy) of
         Just canonicalTy -> canonicalTy
         Nothing -> ty
     Left _ ->
@@ -1594,7 +1594,7 @@ checkedBindingCanonicalTypeOpen context checkedModule binding = do
             then Just canonicalTy
             else
               if alphaEqBackendType (normalizeBuiltinBackendType strippedCheckedBackendTy) (normalizeBuiltinBackendType canonicalBackendTy)
-                then backendTypeToElabTypeWithGenerator (identityGeneratorAfterType checkedTy) strippedCheckedBackendTy
+                then backendTypeToElabTypeSeededByElabType checkedTy strippedCheckedBackendTy
                 else
                   case (checkedBackendTy, canonicalBackendTy) of
                     (BTVarWithIdentity checkedIdentity checkedName, BTVarWithIdentity canonicalIdentity canonicalName)
@@ -1688,7 +1688,7 @@ sourceTypeViewToElabTypeWithGenerator generator view =
   case convertSourceTypeViewWithIdentities view of
     Left err -> Left err
     Right backendTy ->
-      case backendTypeToElabTypeWithGenerator generator backendTy of
+      case backendTypeToElabTypeWithGenerator (advanceIdentityGeneratorPastMany (typeViewGeneratedIdentities view) generator) backendTy of
         Just ty -> Right ty
         Nothing -> Left (BackendUnsupportedCaseShape "source type view did not convert to elaborated type")
 
@@ -3507,6 +3507,16 @@ normalizeBuiltinEnv env =
 backendTypeToElabType :: BackendType -> Maybe ElabType
 backendTypeToElabType ty =
   backendTypeToElabTypeWithGenerator (identityGeneratorAfter (generatedIdentitiesInBackendTypes [ty])) ty
+
+backendTypeToElabTypeSeededByElabType :: ElabType -> BackendType -> Maybe ElabType
+backendTypeToElabTypeSeededByElabType seedTy ty =
+  backendTypeToElabTypeWithGenerator
+    (advanceIdentityGeneratorPastMany (generatedIdentitiesInBackendTypes [ty]) (identityGeneratorAfterType seedTy))
+    ty
+
+advanceIdentityGeneratorPastMany :: [UniqueIdentity] -> IdentityGenerator -> IdentityGenerator
+advanceIdentityGeneratorPastMany identities generator =
+  foldr advanceIdentityGeneratorPast generator identities
 
 backendTypeToElabTypeWithGenerator :: IdentityGenerator -> BackendType -> Maybe ElabType
 backendTypeToElabTypeWithGenerator generator0 ty =
