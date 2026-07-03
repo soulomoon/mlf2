@@ -1828,6 +1828,24 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
         other ->
           expectationFailure ("Expected forall-introduced type, got: " ++ show other)
 
+    it "InstIntro seeds fresh binders after instantiation payload identities" $ do
+      let reservedIdentity = UniqueIdentity 2000000060
+          reservedRef =
+            ElabTypes.typeBinderRefFromIdentity
+              (ElabTypes.typeBinderIdentityFromUnique reservedIdentity)
+              "payload"
+          inst =
+            Elab.InstSeq
+              Elab.InstIntro
+              (Elab.InstInside (Elab.InstBot (ElabTypes.tVarWithRef reservedRef)))
+      out <- requireRight (Elab.applyInstantiation (Elab.TBase (BaseTy "Int")) inst)
+      case out of
+        Elab.TForallRef ref _ _ ->
+          ElabTypes.typeBinderRefIdentity ref
+            `shouldBe` ElabTypes.typeBinderIdentityFromUnique (UniqueIdentity 2000000061)
+        other ->
+          expectationFailure ("Expected forall-introduced type, got: " ++ show other)
+
     it "14.2.1/14.2.7 determinism proxy: InstApp equals InstInside;InstElim application" $ do
       let src = testTForall "a" Nothing (testTVar "a")
           tgt = Elab.TBase (BaseTy "Int")

@@ -26,7 +26,13 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.List.NonEmpty (NonEmpty (..))
 import MLF.Constraint.Types.Graph (BaseTy (..))
-import MLF.Elab.Inst (InstEvalSpec (..), evalInstantiationWith, renameInstBoundRef, schemeToType)
+import MLF.Elab.Inst
+  ( InstEvalSpec (..),
+    evalInstantiationWith,
+    identityGeneratorAfterTypeAndInstantiation,
+    renameInstBoundRef,
+    schemeToType,
+  )
 import MLF.Elab.Types
 import qualified MLF.Frontend.Program.Builtins as Builtins
 import MLF.Frontend.Symbol (SymbolIdentity, symbolUniqueIdentity)
@@ -300,9 +306,9 @@ checkInstantiation env ty inst =
         InstSeq (InstInside (InstApp _)) InstElim -> True
         _ -> False
    in case ty of
-        TForallRef {} -> (\(_, _, ty') -> ty') <$> evalInstantiationWith spec inst' (identityGeneratorAfterType ty, env, ty)
+        TForallRef {} -> (\(_, _, ty') -> ty') <$> evalInstantiationWith spec inst' (identityGeneratorAfterTypeAndInstantiation ty inst', env, ty)
         _ | staleAppLikeInst inst' -> Right ty
-        _ -> (\(_, _, ty') -> ty') <$> evalInstantiationWith spec inst' (identityGeneratorAfterType ty, env, ty)
+        _ -> (\(_, _, ty') -> ty') <$> evalInstantiationWith spec inst' (identityGeneratorAfterTypeAndInstantiation ty inst', env, ty)
   where
     spec :: InstEvalSpec Env TypeCheckError
     spec =

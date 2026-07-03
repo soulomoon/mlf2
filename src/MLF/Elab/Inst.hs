@@ -5,6 +5,7 @@ module MLF.Elab.Inst
     applyInstantiation,
     composeInst,
     evalInstantiationWith,
+    identityGeneratorAfterTypeAndInstantiation,
     instMany,
     renameInstBoundRef,
     schemeToType,
@@ -14,7 +15,8 @@ where
 import Data.Functor.Foldable (Recursive (project), para)
 import MLF.Elab.Types
 import MLF.Reify.TypeOps (alphaEqType, freeTypeVarsType, substTypeCaptureRef)
-import MLF.Types.Identity (IdentityGenerator)
+import MLF.Types.Elab (generatedIdentitiesInInstantiation)
+import MLF.Types.Identity (IdentityGenerator, identityGeneratorAfter)
 
 -- | Turn a scheme into its corresponding type (nested `∀`).
 schemeToType :: ElabScheme -> ElabType
@@ -31,6 +33,10 @@ composeInst i1 i2 = InstSeq i1 i2
 
 instMany :: [Instantiation] -> Instantiation
 instMany = foldr composeInst InstId
+
+identityGeneratorAfterTypeAndInstantiation :: ElabType -> Instantiation -> IdentityGenerator
+identityGeneratorAfterTypeAndInstantiation ty inst =
+  identityGeneratorAfter (generatedIdentitiesInType ty ++ generatedIdentitiesInInstantiation inst)
 
 data InstEvalSpec env err = InstEvalSpec
   { instBot :: ElabType -> (IdentityGenerator, env, ElabType) -> Either err (IdentityGenerator, env, ElabType),
@@ -142,7 +148,7 @@ evalInstantiationWith spec inst = eval inst
 -- type form (e.g. ∀ for `N`) but the type does not match.
 applyInstantiation :: ElabType -> Instantiation -> Either ElabError ElabType
 applyInstantiation ty inst =
-  (\(_, _, ty') -> ty') <$> evalInstantiationWith spec inst (identityGeneratorAfterType ty, [], ty)
+  (\(_, _, ty') -> ty') <$> evalInstantiationWith spec inst (identityGeneratorAfterTypeAndInstantiation ty inst, [], ty)
   where
     resolveReplayVars :: [(TypeBinderRef, ElabType)] -> ElabType -> ElabType
     resolveReplayVars replayEnv ty0 =

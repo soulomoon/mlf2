@@ -97,6 +97,7 @@ module MLF.Types.Elab (
     mkLocalRecursiveLetWithRef,
     identityGeneratorAfterType,
     generatedIdentitiesInType,
+    generatedIdentitiesInInstantiation,
     eTyAbsWithRef,
     identityGeneratorAfterTerm,
     generatedIdentitiesInTerm,
