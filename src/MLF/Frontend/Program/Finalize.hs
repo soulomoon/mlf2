@@ -181,6 +181,7 @@ import MLF.Frontend.Program.Types
     substituteTypeVar,
     typeViewSubstFromParamIdentities,
     typeViewHeadIdentityForAlias,
+    typeViewGeneratedIdentities,
     typeViewVarPairs,
     typeHeadNamesSrcType,
     typeViewSubstKeyForIdentity,
@@ -1857,20 +1858,15 @@ collectEvidenceBinderResolvedVars count0 =
 generatedIdentitiesInLoweredBinding :: LoweredBinding -> [UniqueIdentity]
 generatedIdentitiesInLoweredBinding lowered =
   idDetailsGeneratedIdentities (loweredIdentityDetails (loweredBindingIdentity lowered))
-    ++ maybe [] generatedIdentitiesInTypeView (loweredBindingSourceTypeView lowered)
-    ++ maybe [] generatedIdentitiesInTypeView (loweredBindingExpectedTypeView lowered)
+    ++ maybe [] typeViewGeneratedIdentities (loweredBindingSourceTypeView lowered)
+    ++ maybe [] typeViewGeneratedIdentities (loweredBindingExpectedTypeView lowered)
     ++ concatMap generatedIdentitiesInLoweredResolvedLocalIdentity (loweredBindingResolvedLocalIdentities lowered)
     ++ generatedIdentitiesInDeferredObligations lowered
-    ++ concatMap generatedIdentitiesInTypeView (Map.elems (loweredBindingExternalTypeViews lowered))
+    ++ concatMap typeViewGeneratedIdentities (Map.elems (loweredBindingExternalTypeViews lowered))
 
 generatedIdentitiesInLoweredResolvedLocalIdentity :: LoweredResolvedLocalIdentity -> [UniqueIdentity]
 generatedIdentitiesInLoweredResolvedLocalIdentity =
   localRefGeneratedIdentities . loweredResolvedLocalRef
-
-generatedIdentitiesInTypeView :: TypeView -> [UniqueIdentity]
-generatedIdentitiesInTypeView view =
-  concatMap symbolGeneratedIdentities (Map.elems (typeViewHeadIdentities view))
-    ++ concatMap typeBinderGeneratedIdentities (Map.elems (typeViewBinderIdentities view))
 
 generatedIdentitiesInDeferredObligations :: LoweredBinding -> [UniqueIdentity]
 generatedIdentitiesInDeferredObligations lowered =
@@ -1885,7 +1881,7 @@ generatedIdentitiesInDeferredObligationsMap obligations =
         ++ case obligation of
           DeferredMethod deferred ->
             generatedIdentitiesInMethodInfo (deferredMethodInfo deferred)
-              ++ maybe [] generatedIdentitiesInTypeView (deferredMethodExpectedResult deferred)
+              ++ maybe [] typeViewGeneratedIdentities (deferredMethodExpectedResult deferred)
               ++ maybe [] generatedIdentitiesInDeferredEvidence (deferredMethodEvidence deferred)
               ++ concatMap generatedIdentitiesInEvidenceInfo (deferredMethodLocalEvidence deferred)
           DeferredConstructor deferred ->
@@ -1896,19 +1892,19 @@ generatedIdentitiesInDeferredObligationsMap obligations =
             generatedIdentitiesInDataInfo (deferredCaseDataInfo deferred)
 
     generatedIdentitiesInDeferredEvidence evidence =
-      generatedIdentitiesInTypeView (deferredMethodEvidenceClassArg evidence)
-        ++ foldMap generatedIdentitiesInTypeView (deferredMethodEvidenceClassArgs evidence)
+      typeViewGeneratedIdentities (deferredMethodEvidenceClassArg evidence)
+        ++ foldMap typeViewGeneratedIdentities (deferredMethodEvidenceClassArgs evidence)
         ++ generatedIdentitiesInEvidenceMethod (deferredMethodEvidenceMethod evidence)
 
     generatedIdentitiesInEvidenceInfo evidence =
       symbolGeneratedIdentities (evidenceClassSymbol evidence)
-        ++ foldMap generatedIdentitiesInTypeView (evidenceTypeViews evidence)
+        ++ foldMap typeViewGeneratedIdentities (evidenceTypeViews evidence)
         ++ concatMap generatedIdentitiesInEvidenceMethod (Map.elems (evidenceMethodsByIdentity evidence))
 
     generatedIdentitiesInEvidenceMethod method =
       symbolGeneratedIdentities (evidenceMethodSymbol method)
         ++ maybe [] generatedIdentitiesInResolvedVar (evidenceMethodResolvedVar method)
-        ++ generatedIdentitiesInTypeView (evidenceMethodTypeView method)
+        ++ typeViewGeneratedIdentities (evidenceMethodTypeView method)
 
     generatedIdentitiesInResolvedVar resolved =
       idDetailsGeneratedIdentities (X.resolvedVarDetails resolved)
@@ -1916,13 +1912,13 @@ generatedIdentitiesInDeferredObligationsMap obligations =
 
     generatedIdentitiesInMethodInfo info =
       symbolGeneratedIdentities (methodInfoSymbol info)
-        ++ generatedIdentitiesInTypeView (methodTypeViewRaw info)
+        ++ typeViewGeneratedIdentities (methodTypeViewRaw info)
         ++ concatMap generatedIdentitiesInConstraintInfo (methodConstraintInfos info)
         ++ foldMap typeBinderGeneratedIdentities (methodParamBinderIdentities info)
 
     generatedIdentitiesInConstraintInfo info =
       symbolGeneratedIdentities (constraintClassSymbol info)
-        ++ foldMap generatedIdentitiesInTypeView (constraintTypeViews info)
+        ++ foldMap typeViewGeneratedIdentities (constraintTypeViews info)
 
     generatedIdentitiesInConstructorInfo info =
       symbolGeneratedIdentities (ctorInfoSymbol info)
