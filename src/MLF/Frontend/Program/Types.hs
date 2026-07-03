@@ -2920,7 +2920,6 @@ constructorOwnerResultArgs ctorInfo view ty =
     ownerIdentity = ctorOwningTypeIdentity ctorInfo
     ownerHeadMatches name =
       typeViewHeadIdentityForAlias view name == Just ownerIdentity
-        || name `elem` symbolIdentityAliasNames ownerIdentity
 
 srcTypeVarName :: SrcType -> Maybe String
 srcTypeVarName ty =

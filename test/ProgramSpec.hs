@@ -2370,6 +2370,55 @@ spec = do
                            , ResolvedTypeParam (resolvedTypeBinderRefFromIdentity aIdentity "a") KType
                            ]
 
+        it "does not infer constructor owner params from metadata-free stable owner heads" $ do
+            let typeIdentity =
+                    generatedSymbolIdentity 1041 SymbolType "Core" "MaybeF" Nothing
+                ctorIdentity =
+                    generatedSymbolIdentity 1042 SymbolConstructor "Core" "JustF" (Just (SymbolOwnerType typeIdentity))
+                fIdentity = typeBinderIdentityFromNode (NodeId 992515)
+                aIdentity = typeBinderIdentityFromNode (NodeId 992516)
+                fStableName = typeBinderIdentityStableName fIdentity
+                aStableName = typeBinderIdentityStableName aIdentity
+                ownerStableHead = symbolIdentityStableName typeIdentity
+                displayResult = STCon ownerStableHead (STVar "f" :| [STVar "a"])
+                identityResult = STCon ownerStableHead (STVar fStableName :| [STVar aStableName])
+                ctorView =
+                    ( ProgramTypes.mkTypeView
+                        displayResult
+                        identityResult
+                    )
+                        { ProgramTypes.typeViewBinderIdentities =
+                            Map.fromList
+                                [ (fStableName, fIdentity)
+                                , (aStableName, aIdentity)
+                                ]
+                        }
+                forallBinders =
+                    [ ProgramTypes.ConstructorForallBinder "f" fIdentity
+                    , ProgramTypes.ConstructorForallBinder "a" aIdentity
+                    ]
+                shape =
+                    ConstructorShape
+                        { constructorShapeSymbol = ctorIdentity
+                        , constructorShapeRuntimeName = "Core__JustF"
+                        , constructorShapeTypeView = ctorView
+                        , constructorShapeForallBinderInfo = forallBinders
+                        , constructorShapeIndex = 0
+                        , constructorShapeOwnerTypeParams = []
+                        }
+                ctorInfo =
+                    ConstructorInfo
+                        { ctorInfoSymbol = ctorIdentity
+                        , ctorRuntimeName = "Core__JustF"
+                        , ctorTypeView = ctorView
+                        , ctorForallBinderInfo = forallBinders
+                        , ctorOwningTypeIdentity = typeIdentity
+                        , ctorIndex = 0
+                        , ctorOwnerConstructors = [shape]
+                        }
+                ownerInfo = ProgramTypes.constructorOwnerDataInfoFromShapes ctorInfo
+            dataTypeParams ownerInfo `shouldBe` []
+
         it "infers constructor owner param kinds by binder identity across stale shape aliases" $ do
             let typeIdentity =
                     generatedSymbolIdentity 1026 SymbolType "Core" "MaybeF" Nothing
