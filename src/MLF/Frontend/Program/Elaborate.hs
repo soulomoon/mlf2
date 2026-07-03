@@ -2553,6 +2553,7 @@ compileExpectedResolvedMethodArg scope expectedTy expr = do
     EApp (ELam param body) actual -> do
       let paramRef = P.paramName param
       runtimeName <- freshRuntimeName (localRefName paramRef)
+      recordResolvedLocalIdentity runtimeName paramRef
       actualExpr <- compileResolvedExpr scope (Just expectedTy) actual
       scope' <- extendResolvedLocal scope paramRef runtimeName (Just expectedTy)
       bodyExpr <- compileResolvedExpr scope' (Just expectedTy) body
@@ -3841,6 +3842,7 @@ compileResolvedCatchAllOnly scope mbExpected mbScrutineeTy scrutineeExpr alts =
             )
     [P.Alt (P.PatVar name) body] -> do
       runtimeName <- freshRuntimeName (localRefName name)
+      recordResolvedLocalIdentity runtimeName name
       scope' <-
         case mbScrutineeTy of
           Just scrutineeTy -> extendResolvedLocal scope name runtimeName (Just scrutineeTy)
@@ -3993,6 +3995,7 @@ compileResolvedHandler scope scrutineeExpr scrutineeView resultTy dataInfo alts 
         P.PatWildcard -> compileResolvedExpr scope (Just resultTy) body
         P.PatVar name -> do
           scrutineeName <- freshRuntimeName (localRefName name)
+          recordResolvedLocalIdentity scrutineeName name
           scope' <- extendResolvedLocalView scope name scrutineeName (Just scrutineeView)
           bodyExpr <- compileResolvedExpr scope' (Just resultTy) body
           pure (surfaceLet scrutineeName scrutineeExpr bodyExpr)
@@ -4016,6 +4019,7 @@ compileResolvedHandler scope scrutineeExpr scrutineeView resultTy dataInfo alts 
       case pattern0 of
         P.PatWildcard -> compilePatternSequence scope0 rest body mbFallback
         P.PatVar sourceName -> do
+          recordResolvedLocalIdentity runtimeName sourceName
           scope' <- extendResolvedLocalView scope0 sourceName runtimeName (Just argView)
           compilePatternSequence scope' rest body mbFallback
         P.PatCtor nestedCtorSymbol nestedPatterns -> do

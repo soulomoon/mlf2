@@ -44,6 +44,6 @@ backend-program
                     construct Main__Zero : Main.Nat
                       args:
                         <none>
-                alternative Main__Succ($case1#3)
+                alternative Main__Succ(n)
                   body:
-                    var $case1#3 : Main.Nat
+                    var n : Main.Nat

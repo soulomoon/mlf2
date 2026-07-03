@@ -2719,6 +2719,33 @@ spec = do
             binderRefs `shouldMatchList` resolvedRefs
             occurrenceRefs `shouldMatchList` resolvedRefs
 
+        it "records case pattern binders with resolved local identity" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (Box(..), get, main) {"
+                        , "  data Box = Box : Int -> Box;"
+                        , "  def get : Box -> Int = λbox case box of { Box value -> value };"
+                        , "  def main : Int = get (Box 1);"
+                        , "}"
+                        ]
+            checked <- requireChecked (withPrelude program)
+            getBinding <- requireCheckedBinding "Main__get" checked
+            let term = checkedBindingTerm getBinding
+                binderRefs = resolvedLocalBinders term
+                occurrenceRefs = resolvedLocalOccurrences term
+                resolvedPatternRefs =
+                    [ valueRef
+                    | resolvedModule <- ProgramTypes.resolvedProgramModules (ProgramTypes.checkedProgramResolved checked)
+                    , resolvedModuleName resolvedModule == "Main"
+                    , DeclDef defDecl <- moduleDecls (resolvedModuleSyntax resolvedModule)
+                    , refDisplayName (defDeclName defDecl) == "get"
+                    , ELam _ (ECase _ [Alt (PatCtor _ [PatVar valueRef]) _]) <- [defDeclExpr defDecl]
+                    ]
+            resolvedPatternRefs `shouldSatisfy` (not . null)
+            binderRefs `shouldSatisfy` (\refs -> all (`elem` refs) resolvedPatternRefs)
+            occurrenceRefs `shouldSatisfy` (\refs -> all (`elem` refs) resolvedPatternRefs)
+
         it "does not rename grouped placeholder spellings under resolved local binders" $ do
             finalizeContext <- requireFinalizeContext (mkElaborateScope Map.empty Map.empty Map.empty [])
             let firstLocal = localRefFromIdentity (GeneratedLocalId (UniqueIdentity 991801)) "x"
