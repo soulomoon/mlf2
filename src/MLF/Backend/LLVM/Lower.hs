@@ -175,7 +175,7 @@ import MLF.Constraint.Types.Graph (BaseTy (..))
 import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), SymbolOwnerIdentity (..), symbolIdentityFromParts, symbolIdentityStableName, symbolRefMatches, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit (..))
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
-import MLF.Types.Identity (constructorRefSymbol, deferredRefIdentity, envRefIdentity, IdDetails (..), IdentityGenerator, LocalRef, localRefIdentity, primitiveRefSymbol, idDetailsAliasNames, idDetailsSymbolIdentity, StructuralTypeBinderRole (..), TypeBinderIdentity, UniqueIdentity (..), freshIdentity, freshLocalRef, identityGeneratorAfter, initialIdentityGenerator, localIdentityStableUnique, typeBinderIdentityAliasNames, typeBinderIdentityFromUnique, typeBinderIdentityStableName, typeBinderIdentityStructural)
+import MLF.Types.Identity (constructorRefSymbol, deferredRefIdentity, envRefIdentity, IdDetails (..), IdentityGenerator, LocalRef, localRefIdentity, primitiveRefSymbol, idDetailsAliasMap, idDetailsSymbolIdentity, StructuralTypeBinderRole (..), TypeBinderIdentity, UniqueIdentity (..), freshIdentity, freshLocalRef, identityGeneratorAfter, initialIdentityGenerator, localIdentityStableUnique, typeBinderIdentityAliasNames, typeBinderIdentityFromUnique, typeBinderIdentityStableName, typeBinderIdentityStructural)
 import MLF.Util.Names (freshNameLike)
 
 lowerBackendProgram :: BackendProgram -> Either BackendLLVMError LLVMModule
@@ -438,19 +438,19 @@ shadowBackendTypeBinderIdentity name identity env =
 
 insertUniqueBackendTermIdentity :: String -> IdDetails -> BackendTermEnv -> BackendTermEnv
 insertUniqueBackendTermIdentity name identity env =
-  foldl (\env0 alias -> Map.alter insert alias env0) env (idDetailsAliasNames name identity)
+  Map.foldrWithKey (\alias details env0 -> Map.alter (insert details) alias env0) env (idDetailsAliasMap [(name, identity)])
   where
-    insert Nothing =
-      Just (Just identity)
-    insert (Just (Just existing))
-      | existing == identity = Just (Just existing)
+    insert details Nothing =
+      Just (Just details)
+    insert details (Just (Just existing))
+      | existing == details = Just (Just existing)
       | otherwise = Just Nothing
-    insert (Just Nothing) =
+    insert _ (Just Nothing) =
       Just Nothing
 
 shadowBackendTermIdentity :: String -> IdDetails -> BackendTermEnv -> BackendTermEnv
 shadowBackendTermIdentity name identity env =
-  foldl (\env0 alias -> Map.insert alias (Just identity) env0) env (idDetailsAliasNames name identity)
+  Map.foldrWithKey (\alias details env0 -> Map.insert alias (Just details) env0) env (idDetailsAliasMap [(name, identity)])
 
 unionUniqueBackendTermEnv :: BackendTermEnv -> BackendTermEnv -> BackendTermEnv
 unionUniqueBackendTermEnv =

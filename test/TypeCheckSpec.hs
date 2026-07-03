@@ -91,6 +91,7 @@ import MLF.Types.Identity
     , UniqueIdentity(..)
     , freshDeferredRef
     , freshLocalRef
+    , idDetailsAliasMap
     , idDetailsConstructorRef
     , idDetailsIsLocal
     , idDetailsRenameLocal
@@ -940,6 +941,11 @@ spec = describe "Phase 7 typecheck" $ do
         idDetailsRefMatches (Just localDetails) "$x#0" Nothing "$x#0" `shouldBe` False
         idDetailsRefMatches (Just localDetails) "$x#0" Nothing (uniqueIdentityStableName (UniqueIdentity 0)) `shouldBe` False
         idDetailsRefMatches Nothing "$x#0" Nothing "$x#0" `shouldBe` True
+        let otherLocalDetails = LocalId (generatedLocalRef 1 "$x#0")
+            detailsByAlias = idDetailsAliasMap [("runtime-x", localDetails), ("runtime-y", otherLocalDetails)]
+        Map.lookup "$x#0" detailsByAlias `shouldBe` Nothing
+        Map.lookup (uniqueIdentityStableName (UniqueIdentity 0)) detailsByAlias `shouldBe` Just localDetails
+        Map.lookup (uniqueIdentityStableName (UniqueIdentity 1)) detailsByAlias `shouldBe` Just otherLocalDetails
         localDetails `shouldBe` idDetailsRenameLocal "$x#1" localDetails
         localDetails `shouldBe` EvidenceId (generatedLocalRef 0 "$x#evidence")
         deferredDetails `shouldNotBe` sameNamedDeferredDetails

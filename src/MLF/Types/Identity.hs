@@ -55,6 +55,7 @@ module MLF.Types.Identity
     idDetailsIdentityKey,
     idDetailsStableName,
     idDetailsAliasNames,
+    idDetailsAliasMap,
     idDetailsReferenceName,
     idDetailsDisplayName,
     idDetailsConstructorRef,
@@ -389,6 +390,22 @@ idDetailsAliasNames runtimeName details =
         idDetailsDisplayName runtimeName details,
         idDetailsStableName details
       ]
+
+idDetailsAliasMap :: [(String, IdDetails)] -> Map String IdDetails
+idDetailsAliasMap identities =
+  Map.fromList
+    [ (alias, details)
+    | (alias, detailsForAlias) <- Map.toList identitiesByAlias,
+      [details] <- [Map.elems detailsForAlias]
+    ]
+  where
+    identitiesByAlias =
+      Map.fromListWith
+        Map.union
+        [ (alias, Map.singleton (idDetailsIdentityKey details) details)
+        | (name, details) <- identities,
+          alias <- idDetailsAliasNames name details
+        ]
 
 localRefStableName :: LocalRef -> String
 localRefStableName ref =
