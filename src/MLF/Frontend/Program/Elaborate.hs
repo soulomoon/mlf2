@@ -2145,14 +2145,8 @@ refineValueEvidenceViewSubst scope valueInfo mbExpectedView args subst =
       valueResultTypeViewForArity (ordinaryValueTypeView valueInfo) (length args)
 
 valueResultTypeViewForArity :: TypeView -> Int -> TypeView
-valueResultTypeViewForArity view argCount =
-  view
-    { typeViewDisplay = foldr STArrow displayResult (drop argCount displayArgs),
-      typeViewIdentity = foldr STArrow identityResult (drop argCount identityArgs)
-    }
-  where
-    (displayArgs, displayResult) = splitArrows (snd (splitForalls (typeViewDisplay view)))
-    (identityArgs, identityResult) = splitArrows (snd (splitForalls (typeViewIdentity view)))
+valueResultTypeViewForArity =
+  typeViewArrowResultViewForArity
 
 constraintEvidenceArgExprsInfo :: ElaborateScope -> ConstraintInfo -> ElaborateM [SurfaceExpr]
 constraintEvidenceArgExprsInfo scope constraint
@@ -2215,7 +2209,7 @@ deferMethodEvidenceExpr scope classArgViews methodInfo = do
   let methodView = stripVacuousTypeViewForalls (specializeMethodTypeView methodInfo classArgViews)
       methodTy = typeViewDisplay methodView
       fullArity = methodFullArity methodInfo
-      resultView = resultTypeView methodView
+      resultView = typeViewArrowResultView methodView
   placeholder <-
     if fullArity == 0
       then deferNullaryMethodCall scope methodInfo resultView
@@ -2228,17 +2222,6 @@ deferMethodEvidenceExpr scope classArgViews methodInfo = do
         { typeViewDisplay = stripVacuousSrcForalls (typeViewDisplay view),
           typeViewIdentity = stripVacuousSrcForalls (typeViewIdentity view)
         }
-
-    resultTypeView view =
-      view
-        { typeViewDisplay = displayResult,
-          typeViewIdentity = identityResult
-        }
-      where
-        (_, displayBody) = splitForalls (typeViewDisplay view)
-        (_, identityBody) = splitForalls (typeViewIdentity view)
-        (_, displayResult) = splitArrows displayBody
-        (_, identityResult) = splitArrows identityBody
 
 inferCallSubst :: ElaborateScope -> TypeView -> [P.Expr] -> Maybe TypeViewSubst
 inferCallSubst scope valueView args = do
