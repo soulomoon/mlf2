@@ -2716,6 +2716,37 @@ spec = do
                 )
                 ["Zero", "Succ"]
 
+        it "does not pick an arbitrary constructor metadata match when identities collide" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (Nat(..), main) {"
+                        , "  data Nat ="
+                        , "      Zero : Nat"
+                        , "    | Succ : Nat -> Nat;"
+                        , ""
+                        , "  def main : Nat = Zero;"
+                        , "}"
+                        ]
+            checked <- requireChecked (withPrelude program)
+            dataInfo <- requireCheckedData "Main" "Nat" checked
+            zeroInfo <- requireDataConstructor "Zero" dataInfo
+            succInfo <- requireDataConstructor "Succ" dataInfo
+            let duplicateDataInfo =
+                    dataInfo
+                        { dataConstructors =
+                            [ zeroInfo
+                            , succInfo {ctorInfoSymbol = ctorInfoSymbol zeroInfo}
+                            ]
+                        }
+                scope = mkElaborateScope Map.empty (Map.singleton "Nat" duplicateDataInfo) Map.empty []
+            finalizeContext <- requireFinalizeContext scope
+            let poisonedLowered =
+                    (lowerConstructorBinding scope zeroInfo)
+                        { loweredBindingSurfaceExpr = Surface.EVar "$missing_constructor_pipeline_input"
+                        }
+            finalizeBindingWithContext finalizeContext poisonedLowered `shouldSatisfy` isLeft
+
         it "records parameterized constructor binding binders with resolved local identity" $ do
             program <-
                 requireParsed $

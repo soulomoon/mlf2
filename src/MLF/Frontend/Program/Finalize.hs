@@ -2029,8 +2029,8 @@ lookupConstructorRuntimeBySymbol scope identity =
         ctorInfoSymbol ctor == identity
     ]
   of
-    match : _ -> Just match
-    [] -> Nothing
+    [match] -> Just match
+    _ -> Nothing
 
 data TypeAbsInfo = TypeAbsInfo
   { typeAbsRef :: X.TypeBinderRef,
