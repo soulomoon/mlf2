@@ -1955,13 +1955,16 @@ constructorInfoGeneratedIdentities :: ConstructorInfo -> [UniqueIdentity]
 constructorInfoGeneratedIdentities ctorInfo =
   symbolGeneratedIdentities (ctorInfoSymbol ctorInfo)
     ++ symbolGeneratedIdentities (ctorOwningTypeIdentity ctorInfo)
+    ++ typeViewGeneratedIdentities (ctorTypeView ctorInfo)
     ++ concatMap constructorForallBinderGeneratedIdentities (ctorForallBinderInfo ctorInfo)
     ++ concatMap constructorShapeGeneratedIdentities (ctorOwnerConstructors ctorInfo)
 
 constructorShapeGeneratedIdentities :: ConstructorShape -> [UniqueIdentity]
 constructorShapeGeneratedIdentities shape =
   symbolGeneratedIdentities (constructorShapeSymbol shape)
+    ++ typeViewGeneratedIdentities (constructorShapeTypeView shape)
     ++ concatMap constructorForallBinderGeneratedIdentities (constructorShapeForallBinderInfo shape)
+    ++ concatMap typeParamGeneratedIdentities (constructorShapeOwnerTypeParams shape)
 
 constructorForallBinderGeneratedIdentities :: ConstructorForallBinder -> [UniqueIdentity]
 constructorForallBinderGeneratedIdentities binder =

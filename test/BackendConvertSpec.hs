@@ -1819,6 +1819,41 @@ spec = describe "MLF.Backend.Convert" $ do
       helperUniques ->
         expectationFailure ("expected one lifted helper identity, got " ++ show helperUniques)
 
+  it "seeds lifted helper identities from checked constructor type view metadata identities" $ do
+    checked0 <- requireChecked parameterizedConstructorProgram
+    ctorInfo <- requireCheckedConstructor "Main__Some" checked0
+    let reservedUnique = UniqueIdentity 2000000005
+        reservedHeadIdentity =
+          symbolIdentityFromParts reservedUnique SymbolType "Main" "ReservedCtorHead" Nothing
+        ctorView =
+          (ctorTypeView ctorInfo)
+            { typeViewHeadIdentities =
+                Map.insert "ReservedCtorHead" reservedHeadIdentity (typeViewHeadIdentities (ctorTypeView ctorInfo))
+            }
+        checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingSourceTypeView = mkTypeView (STBase "Int") (STBase "Int"),
+                    checkedBindingType = intElabTy,
+                    checkedBindingTerm = recursiveIntLiftTerm
+                  }
+            )
+            (withConstructorTypeView "Main__Some" ctorView checked0)
+    backend <- requireRight (convertCheckedProgram checked)
+
+    case
+      [ symbolUniqueIdentity identity
+      | binding <- backendBindings backend,
+        "$letrec$" `isInfixOf` backendBindingName binding,
+        Just identity <- [backendBindingIdentity binding]
+      ]
+      of
+      [UniqueIdentity helperUnique] ->
+        helperUnique `shouldSatisfy` (> 2000000005)
+      helperUniques ->
+        expectationFailure ("expected one lifted helper identity, got " ++ show helperUniques)
+
   it "seeds lifted helper identities from deferred constructor type head identities" $ do
     checked0 <- requireChecked parameterizedConstructorProgram
     ctorInfo <- requireCheckedConstructor "Main__Some" checked0
