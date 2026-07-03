@@ -3126,10 +3126,8 @@ convertSourceTypeViewWithIdentities view =
     insertBinderIdentityAliases identityName displayName identity binderIdentities =
       case identity of
         Just resolvedIdentity ->
-          foldr
-            (`Map.insert` resolvedIdentity)
-            binderIdentities
-            (typeBinderIdentityAliasNames identityName resolvedIdentity <> typeBinderIdentityAliasNames displayName resolvedIdentity)
+          typeBinderIdentityAliasMap [(identityName, resolvedIdentity), (displayName, resolvedIdentity)]
+            `Map.union` binderIdentities
         Nothing ->
           binderIdentities
 
