@@ -27,7 +27,7 @@ inferInstAppArgsFromSchemeRefs binds body targetTy =
         targetForallRefs =
             let alg ty = case ty of
                     TForallIFRef ref _ body' -> ref : unK body'
-                    TConIF _ args -> concatMap unK args
+                    TConIFWithIdentity _ _ args -> concatMap unK args
                     _ -> []
             in cataIxConst alg targetTy
         argsAreIdentity :: [TypeBinderRef] -> [ElabType] -> Bool
@@ -142,9 +142,9 @@ varRefsInType = cataIxConst alg
     alg ty = case ty of
         TVarIFRef ref -> [ref]
         TArrowIF a b -> dedupeRefs (unK a ++ unK b)
-        TConIF _ args -> dedupeRefs (concatMap unK args)
+        TConIFWithIdentity _ _ args -> dedupeRefs (concatMap unK args)
         TVarAppIFRef ref args -> dedupeRefs (ref : concatMap unK args)
-        TBaseIF _ -> []
+        TBaseIFWithIdentity _ _ -> []
         TBottomIF -> []
         TForallIFRef _ mb body ->
             let varsBound = maybe [] unK mb
@@ -238,5 +238,5 @@ containsForallType = cataIxConst alg
         TForallIFRef _ _ _ -> True
         TMuIFRef _ body -> unK body
         TArrowIF a b -> unK a || unK b
-        TConIF _ args -> any unK args
+        TConIFWithIdentity _ _ args -> any unK args
         _ -> False

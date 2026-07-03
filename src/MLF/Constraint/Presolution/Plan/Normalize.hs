@@ -170,7 +170,7 @@ substBoundRef ref replacement bound = case bound of
 
 isBaseBound :: Ty v -> Bool
 isBaseBound ty = case ty of
-    TBase{} -> True
+    TBaseWithIdentity{} -> True
     TBottom -> True
     _ -> False
 
@@ -200,7 +200,7 @@ containsForall = cataIxConst alg
         TForallIFRef _ _ _ -> True
         TMuIFRef _ body -> unK body
         TArrowIF d c -> unK d || unK c
-        TConIF _ args -> any unK args
+        TConIFWithIdentity _ _ args -> any unK args
         _ -> False
 
 containsArrow :: ElabType -> Bool
@@ -212,5 +212,5 @@ containsArrow = cataIxConst alg
             let boundHasArrow = maybe False unK mb
             in boundHasArrow || unK body
         TMuIFRef _ body -> unK body
-        TConIF _ args -> any unK args
+        TConIFWithIdentity _ _ args -> any unK args
         _ -> False

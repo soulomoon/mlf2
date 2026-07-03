@@ -201,14 +201,14 @@ hasRecursiveComponent :: ElabType -> Bool
 hasRecursiveComponent ty = case ty of
   TMuRef _ _ -> True
   TArrow dom cod -> hasRecursiveComponent dom || hasRecursiveComponent cod
-  TCon _ args -> any hasRecursiveComponent args
+  TConWithIdentity _ _ args -> any hasRecursiveComponent args
   TForallRef _ mb body -> maybe False hasRecursiveBound mb || hasRecursiveComponent body
   _ -> False
   where
     hasRecursiveBound bound = case bound of
       TArrow dom cod -> hasRecursiveComponent dom || hasRecursiveComponent cod
-      TBase _ -> False
-      TCon _ args -> any hasRecursiveComponent args
+      TBaseWithIdentity _ _ -> False
+      TConWithIdentity _ _ args -> any hasRecursiveComponent args
       TVarAppRef _ args -> any hasRecursiveComponent args
       TForallRef _ mb body -> maybe False hasRecursiveBound mb || hasRecursiveComponent body
       TMuRef _ _ -> True

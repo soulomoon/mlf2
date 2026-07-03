@@ -88,7 +88,7 @@ freeTypeVarRefsFromWith bindInBound bound0 ty =
       TArrowIF d c ->
         BoundRefFun $ \boundRefs ->
           unionRefs (runBoundRefFun d boundRefs) (runBoundRefFun c boundRefs)
-      TConIF _ args ->
+      TConIFWithIdentity _ _ args ->
         BoundRefFun $ \boundRefs ->
           foldr
             (\arg acc -> unionRefs (runBoundRefFun arg boundRefs) acc)
@@ -106,7 +106,7 @@ freeTypeVarRefsFromWith bindInBound bound0 ty =
                   []
                   args
            in unionRefs headFree argsFree
-      TBaseIF _ -> BoundRefFun (const [])
+      TBaseIFWithIdentity _ _ -> BoundRefFun (const [])
       TBottomIF -> BoundRefFun (const [])
       TForallIFRef ref mb body ->
         BoundRefFun $ \boundRefs ->
@@ -324,9 +324,9 @@ firstNonContractiveRecursiveType = goType
     goType ty = case ty of
       TVarRef _ -> Nothing
       TArrow a b -> goType a <|> goType b
-      TCon _ args -> foldr (\arg acc -> goType arg <|> acc) Nothing args
+      TConWithIdentity _ _ args -> foldr (\arg acc -> goType arg <|> acc) Nothing args
       TVarAppRef _ args -> foldr (\arg acc -> goType arg <|> acc) Nothing args
-      TBase _ -> Nothing
+      TBaseWithIdentity _ _ -> Nothing
       TBottom -> Nothing
       TForallRef _ mb body -> maybe Nothing goBound mb <|> goType body
       TMuRef ref body
@@ -336,9 +336,9 @@ firstNonContractiveRecursiveType = goType
     goBound :: BoundType -> Maybe ElabType
     goBound bound = case bound of
       TArrow a b -> goType a <|> goType b
-      TCon _ args -> foldr (\arg acc -> goType arg <|> acc) Nothing args
+      TConWithIdentity _ _ args -> foldr (\arg acc -> goType arg <|> acc) Nothing args
       TVarAppRef _ args -> foldr (\arg acc -> goType arg <|> acc) Nothing args
-      TBase _ -> Nothing
+      TBaseWithIdentity _ _ -> Nothing
       TBottom -> Nothing
       TForallRef _ mb body -> maybe Nothing goBound mb <|> goType body
       TMuRef ref body
@@ -352,11 +352,11 @@ firstNonContractiveRecursiveType = goType
         bodyType guarded shadowed ty = case ty of
           TVarRef ref -> shadowed || not (typeBinderRefsSameIdentity ref needle) || guarded
           TArrow a b -> bodyType True shadowed a && bodyType True shadowed b
-          TCon _ args -> all (bodyType True shadowed) args
+          TConWithIdentity _ _ args -> all (bodyType True shadowed) args
           TVarAppRef ref args ->
             (shadowed || not (typeBinderRefsSameIdentity ref needle) || guarded)
               && all (bodyType guarded shadowed) args
-          TBase _ -> True
+          TBaseWithIdentity _ _ -> True
           TBottom -> True
           TForallRef ref mb body ->
             let shadowed' = shadowed || typeBinderRefsSameIdentity ref needle
@@ -369,11 +369,11 @@ firstNonContractiveRecursiveType = goType
         bodyBound :: Bool -> Bool -> BoundType -> Bool
         bodyBound guarded shadowed bound = case bound of
           TArrow a b -> bodyType True shadowed a && bodyType True shadowed b
-          TCon _ args -> all (bodyType True shadowed) args
+          TConWithIdentity _ _ args -> all (bodyType True shadowed) args
           TVarAppRef ref args ->
             (shadowed || not (typeBinderRefsSameIdentity ref needle) || guarded)
               && all (bodyType guarded shadowed) args
-          TBase _ -> True
+          TBaseWithIdentity _ _ -> True
           TBottom -> True
           TForallRef ref mb body ->
             let shadowed' = shadowed || typeBinderRefsSameIdentity ref needle

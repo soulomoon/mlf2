@@ -413,7 +413,7 @@ containsForallTy = cataIxConst alg
         TForallIFRef _ _ _ -> True
         TMuIFRef _ body -> unK body
         TArrowIF a b -> unK a || unK b
-        TConIF _ args -> any unK args
+        TConIFWithIdentity _ _ args -> any unK args
         TVarAppIFRef _ args -> any unK args
         _ -> False
 
@@ -424,7 +424,7 @@ containsArrowTy = cataIxConst alg
         TArrowIF _ _ -> True
         TForallIFRef _ mb body -> maybe False unK mb || unK body
         TMuIFRef _ body -> unK body
-        TConIF _ args -> any unK args
+        TConIFWithIdentity _ _ args -> any unK args
         TVarAppIFRef _ args -> any unK args
         _ -> False
 

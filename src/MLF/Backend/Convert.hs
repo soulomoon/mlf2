@@ -1140,7 +1140,7 @@ freeElabTypeVarRefsIn initialBound =
           | otherwise -> [ref]
         TArrow dom cod ->
           go bound dom `unionTypeRefs` go bound cod
-        TCon _ args ->
+        TConWithIdentity _ _ args ->
           unionsTypeRefs (map (go bound) (NE.toList args))
         TVarAppRef ref args ->
           let headFree =
@@ -1148,7 +1148,7 @@ freeElabTypeVarRefsIn initialBound =
                   then []
                   else [ref]
            in headFree `unionTypeRefs` unionsTypeRefs (map (go bound) (NE.toList args))
-        TBase {} ->
+        TBaseWithIdentity {} ->
           []
         TForallRef ref mb body ->
           maybe [] (go bound) mb
@@ -1299,11 +1299,11 @@ elabTypeVariableNames =
       Set.singleton (typeBinderRefName ref)
     TArrow dom cod ->
       elabTypeVariableNames dom `Set.union` elabTypeVariableNames cod
-    TCon _ args ->
+    TConWithIdentity _ _ args ->
       Set.unions (map elabTypeVariableNames (NE.toList args))
     TVarAppRef ref args ->
       Set.insert (typeBinderRefName ref) (Set.unions (map elabTypeVariableNames (NE.toList args)))
-    TBase {} ->
+    TBaseWithIdentity {} ->
       Set.empty
     TForallRef ref mbBound body ->
       Set.insert (typeBinderRefName ref) $
@@ -3308,9 +3308,9 @@ elabTypeBinderRefs =
   \case
     TVarRef ref -> [ref]
     TArrow dom cod -> elabTypeBinderRefs dom ++ elabTypeBinderRefs cod
-    TCon _ args -> concatMap elabTypeBinderRefs (NE.toList args)
+    TConWithIdentity _ _ args -> concatMap elabTypeBinderRefs (NE.toList args)
     TVarAppRef ref args -> ref : concatMap elabTypeBinderRefs (NE.toList args)
-    TBase {} -> []
+    TBaseWithIdentity {} -> []
     TForallRef ref mb body -> ref : maybe [] (elabTypeBinderRefs . tyToElab) mb ++ elabTypeBinderRefs body
     TMuRef ref body -> ref : elabTypeBinderRefs body
     TBottom -> []

@@ -118,9 +118,9 @@ checkedType :: Checked.ElabType -> XmlfType
 checkedType ty = case ty of
     Checked.TVarRef ref -> XTVar (Checked.typeBinderRefName ref)
     Checked.TArrow a b -> XTArrow (checkedType a) (checkedType b)
-    Checked.TCon (BaseTy c) args -> XTCon c (fmap checkedType args)
+    Checked.TConWithIdentity _ (BaseTy c) args -> XTCon c (fmap checkedType args)
     Checked.TVarAppRef ref args -> XTVarApp (Checked.typeBinderRefName ref) (fmap checkedType args)
-    Checked.TBase (BaseTy b) -> XTBase b
+    Checked.TBaseWithIdentity _ (BaseTy b) -> XTBase b
     Checked.TForallRef ref mb body ->
         XTForall (Checked.typeBinderRefName ref) (maybe XTBottom checkedBound mb) (checkedType body)
     Checked.TMuRef ref body -> XTMu (Checked.typeBinderRefName ref) (checkedType body)
@@ -129,9 +129,9 @@ checkedType ty = case ty of
 checkedBound :: Checked.BoundType -> XmlfType
 checkedBound bound = case bound of
     Checked.TArrow a b -> XTArrow (checkedType a) (checkedType b)
-    Checked.TCon (BaseTy c) args -> XTCon c (fmap checkedType args)
+    Checked.TConWithIdentity _ (BaseTy c) args -> XTCon c (fmap checkedType args)
     Checked.TVarAppRef ref args -> XTVarApp (Checked.typeBinderRefName ref) (fmap checkedType args)
-    Checked.TBase (BaseTy b) -> XTBase b
+    Checked.TBaseWithIdentity _ (BaseTy b) -> XTBase b
     Checked.TForallRef ref mb body ->
         XTForall (Checked.typeBinderRefName ref) (maybe XTBottom checkedBound mb) (checkedType body)
     Checked.TMuRef ref body -> XTMu (Checked.typeBinderRefName ref) (checkedType body)

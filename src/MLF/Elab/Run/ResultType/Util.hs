@@ -163,12 +163,12 @@ containsBoundForall ty =
         TForallRef _ mb body ->
           maybe False containsAnyForallBound mb || go body
         TArrow a b -> go a || go b
-        TCon _ args -> any go args
+        TConWithIdentity _ _ args -> any go args
         TVarAppRef _ args -> any go args
         _ -> False
       containsAnyForallBound bound = case bound of
         TArrow a b -> go a || go b
-        TCon _ args -> any go args
+        TConWithIdentity _ _ args -> any go args
         TVarAppRef _ args -> any go args
         TForallRef _ _ _ -> True
         _ -> False

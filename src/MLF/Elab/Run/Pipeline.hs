@@ -1722,14 +1722,14 @@ containsRecursiveType :: ElabType -> Bool
 containsRecursiveType ty = case ty of
   TMuRef {} -> True
   TArrow dom cod -> containsRecursiveType dom || containsRecursiveType cod
-  TCon _ args -> any containsRecursiveType args
+  TConWithIdentity _ _ args -> any containsRecursiveType args
   TVarAppRef _ args -> any containsRecursiveType args
   TForallRef _ mb body -> maybe False containsRecursiveBound mb || containsRecursiveType body
   _ -> False
   where
     containsRecursiveBound bound = case bound of
       TArrow dom cod -> containsRecursiveType dom || containsRecursiveType cod
-      TCon _ args -> any containsRecursiveType args
+      TConWithIdentity _ _ args -> any containsRecursiveType args
       TVarAppRef _ args -> any containsRecursiveType args
       TForallRef _ mb body -> maybe False containsRecursiveBound mb || containsRecursiveType body
       TMuRef {} -> True

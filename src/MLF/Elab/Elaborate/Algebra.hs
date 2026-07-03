@@ -218,14 +218,14 @@ containsMuType ty =
   case ty of
     TMuRef {} -> True
     TArrow dom cod -> containsMuType dom || containsMuType cod
-    TCon _ args -> any containsMuType args
+    TConWithIdentity _ _ args -> any containsMuType args
     TVarAppRef _ args -> any containsMuType args
     TForallRef _ mb body -> maybe False containsMuBound mb || containsMuType body
     _ -> False
   where
     containsMuBound bound = case bound of
       TArrow dom cod -> containsMuType dom || containsMuType cod
-      TCon _ args -> any containsMuType args
+      TConWithIdentity _ _ args -> any containsMuType args
       TVarAppRef _ args -> any containsMuType args
       TForallRef _ mb body -> maybe False containsMuBound mb || containsMuType body
       TMuRef {} -> True
@@ -247,7 +247,7 @@ containsInternalTypeVar ty =
   case ty of
     TVarRef ref -> isInternalTypeBinderRef ref
     TArrow dom cod -> containsInternalTypeVar dom || containsInternalTypeVar cod
-    TCon _ args -> any containsInternalTypeVar args
+    TConWithIdentity _ _ args -> any containsInternalTypeVar args
     TVarAppRef ref args -> isInternalTypeBinderRef ref || any containsInternalTypeVar args
     TForallRef _ mb body -> maybe False containsInternalBoundVar mb || containsInternalTypeVar body
     TMuRef _ body -> containsInternalTypeVar body
@@ -256,7 +256,7 @@ containsInternalTypeVar ty =
     containsInternalBoundVar bound =
       case bound of
         TArrow dom cod -> containsInternalTypeVar dom || containsInternalTypeVar cod
-        TCon _ args -> any containsInternalTypeVar args
+        TConWithIdentity _ _ args -> any containsInternalTypeVar args
         TVarAppRef ref args -> isInternalTypeBinderRef ref || any containsInternalTypeVar args
         TForallRef _ mb body -> maybe False containsInternalBoundVar mb || containsInternalTypeVar body
         TMuRef _ body -> containsInternalTypeVar body
@@ -569,7 +569,7 @@ freeTypeVarRefsInOccurrenceOrder ty0 = reverse (snd (goType [] [] [] ty0))
         TArrow dom cod ->
           let (seen', acc') = goType bound seen acc dom
            in goType bound seen' acc' cod
-        TCon _ args ->
+        TConWithIdentity _ _ args ->
           foldl' (\(seen', acc') arg -> goType bound seen' acc' arg) (seen, acc) args
         TVarAppRef ref args ->
           let (seen', acc') = addRef bound seen acc ref
@@ -579,7 +579,7 @@ freeTypeVarRefsInOccurrenceOrder ty0 = reverse (snd (goType [] [] [] ty0))
                 maybe (seen, acc) (\boundTy -> goType bound seen acc (tyToElab boundTy)) mb
            in goType (ref : bound) seen' acc' body
         TMuRef ref body -> goType (ref : bound) seen acc body
-        TBase _ -> (seen, acc)
+        TBaseWithIdentity _ _ -> (seen, acc)
         TBottom -> (seen, acc)
 
 freshenSchemeInfoAgainstEnv :: Env -> SchemeInfo -> SchemeInfo
@@ -880,7 +880,7 @@ elabAlg algebraContext layer =
                                   case reifyNodeTypePreferringBound scopeContext annNodeId of
                                     Right ty@TMuRef {} -> ty
                                     _ -> paramTy0
-                                TBase {} ->
+                                TBaseWithIdentity {} ->
                                   case reifyNodeTypePreferringBound scopeContext annNodeId of
                                     Right ty@TMuRef {} -> ty
                                     _ -> paramTy0
@@ -1461,7 +1461,7 @@ elabAlg algebraContext layer =
                         case ty of
                           TVarRef ref -> isInternalTypeBinderRef ref
                           TArrow dom cod -> containsInternalTyVar dom || containsInternalTyVar cod
-                          TCon _ args -> any containsInternalTyVar args
+                          TConWithIdentity _ _ args -> any containsInternalTyVar args
                           TForallRef _ mb body ->
                             maybe False containsInternalBoundTy mb || containsInternalTyVar body
                           TMuRef _ body -> containsInternalTyVar body
@@ -1469,7 +1469,7 @@ elabAlg algebraContext layer =
                       containsInternalBoundTy bound =
                         case bound of
                           TArrow dom cod -> containsInternalTyVar dom || containsInternalTyVar cod
-                          TCon _ args -> any containsInternalTyVar args
+                          TConWithIdentity _ _ args -> any containsInternalTyVar args
                           TForallRef _ mb body ->
                             maybe False containsInternalBoundTy mb || containsInternalTyVar body
                           TMuRef _ body -> containsInternalTyVar body
@@ -1839,7 +1839,7 @@ elabAlg algebraContext layer =
                     case ty of
                       TVarRef ref -> isInternalTypeBinderRef ref
                       TArrow dom cod -> internalOnlyType dom && internalOnlyType cod
-                      TCon _ args -> not (null args) && all internalOnlyType args
+                      TConWithIdentity _ _ args -> not (null args) && all internalOnlyType args
                       TForallRef _ mb body ->
                         maybe True internalOnlyBound mb && internalOnlyType body
                       TMuRef _ body -> internalOnlyType body
@@ -1847,7 +1847,7 @@ elabAlg algebraContext layer =
                   internalOnlyBound bound =
                     case bound of
                       TArrow dom cod -> internalOnlyType dom && internalOnlyType cod
-                      TCon _ args -> not (null args) && all internalOnlyType args
+                      TConWithIdentity _ _ args -> not (null args) && all internalOnlyType args
                       TForallRef _ mb body ->
                         maybe True internalOnlyBound mb && internalOnlyType body
                       TMuRef _ body -> internalOnlyType body

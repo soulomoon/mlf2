@@ -491,10 +491,10 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
     containsBottomTy :: Ty v -> Bool
     containsBottomTy ty = case ty of
       TVarRef _ -> False
-      TBase _ -> False
+      TBaseWithIdentity _ _ -> False
       TBottom -> True
       TArrow a b -> containsBottomTy a || containsBottomTy b
-      TCon _ args -> any containsBottomTy args
+      TConWithIdentity _ _ args -> any containsBottomTy args
       TVarAppRef _ args -> any containsBottomTy args
       TForallRef _ mb body -> maybe False containsBottomTy mb || containsBottomTy body
       TMuRef _ body -> containsBottomTy body

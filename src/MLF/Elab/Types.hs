@@ -218,9 +218,9 @@ toXmlfType :: ElabType -> XMLF.XmlfType
 toXmlfType ty = case ty of
     TVarRef ref -> XMLF.XTVar (typeBinderRefName ref)
     TArrow a b -> XMLF.XTArrow (toXmlfType a) (toXmlfType b)
-    TCon (BaseTy c) args -> XMLF.XTCon c (fmap toXmlfType args)
+    TConWithIdentity _ (BaseTy c) args -> XMLF.XTCon c (fmap toXmlfType args)
     TVarAppRef ref args -> XMLF.XTVarApp (typeBinderRefName ref) (fmap toXmlfType args)
-    TBase (BaseTy b) -> XMLF.XTBase b
+    TBaseWithIdentity _ (BaseTy b) -> XMLF.XTBase b
     TForallRef ref mb body ->
         let bound = maybe XMLF.XTBottom toXmlfBound mb
         in XMLF.XTForall (typeBinderRefName ref) bound (toXmlfType body)
@@ -230,9 +230,9 @@ toXmlfType ty = case ty of
 toXmlfBound :: BoundType -> XMLF.XmlfType
 toXmlfBound bound = case bound of
     TArrow a b -> XMLF.XTArrow (toXmlfType a) (toXmlfType b)
-    TCon (BaseTy c) args -> XMLF.XTCon c (fmap toXmlfType args)
+    TConWithIdentity _ (BaseTy c) args -> XMLF.XTCon c (fmap toXmlfType args)
     TVarAppRef ref args -> XMLF.XTVarApp (typeBinderRefName ref) (fmap toXmlfType args)
-    TBase (BaseTy b) -> XMLF.XTBase b
+    TBaseWithIdentity _ (BaseTy b) -> XMLF.XTBase b
     TForallRef ref mb body ->
         let boundTy = maybe XMLF.XTBottom toXmlfBound mb
         in XMLF.XTForall (typeBinderRefName ref) boundTy (toXmlfType body)
@@ -302,11 +302,11 @@ inlineBoundsForDisplay = go
 
     inlineableBound :: ElabType -> Bool
     inlineableBound ty = case ty of
-        TBase{} -> True
+        TBaseWithIdentity{} -> True
         TBottom -> True
         TVarRef{} -> True
         TArrow{} -> True
-        TCon{} -> True
+        TConWithIdentity{} -> True
         TVarAppRef{} -> True
         _ -> False
 
@@ -346,7 +346,7 @@ inlineBoundsForDisplay = go
                     occD' = flipOccMap (oiOccMap occD)
                     occC' = oiOccMap occC
                 in K (OccInfo freeVars (mergeOccMaps occD' occC'))
-            TConIF _ args ->
+            TConIFWithIdentity _ _ args ->
                 let occArg :: IxPair Ty (K OccInfo) 'AllowVar -> OccInfo
                     occArg ix = unK (snd (unIxPair ix))
                     occArgs = case args of
@@ -362,7 +362,7 @@ inlineBoundsForDisplay = go
                     freeVars = Set.insert ref (Set.unions (map oiFreeVars occArgs))
                     occMaps = Map.singleton ref (1, 0) : map oiOccMap occArgs
                 in K (OccInfo freeVars (foldr mergeOccMaps Map.empty occMaps))
-            TBaseIF _ -> K emptyOccInfo
+            TBaseIFWithIdentity _ _ -> K emptyOccInfo
             TBottomIF -> K emptyOccInfo
             TForallIFRef ref mb body ->
                 let occBody = unK (snd (unIxPair body))
@@ -390,7 +390,7 @@ inlineBoundsForDisplay = go
                 freeVars = Set.union (oiFreeVars occA) (oiFreeVars occB)
                 occA' = flipOccMap (oiOccMap occA)
             in OccInfo freeVars (mergeOccMaps occA' (oiOccMap occB))
-        TCon _ args ->
+        TConWithIdentity _ _ args ->
             let occArgs = case args of
                     arg :| rest -> map occInfo (arg : rest)
                 freeVars = Set.unions (map oiFreeVars occArgs)
@@ -402,7 +402,7 @@ inlineBoundsForDisplay = go
                 freeVars = Set.insert ref (Set.unions (map oiFreeVars occArgs))
                 occMaps = Map.singleton ref (1, 0) : map oiOccMap occArgs
             in OccInfo freeVars (foldr mergeOccMaps Map.empty occMaps)
-        TBase _ -> emptyOccInfo
+        TBaseWithIdentity _ _ -> emptyOccInfo
         TBottom -> emptyOccInfo
         TForallRef ref mb body ->
             let occBody = occInfo body

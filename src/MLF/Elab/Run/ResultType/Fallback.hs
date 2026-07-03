@@ -167,6 +167,6 @@ forallBinderNames ty =
     TForallRef ref mb body ->
       Set.insert (typeBinderRefName ref) (maybe Set.empty (forallBinderNames . tyToElab) mb `Set.union` forallBinderNames body)
     TArrow dom cod -> forallBinderNames dom `Set.union` forallBinderNames cod
-    TCon _ args -> foldMap forallBinderNames args
+    TConWithIdentity _ _ args -> foldMap forallBinderNames args
     TMuRef ref body -> Set.insert (typeBinderRefName ref) (forallBinderNames body)
     _ -> Set.empty

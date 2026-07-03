@@ -20,7 +20,7 @@ produces an 'ElabType'.  The algorithm handles:
   * TyVar → TVar (with optional bound reification)
   * TyArrow → TArrow (recursive descent into domain/codomain)
   * TyForall → TForall (binder name assignment + body reification)
-  * TyBase → TBase
+  * TyBase → TBaseWithIdentity
   * TyBottom → TBottom
   * TyExp → body reification (expansion nodes are transparent)
   * TyMu → TMu (recursive type binder)
@@ -46,6 +46,7 @@ import MLF.Elab.ReadModel
   ( ElabReadModel (..),
     buildElabReadModel,
   )
+import qualified MLF.Primitive.Identity as PrimitiveIdentity
 import MLF.Reify.Cache
 import MLF.Types.Elab
 import MLF.Util.ElabError (ElabError (..))
@@ -382,7 +383,7 @@ reifyWithReadModelRefs _contextLabel readModel refForVar isNamed rootMode nid =
                                   ]
                               namedExtra' = IntSet.union namedExtra binderKeys
                           (cache', core) <- case node of
-                            TyBase {tnBase = b} -> pure (cache0, TBase b)
+                            TyBase {tnBase = b@(BaseTy name)} -> pure (cache0, TBaseWithIdentity (PrimitiveIdentity.builtinTypeHeadIdentity name) b)
                             TyBottom {} -> pure (cache0, TBottom)
                             TyArrow {tnDom = d, tnCod = c} -> do
                               (cache1, d') <- vChild cache0 namedExtra' mode (canonical d)
@@ -397,7 +398,10 @@ reifyWithReadModelRefs _contextLabel readModel refForVar isNamed rootMode nid =
                                   )
                                   (cache0, [])
                                   (NE.toList args)
-                              pure (cache', TCon con (NE.fromList (reverse args')))
+                              let conIdentity =
+                                    case con of
+                                      BaseTy name -> PrimitiveIdentity.builtinTypeHeadIdentity name
+                              pure (cache', TConWithIdentity conIdentity con (NE.fromList (reverse args')))
                             TyVarApp {tnVarHead = headNode, tnArgs = args} -> do
                               (cache1, headTy) <- vChild cache0 namedExtra' mode (canonical headNode)
                               (cache', args') <-
