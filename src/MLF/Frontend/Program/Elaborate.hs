@@ -1052,19 +1052,24 @@ toListNE (x :| xs) = x : xs
 
 lowerConstructorBinding :: ElaborateScope -> ConstructorInfo -> LoweredBinding
 lowerConstructorBinding scope ctorInfo =
-  LoweredBinding
-    { loweredBindingIdentity = loweredBindingIdentityFromConstructorInfo ctorInfo,
-      loweredBindingSourceType = typeViewIdentity (constructorBindingSourceTypeView scope ctorInfo),
-      loweredBindingSourceTypeView = Just (constructorBindingSourceTypeView scope ctorInfo),
-      loweredBindingExpectedType = constructorBindingExpectedType scope ctorInfo,
-      loweredBindingExpectedTypeView = Nothing,
-      loweredBindingSurfaceExpr = constructorSurfaceExpr scope ctorInfo,
-      loweredBindingResolvedLocalIdentities = [],
-      loweredBindingDeferredObligations = Map.empty,
-      loweredBindingExternalTypeViews = Map.empty,
-      loweredBindingEvidenceParamCount = 0,
-      loweredBindingExportedAsMain = False
-    }
+  let sourceView = constructorBindingSourceTypeView scope ctorInfo
+      expectedTy = constructorBindingExpectedType scope ctorInfo
+      expectedView
+        | lowerTypeView scope sourceView == expectedTy = Just sourceView
+        | otherwise = Nothing
+   in LoweredBinding
+        { loweredBindingIdentity = loweredBindingIdentityFromConstructorInfo ctorInfo,
+          loweredBindingSourceType = typeViewIdentity sourceView,
+          loweredBindingSourceTypeView = Just sourceView,
+          loweredBindingExpectedType = expectedTy,
+          loweredBindingExpectedTypeView = expectedView,
+          loweredBindingSurfaceExpr = constructorSurfaceExpr scope ctorInfo,
+          loweredBindingResolvedLocalIdentities = [],
+          loweredBindingDeferredObligations = Map.empty,
+          loweredBindingExternalTypeViews = Map.empty,
+          loweredBindingEvidenceParamCount = 0,
+          loweredBindingExportedAsMain = False
+        }
 
 constructorBindingSourceTypeView :: ElaborateScope -> ConstructorInfo -> TypeView
 constructorBindingSourceTypeView scope ctorInfo =

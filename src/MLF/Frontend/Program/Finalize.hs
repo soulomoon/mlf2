@@ -1069,7 +1069,7 @@ metadataConstructorTerm context lowered = do
   if constructorMetadataFastPathSupported scope dataInfo ctorInfo
     then pure ()
     else Left (ProgramPipelineError ("constructor metadata fast path unsupported for `" ++ loweredBindingName lowered ++ "`"))
-  expectedTy <- srcTypeToElabTypeInScope scope (loweredBindingExpectedType lowered)
+  expectedTy <- loweredExpectedTypeToElabType scope lowered
   term0 <- inlineConstructorHead scope Map.empty (constructorBindingQuantifiedOwnerParams lowered dataInfo) ctorInfo emptyTypeBinderSubst
   let term = closeTermWithSchemeSubstRefsIfNeeded IntMap.empty (schemeFromType expectedTy) term0
   Right (term, expectedTy)

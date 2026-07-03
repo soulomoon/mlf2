@@ -2845,6 +2845,31 @@ spec = do
             resolvedLocalBinders (checkedBindingTerm binding) `shouldSatisfy` (not . null)
             unresolvedTermVarRefs (checkedBindingTerm binding) `shouldBe` []
 
+        it "finalizes constructor binding types through expected type identity metadata" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (Box(..), main) {"
+                        , "  data Box a ="
+                        , "      Box : a -> Box a;"
+                        , ""
+                        , "  def main : Box Int = Box 1;"
+                        , "}"
+                        ]
+            checked <- requireChecked (withPrelude program)
+            dataInfo <- requireCheckedData "Main" "Box" checked
+            binding <- requireCheckedBinding "Main__Box" checked
+            case ProgramTypes.dataParamBinderIdentities dataInfo of
+                [paramIdentity] ->
+                    case ProgramTypes.checkedBindingType binding of
+                        Elab.TForallRef ref _ body -> do
+                            Elab.typeBinderRefIdentity ref `shouldBe` paramIdentity
+                            elabTypeMentionsBinder paramIdentity body `shouldBe` True
+                        other ->
+                            expectationFailure ("expected constructor binding forall type, got " ++ show other)
+                identities ->
+                    expectationFailure ("expected one data param identity, got " ++ show identities)
+
         it "finalizes non-nullary parameterized constructor bindings from metadata without the surface pipeline" $ do
             program <-
                 requireParsed $
