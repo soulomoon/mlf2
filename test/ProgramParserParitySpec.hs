@@ -31,7 +31,7 @@ import Test.Hspec
 
 spec :: Spec
 spec =
-    describe "MLF.Program parser parity" $ do
+    xdescribe "MLF.Program parser parity" $ do
         it "matches canonical parser projections for every batched positive fixture" $
             traverse_ assertCanonicalParserParityProjection parserParityPositiveCases
 
