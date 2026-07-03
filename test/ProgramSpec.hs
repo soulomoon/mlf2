@@ -343,6 +343,15 @@ spec = do
             ProgramTypes.typeViewSubstKeyFor sourceView stableName
                 `shouldBe` Nothing
 
+        it "does not treat stable binder spelling as identity without metadata" $ do
+            let identity = typeBinderIdentityFromUnique (UniqueIdentity 991603)
+                stableName = typeBinderIdentityStableName identity
+                sourceView = ProgramTypes.mkTypeView (STVar stableName) (STVar stableName)
+            ProgramTypes.typeViewIsBareBinderIdentity identity sourceView
+                `shouldBe` False
+            ProgramTypes.typeViewMentionsFreeBinderIdentity identity sourceView
+                `shouldBe` False
+
         it "keys generated stable binder type-view substitutions by identity without metadata" $ do
             let identity = typeBinderIdentityFromUnique (UniqueIdentity 991613)
                 replacement = ProgramTypes.mkTypeView (STBase "Int") (STBase "Int")

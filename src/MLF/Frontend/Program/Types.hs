@@ -1757,13 +1757,11 @@ typeViewMentionsFreeBinderIdentity :: TypeBinderIdentity -> TypeView -> Bool
 typeViewMentionsFreeBinderIdentity identity view =
   case freeTypeBinderIdentitiesTypeView view of
     Right identities -> Set.member identity identities
-    Left _ -> typeBinderIdentityStableName identity `Set.member` freeTypeVarsTypeView view
+    Left _ -> False
 
 typeViewFreeVarMatchesBinderIdentity :: TypeBinderIdentity -> TypeView -> String -> Bool
 typeViewFreeVarMatchesBinderIdentity identity view name =
-  case typeViewBinderIdentityForAlias view name of
-    Just actualIdentity -> actualIdentity == identity
-    Nothing -> name == typeBinderIdentityStableName identity
+  typeViewBinderIdentityForAlias view name == Just identity
 
 typeViewsDisplay :: NonEmpty TypeView -> NonEmpty SrcType
 typeViewsDisplay = fmap typeViewDisplay
