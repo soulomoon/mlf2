@@ -52,6 +52,8 @@ module MLF.Types.Identity
     IdDetails (..),
     ResolvedTermIdentityKey (..),
     idDetailsIdentityKey,
+    idDetailsStableName,
+    idDetailsAliasNames,
     idDetailsReferenceName,
     idDetailsDisplayName,
     idDetailsConstructorRef,
@@ -73,7 +75,7 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import MLF.Constraint.Types.Graph (NodeId (..))
-import MLF.Frontend.Symbol (SymbolIdentity, SymbolOwnerIdentity (..), symbolDefiningName, symbolOwnerIdentity, symbolUniqueIdentity)
+import MLF.Frontend.Symbol (SymbolIdentity, SymbolOwnerIdentity (..), symbolDefiningName, symbolIdentityStableName, symbolOwnerIdentity, symbolUniqueIdentity)
 import MLF.Types.Unique
 
 data StructuralTypeBinderRole
@@ -361,6 +363,32 @@ idDetailsIdentityKey details =
     MethodId symbol -> ResolvedTermMethodKey symbol
     PrimitiveId ref -> ResolvedTermPrimitiveKey (primitiveRefSymbol ref)
     DeferredId ref -> ResolvedTermDeferredKey ref
+
+idDetailsStableName :: IdDetails -> String
+idDetailsStableName details =
+  case details of
+    LocalId ref -> localRefStableName ref
+    EvidenceId ref -> localRefStableName ref
+    EnvId ref -> uniqueIdentityStableName (envRefIdentity ref)
+    TopLevelId symbol -> symbolIdentityStableName symbol
+    ConstructorId ref -> symbolIdentityStableName (constructorRefSymbol ref)
+    MethodId symbol -> symbolIdentityStableName symbol
+    PrimitiveId ref -> symbolIdentityStableName (primitiveRefSymbol ref)
+    DeferredId ref -> uniqueIdentityStableName (deferredRefIdentity ref)
+
+idDetailsAliasNames :: String -> IdDetails -> [String]
+idDetailsAliasNames runtimeName details =
+  Set.toList $
+    Set.fromList
+      [ runtimeName,
+        idDetailsReferenceName runtimeName details,
+        idDetailsDisplayName runtimeName details,
+        idDetailsStableName details
+      ]
+
+localRefStableName :: LocalRef -> String
+localRefStableName ref =
+  uniqueIdentityStableName (localIdentityStableUnique (localRefIdentity ref))
 
 idDetailsReferenceName :: String -> IdDetails -> String
 idDetailsReferenceName runtimeName details =

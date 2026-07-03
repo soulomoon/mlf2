@@ -73,7 +73,7 @@ import MLF.Frontend.Syntax (Lit (..))
 import MLF.Pipeline (checkProgram)
 import qualified MLF.Program.CLI as CLI
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
-import MLF.Types.Identity (IdDetails (..), LocalIdentity (..), TypeBinderIdentity, localRefFromIdentity, primitiveRefFromSymbol, typeBinderIdentityFromUnique, typeBinderIdentityStableName)
+import MLF.Types.Identity (IdDetails (..), LocalIdentity (..), TypeBinderIdentity, idDetailsStableName, localRefFromIdentity, primitiveRefFromSymbol, typeBinderIdentityFromUnique, typeBinderIdentityStableName)
 import MLF.Types.Unique (UniqueIdentity (..))
 import Parity.ProgramMatrix
   ( ProgramMatrixCase (..),
@@ -1945,6 +1945,13 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldSatisfy` isInfixOf "define i64 @\"main\"()"
     output `shouldSatisfy` isInfixOf "ret i64 41"
     output `shouldNotSatisfy` isInfixOf "ret i64 99"
+    validateLLVMAssembly output
+
+  it "resolves stable-spelled local vars through binder identity aliases" $ do
+    output <- requireRight (renderBackendProgramLLVM localIdentityStableAliasProgram)
+
+    output `shouldSatisfy` isInfixOf "define i64 @\"main\"()"
+    output `shouldSatisfy` isInfixOf "ret i64 42"
     validateLLVMAssembly output
 
   it "resolves same-named lambda parameters by identity before name fallback" $ do
@@ -7408,6 +7415,19 @@ localIdentityShadowedLetProgram =
   where
     outerIdentity = localIdentity 2069101 "x"
     innerIdentity = localIdentity 2069102 "x"
+
+localIdentityStableAliasProgram :: BackendProgram
+localIdentityStableAliasProgram =
+  programWithMainExpr intTy $
+    BackendLetWithIdentity
+      intTy
+      (Just localX)
+      "x"
+      intTy
+      (intLit 42)
+      (BackendVar intTy (idDetailsStableName localX))
+  where
+    localX = localIdentity 2069105 "x"
 
 lambdaIdentityShadowedParamProgram :: BackendProgram
 lambdaIdentityShadowedParamProgram =

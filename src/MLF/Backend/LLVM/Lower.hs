@@ -175,7 +175,7 @@ import MLF.Constraint.Types.Graph (BaseTy (..))
 import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), SymbolOwnerIdentity (..), symbolIdentityFromParts, symbolIdentityStableName, symbolRefMatches, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit (..))
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
-import MLF.Types.Identity (constructorRefSymbol, deferredRefIdentity, envRefIdentity, IdDetails (..), IdentityGenerator, LocalRef, localRefIdentity, primitiveRefSymbol, idDetailsSymbolIdentity, StructuralTypeBinderRole (..), TypeBinderIdentity, UniqueIdentity (..), freshIdentity, freshLocalRef, identityGeneratorAfter, initialIdentityGenerator, localIdentityStableUnique, typeBinderIdentityFromUnique, typeBinderIdentityStableName, typeBinderIdentityStructural)
+import MLF.Types.Identity (constructorRefSymbol, deferredRefIdentity, envRefIdentity, IdDetails (..), IdentityGenerator, LocalRef, localRefIdentity, primitiveRefSymbol, idDetailsAliasNames, idDetailsSymbolIdentity, StructuralTypeBinderRole (..), TypeBinderIdentity, UniqueIdentity (..), freshIdentity, freshLocalRef, identityGeneratorAfter, initialIdentityGenerator, localIdentityStableUnique, typeBinderIdentityFromUnique, typeBinderIdentityStableName, typeBinderIdentityStructural)
 import MLF.Util.Names (freshNameLike)
 
 lowerBackendProgram :: BackendProgram -> Either BackendLLVMError LLVMModule
@@ -437,8 +437,8 @@ shadowBackendTypeBinderIdentity name identity =
   Map.insert name (Just identity)
 
 insertUniqueBackendTermIdentity :: String -> IdDetails -> BackendTermEnv -> BackendTermEnv
-insertUniqueBackendTermIdentity name identity =
-  Map.alter insert name
+insertUniqueBackendTermIdentity name identity env =
+  foldl (\env0 alias -> Map.alter insert alias env0) env (idDetailsAliasNames name identity)
   where
     insert Nothing =
       Just (Just identity)
@@ -449,8 +449,8 @@ insertUniqueBackendTermIdentity name identity =
       Just Nothing
 
 shadowBackendTermIdentity :: String -> IdDetails -> BackendTermEnv -> BackendTermEnv
-shadowBackendTermIdentity name identity =
-  Map.insert name (Just identity)
+shadowBackendTermIdentity name identity env =
+  foldl (\env0 alias -> Map.insert alias (Just identity) env0) env (idDetailsAliasNames name identity)
 
 unionUniqueBackendTermEnv :: BackendTermEnv -> BackendTermEnv -> BackendTermEnv
 unionUniqueBackendTermEnv =
