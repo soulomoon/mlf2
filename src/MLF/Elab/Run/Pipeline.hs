@@ -150,6 +150,7 @@ import MLF.Types.Identity
     IdDetails (..),
     IdentityGenerator,
     freshEnvRef,
+    idDetailsAliasNames,
     idDetailsGeneratedIdentities,
     identityGeneratorAfter,
     localRefMatchesNodeId,
@@ -444,9 +445,11 @@ schemeExternalBindings =
     )
 
 prepareExternalBindings :: ExternalBindings -> Either ConstraintError PreparedExternalBindings
-prepareExternalBindings extBindings = do
-  let initialGenerator = identityGeneratorAfter (externalBindingsGeneratedIdentities extBindings)
-  (schemeGenerator, schemeInfos) <- externalBindingSchemeInfos initialGenerator extBindings
+prepareExternalBindings extBindings0 = do
+  let extBindings = externalBindingsWithIdentityAliases extBindings0
+      initialGenerator = identityGeneratorAfter (externalBindingsGeneratedIdentities extBindings0)
+  (schemeGenerator, schemeInfos0) <- externalBindingSchemeInfos initialGenerator extBindings0
+  let schemeInfos = externalBindingSchemeInfoAliases extBindings0 extBindings schemeInfos0
   let (elaborationBindings, typeCheckEnv0) = externalBindingPreparedEnvs schemeGenerator extBindings schemeInfos
       (headIdentities, binderIdentities) = externalBindingsSourceTypeIdentityMaps extBindings
   pure
@@ -458,6 +461,56 @@ prepareExternalBindings extBindings = do
         pebSourceTypeHeadIdentities = headIdentities,
         pebSourceTypeBinderIdentities = binderIdentities
       }
+
+externalBindingsWithIdentityAliases :: ExternalBindings -> ExternalBindings
+externalBindingsWithIdentityAliases extBindings =
+  extBindings `Map.union` Map.filterWithKey (\name _ -> Map.notMember name extBindings) uniqueAliases
+  where
+    uniqueAliases =
+      Map.fromList
+        [ (alias, binding)
+        | (alias, binding : rest) <- Map.toList aliasesByName,
+          all (== binding) rest
+        ]
+
+    aliasesByName =
+      Map.fromListWith
+        (++)
+        [ (alias, [binding])
+        | (name, binding) <- Map.toList extBindings,
+          alias <- externalBindingAliases name binding
+        ]
+
+externalBindingSchemeInfoAliases :: ExternalBindings -> ExternalBindings -> Map.Map VarName SchemeInfo -> Map.Map VarName SchemeInfo
+externalBindingSchemeInfoAliases originalBindings extBindings schemeInfos =
+  schemeInfos `Map.union` Map.filterWithKey (\name _ -> Map.notMember name schemeInfos) uniqueAliases
+  where
+    uniqueAliases =
+      Map.fromList
+        [ (alias, schemeInfo)
+        | (alias, (binding, schemeInfo) : rest) <- Map.toList aliasesByName,
+          all ((== binding) . fst) rest
+        ]
+
+    aliasesByName =
+      Map.fromListWith
+        (++)
+        [ (alias, [(binding, schemeInfo)])
+        | (name, binding) <- Map.toList originalBindings,
+          Just schemeInfo <- [Map.lookup name schemeInfos],
+          alias <- externalBindingAliases name binding,
+          Map.member alias extBindings
+        ]
+
+externalBindingAliases :: VarName -> ExternalBinding -> [VarName]
+externalBindingAliases name binding =
+  case externalBindingIdentity binding of
+    Just identity ->
+      Set.toList $
+        Set.fromList $
+          idDetailsAliasNames name (externalBindingDetails identity)
+            ++ idDetailsAliasNames (externalBindingRuntimeName identity) (externalBindingDetails identity)
+    Nothing -> [name]
 
 extendPreparedExternalBindingTypeIdentities ::
   Map.Map String SymbolIdentity ->

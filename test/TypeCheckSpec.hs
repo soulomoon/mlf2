@@ -462,6 +462,56 @@ spec = describe "Phase 7 typecheck" $ do
                 typeCheckWithEnv env (EVarNode (topLevelResolved 20 "Actual")) `shouldBe` Right builtinIntTy
                 typeCheckWithEnv env (EVarNode (topLevelResolved 21 "Stale")) `shouldBe` Left (TCUnboundVar "x")
 
+    it "uses external binding identity aliases during constraint generation" $ do
+        let symbol =
+                generatedSymbolIdentity 24 SymbolValue "Actual" "x" Nothing
+            stableName =
+                symbolIdentityStableName symbol
+            externalBinding =
+                ExternalBinding
+                    { externalBindingType = Surf.STBase "Int"
+                    , externalBindingMode = ExternalBindingScheme
+                    , externalBindingIdentity =
+                        Just (externalBindingIdentityFromDetails "$runtime_x" (TopLevelId symbol))
+                    , externalBindingTypeHeadIdentities = Map.empty
+                    , externalBindingTypeBinderIdentities = Map.empty
+                    }
+        case runPipelineElabDetailedWithExternalBindings
+            Set.empty
+            (Map.singleton "$runtime_x" externalBinding)
+            (unsafeNormalizeExpr (Surf.EVar stableName)) of
+            Right PipelineElabDetailedResult {pedTerm = EVarNode resolved} ->
+                resolvedVarDetails resolved `shouldBe` TopLevelId symbol
+            Right result ->
+                expectationFailure ("Expected external variable term, got: " ++ show (pedTerm result))
+            Left err ->
+                expectationFailure ("Expected external binding alias lookup, got: " ++ renderPipelineError err)
+
+    it "does not choose an ambiguous external binding identity alias" $ do
+        let symbol unique moduleName =
+                generatedSymbolIdentity unique SymbolValue moduleName "x" Nothing
+            externalBinding runtimeName unique moduleName =
+                ExternalBinding
+                    { externalBindingType = Surf.STBase "Int"
+                    , externalBindingMode = ExternalBindingScheme
+                    , externalBindingIdentity =
+                        Just (externalBindingIdentityFromDetails runtimeName (TopLevelId (symbol unique moduleName)))
+                    , externalBindingTypeHeadIdentities = Map.empty
+                    , externalBindingTypeBinderIdentities = Map.empty
+                    }
+            externalBindings =
+                Map.fromList
+                    [ ("$left_x", externalBinding "$left_x" 25 "Left")
+                    , ("$right_x", externalBinding "$right_x" 26 "Right")
+                    ]
+        case runPipelineElabDetailedWithExternalBindings
+            Set.empty
+            externalBindings
+            (unsafeNormalizeExpr (Surf.EVar "x")) of
+            Left _ -> pure ()
+            Right result ->
+                expectationFailure ("Expected ambiguous alias to stay unresolved, got: " ++ show (pedTerm result))
+
     it "preserves builtin type identities in prepared external binding types" $ do
         let externalBinding =
                 ExternalBinding
