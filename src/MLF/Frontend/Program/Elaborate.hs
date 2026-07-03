@@ -61,7 +61,7 @@ import MLF.Frontend.Program.Surface
     surfaceVar,
   )
 import MLF.Frontend.Program.Types
-import MLF.Frontend.Symbol (symbolIdentityAliasMapWith, symbolIdentityAliasNames, symbolIdentityStableName)
+import MLF.Frontend.Symbol (symbolIdentityAliasMap, symbolIdentityAliasMapWith, symbolIdentityAliasNames, symbolIdentityStableName)
 import MLF.Frontend.Syntax
   ( Lit (..),
     ResolvedSrcBound (..),
@@ -319,23 +319,21 @@ mkElaborateScope values0 dataTypes0 classes0 instances0 =
 
 addIdentityTypeAliases :: Map String DataInfo -> Map String DataInfo
 addIdentityTypeAliases dataTypes =
-  foldl insertAlias dataTypes (Map.toList aliases)
+  Map.foldlWithKey insertAlias dataTypes aliases
   where
     aliases =
-      Map.fromListWith
-        (++)
-        [ (name, [info])
-        | info <- Map.elems dataTypes,
-          name <- symbolIdentityAliasNames (dataInfoSymbolIdentity info)
-        ]
+      symbolIdentityAliasMap (Map.keys dataTypesByIdentity)
 
-    insertAlias acc (name, [info]) =
+    dataTypesByIdentity =
+      indexInfoByIdentity dataInfoSymbolIdentity dataTypes
+
+    insertAlias acc name identity =
       case Map.lookup name acc of
-        Just existing
-          | dataInfoSymbolIdentity existing == dataInfoSymbolIdentity info -> acc
-          | otherwise -> acc
-        Nothing -> Map.insert name info acc
-    insertAlias acc _ = acc
+        Just {} -> acc
+        Nothing ->
+          case Map.lookup identity dataTypesByIdentity of
+            Just info -> Map.insert name info acc
+            Nothing -> acc
 
 indexInfoByIdentity :: (Eq a) => (a -> SymbolIdentity) -> Map String a -> Map SymbolIdentity a
 indexInfoByIdentity identityOf =
