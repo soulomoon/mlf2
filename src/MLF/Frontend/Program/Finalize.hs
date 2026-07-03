@@ -205,14 +205,11 @@ import MLF.Types.Identity
   ( DeferredRef,
     deferredRefIdentity,
     deferredRefName,
-    envRefIdentity,
     IdentityGenerator,
-    LocalIdentity (..),
     LocalRef,
     localRefGeneratedIdentities,
     localRefIdentity,
     localRefName,
-    primitiveRefSymbol,
     TypeBinderIdentity,
     UniqueIdentity,
     freshDeferredRef,
@@ -239,15 +236,7 @@ data ModuleFinalizeContext = ModuleFinalizeContext
     moduleFinalizeContextBindingReads :: Map ModuleBindingReadKey ModuleBindingReadContext
   }
 
-data ModuleBindingReadKey
-  = ModuleBindingReadLocal LocalIdentity
-  | ModuleBindingReadEnv UniqueIdentity
-  | ModuleBindingReadTopLevel SymbolIdentity
-  | ModuleBindingReadConstructor SymbolIdentity
-  | ModuleBindingReadMethod SymbolIdentity
-  | ModuleBindingReadPrimitive SymbolIdentity
-  | ModuleBindingReadDeferred UniqueIdentity
-  deriving (Eq, Ord)
+type ModuleBindingReadKey = X.ResolvedTermIdentityKey
 
 data ModuleBindingReadContext = ModuleBindingReadContext
   { moduleBindingReadLowered :: LoweredBinding,
@@ -2254,30 +2243,12 @@ loweredBindingReadKey lowered =
   idDetailsReadKey (loweredIdentityDetails (loweredBindingIdentity lowered))
 
 idDetailsReadKey :: IdDetails -> Either ProgramError ModuleBindingReadKey
-idDetailsReadKey details =
-  case details of
-    LocalId ref ->
-      Right (ModuleBindingReadLocal (localRefIdentity ref))
-    EvidenceId ref ->
-      Right (ModuleBindingReadLocal (localRefIdentity ref))
-    EnvId ref ->
-      Right (ModuleBindingReadEnv (envRefIdentity ref))
-    TopLevelId identity ->
-      Right (ModuleBindingReadTopLevel identity)
-    ConstructorId ref ->
-      Right (ModuleBindingReadConstructor (constructorRefSymbol ref))
-    MethodId identity ->
-      Right (ModuleBindingReadMethod identity)
-    PrimitiveId ref ->
-      Right (ModuleBindingReadPrimitive (primitiveRefSymbol ref))
-    DeferredId ref ->
-      Right (ModuleBindingReadDeferred (deferredRefIdentity ref))
+idDetailsReadKey =
+  Right . X.idDetailsIdentityKey
 
 idDetailsReadKeyMaybe :: IdDetails -> Maybe ModuleBindingReadKey
-idDetailsReadKeyMaybe details =
-  case idDetailsReadKey details of
-    Right key -> Just key
-    Left _ -> Nothing
+idDetailsReadKeyMaybe =
+  Just . X.idDetailsIdentityKey
 
 externalBindingModeForObligations :: DeferredExternalBindingIndex -> Map String SrcType -> String -> ExternalBindingMode
 externalBindingModeForObligations deferredExternalIndex externalTypes name =
