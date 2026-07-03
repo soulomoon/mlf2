@@ -4805,11 +4805,23 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 IntMap.empty
             targetDetails = EnvId (envRefFromIdentity (UniqueIdentity 991900) "actual")
             decoyDetails = EnvId (envRefFromIdentity (UniqueIdentity 991901) "actual")
+            targetResolved =
+              ResolvedVar
+                { resolvedVarRuntimeName = "actual",
+                  resolvedVarType = Elab.TBase (BaseTy "Int"),
+                  resolvedVarDetails = targetDetails
+                }
+            decoyResolved =
+              ResolvedVar
+                { resolvedVarRuntimeName = "actual",
+                  resolvedVarType = Elab.TBase (BaseTy "Bool"),
+                  resolvedVarDetails = decoyDetails
+                }
             env =
-              Algebra.mkEnvWithBindingDetails
+              Algebra.mkEnvWithResolvedBindings
                 ( Map.fromList
-                    [ ("actual", (decoySchemeInfo, decoyDetails)),
-                      ("$stale_actual", (targetSchemeInfo, targetDetails))
+                    [ ("actual", (decoySchemeInfo, decoyResolved)),
+                      ("$stale_actual", (targetSchemeInfo, targetResolved))
                     ]
                 )
             resolved =
@@ -4826,9 +4838,15 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 (Elab.schemeFromType (Elab.TBase (BaseTy "Int")))
                 IntMap.empty
             localRef = localRefFromNodeId "x" (NodeId 991902)
+            targetResolved =
+              ResolvedVar
+                { resolvedVarRuntimeName = "x",
+                  resolvedVarType = Elab.TBase (BaseTy "Int"),
+                  resolvedVarDetails = LocalId localRef
+                }
             env =
-              Algebra.mkEnvWithBindingDetails
-                (Map.singleton "x" (targetSchemeInfo, LocalId localRef))
+              Algebra.mkEnvWithResolvedBindings
+                (Map.singleton "x" (targetSchemeInfo, targetResolved))
             resolved =
               ResolvedVar
                 { resolvedVarRuntimeName = "$stale_x",

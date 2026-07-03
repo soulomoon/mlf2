@@ -12,7 +12,6 @@ module MLF.Elab.Elaborate.Algebra
     mkEnv,
     mkEnvBinding,
     mkEnvFromBindings,
-    mkEnvWithBindingDetails,
     mkEnvWithResolvedBindings,
     lookupSchemeInfoForResolved,
     typeCheckEnvFrom,
@@ -322,15 +321,6 @@ mkEnv schemeInfos =
     mkBinding generator (name, schemeInfo) =
       let (envRef, generator') = freshEnvRef name generator
        in (generator', (name, mkEnvValueBinding name envRef schemeInfo False))
-
-mkEnvWithBindingDetails :: Map.Map VarName (SchemeInfo, IdDetails) -> Env
-mkEnvWithBindingDetails schemeInfos =
-  mkEnvFromBindings bindings
-  where
-    bindings =
-      Map.mapWithKey
-        (\name (schemeInfo, details) -> mkEnvBinding name details schemeInfo False)
-        schemeInfos
 
 mkEnvWithResolvedBindings :: Map.Map VarName (SchemeInfo, ResolvedVar) -> Env
 mkEnvWithResolvedBindings schemeInfos =
