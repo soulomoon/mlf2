@@ -195,6 +195,7 @@ import MLF.Frontend.Program.Types
     splitArrows,
     splitForalls,
     typeViewBinderIdentityForAlias,
+    typeViewGeneratedIdentities,
     typeViewHeadIdentityForAlias,
     typeViewMentionedHeadIdentities,
   )
@@ -2050,11 +2051,6 @@ deferredMethodEvidenceGeneratedIdentities evidence =
   typeViewGeneratedIdentities (deferredMethodEvidenceClassArg evidence)
     ++ foldMap typeViewGeneratedIdentities (deferredMethodEvidenceClassArgs evidence)
     ++ evidenceMethodGeneratedIdentities (deferredMethodEvidenceMethod evidence)
-
-typeViewGeneratedIdentities :: TypeView -> [UniqueIdentity]
-typeViewGeneratedIdentities view =
-  concatMap symbolGeneratedIdentities (Map.elems (typeViewHeadIdentities view))
-    ++ concatMap (typeBinderIdentityGeneratedIdentities . Just) (Map.elems (typeViewBinderIdentities view))
 
 typeParamGeneratedIdentities :: TypeParam -> [UniqueIdentity]
 typeParamGeneratedIdentities =
