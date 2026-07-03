@@ -31,14 +31,17 @@ spec = describe "MLF.Primitive.Inventory" $ do
     let intIdentity = PrimitiveInventory.builtinTypeIdentity "Int"
         stableInt = symbolIdentityStableName intIdentity
     PrimitiveInventory.normalizeBuiltinTypeReference stableInt `shouldBe` "Int"
-    PrimitiveInventory.builtinTypeHeadIdentity stableInt `shouldBe` Just intIdentity
-    PrimitiveInventory.isBuiltinTypeName stableInt `shouldBe` True
+    PrimitiveInventory.builtinTypeHeadIdentity stableInt `shouldBe` Nothing
+    PrimitiveInventory.isBuiltinTypeName stableInt `shouldBe` False
     let stableHeads = Builtins.builtinSourceTypeHeadIdentities (STBase stableInt)
-    Map.lookup stableInt stableHeads `shouldBe` Just intIdentity
-    Map.lookup "Int" stableHeads `shouldBe` Just intIdentity
+    Map.lookup stableInt stableHeads `shouldBe` Nothing
+    Map.lookup "Int" stableHeads `shouldBe` Nothing
+    let ioIdentity = PrimitiveInventory.builtinTypeIdentity "IO"
+        stableIO = symbolIdentityStableName ioIdentity
+    PrimitiveInventory.builtinTypeHeadIdentity stableIO `shouldBe` Nothing
+    PrimitiveInventory.isBuiltinTypeName stableIO `shouldBe` False
+    PrimitiveInventory.sourceTypeMentionsOpaqueBuiltin (STCon stableIO (STBase stableInt :| [])) `shouldBe` True
     let andIdentity = PrimitiveInventory.builtinValueIdentity PrimitiveInventory.nativeAndPrimitiveName
-        stableAnd = symbolIdentityStableName andIdentity
-    PrimitiveInventory.builtinValueIdentity stableAnd `shouldBe` andIdentity
     PrimitiveInventory.builtinValueIdentity (PrimitiveInventory.builtinModuleName ++ "." ++ PrimitiveInventory.nativeAndPrimitiveName)
       `shouldBe` andIdentity
 

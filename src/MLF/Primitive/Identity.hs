@@ -26,7 +26,7 @@ builtinTypeNames =
 
 isBuiltinTypeName :: String -> Bool
 isBuiltinTypeName =
-  isBuiltinTypeNameRaw . normalizeBuiltinTypeReference
+  isBuiltinTypeNameRaw . canonicalBuiltinTypeReference
 
 isBuiltinTypeNameRaw :: String -> Bool
 isBuiltinTypeNameRaw = (`Set.member` builtinTypeNames)
@@ -38,18 +38,25 @@ normalizeBuiltinTypeReference name =
       | isBuiltinTypeNameRaw builtinName -> builtinName
     _ -> Map.findWithDefault name name builtinTypeStableNames
 
+canonicalBuiltinTypeReference :: String -> String
+canonicalBuiltinTypeReference name =
+  case stripPrefix (builtinModuleName ++ ".") name of
+    Just builtinName
+      | isBuiltinTypeNameRaw builtinName -> builtinName
+    _ -> name
+
 builtinTypeIdentity :: String -> SymbolIdentity
 builtinTypeIdentity name =
     symbolIdentityFromParts (builtinTypeUniqueIdentity canonical) SymbolType builtinModuleName canonical Nothing
   where
-    canonical = normalizeBuiltinTypeReference name
+    canonical = canonicalBuiltinTypeReference name
 
 builtinTypeHeadIdentity :: String -> Maybe SymbolIdentity
 builtinTypeHeadIdentity name
   | isBuiltinTypeName canonical = Just (builtinTypeIdentity canonical)
   | otherwise = Nothing
   where
-    canonical = normalizeBuiltinTypeReference name
+    canonical = canonicalBuiltinTypeReference name
 
 builtinTypeUniqueIdentity :: String -> UniqueIdentity
 builtinTypeUniqueIdentity name =
@@ -80,14 +87,17 @@ builtinValueIdentity :: String -> SymbolIdentity
 builtinValueIdentity name =
   symbolIdentityFromParts (builtinValueUniqueIdentity canonical) SymbolValue builtinModuleName canonical Nothing
   where
-    canonical = normalizeBuiltinValueReference name
+    canonical = canonicalBuiltinValueReference name
 
 normalizeBuiltinValueReference :: String -> String
 normalizeBuiltinValueReference name =
   case stripPrefix (builtinModuleName ++ ".") name of
     Just builtinName
       | Map.member builtinName builtinValueUniqueIdentities -> builtinName
-    _ -> Map.findWithDefault name name builtinValueStableNames
+    _ -> name
+
+canonicalBuiltinValueReference :: String -> String
+canonicalBuiltinValueReference = normalizeBuiltinValueReference
 
 builtinValueUniqueIdentity :: String -> UniqueIdentity
 builtinValueUniqueIdentity name =
@@ -159,11 +169,4 @@ builtinValueUniqueIdentities =
       ("__string_to_ascii_lower", UniqueIdentity (-200057)),
       ("__string_to_ascii_upper", UniqueIdentity (-200058)),
       ("__string_to_list", UniqueIdentity (-200059))
-    ]
-
-builtinValueStableNames :: Map String String
-builtinValueStableNames =
-  Map.fromList
-    [ (uniqueIdentityStableName unique, name)
-    | (name, unique) <- Map.toList builtinValueUniqueIdentities
     ]

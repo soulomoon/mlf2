@@ -216,12 +216,14 @@ isBuiltinTypeName =
   PrimitiveIdentity.isBuiltinTypeName
 
 isOpaqueBuiltinTypeName :: String -> Bool
-isOpaqueBuiltinTypeName =
-  (`Set.member` builtinOpaqueTypeNames) . normalizeBuiltinTypeReference
+isOpaqueBuiltinTypeName name =
+  normalizeBuiltinTypeReference name `Set.member` builtinOpaqueTypeNames
 
 builtinTypeKind :: String -> Maybe P.SrcKind
 builtinTypeKind name =
-  builtinTypeSpecKind <$> Map.lookup (normalizeBuiltinTypeReference name) builtinTypeSpecs
+  if isBuiltinTypeName name
+    then builtinTypeSpecKind <$> Map.lookup (normalizeBuiltinTypeReference name) builtinTypeSpecs
+    else Nothing
 
 qualifyBuiltinTypeName :: String -> String
 qualifyBuiltinTypeName name = builtinModuleName ++ "." ++ name
@@ -231,7 +233,9 @@ normalizeBuiltinTypeReference = PrimitiveIdentity.normalizeBuiltinTypeReference
 
 matchesBuiltinTypeName :: String -> String -> Bool
 matchesBuiltinTypeName builtinName referenceName =
-  normalizeBuiltinTypeReference referenceName == normalizeBuiltinTypeReference builtinName
+  isBuiltinTypeName referenceName
+    && isBuiltinTypeName builtinName
+    && normalizeBuiltinTypeReference referenceName == normalizeBuiltinTypeReference builtinName
 
 primitiveValueSpecs :: Map String PrimitiveValueSpec
 primitiveValueSpecs =
