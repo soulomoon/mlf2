@@ -114,6 +114,7 @@ data StructuralRecursiveDataMismatch
   | StructuralRecursiveDataArgumentMismatch String [BackendType] [BackendType]
   | StructuralRecursiveDataConstructorSetMismatch String Int Int
   | StructuralRecursiveDataUnknownConstructor String String
+  | StructuralRecursiveDataAmbiguousConstructor String String
   | StructuralRecursiveDataConstructorArityMismatch String String Int Int
   | StructuralRecursiveDataConstructorPayloadMismatch String String BackendType BackendType
   deriving (Eq, Show)
@@ -324,8 +325,9 @@ matchFocusedStructuralConstructor typeBounds dataDecl constructor substitution s
   wholeMatch <- matchStructuralDataDeclaration typeBounds dataDecl substitution structuralTy
   (constructorIndex, matchedConstructor) <-
     case indexedConstructors of
+      [matched] -> Right matched
       [] -> Left (StructuralRecursiveDataUnknownConstructor dataName constructorName)
-      matched : _ -> Right matched
+      _ -> Left (StructuralRecursiveDataAmbiguousConstructor dataName constructorName)
   fields <-
     case atMay (srdmPayloadFields wholeMatch) constructorIndex of
       Just fieldTys -> Right fieldTys

@@ -213,6 +213,24 @@ spec = describe "MLF.Backend.StructuralRecursiveData" $ do
       Left mismatch ->
         expectationFailure ("expected identity-focused constructor match, got " ++ show mismatch)
 
+  it "does not focus duplicate constructor identities by data declaration order" $ do
+    let structuralTy = structuralListTy intTy
+        substitution = subst [("a", intTy)]
+        nilWithConsIdentity =
+          BackendConstructorWithIdentity
+            { backendConstructorIdentity = Just consIdentity,
+              backendConstructorNameWithIdentity = "Nil",
+              backendConstructorForallsWithIdentity = [],
+              backendConstructorFieldsWithIdentity = [],
+              backendConstructorResultWithIdentity = listTy (BTVar "a")
+            }
+        duplicateListData =
+          identityListData
+            { backendDataConstructorsWithIdentity = [nilWithConsIdentity, consConstructorWithIdentity]
+            }
+    matchFocusedStructuralConstructor Map.empty duplicateListData consConstructorWithIdentity substitution structuralTy
+      `shouldBe` Left (StructuralRecursiveDataAmbiguousConstructor "List" "Cons")
+
   it "does not focus identity-bearing constructors through name fallback" $ do
     let structuralTy = structuralListTy intTy
         substitution = subst [("a", intTy)]
