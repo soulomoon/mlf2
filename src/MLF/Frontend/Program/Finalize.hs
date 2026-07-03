@@ -149,6 +149,7 @@ import MLF.Frontend.Program.Types
     deferredProgramObligationRef,
     emptyTypeBinderSubst,
     freeTypeBinderIdentitiesTypeViews,
+    constraintInfoGeneratedIdentities,
     constraintTypeView,
     lookupInstanceMethod,
     ctorName,
@@ -1913,12 +1914,8 @@ generatedIdentitiesInDeferredObligationsMap obligations =
     generatedIdentitiesInMethodInfo info =
       symbolGeneratedIdentities (methodInfoSymbol info)
         ++ typeViewGeneratedIdentities (methodTypeViewRaw info)
-        ++ concatMap generatedIdentitiesInConstraintInfo (methodConstraintInfos info)
+        ++ concatMap constraintInfoGeneratedIdentities (methodConstraintInfos info)
         ++ foldMap typeBinderGeneratedIdentities (methodParamBinderIdentities info)
-
-    generatedIdentitiesInConstraintInfo info =
-      symbolGeneratedIdentities (constraintClassSymbol info)
-        ++ foldMap typeViewGeneratedIdentities (constraintTypeViews info)
 
     generatedIdentitiesInConstructorInfo info =
       symbolGeneratedIdentities (ctorInfoSymbol info)
