@@ -1460,22 +1460,21 @@ filterBinderIdentitiesByNames names aliases identities =
 
 typeViewBinderIdentityAliasEntries :: TypeView -> [(String, TypeBinderIdentity)]
 typeViewBinderIdentityAliasEntries view =
-  directAliases ++ pairedAliases
+  Map.toList (mergeTypeBinderIdentityMaps [directAliases, pairedAliases])
   where
     identities =
       typeViewBinderIdentities view
 
     directAliases =
-      [ (alias, identity)
-      | (name, identity) <- Map.toList identities,
-        alias <- typeBinderIdentityAliasNames name identity
-      ]
+      typeBinderIdentityAliasMap (Map.toList identities)
 
     pairedAliases =
-      concat
-        [ maybe [] (\identity -> [(displayName, identity)]) (Map.lookup identityName identities)
-            ++ maybe [] (\identity -> [(identityName, identity)]) (Map.lookup displayName identities)
+      mergeTypeBinderIdentityMaps
+        [ Map.singleton alias identity
         | (identityName, displayName) <- Map.toList (typeViewBinderPairs view)
+        , (alias, identity) <-
+            maybe [] (\identity -> [(displayName, identity)]) (Map.lookup identityName identities)
+              ++ maybe [] (\identity -> [(identityName, identity)]) (Map.lookup displayName identities)
         ]
 
 mergeSymbolIdentityMaps :: [Map String SymbolIdentity] -> Map String SymbolIdentity

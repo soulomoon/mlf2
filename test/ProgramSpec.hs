@@ -838,6 +838,25 @@ spec = do
             Map.lookup firstStableName aliases `shouldBe` Just firstIdentity
             Map.lookup secondStableName aliases `shouldBe` Just secondIdentity
 
+        it "drops ambiguous direct aliases from type-view binder alias entries" $ do
+            let firstIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991624)
+                secondIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991625)
+                firstStableName = typeBinderIdentityStableName firstIdentity
+                secondStableName = typeBinderIdentityStableName secondIdentity
+                view =
+                    (ProgramTypes.mkTypeView (STVar "x") (STVar "x"))
+                        { ProgramTypes.typeViewBinderIdentities =
+                            Map.fromList
+                                [ ("x", firstIdentity)
+                                , (firstStableName, secondIdentity)
+                                ]
+                        }
+                aliases =
+                    Map.fromList (ProgramTypes.typeViewBinderIdentityAliasEntries view)
+            Map.lookup "x" aliases `shouldBe` Just firstIdentity
+            Map.lookup firstStableName aliases `shouldBe` Nothing
+            Map.lookup secondStableName aliases `shouldBe` Just secondIdentity
+
         it "compares type-binder substitutions by identity targets when alias names are stale" $ do
             let identity = typeBinderIdentityFromUnique (UniqueIdentity 991616)
                 replacementTy = STBase "Int"
