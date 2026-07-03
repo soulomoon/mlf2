@@ -338,6 +338,20 @@ spec = do
       Map.lookup "R.Token" heads `shouldBe` Just rightIdentity
       Map.lookup "Token" heads `shouldBe` Nothing
 
+    it "uses the stable identity name instead of choosing between multiple displays" $ do
+      let sharedIdentity = generatedSymbolIdentity 134 SymbolType "Lib" "Token" Nothing
+          sharedInfo = DataInfo sharedIdentity [] []
+          stableToken = symbolIdentityStableName sharedIdentity
+          scope =
+            mkElaborateScope
+              Map.empty
+              (Map.fromList [("L.Token", sharedInfo), ("R.Token", sharedInfo)])
+              Map.empty
+              []
+          view = sourceTypeViewInScope scope (STBase stableToken)
+      typeViewDisplay view `shouldBe` STBase stableToken
+      typeViewIdentity view `shouldBe` STBase stableToken
+
     it "keys qualified builtin type heads by builtin identity" $ do
       let intIdentity = Builtins.builtinTypeIdentity "Int"
           stableInt = symbolIdentityStableName intIdentity

@@ -1241,12 +1241,16 @@ displayNameForSymbol namesByIdentity symbol =
 
 preferredDisplayName :: SymbolIdentity -> [String] -> Maybe String
 preferredDisplayName identity names =
-  case filter (/= symbolIdentityStableName identity) names of
-    name : _ -> Just name
+  case Set.toList (Set.fromList (filter (/= stableName) names)) of
+    [name] -> Just name
     [] ->
       case names of
-        name : _ -> Just name
         [] -> Nothing
+        _ -> Just stableName
+    _ -> Just stableName
+  where
+    stableName =
+      symbolIdentityStableName identity
 
 isBuiltinTypeSymbol :: ResolvedSymbol -> Bool
 isBuiltinTypeSymbol = Builtins.isBuiltinTypeSymbol
