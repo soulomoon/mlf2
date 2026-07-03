@@ -148,7 +148,6 @@ import MLF.Frontend.Program.Types
     CheckedModule (..),
     CheckedProgram (..),
     ClassInfo (..),
-    ConstraintInfo (..),
     ConstructorForallBinder (..),
     ConstructorInfo (..),
     ConstructorShape (..),
@@ -180,6 +179,7 @@ import MLF.Frontend.Program.Types
     checkedBindingConstructorRef,
     checkedBindingSourceTypeIdentity,
     checkedProgramMain,
+    constraintInfoGeneratedIdentities,
     constructorRefFromInfo,
     constructorRefSymbol,
     dataInfoIdentityName,
@@ -2010,11 +2010,6 @@ valueInfoGeneratedIdentities valueInfo =
       symbolGeneratedIdentities symbol ++ constructorInfoGeneratedIdentities ctorInfo
     OverloadedMethod {valueInfoSymbol = symbol, valueMethodInfo = methodInfo} ->
       symbolGeneratedIdentities symbol ++ methodInfoGeneratedIdentities methodInfo
-
-constraintInfoGeneratedIdentities :: ConstraintInfo -> [UniqueIdentity]
-constraintInfoGeneratedIdentities info =
-  symbolGeneratedIdentities (constraintClassSymbol info)
-    ++ foldMap typeViewGeneratedIdentities (constraintTypeViews info)
 
 evidenceInfoGeneratedIdentities :: EvidenceInfo -> [UniqueIdentity]
 evidenceInfoGeneratedIdentities info =
