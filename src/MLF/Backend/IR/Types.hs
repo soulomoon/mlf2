@@ -1141,10 +1141,7 @@ deleteTypeReplacement identity name =
   Map.delete (backendTypeSubstitutionKeyFor identity name)
 
 freshBackendBinderIdentity :: Maybe TypeBinderIdentity -> IdentityGenerator -> (Maybe TypeBinderIdentity, IdentityGenerator)
-freshBackendBinderIdentity Nothing generator =
-  let (unique, generator') = freshIdentity generator
-   in (Just (typeBinderIdentityFromUnique unique), generator')
-freshBackendBinderIdentity (Just {}) generator =
+freshBackendBinderIdentity _ generator =
   let (unique, generator') = freshIdentity generator
    in (Just (typeBinderIdentityFromUnique unique), generator')
 
