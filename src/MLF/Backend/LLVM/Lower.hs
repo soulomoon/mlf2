@@ -1304,8 +1304,8 @@ ioTypeName =
 backendBuiltinHeadMatches :: String -> Maybe SymbolIdentity -> BaseTy -> Bool
 backendBuiltinHeadMatches builtinName (Just identity) _ =
   identity == PrimitiveInventory.builtinTypeIdentity builtinName
-backendBuiltinHeadMatches builtinName Nothing (BaseTy name) =
-  PrimitiveInventory.matchesBuiltinTypeName builtinName name
+backendBuiltinHeadMatches _ Nothing _ =
+  False
 
 backendIntTy :: BackendType
 backendIntTy =

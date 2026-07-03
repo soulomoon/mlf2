@@ -1896,6 +1896,10 @@ spec = describe "MLF.Backend.LLVM" $ do
     renderBackendProgramLLVM fakeBuiltinIntProgram
       `shouldSatisfyLeft` isInfixOf "Unsupported backend LLVM type"
 
+  it "does not lower name-only builtin type heads as builtin scalars" $ do
+    renderBackendProgramLLVM nameOnlyBuiltinIntProgram
+      `shouldSatisfyLeft` isInfixOf "Unsupported backend LLVM type"
+
   it "rejects unsupported static function arguments instead of erasing them" $ do
     renderBackendProgramLLVM staticPartialApplicationArgumentProgram
       `shouldSatisfyLeft` isInfixOf "unsupported static function argument \"f\""
@@ -5285,6 +5289,25 @@ fakeBuiltinIntProgram =
           backendBindingExportedAsMain = True
         }
     ]
+
+nameOnlyBuiltinIntProgram :: BackendProgram
+nameOnlyBuiltinIntProgram =
+  programWithBindings
+    [ BackendBinding
+        { backendBindingName = "main",
+          backendBindingType = BTArrow nameOnlyIntTy nameOnlyIntTy,
+          backendBindingExpr =
+            BackendLam
+              (BTArrow nameOnlyIntTy nameOnlyIntTy)
+              "x"
+              nameOnlyIntTy
+              (BackendVar nameOnlyIntTy "x"),
+          backendBindingExportedAsMain = True
+        }
+    ]
+  where
+    nameOnlyIntTy =
+      BTBaseWithIdentity Nothing (BaseTy "Int")
 
 constructorFirstClassPolymorphismProgram :: String
 constructorFirstClassPolymorphismProgram =
