@@ -1712,6 +1712,23 @@ spec = describe "MLF.Backend.Convert" $ do
         collectConstructNames (backendBindingExpr mainBinding) `shouldNotContain` ["Core__External"]
       Nothing -> expectationFailure "missing Main.T data info"
 
+  it "does not recover structural constructors through name-only nominal result heads for identity-bearing data" $ do
+    checked0 <- requireChecked sameNameUnqualifiedStructuralOwnerProgram
+    let checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingSourceTypeView = mkTypeView (STBase "Main.T") (STBase "Main.T"),
+                    checkedBindingType = Elab.TBase (BaseTy "Main.T"),
+                    checkedBindingTerm = structuralNullaryConstructorTermWithResult (Elab.TBase (BaseTy "Main.T"))
+                  }
+            )
+            checked0
+
+    backend <- requireRight (convertCheckedProgram checked)
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    collectConstructNames (backendBindingExpr mainBinding) `shouldBe` []
+
   it "does not recover structural constructors by name when result self identity is not structural" $ do
     checked0 <- requireChecked sameNameUnqualifiedStructuralOwnerProgram
     let checked =

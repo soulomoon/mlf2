@@ -5806,7 +5806,8 @@ structuralConstructorResultMatches context constructorMeta resultTy =
 data BackendStructuralDataHead
   = BackendStructuralDataHeadByIdentity SymbolIdentity
   | BackendStructuralDataHeadBySelfIdentity TypeBinderIdentity String
-  | BackendStructuralDataHeadByName String
+  | BackendStructuralDataHeadByNominalName String
+  | BackendStructuralDataHeadByStructuralName String
   deriving (Eq, Show)
 
 constructorDataNameMatches :: ConvertContext -> ConstructorMeta -> BackendStructuralDataHead -> Bool
@@ -5819,14 +5820,20 @@ constructorDataNameMatches context constructorMeta (BackendStructuralDataHeadByS
     Nothing ->
       if Structural.structuralIdentityAllowsNameFallback (Just resultIdentity)
         then
-          constructorDataNameMatches context constructorMeta (BackendStructuralDataHeadByName resultDataName)
+          constructorDataNameMatches context constructorMeta (BackendStructuralDataHeadByStructuralName resultDataName)
         else
           False
   where
     dataMeta = cmData constructorMeta
-constructorDataNameMatches context constructorMeta (BackendStructuralDataHeadByName resultDataName) =
-  resultDataName == backendDataName (dmBackend dataMeta)
-    || structuralDataNameMatches context dataMeta resultDataName
+constructorDataNameMatches context constructorMeta (BackendStructuralDataHeadByNominalName resultDataName) =
+  backendDataIdentity (dmBackend dataMeta) == Nothing
+    && ( resultDataName == backendDataName (dmBackend dataMeta)
+           || structuralDataNameMatches context dataMeta resultDataName
+       )
+  where
+    dataMeta = cmData constructorMeta
+constructorDataNameMatches context constructorMeta (BackendStructuralDataHeadByStructuralName resultDataName) =
+  structuralDataNameMatches context dataMeta resultDataName
   where
     dataMeta = cmData constructorMeta
 
@@ -5841,20 +5848,20 @@ backendTypeStructuralDataHead :: BackendType -> Either BackendConversionError Ba
 backendTypeStructuralDataHead =
   \case
     BTBaseWithIdentity (Just identity) _ -> Right (BackendStructuralDataHeadByIdentity identity)
-    BTBaseWithIdentity Nothing (BaseTy name) -> Right (BackendStructuralDataHeadByName name)
+    BTBaseWithIdentity Nothing (BaseTy name) -> Right (BackendStructuralDataHeadByNominalName name)
     BTConWithIdentity (Just identity) _ _ -> Right (BackendStructuralDataHeadByIdentity identity)
-    BTConWithIdentity Nothing (BaseTy name) _ -> Right (BackendStructuralDataHeadByName name)
+    BTConWithIdentity Nothing (BaseTy name) _ -> Right (BackendStructuralDataHeadByNominalName name)
     BTMuWithIdentity (Just identity) name _ ->
       case Structural.structuralRecursiveDataName name of
         Just resultDataName -> Right (BackendStructuralDataHeadBySelfIdentity identity resultDataName)
         Nothing -> Left (BackendUnsupportedCaseShape ("unsupported structural constructor result type " ++ show name))
     BTMuWithIdentity Nothing name _ ->
       case Structural.structuralRecursiveDataName name of
-        Just resultDataName -> Right (BackendStructuralDataHeadByName resultDataName)
+        Just resultDataName -> Right (BackendStructuralDataHeadByStructuralName resultDataName)
         Nothing -> Left (BackendUnsupportedCaseShape ("unsupported structural constructor result type " ++ show name))
     BTMu name _ ->
       case Structural.structuralRecursiveDataName name of
-        Just resultDataName -> Right (BackendStructuralDataHeadByName resultDataName)
+        Just resultDataName -> Right (BackendStructuralDataHeadByStructuralName resultDataName)
         Nothing -> Left (BackendUnsupportedCaseShape ("unsupported structural constructor result type " ++ show name))
     ty -> Left (BackendUnsupportedCaseShape ("unsupported constructor result type " ++ show ty))
 
