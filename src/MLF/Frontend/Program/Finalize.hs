@@ -66,7 +66,7 @@ import MLF.Elab.TermClosure (closeTermWithSchemeSubstRefsIfNeeded)
 import MLF.Elab.Types (XmlfTerm, ElabType)
 import qualified MLF.Elab.Types as X
 import qualified MLF.Elab.TypeCheck as TypeCheck
-import MLF.Frontend.ConstraintGen (AnnExpr (..), ExternalBinding (..), ExternalBindingIdentity, ExternalBindingMode (..), externalBindingIdentityFromDetails)
+import MLF.Frontend.ConstraintGen (ExternalBinding (..), ExternalBindingIdentity, ExternalBindingMode (..), externalBindingIdentityFromDetails)
 import MLF.Frontend.Normalize (normalizeExpr, normalizeType)
 import qualified MLF.Frontend.Program.Builtins as Builtins
 import MLF.Frontend.Symbol (lookupSymbolIdentityAlias, symbolIdentityAliasMap, symbolIdentityAliasMapWith, symbolIdentityStableName)
@@ -206,7 +206,6 @@ import MLF.Types.Identity
     deferredRefIdentity,
     deferredRefName,
     IdentityGenerator,
-    LocalIdentity (..),
     LocalRef,
     localRefGeneratedIdentities,
     localRefIdentity,
@@ -1599,88 +1598,125 @@ validateLoweredBindingDeferredObligations lowered =
 
 stampPipelineResolvedLocalIdentities :: [LoweredBinding] -> PipelineElabDetailedResult -> PipelineElabDetailedResult
 stampPipelineResolvedLocalIdentities lowereds result =
-  result {pedTerm = stampTerm (resolvedLocalRuntimeRefsByNode lowereds (pedRootAnn result)) (pedTerm result)}
+  result {pedTerm = stampPipelineTerm lowereds (pedTerm result)}
 
-resolvedLocalRuntimeRefsByNode :: [LoweredBinding] -> AnnExpr -> IntMap.IntMap LocalRef
-resolvedLocalRuntimeRefsByNode lowereds =
-  fst . go runtimeRefsByName
+stampPipelineTerm :: [LoweredBinding] -> XmlfTerm -> XmlfTerm
+stampPipelineTerm [] term =
+  term
+stampPipelineTerm [lowered] term =
+  stampLoweredResolvedLocals lowered term
+stampPipelineTerm lowereds term =
+  stampGroupTerms lowereds term
+
+stampGroupTerms :: [LoweredBinding] -> XmlfTerm -> XmlfTerm
+stampGroupTerms lowereds term =
+  fst (go lowereds term)
   where
-    runtimeRefsByName =
-      Map.fromListWith
-        (flip (++))
-        [ (localRefName runtimeRef, [runtimeRef])
-        | identity <- concatMap loweredBindingResolvedLocalIdentities lowereds
-        , let runtimeRef = loweredResolvedLocalRuntimeRef identity
-        ]
-
-    go refs ann =
-      case ann of
-        AVar {} -> (IntMap.empty, refs)
-        ALit {} -> (IntMap.empty, refs)
-        ALam name paramNode _ body _ ->
-          let (entry, refs') = bindNode name paramNode refs
-              (bodyEntries, refs'') = go refs' body
-           in (entry <> bodyEntries, refs'')
-        AApp fun arg _ _ _ ->
-          let (funEntries, refs') = go refs fun
-              (argEntries, refs'') = go refs' arg
-           in (funEntries <> argEntries, refs'')
-        ALet name _ schemeRoot _ _ rhs body _ ->
-          let (entry, refs') = bindNode name schemeRoot refs
-              (rhsEntries, refs'') = go refs' rhs
-              (bodyEntries, refs''') = go refs'' body
-           in (entry <> rhsEntries <> bodyEntries, refs''')
-        AAnn inner _ _ -> go refs inner
-        AUnfold inner _ _ -> go refs inner
-
-    bindNode name node refs =
-      case Map.lookup name refs of
-        Just (runtimeRef : rest) ->
-          let refs' =
-                if null rest
-                  then Map.delete name refs
-                  else Map.insert name rest refs
-           in (IntMap.singleton (Graph.getNodeId node) runtimeRef, refs')
+    go [] current =
+      (current, [])
+    go remaining current =
+      case current of
+        X.ELet resolved scheme rhs body
+          | not (X.resolvedVarIsLocal resolved),
+            lowered : rest <- remaining ->
+              let (body', rest') = go rest body
+               in (X.ELet resolved scheme (stampLoweredResolvedLocals lowered rhs) body', rest')
+        X.ETyAbsRef ref mb body ->
+          let (body', remaining') = go remaining body
+           in (X.ETyAbsRef ref mb body', remaining')
+        X.ETyInst inner inst ->
+          let (inner', remaining') = go remaining inner
+           in (X.ETyInst inner' inst, remaining')
+        X.ERoll ty body ->
+          let (body', remaining') = go remaining body
+           in (X.ERoll ty body', remaining')
+        X.EUnroll body ->
+          let (body', remaining') = go remaining body
+           in (X.EUnroll body', remaining')
         _ ->
-          (IntMap.empty, refs)
+          (current, remaining)
 
-stampTerm :: IntMap.IntMap LocalRef -> XmlfTerm -> XmlfTerm
-stampTerm runtimeRefsByNode =
-  go
+stampLoweredResolvedLocals :: LoweredBinding -> XmlfTerm -> XmlfTerm
+stampLoweredResolvedLocals lowered term0 =
+  let (term, _, _) =
+        go
+          Map.empty
+          (loweredBindingEvidenceParamCount lowered)
+          (loweredBindingResolvedLocalIdentities lowered)
+          term0
+   in term
   where
-    go term =
+    go runtimeRefs evidenceParamsLeft remaining term =
       case term of
         X.EVarNode resolved ->
-          X.EVarNode (stampResolved resolved)
-        X.ELit {} -> term
+          (X.EVarNode (stampResolved runtimeRefs resolved), evidenceParamsLeft, remaining)
+        X.ELit {} ->
+          (term, evidenceParamsLeft, remaining)
         X.ELam resolved body ->
-          X.ELam (stampResolved resolved) (go body)
+          let (resolved', runtimeRefs', evidenceParamsLeft', remaining') =
+                bindResolved runtimeRefs evidenceParamsLeft remaining resolved
+              (body', evidenceParamsLeft'', remaining'') =
+                go runtimeRefs' evidenceParamsLeft' remaining' body
+           in (X.ELam resolved' body', evidenceParamsLeft'', remaining'')
         X.EApp fun arg ->
-          X.EApp (go fun) (go arg)
+          let (fun', evidenceParamsLeft', remaining') =
+                go runtimeRefs evidenceParamsLeft remaining fun
+              (arg', evidenceParamsLeft'', remaining'') =
+                go runtimeRefs evidenceParamsLeft' remaining' arg
+           in (X.EApp fun' arg', evidenceParamsLeft'', remaining'')
         X.ELet resolved scheme rhs body ->
-          X.ELet (stampResolved resolved) scheme (go rhs) (go body)
+          let (resolved', runtimeRefs', evidenceParamsLeft', remaining') =
+                bindResolved runtimeRefs evidenceParamsLeft remaining resolved
+              (rhs', evidenceParamsLeft'', remaining'') =
+                go runtimeRefs' evidenceParamsLeft' remaining' rhs
+              (body', evidenceParamsLeft''', remaining''') =
+                go runtimeRefs' evidenceParamsLeft'' remaining'' body
+           in (X.ELet resolved' scheme rhs' body', evidenceParamsLeft''', remaining''')
         X.ETyAbsRef ref mb body ->
-          X.ETyAbsRef ref mb (go body)
+          let (body', evidenceParamsLeft', remaining') =
+                go runtimeRefs evidenceParamsLeft remaining body
+           in (X.ETyAbsRef ref mb body', evidenceParamsLeft', remaining')
         X.ETyInst inner inst ->
-          X.ETyInst (go inner) inst
+          let (inner', evidenceParamsLeft', remaining') =
+                go runtimeRefs evidenceParamsLeft remaining inner
+           in (X.ETyInst inner' inst, evidenceParamsLeft', remaining')
         X.ERoll ty body ->
-          X.ERoll ty (go body)
+          let (body', evidenceParamsLeft', remaining') =
+                go runtimeRefs evidenceParamsLeft remaining body
+           in (X.ERoll ty body', evidenceParamsLeft', remaining')
         X.EUnroll body ->
-          X.EUnroll (go body)
+          let (body', evidenceParamsLeft', remaining') =
+                go runtimeRefs evidenceParamsLeft remaining body
+           in (X.EUnroll body', evidenceParamsLeft', remaining')
 
-    stampResolved resolved =
-      case X.resolvedVarLocalRef resolved >>= lookupRuntimeRef of
-        Just runtimeRef ->
+    bindResolved runtimeRefs evidenceParamsLeft remaining resolved =
+      case X.resolvedVarDetails resolved of
+        LocalId localRef
+          | evidenceParamsLeft > 0 ->
+              (resolved, runtimeRefs, evidenceParamsLeft - 1, remaining)
+          | identity : remaining' <- remaining ->
+              let runtimeRef = loweredResolvedLocalRuntimeRef identity
+               in ( stampResolvedVar runtimeRef resolved
+                  , Map.insert localRef runtimeRef runtimeRefs
+                  , evidenceParamsLeft
+                  , remaining'
+                  )
+        _ ->
+          (resolved, runtimeRefs, evidenceParamsLeft, remaining)
+
+    stampResolved runtimeRefs resolved =
+      case X.resolvedVarDetails resolved of
+        LocalId localRef
+          | Just runtimeRef <- Map.lookup localRef runtimeRefs ->
+              stampResolvedVar runtimeRef resolved
+        _ ->
           resolved
-            { X.resolvedVarRuntimeName = localRefName runtimeRef
-            , X.resolvedVarDetails = LocalId runtimeRef
-            }
-        Nothing -> resolved
 
-    lookupRuntimeRef localRef =
-      case localRefIdentity localRef of
-        GraphLocalId nodeId -> IntMap.lookup (Graph.getNodeId nodeId) runtimeRefsByNode
-        GeneratedLocalId {} -> Nothing
+    stampResolvedVar runtimeRef resolved =
+      resolved
+        { X.resolvedVarRuntimeName = localRefName runtimeRef
+        , X.resolvedVarDetails = LocalId runtimeRef
+        }
 
 annotateResolvedTermVars :: FinalizeContext -> LoweredBinding -> XmlfTerm -> XmlfTerm
 annotateResolvedTermVars _context lowered term0 =
