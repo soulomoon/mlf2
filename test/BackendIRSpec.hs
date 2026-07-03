@@ -1521,6 +1521,18 @@ spec = describe "MLF.Backend.IR" $ do
 
     alphaEqBackendType fakeIOTy builtinIOTy `shouldBe` False
 
+  it "does not treat name-only IO type heads as opaque IO" $ do
+    let nameOnlyIOTy = BTConWithIdentity Nothing (BaseTy "IO") (intTy :| [])
+        builtinIOTy = ioTy intTy
+    alphaEqBackendType nameOnlyIOTy builtinIOTy `shouldBe` False
+    validateBackendExpr
+      ( BackendApp
+          builtinIOTy
+          (BackendVar (BTArrow nameOnlyIOTy builtinIOTy) "f")
+          (BackendVar builtinIOTy "x")
+      )
+      `shouldBe` Left (BackendApplicationArgumentMismatch nameOnlyIOTy builtinIOTy)
+
   it "checks structural constructor result payloads against metadata" $ do
     alphaEqBackendType boxTy structuralBoxTy
       `shouldBe` False
@@ -3308,7 +3320,7 @@ unitTy =
 
 ioTy :: BackendType -> BackendType
 ioTy ty =
-  BTCon (BaseTy "IO") (ty :| [])
+  BTConWithIdentity (Just (builtinTypeIdentity "IO")) (BaseTy "IO") (ty :| [])
 
 preludeUnitStructuralTy :: BackendType
 preludeUnitStructuralTy =

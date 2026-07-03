@@ -1855,15 +1855,11 @@ backendTypeIsClosureValue =
     BTArrow {} -> True
     _ -> False
 
-isOpaqueIOBackendName :: BaseTy -> Bool
-isOpaqueIOBackendName (BaseTy name) =
-  PrimitiveInventory.matchesBuiltinTypeName "IO" name
-
 opaqueIOBackendHeadMatches :: Maybe SymbolIdentity -> BaseTy -> Bool
 opaqueIOBackendHeadMatches (Just identity) _ =
   identity == PrimitiveInventory.builtinTypeIdentity "IO"
-opaqueIOBackendHeadMatches Nothing base =
-  isOpaqueIOBackendName base
+opaqueIOBackendHeadMatches Nothing _ =
+  False
 
 primitiveTypeToBackendType :: PrimitiveInventory.PrimitiveType -> BackendType
 primitiveTypeToBackendType ty =
