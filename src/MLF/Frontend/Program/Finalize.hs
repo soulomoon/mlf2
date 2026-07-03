@@ -192,6 +192,7 @@ import MLF.Frontend.Program.Types
     typeBinderSubstToTypeViewSubstWith,
     typeBinderAliasIdentityMap,
     typeViewsIdentity,
+    uniqueEvidenceMethodMatch,
     lookupTypeBinderSubstByIdentity,
     insertTypeBinderSubstWithIdentity,
     unqualifiedSymbolName,
@@ -3757,10 +3758,10 @@ resolveDeferredMethods scope deferredMethods env0 term0 = do
       NE.head <$> lookupMethodParamViewSubst methodInfo subst
 
     lookupMethodEvidence deferred methodInfo classArgView =
-      case localMatches of
-        (methodEvidence, subst) : _ ->
+      case uniqueEvidenceMethodMatch localMatches of
+        Just (methodEvidence, subst) ->
           Just (mkEvidence methodEvidence, subst)
-        [] ->
+        Nothing ->
           case globalEvidence of
             Just methodEvidence -> Just (mkEvidence methodEvidence, Map.empty)
             Nothing -> fallbackEvidence
@@ -3969,13 +3970,18 @@ lookupEvidenceMethodMatch scope evidenceInfos classIdentity headViews methodIden
     ]
 
 preferredEvidenceMethodMatch :: [(EvidenceMethod, TypeViewSubst)] -> Maybe (EvidenceMethod, TypeViewSubst)
-preferredEvidenceMethodMatch = go Nothing
+preferredEvidenceMethodMatch matches =
+  case uniqueEvidenceMethodMatch resolvedMatches of
+    Just match -> Just match
+    Nothing
+      | not (null resolvedMatches) -> Nothing
+      | otherwise -> uniqueEvidenceMethodMatch matches
   where
-    go fallback [] = fallback
-    go _ (match@(method, _) : _)
-      | Just _ <- evidenceMethodResolvedVar method = Just match
-    go Nothing (match : matches) = go (Just match) matches
-    go fallback (_ : matches) = go fallback matches
+    resolvedMatches =
+      [ match
+      | match@(method, _) <- matches,
+        Just _ <- [evidenceMethodResolvedVar method]
+      ]
 
 zeroMethodConstraintCoveredByEvidence :: ElaborateScope -> [EvidenceInfo] -> ConstraintInfo -> Bool
 zeroMethodConstraintCoveredByEvidence scope evidenceInfos constraint =

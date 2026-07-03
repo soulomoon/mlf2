@@ -505,6 +505,26 @@ spec = do
         `shouldBe` Just "Lib__eq_first"
       uniqueEvidenceMethod [first, conflicting] `shouldBe` Nothing
 
+    it "does not choose arbitrary evidence method substitutions after duplicate collapse" $ do
+      let methodView = methodTypeView eqMethodInfo
+          replacement = mkTypeView (STBase "Int") (STBase "Int")
+          conflictingReplacement = mkTypeView (STBase "Bool") (STBase "Bool")
+          binderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 210)
+          binderKey = typeViewSubstKeyForIdentity binderIdentity
+          evidence runtimeName =
+            EvidenceMethod
+              { evidenceMethodRuntimeName = runtimeName,
+                evidenceMethodSymbol = eqMethodIdentity,
+                evidenceMethodResolvedVar = Nothing,
+                evidenceMethodTypeView = methodView
+              }
+          first = (evidence "Lib__eq_first", Map.singleton binderKey replacement)
+          duplicate = (evidence "Lib__eq_second", Map.singleton binderKey replacement)
+          conflicting = (evidence "Lib__eq_conflicting", Map.singleton binderKey conflictingReplacement)
+      fmap (evidenceMethodRuntimeName . fst) (uniqueEvidenceMethodMatch [first, duplicate])
+        `shouldBe` Just "Lib__eq_first"
+      uniqueEvidenceMethodMatch [first, conflicting] `shouldBe` Nothing
+
     it "compares method infos by symbol identity when display names are stale" $ do
       eqMethodInfo
         `shouldBe` eqMethodInfo {methodDisplayName = "$stale.eq"}

@@ -49,6 +49,7 @@ module MLF.Frontend.Program.Types
     insertTypeBinderSubstWithIdentity,
     EvidenceMethod (..),
     uniqueEvidenceMethod,
+    uniqueEvidenceMethodMatch,
     EvidenceInfo (..),
     SymbolNamespace (..),
     SymbolOwnerIdentity (..),
@@ -1881,6 +1882,12 @@ uniqueEvidenceMethod :: [EvidenceMethod] -> Maybe EvidenceMethod
 uniqueEvidenceMethod methods =
   case nub methods of
     [method] -> Just method
+    _ -> Nothing
+
+uniqueEvidenceMethodMatch :: [(EvidenceMethod, TypeViewSubst)] -> Maybe (EvidenceMethod, TypeViewSubst)
+uniqueEvidenceMethodMatch matches =
+  case nub matches of
+    [match] -> Just match
     _ -> Nothing
 
 data EvidenceInfo = EvidenceInfo

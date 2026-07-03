@@ -117,6 +117,7 @@ import MLF.Frontend.Program.Types
     typeViewSubstFromParamIdentities,
     typeViewsIdentity,
     uniqueEvidenceMethod,
+    uniqueEvidenceMethodMatch,
     typeBinderSubstFromTypeViewSubst,
     typeBinderSubstToTypeViewSubstWith,
     insertTypeBinderSubstWithIdentity,
@@ -1419,10 +1420,10 @@ resolveRuntimeNullaryInstanceMethod context stack deferredValues env deferred cl
 
 lookupRuntimeMethodEvidence :: RuntimeContext -> DeferredMethodCall -> TypeView -> Maybe (DeferredMethodEvidence, TypeViewSubst)
 lookupRuntimeMethodEvidence context deferred classArgView =
-  case localMatches of
-    (methodEvidence, subst) : _ ->
+  case uniqueEvidenceMethodMatch localMatches of
+    Just (methodEvidence, subst) ->
       Just (mkEvidence methodEvidence, subst)
-    [] ->
+    Nothing ->
       case globalEvidence of
         Just methodEvidence -> Just (mkEvidence methodEvidence, Map.empty)
         Nothing -> fallbackEvidence
