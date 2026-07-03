@@ -9,6 +9,7 @@ module MLF.Types.Identity
     typeBinderIdentityStructural,
     typeBinderIdentityKey,
     typeBinderIdentityStableName,
+    typeBinderIdentityAliasNames,
     typeBinderIdentityAliasMap,
     lookupTypeBinderIdentityAlias,
     typeBinderIdentityFromUnique,
@@ -136,6 +137,10 @@ typeBinderIdentityStableName identity =
     StructuralTypeBinderIdentity unique role ->
       "$typevar#structural#" ++ show (uniqueIdentityValue unique) ++ "#" ++ structuralRoleName role
 
+typeBinderIdentityAliasNames :: String -> TypeBinderIdentity -> [String]
+typeBinderIdentityAliasNames name identity =
+  filter (not . null) [name, typeBinderIdentityStableName identity]
+
 typeBinderIdentityAliasMap :: [(String, TypeBinderIdentity)] -> Map String TypeBinderIdentity
 typeBinderIdentityAliasMap binders =
   Map.fromList
@@ -149,8 +154,7 @@ typeBinderIdentityAliasMap binders =
         Set.union
         [ (alias, Set.singleton identity)
         | (name, identity) <- binders,
-          alias <- [name, typeBinderIdentityStableName identity],
-          not (null alias)
+          alias <- typeBinderIdentityAliasNames name identity
         ]
 
 lookupTypeBinderIdentityAlias :: Map String TypeBinderIdentity -> String -> Maybe TypeBinderIdentity

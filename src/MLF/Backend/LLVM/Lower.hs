@@ -175,7 +175,7 @@ import MLF.Constraint.Types.Graph (BaseTy (..))
 import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), SymbolOwnerIdentity (..), symbolIdentityFromParts, symbolIdentityStableName, symbolRefMatches, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit (..))
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
-import MLF.Types.Identity (constructorRefSymbol, deferredRefIdentity, envRefIdentity, IdDetails (..), IdentityGenerator, LocalRef, localRefIdentity, primitiveRefSymbol, idDetailsAliasNames, idDetailsSymbolIdentity, StructuralTypeBinderRole (..), TypeBinderIdentity, UniqueIdentity (..), freshIdentity, freshLocalRef, identityGeneratorAfter, initialIdentityGenerator, localIdentityStableUnique, typeBinderIdentityFromUnique, typeBinderIdentityStableName, typeBinderIdentityStructural)
+import MLF.Types.Identity (constructorRefSymbol, deferredRefIdentity, envRefIdentity, IdDetails (..), IdentityGenerator, LocalRef, localRefIdentity, primitiveRefSymbol, idDetailsAliasNames, idDetailsSymbolIdentity, StructuralTypeBinderRole (..), TypeBinderIdentity, UniqueIdentity (..), freshIdentity, freshLocalRef, identityGeneratorAfter, initialIdentityGenerator, localIdentityStableUnique, typeBinderIdentityAliasNames, typeBinderIdentityFromUnique, typeBinderIdentityStableName, typeBinderIdentityStructural)
 import MLF.Util.Names (freshNameLike)
 
 lowerBackendProgram :: BackendProgram -> Either BackendLLVMError LLVMModule
@@ -422,7 +422,7 @@ backendSymbolIdentityEntries name identity =
 
 insertUniqueBackendTypeBinderIdentity :: String -> TypeBinderIdentity -> BackendTypeBinderEnv -> BackendTypeBinderEnv
 insertUniqueBackendTypeBinderIdentity name identity env =
-  foldl (\env0 alias -> Map.alter insert alias env0) env [name, typeBinderIdentityStableName identity]
+  foldl (\env0 alias -> Map.alter insert alias env0) env (typeBinderIdentityAliasNames name identity)
   where
     insert Nothing =
       Just (Just identity)
@@ -434,7 +434,7 @@ insertUniqueBackendTypeBinderIdentity name identity env =
 
 shadowBackendTypeBinderIdentity :: String -> TypeBinderIdentity -> BackendTypeBinderEnv -> BackendTypeBinderEnv
 shadowBackendTypeBinderIdentity name identity env =
-  foldl (\env0 alias -> Map.insert alias (Just identity) env0) env [name, typeBinderIdentityStableName identity]
+  foldl (\env0 alias -> Map.insert alias (Just identity) env0) env (typeBinderIdentityAliasNames name identity)
 
 insertUniqueBackendTermIdentity :: String -> IdDetails -> BackendTermEnv -> BackendTermEnv
 insertUniqueBackendTermIdentity name identity env =

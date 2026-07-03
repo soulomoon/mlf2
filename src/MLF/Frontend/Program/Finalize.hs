@@ -220,6 +220,7 @@ import MLF.Types.Identity
     renameDeferredRef,
     symbolGeneratedIdentities,
     typeBinderGeneratedIdentities,
+    typeBinderIdentityAliasNames,
     typeBinderIdentityStableName,
     uniqueIdentityStableName,
   )
@@ -3215,7 +3216,7 @@ inlineConstructorHead scope extraHeadIdentities ownerParamBinders ctorInfo subst
           [ (alias, ref)
           | (name, identity) <- ownerParamBinders,
             let ref = X.typeBinderRefFromIdentity identity name,
-            alias <- [name, typeBinderIdentityStableName identity]
+            alias <- typeBinderIdentityAliasNames name identity
           ]
       ownerParamRefs =
         [ X.typeBinderRefFromIdentity identity name

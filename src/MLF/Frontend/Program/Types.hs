@@ -1472,7 +1472,7 @@ typeViewBinderIdentityAliasEntries view =
     directAliases =
       [ (alias, identity)
       | (name, identity) <- Map.toList identities,
-        alias <- [name, typeBinderIdentityStableName identity]
+        alias <- typeBinderIdentityAliasNames name identity
       ]
 
     pairedAliases =
