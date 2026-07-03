@@ -691,6 +691,15 @@ spec = do
                         , ctorIndex = 0
                         , ctorOwnerConstructors = []
                         }
+                shape =
+                    ConstructorShape
+                        { constructorShapeSymbol = ctorIdentity
+                        , constructorShapeRuntimeName = "Main__MkBox"
+                        , constructorShapeTypeView = ctorView
+                        , constructorShapeForallBinderInfo = []
+                        , constructorShapeIndex = 0
+                        , constructorShapeOwnerTypeParams = []
+                        }
             case ProgramTypes.constructorInfoArgViews ctorInfo of
                 [argView] -> do
                     Map.lookup "DisplayToken" (ProgramTypes.typeViewHeadIdentities argView)
@@ -700,6 +709,16 @@ spec = do
                 views ->
                     expectationFailure ("expected one constructor arg view, got " ++ show views)
             Map.lookup "DisplayBox" (ProgramTypes.typeViewHeadIdentities (ProgramTypes.constructorInfoResultView ctorInfo))
+                `shouldBe` Just resultIdentity
+            case ProgramTypes.constructorShapeArgViews shape of
+                [argView] -> do
+                    Map.lookup "DisplayToken" (ProgramTypes.typeViewHeadIdentities argView)
+                        `shouldBe` Just argIdentity
+                    Map.lookup "DisplayBox" (ProgramTypes.typeViewHeadIdentities argView)
+                        `shouldBe` Nothing
+                views ->
+                    expectationFailure ("expected one constructor shape arg view, got " ++ show views)
+            Map.lookup "DisplayBox" (ProgramTypes.typeViewHeadIdentities (ProgramTypes.constructorShapeResultView shape))
                 `shouldBe` Just resultIdentity
 
         it "keeps replacement type head identities by payload stable name after applying type-view substitutions" $ do

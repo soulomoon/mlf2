@@ -1943,15 +1943,7 @@ constructorShapeForallsIdentity =
 
 constructorShapeArgViews :: ConstructorShape -> [TypeView]
 constructorShapeArgViews shape =
-  zipWith
-    ( \displayTy identityTy ->
-        view
-          { typeViewDisplay = displayTy,
-            typeViewIdentity = identityTy
-          }
-    )
-    displayArgs
-    identityArgs
+  zipWith (projectTypeView view) displayArgs identityArgs
   where
     view = constructorShapeTypeView shape
     (_, displayBody) = splitForalls (typeViewDisplay view)
@@ -1961,10 +1953,7 @@ constructorShapeArgViews shape =
 
 constructorShapeResultView :: ConstructorShape -> TypeView
 constructorShapeResultView shape =
-  view
-    { typeViewDisplay = displayResult,
-      typeViewIdentity = identityResult
-    }
+  projectTypeView view displayResult identityResult
   where
     view = constructorShapeTypeView shape
     (_, displayBody) = splitForalls (typeViewDisplay view)
