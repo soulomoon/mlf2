@@ -2463,8 +2463,8 @@ canonicalizeSourceBackendTypeHeads dataMetasByIdentity =
 canonicalDataTypeForSource :: DataMeta -> BackendType -> Maybe BackendType
 canonicalDataTypeForSource dataMeta sourceBackendTy =
   case candidates of
-    candidate : _ -> Just candidate
-    [] -> Nothing
+    [candidate] -> Just candidate
+    _ -> Nothing
   where
     candidates =
       nub
