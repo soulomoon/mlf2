@@ -1474,7 +1474,7 @@ typeViewBinderIdentityAliasEntries view =
       concat
         [ maybe [] (\identity -> [(displayName, identity)]) (Map.lookup identityName identities)
             ++ maybe [] (\identity -> [(identityName, identity)]) (Map.lookup displayName identities)
-        | (identityName, displayName) <- Map.toList (typeViewVarPairs view)
+        | (identityName, displayName) <- Map.toList (typeViewBinderPairs view)
         ]
 
 mergeSymbolIdentityMaps :: [Map String SymbolIdentity] -> Map String SymbolIdentity
@@ -1588,6 +1588,43 @@ typeViewSubstBinderNames view identity =
 typeViewVarPairs :: TypeView -> Map String String
 typeViewVarPairs view =
   srcTypeVarPairs (typeViewDisplay view) (typeViewIdentity view)
+
+typeViewBinderPairs :: TypeView -> Map String String
+typeViewBinderPairs view =
+  mergeUniquePairMaps [typeViewVarPairs view, boundBinderPairs (typeViewDisplay view) (typeViewIdentity view)]
+  where
+    boundBinderPairs display identityTy =
+      case (display, identityTy) of
+        (STArrow displayDom displayCod, STArrow identityDom identityCod) ->
+          mergeUniquePairMaps [boundBinderPairs displayDom identityDom, boundBinderPairs displayCod identityCod]
+        (STCon _ displayArgs, STCon _ identityArgs) ->
+          pairsFromArgs displayArgs identityArgs
+        (STVarApp _ displayArgs, STVarApp _ identityArgs) ->
+          pairsFromArgs displayArgs identityArgs
+        (STTyLam displayName displayBody, STTyLam identityName identityBody) ->
+          mergeUniquePairMaps [Map.singleton identityName displayName, boundBinderPairs displayBody identityBody]
+        (STTyApp displayFun displayArg, STTyApp identityFun identityArg) ->
+          mergeUniquePairMaps [boundBinderPairs displayFun identityFun, boundBinderPairs displayArg identityArg]
+        (STForall displayName displayMb displayBody, STForall identityName identityMb identityBody) ->
+          mergeUniquePairMaps
+            [ Map.singleton identityName displayName,
+              boundPairs displayMb identityMb,
+              boundBinderPairs displayBody identityBody
+            ]
+        (STMu displayName displayBody, STMu identityName identityBody) ->
+          mergeUniquePairMaps [Map.singleton identityName displayName, boundBinderPairs displayBody identityBody]
+        _ ->
+          Map.empty
+
+    pairsFromArgs displayArgs identityArgs =
+      mergeUniquePairMaps (zipWith boundBinderPairs (NE.toList displayArgs) (NE.toList identityArgs))
+
+    boundPairs displayMb identityMb =
+      case (displayMb, identityMb) of
+        (Just (SrcBound displayBound), Just (SrcBound identityBound)) ->
+          boundBinderPairs displayBound identityBound
+        _ ->
+          Map.empty
 
 typeViewHeadPairs :: TypeView -> Map String String
 typeViewHeadPairs view =

@@ -169,7 +169,6 @@ import MLF.Frontend.Program.Types
     methodParamBinderIdentities,
     mergeTypeBinderIdentityMaps,
     mergeSymbolIdentityMaps,
-    mergeUniquePairMaps,
     loweredBindingConstructorRef,
     loweredBindingIdentityGeneratedIdentities,
     loweredIdentityDetails,
@@ -183,11 +182,11 @@ import MLF.Frontend.Program.Types
     splitForalls,
     specializeMethodTypeView,
     typeViewBinderIdentityForAlias,
+    typeViewBinderIdentityAliasEntries,
     substituteTypeVar,
     typeViewSubstFromParamIdentities,
     typeViewHeadIdentityForAlias,
     typeViewGeneratedIdentities,
-    typeViewVarPairs,
     typeHeadNamesSrcType,
     typeViewSubstKeyForIdentity,
     typeParamBinderIdentity,
@@ -4872,9 +4871,7 @@ typeViewBinderRefs headIdentities view ty =
     pairedBinderIdentities =
       mergeTypeBinderIdentityMaps
         [ Map.singleton alias identity
-        | (identityName, displayName) <- Map.toList (typeViewBinderPairs view),
-          Just identity <- [typeViewBinderIdentityForAlias view identityName]
-        , alias <- [identityName, displayName]
+        | (alias, identity) <- typeViewBinderIdentityAliasEntries view
         ]
 
     knownRefs =
@@ -4891,43 +4888,6 @@ typeViewBinderRefs headIdentities view ty =
 
     (freshRefs, generator) =
       freshTypeBinderRefs missingFreeNames generator0
-
-typeViewBinderPairs :: TypeView -> Map String String
-typeViewBinderPairs view =
-  mergeUniquePairMaps [typeViewVarPairs view, boundBinderPairs (typeViewDisplay view) (typeViewIdentity view)]
-  where
-    boundBinderPairs display identityTy =
-      case (display, identityTy) of
-        (STArrow displayDom displayCod, STArrow identityDom identityCod) ->
-          mergeUniquePairMaps [boundBinderPairs displayDom identityDom, boundBinderPairs displayCod identityCod]
-        (STCon _ displayArgs, STCon _ identityArgs) ->
-          pairsFromArgs displayArgs identityArgs
-        (STVarApp _ displayArgs, STVarApp _ identityArgs) ->
-          pairsFromArgs displayArgs identityArgs
-        (STTyLam displayName displayBody, STTyLam identityName identityBody) ->
-          mergeUniquePairMaps [Map.singleton identityName displayName, boundBinderPairs displayBody identityBody]
-        (STTyApp displayFun displayArg, STTyApp identityFun identityArg) ->
-          mergeUniquePairMaps [boundBinderPairs displayFun identityFun, boundBinderPairs displayArg identityArg]
-        (STForall displayName displayMb displayBody, STForall identityName identityMb identityBody) ->
-          mergeUniquePairMaps
-            [ Map.singleton identityName displayName,
-              boundPairs displayMb identityMb,
-              boundBinderPairs displayBody identityBody
-            ]
-        (STMu displayName displayBody, STMu identityName identityBody) ->
-          mergeUniquePairMaps [Map.singleton identityName displayName, boundBinderPairs displayBody identityBody]
-        _ ->
-          Map.empty
-
-    pairsFromArgs displayArgs identityArgs =
-      mergeUniquePairMaps (zipWith boundBinderPairs (NE.toList displayArgs) (NE.toList identityArgs))
-
-    boundPairs displayMb identityMb =
-      case (displayMb, identityMb) of
-        (Just (SrcBound displayBound), Just (SrcBound identityBound)) ->
-          boundBinderPairs displayBound identityBound
-        _ ->
-          Map.empty
 
 sourceTypeBinderRefsInScope :: Map String SymbolIdentity -> ElaborateScope -> Map String X.TypeBinderRef -> SrcTy n v -> (Map String X.TypeBinderRef, IdentityGenerator)
 sourceTypeBinderRefsInScope headIdentities scope baseRefs ty =
