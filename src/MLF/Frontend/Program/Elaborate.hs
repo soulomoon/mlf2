@@ -3118,38 +3118,15 @@ constructorInfoWithArgs ctorInfo args =
 
 constructorOccurrenceTypeView :: ElaborateScope -> ConstructorInfo -> Int -> TypeView
 constructorOccurrenceTypeView scope ctorInfo argCount =
-  let view = constructorTypeView scope ctorInfo
-      (displayArgs, displayResult) = splitArrows (snd (splitForalls (typeViewDisplay view)))
-      (identityArgs, identityResult) = splitArrows (snd (splitForalls (typeViewIdentity view)))
-   in view
-        { typeViewDisplay = foldr STArrow displayResult (drop argCount displayArgs),
-          typeViewIdentity = foldr STArrow identityResult (drop argCount identityArgs)
-        }
+  typeViewArrowResultViewForArity (constructorTypeView scope ctorInfo) argCount
 
 constructorArgTypeViews :: ElaborateScope -> ConstructorInfo -> [TypeView]
 constructorArgTypeViews scope ctorInfo =
-  let view = constructorTypeView scope ctorInfo
-      (displayArgs, _) = splitArrows (snd (splitForalls (typeViewDisplay view)))
-      (identityArgs, _) = splitArrows (snd (splitForalls (typeViewIdentity view)))
-   in zipWith
-        ( \displayTy identityTy ->
-            view
-              { typeViewDisplay = displayTy,
-                typeViewIdentity = identityTy
-              }
-        )
-        displayArgs
-        identityArgs
+  typeViewArrowArgViews (constructorTypeView scope ctorInfo)
 
 constructorResultTypeView :: ElaborateScope -> ConstructorInfo -> TypeView
 constructorResultTypeView scope ctorInfo =
-  let view = constructorTypeView scope ctorInfo
-      (_, displayResult) = splitArrows (snd (splitForalls (typeViewDisplay view)))
-      (_, identityResult) = splitArrows (snd (splitForalls (typeViewIdentity view)))
-   in view
-        { typeViewDisplay = displayResult,
-          typeViewIdentity = identityResult
-        }
+  typeViewArrowResultView (constructorTypeView scope ctorInfo)
 
 constructorTypeView :: ElaborateScope -> ConstructorInfo -> TypeView
 constructorTypeView scope ctorInfo =

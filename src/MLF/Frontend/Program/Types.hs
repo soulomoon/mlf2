@@ -155,6 +155,9 @@ module MLF.Frontend.Program.Types
     methodTypeIdentity,
     lookupMethodParamViewSubst,
     methodTypeView,
+    typeViewArrowArgViews,
+    typeViewArrowResultView,
+    typeViewArrowResultViewForArity,
     methodParamTypeViews,
     methodResultTypeViewFrom,
     methodResultTypeView,
@@ -1944,23 +1947,11 @@ constructorShapeForallsIdentity =
 
 constructorShapeArgViews :: ConstructorShape -> [TypeView]
 constructorShapeArgViews shape =
-  zipWith (projectTypeView view) displayArgs identityArgs
-  where
-    view = constructorShapeTypeView shape
-    (_, displayBody) = splitForalls (typeViewDisplay view)
-    (_, identityBody) = splitForalls (typeViewIdentity view)
-    (displayArgs, _) = splitArrows displayBody
-    (identityArgs, _) = splitArrows identityBody
+  typeViewArrowArgViews (constructorShapeTypeView shape)
 
 constructorShapeResultView :: ConstructorShape -> TypeView
 constructorShapeResultView shape =
-  projectTypeView view displayResult identityResult
-  where
-    view = constructorShapeTypeView shape
-    (_, displayBody) = splitForalls (typeViewDisplay view)
-    (_, identityBody) = splitForalls (typeViewIdentity view)
-    (_, displayResult) = splitArrows displayBody
-    (_, identityResult) = splitArrows identityBody
+  typeViewArrowResultView (constructorShapeTypeView shape)
 
 constructorShapeArgs :: ConstructorShape -> [SrcType]
 constructorShapeArgs =
@@ -2016,23 +2007,11 @@ ctorArgs =
 
 constructorInfoArgViews :: ConstructorInfo -> [TypeView]
 constructorInfoArgViews ctorInfo =
-  zipWith (projectTypeView view) displayArgs identityArgs
-  where
-    view = ctorTypeView ctorInfo
-    (_, displayBody) = splitForalls (typeViewDisplay view)
-    (_, identityBody) = splitForalls (typeViewIdentity view)
-    (displayArgs, _) = splitArrows displayBody
-    (identityArgs, _) = splitArrows identityBody
+  typeViewArrowArgViews (ctorTypeView ctorInfo)
 
 constructorInfoResultView :: ConstructorInfo -> TypeView
 constructorInfoResultView ctorInfo =
-  projectTypeView view displayResult identityResult
-  where
-    view = ctorTypeView ctorInfo
-    (_, displayBody) = splitForalls (typeViewDisplay view)
-    (_, identityBody) = splitForalls (typeViewIdentity view)
-    (_, displayResult) = splitArrows displayBody
-    (_, identityResult) = splitArrows identityBody
+  typeViewArrowResultView (ctorTypeView ctorInfo)
 
 ctorResult :: ConstructorInfo -> SrcType
 ctorResult =
@@ -3088,8 +3067,8 @@ methodParamStableBinderIdentities methodInfo =
     | identity <- NE.toList (methodParamBinderIdentities methodInfo)
     ]
 
-methodParamTypeViews :: TypeView -> [TypeView]
-methodParamTypeViews view =
+typeViewArrowArgViews :: TypeView -> [TypeView]
+typeViewArrowArgViews view =
   zipWith (projectTypeView view) displayParamTys identityParamTys
   where
     (_, displayBodyTy) = splitForalls (typeViewDisplay view)
@@ -3097,18 +3076,35 @@ methodParamTypeViews view =
     (_, identityBodyTy) = splitForalls (typeViewIdentity view)
     (identityParamTys, _) = splitArrows identityBodyTy
 
-methodResultTypeView :: MethodInfo -> TypeView
-methodResultTypeView methodInfo =
-  methodResultTypeViewFrom (methodTypeView methodInfo)
-
-methodResultTypeViewFrom :: TypeView -> TypeView
-methodResultTypeViewFrom view =
+typeViewArrowResultView :: TypeView -> TypeView
+typeViewArrowResultView view =
   projectTypeView view displayResult identityResult
   where
     (_, displayBody) = splitForalls (typeViewDisplay view)
     (_, identityBody) = splitForalls (typeViewIdentity view)
     (_, displayResult) = splitArrows displayBody
     (_, identityResult) = splitArrows identityBody
+
+typeViewArrowResultViewForArity :: TypeView -> Int -> TypeView
+typeViewArrowResultViewForArity view argCount =
+  projectTypeView view displayTy identityTy
+  where
+    (displayArgs, displayResult) = splitArrows (snd (splitForalls (typeViewDisplay view)))
+    (identityArgs, identityResult) = splitArrows (snd (splitForalls (typeViewIdentity view)))
+    displayTy = foldr STArrow displayResult (drop argCount displayArgs)
+    identityTy = foldr STArrow identityResult (drop argCount identityArgs)
+
+methodParamTypeViews :: TypeView -> [TypeView]
+methodParamTypeViews =
+  typeViewArrowArgViews
+
+methodResultTypeView :: MethodInfo -> TypeView
+methodResultTypeView methodInfo =
+  methodResultTypeViewFrom (methodTypeView methodInfo)
+
+methodResultTypeViewFrom :: TypeView -> TypeView
+methodResultTypeViewFrom =
+  typeViewArrowResultView
 
 projectTypeView :: TypeView -> SrcType -> SrcType -> TypeView
 projectTypeView view displayTy identityTy =

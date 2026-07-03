@@ -282,6 +282,21 @@ spec = do
       Map.lookup "Token" (typeViewHeadIdentities resultView) `shouldBe` Just tokenTypeIdentity
       Map.lookup "Bool" (typeViewHeadIdentities resultView) `shouldBe` Nothing
 
+    it "keeps partial arrow result head identities through display pairs" $ do
+      let stableToken = symbolIdentityStableName tokenTypeIdentity
+          view =
+            ( mkTypeView
+                (STArrow (STBase "Bool") (STArrow (STBase "Char") (STBase "Token")))
+                (STArrow (STBase "Bool") (STArrow (STBase "Char") (STBase stableToken)))
+            )
+              { typeViewHeadIdentities = Map.singleton stableToken tokenTypeIdentity
+              }
+          resultView = typeViewArrowResultViewForArity view 1
+
+      typeViewDisplay resultView `shouldBe` STArrow (STBase "Char") (STBase "Token")
+      Map.lookup "Token" (typeViewHeadIdentities resultView) `shouldBe` Just tokenTypeIdentity
+      Map.lookup "Bool" (typeViewHeadIdentities resultView) `shouldBe` Nothing
+
     it "keys method parameter binder identities by stable names" $ do
       let bodyIdentity = typeBinderIdentityFromUnique (UniqueIdentity 206)
           paramIdentity = typeBinderIdentityFromUnique (UniqueIdentity 207)
