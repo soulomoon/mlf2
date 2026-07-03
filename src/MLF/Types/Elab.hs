@@ -178,16 +178,17 @@ import qualified MLF.Primitive.Identity as PrimitiveIdentity
 import MLF.Types.Identity
     ( ConstructorRef
     , DeferredRef
-    , EnvRef
     , IdDetails(..)
     , IdentityGenerator
     , LocalRef
+    , ResolvedTermIdentityKey
     , TypeBinderIdentity
     , UniqueIdentity(..)
     , idDetailsConstructorRef
     , idDetailsDisplayName
     , idDetailsGeneratedIdentities
     , idDetailsBindingSymbolIdentity
+    , idDetailsIdentityKey
     , idDetailsLocalRef
     , idDetailsIsEvidence
     , idDetailsIsDiscard
@@ -196,13 +197,11 @@ import MLF.Types.Identity
     , idDetailsReferenceName
     , idDetailsSameIdentity
     , idDetailsSymbolIdentity
-    , constructorRefSymbol
     , freshIdentity
     , freshenLocalRef
     , identityGeneratorAfter
     , deferredRefName
     , localRefName
-    , primitiveRefSymbol
     , renameDeferredRef
     , symbolGeneratedIdentities
     , typeBinderGeneratedIdentities
@@ -603,28 +602,6 @@ data ResolvedVar = ResolvedVar
       resolvedVarDetails :: IdDetails
     }
     deriving (Show)
-
-data ResolvedTermIdentityKey
-    = ResolvedTermLocalKey LocalRef
-    | ResolvedTermEnvKey EnvRef
-    | ResolvedTermTopLevelKey SymbolIdentity
-    | ResolvedTermConstructorKey SymbolIdentity
-    | ResolvedTermMethodKey SymbolIdentity
-    | ResolvedTermPrimitiveKey SymbolIdentity
-    | ResolvedTermDeferredKey DeferredRef
-    deriving (Eq, Ord, Show)
-
-idDetailsIdentityKey :: IdDetails -> ResolvedTermIdentityKey
-idDetailsIdentityKey details =
-    case details of
-        LocalId ref -> ResolvedTermLocalKey ref
-        EvidenceId ref -> ResolvedTermLocalKey ref
-        EnvId ref -> ResolvedTermEnvKey ref
-        TopLevelId symbol -> ResolvedTermTopLevelKey symbol
-        ConstructorId ref -> ResolvedTermConstructorKey (constructorRefSymbol ref)
-        MethodId symbol -> ResolvedTermMethodKey symbol
-        PrimitiveId ref -> ResolvedTermPrimitiveKey (primitiveRefSymbol ref)
-        DeferredId ref -> ResolvedTermDeferredKey ref
 
 resolvedVarIdentityKey :: ResolvedVar -> ResolvedTermIdentityKey
 resolvedVarIdentityKey =

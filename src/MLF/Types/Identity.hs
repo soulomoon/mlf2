@@ -50,6 +50,8 @@ module MLF.Types.Identity
     constructorRefFromSymbol,
     constructorRefSymbol,
     IdDetails (..),
+    ResolvedTermIdentityKey (..),
+    idDetailsIdentityKey,
     idDetailsReferenceName,
     idDetailsDisplayName,
     idDetailsConstructorRef,
@@ -337,6 +339,28 @@ data IdDetails
 instance Eq IdDetails where
   left == right =
     idDetailsSameIdentity left right
+
+data ResolvedTermIdentityKey
+  = ResolvedTermLocalKey LocalRef
+  | ResolvedTermEnvKey EnvRef
+  | ResolvedTermTopLevelKey SymbolIdentity
+  | ResolvedTermConstructorKey SymbolIdentity
+  | ResolvedTermMethodKey SymbolIdentity
+  | ResolvedTermPrimitiveKey SymbolIdentity
+  | ResolvedTermDeferredKey DeferredRef
+  deriving (Eq, Ord, Show)
+
+idDetailsIdentityKey :: IdDetails -> ResolvedTermIdentityKey
+idDetailsIdentityKey details =
+  case details of
+    LocalId ref -> ResolvedTermLocalKey ref
+    EvidenceId ref -> ResolvedTermLocalKey ref
+    EnvId ref -> ResolvedTermEnvKey ref
+    TopLevelId symbol -> ResolvedTermTopLevelKey symbol
+    ConstructorId ref -> ResolvedTermConstructorKey (constructorRefSymbol ref)
+    MethodId symbol -> ResolvedTermMethodKey symbol
+    PrimitiveId ref -> ResolvedTermPrimitiveKey (primitiveRefSymbol ref)
+    DeferredId ref -> ResolvedTermDeferredKey ref
 
 idDetailsReferenceName :: String -> IdDetails -> String
 idDetailsReferenceName runtimeName details =
