@@ -211,6 +211,7 @@ import MLF.Frontend.Program.Types
     exportedTypesForDisplay,
     exportedTypeConstructorsForDisplay,
     exportedValuesForDisplay,
+    filterBinderIdentitiesByNames,
     mkResolvedSymbol,
     resolvedSymbolIdentity,
     resolvedProgramSemanticArtifact,
@@ -230,6 +231,7 @@ import MLF.Frontend.Program.Types
     splitForalls,
     typeBinderAliasIdentityMap,
     typeParamBinderIdentity,
+    typeViewBinderIdentityAliasEntries,
     typeViewBinderIdentityForAlias,
     typeViewHeadIdentityForAlias,
     typeViewFromResolved,
@@ -2475,7 +2477,10 @@ hydrateTypeViewBinderIdentitiesFromView sourceView view =
     { typeViewBinderIdentities =
         mergeTypeBinderIdentityMaps
           [ typeViewBinderIdentities view,
-            typeBinderAliasIdentityMap binderAliases
+            filterBinderIdentitiesByNames
+              freeNames
+              (typeViewBinderIdentityAliasEntries sourceView)
+              (typeBinderAliasIdentityMap binderAliases)
           ]
     }
   where
