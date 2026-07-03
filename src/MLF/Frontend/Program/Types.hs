@@ -23,6 +23,7 @@ module MLF.Frontend.Program.Types
     typeViewHeadIdentityForAlias,
     typeViewBinderIdentityForAlias,
     typeViewBinderIdentityAliasEntries,
+    filterBinderIdentitiesByNames,
     filterHeadIdentitiesByNames,
     typeViewMentionedHeadIdentities,
     typeViewVarPairs,

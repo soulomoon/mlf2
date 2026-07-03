@@ -94,6 +94,7 @@ import MLF.Frontend.Program.Types
     deferredMethodName,
     diagnosticForProgramError,
     emptyTypeBinderSubst,
+    filterBinderIdentitiesByNames,
     filterHeadIdentitiesByNames,
     freeTypeBinderIdentitiesTypeViews,
     freeTypeVarsTypeView,
@@ -114,8 +115,6 @@ import MLF.Frontend.Program.Types
     splitForalls,
     typeBinderAliasIdentityMap,
     typeHeadNamesSrcType,
-    typeViewVarPairs,
-    typeViewBinderIdentityForAlias,
     typeViewHeadPairs,
     typeViewHeadIdentityForAlias,
     typeViewSubstFromParamIdentities,
@@ -2873,19 +2872,10 @@ substDataParamView sourceView subst view =
       typeViewHeadPairs sourceView
     sourceHeadIdentities = typeViewHeadIdentities sourceView
     sourceBinderIdentitiesFor names =
-      typeBinderAliasIdentityMap
-        [ (name, identity)
-        | name <- Set.toList (names <> pairedSourceBinderNames names),
-          Just identity <- [typeViewBinderIdentityForAlias sourceView name]
-        ]
-    pairedSourceBinderNames names =
-      Set.fromList
-        [ displayName
-        | identityName <- Set.toList names,
-          Just displayName <- [Map.lookup identityName sourceBinderPairs]
-        ]
-    sourceBinderPairs =
-      typeViewVarPairs sourceView
+      filterBinderIdentitiesByNames
+        names
+        (typeViewBinderIdentityAliasEntries sourceView)
+        (typeViewBinderIdentities sourceView)
 
 displayTypeFromRuntimeHeadPairs :: Map.Map String String -> SrcType -> SrcType
 displayTypeFromRuntimeHeadPairs pairs =
