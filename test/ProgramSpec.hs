@@ -2986,6 +2986,48 @@ spec = do
                 checked' = replaceCheckedBindingTerm "Main__main" churchNone checked
             (programRunOutput <$> runCheckedProgramOutput checked') `shouldBe` Right "None\n"
 
+        it "does not decode Church data through duplicate handler identities" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (Option(..), main) {"
+                        , "  data Option ="
+                        , "      None : Option"
+                        , "    | Some : Int -> Option;"
+                        , ""
+                        , "  def main : Option = None;"
+                        , "}"
+                        ]
+            checked <- requireChecked (withPrelude program)
+            let handlerType = testTVar "r"
+                handlerArgType = Elab.TBase (BaseTy "Int")
+                handlerRef = generatedLocalRefForName "$Option-handler"
+                noneHandler =
+                    ResolvedVar
+                        { resolvedVarRuntimeName = "none-handler"
+                        , resolvedVarType = handlerType
+                        , resolvedVarDetails = LocalId handlerRef
+                        }
+                someHandler =
+                    noneHandler
+                        { resolvedVarRuntimeName = "some-handler"
+                        , resolvedVarType = Elab.TArrow handlerArgType handlerType
+                        , resolvedVarDetails =
+                            LocalId (renameLocalRef "$same-option-handler" handlerRef)
+                        }
+                occurrence =
+                    noneHandler
+                        { resolvedVarRuntimeName = "selected-handler"
+                        , resolvedVarDetails =
+                            LocalId (renameLocalRef "$selected-option-handler" handlerRef)
+                        }
+                churchAmbiguous =
+                    mkTestTyAbs "r" Nothing $
+                        Elab.ELam noneHandler $
+                            Elab.ELam someHandler (Elab.EVarNode occurrence)
+                checked' = replaceCheckedBindingTerm "Main__main" churchAmbiguous checked
+            (programRunOutput <$> runCheckedProgramOutput checked') `shouldNotBe` Right "None\n"
+
         it "decodes Church data using checked source type head identity metadata" $ do
             program <-
                 requireParsed $

@@ -3062,8 +3062,8 @@ decodeArg context view term =
 lookupByHandler :: [ResolvedVar] -> [ConstructorInfo] -> ResolvedVar -> Maybe ConstructorInfo
 lookupByHandler handlerNames constructors selected =
   case [ctor | (handlerName, ctor) <- zip handlerNames constructors, resolvedVarSameIdentity handlerName selected] of
-    ctor : _ -> Just ctor
-    [] -> Nothing
+    [ctor] -> Just ctor
+    _ -> Nothing
 
 collectLeadingLams :: XmlfTerm -> ([ResolvedVar], XmlfTerm)
 collectLeadingLams = go []
