@@ -171,11 +171,13 @@ callableBindingKindForHead =
       BackendCallableBindingUnknown
 
 collapseCallableHeads :: [BackendCallableHead] -> BackendCallableHead
+collapseCallableHeads [] =
+  BackendClosureCallableHead unknownClosureHeadRef
 collapseCallableHeads heads
   | all isClosureHead heads =
-      BackendClosureCallableHead (firstClosureHeadRef heads)
+      BackendClosureCallableHead (sameClosureHeadRef heads)
   | all isDirectHead heads =
-      BackendDirectCallableHead (firstDirectHeadRef heads)
+      BackendDirectCallableHead (sameDirectHeadRef heads)
   | otherwise =
       BackendUnknownCallableHead
   where
@@ -189,24 +191,28 @@ collapseCallableHeads heads
         BackendDirectCallableHead _ -> True
         _ -> False
 
-firstClosureHeadRef :: [BackendCallableHead] -> BackendCallableRef
-firstClosureHeadRef =
-  go
-  where
-    go [] =
-      backendCallableClosureRef Nothing "__mlfp_unknown_closure_head"
-    go (BackendClosureCallableHead ref : _) =
-      ref
-    go (_ : rest) =
-      go rest
+sameClosureHeadRef :: [BackendCallableHead] -> BackendCallableRef
+sameClosureHeadRef heads =
+  case [ref | BackendClosureCallableHead ref <- heads] of
+    ref : rest
+      | all (backendCallableRefMatches ref) rest -> ref
+    _ -> unknownClosureHeadRef
 
-firstDirectHeadRef :: [BackendCallableHead] -> Maybe BackendCallableRef
-firstDirectHeadRef =
-  go
-  where
-    go [] =
-      Nothing
-    go (BackendDirectCallableHead (Just ref) : _) =
-      Just ref
-    go (_ : rest) =
-      go rest
+sameDirectHeadRef :: [BackendCallableHead] -> Maybe BackendCallableRef
+sameDirectHeadRef heads =
+  case [ref | BackendDirectCallableHead ref <- heads] of
+    ref : rest
+      | all (directHeadRefMatches ref) rest -> ref
+    _ -> Nothing
+
+directHeadRefMatches :: Maybe BackendCallableRef -> Maybe BackendCallableRef -> Bool
+directHeadRefMatches (Just left) (Just right) =
+  backendCallableRefMatches left right
+directHeadRefMatches Nothing Nothing =
+  True
+directHeadRefMatches _ _ =
+  False
+
+unknownClosureHeadRef :: BackendCallableRef
+unknownClosureHeadRef =
+  backendCallableClosureRef Nothing "__mlfp_unknown_closure_head"

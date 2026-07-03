@@ -3283,7 +3283,7 @@ spec = describe "MLF.Backend.LLVM" $ do
 
   it "rejects BackendApp heads that select closure values through let or case" $ do
     renderBackendProgramLLVM caseHeadedDirectClosureBackendAppProgram
-      `shouldSatisfyLeft` isInfixOf "Backend LLVM validation failed: BackendClosureCalledWithBackendApp \"__mlfp_closure$backend_app_case_some\""
+      `shouldSatisfyLeft` isInfixOf "Backend LLVM validation failed: BackendClosureCalledWithBackendApp \"__mlfp_unknown_closure_head\""
     renderBackendProgramLLVM letHeadedDirectClosureBackendAppProgram
       `shouldSatisfyLeft` isInfixOf "Backend LLVM validation failed: BackendClosureCalledWithBackendApp \"__mlfp_closure$backend_app_let\""
 

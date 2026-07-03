@@ -4,7 +4,7 @@ import Control.Monad (forM_)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import MLF.Backend.CallableShape (backendCallableRef)
+import MLF.Backend.CallableShape (backendCallableRef, backendCallableRefName)
 import MLF.Backend.IR
 import MLF.Backend.StructuralRecursiveData (structuralDataDeclarationMatches)
 import MLF.Constraint.Types.Graph (BaseTy (..), NodeId (..))
@@ -1173,6 +1173,31 @@ spec = describe "MLF.Backend.IR" $ do
 
     backendCallableHead (\_ _ -> BackendCallableBindingUnknown) stableClosure
       `shouldBe` backendCallableHead (\_ _ -> BackendCallableBindingUnknown) staleClosure
+
+  it "does not pick an arbitrary callable ref when case heads differ" $ do
+    let leftIdentity = LocalId (localRefFromIdentity (GeneratedLocalId (UniqueIdentity 991617)) "f")
+        rightIdentity = LocalId (localRefFromIdentity (GeneratedLocalId (UniqueIdentity 991618)) "f")
+        directCase =
+          BackendCase
+            intTy
+            (intLit 0)
+            ( BackendAlternative BackendDefaultPattern (BackendVarWithIdentity intTy (Just leftIdentity) "f")
+                :| [BackendAlternative BackendDefaultPattern (BackendVarWithIdentity intTy (Just rightIdentity) "f")]
+            )
+        closureCase =
+          BackendCase
+            intTy
+            (intLit 0)
+            ( BackendAlternative BackendDefaultPattern (BackendClosureWithParamIdentities intTy (Just (UniqueIdentity 991619)) "left" [] [] (intLit 0))
+                :| [BackendAlternative BackendDefaultPattern (BackendClosureWithParamIdentities intTy (Just (UniqueIdentity 991620)) "right" [] [] (intLit 0))]
+            )
+    backendCallableHead (\_ _ -> BackendCallableBindingDirect) directCase
+      `shouldBe` BackendDirectCallableHead Nothing
+    case backendCallableHead (\_ _ -> BackendCallableBindingUnknown) closureCase of
+      BackendClosureCallableHead ref ->
+        backendCallableRefName ref `shouldBe` "__mlfp_unknown_closure_head"
+      other ->
+        expectationFailure ("expected closure callable head, got " ++ show other)
 
   it "compares backend binder records by identity when names are stale" $ do
     let identity = LocalId (localRefFromIdentity (GeneratedLocalId (UniqueIdentity 991607)) "x")
