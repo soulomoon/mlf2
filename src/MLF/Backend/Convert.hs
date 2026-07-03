@@ -194,7 +194,7 @@ import MLF.Frontend.Program.Types
 import MLF.Frontend.Symbol (lookupSymbolIdentityAlias, symbolIdentityAliasMap, symbolIdentityAliasNames, symbolIdentityStableName, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit, SrcBound (..), SrcTy (..), SrcType)
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
-import MLF.Types.Identity (DeferredRef, IdDetails (..), IdentityGenerator, LocalRef, StructuralTypeBinderRole (..), UniqueIdentity (..), advanceIdentityGeneratorPast, deferredRefIdentity, deferredRefName, freshDeferredRef, freshIdentity, freshLocalRef, idDetailsGeneratedIdentities, idDetailsSymbolIdentity, identityGeneratorAfter, symbolGeneratedIdentities, typeBinderIdentityFromStructural, typeBinderIdentityNode, typeBinderIdentityStructural)
+import MLF.Types.Identity (DeferredRef, IdDetails (..), IdentityGenerator, LocalRef, StructuralTypeBinderRole (..), UniqueIdentity (..), advanceIdentityGeneratorPast, deferredRefIdentity, deferredRefName, freshDeferredRef, freshIdentity, freshLocalRef, idDetailsGeneratedIdentities, idDetailsSymbolIdentity, identityGeneratorAfter, symbolGeneratedIdentities, typeBinderIdentityAliasNames, typeBinderIdentityFromStructural, typeBinderIdentityNode, typeBinderIdentityStructural)
 import MLF.Util.Names (freshNameLike)
 
 data BackendConversionError
@@ -3020,11 +3020,15 @@ lookupSourceTypeVar identity backendName sourceName typeVars =
       lookupConstructorTypeVar Nothing sourceName typeVars
 
 constructorTypeVarAliasKeys :: Maybe TypeBinderIdentity -> [String] -> [BackendTypeSubstitutionKey]
-constructorTypeVarAliasKeys identity =
-  map keyFor
+constructorTypeVarAliasKeys identity names =
+  map keyFor (aliasNames identity)
   where
     keyFor =
       backendTypeSubstitutionKeyFor identity
+    aliasNames =
+      \case
+        Just resolvedIdentity -> nub (concatMap (`typeBinderIdentityAliasNames` resolvedIdentity) names)
+        Nothing -> filter (not . null) names
 
 zipWithNE :: (a -> b -> c) -> NonEmpty a -> NonEmpty b -> NonEmpty c
 zipWithNE f (a :| as) (b :| bs) =
@@ -3122,7 +3126,10 @@ convertSourceTypeViewWithIdentities view =
     insertBinderIdentityAliases identityName displayName identity binderIdentities =
       case identity of
         Just resolvedIdentity ->
-          foldr (`Map.insert` resolvedIdentity) binderIdentities [identityName, displayName]
+          foldr
+            (`Map.insert` resolvedIdentity)
+            binderIdentities
+            (typeBinderIdentityAliasNames identityName resolvedIdentity <> typeBinderIdentityAliasNames displayName resolvedIdentity)
         Nothing ->
           binderIdentities
 

@@ -565,6 +565,36 @@ spec = describe "MLF.Backend.Convert" $ do
       other ->
         expectationFailure ("expected source identity-backed backend type abstraction, got " ++ show other)
 
+  it "resolves checked source type binder occurrences through stable aliases under stale declaration names" $ do
+    checked0 <- requireChecked simpleFunctionProgram
+    let sourceIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991636)
+        sourceStableName = typeBinderIdentityStableName sourceIdentity
+        displayTy = STForall "a" Nothing (STArrow (STVar "a") (STBase "Int"))
+        identityTy = STForall "$stale_a" Nothing (STArrow (STVar sourceStableName) (STBase "Int"))
+        checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingSourceTypeView =
+                      (mkTypeView displayTy identityTy)
+                        { typeViewBinderIdentities =
+                            Map.singleton "a" sourceIdentity
+                        },
+                    checkedBindingType = Elab.TForallRef sameNamedOuterTypeRef Nothing (Elab.TArrow (Elab.TVarRef sameNamedOuterTypeRef) intElabTy),
+                    checkedBindingTerm = Elab.ETyAbsRef sameNamedOuterTypeRef Nothing (mkTestLocalLam "x" (Elab.TVarRef sameNamedOuterTypeRef) (Elab.ELit (LInt 1)))
+                  }
+            )
+            checked0
+    backend <- requireRight (convertCheckedProgram checked)
+
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    backendBindingType mainBinding
+      `shouldBe` BTForallWithIdentity
+        (Just sourceIdentity)
+        "a"
+        Nothing
+        (BTArrow (BTVarWithIdentity (Just sourceIdentity) "a") intTy)
+
   it "uses checked source type binder identities when identity names are stale" $ do
     checked0 <- requireChecked simpleFunctionProgram
     let sourceIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991608)
