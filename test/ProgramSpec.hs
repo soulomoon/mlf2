@@ -4973,7 +4973,8 @@ spec = do
                 firstIdentity = generatedSymbolIdentity 1 SymbolValue "Main" "first" Nothing
                 secondIdentity = generatedSymbolIdentity 2 SymbolValue "Main" "second" Nothing
                 dataIdentity = generatedSymbolIdentity 3 SymbolType "Main" "Phantom" Nothing
-                occupiedLocal = localRefFromIdentity (GeneratedLocalId (UniqueIdentity 4)) "x"
+                occupiedRuntimeLocal = localRefFromIdentity (GeneratedLocalId (UniqueIdentity 4)) "x"
+                sourceLocal = localRefFromNodeId "source_x" (NodeId 0)
                 phantomData =
                     DataInfo
                         { dataInfoSymbol = dataIdentity
@@ -5010,7 +5011,7 @@ spec = do
                         "Main__first"
                         firstIdentity
                         1
-                        [ProgramTypes.LoweredResolvedLocalIdentity occupiedLocal occupiedLocal]
+                        [ProgramTypes.LoweredResolvedLocalIdentity occupiedRuntimeLocal sourceLocal]
                     , lowered "Main__second" secondIdentity 2 []
                     ] of
                     Right bindings -> pure bindings

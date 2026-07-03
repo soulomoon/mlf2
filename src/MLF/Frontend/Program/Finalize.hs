@@ -1884,8 +1884,9 @@ generatedIdentitiesInLoweredBinding lowered =
     ++ concatMap typeViewGeneratedIdentities (Map.elems (loweredBindingExternalTypeViews lowered))
 
 generatedIdentitiesInLoweredResolvedLocalIdentity :: LoweredResolvedLocalIdentity -> [UniqueIdentity]
-generatedIdentitiesInLoweredResolvedLocalIdentity =
-  localRefGeneratedIdentities . loweredResolvedLocalRef
+generatedIdentitiesInLoweredResolvedLocalIdentity identity =
+  localRefGeneratedIdentities (loweredResolvedLocalRuntimeRef identity)
+    ++ localRefGeneratedIdentities (loweredResolvedLocalRef identity)
 
 generatedIdentitiesInDeferredObligations :: LoweredBinding -> [UniqueIdentity]
 generatedIdentitiesInDeferredObligations lowered =
