@@ -271,6 +271,17 @@ spec = do
       map typeViewHeadIdentities (methodParamTypeViews (methodTypeView methodInfo))
         `shouldBe` [Map.singleton "Token" tokenTypeIdentity]
 
+    it "keeps projected method result head identities through display pairs" $ do
+      let stableToken = symbolIdentityStableName tokenTypeIdentity
+          view =
+            (mkTypeView (STArrow (STBase "Bool") (STBase "Token")) (STArrow (STBase "Bool") (STBase stableToken)))
+              { typeViewHeadIdentities = Map.singleton stableToken tokenTypeIdentity
+              }
+          resultView = methodResultTypeViewFrom view
+
+      Map.lookup "Token" (typeViewHeadIdentities resultView) `shouldBe` Just tokenTypeIdentity
+      Map.lookup "Bool" (typeViewHeadIdentities resultView) `shouldBe` Nothing
+
     it "keys method parameter binder identities by stable names" $ do
       let bodyIdentity = typeBinderIdentityFromUnique (UniqueIdentity 206)
           paramIdentity = typeBinderIdentityFromUnique (UniqueIdentity 207)

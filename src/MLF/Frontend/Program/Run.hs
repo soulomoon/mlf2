@@ -101,7 +101,9 @@ import MLF.Frontend.Program.Types
     lookupMethodParamViewSubst,
     methodType,
     methodTypeView,
+    methodParamTypeViews,
     methodResultTypeView,
+    methodResultTypeViewFrom,
     methodInfoOwnerClassSymbolIdentity,
     methodInfoSymbolIdentity,
     methodParamBinderIdentities,
@@ -1706,7 +1708,7 @@ inferRuntimeMethodClassArgumentFromArgs context methodInfo argViews = do
     foldM
       (\acc (templateView, actualView) -> matchMethodTypeViews scope acc (NE.singleton templateView) (NE.singleton actualView))
       Map.empty
-      (zip (methodParamViews methodView) argViews)
+      (zip (methodParamTypeViews methodView) argViews)
   NE.head <$> lookupMethodParamViewSubst methodInfo subst
   where
     scope = runtimeElaborateScope context
@@ -1721,7 +1723,7 @@ inferRuntimeMethodClassArgumentFromExpected context methodInfo argViews (Just ex
     foldM
       (\acc (templateView, actualView) -> matchMethodTypeViews scope acc (NE.singleton templateView) (NE.singleton actualView))
       Map.empty
-      (zip (methodParamViews methodView) argViews)
+      (zip (methodParamTypeViews methodView) argViews)
   subst <- matchMethodTypeViews scope substFromArgs (NE.singleton (methodResultTypeView methodInfo)) (NE.singleton expectedView)
   NE.head <$> lookupMethodParamViewSubst methodInfo subst
 
@@ -1735,7 +1737,7 @@ inferRuntimeNullaryMethodClassArgument context methodInfo expectedView
 
 inferRuntimeNullaryMethodSubst :: RuntimeContext -> MethodInfo -> TypeView -> TypeViewSubst -> TypeView -> Maybe TypeViewSubst
 inferRuntimeNullaryMethodSubst context methodInfo classArgView subst expectedView =
-  matchMethodTypeViews scope subst (NE.singleton (methodResultView specializedMethodView)) (NE.singleton expectedView)
+  matchMethodTypeViews scope subst (NE.singleton (methodResultTypeViewFrom specializedMethodView)) (NE.singleton expectedView)
   where
     scope = runtimeElaborateScope context
     specializedMethodView = specializeMethodTypeView methodInfo (NE.singleton classArgView)
@@ -1745,36 +1747,10 @@ inferRuntimeMethodArgumentSubst context methodInfo classArgView subst argViews =
   foldM
     (\acc (templateView, actualView) -> matchMethodTypeViews scope acc (NE.singleton templateView) (NE.singleton actualView))
     subst
-    (zip (methodParamViews specializedMethodView) argViews)
+    (zip (methodParamTypeViews specializedMethodView) argViews)
   where
     scope = runtimeElaborateScope context
     specializedMethodView = specializeMethodTypeView methodInfo (NE.singleton classArgView)
-
-methodResultView :: TypeView -> TypeView
-methodResultView view =
-  view
-    { typeViewDisplay = displayResult,
-      typeViewIdentity = identityResult
-    }
-  where
-    (_, displayBodyTy) = splitForalls (typeViewDisplay view)
-    (_, displayResult) = splitArrows displayBodyTy
-    (_, identityBodyTy) = splitForalls (typeViewIdentity view)
-    (_, identityResult) = splitArrows identityBodyTy
-
-methodParamViews :: TypeView -> [TypeView]
-methodParamViews view =
-  zipWith paramView displayParamTys identityParamTys
-  where
-    (_, displayBodyTy) = splitForalls (typeViewDisplay view)
-    (displayParamTys, _) = splitArrows displayBodyTy
-    (_, identityBodyTy) = splitForalls (typeViewIdentity view)
-    (identityParamTys, _) = splitArrows identityBodyTy
-    paramView displayTy identityTy =
-      view
-        { typeViewDisplay = displayTy,
-          typeViewIdentity = identityTy
-        }
 
 methodFullArityFromInfo :: MethodInfo -> Int
 methodFullArityFromInfo methodInfo =

@@ -156,6 +156,7 @@ module MLF.Frontend.Program.Types
     lookupMethodParamViewSubst,
     methodTypeView,
     methodParamTypeViews,
+    methodResultTypeViewFrom,
     methodResultTypeView,
     methodInfoOwnerClassSymbolIdentity,
     instanceClassName,
@@ -3098,9 +3099,12 @@ methodParamTypeViews view =
 
 methodResultTypeView :: MethodInfo -> TypeView
 methodResultTypeView methodInfo =
+  methodResultTypeViewFrom (methodTypeView methodInfo)
+
+methodResultTypeViewFrom :: TypeView -> TypeView
+methodResultTypeViewFrom view =
   projectTypeView view displayResult identityResult
   where
-    view = methodTypeView methodInfo
     (_, displayBody) = splitForalls (typeViewDisplay view)
     (_, identityBody) = splitForalls (typeViewIdentity view)
     (_, displayResult) = splitArrows displayBody
