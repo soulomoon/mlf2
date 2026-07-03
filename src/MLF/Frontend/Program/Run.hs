@@ -85,6 +85,8 @@ import MLF.Frontend.Program.Types
     checkedBindingSourceType,
     ctorName,
     ctorArgs,
+    constructorInfoArgViews,
+    constructorInfoResultView,
     classInfoIdentityQualifiedName,
     dataParamBinders,
     dataInfoIdentityName,
@@ -2860,44 +2862,6 @@ dataTypeSubst dataInfo view =
   where
     insertDataParam (displayName, identity) ty =
       insertTypeBinderSubstWithIdentity identity displayName ty
-
-constructorInfoArgViews :: ConstructorInfo -> [TypeView]
-constructorInfoArgViews ctorInfo =
-  zipWith argView displayArgs identityArgs
-  where
-    view = ctorTypeView ctorInfo
-    (_, displayBody) = splitForalls (typeViewDisplay view)
-    (_, identityBody) = splitForalls (typeViewIdentity view)
-    (displayArgs, _) = splitArrows displayBody
-    (identityArgs, _) = splitArrows identityBody
-
-    argView displayTy identityTy =
-      TypeView
-        { typeViewDisplay = displayTy,
-          typeViewIdentity = identityTy,
-          typeViewHeadIdentities =
-            filterHeadIdentitiesByNames
-              (typeHeadNamesSrcType identityTy <> typeHeadNamesSrcType displayTy)
-              (typeViewHeadIdentities view),
-          typeViewBinderIdentities = typeViewBinderIdentities view
-        }
-
-constructorInfoResultView :: ConstructorInfo -> TypeView
-constructorInfoResultView ctorInfo =
-  view
-    { typeViewDisplay = displayResult,
-      typeViewIdentity = identityResult,
-      typeViewHeadIdentities =
-        filterHeadIdentitiesByNames
-          (typeHeadNamesSrcType identityResult <> typeHeadNamesSrcType displayResult)
-          (typeViewHeadIdentities view)
-    }
-  where
-    view = ctorTypeView ctorInfo
-    (_, displayBody) = splitForalls (typeViewDisplay view)
-    (_, identityBody) = splitForalls (typeViewIdentity view)
-    (_, displayResult) = splitArrows displayBody
-    (_, identityResult) = splitArrows identityBody
 
 substDataParamView :: TypeView -> TypeBinderSubst -> TypeView -> TypeView
 substDataParamView sourceView subst view =

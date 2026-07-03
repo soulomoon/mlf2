@@ -239,7 +239,7 @@ spec = do
       typeViewHeadIdentities (methodTypeView methodInfo)
         `shouldBe` Map.singleton stableToken tokenTypeIdentity
       typeViewHeadIdentities (methodResultTypeView methodInfo)
-        `shouldBe` Map.singleton stableToken tokenTypeIdentity
+        `shouldBe` Map.fromList [(stableToken, tokenTypeIdentity), ("Token", tokenTypeIdentity)]
 
     it "keeps method result head identities by payload stable name" $ do
       let stableToken = symbolIdentityStableName tokenTypeIdentity

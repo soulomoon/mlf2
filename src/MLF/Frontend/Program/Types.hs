@@ -190,6 +190,8 @@ module MLF.Frontend.Program.Types
     ctorTypeIdentity,
     ctorForalls,
     ctorArgs,
+    constructorInfoArgViews,
+    constructorInfoResultView,
     ctorResult,
     DataInfo (..),
     FunctionalDependencyInfo (..),
@@ -2022,6 +2024,26 @@ ctorArgs :: ConstructorInfo -> [SrcType]
 ctorArgs =
   fst . splitArrows . snd . splitForalls . ctorType
 
+constructorInfoArgViews :: ConstructorInfo -> [TypeView]
+constructorInfoArgViews ctorInfo =
+  zipWith (projectTypeView view) displayArgs identityArgs
+  where
+    view = ctorTypeView ctorInfo
+    (_, displayBody) = splitForalls (typeViewDisplay view)
+    (_, identityBody) = splitForalls (typeViewIdentity view)
+    (displayArgs, _) = splitArrows displayBody
+    (identityArgs, _) = splitArrows identityBody
+
+constructorInfoResultView :: ConstructorInfo -> TypeView
+constructorInfoResultView ctorInfo =
+  projectTypeView view displayResult identityResult
+  where
+    view = ctorTypeView ctorInfo
+    (_, displayBody) = splitForalls (typeViewDisplay view)
+    (_, identityBody) = splitForalls (typeViewIdentity view)
+    (_, displayResult) = splitArrows displayBody
+    (_, identityResult) = splitArrows identityBody
+
 ctorResult :: ConstructorInfo -> SrcType
 ctorResult =
   snd . splitArrows . snd . splitForalls . ctorType
@@ -3078,40 +3100,32 @@ methodParamStableBinderIdentities methodInfo =
 
 methodParamTypeViews :: TypeView -> [TypeView]
 methodParamTypeViews view =
-  zipWith paramView displayParamTys identityParamTys
+  zipWith (projectTypeView view) displayParamTys identityParamTys
   where
     (_, displayBodyTy) = splitForalls (typeViewDisplay view)
     (displayParamTys, _) = splitArrows displayBodyTy
     (_, identityBodyTy) = splitForalls (typeViewIdentity view)
     (identityParamTys, _) = splitArrows identityBodyTy
-    paramView displayTy identityTy =
-      TypeView
-        { typeViewDisplay = displayTy,
-          typeViewIdentity = identityTy,
-          typeViewHeadIdentities =
-            filterHeadIdentitiesByNames
-              (typeHeadNamesSrcType identityTy <> typeHeadNamesSrcType displayTy)
-              (typeViewHeadIdentities view),
-          typeViewBinderIdentities = typeViewBinderIdentities view
-        }
 
 methodResultTypeView :: MethodInfo -> TypeView
 methodResultTypeView methodInfo =
-  TypeView
-    { typeViewDisplay = displayResult,
-      typeViewIdentity = identityResult,
-      typeViewHeadIdentities =
-        filterHeadIdentitiesByNames
-          (typeHeadNamesSrcType identityResult <> typeHeadNamesSrcType displayResult)
-          (typeViewHeadIdentities view),
-      typeViewBinderIdentities = typeViewBinderIdentities view
-    }
+  projectTypeView view displayResult identityResult
   where
     view = methodTypeView methodInfo
     (_, displayBody) = splitForalls (typeViewDisplay view)
     (_, identityBody) = splitForalls (typeViewIdentity view)
     (_, displayResult) = splitArrows displayBody
     (_, identityResult) = splitArrows identityBody
+
+projectTypeView :: TypeView -> SrcType -> SrcType -> TypeView
+projectTypeView view displayTy identityTy =
+  TypeView
+    { typeViewDisplay = displayTy,
+      typeViewIdentity = identityTy,
+      typeViewHeadIdentities =
+        filterHeadIdentitiesByTypeNames displayTy identityTy (typeViewHeadIdentities view),
+      typeViewBinderIdentities = typeViewBinderIdentities view
+    }
 
 methodInfoOwnerClassSymbolIdentity :: MethodInfo -> SymbolIdentity
 methodInfoOwnerClassSymbolIdentity methodInfo =

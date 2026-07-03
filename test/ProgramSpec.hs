@@ -663,6 +663,45 @@ spec = do
                     ProgramTypes.typeViewHeadIdentities (ProgramTypes.applyTypeViewSubst subst sourceView)
             Map.lookup "DisplayToken" actual `shouldBe` Just headIdentity
 
+        it "projects constructor argument head identities through display pairs" $ do
+            let dataIdentity = generatedSymbolIdentity 991652 SymbolType "Main" "Box" Nothing
+                ctorIdentity = generatedSymbolIdentity 991653 SymbolConstructor "Main" "MkBox" (Just (SymbolOwnerType dataIdentity))
+                argIdentity = generatedSymbolIdentity 991654 SymbolType "Main" "Token" Nothing
+                resultIdentity = generatedSymbolIdentity 991655 SymbolType "Main" "Box" Nothing
+                argStableName = symbolIdentityStableName argIdentity
+                resultStableName = symbolIdentityStableName resultIdentity
+                ctorView =
+                    ( ProgramTypes.mkTypeView
+                        (STArrow (STBase "DisplayToken") (STBase "DisplayBox"))
+                        (STArrow (STBase argStableName) (STBase resultStableName))
+                    )
+                        { ProgramTypes.typeViewHeadIdentities =
+                            Map.fromList
+                                [ (argStableName, argIdentity)
+                                , (resultStableName, resultIdentity)
+                                ]
+                        }
+                ctorInfo =
+                    ConstructorInfo
+                        { ctorInfoSymbol = ctorIdentity
+                        , ctorRuntimeName = "Main__MkBox"
+                        , ctorTypeView = ctorView
+                        , ctorForallBinderInfo = []
+                        , ctorOwningTypeIdentity = dataIdentity
+                        , ctorIndex = 0
+                        , ctorOwnerConstructors = []
+                        }
+            case ProgramTypes.constructorInfoArgViews ctorInfo of
+                [argView] -> do
+                    Map.lookup "DisplayToken" (ProgramTypes.typeViewHeadIdentities argView)
+                        `shouldBe` Just argIdentity
+                    ProgramTypes.typeViewHeadIdentityForAlias argView "DisplayToken"
+                        `shouldBe` Just argIdentity
+                views ->
+                    expectationFailure ("expected one constructor arg view, got " ++ show views)
+            Map.lookup "DisplayBox" (ProgramTypes.typeViewHeadIdentities (ProgramTypes.constructorInfoResultView ctorInfo))
+                `shouldBe` Just resultIdentity
+
         it "keeps replacement type head identities by payload stable name after applying type-view substitutions" $ do
             let sourceIdentity = typeBinderIdentityFromNode (NodeId 992501)
                 sourceStableName = typeBinderIdentityStableName sourceIdentity
