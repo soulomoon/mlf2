@@ -2815,8 +2815,8 @@ allInstanceInfos checked =
 decodeAnyData :: RuntimeContext -> XmlfTerm -> Maybe Value
 decodeAnyData context term =
   case [value | dataInfo <- runtimeDataInfos context, Just value <- [decodeChurchData context emptyView dataInfo emptyTypeBinderSubst term]] of
-    value : _ -> Just value
-    [] -> Nothing
+    [value] -> Just value
+    _ -> Nothing
   where
     emptyView =
       TypeView

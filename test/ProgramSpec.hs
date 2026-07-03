@@ -3028,6 +3028,56 @@ spec = do
                 checked' = replaceCheckedBindingTerm "Main__main" churchAmbiguous checked
             (programRunOutput <$> runCheckedProgramOutput checked') `shouldNotBe` Right "None\n"
 
+        it "does not decode ambiguous fallback Church data by data iteration order" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (SoloA(..), SoloB(..), Option(..), main) {"
+                        , "  data SoloA ="
+                        , "      OnlyA : SoloA;"
+                        , ""
+                        , "  data SoloB ="
+                        , "      OnlyB : SoloB;"
+                        , ""
+                        , "  data Option ="
+                        , "      None : Option"
+                        , "    | Some : Int -> Option;"
+                        , ""
+                        , "  def main : Option = None;"
+                        , "}"
+                        ]
+            checked <- requireChecked program
+            let handlerType = testTVar "r"
+                handlerArgType = Elab.TBase (BaseTy "Int")
+                handlerRef = generatedLocalRefForName "$Option-fallback-handler"
+                noneHandler =
+                    ResolvedVar
+                        { resolvedVarRuntimeName = "none-handler"
+                        , resolvedVarType = handlerType
+                        , resolvedVarDetails = LocalId handlerRef
+                        }
+                someHandler =
+                    noneHandler
+                        { resolvedVarRuntimeName = "some-handler"
+                        , resolvedVarType = Elab.TArrow handlerArgType handlerType
+                        , resolvedVarDetails =
+                            LocalId (renameLocalRef "$same-option-fallback-handler" handlerRef)
+                        }
+                occurrence =
+                    noneHandler
+                        { resolvedVarRuntimeName = "selected-handler"
+                        , resolvedVarDetails =
+                            LocalId (renameLocalRef "$selected-option-fallback-handler" handlerRef)
+                        }
+                churchAmbiguous =
+                    mkTestTyAbs "r" Nothing $
+                        Elab.ELam noneHandler $
+                            Elab.ELam someHandler (Elab.EVarNode occurrence)
+                checked' = replaceCheckedBindingTerm "Main__main" churchAmbiguous checked
+                output = programRunOutput <$> runCheckedProgramOutput checked'
+            output `shouldNotBe` Right "OnlyA\n"
+            output `shouldNotBe` Right "OnlyB\n"
+
         it "decodes Church data using checked source type head identity metadata" $ do
             program <-
                 requireParsed $
