@@ -3621,6 +3621,69 @@ spec = do
                 identities ->
                     expectationFailure ("expected one data param identity, got " ++ show identities)
 
+        it "runs parameterized constructors when stable metadata backs display binders" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (Box(..), main) {"
+                        , "  data Box a ="
+                        , "      Box : a -> Box a;"
+                        , ""
+                        , "  def main : Box String = Box \"stable\";"
+                        , "}"
+                        ]
+            checked <- requireChecked (withPrelude program)
+            dataInfo <- requireCheckedData "Main" "Box" checked
+            ctorInfo <- requireDataConstructor "Box" dataInfo
+            case ProgramTypes.dataParamBinders dataInfo of
+                [(paramName, paramIdentity)] -> do
+                    let displayParam = "$runtime_display_box_param"
+                        stableParam = typeBinderIdentityStableName paramIdentity
+                        oldView = ProgramTypes.ctorTypeView ctorInfo
+                        (_, displayResult) = ProgramTypes.splitArrows (snd (ProgramTypes.splitForalls (ProgramTypes.typeViewDisplay oldView)))
+                        (_, identityResult) = ProgramTypes.splitArrows (snd (ProgramTypes.splitForalls (ProgramTypes.typeViewIdentity oldView)))
+                        displayResult' = ProgramTypes.substituteTypeVar paramName (STVar displayParam) displayResult
+                        identityResult' = ProgramTypes.substituteTypeVar paramName (STVar stableParam) identityResult
+                        poisonedView =
+                            oldView
+                                { ProgramTypes.typeViewDisplay = STArrow (STVar displayParam) displayResult'
+                                , ProgramTypes.typeViewIdentity = STArrow (STVar stableParam) identityResult'
+                                , ProgramTypes.typeViewBinderIdentities = Map.singleton stableParam paramIdentity
+                                }
+                        poisonedCtor = ctorInfo {ProgramTypes.ctorTypeView = poisonedView}
+                        ctorTy = ProgramTypes.ctorTypeView poisonedCtor
+                        stringFromInt =
+                            ResolvedVar
+                                { resolvedVarRuntimeName = PrimitiveInventory.stringFromIntPrimitiveName
+                                , resolvedVarType = Elab.TArrow (Elab.TBase (BaseTy "Int")) (Elab.TBase (BaseTy "String"))
+                                , resolvedVarDetails =
+                                    PrimitiveId (primitiveRefFromSymbol (Builtins.builtinValueIdentity PrimitiveInventory.stringFromIntPrimitiveName))
+                                }
+                    ctorResolvedTy <-
+                        either
+                            (\err -> expectationFailure ("constructor type conversion failed: " ++ show err) >> fail "constructor type conversion failed")
+                            pure
+                            (typeViewToElabType (checkedProgramElaborateScope checked) ctorTy)
+                    let ctorValue =
+                            ConstructorValue
+                                { valueInfoSymbol = ProgramTypes.ctorInfoSymbol poisonedCtor
+                                , valueRuntimeName = ProgramTypes.ctorRuntimeName poisonedCtor
+                                , valueCtorInfo = poisonedCtor
+                                }
+                        ctorResolved = ProgramTypes.resolvedVarFromValueInfo ctorValue ctorResolvedTy
+                        checkedTerm =
+                            Elab.EApp
+                                (Elab.EVarNode ctorResolved)
+                                (Elab.EApp (Elab.EVarNode stringFromInt) (Elab.ELit (LInt 7)))
+                        checked' =
+                            replaceCheckedBindingTerm
+                                "Main__main"
+                                checkedTerm
+                                (replaceCheckedConstructorTypeView "Main__Box" poisonedView checked)
+                    (programRunOutput <$> runCheckedProgramOutput checked') `shouldBe` Right "Box \"7\"\n"
+                identities ->
+                    expectationFailure ("expected one data param binder, got " ++ show identities)
+
         it "decodes checked main data by checked type identity before source type spelling" $ do
             located <-
                 requireLocated $

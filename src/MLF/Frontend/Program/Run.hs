@@ -120,6 +120,7 @@ import MLF.Frontend.Program.Types
     typeViewHeadIdentityForAlias,
     typeViewSubstFromParamIdentities,
     typeViewsIdentity,
+    typeViewBinderIdentityAliasEntries,
     uniqueEvidenceMethod,
     uniqueEvidenceMethodMatch,
     typeBinderSubstFromTypeViewSubst,
@@ -1005,7 +1006,7 @@ runtimeConstructorBinders context ctor
       Left (ProgramPipelineError ("run-program constructor binder `" ++ missing ++ "` is missing identity"))
   | otherwise = Right binders
   where
-    binders = explicitBinders ++ viewBinders ++ ownerBinders ++ pairedViewBinders
+    binders = explicitBinders ++ viewBinders ++ ownerBinders
     explicitBinders =
       Map.toList $
         typeBinderAliasIdentityMap
@@ -1013,14 +1014,7 @@ runtimeConstructorBinders context ctor
           | binder <- ctorForallBinderInfo ctor
           ]
     viewBinders =
-      Map.toList (typeViewBinderIdentities (ctorTypeView ctor))
-    pairedViewBinders =
-      [ (identityName, identity)
-      | (identityName, _) <- Map.toList (typeViewVarPairs (ctorTypeView ctor)),
-        Just identity <- [typeViewBinderIdentityForAlias ctorView identityName]
-      ]
-    ctorView =
-      ctorTypeView ctor
+      typeViewBinderIdentityAliasEntries (ctorTypeView ctor)
     ownerBinders =
       case Map.lookup (ctorOwningTypeIdentity ctor) (elaborateScopeDataTypesByIdentity (runtimeElaborateScope context)) of
         Just dataInfo ->
