@@ -122,6 +122,21 @@ spec =
 
             map checkedBindingName (checkedModuleBindings preludeModule) `shouldBe` ["Prelude__keep"]
 
+        it "does not prune by an arbitrary Prelude module identity when identities conflict" $ do
+            let checked = prepareCheckedProgramForBackendEmission ambiguousPreludeModuleIdentityProgram
+                bindingsByModule =
+                    Map.fromList
+                        [ (checkedModuleName checkedModule0, map checkedBindingName (checkedModuleBindings checkedModule0))
+                        | checkedModule0 <- checkedProgramModules checked
+                        ]
+
+            bindingsByModule
+                `shouldBe` Map.fromList
+                    [ ("$prelude_left", ["Prelude__keep", "Prelude__drop"])
+                    , ("$prelude_right", ["OtherPrelude__drop"])
+                    , ("Main", ["Main__main"])
+                    ]
+
         it "retains Prelude data by checked type identity when data names are stale" $ do
             let checked = prepareCheckedProgramForBackendEmission stalePreludeDataNameProgram
             preludeModule <- requirePreludeModule checked
@@ -259,6 +274,35 @@ stalePreludeModuleNameProgram =
     preludeKeepVar = topLevelVar 23 "Prelude__keep" "Prelude" "keep" intTy
     preludeDropVar = topLevelVar 24 "Prelude__drop" "Prelude" "drop" intTy
     mainVar = topLevelVar 25 "Main__main" "Main" "main" intTy
+
+ambiguousPreludeModuleIdentityProgram :: CheckedProgram
+ambiguousPreludeModuleIdentityProgram =
+    CheckedProgram
+        { checkedProgramModules =
+            [ ( checkedModule
+                    "$prelude_left"
+                    [ testBinding "Prelude__keep" preludeKeepVar (Elab.ELit (Surface.LInt 1))
+                    , testBinding "Prelude__drop" preludeDropVar (Elab.ELit (Surface.LInt 0))
+                    ]
+              )
+                { checkedModuleIdentity = generatedSymbolIdentity 210 SymbolModule "PreludeLeft" "Prelude" Nothing }
+            , ( checkedModule
+                    "$prelude_right"
+                    [ testBinding "OtherPrelude__drop" otherPreludeDropVar (Elab.ELit (Surface.LInt 0))
+                    ]
+              )
+                { checkedModuleIdentity = generatedSymbolIdentity 211 SymbolModule "PreludeRight" "Prelude" Nothing }
+            , checkedModule "Main" [testBinding "Main__main" mainVar (Elab.EVarNode preludeKeepVar)]
+            ]
+        , checkedProgramMainResolvedVar = mainVar
+        , checkedProgramResolved = ResolvedProgram []
+        }
+  where
+    intTy = Elab.TBase (BaseTy "Int")
+    preludeKeepVar = topLevelVar 26 "Prelude__keep" "Prelude" "keep" intTy
+    preludeDropVar = topLevelVar 27 "Prelude__drop" "Prelude" "drop" intTy
+    otherPreludeDropVar = topLevelVar 28 "OtherPrelude__drop" "OtherPrelude" "drop" intTy
+    mainVar = topLevelVar 29 "Main__main" "Main" "main" intTy
 
 stalePreludeDataNameProgram :: CheckedProgram
 stalePreludeDataNameProgram =

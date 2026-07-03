@@ -104,9 +104,15 @@ prepareCheckedProgramForBackendEmission checked =
 
 preludeModuleIdentity :: [CheckedModule] -> Maybe SymbolIdentity
 preludeModuleIdentity modules0 =
-    case [checkedModuleIdentity checkedModule | checkedModule <- modules0, isPreludeModuleIdentity (checkedModuleIdentity checkedModule)] of
-        identity : _ -> Just identity
-        [] -> Nothing
+    case Set.toList (Set.fromList preludeIdentities) of
+        [identity] -> Just identity
+        _ -> Nothing
+  where
+    preludeIdentities =
+        [ checkedModuleIdentity checkedModule
+        | checkedModule <- modules0
+        , isPreludeModuleIdentity (checkedModuleIdentity checkedModule)
+        ]
 
 isPreludeModuleIdentity :: SymbolIdentity -> Bool
 isPreludeModuleIdentity identity =
