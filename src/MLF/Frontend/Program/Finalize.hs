@@ -209,6 +209,7 @@ import MLF.Types.Identity
     LocalRef,
     localRefGeneratedIdentities,
     localRefIdentity,
+    localRefName,
     primitiveRefSymbol,
     TypeBinderIdentity,
     UniqueIdentity,
@@ -1749,7 +1750,7 @@ collectResolvedLocalIdentityOverrides resolvedLocalIdentities =
     resolvedLocalEntry resolved overrides
       | X.resolvedVarIsLocal resolved,
         let runtimeName = X.resolvedVarRuntimeName resolved,
-        (before, match : after) <- break ((== runtimeName) . loweredResolvedLocalRuntimeName) overrides =
+        (before, match : after) <- break ((== runtimeName) . localRefName . loweredResolvedLocalRuntimeRef) overrides =
           ( Map.singleton (X.resolvedVarIdentityKey resolved) (loweredResolvedLocalRef match),
             before ++ after
           )

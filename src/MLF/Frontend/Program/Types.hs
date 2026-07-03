@@ -2601,7 +2601,7 @@ data LoweredBinding = LoweredBinding
   deriving (Eq, Show)
 
 data LoweredResolvedLocalIdentity = LoweredResolvedLocalIdentity
-  { loweredResolvedLocalRuntimeName :: String,
+  { loweredResolvedLocalRuntimeRef :: LocalRef,
     loweredResolvedLocalRef :: LocalRef
   }
   deriving (Eq, Show)

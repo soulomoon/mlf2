@@ -87,6 +87,7 @@ import MLF.Types.Identity
     identityGeneratorAfter,
     initialIdentityGenerator,
     localIdentityStableUnique,
+    renameLocalRef,
     typeBinderIdentityFromStructural,
   )
 
@@ -5071,7 +5072,7 @@ extendResolvedLocalLowered scope localRef runtimeName loweredTy = do
 
 recordResolvedLocalIdentity :: String -> LocalRef -> ElaborateM ()
 recordResolvedLocalIdentity runtimeName localRef = do
-  let entry = LoweredResolvedLocalIdentity runtimeName localRef
+  let entry = LoweredResolvedLocalIdentity (renameLocalRef runtimeName localRef) localRef
   modify
     ( \state ->
         let entries = elaborateResolvedLocalIdentities state

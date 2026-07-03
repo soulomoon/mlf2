@@ -2976,8 +2976,8 @@ spec = do
 
         it "does not rename grouped placeholder spellings under resolved local binders" $ do
             finalizeContext <- requireFinalizeContext (mkElaborateScope Map.empty Map.empty Map.empty [])
-            let firstLocal = localRefFromIdentity (GeneratedLocalId (UniqueIdentity 991801)) "x"
-                secondLocal = localRefFromIdentity (GeneratedLocalId (UniqueIdentity 991802)) "x"
+            let firstLocal = localRefFromIdentity (GeneratedLocalId (UniqueIdentity 991801)) "source_x"
+                secondLocal = localRefFromIdentity (GeneratedLocalId (UniqueIdentity 991802)) "source_x"
                 firstIdentity = generatedSymbolIdentity 991803 SymbolValue "Main" "first" Nothing
                 secondIdentity = generatedSymbolIdentity 991804 SymbolValue "Main" "second" Nothing
                 firstDeferred = deferredRefFromIdentity (UniqueIdentity 991805) "x"
@@ -3000,7 +3000,7 @@ spec = do
                             }
                 intTy = STBase "Int"
                 functionTy = STArrow intTy intTy
-                localIdentityExpr = Surface.ELamAnn "x" intTy (Surface.EVar "x")
+                localIdentityExpr runtimeName = Surface.ELamAnn runtimeName intTy (Surface.EVar runtimeName)
                 lowered name identity localRef deferredRef =
                     LoweredBinding
                         { loweredBindingIdentity =
@@ -3009,9 +3009,9 @@ spec = do
                         , loweredBindingSourceTypeView = Nothing
                         , loweredBindingExpectedType = functionTy
                         , loweredBindingExpectedTypeView = Nothing
-                        , loweredBindingSurfaceExpr = localIdentityExpr
+                        , loweredBindingSurfaceExpr = localIdentityExpr "x"
                         , loweredBindingResolvedLocalIdentities =
-                            [ProgramTypes.LoweredResolvedLocalIdentity "x" localRef]
+                            [ProgramTypes.LoweredResolvedLocalIdentity (renameLocalRef "x" localRef) localRef]
                         , loweredBindingDeferredObligations = Map.singleton deferredRef (obligation deferredRef)
                         , loweredBindingExternalTypeViews = Map.empty
                         , loweredBindingEvidenceParamCount = 0
@@ -3026,6 +3026,8 @@ spec = do
                     Left err -> expectationFailure ("finalize group failed: " ++ show err) >> fail "finalize group failed"
             map (resolvedLocalBinders . checkedBindingTerm) checked `shouldBe` [[firstLocal], [secondLocal]]
             map (resolvedLocalOccurrences . checkedBindingTerm) checked `shouldBe` [[firstLocal], [secondLocal]]
+            map (map localRefName . resolvedLocalBinders . checkedBindingTerm) checked `shouldBe` [["source_x"], ["source_x"]]
+            map (map localRefName . resolvedLocalOccurrences . checkedBindingTerm) checked `shouldBe` [["source_x"], ["source_x"]]
 
         it "keeps graph local refs distinct from generated local refs" $ do
             let graphRef = localRefFromNodeId "x" (NodeId 0)
@@ -4802,7 +4804,7 @@ spec = do
                         "Main__first"
                         firstIdentity
                         1
-                        [ProgramTypes.LoweredResolvedLocalIdentity "x" occupiedLocal]
+                        [ProgramTypes.LoweredResolvedLocalIdentity occupiedLocal occupiedLocal]
                     , lowered "Main__second" secondIdentity 2 []
                     ] of
                     Right bindings -> pure bindings
