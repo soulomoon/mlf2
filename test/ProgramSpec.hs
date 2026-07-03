@@ -1749,6 +1749,20 @@ spec = do
                 expected = Elab.TForallRef ref Nothing (Elab.TVarRef ref)
             typeViewToElabType scope view `shouldBe` Right expected
 
+        it "preserves type-view binder identities through stable metadata while finalizing display binders" $ do
+            let identity = typeBinderIdentityFromNode (NodeId 991610)
+                stableName = typeBinderIdentityStableName identity
+                ref = Elab.typeBinderRefFromIdentity identity "a"
+                scope = mkElaborateScope Map.empty Map.empty Map.empty []
+                displayTy = STForall "a" Nothing (STVar "a")
+                identityTy = STForall stableName Nothing (STVar stableName)
+                view =
+                    (ProgramTypes.mkTypeView displayTy identityTy)
+                        { ProgramTypes.typeViewBinderIdentities = Map.singleton stableName identity
+                        }
+                expected = Elab.TForallRef ref Nothing (Elab.TVarRef ref)
+            typeViewToElabType scope view `shouldBe` Right expected
+
         it "does not reuse an outer display binder identity for a same-named missing inner finalization binder" $ do
             let outerIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991633)
                 scope = mkElaborateScope Map.empty Map.empty Map.empty []
