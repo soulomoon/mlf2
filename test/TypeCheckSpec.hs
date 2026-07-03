@@ -73,7 +73,7 @@ import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace(..), SymbolOwnerIden
 import MLF.Frontend.ConstraintGen (ExternalBinding(..), ExternalBindingMode(..), externalBindingIdentityFromDetails)
 import MLF.Frontend.Program.Builtins (builtinTypeIdentity, builtinValueIdentity)
 import MLF.Frontend.Program.Types (loweredBindingIdentityFromDetails)
-import MLF.Frontend.Syntax (Lit(..))
+import MLF.Frontend.Syntax (Lit(..), SrcBound(..))
 import qualified MLF.Frontend.Syntax as Surf (Expr(..), SrcTy(..))
 import MLF.Primitive.Inventory (stringLengthPrimitiveName)
 import qualified MLF.Reify.TypeOps as TypeOps
@@ -581,6 +581,45 @@ spec = describe "Phase 7 typecheck" $ do
                         typeBinderRefIdentity innerRef `shouldNotBe` binderIdentity
                         typeBinderRefIdentity bodyRef `shouldBe` typeBinderRefIdentity innerRef
                     other -> expectationFailure ("Expected nested forall with distinct shadowed refs, got: " ++ show other)
+
+    it "does not reuse supplied binder identities inside external binding bounds" $ do
+        let binderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 49)
+            typeIdentity = generatedSymbolIdentity 50 SymbolType "Main" "Box" Nothing
+            externalBinding =
+                ExternalBinding
+                    { externalBindingType =
+                        Surf.STForall
+                            "a"
+                            Nothing
+                            ( Surf.STForall
+                                "b"
+                                ( Just
+                                    ( SrcBound
+                                        ( Surf.STCon
+                                            "Box"
+                                            (Surf.STForall "a" Nothing (Surf.STVar "a") :| [])
+                                        )
+                                    )
+                                )
+                                (Surf.STVar "b")
+                            )
+                    , externalBindingMode = ExternalBindingScheme
+                    , externalBindingIdentity = Nothing
+                    , externalBindingTypeHeadIdentities = Map.singleton "Box" typeIdentity
+                    , externalBindingTypeBinderIdentities = Map.singleton "a" binderIdentity
+                    }
+        case prepareExternalBindings (Map.singleton "id" externalBinding) of
+            Left err -> expectationFailure ("Expected external binding preparation, got: " ++ show err)
+            Right prepared ->
+                case [ ty | (resolved, ty) <- resolvedTermEnvEntries (resolvedTermEnv (preparedExternalTypeCheckEnv prepared)), resolvedVarReferenceName resolved == "id" ] of
+                    [ TForallRef outerRef Nothing
+                            ( TForallRef _ (Just (TConWithIdentity _ (BaseTy "Box") (TForallRef innerRef Nothing (TVarRef bodyRef) :| []))) _
+                            )
+                        ] -> do
+                            typeBinderRefIdentity outerRef `shouldBe` binderIdentity
+                            typeBinderRefIdentity innerRef `shouldNotBe` binderIdentity
+                            typeBinderRefIdentity bodyRef `shouldBe` typeBinderRefIdentity innerRef
+                    other -> expectationFailure ("Expected bound-local shadowed refs, got: " ++ show other)
 
     it "resolves external binding type variables through stable binder identity aliases" $ do
         let binderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 142)
