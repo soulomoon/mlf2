@@ -133,7 +133,7 @@ import MLF.Frontend.ConstraintGen
   )
 import qualified MLF.Frontend.Program.Builtins as Builtins
 import MLF.Frontend.Program.Types (mergeSymbolIdentityMaps, mergeTypeBinderIdentityMaps)
-import MLF.Frontend.Symbol (SymbolIdentity, lookupSymbolIdentityAlias, symbolIdentityAliasNames, symbolUniqueIdentity)
+import MLF.Frontend.Symbol (SymbolIdentity, lookupSymbolIdentityAlias, symbolIdentityAliasMap, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (NormSrcType, NormSurfaceExpr, StructBound, VarName)
 import qualified MLF.Frontend.Syntax as Surface
 import MLF.Reify.TypeOps (freeTypeVarRefsType, freeTypeVarsType, freshNameLike, substTypeCaptureRef)
@@ -225,12 +225,8 @@ structuralTypeBinderIdentitiesFromHeads headIdentities =
         [ ("$" ++ headName ++ "_self", typeBinderIdentityFromStructural (symbolUniqueIdentity identity) StructuralSelfBinder),
           ("$" ++ headName ++ "_result", typeBinderIdentityFromStructural (symbolUniqueIdentity identity) StructuralResultBinder)
         ]
-    | identity <- Map.elems headIdentities,
-      headName <- structuralHeadNames identity
+    | (headName, identity) <- Map.toList (symbolIdentityAliasMap (Map.elems headIdentities))
     ]
-  where
-    structuralHeadNames identity =
-      symbolIdentityAliasNames identity
 
 data ModuleBatchPlan key p = ModuleBatchPlan
   { mbpRoots :: [(key, PreparedExternalBindings, ModuleConstraintRoot)],
