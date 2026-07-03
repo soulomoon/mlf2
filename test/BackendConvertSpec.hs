@@ -65,7 +65,7 @@ import MLF.Frontend.Program.Types
     resolvedValueInfoSymbol,
     typeHeadNamesSrcType,
   )
-import MLF.Frontend.Syntax (Lit (..), SrcBound (..), SrcTy (..), SrcType)
+import MLF.Frontend.Syntax (Lit (..), SrcBound (..), SrcTy (..), SrcType, TypeParam (..), resolvedTypeBinderRefFromIdentity, resolvedTypeBinderTypeIdentity, typeParamKind, typeParamRef)
 import MLF.Frontend.Syntax.Program (Program)
 import MLF.Pipeline (checkProgram)
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
@@ -1306,6 +1306,39 @@ spec = describe "MLF.Backend.Convert" $ do
           actualAIdentity `shouldBe` aIdentity
       other ->
         expectationFailure ("expected identity-mapped higher-kinded constructor field, got " ++ show other)
+
+  it "does not pick an arbitrary constructor binder identity when data parameter displays collide" $ do
+    dataChecked0 <- requireChecked dataParameterOrderConstructorProgram
+    mainChecked <- requireChecked simpleFunctionProgram
+    dataInfo <- requireCheckedData "Main.T" dataChecked0
+    case dataParamBinders dataInfo of
+      [("z", zIdentity), ("a", aIdentity)] -> do
+        let zStableName = typeBinderIdentityStableName zIdentity
+            aStableName = typeBinderIdentityStableName aIdentity
+            displayTy =
+              STArrow
+                (STVar "a")
+                (STArrow (STVar "a") (STCon "T" (STVar "a" :| [STVar "a"])))
+            identityTy =
+              STArrow
+                (STVar zStableName)
+                (STArrow (STVar aStableName) (STCon (dataInfoIdentityQualifiedName dataInfo) (STVar zStableName :| [STVar aStableName])))
+            constructorView = mkTypeView displayTy identityTy
+            dataChecked =
+              withConstructorTypeView "Main__Mk" constructorView $
+                renameDataParamDisplays "Main.T" ["a", "a"] dataChecked0
+        mutatedDataInfo <- requireCheckedData "Main.T" dataChecked
+        let checked = addDataInfo mutatedDataInfo mainChecked
+        backend <- requireRight (convertCheckedProgram checked)
+
+        validateBackendProgram backend `shouldBe` Right ()
+        constructor <- requireConstructor "Main__Mk" backend
+        backendConstructorFields constructor
+          `shouldBe` [ BTVarWithIdentity (Just zIdentity) "a",
+                       BTVarWithIdentity (Just aIdentity) "a"
+                     ]
+      other ->
+        expectationFailure ("expected two data parameters, got " ++ show other)
 
   it "preserves bounded constructor foralls in backend metadata" $ do
     checked <- requireChecked boundedConstructorForallProgram
@@ -5252,6 +5285,33 @@ withConstructorTypeView runtimeName view checked =
           constructorInfo {ctorTypeView = view}
       | otherwise =
           constructorInfo
+
+renameDataParamDisplays :: String -> [String] -> CheckedProgram -> CheckedProgram
+renameDataParamDisplays dataName names checked =
+  checked
+    { checkedProgramModules =
+        map updateModule (checkedProgramModules checked)
+    }
+  where
+    updateModule checkedModule =
+      checkedModule
+        { checkedModuleData = fmap updateDataInfo (checkedModuleData checkedModule)
+        }
+
+    updateDataInfo dataInfo
+      | dataInfoIdentityQualifiedName dataInfo == dataName =
+          dataInfo {dataTypeParams = zipWith renameTypeParam names (dataTypeParams dataInfo)}
+      | otherwise =
+          dataInfo
+
+    renameTypeParam name param =
+      case typeParamRef param of
+        Just ref ->
+          ResolvedTypeParam
+            (resolvedTypeBinderRefFromIdentity (resolvedTypeBinderTypeIdentity ref) name)
+            (typeParamKind param)
+        Nothing ->
+          TypeParam name (typeParamKind param)
 
 withConstructorDisplayType :: String -> SrcType -> CheckedProgram -> CheckedProgram
 withConstructorDisplayType runtimeName displayTy checked =
