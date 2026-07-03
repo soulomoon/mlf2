@@ -3065,8 +3065,8 @@ applyConstructorTypeBinderIdentities typeVars sourceTy backendTy =
       case lookupConstructorTypeVar Nothing name typeVars of
         Just replacement -> replacement
         Nothing -> backendTy
-    (STVarApp name sourceArgs, BTVarAppWithIdentity _ _ backendArgs)
-      | Just headTy <- lookupConstructorTypeVar Nothing name typeVars ->
+    (STVarApp sourceName sourceArgs, BTVarAppWithIdentity identity backendName backendArgs)
+      | Just headTy <- lookupSourceTypeVar identity backendName sourceName typeVars ->
           applyBackendHeadLocal headTy (zipWithNE (applyConstructorTypeBinderIdentities typeVars) sourceArgs backendArgs)
     (STArrow sourceDom sourceCod, BTArrow backendDom backendCod) ->
       BTArrow

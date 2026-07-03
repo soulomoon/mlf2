@@ -1,4 +1,5 @@
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE LambdaCase #-}
 
 module BackendConvertSpec (spec) where
 
@@ -53,6 +54,7 @@ import MLF.Frontend.Program.Types
     ConstructorInfo (..),
     DataInfo (..),
     dataInfoIdentityQualifiedName,
+    dataParamBinders,
     emptyTypeBinderSubst,
     IdDetails (..),
     instanceHeadIdentityTypes,
@@ -1222,6 +1224,29 @@ spec = describe "MLF.Backend.Convert" $ do
 
     mainBinding <- requireBinding (backendProgramMain backend) backend
     collectConstructNames (backendBindingExpr mainBinding) `shouldContain` ["Main__Mk"]
+
+  it "maps constructor type application heads by binder identity when display names are stale" $ do
+    checked0 <- requireChecked higherKindedConstructorProgram
+    wrapData <- requireCheckedData "Main.Wrap" checked0
+    wrapConstructor <- requireCheckedConstructor "Main__Wrap" checked0
+    let checked =
+          withConstructorTypeView
+            "Main__Wrap"
+            (staleTypeViewBinderDisplay "f" "$stale_f" (ctorTypeView wrapConstructor))
+            checked0
+
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    constructor <- requireConstructor "Main__Wrap" backend
+    case (dataParamBinders wrapData, backendConstructorFields constructor) of
+      ( [("f", fIdentity), ("a", aIdentity)],
+        [BTVarAppWithIdentity (Just actualFIdentity) "f" (BTVarWithIdentity (Just actualAIdentity) "a" :| [])]
+        ) -> do
+          actualFIdentity `shouldBe` fIdentity
+          actualAIdentity `shouldBe` aIdentity
+      other ->
+        expectationFailure ("expected identity-mapped higher-kinded constructor field, got " ++ show other)
 
   it "preserves bounded constructor foralls in backend metadata" $ do
     checked <- requireChecked boundedConstructorForallProgram
@@ -3437,6 +3462,44 @@ requireCheckedConstructor name checked =
   where
     constructors =
       concatMap dataConstructors (checkedDataInfos checked)
+
+requireCheckedData :: String -> CheckedProgram -> IO DataInfo
+requireCheckedData name checked =
+  case find ((== name) . dataInfoIdentityQualifiedName) (checkedDataInfos checked) of
+    Just dataInfo -> pure dataInfo
+    Nothing -> expectationFailure ("missing checked data " ++ show name) >> fail "missing checked data"
+
+staleTypeViewBinderDisplay :: String -> String -> TypeView -> TypeView
+staleTypeViewBinderDisplay oldName newName view =
+  view
+    { typeViewDisplay = renameSourceTypeBinderDisplay oldName newName (typeViewDisplay view),
+      typeViewBinderIdentities =
+        maybe
+          (typeViewBinderIdentities view)
+          (\identity -> Map.insert newName identity (typeViewBinderIdentities view))
+          (Map.lookup oldName (typeViewBinderIdentities view))
+    }
+
+renameSourceTypeBinderDisplay :: String -> String -> SrcType -> SrcType
+renameSourceTypeBinderDisplay oldName newName =
+  go
+  where
+    rename name
+      | name == oldName = newName
+      | otherwise = name
+
+    go =
+      \case
+        STVar name -> STVar (rename name)
+        STArrow dom cod -> STArrow (go dom) (go cod)
+        STBase name -> STBase name
+        STCon name args -> STCon name (fmap go args)
+        STVarApp name args -> STVarApp (rename name) (fmap go args)
+        STTyLam name body -> STTyLam (rename name) (go body)
+        STTyApp fun arg -> STTyApp (go fun) (go arg)
+        STForall name mbBound body -> STForall (rename name) (fmap (SrcBound . go . unSrcBound) mbBound) (go body)
+        STMu name body -> STMu (rename name) (go body)
+        STBottom -> STBottom
 
 backendBindings :: BackendProgram -> [BackendBinding]
 backendBindings =
