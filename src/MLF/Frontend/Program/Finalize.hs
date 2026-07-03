@@ -220,7 +220,7 @@ import MLF.Types.Identity
     renameDeferredRef,
     symbolGeneratedIdentities,
     typeBinderGeneratedIdentities,
-    typeBinderIdentityAliasNames,
+    typeBinderIdentityAliasMap,
     typeBinderIdentityStableName,
     uniqueIdentityStableName,
   )
@@ -3212,12 +3212,11 @@ inlineConstructorHead scope extraHeadIdentities ownerParamBinders ctorInfo subst
       headIdentities =
         Map.union extraHeadIdentities (typeHeadIdentitiesInScope scope)
       ownerParamRefsByAlias =
-        Map.fromList
-          [ (alias, ref)
-          | (name, identity) <- ownerParamBinders,
-            let ref = X.typeBinderRefFromIdentity identity name,
-            alias <- typeBinderIdentityAliasNames name identity
-          ]
+        Map.mapWithKey ownerParamRefForAlias (typeBinderIdentityAliasMap ownerParamBinders)
+      ownerParamRefForAlias alias identity =
+        X.typeBinderRefFromIdentity identity (Map.findWithDefault alias identity ownerParamNamesByIdentity)
+      ownerParamNamesByIdentity =
+        Map.fromList [(identity, name) | (name, identity) <- ownerParamBinders]
       ownerParamRefs =
         [ X.typeBinderRefFromIdentity identity name
         | (name, identity) <- ownerParamBinders
