@@ -1207,15 +1207,15 @@ generatedCasePatternVariableTypeMatches name typeBounds expectedTy =
         _ -> False
 
 primitiveRuntimeVariableTypeMatches :: Maybe IdDetails -> String -> BackendType -> BackendType -> Bool
-primitiveRuntimeVariableTypeMatches mbIdentity name expectedTy actualTy
-  | primitiveRuntimeVariableReference mbIdentity name =
+primitiveRuntimeVariableTypeMatches mbIdentity _name expectedTy actualTy
+  | primitiveRuntimeVariableReference mbIdentity =
       go expectedTy actualTy
   | otherwise =
       False
   where
-    primitiveRuntimeVariableReference Nothing _ =
+    primitiveRuntimeVariableReference Nothing =
       False
-    primitiveRuntimeVariableReference (Just details) _ =
+    primitiveRuntimeVariableReference (Just details) =
       maybe False (`Map.member` backendRuntimePrimitiveTypesByIdentity) (idDetailsSymbolIdentity details)
 
     go expected actual
@@ -1732,7 +1732,7 @@ extendFunctionParamLocalMaybe mbContext mbIdentity name ty body
 
 extendLocal :: BackendValidationContext -> Maybe IdDetails -> String -> BackendType -> BackendValidationContext
 extendLocal context0 mbIdentity name ty =
-  insertLocalIdentity mbIdentity name ty
+  insertLocalIdentity mbIdentity ty
     context0
       { bvcLocals = bindLocalName mbIdentity name ty (bvcLocals context0),
         bvcClosureLocals = Set.delete name (bvcClosureLocals context0),
@@ -1747,7 +1747,7 @@ extendClosureLocalMaybe mbContext mbIdentity name ty =
 
 extendClosureLocal :: BackendValidationContext -> Maybe IdDetails -> String -> BackendType -> BackendValidationContext
 extendClosureLocal context0 mbIdentity name ty =
-  insertLocalIdentity mbIdentity name ty
+  insertLocalIdentity mbIdentity ty
     context0
       { bvcLocals = bindLocalName mbIdentity name ty (bvcLocals context0),
         bvcClosureLocals = bindLocalNameSet mbIdentity name (bvcClosureLocals context0),
@@ -1762,7 +1762,7 @@ extendPossibleClosureLocalMaybe mbContext mbIdentity name ty =
 
 extendPossibleClosureLocal :: BackendValidationContext -> Maybe IdDetails -> String -> BackendType -> BackendValidationContext
 extendPossibleClosureLocal context0 mbIdentity name ty =
-  insertLocalIdentity mbIdentity name ty
+  insertLocalIdentity mbIdentity ty
     context0
       { bvcLocals = bindLocalName mbIdentity name ty (bvcLocals context0),
         bvcClosureLocals = Set.delete name (bvcClosureLocals context0),
@@ -1783,8 +1783,8 @@ bindLocalNameSet mbIdentity name names =
     Just _ -> Set.delete name names
     Nothing -> Set.insert name names
 
-insertLocalIdentity :: Maybe IdDetails -> String -> BackendType -> BackendValidationContext -> BackendValidationContext
-insertLocalIdentity mbIdentity _name ty context0 =
+insertLocalIdentity :: Maybe IdDetails -> BackendType -> BackendValidationContext -> BackendValidationContext
+insertLocalIdentity mbIdentity ty context0 =
   case mbIdentity >>= idDetailsLocalKey of
     Just key ->
       context0
