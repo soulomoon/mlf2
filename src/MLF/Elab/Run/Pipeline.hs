@@ -132,6 +132,7 @@ import MLF.Frontend.ConstraintGen
     generateModuleConstraintsKeyedWithExternalBindings,
   )
 import qualified MLF.Frontend.Program.Builtins as Builtins
+import MLF.Frontend.Program.Types (mergeSymbolIdentityMaps, mergeTypeBinderIdentityMaps)
 import MLF.Frontend.Symbol (SymbolIdentity, lookupSymbolIdentityAlias, symbolIdentityAliasNames, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (NormSrcType, NormSurfaceExpr, StructBound, VarName)
 import qualified MLF.Frontend.Syntax as Surface
@@ -213,14 +214,14 @@ externalBindingsSourceTypeIdentityMaps extBindings =
     bindings = Map.elems extBindings
 
     headIdentities =
-      mergeIdentityMaps (map externalBindingTypeHeadIdentities bindings)
+      mergeSymbolIdentityMaps (map externalBindingTypeHeadIdentities bindings)
 
     binderIdentities =
-      mergeIdentityMaps (structuralTypeBinderIdentitiesFromHeads headIdentities : map externalBindingTypeBinderIdentities bindings)
+      mergeTypeBinderIdentityMaps (structuralTypeBinderIdentitiesFromHeads headIdentities : map externalBindingTypeBinderIdentities bindings)
 
 structuralTypeBinderIdentitiesFromHeads :: Map.Map String SymbolIdentity -> Map.Map String TypeBinderIdentity
 structuralTypeBinderIdentitiesFromHeads headIdentities =
-  mergeIdentityMaps $
+  mergeTypeBinderIdentityMaps $
     [ Map.fromList
         [ ("$" ++ headName ++ "_self", typeBinderIdentityFromStructural (symbolUniqueIdentity identity) StructuralSelfBinder),
           ("$" ++ headName ++ "_result", typeBinderIdentityFromStructural (symbolUniqueIdentity identity) StructuralResultBinder)
@@ -231,22 +232,6 @@ structuralTypeBinderIdentitiesFromHeads headIdentities =
   where
     structuralHeadNames identity =
       symbolIdentityAliasNames identity
-
-mergeIdentityMaps :: (Ord a) => [Map.Map String a] -> Map.Map String a
-mergeIdentityMaps maps =
-  Map.fromList
-    [ (name, identity)
-    | (name, identities) <- Map.toList identitiesByName,
-      [identity] <- [Set.toList identities]
-    ]
-  where
-    identitiesByName =
-      Map.fromListWith
-        Set.union
-        [ (name, Set.singleton identity)
-        | identityMap <- maps,
-          (name, identity) <- Map.toList identityMap
-        ]
 
 data ModuleBatchPlan key p = ModuleBatchPlan
   { mbpRoots :: [(key, PreparedExternalBindings, ModuleConstraintRoot)],
@@ -486,10 +471,10 @@ extendPreparedExternalBindingTypeIdentities ::
   PreparedExternalBindings
 extendPreparedExternalBindingTypeIdentities headIdentities binderIdentities prepared =
   let heads =
-        mergeIdentityMaps
+        mergeSymbolIdentityMaps
           [pebSourceTypeHeadIdentities prepared, headIdentities]
       binders =
-        mergeIdentityMaps
+        mergeTypeBinderIdentityMaps
           [ pebSourceTypeBinderIdentities prepared,
             binderIdentities,
             structuralTypeBinderIdentitiesFromHeads heads
@@ -516,10 +501,10 @@ unionPreparedExternalBindings :: PreparedExternalBindings -> PreparedExternalBin
 unionPreparedExternalBindings preferred fallback =
   let schemeInfos = pebSchemeInfos preferred `Map.union` pebSchemeInfos fallback
       heads =
-        mergeIdentityMaps
+        mergeSymbolIdentityMaps
           [pebSourceTypeHeadIdentities preferred, pebSourceTypeHeadIdentities fallback]
       binders =
-        mergeIdentityMaps
+        mergeTypeBinderIdentityMaps
           [ pebSourceTypeBinderIdentities preferred,
             pebSourceTypeBinderIdentities fallback,
             structuralTypeBinderIdentitiesFromHeads heads
