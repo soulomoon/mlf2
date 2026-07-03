@@ -1757,13 +1757,18 @@ collectResolvedLocalIdentityOverrides resolvedLocalIdentities =
 
     resolvedLocalEntry resolved overrides
       | X.resolvedVarIsLocal resolved,
-        let runtimeName = X.resolvedVarRuntimeName resolved,
-        (before, match : after) <- break ((== runtimeName) . localRefName . loweredResolvedLocalRuntimeRef) overrides =
+        Just localRef <- X.resolvedVarLocalRef resolved,
+        (before, match : after) <- break (resolvedLocalOverrideMatches resolved localRef) overrides =
           ( Map.singleton (X.resolvedVarIdentityKey resolved) (loweredResolvedLocalRef match),
             before ++ after
           )
       | otherwise =
           (Map.empty, overrides)
+
+    resolvedLocalOverrideMatches resolved localRef override =
+      let runtimeRef = loweredResolvedLocalRuntimeRef override
+       in localRefIdentity runtimeRef == localRefIdentity localRef
+            || localRefName runtimeRef == X.resolvedVarRuntimeName resolved
 
 type EvidenceMethodKey = (SymbolIdentity, [SrcType], SymbolIdentity)
 

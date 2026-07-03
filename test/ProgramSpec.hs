@@ -3090,6 +3090,38 @@ spec = do
             binderRefs `shouldSatisfy` (\refs -> all (`elem` refs) resolvedPatternRefs)
             occurrenceRefs `shouldSatisfy` (\refs -> all (`elem` refs) resolvedPatternRefs)
 
+        it "matches resolved local binders by identity when runtime spellings are stale" $ do
+            finalizeContext <- requireFinalizeContext (mkElaborateScope Map.empty Map.empty Map.empty [])
+            let sourceLocal = localRefFromNodeId "source_x" (NodeId 0)
+                bindingIdentity = generatedSymbolIdentity 991800 SymbolValue "Main" "identity" Nothing
+                intTy = STBase "Int"
+                functionTy = STArrow intTy intTy
+                localIdentityExpr runtimeName = Surface.ELamAnn runtimeName intTy (Surface.EVar runtimeName)
+                lowered =
+                    LoweredBinding
+                        { loweredBindingIdentity =
+                            ProgramTypes.loweredBindingIdentityFromDetails "Main__identity" (TopLevelId bindingIdentity)
+                        , loweredBindingSourceType = functionTy
+                        , loweredBindingSourceTypeView = Nothing
+                        , loweredBindingExpectedType = functionTy
+                        , loweredBindingExpectedTypeView = Nothing
+                        , loweredBindingSurfaceExpr = localIdentityExpr "x"
+                        , loweredBindingResolvedLocalIdentities =
+                            [ProgramTypes.LoweredResolvedLocalIdentity (renameLocalRef "$stale_x" sourceLocal) sourceLocal]
+                        , loweredBindingDeferredObligations = Map.empty
+                        , loweredBindingExternalTypeViews = Map.empty
+                        , loweredBindingEvidenceParamCount = 0
+                        , loweredBindingExportedAsMain = False
+                        }
+            binding <-
+                case finalizeBindingWithContext finalizeContext lowered of
+                    Right checked -> pure checked
+                    Left err -> expectationFailure ("finalize binding failed: " ++ show err) >> fail "finalize binding failed"
+            resolvedLocalBinders (checkedBindingTerm binding) `shouldBe` [sourceLocal]
+            resolvedLocalOccurrences (checkedBindingTerm binding) `shouldBe` [sourceLocal]
+            map localRefName (resolvedLocalBinders (checkedBindingTerm binding)) `shouldBe` ["source_x"]
+            map localRefName (resolvedLocalOccurrences (checkedBindingTerm binding)) `shouldBe` ["source_x"]
+
         it "does not rename grouped placeholder spellings under resolved local binders" $ do
             finalizeContext <- requireFinalizeContext (mkElaborateScope Map.empty Map.empty Map.empty [])
             let firstLocal = localRefFromIdentity (GeneratedLocalId (UniqueIdentity 991801)) "source_x"
