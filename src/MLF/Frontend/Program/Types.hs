@@ -102,6 +102,10 @@ module MLF.Frontend.Program.Types
     typeParamGeneratedIdentities,
     typeViewGeneratedIdentities,
     constraintInfoGeneratedIdentities,
+    constructorForallBinderGeneratedIdentities,
+    constructorShapeGeneratedIdentities,
+    constructorInfoGeneratedIdentities,
+    dataInfoGeneratedIdentities,
     loweredBindingIdentityGeneratedIdentities,
     valueInfoSymbolIdentity,
     valueInfoIdentityName,
@@ -2167,6 +2171,31 @@ instanceHeadTypes =
 instanceHeadIdentityTypes :: InstanceInfo -> NonEmpty SrcType
 instanceHeadIdentityTypes =
   fmap typeViewIdentity . instanceHeadTypeViews
+
+constructorForallBinderGeneratedIdentities :: ConstructorForallBinder -> [UniqueIdentity]
+constructorForallBinderGeneratedIdentities =
+  typeBinderGeneratedIdentities . constructorForallIdentity
+
+constructorShapeGeneratedIdentities :: ConstructorShape -> [UniqueIdentity]
+constructorShapeGeneratedIdentities shape =
+  symbolGeneratedIdentities (constructorShapeSymbol shape)
+    ++ typeViewGeneratedIdentities (constructorShapeTypeView shape)
+    ++ concatMap constructorForallBinderGeneratedIdentities (constructorShapeForallBinderInfo shape)
+    ++ concatMap typeParamGeneratedIdentities (constructorShapeOwnerTypeParams shape)
+
+constructorInfoGeneratedIdentities :: ConstructorInfo -> [UniqueIdentity]
+constructorInfoGeneratedIdentities ctorInfo =
+  symbolGeneratedIdentities (ctorInfoSymbol ctorInfo)
+    ++ symbolGeneratedIdentities (ctorOwningTypeIdentity ctorInfo)
+    ++ typeViewGeneratedIdentities (ctorTypeView ctorInfo)
+    ++ concatMap constructorForallBinderGeneratedIdentities (ctorForallBinderInfo ctorInfo)
+    ++ concatMap constructorShapeGeneratedIdentities (ctorOwnerConstructors ctorInfo)
+
+dataInfoGeneratedIdentities :: DataInfo -> [UniqueIdentity]
+dataInfoGeneratedIdentities info =
+  symbolGeneratedIdentities (dataInfoSymbol info)
+    ++ concatMap typeParamGeneratedIdentities (dataTypeParams info)
+    ++ concatMap constructorInfoGeneratedIdentities (dataConstructors info)
 
 data LoweredBindingIdentity = LoweredBindingIdentity
   { loweredIdentityRuntimeName :: String,

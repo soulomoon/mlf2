@@ -150,7 +150,9 @@ import MLF.Frontend.Program.Types
     emptyTypeBinderSubst,
     freeTypeBinderIdentitiesTypeViews,
     constraintInfoGeneratedIdentities,
+    constructorInfoGeneratedIdentities,
     constraintTypeView,
+    dataInfoGeneratedIdentities,
     lookupInstanceMethod,
     ctorName,
     ctorForalls,
@@ -1887,11 +1889,11 @@ generatedIdentitiesInDeferredObligationsMap obligations =
               ++ maybe [] generatedIdentitiesInDeferredEvidence (deferredMethodEvidence deferred)
               ++ concatMap generatedIdentitiesInEvidenceInfo (deferredMethodLocalEvidence deferred)
           DeferredConstructor deferred ->
-            generatedIdentitiesInConstructorInfo (deferredConstructorInfo deferred)
+            constructorInfoGeneratedIdentities (deferredConstructorInfo deferred)
               ++ concatMap symbolGeneratedIdentities (Map.elems (deferredConstructorTypeHeadIdentities deferred))
               ++ concatMap (typeBinderGeneratedIdentities . snd) (deferredConstructorInstBinders deferred)
           DeferredCase deferred ->
-            generatedIdentitiesInDataInfo (deferredCaseDataInfo deferred)
+            dataInfoGeneratedIdentities (deferredCaseDataInfo deferred)
 
     generatedIdentitiesInDeferredEvidence evidence =
       typeViewGeneratedIdentities (deferredMethodEvidenceClassArg evidence)
@@ -1917,24 +1919,6 @@ generatedIdentitiesInDeferredObligationsMap obligations =
         ++ typeViewGeneratedIdentities (methodTypeViewRaw info)
         ++ concatMap constraintInfoGeneratedIdentities (methodConstraintInfos info)
         ++ foldMap typeBinderGeneratedIdentities (methodParamBinderIdentities info)
-
-    generatedIdentitiesInConstructorInfo info =
-      symbolGeneratedIdentities (ctorInfoSymbol info)
-        ++ symbolGeneratedIdentities (ctorOwningTypeIdentity info)
-        ++ concatMap generatedIdentitiesInConstructorForallBinder (ctorForallBinderInfo info)
-        ++ concatMap generatedIdentitiesInConstructorShape (ctorOwnerConstructors info)
-
-    generatedIdentitiesInConstructorShape shape =
-      symbolGeneratedIdentities (constructorShapeSymbol shape)
-        ++ concatMap generatedIdentitiesInConstructorForallBinder (constructorShapeForallBinderInfo shape)
-
-    generatedIdentitiesInConstructorForallBinder =
-      typeBinderGeneratedIdentities . constructorForallIdentity
-
-    generatedIdentitiesInDataInfo info =
-      symbolGeneratedIdentities (dataInfoSymbol info)
-        ++ concatMap (maybe [] typeBinderGeneratedIdentities . typeParamBinderIdentity) (dataTypeParams info)
-        ++ concatMap generatedIdentitiesInConstructorInfo (dataConstructors info)
 
 unresolvedXmlfTermVarRefs :: XmlfTerm -> [DeferredRef]
 unresolvedXmlfTermVarRefs term =

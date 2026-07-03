@@ -568,6 +568,52 @@ spec = do
             ProgramTypes.typeViewHeadIdentities (ProgramTypes.applyTypeViewSubst subst sourceView)
                 `shouldBe` Map.singleton "Token" headIdentity
 
+        it "collects constructor metadata type-view identities for generated identity seeding" $ do
+            let dataIdentity = generatedSymbolIdentity 992530 SymbolType "Main" "Phantom" Nothing
+                ctorIdentity = generatedSymbolIdentity 992531 SymbolConstructor "Main" "MkPhantom" (Just (SymbolOwnerType dataIdentity))
+                ctorHeadUnique = UniqueIdentity 992532
+                ownerShapeHeadUnique = UniqueIdentity 992533
+                ctorHeadIdentity = generatedSymbolIdentity 992532 SymbolType "Main" "CtorViewHead" Nothing
+                ownerShapeHeadIdentity = generatedSymbolIdentity 992533 SymbolType "Main" "OwnerShapeHead" Nothing
+                ctorHeadName = symbolIdentityStableName ctorHeadIdentity
+                ownerShapeHeadName = symbolIdentityStableName ownerShapeHeadIdentity
+                ctorView =
+                    (ProgramTypes.mkTypeView (STBase "Phantom") (STBase ctorHeadName))
+                        { ProgramTypes.typeViewHeadIdentities = Map.singleton ctorHeadName ctorHeadIdentity
+                        }
+                ownerShapeView =
+                    (ProgramTypes.mkTypeView (STBase "Phantom") (STBase ownerShapeHeadName))
+                        { ProgramTypes.typeViewHeadIdentities = Map.singleton ownerShapeHeadName ownerShapeHeadIdentity
+                        }
+                ownerShape =
+                    ConstructorShape
+                        { constructorShapeSymbol = ctorIdentity
+                        , constructorShapeRuntimeName = "Main__MkPhantom"
+                        , constructorShapeTypeView = ownerShapeView
+                        , constructorShapeForallBinderInfo = []
+                        , constructorShapeIndex = 0
+                        , constructorShapeOwnerTypeParams = []
+                        }
+                ctorInfo =
+                    ConstructorInfo
+                        { ctorInfoSymbol = ctorIdentity
+                        , ctorRuntimeName = "Main__MkPhantom"
+                        , ctorTypeView = ctorView
+                        , ctorForallBinderInfo = []
+                        , ctorOwningTypeIdentity = dataIdentity
+                        , ctorIndex = 0
+                        , ctorOwnerConstructors = [ownerShape]
+                        }
+                dataInfo =
+                    DataInfo
+                        { dataInfoSymbol = dataIdentity
+                        , dataTypeParams = []
+                        , dataConstructors = [ctorInfo]
+                        }
+                collected = ProgramTypes.dataInfoGeneratedIdentities dataInfo
+            collected `shouldSatisfy` elem ctorHeadUnique
+            collected `shouldSatisfy` elem ownerShapeHeadUnique
+
         it "keeps replacement type head identities by display pair after applying type-view substitutions" $ do
             let sourceIdentity = typeBinderIdentityFromNode (NodeId 991650)
                 sourceStableName = typeBinderIdentityStableName sourceIdentity

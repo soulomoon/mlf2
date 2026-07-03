@@ -150,7 +150,6 @@ import MLF.Frontend.Program.Types
     ClassInfo (..),
     ConstructorForallBinder (..),
     ConstructorInfo (..),
-    ConstructorShape (..),
     DeferredCaseCall (..),
     DeferredConstructorCall (..),
     DataInfo (..),
@@ -180,8 +179,10 @@ import MLF.Frontend.Program.Types
     checkedBindingSourceTypeIdentity,
     checkedProgramMain,
     constraintInfoGeneratedIdentities,
+    constructorInfoGeneratedIdentities,
     constructorRefFromInfo,
     constructorRefSymbol,
+    dataInfoGeneratedIdentities,
     dataInfoIdentityName,
     dataInfoIdentityQualifiedName,
     dataParamBinders,
@@ -1945,31 +1946,6 @@ checkedBindingGeneratedIdentities binding =
   where
     resolved =
       checkedBindingResolvedVar binding
-
-dataInfoGeneratedIdentities :: DataInfo -> [UniqueIdentity]
-dataInfoGeneratedIdentities info =
-  symbolGeneratedIdentities (dataInfoSymbol info)
-    ++ concatMap typeParamGeneratedIdentities (dataTypeParams info)
-    ++ concatMap constructorInfoGeneratedIdentities (dataConstructors info)
-
-constructorInfoGeneratedIdentities :: ConstructorInfo -> [UniqueIdentity]
-constructorInfoGeneratedIdentities ctorInfo =
-  symbolGeneratedIdentities (ctorInfoSymbol ctorInfo)
-    ++ symbolGeneratedIdentities (ctorOwningTypeIdentity ctorInfo)
-    ++ typeViewGeneratedIdentities (ctorTypeView ctorInfo)
-    ++ concatMap constructorForallBinderGeneratedIdentities (ctorForallBinderInfo ctorInfo)
-    ++ concatMap constructorShapeGeneratedIdentities (ctorOwnerConstructors ctorInfo)
-
-constructorShapeGeneratedIdentities :: ConstructorShape -> [UniqueIdentity]
-constructorShapeGeneratedIdentities shape =
-  symbolGeneratedIdentities (constructorShapeSymbol shape)
-    ++ typeViewGeneratedIdentities (constructorShapeTypeView shape)
-    ++ concatMap constructorForallBinderGeneratedIdentities (constructorShapeForallBinderInfo shape)
-    ++ concatMap typeParamGeneratedIdentities (constructorShapeOwnerTypeParams shape)
-
-constructorForallBinderGeneratedIdentities :: ConstructorForallBinder -> [UniqueIdentity]
-constructorForallBinderGeneratedIdentities binder =
-  typeBinderIdentityGeneratedIdentities (Just (constructorForallIdentity binder))
 
 classInfoGeneratedIdentities :: ClassInfo -> [UniqueIdentity]
 classInfoGeneratedIdentities info =
