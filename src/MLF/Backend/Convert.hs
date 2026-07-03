@@ -194,7 +194,7 @@ import MLF.Frontend.Program.Types
 import MLF.Frontend.Symbol (lookupSymbolIdentityAlias, symbolIdentityAliasMap, symbolIdentityAliasNames, symbolIdentityStableName, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit, SrcBound (..), SrcTy (..), SrcType)
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
-import MLF.Types.Identity (DeferredRef, IdDetails (..), IdentityGenerator, LocalRef, StructuralTypeBinderRole (..), UniqueIdentity (..), advanceIdentityGeneratorPast, deferredRefIdentity, deferredRefName, freshDeferredRef, freshIdentity, freshLocalRef, idDetailsGeneratedIdentities, idDetailsSymbolIdentity, identityGeneratorAfter, symbolGeneratedIdentities, typeBinderIdentityAliasMap, typeBinderIdentityAliasNames, typeBinderIdentityFromStructural, typeBinderIdentityNode, typeBinderIdentityStructural)
+import MLF.Types.Identity (DeferredRef, IdDetails (..), IdentityGenerator, LocalRef, StructuralTypeBinderRole (..), UniqueIdentity (..), advanceIdentityGeneratorPast, deferredRefIdentity, deferredRefName, freshDeferredRef, freshIdentity, freshLocalRef, idDetailsGeneratedIdentities, idDetailsSymbolIdentity, identityGeneratorAfter, symbolGeneratedIdentities, typeBinderIdentityAliasMap, typeBinderIdentityFromStructural, typeBinderIdentityNode, typeBinderIdentityStructural)
 import MLF.Util.Names (freshNameLike)
 
 data BackendConversionError
@@ -3027,7 +3027,8 @@ constructorTypeVarAliasKeys identity names =
       backendTypeSubstitutionKeyFor identity
     aliasNames =
       \case
-        Just resolvedIdentity -> nub (concatMap (`typeBinderIdentityAliasNames` resolvedIdentity) names)
+        Just resolvedIdentity ->
+          Map.keys (typeBinderIdentityAliasMap [(name, resolvedIdentity) | name <- names])
         Nothing -> filter (not . null) names
 
 zipWithNE :: (a -> b -> c) -> NonEmpty a -> NonEmpty b -> NonEmpty c
