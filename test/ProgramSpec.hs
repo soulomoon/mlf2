@@ -2908,6 +2908,48 @@ spec = do
                     expectationFailure ("expected one data param identity, got " ++ show identities)
             unresolvedTermVarRefs (checkedBindingTerm binding) `shouldBe` []
 
+        it "does not recover constructor owner params from metadata-free stable spellings" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (Box(..), main) {"
+                        , "  data Box a ="
+                        , "      Box : a -> Box a;"
+                        , ""
+                        , "  def main : Box Int = Box 1;"
+                        , "}"
+                        ]
+            checked <- requireChecked (withPrelude program)
+            dataInfo <- requireCheckedData "Main" "Box" checked
+            ctorInfo <- requireDataConstructor "Box" dataInfo
+            let scope = mkElaborateScope Map.empty (Map.singleton "Box" dataInfo) Map.empty []
+            finalizeContext <- requireFinalizeContext scope
+            case ProgramTypes.dataParamBinderIdentities dataInfo of
+                [paramIdentity] -> do
+                    let stableParamName = typeBinderIdentityStableName paramIdentity
+                        metadataFreeLowered =
+                            (lowerConstructorBinding scope ctorInfo)
+                                { loweredBindingExpectedType =
+                                    STForall
+                                        stableParamName
+                                        Nothing
+                                        ( STArrow
+                                            (STVar stableParamName)
+                                            (STCon "Box" (STVar stableParamName :| []))
+                                        )
+                                , loweredBindingExpectedTypeView = Nothing
+                                , loweredBindingSurfaceExpr = Surface.EVar "$missing_constructor_pipeline_input"
+                                }
+                    binding <-
+                        case finalizeBindingWithContext finalizeContext metadataFreeLowered of
+                            Left err -> expectationFailure ("metadata constructor finalization failed: " ++ show err) >> fail "metadata constructor finalization failed"
+                            Right checkedBinding -> pure checkedBinding
+                    let leadingIdentities = leadingTypeAbsIdentities (checkedBindingTerm binding)
+                    leadingIdentities `shouldSatisfy` (not . null)
+                    leadingIdentities `shouldSatisfy` all (/= paramIdentity)
+                identities ->
+                    expectationFailure ("expected one data param identity, got " ++ show identities)
+
         it "finalizes parameterized nullary constructor bindings from metadata without the surface pipeline" $ do
             program <-
                 requireParsed $

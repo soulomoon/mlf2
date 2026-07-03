@@ -1091,7 +1091,15 @@ constructorBindingQuantifiedOwnerParams lowered dataInfo =
 
     quantifiedOwnerParam (name, identity) =
       name `Set.member` quantifiedNames
-        || typeBinderIdentityStableName identity `Set.member` quantifiedNames
+        || expectedViewQuantifies identity
+
+    expectedViewQuantifies identity =
+      case loweredBindingExpectedTypeView lowered of
+        Just view ->
+          any
+            (\name -> typeViewBinderIdentityForAlias view name == Just identity)
+            quantifiedNames
+        Nothing -> False
 
 loweredBindingIsConstructor :: LoweredBinding -> Bool
 loweredBindingIsConstructor lowered =
