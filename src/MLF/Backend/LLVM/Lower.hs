@@ -593,7 +593,7 @@ assignDataDeclaration dataEnv moduleName generator dataDecl =
     assignParameter (generator0, refs, env0) ref =
       let name = backendDataParameterRefName ref
           oldIdentity = backendDataParameterRefIdentity ref
-          (identity, generatorNext) = freshTypeBinderIdentity oldIdentity name generator0
+          (identity, generatorNext) = freshTypeBinderIdentity oldIdentity generator0
           ref' = backendDataParameterRefFromIdentity identity name
        in (generatorNext, refs ++ [ref'], insertUniqueBackendTypeBinderIdentity name identity env0)
 
@@ -640,7 +640,7 @@ assignTypeBinders dataEnv env generator =
           (generator1, bound') =
             assignMaybeTypeBinderIdentitiesInType dataEnv env0 generator0 (backendTypeBinderBound binder)
           (identity, generator2) =
-            freshTypeBinderIdentity (backendTypeBinderIdentity binder) name generator1
+            freshTypeBinderIdentity (backendTypeBinderIdentity binder) generator1
           binder' =
             BackendTypeBinderWithIdentity
               (Just identity)
@@ -675,12 +675,12 @@ assignTypeBinderIdentitiesInType dataEnv env generator ty =
        in (generator', BTVarAppWithIdentity (typeRefIdentity env identity name) name args')
     BTForallWithIdentity identity name mbBound body ->
       let (generator1, mbBound') = assignMaybeTypeBinderIdentitiesInType dataEnv env generator mbBound
-          (binderIdentity, generator2) = freshTypeBinderIdentity identity name generator1
+          (binderIdentity, generator2) = freshTypeBinderIdentity identity generator1
           env' = shadowBackendTypeBinderIdentity name binderIdentity env
           (generator3, body') = assignTypeBinderIdentitiesInType dataEnv env' generator2 body
        in (generator3, BTForallWithIdentity (Just binderIdentity) name mbBound' body')
     BTMuWithIdentity identity name body ->
-      let (binderIdentity, generator1) = freshTypeBinderIdentity identity name generator
+      let (binderIdentity, generator1) = freshTypeBinderIdentity identity generator
           env' = shadowBackendTypeBinderIdentity name binderIdentity env
           (generator2, body') = assignTypeBinderIdentitiesInType dataEnv env' generator1 body
        in (generator2, BTMuWithIdentity (Just binderIdentity) name body')
@@ -727,7 +727,7 @@ assignIdentitiesInExpr dataEnv constructorEnv globalEnv typeEnv termEnv generato
             case resultTy' of
               BTForallWithIdentity (Just resultIdentity) _ _ _ ->
                 (resultIdentity, generator2)
-              _ -> freshTypeBinderIdentity identity name generator2
+              _ -> freshTypeBinderIdentity identity generator2
           typeEnv' = shadowBackendTypeBinderIdentity name binderIdentity typeEnv
           (generator4, body') = assignIdentitiesInExpr dataEnv constructorEnv globalEnv typeEnv' termEnv generator3 body
        in (generator4, BackendTyAbsWithIdentity resultTy' (Just binderIdentity) name mbBound' body')
@@ -838,8 +838,8 @@ assignPatternIdentities constructorEnv generator =
           binder' = binder {backendPatternBinderIdentity = Just identity}
        in (generator1, binders ++ [binder'], insertUniqueBackendTermIdentity name identity env)
 
-freshTypeBinderIdentity :: Maybe TypeBinderIdentity -> String -> IdentityGenerator -> (TypeBinderIdentity, IdentityGenerator)
-freshTypeBinderIdentity identity _ generator =
+freshTypeBinderIdentity :: Maybe TypeBinderIdentity -> IdentityGenerator -> (TypeBinderIdentity, IdentityGenerator)
+freshTypeBinderIdentity identity generator =
   case identity of
     Just resolvedIdentity -> (resolvedIdentity, generator)
     Nothing ->
