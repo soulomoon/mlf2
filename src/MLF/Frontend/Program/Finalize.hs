@@ -168,6 +168,7 @@ import MLF.Frontend.Program.Types
     mergeTypeBinderIdentityMaps,
     mergeSymbolIdentityMaps,
     loweredBindingConstructorRef,
+    loweredBindingIdentityGeneratedIdentities,
     loweredIdentityDetails,
     loweredBindingName,
     resolvedVarFromLoweredBinding,
@@ -1858,7 +1859,7 @@ collectEvidenceBinderResolvedVars count0 =
 
 generatedIdentitiesInLoweredBinding :: LoweredBinding -> [UniqueIdentity]
 generatedIdentitiesInLoweredBinding lowered =
-  idDetailsGeneratedIdentities (loweredIdentityDetails (loweredBindingIdentity lowered))
+  loweredBindingIdentityGeneratedIdentities (loweredBindingIdentity lowered)
     ++ maybe [] typeViewGeneratedIdentities (loweredBindingSourceTypeView lowered)
     ++ maybe [] typeViewGeneratedIdentities (loweredBindingExpectedTypeView lowered)
     ++ concatMap generatedIdentitiesInLoweredResolvedLocalIdentity (loweredBindingResolvedLocalIdentities lowered)
