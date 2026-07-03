@@ -1552,32 +1552,12 @@ compileResolvedExprWithExpectedView scope mbExpectedView expr =
     mbExpected = typeViewDisplay <$> mbExpectedView
 
 expectedDomainTypeView :: TypeView -> Maybe TypeView
-expectedDomainTypeView view =
-  case (typeViewDisplay view, typeViewIdentity view) of
-    (STArrow displayDom _, STArrow identityDom _) ->
-      Just
-        ( TypeView
-            { typeViewDisplay = displayDom,
-              typeViewIdentity = identityDom,
-              typeViewHeadIdentities = typeViewHeadIdentities view,
-              typeViewBinderIdentities = typeViewBinderIdentities view
-            }
-        )
-    _ -> Nothing
+expectedDomainTypeView =
+  typeViewDirectArrowDomainView
 
 expectedCodomainTypeView :: TypeView -> Maybe TypeView
-expectedCodomainTypeView view =
-  case (typeViewDisplay view, typeViewIdentity view) of
-    (STArrow _ displayCod, STArrow _ identityCod) ->
-      Just
-        ( TypeView
-            { typeViewDisplay = displayCod,
-              typeViewIdentity = identityCod,
-              typeViewHeadIdentities = typeViewHeadIdentities view,
-              typeViewBinderIdentities = typeViewBinderIdentities view
-            }
-        )
-    _ -> Nothing
+expectedCodomainTypeView =
+  typeViewDirectArrowCodomainView
 
 compileApp :: ElaborateScope -> Maybe SrcType -> P.Expr -> ElaborateM SurfaceExpr
 compileApp scope mbExpected expr =

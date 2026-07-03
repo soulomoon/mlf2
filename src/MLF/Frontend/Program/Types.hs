@@ -156,6 +156,8 @@ module MLF.Frontend.Program.Types
     lookupMethodParamViewSubst,
     methodTypeView,
     typeViewArrowArgViews,
+    typeViewDirectArrowDomainView,
+    typeViewDirectArrowCodomainView,
     typeViewArrowResultView,
     typeViewArrowResultViewForArity,
     methodParamTypeViews,
@@ -3075,6 +3077,22 @@ typeViewArrowArgViews view =
     (displayParamTys, _) = splitArrows displayBodyTy
     (_, identityBodyTy) = splitForalls (typeViewIdentity view)
     (identityParamTys, _) = splitArrows identityBodyTy
+
+typeViewDirectArrowDomainView :: TypeView -> Maybe TypeView
+typeViewDirectArrowDomainView view =
+  case (typeViewDisplay view, typeViewIdentity view) of
+    (STArrow displayDom _, STArrow identityDom _) ->
+      Just (projectTypeView view displayDom identityDom)
+    _ ->
+      Nothing
+
+typeViewDirectArrowCodomainView :: TypeView -> Maybe TypeView
+typeViewDirectArrowCodomainView view =
+  case (typeViewDisplay view, typeViewIdentity view) of
+    (STArrow _ displayCod, STArrow _ identityCod) ->
+      Just (projectTypeView view displayCod identityCod)
+    _ ->
+      Nothing
 
 typeViewArrowResultView :: TypeView -> TypeView
 typeViewArrowResultView view =
