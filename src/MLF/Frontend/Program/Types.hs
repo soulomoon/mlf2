@@ -2809,12 +2809,26 @@ constructorOwnerDataInfoFromShapes ctorInfo =
 inferredConstructorOwnerTypeParams :: ConstructorInfo -> [ConstructorShape] -> [P.TypeParam]
 inferredConstructorOwnerTypeParams ctorInfo ownerShapes =
   [ maybe (P.TypeParam name kind0) (`P.ResolvedTypeParam` kind0) (Map.lookup name paramRefs)
-  | name <- inferredConstructorOwnerParamNames ctorInfo ownerShapes
-  , let kind0 = kindFromMaxApplicationArity (Map.findWithDefault 0 name paramArities)
+  | name <- inferredConstructorOwnerParamNames ctorInfo ownerShapes paramRefs
+  , let kind0 = kindForName name
   ]
   where
     paramArities = foldMap constructorShapeVariableHeadArities ownerShapes
     paramRefs = inferredConstructorOwnerParamRefs ctorInfo ownerShapes
+
+    kindForName name =
+      kindFromMaxApplicationArity $
+        maximum
+          ( 0 :
+            [ Map.findWithDefault 0 alias paramArities
+            | alias <- ownerParamNameAliases name
+            ]
+          )
+
+    ownerParamNameAliases name =
+      case Map.lookup name paramRefs of
+        Just ref -> [alias | (alias, aliasRef) <- Map.toList paramRefs, aliasRef == ref]
+        Nothing -> [name]
 
 inferredConstructorOwnerParamRefs :: ConstructorInfo -> [ConstructorShape] -> Map String ResolvedTypeBinderRef
 inferredConstructorOwnerParamRefs ctorInfo ownerShapes =
@@ -2837,7 +2851,7 @@ constructorOwnerResultArgRefs :: ConstructorInfo -> ConstructorShape -> [(String
 constructorOwnerResultArgRefs ctorInfo shape =
   [ (displayName, ref)
   | (displayName, identity) <-
-      constructorOwnerResultArgPairs ctorInfo (constructorShapeTypeView shape),
+      constructorOwnerResultArgPairs ctorInfo (constructorShapeResultView shape),
     Just ref <- [Map.lookup identity refsByIdentity]
   ]
   where
@@ -2859,19 +2873,26 @@ constructorOwnerResultArgPairs ctorInfo view =
       ]
     _ -> []
 
-inferredConstructorOwnerParamNames :: ConstructorInfo -> [ConstructorShape] -> [String]
-inferredConstructorOwnerParamNames ctorInfo ownerShapes =
+inferredConstructorOwnerParamNames :: ConstructorInfo -> [ConstructorShape] -> Map String ResolvedTypeBinderRef -> [String]
+inferredConstructorOwnerParamNames ctorInfo ownerShapes paramRefs =
   case transpose (map shapeOwnerDisplayArgs ownerShapes) of
-    [] -> map fst (constructorOwnerResultArgPairs ctorInfo (ctorTypeView ctorInfo))
+    [] -> map fst (constructorOwnerResultArgPairs ctorInfo (constructorShapeResultView (constructorShapeFromInfo ctorInfo)))
     columns -> mapMaybe firstName columns
   where
     shapeOwnerDisplayArgs shape =
-      map fst (constructorOwnerResultArgPairs ctorInfo (constructorShapeTypeView shape))
+      map fst (constructorOwnerResultArgPairs ctorInfo (constructorShapeResultView shape))
 
     firstName names =
-      case names of
-        name : _ -> Just name
-        [] -> Nothing
+      case Set.toList (Set.fromList [ref | name <- names, Just ref <- [Map.lookup name paramRefs]]) of
+        [_] ->
+          case filter (`Map.member` paramRefs) names of
+            name : _ -> Just name
+            [] -> Nothing
+        [] ->
+          case names of
+            name : _ -> Just name
+            [] -> Nothing
+        _ -> Nothing
 
 constructorOwnerResultArgs :: ConstructorInfo -> TypeView -> SrcType -> Maybe (NonEmpty SrcType)
 constructorOwnerResultArgs ctorInfo view ty =

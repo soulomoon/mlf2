@@ -2361,6 +2361,79 @@ spec = do
                            , ResolvedTypeParam (resolvedTypeBinderRefFromIdentity aIdentity "a") KType
                            ]
 
+        it "infers constructor owner param kinds by binder identity across stale shape aliases" $ do
+            let typeIdentity =
+                    generatedSymbolIdentity 1026 SymbolType "Core" "MaybeF" Nothing
+                ctorIdentity unique name =
+                    generatedSymbolIdentity unique SymbolConstructor "Core" name (Just (SymbolOwnerType typeIdentity))
+                fIdentity = typeBinderIdentityFromNode (NodeId 992507)
+                aIdentity = typeBinderIdentityFromNode (NodeId 992508)
+                fStableName = typeBinderIdentityStableName fIdentity
+                aStableName = typeBinderIdentityStableName aIdentity
+                staleDisplayHead = "$stale_display_maybef"
+                staleIdentityHead = "$stale_identity_maybef"
+                leftDisplayResult = STCon staleDisplayHead (STVar "$left_f" :| [STVar "$left_a"])
+                rightDisplayResult = STCon staleDisplayHead (STVar "$right_f" :| [STVar "$right_a"])
+                identityResult = STCon staleIdentityHead (STVar fStableName :| [STVar aStableName])
+                rightDisplayType =
+                    STArrow
+                        (STVarApp "$right_f" (STVar "$right_a" :| []))
+                        rightDisplayResult
+                rightIdentityType =
+                    STArrow
+                        (STVarApp fStableName (STVar aStableName :| []))
+                        identityResult
+                mkView displayTy identityTy =
+                    (ProgramTypes.mkTypeView displayTy identityTy)
+                        { ProgramTypes.typeViewHeadIdentities =
+                            Map.fromList
+                                [ (staleDisplayHead, typeIdentity)
+                                , (staleIdentityHead, typeIdentity)
+                                ]
+                        , ProgramTypes.typeViewBinderIdentities =
+                            Map.fromList
+                                [ (fStableName, fIdentity)
+                                , (aStableName, aIdentity)
+                                ]
+                        }
+                forallBinders =
+                    [ ProgramTypes.ConstructorForallBinder "f" fIdentity
+                    , ProgramTypes.ConstructorForallBinder "a" aIdentity
+                    ]
+                leftShape =
+                    ConstructorShape
+                        { constructorShapeSymbol = ctorIdentity 1027 "NothingF"
+                        , constructorShapeRuntimeName = "Core__NothingF"
+                        , constructorShapeTypeView = mkView leftDisplayResult identityResult
+                        , constructorShapeForallBinderInfo = forallBinders
+                        , constructorShapeIndex = 0
+                        , constructorShapeOwnerTypeParams = []
+                        }
+                rightShape =
+                    ConstructorShape
+                        { constructorShapeSymbol = ctorIdentity 1028 "JustF"
+                        , constructorShapeRuntimeName = "Core__JustF"
+                        , constructorShapeTypeView = mkView rightDisplayType rightIdentityType
+                        , constructorShapeForallBinderInfo = forallBinders
+                        , constructorShapeIndex = 1
+                        , constructorShapeOwnerTypeParams = []
+                        }
+                ctorInfo =
+                    ConstructorInfo
+                        { ctorInfoSymbol = ctorIdentity 1027 "NothingF"
+                        , ctorRuntimeName = "Core__NothingF"
+                        , ctorTypeView = mkView leftDisplayResult identityResult
+                        , ctorForallBinderInfo = forallBinders
+                        , ctorOwningTypeIdentity = typeIdentity
+                        , ctorIndex = 0
+                        , ctorOwnerConstructors = [leftShape, rightShape]
+                        }
+                ownerInfo = ProgramTypes.constructorOwnerDataInfoFromShapes ctorInfo
+            dataTypeParams ownerInfo
+                `shouldBe` [ ResolvedTypeParam (resolvedTypeBinderRefFromIdentity fIdentity "f") (KArrow KType KType)
+                           , ResolvedTypeParam (resolvedTypeBinderRefFromIdentity aIdentity "a") KType
+                           ]
+
         it "records constructor bindings with resolved constructor identity" $ do
             program <-
                 requireParsed $
