@@ -160,7 +160,9 @@ import MLF.Frontend.Program.Types
     lookupMethodParamViewSubst,
     methodType,
     methodTypeView,
+    methodParamTypeViews,
     methodResultTypeView,
+    methodResultTypeViewFrom,
     methodName,
     methodInfoOwnerClassSymbolIdentity,
     methodInfoSymbolIdentity,
@@ -3757,7 +3759,7 @@ resolveDeferredMethods scope deferredMethods env0 term0 = do
         foldM
           (\acc (templateView, actualView) -> matchMethodTypeViews scope acc (templateView :| []) (actualView :| []))
           Map.empty
-          (zip (methodParamViews methodView) argViews)
+          (zip (methodParamTypeViews methodView) argViews)
       NE.head <$> lookupMethodParamViewSubst methodInfo subst
 
     inferDeferredMethodClassArgumentFromExpected _ _ Nothing = Nothing
@@ -3767,7 +3769,7 @@ resolveDeferredMethods scope deferredMethods env0 term0 = do
         foldM
           (\acc (templateView, actualView) -> matchMethodTypeViews scope acc (templateView :| []) (actualView :| []))
           Map.empty
-          (zip (methodParamViews methodView) argViews)
+          (zip (methodParamTypeViews methodView) argViews)
       subst <- matchMethodTypeViews scope substFromArgs (methodResultTypeView methodInfo :| []) (expectedView :| [])
       NE.head <$> lookupMethodParamViewSubst methodInfo subst
 
@@ -3833,7 +3835,7 @@ resolveDeferredMethods scope deferredMethods env0 term0 = do
     inferNullaryMethodSubst methodInfo classArgView subst expectedView =
       let specializedMethodView =
             specializeMethodTypeView methodInfo (classArgView :| [])
-       in matchMethodTypeViews scope subst (methodResultView specializedMethodView :| []) (expectedView :| [])
+       in matchMethodTypeViews scope subst (methodResultTypeViewFrom specializedMethodView :| []) (expectedView :| [])
 
     nullaryMethodResultIsClassParameter methodInfo =
       case typeViewIdentity resultView of
@@ -3864,31 +3866,7 @@ resolveDeferredMethods scope deferredMethods env0 term0 = do
        in foldM
             (\acc (templateView, actualView) -> matchMethodTypeViews scope acc (templateView :| []) (actualView :| []))
             subst
-            (zip (methodParamViews specializedMethodView) argViews)
-
-    methodResultView view =
-      view
-        { typeViewDisplay = displayResult,
-          typeViewIdentity = identityResult
-        }
-      where
-        (_, displayBodyTy) = splitForalls (typeViewDisplay view)
-        (_, displayResult) = splitArrows displayBodyTy
-        (_, identityBodyTy) = splitForalls (typeViewIdentity view)
-        (_, identityResult) = splitArrows identityBodyTy
-
-    methodParamViews view =
-      zipWith paramView displayParamTys identityParamTys
-      where
-        (_, displayBodyTy) = splitForalls (typeViewDisplay view)
-        (displayParamTys, _) = splitArrows displayBodyTy
-        (_, identityBodyTy) = splitForalls (typeViewIdentity view)
-        (identityParamTys, _) = splitArrows identityBodyTy
-        paramView displayTy identityTy =
-          view
-            { typeViewDisplay = displayTy,
-              typeViewIdentity = identityTy
-            }
+            (zip (methodParamTypeViews specializedMethodView) argViews)
 
 resolveConstraintEvidenceTerms :: ElaborateScope -> [EvidenceInfo] -> Set (SymbolIdentity, [SrcType]) -> [ConstraintInfo] -> Either ProgramError [XmlfTerm]
 resolveConstraintEvidenceTerms scope localEvidence seen constraints =
