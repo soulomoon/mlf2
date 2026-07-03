@@ -563,26 +563,13 @@ sourceTypeViewSubstForTemplateInScope scope template matched =
       Just key <- [templateBinderKey name]
     ]
   where
-    displayNamesByIdentityName =
-      typeViewVarPairs template
-
-    identitiesByDisplayName =
-      mergeTypeBinderIdentityMaps
-        [ Map.singleton displayName identity
-        | (identityName, displayName) <- Map.toList displayNamesByIdentityName
-        , Just identity <- [typeViewBinderIdentityForAlias template identityName]
-        ]
-
     templateBinderKey name =
       case typeViewBinderIdentityForAlias template name of
         Just identity -> Just (typeViewSubstKeyForIdentity identity)
-        Nothing ->
-          case Map.lookup name identitiesByDisplayName of
-            Just identity -> Just (typeViewSubstKeyForIdentity identity)
-            Nothing
-              | Map.null (typeViewBinderIdentities template) ->
-                  typeViewSubstKeyForTemplateName template name
-              | otherwise -> Nothing
+        Nothing
+          | Map.null (typeViewBinderIdentities template) ->
+              typeViewSubstKeyForTemplateName template name
+          | otherwise -> Nothing
 
 typeViewSubstKeyForTemplateName :: TypeView -> String -> Maybe TypeViewSubstKey
 typeViewSubstKeyForTemplateName template identityName =
