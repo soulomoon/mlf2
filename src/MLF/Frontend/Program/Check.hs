@@ -472,44 +472,30 @@ checkedClassesByIdentity :: Map String ClassInfo -> Map SymbolIdentity ClassInfo
 checkedClassesByIdentity =
   indexByIdentity classInfoSymbolIdentity
 
-addValues :: Map String ValueInfo -> Map String ValueInfo -> Either ProgramError (Map String ValueInfo)
-addValues base incoming =
+addVisibleByIdentity :: (a -> SymbolIdentity) -> Map String a -> Map String a -> Either ProgramError (Map String a)
+addVisibleByIdentity identityFor base incoming =
   foldM
     ( \acc (name, info) ->
         case Map.lookup name acc of
           Just existing
-            | valueInfoSymbolIdentity existing == valueInfoSymbolIdentity info -> Right acc
+            | identityFor existing == identityFor info -> Right acc
             | otherwise -> Left (ProgramDuplicateVisibleName name)
           Nothing -> Right (Map.insert name info acc)
     )
     base
     (Map.toList incoming)
+
+addValues :: Map String ValueInfo -> Map String ValueInfo -> Either ProgramError (Map String ValueInfo)
+addValues =
+  addVisibleByIdentity valueInfoSymbolIdentity
 
 addTypes :: Map String DataInfo -> Map String DataInfo -> Either ProgramError (Map String DataInfo)
-addTypes base incoming =
-  foldM
-    ( \acc (name, info) ->
-        case Map.lookup name acc of
-          Just existing
-            | dataInfoSymbolIdentity existing == dataInfoSymbolIdentity info -> Right acc
-            | otherwise -> Left (ProgramDuplicateVisibleName name)
-          Nothing -> Right (Map.insert name info acc)
-    )
-    base
-    (Map.toList incoming)
+addTypes =
+  addVisibleByIdentity dataInfoSymbolIdentity
 
 addClasses :: Map String ClassInfo -> Map String ClassInfo -> Either ProgramError (Map String ClassInfo)
-addClasses base incoming =
-  foldM
-    ( \acc (name, info) ->
-        case Map.lookup name acc of
-          Just existing
-            | classInfoSymbolIdentity existing == classInfoSymbolIdentity info -> Right acc
-            | otherwise -> Left (ProgramDuplicateVisibleName name)
-          Nothing -> Right (Map.insert name info acc)
-    )
-    base
-    (Map.toList incoming)
+addClasses =
+  addVisibleByIdentity classInfoSymbolIdentity
 
 lookupValueInfoBySymbol :: Scope -> ResolvedSymbol -> TcM ValueInfo
 lookupValueInfoBySymbol scope symbol =
