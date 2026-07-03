@@ -1544,6 +1544,13 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldNotSatisfy` isInfixOf "BackendTypeAbsTypeMismatch"
     validateLLVMAssembly output
 
+  it "resolves stable-spelled type vars through binder identity aliases" $ do
+    output <- requireRight (renderBackendProgramLLVM typeBinderStableAliasProgram)
+
+    output `shouldSatisfy` isInfixOf "define i64 @\"main\"()"
+    output `shouldSatisfy` isInfixOf "ret i64 42"
+    validateLLVMAssembly output
+
   describe "polymorphism lowerability contract" $ do
     it "supports top-level complete type application through static specialization" $ do
       output <- requireRight (renderBackendProgramLLVM polymorphicZeroArityProgram)
@@ -6788,6 +6795,32 @@ staleTypeAbsResultExpr =
 staleTypeAbsBinderIdentity :: TypeBinderIdentity
 staleTypeAbsBinderIdentity =
   typeBinderIdentityFromUnique (UniqueIdentity 990006)
+
+typeBinderStableAliasProgram :: BackendProgram
+typeBinderStableAliasProgram =
+  programWithMainExpr intTy $
+    BackendApp
+      intTy
+      (BackendTyApp (BTArrow intTy intTy) typeAbs intTy)
+      (intLit 42)
+  where
+    binderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 990007)
+    stableName = typeBinderIdentityStableName binderIdentity
+    binderTy = BTVarWithIdentity (Just binderIdentity) "a"
+    polyTy = BTForallWithIdentity (Just binderIdentity) "a" Nothing (BTArrow binderTy binderTy)
+    stableTy = BTVar stableName
+    typeAbs =
+      BackendTyAbsWithIdentity
+        polyTy
+        Nothing
+        "a"
+        Nothing
+        ( BackendLam
+            (BTArrow stableTy stableTy)
+            "x"
+            stableTy
+            (BackendVar stableTy "x")
+        )
 
 polymorphicZeroArityProgram :: BackendProgram
 polymorphicZeroArityProgram =

@@ -421,8 +421,8 @@ backendSymbolIdentityEntries name identity =
   [(name, identity)]
 
 insertUniqueBackendTypeBinderIdentity :: String -> TypeBinderIdentity -> BackendTypeBinderEnv -> BackendTypeBinderEnv
-insertUniqueBackendTypeBinderIdentity name identity =
-  Map.alter insert name
+insertUniqueBackendTypeBinderIdentity name identity env =
+  foldl (\env0 alias -> Map.alter insert alias env0) env [name, typeBinderIdentityStableName identity]
   where
     insert Nothing =
       Just (Just identity)
@@ -433,8 +433,8 @@ insertUniqueBackendTypeBinderIdentity name identity =
       Just Nothing
 
 shadowBackendTypeBinderIdentity :: String -> TypeBinderIdentity -> BackendTypeBinderEnv -> BackendTypeBinderEnv
-shadowBackendTypeBinderIdentity name identity =
-  Map.insert name (Just identity)
+shadowBackendTypeBinderIdentity name identity env =
+  foldl (\env0 alias -> Map.insert alias (Just identity) env0) env [name, typeBinderIdentityStableName identity]
 
 insertUniqueBackendTermIdentity :: String -> IdDetails -> BackendTermEnv -> BackendTermEnv
 insertUniqueBackendTermIdentity name identity env =
