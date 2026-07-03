@@ -5040,18 +5040,10 @@ extendLocalLoweredPure scope localRef sourceName runtimeName loweredTy =
       OrdinaryValue
         { valueInfoSymbol = resolvedLocalValueSymbol localRef runtimeName,
           valueRuntimeName = runtimeName,
-          valueTypeView =
-            TypeView
-              { typeViewDisplay = loweredTy,
-                typeViewIdentity = loweredTy,
-                typeViewHeadIdentities = typeViewHeadIdentities sourceView,
-                typeViewBinderIdentities = typeViewBinderIdentities sourceView
-              },
+          valueTypeView = loweredSourceTypeViewInScope scope loweredTy,
           valueConstraints = [],
           valueConstraintInfos = []
         }
-    sourceView =
-      sourceTypeViewInScope scope loweredTy
 
 extendResolvedLocalLoweredPure :: ElaborateScope -> LocalRef -> String -> SrcType -> ElaborateScope
 extendResolvedLocalLoweredPure scope localRef runtimeName loweredTy =
@@ -5062,18 +5054,17 @@ extendResolvedLocalLoweredPure scope localRef runtimeName loweredTy =
       OrdinaryValue
         { valueInfoSymbol = resolvedLocalValueSymbol localRef runtimeName,
           valueRuntimeName = runtimeName,
-          valueTypeView =
-            TypeView
-              { typeViewDisplay = loweredTy,
-                typeViewIdentity = loweredTy,
-                typeViewHeadIdentities = typeViewHeadIdentities sourceView,
-                typeViewBinderIdentities = typeViewBinderIdentities sourceView
-              },
+          valueTypeView = loweredSourceTypeViewInScope scope loweredTy,
           valueConstraints = [],
           valueConstraintInfos = []
         }
-    sourceView =
-      sourceTypeViewInScope scope loweredTy
+
+loweredSourceTypeViewInScope :: ElaborateScope -> SrcType -> TypeView
+loweredSourceTypeViewInScope scope loweredTy =
+  (sourceTypeViewInScope scope loweredTy)
+    { typeViewDisplay = loweredTy,
+      typeViewIdentity = loweredTy
+    }
 
 extendLocalSourceTypePure :: ElaborateScope -> LocalRef -> String -> String -> SrcType -> ElaborateScope
 extendLocalSourceTypePure scope localRef sourceName runtimeName sourceTy =
