@@ -203,6 +203,7 @@ import MLF.Types.Identity
     IdentityGenerator,
     LocalIdentity (..),
     LocalRef,
+    localRefGeneratedIdentities,
     localRefIdentity,
     primitiveRefSymbol,
     TypeBinderIdentity,
@@ -1629,7 +1630,10 @@ annotateResolvedTermVarsWithEvidenceCounts evidenceCountsByBinding initialEviden
    in term
   where
     initialGenerator =
-      identityGeneratorAfter generatedIdentities
+      identityGeneratorAfter
+        ( generatedIdentities
+            ++ concatMap generatedIdentitiesInLoweredResolvedLocalIdentity resolvedLocalIdentities
+        )
 
     resolvedLocalIdentityOverrides =
       collectResolvedLocalIdentityOverrides resolvedLocalIdentities term0
@@ -1853,8 +1857,15 @@ collectEvidenceBinderResolvedVars count0 =
 generatedIdentitiesInLoweredBinding :: LoweredBinding -> [UniqueIdentity]
 generatedIdentitiesInLoweredBinding lowered =
   idDetailsGeneratedIdentities (loweredIdentityDetails (loweredBindingIdentity lowered))
+    ++ maybe [] generatedIdentitiesInTypeView (loweredBindingSourceTypeView lowered)
+    ++ maybe [] generatedIdentitiesInTypeView (loweredBindingExpectedTypeView lowered)
+    ++ concatMap generatedIdentitiesInLoweredResolvedLocalIdentity (loweredBindingResolvedLocalIdentities lowered)
     ++ generatedIdentitiesInDeferredObligations lowered
     ++ concatMap generatedIdentitiesInTypeView (Map.elems (loweredBindingExternalTypeViews lowered))
+
+generatedIdentitiesInLoweredResolvedLocalIdentity :: LoweredResolvedLocalIdentity -> [UniqueIdentity]
+generatedIdentitiesInLoweredResolvedLocalIdentity =
+  localRefGeneratedIdentities . loweredResolvedLocalRef
 
 generatedIdentitiesInTypeView :: TypeView -> [UniqueIdentity]
 generatedIdentitiesInTypeView view =

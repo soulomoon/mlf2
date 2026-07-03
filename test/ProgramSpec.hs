@@ -4439,6 +4439,57 @@ spec = do
             concatMap generatedDeferredIdentityValues checked
                 `shouldSatisfy` all (`notElem` bindingIdentities)
 
+        it "refreshes duplicate deferred refs after lowered local identities" $ do
+            finalizeContext <- requireFinalizeContext (mkElaborateScope Map.empty Map.empty Map.empty [])
+            let duplicateRef = deferredRefFromIdentity (UniqueIdentity 0) "$deferred"
+                firstIdentity = generatedSymbolIdentity 1 SymbolValue "Main" "first" Nothing
+                secondIdentity = generatedSymbolIdentity 2 SymbolValue "Main" "second" Nothing
+                dataIdentity = generatedSymbolIdentity 3 SymbolType "Main" "Phantom" Nothing
+                occupiedLocal = localRefFromIdentity (GeneratedLocalId (UniqueIdentity 4)) "x"
+                phantomData =
+                    DataInfo
+                        { dataInfoSymbol = dataIdentity
+                        , dataTypeParams = []
+                        , dataConstructors = []
+                        }
+                obligation =
+                    DeferredCase
+                        DeferredCaseCall
+                            { deferredCaseRef = duplicateRef
+                            , deferredCaseDataInfo = phantomData
+                            , deferredCaseScrutineeType = STBase "Int"
+                            , deferredCaseResultType = STBase "Int"
+                            , deferredCaseExpectedArgCount = 0
+                            }
+                lowered name identity value locals =
+                    LoweredBinding
+                        { loweredBindingIdentity =
+                            ProgramTypes.loweredBindingIdentityFromDetails name (TopLevelId identity)
+                        , loweredBindingSourceType = STBase "Int"
+                        , loweredBindingSourceTypeView = Nothing
+                        , loweredBindingExpectedType = STBase "Int"
+                        , loweredBindingExpectedTypeView = Nothing
+                        , loweredBindingSurfaceExpr = Surface.ELit (LInt value)
+                        , loweredBindingResolvedLocalIdentities = locals
+                        , loweredBindingDeferredObligations = Map.singleton duplicateRef obligation
+                        , loweredBindingExternalTypeViews = Map.empty
+                        , loweredBindingEvidenceParamCount = 0
+                        , loweredBindingExportedAsMain = False
+                        }
+            checked <-
+                case finalizeBindingsAllowOpaqueWithContext finalizeContext
+                    [ lowered
+                        "Main__first"
+                        firstIdentity
+                        1
+                        [ProgramTypes.LoweredResolvedLocalIdentity "x" occupiedLocal]
+                    , lowered "Main__second" secondIdentity 2 []
+                    ] of
+                    Right bindings -> pure bindings
+                    Left err -> expectationFailure ("finalize group failed: " ++ show err) >> fail "finalize group failed"
+            concatMap generatedDeferredIdentityValues checked
+                `shouldSatisfy` all (/= UniqueIdentity 4)
+
         it "rejects duplicate lowered binding identities before caching read contexts" $ do
             finalizeContext <- requireFinalizeContext (mkElaborateScope Map.empty Map.empty Map.empty [])
             let duplicateIdentity = generatedSymbolIdentity 7 SymbolValue "Main" "dup" Nothing
