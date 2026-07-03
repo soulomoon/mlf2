@@ -106,6 +106,15 @@ module MLF.Frontend.Program.Types
     constructorShapeGeneratedIdentities,
     constructorInfoGeneratedIdentities,
     dataInfoGeneratedIdentities,
+    functionalDependencyGeneratedIdentities,
+    methodInfoGeneratedIdentities,
+    classInfoGeneratedIdentities,
+    valueInfoGeneratedIdentities,
+    instanceInfoGeneratedIdentities,
+    evidenceMethodGeneratedIdentities,
+    evidenceInfoGeneratedIdentities,
+    deferredMethodEvidenceGeneratedIdentities,
+    deferredProgramObligationGeneratedIdentities,
     loweredBindingIdentityGeneratedIdentities,
     valueInfoSymbolIdentity,
     valueInfoIdentityName,
@@ -279,7 +288,7 @@ import qualified Data.Map.Strict as Map
 import Data.Maybe (mapMaybe)
 import Data.Set (Set)
 import qualified Data.Set as Set
-import MLF.Elab.Types (XmlfTerm, ElabType, ResolvedVar (..), resolvedVarConstructorRef)
+import MLF.Elab.Types (XmlfTerm, ElabType, ResolvedVar (..), generatedIdentitiesInType, resolvedVarConstructorRef)
 import MLF.Frontend.Symbol
   ( ResolvedReference,
     ResolvedReferenceKind (..),
@@ -2196,6 +2205,84 @@ dataInfoGeneratedIdentities info =
   symbolGeneratedIdentities (dataInfoSymbol info)
     ++ concatMap typeParamGeneratedIdentities (dataTypeParams info)
     ++ concatMap constructorInfoGeneratedIdentities (dataConstructors info)
+
+functionalDependencyGeneratedIdentities :: FunctionalDependencyInfo -> [UniqueIdentity]
+functionalDependencyGeneratedIdentities info =
+  foldMap typeBinderGeneratedIdentities (functionalDependencyDeterminerRefs info)
+    ++ foldMap typeBinderGeneratedIdentities (functionalDependencyDeterminedRefs info)
+
+methodInfoGeneratedIdentities :: MethodInfo -> [UniqueIdentity]
+methodInfoGeneratedIdentities info =
+  symbolGeneratedIdentities (methodInfoSymbol info)
+    ++ typeViewGeneratedIdentities (methodTypeViewRaw info)
+    ++ concatMap constraintInfoGeneratedIdentities (methodConstraintInfos info)
+    ++ foldMap typeBinderGeneratedIdentities (methodParamBinderIdentities info)
+
+classInfoGeneratedIdentities :: ClassInfo -> [UniqueIdentity]
+classInfoGeneratedIdentities info =
+  symbolGeneratedIdentities (classInfoSymbol info)
+    ++ foldMap typeParamGeneratedIdentities (classTypeParams info)
+    ++ concatMap constraintInfoGeneratedIdentities (classSuperclassInfos info)
+    ++ concatMap functionalDependencyGeneratedIdentities (classFunctionalDependencies info)
+    ++ concatMap methodInfoGeneratedIdentities (Map.elems (classMethodsByIdentity info))
+
+valueInfoGeneratedIdentities :: ValueInfo -> [UniqueIdentity]
+valueInfoGeneratedIdentities valueInfo =
+  case valueInfo of
+    OrdinaryValue {valueInfoSymbol = symbol, valueConstraintInfos = constraints} ->
+      symbolGeneratedIdentities symbol
+        ++ typeViewGeneratedIdentities (ordinaryValueTypeView valueInfo)
+        ++ concatMap constraintInfoGeneratedIdentities constraints
+    ConstructorValue {valueInfoSymbol = symbol, valueCtorInfo = ctorInfo} ->
+      symbolGeneratedIdentities symbol ++ constructorInfoGeneratedIdentities ctorInfo
+    OverloadedMethod {valueInfoSymbol = symbol, valueMethodInfo = methodInfo} ->
+      symbolGeneratedIdentities symbol ++ methodInfoGeneratedIdentities methodInfo
+
+instanceInfoGeneratedIdentities :: InstanceInfo -> [UniqueIdentity]
+instanceInfoGeneratedIdentities info =
+  symbolGeneratedIdentities (instanceClassSymbol info)
+    ++ symbolGeneratedIdentities (instanceOriginModuleIdentity info)
+    ++ concatMap constraintInfoGeneratedIdentities (instanceConstraintInfos info)
+    ++ foldMap typeViewGeneratedIdentities (instanceHeadTypeViews info)
+    ++ concatMap valueInfoGeneratedIdentities (Map.elems (instanceMethodsByIdentity info))
+
+evidenceMethodGeneratedIdentities :: EvidenceMethod -> [UniqueIdentity]
+evidenceMethodGeneratedIdentities method =
+  symbolGeneratedIdentities (evidenceMethodSymbol method)
+    ++ maybe [] resolvedVarGeneratedIdentities (evidenceMethodResolvedVar method)
+    ++ typeViewGeneratedIdentities (evidenceMethodTypeView method)
+  where
+    resolvedVarGeneratedIdentities resolved =
+      idDetailsGeneratedIdentities (resolvedVarDetails resolved)
+        ++ generatedIdentitiesInType (resolvedVarType resolved)
+
+evidenceInfoGeneratedIdentities :: EvidenceInfo -> [UniqueIdentity]
+evidenceInfoGeneratedIdentities info =
+  symbolGeneratedIdentities (evidenceClassSymbol info)
+    ++ foldMap typeViewGeneratedIdentities (evidenceTypeViews info)
+    ++ concatMap evidenceMethodGeneratedIdentities (Map.elems (evidenceMethodsByIdentity info))
+
+deferredMethodEvidenceGeneratedIdentities :: DeferredMethodEvidence -> [UniqueIdentity]
+deferredMethodEvidenceGeneratedIdentities evidence =
+  typeViewGeneratedIdentities (deferredMethodEvidenceClassArg evidence)
+    ++ foldMap typeViewGeneratedIdentities (deferredMethodEvidenceClassArgs evidence)
+    ++ evidenceMethodGeneratedIdentities (deferredMethodEvidenceMethod evidence)
+
+deferredProgramObligationGeneratedIdentities :: DeferredProgramObligation -> [UniqueIdentity]
+deferredProgramObligationGeneratedIdentities obligation =
+  idDetailsGeneratedIdentities (DeferredId (deferredProgramObligationRef obligation))
+    ++ case obligation of
+      DeferredMethod deferred ->
+        methodInfoGeneratedIdentities (deferredMethodInfo deferred)
+          ++ maybe [] typeViewGeneratedIdentities (deferredMethodExpectedResult deferred)
+          ++ maybe [] deferredMethodEvidenceGeneratedIdentities (deferredMethodEvidence deferred)
+          ++ concatMap evidenceInfoGeneratedIdentities (deferredMethodLocalEvidence deferred)
+      DeferredConstructor deferred ->
+        constructorInfoGeneratedIdentities (deferredConstructorInfo deferred)
+          ++ concatMap symbolGeneratedIdentities (Map.elems (deferredConstructorTypeHeadIdentities deferred))
+          ++ concatMap (typeBinderGeneratedIdentities . snd) (deferredConstructorInstBinders deferred)
+      DeferredCase deferred ->
+        dataInfoGeneratedIdentities (deferredCaseDataInfo deferred)
 
 data LoweredBindingIdentity = LoweredBindingIdentity
   { loweredIdentityRuntimeName :: String,

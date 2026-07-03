@@ -147,12 +147,10 @@ import MLF.Frontend.Program.Types
     deferredMethodPlaceholder,
     deferredMethodName,
     deferredProgramObligationRef,
+    deferredProgramObligationGeneratedIdentities,
     emptyTypeBinderSubst,
     freeTypeBinderIdentitiesTypeViews,
-    constraintInfoGeneratedIdentities,
-    constructorInfoGeneratedIdentities,
     constraintTypeView,
-    dataInfoGeneratedIdentities,
     lookupInstanceMethod,
     ctorName,
     ctorForalls,
@@ -1878,47 +1876,7 @@ generatedIdentitiesInDeferredObligations lowered =
 
 generatedIdentitiesInDeferredObligationsMap :: DeferredObligations -> [UniqueIdentity]
 generatedIdentitiesInDeferredObligationsMap obligations =
-  concatMap generatedIdentitiesInObligation (Map.elems obligations)
-  where
-    generatedIdentitiesInObligation obligation =
-      idDetailsGeneratedIdentities (DeferredId (deferredProgramObligationRef obligation))
-        ++ case obligation of
-          DeferredMethod deferred ->
-            generatedIdentitiesInMethodInfo (deferredMethodInfo deferred)
-              ++ maybe [] typeViewGeneratedIdentities (deferredMethodExpectedResult deferred)
-              ++ maybe [] generatedIdentitiesInDeferredEvidence (deferredMethodEvidence deferred)
-              ++ concatMap generatedIdentitiesInEvidenceInfo (deferredMethodLocalEvidence deferred)
-          DeferredConstructor deferred ->
-            constructorInfoGeneratedIdentities (deferredConstructorInfo deferred)
-              ++ concatMap symbolGeneratedIdentities (Map.elems (deferredConstructorTypeHeadIdentities deferred))
-              ++ concatMap (typeBinderGeneratedIdentities . snd) (deferredConstructorInstBinders deferred)
-          DeferredCase deferred ->
-            dataInfoGeneratedIdentities (deferredCaseDataInfo deferred)
-
-    generatedIdentitiesInDeferredEvidence evidence =
-      typeViewGeneratedIdentities (deferredMethodEvidenceClassArg evidence)
-        ++ foldMap typeViewGeneratedIdentities (deferredMethodEvidenceClassArgs evidence)
-        ++ generatedIdentitiesInEvidenceMethod (deferredMethodEvidenceMethod evidence)
-
-    generatedIdentitiesInEvidenceInfo evidence =
-      symbolGeneratedIdentities (evidenceClassSymbol evidence)
-        ++ foldMap typeViewGeneratedIdentities (evidenceTypeViews evidence)
-        ++ concatMap generatedIdentitiesInEvidenceMethod (Map.elems (evidenceMethodsByIdentity evidence))
-
-    generatedIdentitiesInEvidenceMethod method =
-      symbolGeneratedIdentities (evidenceMethodSymbol method)
-        ++ maybe [] generatedIdentitiesInResolvedVar (evidenceMethodResolvedVar method)
-        ++ typeViewGeneratedIdentities (evidenceMethodTypeView method)
-
-    generatedIdentitiesInResolvedVar resolved =
-      idDetailsGeneratedIdentities (X.resolvedVarDetails resolved)
-        ++ X.generatedIdentitiesInType (X.resolvedVarType resolved)
-
-    generatedIdentitiesInMethodInfo info =
-      symbolGeneratedIdentities (methodInfoSymbol info)
-        ++ typeViewGeneratedIdentities (methodTypeViewRaw info)
-        ++ concatMap constraintInfoGeneratedIdentities (methodConstraintInfos info)
-        ++ foldMap typeBinderGeneratedIdentities (methodParamBinderIdentities info)
+  concatMap deferredProgramObligationGeneratedIdentities (Map.elems obligations)
 
 unresolvedXmlfTermVarRefs :: XmlfTerm -> [DeferredRef]
 unresolvedXmlfTermVarRefs term =

@@ -147,20 +147,14 @@ import MLF.Frontend.Program.Types
   ( CheckedBinding (..),
     CheckedModule (..),
     CheckedProgram (..),
-    ClassInfo (..),
     ConstructorForallBinder (..),
     ConstructorInfo (..),
-    DeferredCaseCall (..),
-    DeferredConstructorCall (..),
     DataInfo (..),
     DeferredMethodCall (..),
     DeferredMethodEvidence (..),
     DeferredProgramObligation (..),
     EvidenceInfo (..),
     EvidenceMethod (..),
-    FunctionalDependencyInfo (..),
-    InstanceInfo (..),
-    MethodInfo (..),
     ResolvedModule (..),
     ResolvedProgram (..),
     ResolvedScope (..),
@@ -174,28 +168,25 @@ import MLF.Frontend.Program.Types
     symbolDefiningName,
     symbolIdentityFromParts,
     TypeView (..),
-    ValueInfo (..),
     checkedBindingConstructorRef,
     checkedBindingSourceTypeIdentity,
     checkedProgramMain,
-    constraintInfoGeneratedIdentities,
-    constructorInfoGeneratedIdentities,
+    classInfoGeneratedIdentities,
     constructorRefFromInfo,
     constructorRefSymbol,
     dataInfoGeneratedIdentities,
     dataInfoIdentityName,
     dataInfoIdentityQualifiedName,
     dataParamBinders,
+    deferredProgramObligationGeneratedIdentities,
+    instanceInfoGeneratedIdentities,
     mergeTypeBinderIdentityMaps,
     mergeSymbolIdentityMaps,
-    methodParamBinderIdentities,
-    ordinaryValueTypeView,
     resolvedModuleIdentity,
     resolvedModuleScope,
     splitArrows,
     splitForalls,
     typeViewBinderIdentityForAlias,
-    typeParamGeneratedIdentities,
     typeViewGeneratedIdentities,
     typeViewHeadIdentityForAlias,
     typeViewMentionedHeadIdentities,
@@ -203,7 +194,7 @@ import MLF.Frontend.Program.Types
 import MLF.Frontend.Symbol (lookupSymbolIdentityAlias, symbolIdentityAliasMap, symbolIdentityAliasNames, symbolIdentityStableName, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit, SrcBound (..), SrcTy (..), SrcType)
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
-import MLF.Types.Identity (DeferredRef, IdDetails (..), IdentityGenerator, LocalRef, StructuralTypeBinderRole (..), UniqueIdentity (..), advanceIdentityGeneratorPast, deferredRefIdentity, deferredRefName, freshDeferredRef, freshIdentity, freshLocalRef, idDetailsGeneratedIdentities, idDetailsSymbolIdentity, identityGeneratorAfter, symbolGeneratedIdentities, typeBinderGeneratedIdentities, typeBinderIdentityFromStructural, typeBinderIdentityNode, typeBinderIdentityStructural)
+import MLF.Types.Identity (DeferredRef, IdDetails (..), IdentityGenerator, LocalRef, StructuralTypeBinderRole (..), UniqueIdentity (..), advanceIdentityGeneratorPast, deferredRefIdentity, deferredRefName, freshDeferredRef, freshIdentity, freshLocalRef, idDetailsGeneratedIdentities, idDetailsSymbolIdentity, identityGeneratorAfter, symbolGeneratedIdentities, typeBinderIdentityFromStructural, typeBinderIdentityNode, typeBinderIdentityStructural)
 import MLF.Util.Names (freshNameLike)
 
 data BackendConversionError
@@ -1946,86 +1937,6 @@ checkedBindingGeneratedIdentities binding =
   where
     resolved =
       checkedBindingResolvedVar binding
-
-classInfoGeneratedIdentities :: ClassInfo -> [UniqueIdentity]
-classInfoGeneratedIdentities info =
-  symbolGeneratedIdentities (classInfoSymbol info)
-    ++ foldMap typeParamGeneratedIdentities (classTypeParams info)
-    ++ concatMap constraintInfoGeneratedIdentities (classSuperclassInfos info)
-    ++ concatMap functionalDependencyGeneratedIdentities (classFunctionalDependencies info)
-    ++ concatMap methodInfoGeneratedIdentities (Map.elems (classMethodsByIdentity info))
-
-functionalDependencyGeneratedIdentities :: FunctionalDependencyInfo -> [UniqueIdentity]
-functionalDependencyGeneratedIdentities info =
-  foldMap (typeBinderIdentityGeneratedIdentities . Just) (functionalDependencyDeterminerRefs info)
-    ++ foldMap (typeBinderIdentityGeneratedIdentities . Just) (functionalDependencyDeterminedRefs info)
-
-instanceInfoGeneratedIdentities :: InstanceInfo -> [UniqueIdentity]
-instanceInfoGeneratedIdentities info =
-  symbolGeneratedIdentities (instanceClassSymbol info)
-    ++ symbolGeneratedIdentities (instanceOriginModuleIdentity info)
-    ++ concatMap constraintInfoGeneratedIdentities (instanceConstraintInfos info)
-    ++ foldMap typeViewGeneratedIdentities (instanceHeadTypeViews info)
-    ++ concatMap valueInfoGeneratedIdentities (Map.elems (instanceMethodsByIdentity info))
-
-methodInfoGeneratedIdentities :: MethodInfo -> [UniqueIdentity]
-methodInfoGeneratedIdentities info =
-  symbolGeneratedIdentities (methodInfoSymbol info)
-    ++ typeViewGeneratedIdentities (methodTypeViewRaw info)
-    ++ concatMap constraintInfoGeneratedIdentities (methodConstraintInfos info)
-    ++ foldMap (typeBinderIdentityGeneratedIdentities . Just) (methodParamBinderIdentities info)
-
-valueInfoGeneratedIdentities :: ValueInfo -> [UniqueIdentity]
-valueInfoGeneratedIdentities valueInfo =
-  case valueInfo of
-    OrdinaryValue {valueInfoSymbol = symbol, valueConstraintInfos = constraints} ->
-      symbolGeneratedIdentities symbol
-        ++ typeViewGeneratedIdentities (ordinaryValueTypeView valueInfo)
-        ++ concatMap constraintInfoGeneratedIdentities constraints
-    ConstructorValue {valueInfoSymbol = symbol, valueCtorInfo = ctorInfo} ->
-      symbolGeneratedIdentities symbol ++ constructorInfoGeneratedIdentities ctorInfo
-    OverloadedMethod {valueInfoSymbol = symbol, valueMethodInfo = methodInfo} ->
-      symbolGeneratedIdentities symbol ++ methodInfoGeneratedIdentities methodInfo
-
-evidenceInfoGeneratedIdentities :: EvidenceInfo -> [UniqueIdentity]
-evidenceInfoGeneratedIdentities info =
-  symbolGeneratedIdentities (evidenceClassSymbol info)
-    ++ foldMap typeViewGeneratedIdentities (evidenceTypeViews info)
-    ++ concatMap evidenceMethodGeneratedIdentities (Map.elems (evidenceMethodsByIdentity info))
-
-evidenceMethodGeneratedIdentities :: EvidenceMethod -> [UniqueIdentity]
-evidenceMethodGeneratedIdentities method =
-  symbolGeneratedIdentities (evidenceMethodSymbol method)
-    ++ maybe [] (idDetailsGeneratedIdentities . resolvedVarDetails) (evidenceMethodResolvedVar method)
-    ++ typeViewGeneratedIdentities (evidenceMethodTypeView method)
-
-deferredProgramObligationGeneratedIdentities :: DeferredProgramObligation -> [UniqueIdentity]
-deferredProgramObligationGeneratedIdentities obligation =
-  case obligation of
-    DeferredMethod deferred ->
-      idDetailsGeneratedIdentities (DeferredId (deferredMethodRef deferred))
-        ++ methodInfoGeneratedIdentities (deferredMethodInfo deferred)
-        ++ maybe [] typeViewGeneratedIdentities (deferredMethodExpectedResult deferred)
-        ++ maybe [] deferredMethodEvidenceGeneratedIdentities (deferredMethodEvidence deferred)
-        ++ concatMap evidenceInfoGeneratedIdentities (deferredMethodLocalEvidence deferred)
-    DeferredConstructor deferred ->
-      idDetailsGeneratedIdentities (DeferredId (deferredConstructorRef deferred))
-        ++ constructorInfoGeneratedIdentities (deferredConstructorInfo deferred)
-        ++ concatMap symbolGeneratedIdentities (Map.elems (deferredConstructorTypeHeadIdentities deferred))
-        ++ concatMap (typeBinderIdentityGeneratedIdentities . Just . snd) (deferredConstructorInstBinders deferred)
-    DeferredCase deferred ->
-      idDetailsGeneratedIdentities (DeferredId (deferredCaseRef deferred))
-        ++ dataInfoGeneratedIdentities (deferredCaseDataInfo deferred)
-
-deferredMethodEvidenceGeneratedIdentities :: DeferredMethodEvidence -> [UniqueIdentity]
-deferredMethodEvidenceGeneratedIdentities evidence =
-  typeViewGeneratedIdentities (deferredMethodEvidenceClassArg evidence)
-    ++ foldMap typeViewGeneratedIdentities (deferredMethodEvidenceClassArgs evidence)
-    ++ evidenceMethodGeneratedIdentities (deferredMethodEvidenceMethod evidence)
-
-typeBinderIdentityGeneratedIdentities :: Maybe TypeBinderIdentity -> [UniqueIdentity]
-typeBinderIdentityGeneratedIdentities =
-  maybe [] typeBinderGeneratedIdentities
 
 checkedProgramEvidenceResolvedVars :: ConvertContext -> CheckedProgram -> Either BackendConversionError [ResolvedVar]
 checkedProgramEvidenceResolvedVars context checked =

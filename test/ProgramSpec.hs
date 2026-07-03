@@ -614,6 +614,27 @@ spec = do
             collected `shouldSatisfy` elem ctorHeadUnique
             collected `shouldSatisfy` elem ownerShapeHeadUnique
 
+        it "collects evidence resolved-var type identities for generated identity seeding" $ do
+            let classIdentity = generatedSymbolIdentity 992534 SymbolClass "Main" "C" Nothing
+                methodIdentity = generatedSymbolIdentity 992535 SymbolMethod "Main" "method" (Just (SymbolOwnerClass classIdentity))
+                valueIdentity = generatedSymbolIdentity 992536 SymbolValue "Main" "method" Nothing
+                binderUnique = UniqueIdentity 992537
+                binderRef = Elab.typeBinderRefFromIdentity (typeBinderIdentityFromUnique binderUnique) "a"
+                resolved =
+                    ResolvedVar
+                        { resolvedVarRuntimeName = "Main__method"
+                        , resolvedVarType = Elab.TVarRef binderRef
+                        , resolvedVarDetails = TopLevelId valueIdentity
+                        }
+                method =
+                    EvidenceMethod
+                        { evidenceMethodRuntimeName = "Main__method"
+                        , evidenceMethodSymbol = methodIdentity
+                        , evidenceMethodResolvedVar = Just resolved
+                        , evidenceMethodTypeView = ProgramTypes.mkTypeView (STBase "Int") (STBase "Int")
+                        }
+            ProgramTypes.evidenceMethodGeneratedIdentities method `shouldSatisfy` elem binderUnique
+
         it "keeps replacement type head identities by display pair after applying type-view substitutions" $ do
             let sourceIdentity = typeBinderIdentityFromNode (NodeId 991650)
                 sourceStableName = typeBinderIdentityStableName sourceIdentity
