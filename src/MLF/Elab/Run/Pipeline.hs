@@ -153,7 +153,6 @@ import MLF.Types.Identity
     idDetailsGeneratedIdentities,
     identityGeneratorAfter,
     localRefMatchesNodeId,
-    lookupTypeBinderIdentityAlias,
     typeBinderIdentityFromStructural,
     symbolGeneratedIdentities,
     StructuralTypeBinderRole (..),
@@ -1860,7 +1859,7 @@ externalBindingSchemeInfoWithGenerator generator0 ExternalBinding {externalBindi
 
 srcTypeToElabSchemeWithFresh :: Map.Map String SymbolIdentity -> Map.Map String TypeBinderIdentity -> IdentityGenerator -> NormSrcType -> Either ConstraintError (ElabScheme, IdentityGenerator)
 srcTypeToElabSchemeWithFresh headIdentities binderIdentities generator0 srcTy = do
-  let (refs, generator1) = sourceTypeBinderRefs binderIdentities (Set.toList (freeSrcTypeVars srcTy)) generator0
+  let (refs, generator1) = sourceTypeBinderRefsFromIdentities binderIdentities (Set.toList (freeSrcTypeVars srcTy)) generator0
   (ty, generator2) <- srcTypeToElabTypeWith headIdentities binderIdentities refs generator1 srcTy
   let explicitScheme = schemeFromType ty
       explicitRefs = map fst (schemeBinderRefs explicitScheme)
@@ -1898,21 +1897,6 @@ freeSrcTypeVars ty =
             `Set.union` go (Set.insert name bound) body
         Surface.STMu name body -> go (Set.insert name bound) body
         Surface.STBottom -> Set.empty
-
-sourceTypeBinderRefs :: Map.Map String TypeBinderIdentity -> [String] -> IdentityGenerator -> (Map.Map String TypeBinderRef, IdentityGenerator)
-sourceTypeBinderRefs binderIdentities names generator0 =
-  go names Map.empty generator0
-  where
-    go [] refs generator = (refs, generator)
-    go (name : rest) refs generator =
-      let (ref, generator1) = sourceTypeBinderRefOrFresh binderIdentities name generator
-       in go rest (Map.insert name ref refs) generator1
-
-sourceTypeBinderRefOrFresh :: Map.Map String TypeBinderIdentity -> String -> IdentityGenerator -> (TypeBinderRef, IdentityGenerator)
-sourceTypeBinderRefOrFresh binderIdentities name generator =
-  case lookupTypeBinderIdentityAlias binderIdentities name of
-    Just identity -> (typeBinderRefFromIdentity identity name, generator)
-    Nothing -> sourceTypeBinderRefForName name generator
 
 srcTypeToElabTypeWith :: Map.Map String SymbolIdentity -> Map.Map String TypeBinderIdentity -> Map.Map String TypeBinderRef -> IdentityGenerator -> NormSrcType -> Either ConstraintError (ElabType, IdentityGenerator)
 srcTypeToElabTypeWith =
@@ -1962,10 +1946,6 @@ srcTypeToElabTypeWithBound boundNames headIdentities binderIdentities refs gener
           Right (TMuRef ref body', generator2)
   Surface.STBottom -> Right (TBottom, generator)
   where
-    sourceTypeBinderRefOrFreshInScope shadowed binderIdentities' name' generator'
-      | shadowed = sourceTypeBinderRefForName name' generator'
-      | otherwise = sourceTypeBinderRefOrFresh binderIdentities' name' generator'
-
     sourceTypeBinderRef env name =
       case Map.lookup name env of
         Just ref -> Right ref

@@ -77,6 +77,9 @@ module MLF.Types.Elab (
     renameTypeBinderRef,
     freshTypeBinderRef,
     sourceTypeBinderRefForName,
+    sourceTypeBinderRefsFromIdentities,
+    sourceTypeBinderRefOrFresh,
+    sourceTypeBinderRefOrFreshInScope,
     freshTypeBinderRefFromNames,
     instAbstrWithRef,
     instUnderWithRef,
@@ -169,6 +172,8 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.List (mapAccumL)
 import Data.List.NonEmpty (NonEmpty)
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
 import MLF.Constraint.Types.Graph (BaseTy(..), BindFlag(..), NodeId(..))
@@ -202,6 +207,7 @@ import MLF.Types.Identity
     , identityGeneratorAfter
     , deferredRefName
     , localRefName
+    , lookupTypeBinderIdentityAlias
     , renameDeferredRef
     , symbolGeneratedIdentities
     , typeBinderGeneratedIdentities
@@ -507,6 +513,26 @@ freshTypeBinderRef name generator =
 sourceTypeBinderRefForName :: String -> IdentityGenerator -> (TypeBinderRef, IdentityGenerator)
 sourceTypeBinderRefForName name generator =
     freshTypeBinderRef name generator
+
+sourceTypeBinderRefsFromIdentities :: Map String TypeBinderIdentity -> [String] -> IdentityGenerator -> (Map String TypeBinderRef, IdentityGenerator)
+sourceTypeBinderRefsFromIdentities binderIdentities names generator0 =
+    go names Map.empty generator0
+  where
+    go [] refs generator = (refs, generator)
+    go (name : rest) refs generator =
+        let (ref, generator1) = sourceTypeBinderRefOrFresh binderIdentities name generator
+         in go rest (Map.insert name ref refs) generator1
+
+sourceTypeBinderRefOrFresh :: Map String TypeBinderIdentity -> String -> IdentityGenerator -> (TypeBinderRef, IdentityGenerator)
+sourceTypeBinderRefOrFresh binderIdentities name generator =
+    case lookupTypeBinderIdentityAlias binderIdentities name of
+        Just identity -> (typeBinderRefFromIdentity identity name, generator)
+        Nothing -> sourceTypeBinderRefForName name generator
+
+sourceTypeBinderRefOrFreshInScope :: Bool -> Map String TypeBinderIdentity -> String -> IdentityGenerator -> (TypeBinderRef, IdentityGenerator)
+sourceTypeBinderRefOrFreshInScope shadowed binderIdentities name generator
+    | shadowed = sourceTypeBinderRefForName name generator
+    | otherwise = sourceTypeBinderRefOrFresh binderIdentities name generator
 
 freshTypeBinderRefFromNames :: Set.Set String -> IdentityGenerator -> (TypeBinderRef, IdentityGenerator)
 freshTypeBinderRefFromNames used generator =

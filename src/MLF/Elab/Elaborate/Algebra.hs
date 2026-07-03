@@ -81,7 +81,8 @@ import MLF.Elab.Types
     SchemeInfo (..),
     Ty (..),
     freshTypeBinderRef,
-    sourceTypeBinderRefForName,
+    sourceTypeBinderRefsFromIdentities,
+    sourceTypeBinderRefOrFreshInScope,
     generatedIdentitiesInType,
     generatedIdentitiesInTerm,
     identityGeneratorAfterType,
@@ -94,7 +95,6 @@ import MLF.Elab.Types
     schemeInfoBinderRefSubst,
     renameTypeBinderRef,
     TypeBinderRef,
-    typeBinderRefFromIdentity,
     typeBinderRefName,
     typeBinderRefNode,
     typeBinderRefsSameIdentity,
@@ -135,7 +135,6 @@ import MLF.Types.Identity
     idDetailsIsDiscard,
     identityGeneratorAfter,
     localRefFromNodeId,
-    lookupTypeBinderIdentityAlias,
     primitiveRefSymbol,
     symbolGeneratedIdentities,
     typeBinderGeneratedIdentities,
@@ -3080,7 +3079,7 @@ internal consumer.
 srcTypeToElabType :: AlgebraContext p -> NormSrcType -> Either ElabError ElabType
 srcTypeToElabType algebraContext ty =
   let (refs, generator) =
-        sourceTypeBinderRefs
+        sourceTypeBinderRefsFromIdentities
           (algSourceTypeBinderIdentities algebraContext)
           (Set.toList (freeSrcTypeVars ty))
           (sourceTypeIdentityGenerator algebraContext ty)
@@ -3124,26 +3123,6 @@ freeSrcTypeVars ty =
             `Set.union` go (Set.insert name bound) body
         STMu name body -> go (Set.insert name bound) body
         STBottom -> Set.empty
-
-sourceTypeBinderRefs :: Map.Map String TypeBinderIdentity -> [String] -> IdentityGenerator -> (Map.Map String TypeBinderRef, IdentityGenerator)
-sourceTypeBinderRefs binderIdentities names generator0 =
-  go names Map.empty generator0
-  where
-    go [] refs generator = (refs, generator)
-    go (name : rest) refs generator =
-      let (ref, generator1) = sourceTypeBinderRefOrFresh binderIdentities name generator
-       in go rest (Map.insert name ref refs) generator1
-
-sourceTypeBinderRefOrFresh :: Map.Map String TypeBinderIdentity -> String -> IdentityGenerator -> (TypeBinderRef, IdentityGenerator)
-sourceTypeBinderRefOrFresh binderIdentities name generator =
-  case lookupTypeBinderIdentityAlias binderIdentities name of
-    Just identity -> (typeBinderRefFromIdentity identity name, generator)
-    Nothing -> sourceTypeBinderRefForName name generator
-
-sourceTypeBinderRefOrFreshInScope :: Bool -> Map.Map String TypeBinderIdentity -> String -> IdentityGenerator -> (TypeBinderRef, IdentityGenerator)
-sourceTypeBinderRefOrFreshInScope shadowed binderIdentities name generator
-  | shadowed = sourceTypeBinderRefForName name generator
-  | otherwise = sourceTypeBinderRefOrFresh binderIdentities name generator
 
 srcTypeToElabTypeWith :: AlgebraContext p -> Map.Map String TypeBinderRef -> IdentityGenerator -> NormSrcType -> Either ElabError (ElabType, IdentityGenerator)
 srcTypeToElabTypeWith =
