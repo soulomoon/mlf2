@@ -77,6 +77,7 @@ module MLF.Types.Elab (
     renameTypeBinderRef,
     freshTypeBinderRef,
     sourceTypeBinderRefForName,
+    typeBinderRefFromIdentityOrFresh,
     sourceTypeBinderRefsFromIdentities,
     sourceTypeBinderRefOrFresh,
     sourceTypeBinderRefOrFreshInScope,
@@ -514,6 +515,12 @@ sourceTypeBinderRefForName :: String -> IdentityGenerator -> (TypeBinderRef, Ide
 sourceTypeBinderRefForName name generator =
     freshTypeBinderRef name generator
 
+typeBinderRefFromIdentityOrFresh :: Maybe TypeBinderIdentity -> String -> IdentityGenerator -> (TypeBinderRef, IdentityGenerator)
+typeBinderRefFromIdentityOrFresh (Just identity) name generator =
+    (typeBinderRefFromIdentity identity name, generator)
+typeBinderRefFromIdentityOrFresh Nothing name generator =
+    sourceTypeBinderRefForName name generator
+
 sourceTypeBinderRefsFromIdentities :: Map String TypeBinderIdentity -> [String] -> IdentityGenerator -> (Map String TypeBinderRef, IdentityGenerator)
 sourceTypeBinderRefsFromIdentities binderIdentities names generator0 =
     go names Map.empty generator0
@@ -525,9 +532,7 @@ sourceTypeBinderRefsFromIdentities binderIdentities names generator0 =
 
 sourceTypeBinderRefOrFresh :: Map String TypeBinderIdentity -> String -> IdentityGenerator -> (TypeBinderRef, IdentityGenerator)
 sourceTypeBinderRefOrFresh binderIdentities name generator =
-    case lookupTypeBinderIdentityAlias binderIdentities name of
-        Just identity -> (typeBinderRefFromIdentity identity name, generator)
-        Nothing -> sourceTypeBinderRefForName name generator
+    typeBinderRefFromIdentityOrFresh (lookupTypeBinderIdentityAlias binderIdentities name) name generator
 
 sourceTypeBinderRefOrFreshInScope :: Bool -> Map String TypeBinderIdentity -> String -> IdentityGenerator -> (TypeBinderRef, IdentityGenerator)
 sourceTypeBinderRefOrFreshInScope shadowed binderIdentities name generator

@@ -114,7 +114,7 @@ import MLF.Elab.Types
     typeBinderRefFromIdentity,
     typeBinderRefName,
     typeBinderRefsSameIdentity,
-    sourceTypeBinderRefForName,
+    typeBinderRefFromIdentityOrFresh,
     TypeCheckError,
     deferredResolvedVarRef,
     elabToBound,
@@ -3464,10 +3464,8 @@ backendTypeBinderRefWithIdentity refs identity name =
         Nothing -> Nothing
 
 backendTypeBinderRefForBinder :: Maybe TypeBinderIdentity -> String -> IdentityGenerator -> (TypeBinderRef, IdentityGenerator)
-backendTypeBinderRefForBinder (Just identity) name generator =
-  (typeBinderRefFromIdentity identity name, generator)
-backendTypeBinderRefForBinder Nothing name generator =
-  sourceTypeBinderRefForName name generator
+backendTypeBinderRefForBinder =
+  typeBinderRefFromIdentityOrFresh
 
 backendTypeBinderRef :: Map BackendTypeSubstitutionKey TypeBinderRef -> Maybe TypeBinderIdentity -> String -> Maybe TypeBinderRef
 backendTypeBinderRef env identity name =

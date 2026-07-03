@@ -88,6 +88,7 @@ module MLF.Elab.Types (
     renameTypeBinderRef,
     freshTypeBinderRef,
     sourceTypeBinderRefForName,
+    typeBinderRefFromIdentityOrFresh,
     sourceTypeBinderRefsFromIdentities,
     sourceTypeBinderRefOrFresh,
     sourceTypeBinderRefOrFreshInScope,
