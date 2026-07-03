@@ -69,7 +69,7 @@ import qualified MLF.Elab.TypeCheck as TypeCheck
 import MLF.Frontend.ConstraintGen (ExternalBinding (..), ExternalBindingIdentity, ExternalBindingMode (..), externalBindingIdentityFromDetails)
 import MLF.Frontend.Normalize (normalizeExpr, normalizeType)
 import qualified MLF.Frontend.Program.Builtins as Builtins
-import MLF.Frontend.Symbol (lookupSymbolIdentityAlias, symbolIdentityAliasMap, symbolIdentityAliasNames, symbolIdentityStableName)
+import MLF.Frontend.Symbol (lookupSymbolIdentityAlias, symbolIdentityAliasMap, symbolIdentityAliasMapWith, symbolIdentityStableName)
 import MLF.Frontend.Program.Elaborate
   ( ElaborateScope,
     elaborateScopeDataTypes,
@@ -4755,11 +4755,7 @@ elabTypeHeadIdentities =
     identityHead _ Nothing =
       Map.empty
     identityHead (Graph.BaseTy name) (Just identity) =
-      Map.fromList
-        [ (alias, identity)
-        | alias <- name : symbolIdentityAliasNames identity,
-          not (null alias)
-        ]
+      symbolIdentityAliasMapWith [(identity, [name])]
 
 elabTypeBinderIdentities :: X.Ty v -> Map String TypeBinderIdentity
 elabTypeBinderIdentities =

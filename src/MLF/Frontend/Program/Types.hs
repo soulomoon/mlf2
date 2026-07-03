@@ -319,7 +319,8 @@ import MLF.Frontend.Symbol
     resolvedSymbolSpelling,
     sameResolvedSymbol,
     symbolIdentityAliasMap,
-    symbolIdentityAliasNames,
+    symbolIdentityAliasMapWith,
+    symbolIdentityAliasNamesWith,
     symbolIdentityStableName,
     symbolDefiningModule,
     symbolDefiningName,
@@ -1275,10 +1276,7 @@ resolvedSrcTypeHeadSymbols =
 
 resolvedTypeHeadIdentityNames :: ResolvedSymbol -> [String]
 resolvedTypeHeadIdentityNames symbol =
-  [ symbolSourceName spelling,
-    symbolDisplayName spelling
-  ]
-    ++ symbolIdentityAliasNames identity
+  symbolIdentityAliasNamesWith [symbolSourceName spelling, symbolDisplayName spelling] identity
   where
     identity =
       resolvedSymbolIdentity symbol
@@ -1383,11 +1381,7 @@ filterHeadIdentitiesByNames names identities =
   mergeSymbolIdentityMaps [keptRaw, rescuedStable]
   where
     identityByName =
-      mergeSymbolIdentityMaps
-        [ Map.singleton name identity
-        | (key, identity) <- Map.toList identities,
-          name <- key : symbolIdentityAliasNames identity
-        ]
+      symbolIdentityAliasMapWith [(identity, [key]) | (key, identity) <- Map.toList identities]
 
     keptRaw =
       Map.filterWithKey keep identities

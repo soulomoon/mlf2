@@ -28,7 +28,9 @@ module MLF.Frontend.Symbol
     symbolRefMatches,
     symbolIdentityStableName,
     symbolIdentityAliasNames,
+    symbolIdentityAliasNamesWith,
     symbolIdentityAliasMap,
+    symbolIdentityAliasMapWith,
     lookupSymbolIdentityAlias,
     unqualifiedSymbolName,
   )
@@ -198,13 +200,25 @@ symbolIdentityStableName identity =
 
 symbolIdentityAliasNames :: SymbolIdentity -> [String]
 symbolIdentityAliasNames identity =
-  [ symbolIdentityStableName identity,
-    symbolDefiningName identity,
-    symbolDefiningModule identity ++ "." ++ symbolDefiningName identity
-  ]
+  symbolIdentityAliasNamesWith [] identity
+
+symbolIdentityAliasNamesWith :: [String] -> SymbolIdentity -> [String]
+symbolIdentityAliasNamesWith names identity =
+  filter
+    (not . null)
+    ( names
+        ++ [ symbolIdentityStableName identity,
+             symbolDefiningName identity,
+             symbolDefiningModule identity ++ "." ++ symbolDefiningName identity
+           ]
+    )
 
 symbolIdentityAliasMap :: [SymbolIdentity] -> Map String SymbolIdentity
 symbolIdentityAliasMap identities =
+  symbolIdentityAliasMapWith [(identity, []) | identity <- identities]
+
+symbolIdentityAliasMapWith :: [(SymbolIdentity, [String])] -> Map String SymbolIdentity
+symbolIdentityAliasMapWith identities =
   Map.fromList
     [ (alias, identity)
     | (alias, identitiesForAlias) <- Map.toList identitiesByAlias,
@@ -215,8 +229,8 @@ symbolIdentityAliasMap identities =
       Map.fromListWith
         Set.union
         [ (alias, Set.singleton identity)
-        | identity <- identities,
-          alias <- symbolIdentityAliasNames identity
+        | (identity, names) <- identities,
+          alias <- symbolIdentityAliasNamesWith names identity
         ]
 
 lookupSymbolIdentityAlias :: Map String SymbolIdentity -> String -> Maybe SymbolIdentity

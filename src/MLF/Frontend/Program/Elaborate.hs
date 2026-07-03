@@ -61,7 +61,7 @@ import MLF.Frontend.Program.Surface
     surfaceVar,
   )
 import MLF.Frontend.Program.Types
-import MLF.Frontend.Symbol (symbolIdentityAliasNames, symbolIdentityStableName)
+import MLF.Frontend.Symbol (symbolIdentityAliasMapWith, symbolIdentityAliasNames, symbolIdentityStableName)
 import MLF.Frontend.Syntax
   ( Lit (..),
     ResolvedSrcBound (..),
@@ -351,11 +351,8 @@ indexDisplayNamesByIdentity identityOf =
 
 dataTypeHeadIdentityAliases :: Map SymbolIdentity DataInfo -> Map SymbolIdentity [String] -> Map String SymbolIdentity
 dataTypeHeadIdentityAliases dataTypesByIdentity displayNamesByIdentity =
-  mergeSymbolIdentityMaps
-    [ Map.singleton name identity
-    | identity <- Map.keys dataTypesByIdentity,
-      name <- symbolIdentityAliasNames identity ++ Map.findWithDefault [] identity displayNamesByIdentity
-    ]
+  symbolIdentityAliasMapWith
+    [(identity, Map.findWithDefault [] identity displayNamesByIdentity) | identity <- Map.keys dataTypesByIdentity]
 
 elaborateScopeRuntimeTypes :: ElaborateScope -> Map String SrcType
 elaborateScopeRuntimeTypes =
@@ -625,12 +622,7 @@ sourceTypeIdentityInScope scope = canonical
 
 sourceTypeHeadIdentitiesInScope :: ElaborateScope -> SrcType -> Map String SymbolIdentity
 sourceTypeHeadIdentitiesInScope scope ty =
-  mergeSymbolIdentityMaps
-    [ Map.singleton name identity
-    | (identity, names) <- entries,
-      name <- names,
-      not (null name)
-    ]
+  symbolIdentityAliasMapWith entries
   where
     entries = sourceTypeHeadIdentityEntriesInScope scope ty
 
@@ -660,10 +652,10 @@ sourceTypeHeadIdentityEntriesInScope scope =
         Nothing -> []
 
     dataHeadIdentityEntries name info =
-      [(dataInfoSymbol info, name : symbolIdentityAliasNames (dataInfoSymbol info))]
+      [(dataInfoSymbol info, [name])]
 
     builtinHeadIdentityEntries name identity =
-      [(identity, name : Builtins.normalizeBuiltinTypeReference name : symbolIdentityAliasNames identity)]
+      [(identity, [name, Builtins.normalizeBuiltinTypeReference name])]
 
 constrainedRuntimeTypeInfoViewRaw :: Map String DataInfo -> Map SymbolIdentity ClassInfo -> [ConstraintInfo] -> TypeView -> TypeView
 constrainedRuntimeTypeInfoViewRaw dataTypes classesByIdentity constraints visibleView =

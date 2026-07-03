@@ -114,7 +114,7 @@ import MLF.Frontend.Program.Package
     trivialProgramPackage,
   )
 import MLF.Frontend.Program.Resolve (resolveProgram)
-import MLF.Frontend.Symbol (symbolIdentityAliasNames, symbolIdentityStableName)
+import MLF.Frontend.Symbol (symbolIdentityAliasMap, symbolIdentityAliasMapWith, symbolIdentityStableName)
 import MLF.Frontend.Program.TypeFamilies (normalizeTypeFamiliesInProgram)
 import MLF.Frontend.Program.Types
   ( CheckedBinding (..),
@@ -2263,12 +2263,10 @@ prepareImportedValue exports scope valueInfo =
 
 importedValueTypeHeadIdentities :: ModuleExports -> TypeView -> Map String SymbolIdentity
 importedValueTypeHeadIdentities exports view =
-  Map.fromList
-    [ (alias, identity)
+  symbolIdentityAliasMap
+    [ identity
     | identity <- Map.keys (exportedTypesByIdentity exports),
-      identity `Set.member` mentionedHeadIdentities,
-      alias <- symbolIdentityAliasNames identity,
-      not (null alias)
+      identity `Set.member` mentionedHeadIdentities
     ]
   where
     mentionedHeadIdentities =
@@ -3878,10 +3876,9 @@ buildInstanceSkeletons moduleIdentity generator0 displayEnv scope mod0 derived =
         ]
 
     typeViewHeadIdentityAliases view =
-      concat
-        [ (name, identity) : [(alias, identity) | alias <- symbolIdentityAliasNames identity]
-        | (name, identity) <- Map.toList (typeViewHeadIdentities view)
-        ]
+      Map.toList $
+        symbolIdentityAliasMapWith
+          [(identity, [name]) | (name, identity) <- Map.toList (typeViewHeadIdentities view)]
 
     unifyOverlap headIdentities subst left right =
       case (applyOverlapSubst subst left, applyOverlapSubst subst right) of

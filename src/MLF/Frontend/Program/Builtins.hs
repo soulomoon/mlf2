@@ -40,7 +40,7 @@ import MLF.Frontend.Program.Types
     typeViewDisplay,
     typeViewHeadIdentities,
   )
-import MLF.Frontend.Symbol (symbolIdentityAliasNames)
+import MLF.Frontend.Symbol (symbolIdentityAliasMapWith)
 import MLF.Frontend.Syntax (SrcBound (..), SrcKind (..), SrcTy (..), SrcType, TypeParam (..), resolvedTypeBinderRefFromIdentity)
 import qualified MLF.Frontend.Syntax.Program as P
 import qualified MLF.Primitive.Inventory as Inventory
@@ -142,11 +142,7 @@ builtinSourceTypeHeadIdentities =
     headIdentity name =
       case builtinTypeHeadIdentity name of
         Just identity ->
-          Map.fromList
-            [ (alias, identity)
-            | alias <- name : normalizeBuiltinTypeReference name : symbolIdentityAliasNames identity,
-              not (null alias)
-            ]
+          symbolIdentityAliasMapWith [(identity, [name, normalizeBuiltinTypeReference name])]
         Nothing -> Map.empty
 
 builtinOpaqueValueNames :: Set String

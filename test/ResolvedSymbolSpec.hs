@@ -8,7 +8,7 @@ import qualified MLF.Frontend.Program.Builtins as Builtins
 import MLF.Frontend.Program.Elaborate (lowerType, mkElaborateScope, sourceTypeViewInScope)
 import MLF.Frontend.Program.Types
 import MLF.Frontend.Syntax.Program (ClassConstraintF (..), resolvedExportTypeRefFromSymbols, refDisplayName)
-import MLF.Frontend.Symbol (symbolIdentityStableName, symbolRefMatches)
+import MLF.Frontend.Symbol (symbolIdentityAliasMapWith, symbolIdentityStableName, symbolRefMatches)
 import MLF.Frontend.Syntax
   ( ResolvedSrcTy (..),
     ResolvedTypeBinderRef,
@@ -223,6 +223,21 @@ spec = do
               (SymbolLocal "Lib")
 
       symbolIdentityStableName (resolvedSymbolIdentity typeSymbol) `shouldBe` "$identity#42"
+
+    it "drops ambiguous display aliases without losing stable identity aliases" $ do
+      let leftIdentity = generatedSymbolIdentity 301 SymbolType "Left" "Shared" Nothing
+          rightIdentity = generatedSymbolIdentity 302 SymbolType "Right" "Shared" Nothing
+          aliases =
+            symbolIdentityAliasMapWith
+              [ (leftIdentity, ["VisibleLeft", "Shared"]),
+                (rightIdentity, ["VisibleRight", "Shared"])
+              ]
+
+      Map.lookup "Shared" aliases `shouldBe` Nothing
+      Map.lookup (symbolIdentityStableName leftIdentity) aliases `shouldBe` Just leftIdentity
+      Map.lookup (symbolIdentityStableName rightIdentity) aliases `shouldBe` Just rightIdentity
+      Map.lookup "VisibleLeft" aliases `shouldBe` Just leftIdentity
+      Map.lookup "VisibleRight" aliases `shouldBe` Just rightIdentity
 
     it "keeps method type head identities in type views" $ do
       let stableToken = symbolIdentityStableName tokenTypeIdentity
