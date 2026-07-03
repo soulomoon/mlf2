@@ -99,6 +99,7 @@ module MLF.Frontend.Program.Types
     resolvedExprGeneratedIdentities,
     resolvedSrcTypeGeneratedIdentities,
     resolvedTypeBinderGeneratedIdentities,
+    typeParamGeneratedIdentities,
     typeViewGeneratedIdentities,
     constraintInfoGeneratedIdentities,
     loweredBindingIdentityGeneratedIdentities,

@@ -185,7 +185,6 @@ import MLF.Frontend.Program.Types
     dataInfoIdentityName,
     dataInfoIdentityQualifiedName,
     dataParamBinders,
-    typeParamBinderIdentity,
     mergeTypeBinderIdentityMaps,
     mergeSymbolIdentityMaps,
     methodParamBinderIdentities,
@@ -195,12 +194,13 @@ import MLF.Frontend.Program.Types
     splitArrows,
     splitForalls,
     typeViewBinderIdentityForAlias,
+    typeParamGeneratedIdentities,
     typeViewGeneratedIdentities,
     typeViewHeadIdentityForAlias,
     typeViewMentionedHeadIdentities,
   )
 import MLF.Frontend.Symbol (lookupSymbolIdentityAlias, symbolIdentityAliasMap, symbolIdentityAliasNames, symbolIdentityStableName, symbolUniqueIdentity)
-import MLF.Frontend.Syntax (Lit, SrcBound (..), SrcTy (..), SrcType, TypeParam)
+import MLF.Frontend.Syntax (Lit, SrcBound (..), SrcTy (..), SrcType)
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
 import MLF.Types.Identity (DeferredRef, IdDetails (..), IdentityGenerator, LocalRef, StructuralTypeBinderRole (..), UniqueIdentity (..), advanceIdentityGeneratorPast, deferredRefIdentity, deferredRefName, freshDeferredRef, freshIdentity, freshLocalRef, idDetailsGeneratedIdentities, idDetailsSymbolIdentity, identityGeneratorAfter, symbolGeneratedIdentities, typeBinderGeneratedIdentities, typeBinderIdentityFromStructural, typeBinderIdentityNode, typeBinderIdentityStructural)
 import MLF.Util.Names (freshNameLike)
@@ -2046,10 +2046,6 @@ deferredMethodEvidenceGeneratedIdentities evidence =
   typeViewGeneratedIdentities (deferredMethodEvidenceClassArg evidence)
     ++ foldMap typeViewGeneratedIdentities (deferredMethodEvidenceClassArgs evidence)
     ++ evidenceMethodGeneratedIdentities (deferredMethodEvidenceMethod evidence)
-
-typeParamGeneratedIdentities :: TypeParam -> [UniqueIdentity]
-typeParamGeneratedIdentities =
-  typeBinderIdentityGeneratedIdentities . typeParamBinderIdentity
 
 typeBinderIdentityGeneratedIdentities :: Maybe TypeBinderIdentity -> [UniqueIdentity]
 typeBinderIdentityGeneratedIdentities =
