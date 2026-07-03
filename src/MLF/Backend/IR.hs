@@ -1874,7 +1874,7 @@ primitiveTypeToBackendTypeFromWithHeadIdentities headIdentities0 generator0 ty =
   let (freeEnv, generator) =
         foldl
           ( \(env, gen) name ->
-              let (identity, gen') = backendTypeIdentityForName name gen
+              let (identity, gen') = freshBackendTypeIdentity gen
                in (Map.insert name identity env, gen')
           )
           (Map.empty, generatorAfterHeads)
@@ -1894,7 +1894,7 @@ primitiveTypeToBackendTypeFromWithHeadIdentities headIdentities0 generator0 ty =
           case Map.lookup name env of
             Just identity -> (BTVarWithIdentity (Just identity) name, generator)
             Nothing ->
-              let (identity, generator') = backendTypeIdentityForName name generator
+              let (identity, generator') = freshBackendTypeIdentity generator
                in (BTVarWithIdentity (Just identity) name, generator')
         PrimitiveInventory.PrimitiveTypeArrow dom cod ->
           let (dom', generator1) = go env generator dom
@@ -1906,11 +1906,11 @@ primitiveTypeToBackendTypeFromWithHeadIdentities headIdentities0 generator0 ty =
           let (args', generator') = mapAccumPrimitiveBackendTypes env generator args
            in (BTConWithIdentity (primitiveTypeHeadIdentity name) (BaseTy name) args', generator')
         PrimitiveInventory.PrimitiveTypeForall name body ->
-          let (identity, generator1) = backendTypeIdentityForName name generator
+          let (identity, generator1) = freshBackendTypeIdentity generator
               (body', generator2) = go (Map.insert name identity env) generator1 body
            in (BTForallWithIdentity (Just identity) name Nothing body', generator2)
         PrimitiveInventory.PrimitiveTypeMu name body ->
-          let (identity, generator1) = backendTypeIdentityForName name generator
+          let (identity, generator1) = freshBackendTypeIdentity generator
               (body', generator2) = go (Map.insert name identity env) generator1 body
            in (BTMuWithIdentity (Just identity) name body', generator2)
 
@@ -1938,9 +1938,6 @@ primitiveTypeToBackendTypeFromWithHeadIdentities headIdentities0 generator0 ty =
     freshBackendTypeIdentity generator =
       let (unique, generator') = freshIdentity generator
        in (typeBinderIdentityFromUnique unique, generator')
-
-    backendTypeIdentityForName _ generator =
-      freshBackendTypeIdentity generator
 
 dropTermLocalsMaybe :: Maybe BackendValidationContext -> Maybe BackendValidationContext
 dropTermLocalsMaybe =
