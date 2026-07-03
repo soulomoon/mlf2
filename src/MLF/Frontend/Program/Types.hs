@@ -1224,6 +1224,10 @@ typeViewGeneratedIdentities view =
   concatMap symbolGeneratedIdentities (Map.elems (typeViewHeadIdentities view))
     ++ concatMap typeBinderGeneratedIdentities (Map.elems (typeViewBinderIdentities view))
 
+typeBinderSubstGeneratedIdentities :: TypeBinderSubst -> [UniqueIdentity]
+typeBinderSubstGeneratedIdentities subst =
+  concatMap typeBinderGeneratedIdentities (Map.keys (typeBinderSubstByIdentity subst))
+
 constraintInfoGeneratedIdentities :: ConstraintInfo -> [UniqueIdentity]
 constraintInfoGeneratedIdentities constraint =
   symbolGeneratedIdentities (constraintClassSymbol constraint)
@@ -2286,6 +2290,7 @@ deferredProgramObligationGeneratedIdentities obligation =
         constructorInfoGeneratedIdentities (deferredConstructorInfo deferred)
           ++ concatMap symbolGeneratedIdentities (Map.elems (deferredConstructorTypeHeadIdentities deferred))
           ++ concatMap (typeBinderGeneratedIdentities . snd) (deferredConstructorInstBinders deferred)
+          ++ typeBinderSubstGeneratedIdentities (deferredConstructorInitialSubst deferred)
       DeferredCase deferred ->
         dataInfoGeneratedIdentities (deferredCaseDataInfo deferred)
 

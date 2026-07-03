@@ -5019,6 +5019,69 @@ spec = do
             concatMap generatedDeferredIdentityValues checked
                 `shouldSatisfy` all (/= UniqueIdentity 4)
 
+        it "refreshes duplicate deferred refs after constructor initial substitutions" $ do
+            finalizeContext <- requireFinalizeContext (mkElaborateScope Map.empty Map.empty Map.empty [])
+            let duplicateRef = deferredRefFromIdentity (UniqueIdentity 0) "$deferred"
+                firstIdentity = generatedSymbolIdentity 1 SymbolValue "Main" "first" Nothing
+                secondIdentity = generatedSymbolIdentity 2 SymbolValue "Main" "second" Nothing
+                dataIdentity = generatedSymbolIdentity 3 SymbolType "Main" "Box" Nothing
+                ctorIdentity = generatedSymbolIdentity 4 SymbolConstructor "Main" "Box" (Just (SymbolOwnerType dataIdentity))
+                substIdentity = typeBinderIdentityFromUnique (UniqueIdentity 5)
+                ctorView =
+                    ProgramTypes.mkTypeView (STForall "a" Nothing (STVar "a")) (STForall "a" Nothing (STVar "a"))
+                ctorInfo =
+                    ConstructorInfo
+                        { ctorInfoSymbol = ctorIdentity
+                        , ctorRuntimeName = "Main__Box"
+                        , ctorTypeView = ctorView
+                        , ctorForallBinderInfo = []
+                        , ctorOwningTypeIdentity = dataIdentity
+                        , ctorIndex = 0
+                        , ctorOwnerConstructors = []
+                        }
+                obligation =
+                    DeferredConstructor
+                        DeferredConstructorCall
+                            { deferredConstructorRef = duplicateRef
+                            , deferredConstructorInfo = ctorInfo
+                            , deferredConstructorArgCount = 0
+                            , deferredConstructorSourceType = STBase "Int"
+                            , deferredConstructorOccurrenceType = STBase "Int"
+                            , deferredConstructorTypeHeadIdentities = Map.empty
+                            , deferredConstructorInstBinders = []
+                            , deferredConstructorInitialSubst =
+                                ProgramTypes.insertTypeBinderSubstWithIdentity
+                                    substIdentity
+                                    "a"
+                                    (STBase "Int")
+                                    ProgramTypes.emptyTypeBinderSubst
+                            , deferredConstructorBindingMode = ProgramTypes.DeferredBindingMonomorphic
+                            }
+                lowered name identity value =
+                    LoweredBinding
+                        { loweredBindingIdentity =
+                            ProgramTypes.loweredBindingIdentityFromDetails name (TopLevelId identity)
+                        , loweredBindingSourceType = STBase "Int"
+                        , loweredBindingSourceTypeView = Nothing
+                        , loweredBindingExpectedType = STBase "Int"
+                        , loweredBindingExpectedTypeView = Nothing
+                        , loweredBindingSurfaceExpr = Surface.ELit (LInt value)
+                        , loweredBindingResolvedLocalIdentities = []
+                        , loweredBindingDeferredObligations = Map.singleton duplicateRef obligation
+                        , loweredBindingExternalTypeViews = Map.empty
+                        , loweredBindingEvidenceParamCount = 0
+                        , loweredBindingExportedAsMain = False
+                        }
+            checked <-
+                case finalizeBindingsAllowOpaqueWithContext finalizeContext
+                    [ lowered "Main__first" firstIdentity 1
+                    , lowered "Main__second" secondIdentity 2
+                    ] of
+                    Right bindings -> pure bindings
+                    Left err -> expectationFailure ("finalize group failed: " ++ show err) >> fail "finalize group failed"
+            concatMap generatedDeferredIdentityValues checked
+                `shouldSatisfy` all (/= UniqueIdentity 5)
+
         it "rejects duplicate lowered binding identities before caching read contexts" $ do
             finalizeContext <- requireFinalizeContext (mkElaborateScope Map.empty Map.empty Map.empty [])
             let duplicateIdentity = generatedSymbolIdentity 7 SymbolValue "Main" "dup" Nothing
