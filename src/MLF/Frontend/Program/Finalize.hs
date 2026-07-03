@@ -1963,14 +1963,13 @@ runtimeExternalBindingIndexFromScope scope runtimeTypes =
         ]
 
     sameRuntimeExternalBinding left right =
-      X.resolvedVarRuntimeName left == X.resolvedVarRuntimeName right
-        && X.resolvedVarType left == X.resolvedVarType right
+      X.resolvedVarType left == X.resolvedVarType right
         && X.resolvedVarDetails left == X.resolvedVarDetails right
 
 runtimeExternalBindingIdentity :: RuntimeExternalBindingIndex -> String -> Maybe ExternalBindingIdentity
 runtimeExternalBindingIdentity index name = do
   resolved <- lookupRuntimeExternalBindingByName name index
-  pure (externalBindingIdentityFromDetails (X.resolvedVarRuntimeName resolved) (X.resolvedVarDetails resolved))
+  pure (externalBindingIdentityFromDetails name (X.resolvedVarDetails resolved))
 
 deferredExternalBindingIndex :: DeferredObligations -> DeferredExternalBindingIndex
 deferredExternalBindingIndex obligations =
