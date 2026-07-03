@@ -840,6 +840,7 @@ resolvedDeclGeneratedIdentities :: P.ResolvedDecl -> [UniqueIdentity]
 resolvedDeclGeneratedIdentities = \case
   P.DeclClass decl ->
     resolvedSymbolGeneratedIdentities (P.classDeclName decl)
+      ++ concatMap typeParamGeneratedIdentities (NE.toList (P.classDeclParams decl))
       ++ concatMap resolvedClassConstraintGeneratedIdentities (P.classDeclSuperclasses decl)
       ++ concatMap (resolvedSymbolGeneratedIdentities . P.methodSigName) (P.classDeclMethods decl)
       ++ concatMap (resolvedConstrainedTypeGeneratedIdentities . P.methodSigType) (P.classDeclMethods decl)
@@ -850,6 +851,7 @@ resolvedDeclGeneratedIdentities = \case
       ++ concatMap resolvedMethodDefGeneratedIdentities (P.instanceDeclMethods decl)
   P.DeclData decl ->
     resolvedSymbolGeneratedIdentities (P.dataDeclName decl)
+      ++ concatMap typeParamGeneratedIdentities (P.dataDeclParams decl)
       ++ concatMap (resolvedSymbolGeneratedIdentities . P.constructorDeclName) (P.dataDeclConstructors decl)
       ++ concatMap (resolvedSrcTypeGeneratedIdentities . P.constructorDeclType) (P.dataDeclConstructors decl)
       ++ concatMap resolvedSymbolGeneratedIdentities (P.dataDeclDeriving decl)
@@ -864,6 +866,10 @@ resolvedMethodDefGeneratedIdentities :: P.ResolvedMethodDef -> [UniqueIdentity]
 resolvedMethodDefGeneratedIdentities methodDef =
   resolvedSymbolGeneratedIdentities (P.methodDefName methodDef)
     ++ resolvedExprGeneratedIdentities (P.methodDefExpr methodDef)
+
+typeParamGeneratedIdentities :: P.TypeParam -> [UniqueIdentity]
+typeParamGeneratedIdentities param =
+  maybe [] resolvedTypeBinderGeneratedIdentities (P.typeParamRef param)
 
 resolvedClassConstraintGeneratedIdentities :: P.ResolvedClassConstraint -> [UniqueIdentity]
 resolvedClassConstraintGeneratedIdentities constraint =

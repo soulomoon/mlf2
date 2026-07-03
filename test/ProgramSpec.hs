@@ -6651,6 +6651,42 @@ spec = do
             checkResolvedProgram (ResolvedProgram [resolvedModule])
                 `shouldBe` Left (ProgramPipelineError "resolved type parameter `a` is missing identity")
 
+        it "seeds resolved declaration identities from type parameters" $ do
+            let dataParamIdentity = UniqueIdentity 991901
+                classParamIdentity = UniqueIdentity 991902
+                boxType =
+                    mkResolvedSymbol
+                        (generatedSymbolIdentity 991903 SymbolType "Main" "Box" Nothing)
+                        "Box"
+                        "Box"
+                        (SymbolLocal "Main")
+                classSymbol =
+                    mkResolvedSymbol
+                        (generatedSymbolIdentity 991904 SymbolClass "Main" "Functor" Nothing)
+                        "Functor"
+                        "Functor"
+                        (SymbolLocal "Main")
+                dataDecl =
+                    DeclData
+                        DataDecl
+                            { dataDeclName = boxType
+                            , dataDeclParams = [ResolvedTypeParam (resolvedTypeBinderRef dataParamIdentity "a") KType]
+                            , dataDeclConstructors = []
+                            , dataDeclDeriving = []
+                            }
+                classDecl =
+                    DeclClass
+                        ClassDecl
+                            { classDeclName = classSymbol
+                            , classDeclSuperclasses = []
+                            , classDeclParams =
+                                ResolvedTypeParam (resolvedTypeBinderRef classParamIdentity "f") (KArrow KType KType) :| []
+                            , classDeclFundeps = []
+                            , classDeclMethods = []
+                            }
+            ProgramTypes.resolvedDeclGeneratedIdentities dataDecl `shouldSatisfy` elem dataParamIdentity
+            ProgramTypes.resolvedDeclGeneratedIdentities classDecl `shouldSatisfy` elem classParamIdentity
+
         it "checks resolved syntax by identity when display spellings are stale" $ do
             let boxType =
                     mkResolvedSymbol
