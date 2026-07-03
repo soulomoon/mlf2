@@ -66,7 +66,7 @@ import MLF.Elab.TermClosure (closeTermWithSchemeSubstRefsIfNeeded)
 import MLF.Elab.Types (XmlfTerm, ElabType)
 import qualified MLF.Elab.Types as X
 import qualified MLF.Elab.TypeCheck as TypeCheck
-import MLF.Frontend.ConstraintGen (ExternalBinding (..), ExternalBindingIdentity, ExternalBindingMode (..), externalBindingIdentityFromDetails)
+import MLF.Frontend.ConstraintGen (AnnExpr (..), ExternalBinding (..), ExternalBindingIdentity, ExternalBindingMode (..), externalBindingIdentityFromDetails)
 import MLF.Frontend.Normalize (normalizeExpr, normalizeType)
 import qualified MLF.Frontend.Program.Builtins as Builtins
 import MLF.Frontend.Symbol (lookupSymbolIdentityAlias, symbolIdentityAliasMap, symbolIdentityAliasMapWith, symbolIdentityStableName)
@@ -206,6 +206,7 @@ import MLF.Types.Identity
     deferredRefIdentity,
     deferredRefName,
     IdentityGenerator,
+    LocalIdentity (..),
     LocalRef,
     localRefGeneratedIdentities,
     localRefIdentity,
@@ -429,13 +430,15 @@ finalizeOpaqueUncheckedBindingWithContext :: FinalizeContext -> LoweredBinding -
 finalizeOpaqueUncheckedBindingWithContext context lowered0 placeholderTy = do
   validateDeferredObligationIdentities (loweredBindingName lowered0) (loweredBindingDeferredObligations lowered0)
   let lowered = stampLoweredBindingDeferredIdentities lowered0
-  PipelineElabDetailedResult {pedTerm = term0, pedTypeCheckEnv = tcEnv} <-
+  pipelineResult <-
     runSurfacePipelineWithContext
       context
       True
       (loweredBindingDeferredObligations lowered)
       (loweredBindingExternalTypeViews lowered)
       (loweredBindingSurfaceExpr lowered)
+  let PipelineElabDetailedResult {pedTerm = term0, pedTypeCheckEnv = tcEnv} =
+        stampPipelineResolvedLocalIdentities [lowered] pipelineResult
   term <- finalizeOpaqueDeferredConstructors context (loweredBindingDeferredObligations lowered) tcEnv term0
   let resolvedTerm = annotateResolvedTermVars context lowered term
       resolvedDeferredObligations =
@@ -616,13 +619,15 @@ finalizeBindingWithContext context lowered0 = do
 finalizeBindingWithSurfacePipeline :: FinalizeContext -> LoweredBinding -> Either ProgramError CheckedBinding
 finalizeBindingWithSurfacePipeline context lowered0 = do
   let lowered = stampLoweredBindingDeferredIdentities lowered0
-  PipelineElabDetailedResult {pedTerm = term0, pedType = actualTy0, pedTypeCheckEnv = tcEnv} <-
+  pipelineResult <-
     runSurfacePipelineWithContext
       context
       (constructorBindingNeedsUnchecked scope lowered)
       (loweredBindingDeferredObligations lowered)
       (loweredBindingExternalTypeViews lowered)
       (loweredBindingSurfaceExpr lowered)
+  let PipelineElabDetailedResult {pedTerm = term0, pedType = actualTy0, pedTypeCheckEnv = tcEnv} =
+        stampPipelineResolvedLocalIdentities [lowered] pipelineResult
   (term, actualTy) <-
     finalizeDeferredObligationsForBinding context lowered (loweredBindingDeferredObligations lowered) tcEnv term0 actualTy0 (loweredBindingExpectedType lowered)
   finalizeCheckedBindingFromTerm context lowered term actualTy
@@ -680,11 +685,13 @@ finalizeBindingWithModuleContext moduleContext lowered0 = do
     Nothing -> do
       readContext <- mbReadContext
       let stampedLowered = moduleBindingReadLowered readContext
-      PipelineElabDetailedResult {pedTerm = term0, pedType = actualTy0, pedTypeCheckEnv = tcEnv} <-
+      pipelineResult <-
         runLoweredSurfacePipelineWithModuleContext
           moduleContext
           (constructorBindingNeedsUnchecked scope stampedLowered)
           stampedLowered
+      let PipelineElabDetailedResult {pedTerm = term0, pedType = actualTy0, pedTypeCheckEnv = tcEnv} =
+            stampPipelineResolvedLocalIdentities [stampedLowered] pipelineResult
       (term, actualTy) <-
         finalizeDeferredObligationsForBinding context stampedLowered (loweredBindingDeferredObligations stampedLowered) tcEnv term0 actualTy0 (loweredBindingExpectedType stampedLowered)
       finalizeCheckedBindingFromTermWithReadContext context (Just (moduleBindingReadCheckContext readContext)) stampedLowered term actualTy
@@ -1028,8 +1035,9 @@ finalizePipelineBindingResultWithReadContext ::
   IO (Either ProgramError CheckedBinding)
 finalizePipelineBindingResultWithReadContext timing label context mbCheckContext lowered pipelineResult =
   runExceptT $ do
-    PipelineElabDetailedResult {pedTerm = term0, pedType = actualTy0, pedTypeCheckEnv = tcEnv} <-
-      fromProgramEither pipelineResult
+    pipelineResult0 <- fromProgramEither pipelineResult
+    let PipelineElabDetailedResult {pedTerm = term0, pedType = actualTy0, pedTypeCheckEnv = tcEnv} =
+          stampPipelineResolvedLocalIdentities [lowered] pipelineResult0
     (term, actualTy) <-
       evaluateFinalizeEither timing (label ++ ".deferred_obligations") $
         finalizeDeferredObligationsForBinding
@@ -1155,8 +1163,10 @@ finalizeBindingGroupWithContext context lowereds0 = do
       deferredObligations = Map.unions (map loweredBindingDeferredObligations lowereds)
       externalTypeViews0 = Map.unions (map loweredBindingExternalTypeViews lowereds)
       groupExpr = groupedBindingExpr lowereds
-  PipelineElabDetailedResult {pedTerm = term0, pedType = actualTy0, pedTypeCheckEnv = tcEnv} <-
+  pipelineResult <-
     runSurfacePipelineWithContext context False deferredObligations externalTypeViews0 groupExpr
+  let PipelineElabDetailedResult {pedTerm = term0, pedType = actualTy0, pedTypeCheckEnv = tcEnv} =
+        stampPipelineResolvedLocalIdentities lowereds pipelineResult
   (term, _actualTy) <-
     finalizeDeferredObligationsForGroup context lowereds deferredObligations tcEnv term0 actualTy0 STBottom
   case extractGroupedBindings lowereds term of
@@ -1185,9 +1195,11 @@ finalizeBindingGroupWithContextWithTiming timing label context lowereds0 =
         deferredObligations = Map.unions (map loweredBindingDeferredObligations lowereds)
         externalTypeViews0 = Map.unions (map loweredBindingExternalTypeViews lowereds)
         groupExpr = groupedBindingExpr lowereds
-    PipelineElabDetailedResult {pedTerm = term0, pedType = actualTy0, pedTypeCheckEnv = tcEnv} <-
+    pipelineResult <-
       timeFinalizeEither timing (label ++ ".pipeline") $
         runSurfacePipelineWithContextWithTiming timing (label ++ ".pipeline") context False deferredObligations externalTypeViews0 groupExpr
+    let PipelineElabDetailedResult {pedTerm = term0, pedType = actualTy0, pedTypeCheckEnv = tcEnv} =
+          stampPipelineResolvedLocalIdentities lowereds pipelineResult
     (term, _actualTy) <-
       evaluateFinalizeEither timing (label ++ ".deferred_obligations") $
         finalizeDeferredObligationsForGroup context lowereds deferredObligations tcEnv term0 actualTy0 STBottom
@@ -1585,6 +1597,91 @@ validateLoweredBindingDeferredObligations :: LoweredBinding -> Either ProgramErr
 validateLoweredBindingDeferredObligations lowered =
   validateDeferredObligationIdentities (loweredBindingName lowered) (loweredBindingDeferredObligations lowered)
 
+stampPipelineResolvedLocalIdentities :: [LoweredBinding] -> PipelineElabDetailedResult -> PipelineElabDetailedResult
+stampPipelineResolvedLocalIdentities lowereds result =
+  result {pedTerm = stampTerm (resolvedLocalRuntimeRefsByNode lowereds (pedRootAnn result)) (pedTerm result)}
+
+resolvedLocalRuntimeRefsByNode :: [LoweredBinding] -> AnnExpr -> IntMap.IntMap LocalRef
+resolvedLocalRuntimeRefsByNode lowereds =
+  fst . go runtimeRefsByName
+  where
+    runtimeRefsByName =
+      Map.fromListWith
+        (flip (++))
+        [ (localRefName runtimeRef, [runtimeRef])
+        | identity <- concatMap loweredBindingResolvedLocalIdentities lowereds
+        , let runtimeRef = loweredResolvedLocalRuntimeRef identity
+        ]
+
+    go refs ann =
+      case ann of
+        AVar {} -> (IntMap.empty, refs)
+        ALit {} -> (IntMap.empty, refs)
+        ALam name paramNode _ body _ ->
+          let (entry, refs') = bindNode name paramNode refs
+              (bodyEntries, refs'') = go refs' body
+           in (entry <> bodyEntries, refs'')
+        AApp fun arg _ _ _ ->
+          let (funEntries, refs') = go refs fun
+              (argEntries, refs'') = go refs' arg
+           in (funEntries <> argEntries, refs'')
+        ALet name _ schemeRoot _ _ rhs body _ ->
+          let (entry, refs') = bindNode name schemeRoot refs
+              (rhsEntries, refs'') = go refs' rhs
+              (bodyEntries, refs''') = go refs'' body
+           in (entry <> rhsEntries <> bodyEntries, refs''')
+        AAnn inner _ _ -> go refs inner
+        AUnfold inner _ _ -> go refs inner
+
+    bindNode name node refs =
+      case Map.lookup name refs of
+        Just (runtimeRef : rest) ->
+          let refs' =
+                if null rest
+                  then Map.delete name refs
+                  else Map.insert name rest refs
+           in (IntMap.singleton (Graph.getNodeId node) runtimeRef, refs')
+        _ ->
+          (IntMap.empty, refs)
+
+stampTerm :: IntMap.IntMap LocalRef -> XmlfTerm -> XmlfTerm
+stampTerm runtimeRefsByNode =
+  go
+  where
+    go term =
+      case term of
+        X.EVarNode resolved ->
+          X.EVarNode (stampResolved resolved)
+        X.ELit {} -> term
+        X.ELam resolved body ->
+          X.ELam (stampResolved resolved) (go body)
+        X.EApp fun arg ->
+          X.EApp (go fun) (go arg)
+        X.ELet resolved scheme rhs body ->
+          X.ELet (stampResolved resolved) scheme (go rhs) (go body)
+        X.ETyAbsRef ref mb body ->
+          X.ETyAbsRef ref mb (go body)
+        X.ETyInst inner inst ->
+          X.ETyInst (go inner) inst
+        X.ERoll ty body ->
+          X.ERoll ty (go body)
+        X.EUnroll body ->
+          X.EUnroll (go body)
+
+    stampResolved resolved =
+      case X.resolvedVarLocalRef resolved >>= lookupRuntimeRef of
+        Just runtimeRef ->
+          resolved
+            { X.resolvedVarRuntimeName = localRefName runtimeRef
+            , X.resolvedVarDetails = LocalId runtimeRef
+            }
+        Nothing -> resolved
+
+    lookupRuntimeRef localRef =
+      case localRefIdentity localRef of
+        GraphLocalId nodeId -> IntMap.lookup (Graph.getNodeId nodeId) runtimeRefsByNode
+        GeneratedLocalId {} -> Nothing
+
 annotateResolvedTermVars :: FinalizeContext -> LoweredBinding -> XmlfTerm -> XmlfTerm
 annotateResolvedTermVars _context lowered term0 =
   annotateResolvedTermVarsWithEvidenceCounts
@@ -1750,17 +1847,16 @@ collectResolvedLocalIdentityOverrides resolvedLocalIdentities =
     resolvedLocalEntry resolved overrides
       | X.resolvedVarIsLocal resolved,
         Just localRef <- X.resolvedVarLocalRef resolved,
-        (before, match : after) <- break (resolvedLocalOverrideMatches resolved localRef) overrides =
+        (before, match : after) <- break (resolvedLocalOverrideMatches localRef) overrides =
           ( Map.singleton (X.resolvedVarIdentityKey resolved) (loweredResolvedLocalRef match),
             before ++ after
           )
       | otherwise =
           (Map.empty, overrides)
 
-    resolvedLocalOverrideMatches resolved localRef override =
+    resolvedLocalOverrideMatches localRef override =
       let runtimeRef = loweredResolvedLocalRuntimeRef override
        in localRefIdentity runtimeRef == localRefIdentity localRef
-            || localRefName runtimeRef == X.resolvedVarRuntimeName resolved
 
 type EvidenceMethodKey = (SymbolIdentity, [SrcType], SymbolIdentity)
 
