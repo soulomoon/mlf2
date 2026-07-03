@@ -80,7 +80,7 @@ import MLF.Constraint.Types.Graph
   )
 import MLF.Constraint.Types.Phase (Phase (Presolved, Raw))
 import MLF.Elab.Elaborate (ElabConfig, ElabEnv (..), elaborateWithEnv)
-import MLF.Elab.Elaborate.Algebra (Env, mkEnvWithBindingDetails)
+import MLF.Elab.Elaborate.Algebra (Env, mkEnvWithResolvedBindings)
 import MLF.Elab.Inst (schemeToType)
 import MLF.Elab.PipelineConfig (PipelineConfig (..), defaultPipelineConfig)
 import MLF.Elab.PipelineError
@@ -170,7 +170,7 @@ data PipelineElabDetailedResult = PipelineElabDetailedResult
 data PreparedExternalBindings = PreparedExternalBindings
   { pebBindings :: ExternalBindings,
     pebSchemeInfos :: Map.Map VarName SchemeInfo,
-    pebElaborationBindings :: Map.Map VarName (SchemeInfo, IdDetails),
+    pebElaborationBindings :: Map.Map VarName (SchemeInfo, ResolvedVar),
     pebTypeCheckEnv :: TypeCheck.Env,
     pebSourceTypeHeadIdentities :: Map.Map String SymbolIdentity,
     pebSourceTypeBinderIdentities :: Map.Map String TypeBinderIdentity
@@ -181,7 +181,7 @@ preparedExternalTypeCheckEnv = pebTypeCheckEnv
 
 preparedExternalElaborationEnv :: PreparedExternalBindings -> Env
 preparedExternalElaborationEnv =
-  mkEnvWithBindingDetails . pebElaborationBindings
+  mkEnvWithResolvedBindings . pebElaborationBindings
 
 preparedElaborationEnvWithExternalIdentities ::
   IntMap.IntMap NormSrcType ->
@@ -566,7 +566,7 @@ unionPreparedExternalBindings preferred fallback =
           pebSourceTypeBinderIdentities = binders
         }
 
-externalBindingPreparedEnvs :: IdentityGenerator -> ExternalBindings -> Map.Map VarName SchemeInfo -> (Map.Map VarName (SchemeInfo, IdDetails), TypeCheck.Env)
+externalBindingPreparedEnvs :: IdentityGenerator -> ExternalBindings -> Map.Map VarName SchemeInfo -> (Map.Map VarName (SchemeInfo, ResolvedVar), TypeCheck.Env)
 externalBindingPreparedEnvs generator0 extBindings schemeInfos =
   (Map.fromList elaborationEntries, TypeCheck.mkTypeCheckEnvWithResolvedTerms typeCheckEntries Map.empty)
   where
@@ -577,17 +577,17 @@ externalBindingPreparedEnvs generator0 extBindings schemeInfos =
       let ty = schemeToType (siScheme schemeInfo)
        in case Map.lookup name extBindings >>= externalBindingIdentity of
             Just identity ->
-              let details = externalBindingDetails identity
+              let resolved = resolvedExternalBindingVar identity schemeInfo
                in ( generator,
-                    (name, (schemeInfo, details)) : elabAcc,
-                    (resolvedExternalBindingVar identity schemeInfo, ty) : tcAcc
+                    (name, (schemeInfo, resolved)) : elabAcc,
+                    (resolved, ty) : tcAcc
                   )
             Nothing ->
               let (envRef, generator') = freshEnvRef name generator
-                  details = EnvId envRef
+                  resolved = resolvedGeneratedExternalBindingVar envRef name schemeInfo
                in ( generator',
-                    (name, (schemeInfo, details)) : elabAcc,
-                    (resolvedGeneratedExternalBindingVar envRef name schemeInfo, ty) : tcAcc
+                    (name, (schemeInfo, resolved)) : elabAcc,
+                    (resolved, ty) : tcAcc
                   )
 
 externalBindingsGeneratedIdentities :: ExternalBindings -> [UniqueIdentity]
@@ -621,17 +621,13 @@ resolvedGeneratedExternalBindingVar envRef name schemeInfo =
       resolvedVarDetails = EnvId envRef
     }
 
-restrictTypeCheckEnv :: Map.Map VarName (SchemeInfo, IdDetails) -> TypeCheck.Env -> TypeCheck.Env
+restrictTypeCheckEnv :: Map.Map VarName (SchemeInfo, ResolvedVar) -> TypeCheck.Env -> TypeCheck.Env
 restrictTypeCheckEnv bindings env =
   TypeCheck.restrictResolvedTermBindings allowed env
   where
     allowed =
-      [ ResolvedVar
-          { resolvedVarRuntimeName = name,
-            resolvedVarType = schemeToType (siScheme schemeInfo),
-            resolvedVarDetails = details
-          }
-      | (name, (schemeInfo, details)) <- Map.toList bindings
+      [ resolved
+      | (_, (_, resolved)) <- Map.toList bindings
       ]
 
 unionTypeCheckEnv :: TypeCheck.Env -> TypeCheck.Env -> TypeCheck.Env

@@ -13,6 +13,7 @@ module MLF.Elab.Elaborate.Algebra
     mkEnvBinding,
     mkEnvFromBindings,
     mkEnvWithBindingDetails,
+    mkEnvWithResolvedBindings,
     lookupSchemeInfoForResolved,
     typeCheckEnvFrom,
     freshenSchemeInfoAgainstEnv,
@@ -145,6 +146,7 @@ data EnvBinding = EnvBinding
   { ebSchemeInfo :: SchemeInfo,
     ebSchemeType :: ElabType,
     ebIdentityDetails :: IdDetails,
+    ebRuntimeName :: VarName,
     ebTransparentMediator :: Bool,
     ebAliasTarget :: Maybe VarName,
     ebExplicitRecursiveParam :: Bool
@@ -267,11 +269,12 @@ isInternalTypeBinderRef ref =
   isJust (typeBinderRefNode ref)
 
 mkEnvBinding :: VarName -> IdDetails -> SchemeInfo -> Bool -> EnvBinding
-mkEnvBinding _ details schemeInfo transparentMediator =
+mkEnvBinding name details schemeInfo transparentMediator =
   EnvBinding
     { ebSchemeInfo = schemeInfo,
       ebSchemeType = schemeToType (siScheme schemeInfo),
       ebIdentityDetails = details,
+      ebRuntimeName = name,
       ebTransparentMediator = transparentMediator,
       ebAliasTarget = Nothing,
       ebExplicitRecursiveParam = False
@@ -327,6 +330,17 @@ mkEnvWithBindingDetails schemeInfos =
     bindings =
       Map.mapWithKey
         (\name (schemeInfo, details) -> mkEnvBinding name details schemeInfo False)
+        schemeInfos
+
+mkEnvWithResolvedBindings :: Map.Map VarName (SchemeInfo, ResolvedVar) -> Env
+mkEnvWithResolvedBindings schemeInfos =
+  mkEnvFromBindings bindings
+  where
+    bindings =
+      Map.map
+        ( \(schemeInfo, resolved) ->
+            mkEnvBinding (resolvedVarRuntimeName resolved) (resolvedVarDetails resolved) schemeInfo False
+        )
         schemeInfos
 
 mkEnvFromBindings :: Map.Map VarName EnvBinding -> Env
@@ -424,9 +438,9 @@ envBindingDetailsKey details =
     DeferredId ref -> EnvBindingDeferredKey ref
 
 resolvedEnvBindingVar :: VarName -> EnvBinding -> ResolvedVar
-resolvedEnvBindingVar name binding =
+resolvedEnvBindingVar _name binding =
   ResolvedVar
-    { resolvedVarRuntimeName = name,
+    { resolvedVarRuntimeName = ebRuntimeName binding,
       resolvedVarType = ebSchemeType binding,
       resolvedVarDetails = ebIdentityDetails binding
     }

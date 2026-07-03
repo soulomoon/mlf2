@@ -1653,6 +1653,51 @@ spec = do
                 Left err ->
                     expectationFailure ("expected resolved external identity, got " ++ show err)
 
+        it "resolves runtime external bindings through stable identity aliases" $ do
+            let valueIdentity = generatedSymbolIdentity 991655 SymbolValue "Main" "actual" Nothing
+                bindingIdentity = generatedSymbolIdentity 991656 SymbolValue "Main" "main" Nothing
+                stableName = symbolIdentityStableName valueIdentity
+                valueInfo =
+                    OrdinaryValue
+                        { valueInfoSymbol = valueIdentity
+                        , valueRuntimeName = "Main__actual"
+                        , valueTypeView = ProgramTypes.mkTypeView (STBase "Int") (STBase "Int")
+                        , valueConstraints = []
+                        , valueConstraintInfos = []
+                        }
+                scope =
+                    mkElaborateScope
+                        (Map.singleton "actual" valueInfo)
+                        Map.empty
+                        Map.empty
+                        []
+                lowered =
+                    LoweredBinding
+                        { loweredBindingIdentity =
+                            ProgramTypes.loweredBindingIdentityFromDetails "Main__main" (TopLevelId bindingIdentity)
+                        , loweredBindingSourceType = STBase "Int"
+                        , loweredBindingSourceTypeView = Nothing
+                        , loweredBindingExpectedType = STBase "Int"
+                        , loweredBindingExpectedTypeView = Nothing
+                        , loweredBindingSurfaceExpr = Surface.EVar stableName
+                        , loweredBindingResolvedLocalIdentities = []
+                        , loweredBindingDeferredObligations = Map.empty
+                        , loweredBindingExternalTypeViews = Map.empty
+                        , loweredBindingEvidenceParamCount = 0
+                        , loweredBindingExportedAsMain = False
+                        }
+            finalizeContext <- requireFinalizeContext scope
+            case finalizeBindingWithContext finalizeContext lowered of
+                Right binding ->
+                    case checkedBindingTerm binding of
+                        Elab.EVarNode resolved -> do
+                            Elab.resolvedVarRuntimeName resolved `shouldBe` "Main__actual"
+                            Elab.resolvedVarDetails resolved `shouldBe` TopLevelId valueIdentity
+                        other ->
+                            expectationFailure ("expected external variable term, got " ++ show other)
+                Left err ->
+                    expectationFailure ("expected stable runtime alias lookup, got " ++ show err)
+
         it "does not resolve conflicting runtime external payloads by an arbitrary identity" $ do
             let sharedIdentity = generatedSymbolIdentity 991650 SymbolValue "Main" "shared" Nothing
                 bindingIdentity = generatedSymbolIdentity 991651 SymbolValue "Main" "main" Nothing

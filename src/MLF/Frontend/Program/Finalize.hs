@@ -215,6 +215,7 @@ import MLF.Types.Identity
     freshDeferredRef,
     freshEnvRef,
     freshLocalRef,
+    idDetailsAliasNames,
     idDetailsGeneratedIdentities,
     identityGeneratorAfter,
     renameDeferredRef,
@@ -229,6 +230,7 @@ import MLF.Util.Timing (TimingConfig(..), defaultTimingConfig, timeProgramOperat
 data FinalizeContext = FinalizeContext
   { finalizeContextScope :: ElaborateScope,
     finalizeContextRuntimeBindings :: PreparedExternalBindings,
+    finalizeContextRuntimeSourceTypes :: Map String SrcType,
     finalizeContextRuntimeTypeEnv :: Map String ElabType
   }
 
@@ -291,6 +293,7 @@ mkFinalizeContext scope = do
       runtimeSourceTypes = Map.map typeViewDisplay runtimeTypeViews
   runtimeTypeEnv <- traverse (srcTypeToElabTypeInScope scope) runtimeSourceTypes
   let runtimeIndex = runtimeExternalBindingIndexFromScope scope runtimeTypeEnv
+      runtimeSourceTypesWithAliases = runtimeSourceTypesWithIdentityAliases runtimeSourceTypes runtimeIndex
   runtimeBindings <-
     prepareSurfaceExternalBindingsWithIdentity
       scope
@@ -304,6 +307,7 @@ mkFinalizeContext scope = do
     FinalizeContext
       { finalizeContextScope = scope,
         finalizeContextRuntimeBindings = runtimeBindings,
+        finalizeContextRuntimeSourceTypes = runtimeSourceTypesWithAliases,
         finalizeContextRuntimeTypeEnv = runtimeTypeEnv
       }
 
@@ -384,7 +388,7 @@ mkModuleBindingReadContext context schemeExternalTypes schemeExternalBindings lo
     runtimeFreeVars = Set.fromList [name | name <- freeVars, name `Set.notMember` externalTypeNames]
     sharedSchemeBindings = restrictPreparedExternalBindings sharedSchemeExternalFreeVars schemeExternalBindings
     runtimeBindings = restrictPreparedExternalBindings runtimeFreeVars (finalizeContextRuntimeBindings context)
-    runtimeTypes = externalTypes `Map.union` elaborateScopeRuntimeTypes scope
+    runtimeTypes = externalTypes `Map.union` finalizeContextRuntimeSourceTypes context
     expectedType = loweredExpectedTypeToElabType scope lowered
 
     resolveRuntimeType name =
@@ -1550,7 +1554,7 @@ finalizeCheckedBindingFromTermWithReadContext context mbCheckContext lowered ter
         Nothing -> False
 
     runtimeSourceTypes =
-      Map.map typeViewDisplay (loweredBindingExternalTypeViews lowered) `Map.union` elaborateScopeRuntimeTypes scope
+      Map.map typeViewDisplay (loweredBindingExternalTypeViews lowered) `Map.union` finalizeContextRuntimeSourceTypes context
 
     directSurfaceValueName :: SurfaceExpr -> Maybe String
     directSurfaceValueName expr =
@@ -2091,8 +2095,9 @@ runtimeExternalBindingIndexFromScope scope runtimeTypes =
     keysByRuntimeName =
       Map.fromListWith
         Set.union
-        [ (runtimeName, Set.singleton key)
-        | (runtimeName, key, _) <- entries
+        [ (alias, Set.singleton key)
+        | (runtimeName, key, resolved) <- entries,
+          alias <- idDetailsAliasNames runtimeName (X.resolvedVarDetails resolved)
         ]
 
     resolvedByKey =
@@ -2109,7 +2114,27 @@ runtimeExternalBindingIndexFromScope scope runtimeTypes =
 runtimeExternalBindingIdentity :: RuntimeExternalBindingIndex -> String -> Maybe ExternalBindingIdentity
 runtimeExternalBindingIdentity index name = do
   resolved <- lookupRuntimeExternalBindingByName name index
-  pure (externalBindingIdentityFromDetails name (X.resolvedVarDetails resolved))
+  pure (externalBindingIdentityFromDetails (X.resolvedVarRuntimeName resolved) (X.resolvedVarDetails resolved))
+
+runtimeSourceTypesWithIdentityAliases :: Map String SrcType -> RuntimeExternalBindingIndex -> Map String SrcType
+runtimeSourceTypesWithIdentityAliases runtimeSourceTypes index =
+  runtimeSourceTypes `Map.union` Map.mapMaybe uniqueAlias aliasEntries
+  where
+    aliasEntries =
+      Map.fromListWith
+        (++)
+        [ (alias, [(X.resolvedVarIdentityKey resolved, ty)])
+        | resolved <- Map.elems (runtimeExternalBindingByKey index),
+          let runtimeName = X.resolvedVarRuntimeName resolved,
+          Just ty <- [Map.lookup runtimeName runtimeSourceTypes],
+          alias <- idDetailsAliasNames runtimeName (X.resolvedVarDetails resolved)
+        ]
+
+    uniqueAlias entries =
+      case (Set.toList (Set.fromList (map fst entries)), entries) of
+        ([_], (_, ty) : rest)
+          | all ((== ty) . snd) rest -> Just ty
+        _ -> Nothing
 
 deferredExternalBindingIndex :: DeferredObligations -> DeferredExternalBindingIndex
 deferredExternalBindingIndex obligations =
@@ -2254,7 +2279,7 @@ runSurfacePipelineWithContext context forceUnchecked deferredObligations externa
   where
     scope = finalizeContextScope context
     externalTypes = Map.map typeViewDisplay externalTypeViews0
-    runtimeTypes = externalTypes `Map.union` elaborateScopeRuntimeTypes scope
+    runtimeTypes = externalTypes `Map.union` finalizeContextRuntimeSourceTypes context
     deferredExternalIndex = deferredExternalBindingIndex deferredObligations
 
     resolveRuntimeType name =
@@ -2306,7 +2331,7 @@ runSurfacePipelineWithContextWithTiming timing label context forceUnchecked defe
   where
     scope = finalizeContextScope context
     externalTypes = Map.map typeViewDisplay externalTypeViews0
-    runtimeTypes = externalTypes `Map.union` elaborateScopeRuntimeTypes scope
+    runtimeTypes = externalTypes `Map.union` finalizeContextRuntimeSourceTypes context
     deferredExternalIndex = deferredExternalBindingIndex deferredObligations
 
     resolveRuntimeType name =
