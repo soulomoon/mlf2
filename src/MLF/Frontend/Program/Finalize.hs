@@ -222,6 +222,7 @@ import MLF.Types.Identity
     freshDeferredRef,
     freshEnvRef,
     freshLocalRef,
+    idDetailsAliasMap,
     idDetailsAliasNames,
     idDetailsGeneratedIdentities,
     identityGeneratorAfter,
@@ -2148,8 +2149,8 @@ deferredExternalBindingIndex obligations =
   DeferredExternalBindingIndex
     { deferredExternalBindingRefByName =
         Map.fromList
-          [ (name, ref)
-          | (name, [ref]) <- Map.toList refsByName
+          [ (alias, ref)
+          | (alias, DeferredId ref) <- Map.toList refAliases
           ],
       deferredExternalBindingByRef =
         Map.fromList
@@ -2158,10 +2159,9 @@ deferredExternalBindingIndex obligations =
           ]
     }
   where
-    refsByName =
-      Map.fromListWith
-        (++)
-        [ (deferredRefName ref, [ref])
+    refAliases =
+      idDetailsAliasMap
+        [ (deferredRefName ref, DeferredId ref)
         | obligation <- Map.elems obligations,
           let ref = deferredProgramObligationRef obligation
         ]
