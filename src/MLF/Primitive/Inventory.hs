@@ -88,7 +88,7 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import MLF.Constraint.Types.Graph (BaseTy (..))
 import MLF.Elab.Types (ElabType, Ty (..), TypeBinderRef, sourceTypeBinderRefForName)
-import MLF.Frontend.Symbol (SymbolIdentity)
+import MLF.Frontend.Symbol (SymbolIdentity, lookupSymbolIdentityExact)
 import MLF.Frontend.Syntax (SrcBound (..), SrcTy (..), SrcType)
 import qualified MLF.Frontend.Syntax.Program as P
 import qualified MLF.Primitive.Identity as PrimitiveIdentity
@@ -637,7 +637,7 @@ primitiveValueNames = Map.keysSet primitiveValueSpecs
 
 primitiveValueNameByIdentity :: SymbolIdentity -> Maybe String
 primitiveValueNameByIdentity identity =
-  Map.lookup identity primitiveValueNamesByIdentity
+  lookupSymbolIdentityExact identity primitiveValueNamesByIdentity
 
 primitiveValueNamesByIdentity :: Map SymbolIdentity String
 primitiveValueNamesByIdentity =

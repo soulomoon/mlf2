@@ -108,11 +108,14 @@ spec = describe "MLF.Primitive.Inventory" $ do
       other ->
         expectationFailure ("unexpected primitive elab type: " ++ show other)
 
-  it "classifies native-lowerable primitive support from the shared primitive inventory owner" $ do
-    let staleAndIdentity =
+  it "classifies native-lowerable primitive support by exact shared primitive identity" $ do
+    let andIdentity = PrimitiveInventory.builtinValueIdentity PrimitiveInventory.nativeAndPrimitiveName
+        staleAndIdentity =
           renameSymbolDefiningName "$stale_and" (PrimitiveInventory.builtinValueIdentity PrimitiveInventory.nativeAndPrimitiveName)
-    PrimitiveInventory.primitiveValueNameByIdentity staleAndIdentity
+    PrimitiveInventory.primitiveValueNameByIdentity andIdentity
       `shouldBe` Just PrimitiveInventory.nativeAndPrimitiveName
+    PrimitiveInventory.primitiveValueNameByIdentity staleAndIdentity
+      `shouldBe` Nothing
     PrimitiveInventory.primitiveNativeSupport PrimitiveInventory.nativeAndPrimitiveName
       `shouldBe` Just PrimitiveInventory.PrimitiveNativeBooleanAnd
 

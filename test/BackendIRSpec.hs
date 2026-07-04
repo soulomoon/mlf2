@@ -119,13 +119,13 @@ spec = describe "MLF.Backend.IR" $ do
         expr = BackendVarWithIdentity placeholderTy (Just primitiveDetails) "__renamed_string_length"
     validateBackendProgram (programWithMainExpr expr) `shouldBe` Right ()
 
-  it "looks up stale-named primitive runtime variables by inventory identity" $ do
+  it "does not look up primitive runtime variables through stale identity payloads" $ do
     let primitiveName = PrimitiveInventory.nativeAndPrimitiveName
         primitiveTy = BTArrow boolTy (BTArrow boolTy boolTy)
         stalePrimitiveIdentity = renameSymbolDefiningName "$stale_and" (builtinValueIdentity primitiveName)
         primitiveDetails = PrimitiveId (primitiveRefFromSymbol stalePrimitiveIdentity)
         expr = BackendVarWithIdentity primitiveTy (Just primitiveDetails) "$stale_and"
-    validateBackendProgram (programWithMainExpr expr) `shouldBe` Right ()
+    validateBackendProgram (programWithMainExpr expr) `shouldBe` Left (BackendUnknownVariable "$stale_and")
 
   it "types primitive Prelude data heads by identity during backend validation" $ do
     let primitiveName = PrimitiveInventory.stringCharAtOptionPrimitiveName

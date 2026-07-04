@@ -128,7 +128,7 @@ import MLF.Frontend.Program.Types
     ordinaryValueTypeView,
     resolvedVarFromValueInfo,
   )
-import MLF.Frontend.Symbol (lookupSymbolIdentityExact, sameSymbolIdentity, symbolIdentityPayloadKey, symbolIdentityStableName, symbolUniqueIdentity)
+import MLF.Frontend.Symbol (lookupSymbolIdentityExact, memberSymbolIdentityExact, sameSymbolIdentity, symbolIdentityPayloadKey, symbolIdentityStableName, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit (..), SrcBound (..), SrcTy (..), SrcType)
 import qualified MLF.Frontend.Syntax.Program as ProgramSyntax
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
@@ -936,27 +936,20 @@ resolvedVarPrimitiveSymbol resolved =
     PrimitiveId ref ->
       Just (primitiveRefSymbol ref)
     TopLevelId symbol
-      | Map.member symbol runtimePrimitivesByIdentity ->
+      | Just _ <- lookupSymbolIdentityExact symbol runtimePrimitivesByIdentity ->
           Just symbol
     _ ->
       Nothing
 
 runtimePrimitiveByIdentity :: SymbolIdentity -> Maybe RuntimePrimitive
 runtimePrimitiveByIdentity symbol =
-  Map.lookup symbol runtimePrimitivesByIdentity
+  lookupSymbolIdentityExact symbol runtimePrimitivesByIdentity
 
 runtimePrimitivesByIdentity :: Map.Map SymbolIdentity RuntimePrimitive
 runtimePrimitivesByIdentity =
   Map.fromList
     [ (Builtins.builtinValueIdentity name, primitive)
     | (name, primitive) <- runtimePrimitiveEntries
-    ]
-
-runtimePrimitiveNamesByIdentity :: Map.Map SymbolIdentity String
-runtimePrimitiveNamesByIdentity =
-  Map.fromList
-    [ (Builtins.builtinValueIdentity name, name)
-    | name <- Map.keys PrimitiveInventory.primitiveValueSpecs
     ]
 
 runtimeConstructorValue :: RuntimeContext -> RuntimeConstructorSpec -> [RuntimeValue] -> Either ProgramError RuntimeValue
@@ -2427,12 +2420,12 @@ reachableOpaquePrimitiveNames checked =
   Set.fromList
     [ name
     | identity <- Set.toList (reachableOpaquePrimitiveIdentities checked),
-      Just name <- [Map.lookup identity runtimePrimitiveNamesByIdentity]
+      Just name <- [PrimitiveInventory.primitiveValueNameByIdentity identity]
     ]
 
 reachableOpaquePrimitiveIdentities :: CheckedProgram -> Set.Set SymbolIdentity
 reachableOpaquePrimitiveIdentities checked =
-  reachableFreePrimitiveIdentities checked `Set.intersection` builtinOpaqueValueIdentities
+  Set.filter (`memberSymbolIdentityExact` builtinOpaqueValueIdentities) (reachableFreePrimitiveIdentities checked)
 
 reachableFreePrimitiveIdentities :: CheckedProgram -> Set.Set SymbolIdentity
 reachableFreePrimitiveIdentities checked =
@@ -2496,7 +2489,7 @@ allCheckedBindings checked =
 checkedBindingMentionsOpaqueBuiltin :: CheckedBinding -> Bool
 checkedBindingMentionsOpaqueBuiltin binding =
   Builtins.srcTypeMentionsOpaqueBuiltin (checkedBindingSourceType binding)
-    || any (`Set.member` builtinOpaqueTypeIdentities) (Map.elems (typeViewHeadIdentities (checkedBindingSourceTypeView binding)))
+    || any (`memberSymbolIdentityExact` builtinOpaqueTypeIdentities) (Map.elems (typeViewHeadIdentities (checkedBindingSourceTypeView binding)))
 
 freeResolvedTermVars :: XmlfTerm -> [ResolvedVar]
 freeResolvedTermVars =
@@ -2535,7 +2528,7 @@ resolvedVarIsRuntimePurePrimitive :: ResolvedVar -> Bool
 resolvedVarIsRuntimePurePrimitive resolved =
   case resolvedVarPrimitiveSymbol resolved of
     Just symbol ->
-      Set.member symbol runtimePurePrimitiveIdentities
+      memberSymbolIdentityExact symbol runtimePurePrimitiveIdentities
     Nothing ->
       False
 

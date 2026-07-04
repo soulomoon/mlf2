@@ -2086,13 +2086,9 @@ spec = describe "MLF.Backend.LLVM" $ do
     renderBackendProgramLLVM nameOnlyRuntimePrimitiveProgram
       `shouldSatisfyLeft` isInfixOf "BackendUnknownVariable \"__mlfp_and\""
 
-  it "dispatches primitive calls by identity when the symbol name is stale" $ do
-    output <- requireRight (renderBackendProgramLLVM staleNamedRuntimePrimitiveProgram)
-
-    output `shouldSatisfy` isInfixOf "declare i1 @\"__mlfp_and\"(i1, i1)"
-    output `shouldSatisfy` isInfixOf "call i1 @\"__mlfp_and\""
-    output `shouldNotSatisfy` isInfixOf "$stale_and"
-    validateLLVMAssembly output
+  it "does not dispatch primitive calls through stale identity payloads" $
+    renderBackendProgramLLVM staleNamedRuntimePrimitiveProgram
+      `shouldSatisfyLeft` isInfixOf "BackendUnknownVariable \"$stale_and\""
 
   it "suppresses the runtime malloc declaration when a global owns that name" $ do
     output <- requireRight (renderBackendProgramLLVM userNamedMallocProgram)
