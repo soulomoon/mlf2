@@ -25,6 +25,7 @@ import MLF.Frontend.Program.Finalize
     , finalizeBindingsAllowOpaqueWithContext
     , mkFinalizeContext
     , mkModuleFinalizeContext
+    , elabTypeToRecoveredTypeView
     , recoverSourceType
     , resolvedForallSubst
     , sourceForallMatches
@@ -1807,6 +1808,23 @@ spec = do
                         }
                 expected = Elab.TForallRef ref Nothing (Elab.TVarRef ref)
             typeViewToElabType scope view `shouldBe` Right expected
+
+        it "drops ambiguous recovered elab type binder display identities" $ do
+            let leftIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991635)
+                rightIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991636)
+                leftStableName = typeBinderIdentityStableName leftIdentity
+                rightStableName = typeBinderIdentityStableName rightIdentity
+                leftRef = Elab.typeBinderRefFromIdentity leftIdentity "a"
+                rightRef = Elab.typeBinderRefFromIdentity rightIdentity "a"
+                scope = mkElaborateScope Map.empty Map.empty Map.empty []
+                view =
+                    elabTypeToRecoveredTypeView
+                        scope
+                        (Elab.TArrow (Elab.TVarRef leftRef) (Elab.TVarRef rightRef))
+                identities = ProgramTypes.typeViewBinderIdentities view
+            Map.lookup "a" identities `shouldBe` Nothing
+            Map.lookup leftStableName identities `shouldBe` Just leftIdentity
+            Map.lookup rightStableName identities `shouldBe` Just rightIdentity
 
         it "preserves type-view binder identities through display metadata while finalizing views" $ do
             let identity = typeBinderIdentityFromNode (NodeId 991609)

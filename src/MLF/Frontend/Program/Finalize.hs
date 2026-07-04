@@ -18,6 +18,7 @@ module MLF.Frontend.Program.Finalize
     finalizeBindingAllowOpaqueWithContextWithTiming,
     finalizeBindingAllowOpaqueWithModuleContextWithTiming,
     recoverSourceType,
+    elabTypeToRecoveredTypeView,
     typeViewToElabType,
     resolvedForallSubst,
     sourceForallMatches,
@@ -4927,12 +4928,12 @@ elabTypeBinderIdentities =
     go ty =
       case ty of
         X.TVarRef ref -> binder ref
-        X.TArrow dom cod -> go dom <> go cod
+        X.TArrow dom cod -> mergeTypeBinderIdentityMaps [go dom, go cod]
         X.TBaseWithIdentity {} -> Map.empty
-        X.TConWithIdentity _ _ args -> foldMap go args
-        X.TVarAppRef ref args -> binder ref <> foldMap go args
-        X.TForallRef ref mb body -> binder ref <> maybe Map.empty go mb <> go body
-        X.TMuRef ref body -> binder ref <> go body
+        X.TConWithIdentity _ _ args -> mergeTypeBinderIdentityMaps (map go (NE.toList args))
+        X.TVarAppRef ref args -> mergeTypeBinderIdentityMaps (binder ref : map go (NE.toList args))
+        X.TForallRef ref mb body -> mergeTypeBinderIdentityMaps [binder ref, maybe Map.empty go mb, go body]
+        X.TMuRef ref body -> mergeTypeBinderIdentityMaps [binder ref, go body]
         X.TBottom -> Map.empty
 
     binder ref =
