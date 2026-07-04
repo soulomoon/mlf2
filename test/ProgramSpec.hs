@@ -1173,6 +1173,40 @@ spec = do
                         ]
             Map.lookup stableName aliases `shouldBe` Nothing
 
+        it "drops unique info entries when one symbol identity has conflicting payloads" $ do
+            let originalIdentity = generatedSymbolIdentity 991658 SymbolValue "Lib" "answer" Nothing
+                conflictingIdentity = generatedSymbolIdentity 991658 SymbolValue "Other" "staleAnswer" Nothing
+                infos =
+                    ProgramTypes.uniqueInfoEntriesByIdentity
+                        [(originalIdentity, "same"), (conflictingIdentity, "same")]
+            Map.lookup originalIdentity infos `shouldBe` Nothing
+
+        it "drops exported constructor metadata when one constructor symbol payload conflicts" $ do
+            let dataIdentity = generatedSymbolIdentity 991659 SymbolType "Lib" "Token" Nothing
+                originalCtorIdentity =
+                    generatedSymbolIdentity 991660 SymbolConstructor "Lib" "Some" (Just (SymbolOwnerType dataIdentity))
+                conflictingCtorIdentity =
+                    generatedSymbolIdentity 991660 SymbolConstructor "Other" "StaleSome" (Just (SymbolOwnerType dataIdentity))
+                ctorInfo identity =
+                    ConstructorInfo
+                        { ctorInfoSymbol = identity
+                        , ctorRuntimeName = "Lib__Some"
+                        , ctorTypeView = ProgramTypes.mkTypeView (STBase "Token") (STBase "Token")
+                        , ctorForallBinderInfo = []
+                        , ctorOwningTypeIdentity = dataIdentity
+                        , ctorIndex = 0
+                        , ctorOwnerConstructors = []
+                        }
+                exportedType =
+                    ProgramTypes.mkExportedTypeInfo
+                        (DataInfo dataIdentity [] [])
+                        [ ("Some", ctorInfo originalCtorIdentity)
+                        , ("Some", ctorInfo conflictingCtorIdentity)
+                        ]
+            Map.lookup originalCtorIdentity (ProgramTypes.exportedTypeConstructorsByIdentity exportedType) `shouldBe` Nothing
+            Map.lookup originalCtorIdentity (ProgramTypes.exportedTypeConstructorDisplaysByIdentity exportedType) `shouldBe` Nothing
+            ProgramTypes.exportedTypeConstructorsForDisplay exportedType `shouldBe` Map.empty
+
         it "does not compare deferred constructors equal when type head payloads conflict" $ do
             let dataIdentity = generatedSymbolIdentity 991637 SymbolType "Lib" "Token" Nothing
                 ctorIdentity = generatedSymbolIdentity 991638 SymbolConstructor "Lib" "MkToken" (Just (SymbolOwnerType dataIdentity))

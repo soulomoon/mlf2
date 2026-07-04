@@ -2583,14 +2583,33 @@ uniqueInfoEntriesByIdentity :: (Eq a) => [(SymbolIdentity, a)] -> Map SymbolIden
 uniqueInfoEntriesByIdentity entries =
   Map.fromList
     [ (identity, info)
-    | (identity, info : rest) <- Map.toList infosByIdentity,
+    | (identity, info : rest) <- uniquePayloadIdentityGroups entries,
       all (== info) rest
     ]
+
+uniquePayloadIdentityGroups :: [(SymbolIdentity, a)] -> [(SymbolIdentity, [a])]
+uniquePayloadIdentityGroups entries =
+  [ (identity, values)
+  | (_, identityEntries) <- Map.toList entriesByUnique,
+    [(identity, values)] <- [payloadGroups identityEntries]
+  ]
   where
-    infosByIdentity =
+    entriesByUnique =
       Map.fromListWith
         (++)
-        [(identity, [info]) | (identity, info) <- entries]
+        [(symbolUniqueIdentity identity, [(identity, value)]) | (identity, value) <- entries]
+
+    payloadGroups identityEntries =
+      [ (identity, map snd payloadEntries)
+      | (_, payloadEntries@((identity, _) : _)) <-
+          Map.toList
+            ( Map.fromListWith
+                (++)
+                [ (symbolIdentityPayloadKey identity, [(identity, value)])
+                | (identity, value) <- identityEntries
+                ]
+            )
+      ]
 
 uniqueDisplayByIdentity :: (a -> SymbolIdentity) -> Map String a -> Map SymbolIdentity String
 uniqueDisplayByIdentity identityFor values =
@@ -2603,14 +2622,9 @@ uniqueDisplayEntriesByIdentity :: [(SymbolIdentity, String)] -> Map SymbolIdenti
 uniqueDisplayEntriesByIdentity entries =
   Map.fromList
     [ (identity, displayName)
-    | (identity, displayName : rest) <- Map.toList displayNamesByIdentity,
+    | (identity, displayName : rest) <- uniquePayloadIdentityGroups entries,
       all (== displayName) rest
     ]
-  where
-    displayNamesByIdentity =
-      Map.fromListWith
-        (++)
-        [(identity, [displayName]) | (identity, displayName) <- entries]
 
 displayMap :: Map SymbolIdentity a -> Map SymbolIdentity String -> Map String a
 displayMap values displays =
