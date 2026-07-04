@@ -1494,8 +1494,8 @@ typeViewBinderIdentityAliasEntries view =
         [ Map.singleton alias identity
         | (identityName, displayName) <- Map.toList (typeViewBinderPairs view)
         , (alias, identity) <-
-            maybe [] (\identity -> [(displayName, identity)]) (Map.lookup identityName identities)
-              ++ maybe [] (\identity -> [(identityName, identity)]) (Map.lookup displayName identities)
+            maybe [] (\identity -> [(displayName, identity)]) (lookupTypeBinderIdentityAlias identities identityName)
+              ++ maybe [] (\identity -> [(identityName, identity)]) (lookupTypeBinderIdentityAlias identities displayName)
         ]
 
 mergeSymbolIdentityMaps :: [Map String SymbolIdentity] -> Map String SymbolIdentity

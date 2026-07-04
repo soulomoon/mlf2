@@ -1084,6 +1084,18 @@ spec = do
             Map.lookup firstStableName aliases `shouldBe` Nothing
             Map.lookup secondStableName aliases `shouldBe` Just secondIdentity
 
+        it "pairs display aliases through stable type-binder identity keys" $ do
+            let identity = typeBinderIdentityFromUnique (UniqueIdentity 991626)
+                stableName = typeBinderIdentityStableName identity
+                view =
+                    (ProgramTypes.mkTypeView (STVar "display") (STVar stableName))
+                        { ProgramTypes.typeViewBinderIdentities = Map.singleton stableName identity
+                        }
+                aliases =
+                    Map.fromList (ProgramTypes.typeViewBinderIdentityAliasEntries view)
+            Map.lookup "display" aliases `shouldBe` Just identity
+            Map.lookup stableName aliases `shouldBe` Just identity
+
         it "compares type-binder substitutions by identity targets when alias names are stale" $ do
             let identity = typeBinderIdentityFromUnique (UniqueIdentity 991616)
                 replacementTy = STBase "Int"
