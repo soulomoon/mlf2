@@ -113,7 +113,7 @@ import MLF.Frontend.Program.Package
     trivialProgramPackage,
   )
 import MLF.Frontend.Program.Resolve (resolveProgram)
-import MLF.Frontend.Symbol (lookupSymbolIdentityExact, sameSymbolIdentity, symbolIdentityAliasMap, symbolIdentityAliasMapWith, symbolIdentityPayloadKey, symbolIdentityStableName, symbolUniqueIdentity)
+import MLF.Frontend.Symbol (lookupSymbolIdentityAlias, lookupSymbolIdentityExact, sameSymbolIdentity, symbolIdentityAliasMap, symbolIdentityAliasMapWith, symbolIdentityPayloadKey, symbolIdentityStableName, symbolUniqueIdentity)
 import MLF.Frontend.Program.TypeFamilies (normalizeTypeFamiliesInProgram)
 import MLF.Frontend.Program.Types
   ( CheckedBinding (..),
@@ -3922,7 +3922,7 @@ buildInstanceSkeletons moduleIdentity generator0 displayEnv scope mod0 derived =
             else not (Set.null (Set.intersection leftIdentities rightIdentities))
 
     overlapHeadDataIdentities headIdentities name =
-      case Map.lookup name headIdentities of
+      case lookupSymbolIdentityAlias headIdentities name of
         Just identity
           | Just dataInfo <- lookupSymbolIdentityExact identity overlapDataByIdentity -> Set.singleton (dataInfoSymbolIdentity dataInfo)
           | otherwise -> Set.empty
