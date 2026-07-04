@@ -139,6 +139,15 @@ substTypeCaptureRef target s = goSub
     freeSRefs = freeTypeVarRefsType s
     freeSNames = Set.unions (map typeBinderRefAliasNames freeSRefs)
 
+    freshCaptureRef :: String -> ElabType -> Maybe BoundType -> TypeBinderRef
+    freshCaptureRef name body mbBound =
+      fst (freshTypeBinderRef name (identityGeneratorAfterType seed))
+      where
+        seed =
+          TArrow
+            s
+            (maybe body (\bound -> TArrow (tyToElab bound) body) mbBound)
+
     replacementMentionsRef :: TypeBinderRef -> Bool
     replacementMentionsRef ref =
       any (binderMayCaptureReplacementRef ref) freeSRefs
@@ -172,7 +181,7 @@ substTypeCaptureRef target s = goSub
                       Set.singleton v
                     ]
                 v' = freshNameLike v used
-                ref' = renameTypeBinderRef v' ref
+                ref' = freshCaptureRef v' (tyToElab body) mb
                 body' = substTypeCaptureRef ref (TVarRef ref') body
                 mb' = fmap (substBoundCaptureLocal targetRef replacement) mb
              in TForallRef ref' mb' (substTypeCaptureRef targetRef replacement body')
@@ -191,7 +200,7 @@ substTypeCaptureRef target s = goSub
                       Set.singleton v
                     ]
                 v' = freshNameLike v used
-                ref' = renameTypeBinderRef v' ref
+                ref' = freshCaptureRef v' (tyToElab body) Nothing
                 body' = substTypeCaptureRef ref (TVarRef ref') body
              in TMuRef ref' (substTypeCaptureRef targetRef replacement body')
         | otherwise ->
@@ -228,7 +237,7 @@ substTypeCaptureRef target s = goSub
                           Set.singleton v
                         ]
                     v' = freshNameLike v used
-                    ref' = renameTypeBinderRef v' ref
+                    ref' = freshCaptureRef v' (fst (unIxPair body)) (fmap (fst . unIxPair) mb)
                     body' = substTypeCaptureRef ref (TVarRef ref') (fst (unIxPair body))
                     mb' = fmap (substBoundCaptureLocal target s . fst . unIxPair) mb
                  in TForallRef ref' mb' (substTypeCaptureRef target s body')
@@ -247,7 +256,7 @@ substTypeCaptureRef target s = goSub
                           Set.singleton v
                         ]
                     v' = freshNameLike v used
-                    ref' = renameTypeBinderRef v' ref
+                    ref' = freshCaptureRef v' (fst (unIxPair body)) Nothing
                     body' = substTypeCaptureRef ref (TVarRef ref') (fst (unIxPair body))
                  in TMuRef ref' (substTypeCaptureRef target s body')
             | otherwise ->

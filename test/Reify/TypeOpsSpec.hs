@@ -195,7 +195,7 @@ spec = describe "MLF.Reify.TypeOps" $ do
               (tVarAppWithRef refF (tVarWithRef refA NE.:| []))
        in substTypeCaptureRef refZ intTy ty `shouldBe` ty
 
-    it "preserves binder identity when capture freshening renames display name" $
+    it "freshens binder identity when capture freshening renames display name" $
       let refA = typeRef 88 "a"
           refB = typeRef 3 "b"
           ty :: ElabType
@@ -203,7 +203,7 @@ spec = describe "MLF.Reify.TypeOps" $ do
           result = substTypeCaptureRef refA (tVarWithRef refB) ty
        in case result of
             TForallRef ref' Nothing (TVarRef bodyRef) -> do
-              typeBinderRefIdentity ref' `shouldBe` typeBinderRefIdentity refB
+              typeBinderRefIdentity ref' `shouldNotBe` typeBinderRefIdentity refB
               typeBinderRefName ref' `shouldBe` "b1"
               bodyRef `shouldBe` refB
             other -> expectationFailure ("expected freshened forall, got: " ++ show other)
@@ -218,7 +218,7 @@ spec = describe "MLF.Reify.TypeOps" $ do
        in case result of
             TForallRef ref' Nothing (TVarRef bodyRef) -> do
               typeBinderRefAliasNames replacement `shouldSatisfy` Set.member stableAlias
-              typeBinderRefIdentity ref' `shouldBe` typeBinderRefIdentity replacement
+              typeBinderRefIdentity ref' `shouldNotBe` typeBinderRefIdentity replacement
               typeBinderRefName ref' `shouldNotBe` stableAlias
               bodyRef `shouldBe` replacement
             other -> expectationFailure ("expected stable-alias freshened forall, got: " ++ show other)

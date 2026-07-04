@@ -30,6 +30,7 @@ import MLF.Types.Elab
     , resolvedVarSameIdentity
     , tVarWithRef
     , typeBinderIdentityFromNode
+    , typeBinderRefIdentity
     , typeBinderRefName
     , typeBinderRefFromIdentity
     )
@@ -37,7 +38,7 @@ import MLF.Frontend.Program.Builtins (builtinValueIdentity)
 import MLF.Frontend.Syntax (Lit(..))
 import qualified MLF.Frontend.Syntax as Surf (Expr(..), SrcTy(..))
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
-import MLF.Types.Identity (IdDetails(..), idDetailsStableName, primitiveRefFromSymbol, freshLocalRef, initialIdentityGenerator)
+import MLF.Types.Identity (IdDetails(..), idDetailsStableName, primitiveRefFromSymbol, freshLocalRef, initialIdentityGenerator, typeBinderIdentityStableName)
 import ElabTermTestSupport
     ( generatedLocalRef
     , generatedResolvedLocalForName
@@ -210,6 +211,25 @@ spec = do
                                 (tVarWithRef freeB1)
                         }
             step term `shouldBe` Just (eTyAbsWithRef innerB Nothing (EVarNode expectedOccurrence))
+
+        it "freshens type abstraction identity during reduction capture avoidance" $ do
+            let target = typeRef 89 "target"
+                replacement = typeRef 90 "free"
+                replacementTy = TArrow (tVarWithRef replacement) TBottom
+                stableAlias = typeBinderIdentityStableName (typeBinderRefIdentity replacement)
+                binder = typeBinderRefFromIdentity (typeBinderRefIdentity replacement) stableAlias
+                occurrence = resolvedLocal "$x#0" "runtime-x" (tVarWithRef target)
+                term =
+                    ETyInst
+                        (eTyAbsWithRef target (Just replacementTy) (eTyAbsWithRef binder Nothing (EVarNode occurrence)))
+                        InstElim
+                expectedOccurrence = occurrence { resolvedVarType = replacementTy }
+            case step term of
+                Just (ETyAbsRef ref' Nothing (EVarNode occurrence')) -> do
+                    typeBinderRefIdentity ref' `shouldNotBe` typeBinderRefIdentity replacement
+                    typeBinderRefName ref' `shouldNotBe` stableAlias
+                    occurrence' `shouldBe` expectedOccurrence
+                other -> expectationFailure ("Expected fresh type abstraction identity, got: " ++ show other)
 
         it "does not substitute same-named type refs with different identities" $ do
             let refA = typeRef 70 "a"

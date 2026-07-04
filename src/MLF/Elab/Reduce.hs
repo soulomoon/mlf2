@@ -172,7 +172,7 @@ reduceInst v inst = do
         Just
           ( InstIntro,
             \term ->
-              let (ref, _) = freshTypeBinderRefFromNames (freeTypeVarsTerm term) (identityGeneratorAfterTerm term)
+              let (ref, _) = freshTypeBinderRefFromNames (freeTypeVarAliasNamesTerm term) (identityGeneratorAfterTerm term)
                in Just (eTyAbsWithRef ref Nothing term)
           )
       InstElimF ->
@@ -278,9 +278,9 @@ instConsumesForall inst = case inst of
   InstBot _ -> False
   InstAbstrRef _ -> False
 
-freeTypeVarsTerm :: XmlfTerm -> Set.Set String
-freeTypeVarsTerm =
-  Set.fromList . map typeBinderRefName . freeTypeVarRefsTerm
+freeTypeVarAliasNamesTerm :: XmlfTerm -> Set.Set String
+freeTypeVarAliasNamesTerm =
+  Set.unions . map typeBinderRefAliasNames . freeTypeVarRefsTerm
 
 freeTypeVarRefsInst :: Instantiation -> [TypeBinderRef]
 freeTypeVarRefsInst = foldInstantiation alg
@@ -393,7 +393,14 @@ substTypeVarTermRef target s = goSub
   where
     x = typeBinderRefName target
     freeSRefs = freeTypeVarRefsType s
-    freeSNames = Set.fromList (map typeBinderRefName freeSRefs)
+    freeSNames = Set.unions (map typeBinderRefAliasNames freeSRefs)
+    freshCaptureRef name mb body =
+      fst (freshTypeBinderRef name (identityGeneratorAfterTerm seed))
+      where
+        seed =
+          ERoll
+            (maybe s (\bound -> TArrow s (tyToElab bound)) mb)
+            body
     substBoundVar mb = do
       bnd <- mb
       let result = substTypeCaptureRef target s (tyToElab bnd)
@@ -419,9 +426,9 @@ substTypeVarTermRef target s = goSub
           ETyAbsFRef ref mb body
             | typeBinderRefsSameIdentity ref target -> eTyAbsWithRef ref (substBoundVar mb) (fst body)
             | typeRefMember ref freeSRefs ->
-                let used = Set.unions [freeSNames, freeTypeVarsTerm (fst body), Set.singleton x]
+                let used = Set.unions [freeSNames, freeTypeVarAliasNamesTerm (fst body), Set.singleton x]
                     v' = freshTermNameFrom v used
-                    ref' = renameTypeBinderRef v' ref
+                    ref' = freshCaptureRef v' mb (fst body)
                     body' = substTypeVarTermRef ref (tVarWithRef ref') (fst body)
                  in eTyAbsWithRef ref' (substBoundVar mb) (goSub body')
             | otherwise -> eTyAbsWithRef ref (substBoundVar mb) (snd body)
