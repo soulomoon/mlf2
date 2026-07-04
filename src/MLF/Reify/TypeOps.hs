@@ -8,6 +8,7 @@ module MLF.Reify.TypeOps
     stripForallsType,
     freeTypeVarRefsFrom,
     freeTypeVarsType,
+    freeTypeVarAliasNamesType,
     freeTypeVarRefsType,
     freeTypeVarRefsList,
     substTypeCaptureRef,

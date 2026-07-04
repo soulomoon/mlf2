@@ -71,6 +71,7 @@ import MLF.Constraint.Types.Witness
 import MLF.Constraint.Types.Witness.TestSupport (EdgeWitness (..), InstanceWitness (..))
 import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Elab.Elaborate.Algebra qualified as Algebra
+import MLF.Elab.Elaborate.Annotation qualified as Annotation
 import MLF.Elab.Pipeline qualified as Elab
 import MLF.Elab.Types (ResolvedVar (..))
 import MLF.Elab.Types qualified as ElabTypes
@@ -111,7 +112,7 @@ import MLF.Frontend.Program.Finalize qualified as ProgramFinalize
 import MLF.Frontend.Program.Types qualified as ProgramTypes
 import MLF.Frontend.Symbol (SymbolNamespace (..), symbolIdentityFromParts)
 import MLF.Frontend.Syntax (Expr (..), Lit (..), NormSrcType, SrcTy (..), SrcType, SurfaceExpr, mkSrcBound)
-import MLF.Types.Identity (IdDetails (..), UniqueIdentity (..), envRefFromIdentity, envRefIdentity, localRefFromNodeId)
+import MLF.Types.Identity (IdDetails (..), UniqueIdentity (..), envRefFromIdentity, envRefIdentity, localRefFromNodeId, typeBinderIdentityStableName)
 import MLF.Reify.Type qualified as ReifyType
 import MLF.Reify.TypeOps qualified as TypeOps
 import MLF.Util.Order qualified as Order
@@ -2115,6 +2116,43 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
           resolvedVarDetails binder `shouldBe` LocalId (generatedLocalRefForName "$x#0")
           resolvedVarRuntimeName occurrence `shouldBe` "different-runtime"
         other -> expectationFailure ("Expected resolved freshened term, got: " ++ show other)
+
+    it "freshens annotation type abstractions away from visible stable aliases" $ do
+      let envRef =
+            ElabTypes.typeBinderRefFromIdentity
+              (ElabTypes.typeBinderIdentityFromNode (NodeId 1867))
+              "captured"
+          stableAlias = typeBinderIdentityStableName (ElabTypes.typeBinderRefIdentity envRef)
+          absRef =
+            ElabTypes.typeBinderRefFromIdentity
+              (ElabTypes.typeBinderIdentityFromNode (NodeId 1868))
+              stableAlias
+          captured =
+            ResolvedVar
+              { resolvedVarRuntimeName = "captured",
+                resolvedVarType = ElabTypes.tVarWithRef envRef,
+                resolvedVarDetails =
+                  EnvId (envRefFromIdentity (UniqueIdentity 1869) "captured")
+              }
+          env = Elab.mkTypeCheckEnvWithResolvedTerms [(captured, ElabTypes.tVarWithRef envRef)] Map.empty
+          resolved ref runtime ty =
+            ResolvedVar
+              { resolvedVarRuntimeName = runtime,
+                resolvedVarType = ty,
+                resolvedVarDetails = LocalId (generatedLocalRefForName ref)
+              }
+          term =
+            ElabTypes.eTyAbsWithRef absRef Nothing $
+              Elab.ELam
+                (resolved "$x#0" "runtime-x" (ElabTypes.tVarWithRef absRef))
+                (Elab.EVarNode (resolved "$x#0" "different-runtime" (ElabTypes.tVarWithRef absRef)))
+      case Annotation.freshenTermTypeAbsAgainstEnv env term of
+        Elab.ETyAbsRef freshRef Nothing (Elab.ELam binder (Elab.EVarNode occurrence)) -> do
+          ElabTypes.typeBinderRefIdentity freshRef `shouldBe` ElabTypes.typeBinderRefIdentity absRef
+          ElabTypes.typeBinderRefName freshRef `shouldNotBe` stableAlias
+          resolvedVarType binder `shouldBe` ElabTypes.tVarWithRef freshRef
+          resolvedVarType occurrence `shouldBe` ElabTypes.tVarWithRef freshRef
+        other -> expectationFailure ("Expected annotation stable-alias freshening, got: " ++ show other)
 
     it "uses resolved local identity when selecting authoritative app annotations" $ do
       let intTy = Elab.TBase (BaseTy "Int")

@@ -136,7 +136,7 @@ import MLF.Frontend.Program.Types (mergeSymbolIdentityMaps, mergeTypeBinderIdent
 import MLF.Frontend.Symbol (SymbolIdentity, lookupSymbolIdentityAlias, symbolIdentityAliasMap, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (NormSrcType, NormSurfaceExpr, StructBound, VarName)
 import qualified MLF.Frontend.Syntax as Surface
-import MLF.Reify.TypeOps (freeTypeVarRefsType, freshNameLike, substTypeCaptureRef)
+import MLF.Reify.TypeOps (freeTypeVarAliasNamesType, freeTypeVarRefsType, freshNameLike, substTypeCaptureRef)
 import MLF.Util.Timing
   ( TimingConfig,
     emitProgramOperationMetricIO,
@@ -1679,10 +1679,6 @@ pipelineFreshenReservedTypeVars :: PipelineTypeCheckEnvSummary -> Set.Set String
 pipelineFreshenReservedTypeVars summary =
   freeVarCountsNames (ptcesTermFreeVars summary)
     `Set.union` typeVarRefAliasNames (ptcesTypeRefs summary)
-
-freeTypeVarAliasNamesType :: Ty v -> Set.Set String
-freeTypeVarAliasNamesType =
-  typeVarRefAliasNames . freeTypeVarRefsType
 
 typeVarRefAliasNames :: [TypeBinderRef] -> Set.Set String
 typeVarRefAliasNames =

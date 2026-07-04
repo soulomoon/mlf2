@@ -11,6 +11,7 @@ module MLF.Elab.Elaborate.Annotation
     sourceAnnSchemeInfo,
     desugaredAnnLambdaInfo,
     elaborateAnnotationTerm,
+    freshenTermTypeAbsAgainstEnv,
     reifyInst,
     instSeqApps,
   )
@@ -81,6 +82,7 @@ import MLF.Elab.Types
     schemeInfoFromRefSubst,
     schemeInfoBinderRefSubst,
     TypeBinderRef,
+    typeBinderRefAliasNames,
     typeBinderRefName,
     typeBinderRefNode,
     typeBinderRefsSameIdentity,
@@ -95,8 +97,8 @@ import MLF.Reify.Type (reifyTypeWithNamedSetRefsNoFallbackReadModel)
 import MLF.Reify.TypeOps
   ( alphaEqType,
     churchAwareEqType,
+    freeTypeVarAliasNamesType,
     freeTypeVarRefsType,
-    freeTypeVarsType,
     freshNameLike,
     resolveBaseBoundForInstConstraint,
     substTypeCaptureRef,
@@ -223,21 +225,21 @@ elaborateAnnotationTerm annotationContext namedSetReify env tcEnv exprAnn annNod
       freshenSchemeAgainstEnv scheme0 =
         let reserved =
               Set.unions
-                ( map freeTypeVarsType (map snd (TypeCheck.resolvedTermEnvEntries (TypeCheck.resolvedTermEnv tcEnv)))
-                    ++ [Set.fromList (map typeBinderRefName (Map.keys (TypeCheck.typeEnv tcEnv)))]
+                ( map freeTypeVarAliasNamesType (map snd (TypeCheck.resolvedTermEnvEntries (TypeCheck.resolvedTermEnv tcEnv)))
+                    ++ [typeVarRefAliasNames (Map.keys (TypeCheck.typeEnv tcEnv))]
                 )
             go _ [] bodyAcc acc = (reverse acc, bodyAcc)
             go used ((ref, mb) : rest) bodyAcc acc =
               let name = typeBinderRefName ref
                   ref' = if Set.member name used then renameTypeBinderRef (freshNameLike name used) ref else ref
-                  name' = typeBinderRefName ref'
+                  aliases' = typeBinderRefAliasNames ref'
                   renameTy = TVarRef ref'
                   bodyAcc' =
                     if typeBinderRefsSameIdentityAndName ref' ref
                       then bodyAcc
                       else substTypeCaptureRef ref renameTy bodyAcc
                   acc' = (ref', mb) : acc
-               in go (Set.insert name' used) rest bodyAcc' acc'
+               in go (aliases' `Set.union` used) rest bodyAcc' acc'
             (binds', body') = go reserved (schemeBinderRefs scheme0) (schemeBody scheme0) []
          in mkElabSchemeWithRefs binds' body'
       sourceSchemeInfo = sourceAnnSchemeInfo env exprAnn
@@ -860,14 +862,14 @@ freshenTermTypeAbsAgainstEnv env = go reserved
   where
     reserved =
       Set.unions
-        ( map freeTypeVarsType (map snd (TypeCheck.resolvedTermEnvEntries (TypeCheck.resolvedTermEnv env)))
-            ++ [Set.fromList (map typeBinderRefName (Map.keys (TypeCheck.typeEnv env)))]
+        ( map freeTypeVarAliasNamesType (map snd (TypeCheck.resolvedTermEnvEntries (TypeCheck.resolvedTermEnv env)))
+            ++ [typeVarRefAliasNames (Map.keys (TypeCheck.typeEnv env))]
         )
 
     go used term = case term of
       ETyAbsRef ref mb body ->
         let name = typeBinderRefName ref
-            usedForBinder = Set.union used (maybe Set.empty freeTypeVarsType mb)
+            usedForBinder = Set.union used (maybe Set.empty freeTypeVarAliasNamesType mb)
             (ref', body') =
               if Set.member name usedForBinder
                 then
@@ -875,18 +877,22 @@ freshenTermTypeAbsAgainstEnv env = go reserved
                       freshRef = renameTypeBinderRef fresh ref
                    in (freshRef, renameTypeVarInTerm ref freshRef body)
                 else (ref, body)
-            used' = Set.insert (typeBinderRefName ref') usedForBinder
+            used' = typeBinderRefAliasNames ref' `Set.union` usedForBinder
          in ETyAbsRef ref' mb (go used' body')
       ELam resolved body ->
-        ELam resolved (go (Set.union used (freeTypeVarsType (resolvedVarType resolved))) body)
+        ELam resolved (go (Set.union used (freeTypeVarAliasNamesType (resolvedVarType resolved))) body)
       EApp f a -> EApp (go used f) (go used a)
       ELet resolved sch rhs body ->
-        let used' = Set.union used (freeTypeVarsType (schemeToType sch))
+        let used' = Set.union used (freeTypeVarAliasNamesType (schemeToType sch))
          in ELet resolved sch (go used' rhs) (go used' body)
       ETyInst t inst -> ETyInst (go used t) inst
       ERoll ty body -> ERoll ty (go used body)
       EUnroll body -> EUnroll (go used body)
       _ -> term
+
+typeVarRefAliasNames :: [TypeBinderRef] -> Set.Set String
+typeVarRefAliasNames =
+  Set.unions . map typeBinderRefAliasNames
 
 renameTypeVarInTerm :: TypeBinderRef -> TypeBinderRef -> XmlfTerm -> XmlfTerm
 renameTypeVarInTerm oldRef newRef term =
