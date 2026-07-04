@@ -77,7 +77,7 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import MLF.Constraint.Types.Graph (NodeId (..))
-import MLF.Frontend.Symbol (SymbolIdentity, SymbolOwnerIdentity (..), symbolDefiningName, symbolIdentityStableName, symbolOwnerIdentity, symbolUniqueIdentity)
+import MLF.Frontend.Symbol (SymbolIdentity, SymbolIdentityPayloadKey, SymbolOwnerIdentity (..), symbolDefiningName, symbolIdentityPayloadKey, symbolIdentityStableName, symbolOwnerIdentity, symbolUniqueIdentity)
 import MLF.Types.Unique
 
 data StructuralTypeBinderRole
@@ -361,10 +361,10 @@ data IdDetailsAliasPayloadKey
   = AliasPayloadLocalKey LocalIdentity String Bool
   | AliasPayloadEvidenceKey LocalIdentity String Bool
   | AliasPayloadEnvKey UniqueIdentity String
-  | AliasPayloadTopLevelKey SymbolIdentity
-  | AliasPayloadConstructorKey SymbolIdentity
-  | AliasPayloadMethodKey SymbolIdentity
-  | AliasPayloadPrimitiveKey SymbolIdentity
+  | AliasPayloadTopLevelKey SymbolIdentityPayloadKey
+  | AliasPayloadConstructorKey SymbolIdentityPayloadKey
+  | AliasPayloadMethodKey SymbolIdentityPayloadKey
+  | AliasPayloadPrimitiveKey SymbolIdentityPayloadKey
   | AliasPayloadDeferredKey UniqueIdentity String
   deriving (Eq, Ord, Show)
 
@@ -386,10 +386,10 @@ idDetailsAliasPayloadKey details =
     LocalId ref -> AliasPayloadLocalKey (localRefIdentity ref) (localRefName ref) (localRefDiscard ref)
     EvidenceId ref -> AliasPayloadEvidenceKey (localRefIdentity ref) (localRefName ref) (localRefDiscard ref)
     EnvId ref -> AliasPayloadEnvKey (envRefIdentity ref) (envRefName ref)
-    TopLevelId symbol -> AliasPayloadTopLevelKey symbol
-    ConstructorId ref -> AliasPayloadConstructorKey (constructorRefSymbol ref)
-    MethodId symbol -> AliasPayloadMethodKey symbol
-    PrimitiveId ref -> AliasPayloadPrimitiveKey (primitiveRefSymbol ref)
+    TopLevelId symbol -> AliasPayloadTopLevelKey (symbolIdentityPayloadKey symbol)
+    ConstructorId ref -> AliasPayloadConstructorKey (symbolIdentityPayloadKey (constructorRefSymbol ref))
+    MethodId symbol -> AliasPayloadMethodKey (symbolIdentityPayloadKey symbol)
+    PrimitiveId ref -> AliasPayloadPrimitiveKey (symbolIdentityPayloadKey (primitiveRefSymbol ref))
     DeferredId ref -> AliasPayloadDeferredKey (deferredRefIdentity ref) (deferredRefName ref)
 
 idDetailsStableName :: IdDetails -> String

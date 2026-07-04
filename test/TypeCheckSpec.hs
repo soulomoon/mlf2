@@ -93,6 +93,7 @@ import MLF.Types.Identity
     , freshLocalRef
     , idDetailsAliasMap
     , idDetailsConstructorRef
+    , idDetailsDisplayName
     , idDetailsIsLocal
     , idDetailsRenameLocal
     , idDetailsReferenceName
@@ -1000,6 +1001,10 @@ spec = describe "Phase 7 typecheck" $ do
             deferredDetails = DeferredId (deferredRefFromIdentity (UniqueIdentity 50) "x")
             sameNamedDeferredDetails = DeferredId (deferredRefFromIdentity (UniqueIdentity 51) "x")
             constructorDetails = ConstructorId ctorRef
+            topLevelDetails =
+                TopLevelId (generatedSymbolIdentity 42 SymbolValue "Main" "value" Nothing)
+            conflictingTopLevelDetails =
+                TopLevelId (generatedSymbolIdentity 42 SymbolValue "Main" "stale-value" Nothing)
             loweredIdentity =
                 loweredBindingIdentityFromDetails "$Box" constructorDetails
             renamedLoweredIdentity =
@@ -1056,12 +1061,21 @@ spec = describe "Phase 7 typecheck" $ do
                     [ ("runtime-x", localDetails)
                     , ("runtime-renamed", renamedSameIdentityDetails)
                     ]
+            conflictingPayloadAliases =
+                idDetailsAliasMap
+                    [ ("runtime-value", topLevelDetails)
+                    , ("runtime-value", conflictingTopLevelDetails)
+                    ]
         Map.lookup "$x#0" detailsByAlias `shouldBe` Nothing
         Map.lookup (uniqueIdentityStableName (UniqueIdentity 0)) detailsByAlias `shouldBe` Just localDetails
         Map.lookup (uniqueIdentityStableName (UniqueIdentity 1)) detailsByAlias `shouldBe` Just otherLocalDetails
         Map.lookup (uniqueIdentityStableName (UniqueIdentity 0)) sameIdentityConflictAliases `shouldBe` Nothing
         fmap (idDetailsReferenceName "fallback") (Map.lookup "$x#0" sameIdentityConflictAliases) `shouldBe` Just "$x#0"
         fmap (idDetailsReferenceName "fallback") (Map.lookup "$x#renamed" sameIdentityConflictAliases) `shouldBe` Just "$x#renamed"
+        Map.lookup "runtime-value" conflictingPayloadAliases `shouldBe` Nothing
+        Map.lookup (symbolIdentityStableName (generatedSymbolIdentity 42 SymbolValue "Main" "value" Nothing)) conflictingPayloadAliases `shouldBe` Nothing
+        fmap (idDetailsDisplayName "fallback") (Map.lookup "value" conflictingPayloadAliases) `shouldBe` Just "value"
+        fmap (idDetailsDisplayName "fallback") (Map.lookup "stale-value" conflictingPayloadAliases) `shouldBe` Just "stale-value"
         localDetails `shouldBe` idDetailsRenameLocal "$x#1" localDetails
         localDetails `shouldBe` EvidenceId (generatedLocalRef 0 "$x#evidence")
         deferredDetails `shouldNotBe` sameNamedDeferredDetails
