@@ -323,6 +323,7 @@ import MLF.Frontend.Symbol
     symbolIdentityAliasMap,
     symbolIdentityAliasMapWith,
     symbolIdentityAliasNamesWith,
+    symbolIdentityPayloadKey,
     symbolIdentityStableName,
     symbolDefiningModule,
     symbolDefiningName,
@@ -1482,13 +1483,13 @@ mergeSymbolIdentityMaps maps =
   Map.fromList
     [ (name, identity)
     | (name, identities) <- Map.toList identitiesByName,
-      [identity] <- [Set.toList identities]
+      [identity] <- [Map.elems identities]
     ]
   where
     identitiesByName =
       Map.fromListWith
-        Set.union
-        [ (name, Set.singleton identity)
+        Map.union
+        [ (name, Map.singleton (symbolIdentityPayloadKey identity) identity)
         | identityMap <- maps,
           (name, identity) <- Map.toList identityMap
         ]

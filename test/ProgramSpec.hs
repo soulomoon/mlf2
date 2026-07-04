@@ -1162,6 +1162,17 @@ spec = do
             ProgramTypes.typeViewHeadIdentities (ProgramTypes.applyTypeViewSubst subst sourceView)
                 `shouldBe` Map.empty
 
+        it "drops conflicting merged type head payloads with the same symbol identity" $ do
+            let stableName = symbolIdentityStableName originalIdentity
+                originalIdentity = generatedSymbolIdentity 991629 SymbolType "Lib" "Token" Nothing
+                conflictingIdentity = generatedSymbolIdentity 991629 SymbolType "Other" "StaleToken" Nothing
+                aliases =
+                    ProgramTypes.mergeSymbolIdentityMaps
+                        [ Map.singleton stableName originalIdentity
+                        , Map.singleton stableName conflictingIdentity
+                        ]
+            Map.lookup stableName aliases `shouldBe` Nothing
+
         it "drops ambiguous constraint binder display identities from ordinary value views" $ do
             let valueIdentity = generatedSymbolIdentity 991423 SymbolValue "Main" "f" Nothing
                 classIdentity = generatedSymbolIdentity 991424 SymbolClass "Main" "C" Nothing
