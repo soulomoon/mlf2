@@ -3137,6 +3137,7 @@ convertSourceTypeViewWithIdentities view =
 
     sourceTypeHeadIdentityFromNames identityName displayName =
       typeViewHeadIdentityForAlias view identityName
+        <|> typeViewHeadIdentityForAlias view displayName
         <|> builtinTypeHeadIdentity identityName
         <|> builtinTypeHeadIdentity displayName
 

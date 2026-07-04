@@ -1005,6 +1005,32 @@ spec = describe "MLF.Backend.Convert" $ do
       Nothing ->
         expectationFailure "expected Main.Option data info"
 
+  it "converts constructor metadata by display head identity maps when identity names are stale" $ do
+    checked0 <- requireChecked parameterizedConstructorProgram
+    case find ((== "Main.Option") . dataInfoIdentityQualifiedName) (checkedDataInfos checked0) of
+      Just dataInfo -> do
+        let displayHeadAlias = "$display_alias_option"
+            staleIdentityHead = "$stale_identity_option"
+            staleCtorType =
+              ( mkTypeView
+                  (STArrow (STVar "a") (STCon displayHeadAlias (STVar "a" :| [])))
+                  (STArrow (STVar "a") (STCon staleIdentityHead (STVar "a" :| [])))
+              )
+                { typeViewHeadIdentities = Map.singleton displayHeadAlias (dataInfoSymbol dataInfo)
+                }
+            checked =
+              withConstructorTypeView "Main__Some" staleCtorType checked0
+        backend <- requireRight (convertCheckedProgram checked)
+        validateBackendProgram backend `shouldBe` Right ()
+        constructor <- requireConstructor "Main__Some" backend
+        case backendConstructorResult constructor of
+          BTConWithIdentity (Just identity) (BaseTy "Main.Option") (_ :| []) ->
+            identity `shouldBe` dataInfoSymbol dataInfo
+          other ->
+            expectationFailure ("expected identity-bearing Main.Option result, got " ++ show other)
+      Nothing ->
+        expectationFailure "expected Main.Option data info"
+
   it "promotes constructor field local builtin names before checking metadata" $ do
     checked0 <- requireChecked constructorFieldLetProgram
     let nameOnlyIntTy = Elab.TBaseWithIdentity Nothing (BaseTy "Int")
