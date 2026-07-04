@@ -1364,8 +1364,9 @@ applyTypeViewSubst subst view =
       typeViewHeadIdentities =
         filterHeadIdentitiesByTypeNames displayTy identityTy substitutedHeadIdentities,
       typeViewBinderIdentities =
-        filterBinderIdentitiesByNames
-          (freeIdentityNames <> freeDisplayNames)
+        filterBinderIdentitiesByTypeNames
+          displayTy
+          identityTy
           substitutedBinderIdentityAliases
           substitutedBinderIdentities
     }
@@ -1374,8 +1375,6 @@ applyTypeViewSubst subst view =
     identitySubst = typeViewIdentitySubstTypesFor view subst
     displayTy = Map.foldrWithKey substituteTypeVar (typeViewDisplay view) displaySubst
     identityTy = Map.foldrWithKey substituteTypeVar (typeViewIdentity view) identitySubst
-    freeDisplayNames = freeTypeVarsSrcType displayTy
-    freeIdentityNames = freeTypeVarsSrcType identityTy
     substitutedHeadIdentities =
       mergeSymbolIdentityMaps (typeViewHeadIdentities view : map typeViewHeadIdentities (Map.elems subst))
     substitutedBinderIdentities =
@@ -1462,6 +1461,23 @@ filterBinderIdentitiesByNames names aliases identities =
 
     mentioned identity =
       any (\name -> Map.lookup name identityByName == Just identity) (Set.toList names)
+
+filterBinderIdentitiesByTypeNames :: SrcType -> SrcType -> [(String, TypeBinderIdentity)] -> Map String TypeBinderIdentity -> Map String TypeBinderIdentity
+filterBinderIdentitiesByTypeNames displayTy identityTy =
+  filterBinderIdentitiesByNames names
+  where
+    names =
+      typeBinderNamesSrcType displayTy <> typeBinderNamesSrcType identityTy
+
+filterBinderIdentitiesByProjectedTypeNames :: TypeView -> SrcType -> SrcType -> [(String, TypeBinderIdentity)] -> Map String TypeBinderIdentity -> Map String TypeBinderIdentity
+filterBinderIdentitiesByProjectedTypeNames view displayTy identityTy =
+  filterBinderIdentitiesByNames names
+  where
+    names =
+      leadingTypeBinderNamesSrcType (typeViewDisplay view)
+        <> leadingTypeBinderNamesSrcType (typeViewIdentity view)
+        <> typeBinderNamesSrcType displayTy
+        <> typeBinderNamesSrcType identityTy
 
 typeViewBinderIdentityAliasEntries :: TypeView -> [(String, TypeBinderIdentity)]
 typeViewBinderIdentityAliasEntries view =
@@ -3220,7 +3236,13 @@ projectTypeView view displayTy identityTy =
       typeViewIdentity = identityTy,
       typeViewHeadIdentities =
         filterHeadIdentitiesByTypeNames displayTy identityTy (typeViewHeadIdentities view),
-      typeViewBinderIdentities = typeViewBinderIdentities view
+      typeViewBinderIdentities =
+        filterBinderIdentitiesByProjectedTypeNames
+          view
+          displayTy
+          identityTy
+          (typeViewBinderIdentityAliasEntries view)
+          (typeViewBinderIdentities view)
     }
 
 methodInfoOwnerClassSymbolIdentity :: MethodInfo -> SymbolIdentity
@@ -3409,6 +3431,29 @@ typeHeadNamesSrcType =
     STMu _ body -> typeHeadNamesSrcType body
     STBottom -> Set.empty
 
+typeBinderNamesSrcType :: SrcType -> Set String
+typeBinderNamesSrcType =
+  \case
+    STVar name -> Set.singleton name
+    STArrow dom cod -> typeBinderNamesSrcType dom `Set.union` typeBinderNamesSrcType cod
+    STBase {} -> Set.empty
+    STCon _ args -> foldMap typeBinderNamesSrcType args
+    STVarApp name args -> Set.insert name (foldMap typeBinderNamesSrcType args)
+    STTyLam name body -> Set.insert name (typeBinderNamesSrcType body)
+    STTyApp fun arg -> typeBinderNamesSrcType fun `Set.union` typeBinderNamesSrcType arg
+    STForall name mb body ->
+      Set.insert name $
+        maybe Set.empty (typeBinderNamesSrcType . unSrcBound) mb `Set.union` typeBinderNamesSrcType body
+    STMu name body -> Set.insert name (typeBinderNamesSrcType body)
+    STBottom -> Set.empty
+
+leadingTypeBinderNamesSrcType :: SrcType -> Set String
+leadingTypeBinderNamesSrcType =
+  \case
+    STForall name _ body ->
+      Set.insert name (leadingTypeBinderNamesSrcType body)
+    _ -> Set.empty
+
 specializeMethodTypeView :: MethodInfo -> NonEmpty TypeView -> TypeView
 specializeMethodTypeView methodInfo classArgViews =
   specialized
@@ -3428,16 +3473,15 @@ specializeQuantifiedTypeView subst view =
       typeViewHeadIdentities =
         filterHeadIdentitiesByTypeNames displayTy identityTy substitutedHeadIdentities,
       typeViewBinderIdentities =
-        filterBinderIdentitiesByNames
-          (freeIdentityNames <> freeDisplayNames)
+        filterBinderIdentitiesByTypeNames
+          displayTy
+          identityTy
           substitutedBinderIdentityAliases
           substitutedBinderIdentities
     }
   where
     displayTy = specialize (typeViewDisplay view) (typeViewSubstDisplayTypes view subst)
     identityTy = specialize (typeViewIdentity view) (typeViewIdentitySubstTypesFor view subst)
-    freeDisplayNames = freeTypeVarsSrcType displayTy
-    freeIdentityNames = freeTypeVarsSrcType identityTy
     substitutedHeadIdentities =
       mergeSymbolIdentityMaps (typeViewHeadIdentities view : map typeViewHeadIdentities (Map.elems subst))
     substitutedBinderIdentities =

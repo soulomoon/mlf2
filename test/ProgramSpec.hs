@@ -874,6 +874,80 @@ spec = do
             Map.lookup "DisplayBox" (ProgramTypes.typeViewHeadIdentities (ProgramTypes.constructorShapeResultView shape))
                 `shouldBe` Just resultIdentity
 
+        it "projects constructor argument binder identities without retaining result binders" $ do
+            let dataIdentity = generatedSymbolIdentity 992538 SymbolType "Main" "Box" Nothing
+                ctorIdentity = generatedSymbolIdentity 992539 SymbolConstructor "Main" "MkBox" (Just (SymbolOwnerType dataIdentity))
+                argIdentity = typeBinderIdentityFromUnique (UniqueIdentity 992540)
+                resultIdentity = typeBinderIdentityFromUnique (UniqueIdentity 992541)
+                argStableName = typeBinderIdentityStableName argIdentity
+                resultStableName = typeBinderIdentityStableName resultIdentity
+                ctorView =
+                    ( ProgramTypes.mkTypeView
+                        (STArrow (STVar "DisplayArg") (STVar "DisplayResult"))
+                        (STArrow (STVar argStableName) (STVar resultStableName))
+                    )
+                        { ProgramTypes.typeViewBinderIdentities =
+                            Map.fromList
+                                [ (argStableName, argIdentity)
+                                , (resultStableName, resultIdentity)
+                                ]
+                        }
+                ctorInfo =
+                    ConstructorInfo
+                        { ctorInfoSymbol = ctorIdentity
+                        , ctorRuntimeName = "Main__MkBox"
+                        , ctorTypeView = ctorView
+                        , ctorForallBinderInfo = []
+                        , ctorOwningTypeIdentity = dataIdentity
+                        , ctorIndex = 0
+                        , ctorOwnerConstructors = []
+                        }
+            case ProgramTypes.constructorInfoArgViews ctorInfo of
+                [argView] -> do
+                    Map.lookup argStableName (ProgramTypes.typeViewBinderIdentities argView)
+                        `shouldBe` Just argIdentity
+                    ProgramTypes.typeViewBinderIdentityForAlias argView "DisplayArg"
+                        `shouldBe` Just argIdentity
+                    Map.lookup resultStableName (ProgramTypes.typeViewBinderIdentities argView)
+                        `shouldBe` Nothing
+                views ->
+                    expectationFailure ("expected one constructor arg view, got " ++ show views)
+
+        it "retains constructor existential binder identities on projected result views" $ do
+            let dataIdentity = generatedSymbolIdentity 992542 SymbolType "Main" "SomeExpr" Nothing
+                ctorIdentity = generatedSymbolIdentity 992543 SymbolConstructor "Main" "SomeExpr" (Just (SymbolOwnerType dataIdentity))
+                existentialIdentity = typeBinderIdentityFromUnique (UniqueIdentity 992544)
+                existentialStableName = typeBinderIdentityStableName existentialIdentity
+                displayTy =
+                    STForall
+                        "a"
+                        Nothing
+                        (STArrow (STCon "Expr" (STVar "a" :| [])) (STBase "SomeExpr"))
+                identityTy =
+                    STForall
+                        existentialStableName
+                        Nothing
+                        (STArrow (STCon "Expr" (STVar existentialStableName :| [])) (STBase "SomeExpr"))
+                ctorView =
+                    (ProgramTypes.mkTypeView displayTy identityTy)
+                        { ProgramTypes.typeViewBinderIdentities = Map.singleton existentialStableName existentialIdentity
+                        }
+                ctorInfo =
+                    ConstructorInfo
+                        { ctorInfoSymbol = ctorIdentity
+                        , ctorRuntimeName = "Main__SomeExpr"
+                        , ctorTypeView = ctorView
+                        , ctorForallBinderInfo = []
+                        , ctorOwningTypeIdentity = dataIdentity
+                        , ctorIndex = 0
+                        , ctorOwnerConstructors = []
+                        }
+                resultView = ProgramTypes.constructorInfoResultView ctorInfo
+            Map.lookup existentialStableName (ProgramTypes.typeViewBinderIdentities resultView)
+                `shouldBe` Just existentialIdentity
+            ProgramTypes.typeViewBinderIdentityForAlias resultView existentialStableName
+                `shouldBe` Just existentialIdentity
+
         it "keeps replacement type head identities by payload stable name after applying type-view substitutions" $ do
             let sourceIdentity = typeBinderIdentityFromNode (NodeId 992501)
                 sourceStableName = typeBinderIdentityStableName sourceIdentity
