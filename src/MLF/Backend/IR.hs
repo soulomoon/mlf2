@@ -239,7 +239,7 @@ import MLF.Backend.StructuralRecursiveData
   )
 import MLF.Constraint.Types.Graph (BaseTy (..))
 import MLF.Frontend.Program.Builtins (builtinTypeHeadIdentity, builtinValueIdentity)
-import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), symbolDefiningModule, symbolDefiningName, symbolIdentityAliasMap, symbolIdentityStableName, symbolNamespace, symbolUniqueIdentity)
+import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), symbolDefiningModule, symbolDefiningName, symbolIdentityAliasMap, symbolIdentityPayloadKey, symbolIdentityStableName, symbolNamespace, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit (..))
 import MLF.Types.Identity
   ( DeferredRef,
@@ -388,16 +388,16 @@ backendClosureEntryNames =
 validateBackendProgram :: BackendProgram -> Either BackendValidationError ()
 validateBackendProgram program = do
   requireUnique BackendDuplicateModule (map backendModuleName modules0)
-  requireUniqueBy BackendDuplicateModule [(identity, symbolIdentityStableName identity) | module0 <- modules0, Just identity <- [backendModuleIdentity module0]]
+  requireUniqueSymbolIdentities "module" BackendDuplicateModule [identity | module0 <- modules0, Just identity <- [backendModuleIdentity module0]]
   requireUnique BackendDuplicateData (map backendDataName dataDecls)
-  requireUniqueBy BackendDuplicateData [(identity, symbolIdentityStableName identity) | dataDecl <- dataDecls, Just identity <- [backendDataIdentity dataDecl]]
+  requireUniqueSymbolIdentities "data" BackendDuplicateData [identity | dataDecl <- dataDecls, Just identity <- [backendDataIdentity dataDecl]]
   mapM_ validateBackendDataParameterIdentities dataDecls
   mapM_ validateBackendDataConstructorBinderIdentities dataDecls
   mapM_ validateBackendDataConstructorTypeVariables dataDecls
   requireUnique BackendDuplicateBinding (map backendBindingName bindings)
-  requireUniqueBy BackendDuplicateBinding [(identity, symbolIdentityStableName identity) | binding <- bindings, Just identity <- [backendBindingIdentity binding]]
+  requireUniqueSymbolIdentities "binding" BackendDuplicateBinding [identity | binding <- bindings, Just identity <- [backendBindingIdentity binding]]
   requireUnique BackendDuplicateConstructor (map backendConstructorName constructors)
-  requireUniqueBy BackendDuplicateConstructor [(identity, symbolIdentityStableName identity) | constructor <- constructors, Just identity <- [backendConstructorIdentity constructor]]
+  requireUniqueSymbolIdentities "constructor" BackendDuplicateConstructor [identity | constructor <- constructors, Just identity <- [backendConstructorIdentity constructor]]
   requireUnique BackendDuplicateClosureEntry closureEntryNames
   rejectClosureEntryNameCollisions closureEntryNames (map backendBindingName bindings ++ Map.keys runtimePrimitiveTypes)
   unless (backendProgramMainExists program bindings) $
@@ -2556,6 +2556,19 @@ requireUniqueBy mkError =
     go seen ((key, name) : rest)
       | Set.member key seen = Left (mkError name)
       | otherwise = go (Set.insert key seen) rest
+
+requireUniqueSymbolIdentities :: String -> (String -> BackendValidationError) -> [SymbolIdentity] -> Either BackendValidationError ()
+requireUniqueSymbolIdentities label mkError =
+  go Map.empty
+  where
+    go _ [] = Right ()
+    go seen (identity : rest)
+      | Just existing <- Map.lookup (symbolUniqueIdentity identity) seen =
+          if symbolIdentityPayloadKey existing == symbolIdentityPayloadKey identity
+            then Left (mkError (symbolIdentityStableName identity))
+            else Left (BackendConflictingIdentityPayload label (symbolIdentityStableName identity))
+      | otherwise =
+          go (Map.insert (symbolUniqueIdentity identity) identity seen) rest
 
 data TermBinderKey
   = TermBinderIdentity BackendLocalKey

@@ -41,6 +41,19 @@ spec = describe "MLF.Backend.IR" $ do
     validateBackendProgram duplicateBindingIdentityProgram
       `shouldBe` Left (BackendDuplicateBinding (symbolIdentityStableName duplicateValueIdentity))
 
+  it "rejects backend symbol identity payload conflicts" $ do
+    validateBackendProgram conflictingModuleIdentityPayloadProgram
+      `shouldBe` Left (BackendConflictingIdentityPayload "module" (symbolIdentityStableName conflictingModuleIdentity))
+
+    validateBackendProgram conflictingDataIdentityPayloadProgram
+      `shouldBe` Left (BackendConflictingIdentityPayload "data" (symbolIdentityStableName conflictingDataIdentity))
+
+    validateBackendProgram conflictingBindingIdentityPayloadProgram
+      `shouldBe` Left (BackendConflictingIdentityPayload "binding" (symbolIdentityStableName conflictingValueIdentity))
+
+    validateBackendProgram conflictingConstructorIdentityPayloadProgram
+      `shouldBe` Left (BackendConflictingIdentityPayload "constructor" (symbolIdentityStableName conflictingConstructorIdentity))
+
   it "rejects identity-bearing data declarations with name-only parameters" $
     validateBackendProgram identityDataWithNameOnlyParameterProgram
       `shouldBe` Left (BackendDataParameterIdentityMissing "NamedBox" "a")
@@ -1953,6 +1966,14 @@ duplicateBindingIdentityProgram =
       mainLiteralBinding
     ]
 
+conflictingBindingIdentityPayloadProgram :: BackendProgram
+conflictingBindingIdentityPayloadProgram =
+  programWithBindings
+    [ bindingWithIdentity "left" duplicateValueIdentity,
+      bindingWithIdentity "right" conflictingValueIdentity,
+      mainLiteralBinding
+    ]
+
 mismatchedGlobalBindingIdentityProgram :: BackendProgram
 mismatchedGlobalBindingIdentityProgram =
   programWithBindings
@@ -2029,6 +2050,14 @@ duplicateValueIdentity =
 duplicateModuleIdentity :: SymbolIdentity
 duplicateModuleIdentity =
   testSymbolIdentity 991015 SymbolModule "Main" "Main"
+
+conflictingValueIdentity :: SymbolIdentity
+conflictingValueIdentity =
+  symbolIdentityFromParts (symbolUniqueIdentity duplicateValueIdentity) SymbolValue "Main" "$stale_value" Nothing
+
+conflictingModuleIdentity :: SymbolIdentity
+conflictingModuleIdentity =
+  symbolIdentityFromParts (symbolUniqueIdentity duplicateModuleIdentity) SymbolModule "Main" "$stale_Main" Nothing
 
 otherValueIdentity :: SymbolIdentity
 otherValueIdentity =
@@ -2284,6 +2313,10 @@ duplicateDataIdentity :: SymbolIdentity
 duplicateDataIdentity =
   testSymbolIdentity 991000 SymbolType "Main" "Data"
 
+conflictingDataIdentity :: SymbolIdentity
+conflictingDataIdentity =
+  symbolIdentityFromParts (symbolUniqueIdentity duplicateDataIdentity) SymbolType "Main" "$stale_Data" Nothing
+
 preludeOptionIdentity :: SymbolIdentity
 preludeOptionIdentity =
   testSymbolIdentity 991622 SymbolType "Prelude" "Option"
@@ -2291,6 +2324,10 @@ preludeOptionIdentity =
 duplicateConstructorIdentity :: SymbolIdentity
 duplicateConstructorIdentity =
   testSymbolIdentity 991002 SymbolConstructor "Main" "Box"
+
+conflictingConstructorIdentity :: SymbolIdentity
+conflictingConstructorIdentity =
+  symbolIdentityFromParts (symbolUniqueIdentity duplicateConstructorIdentity) SymbolConstructor "Main" "$stale_Box" Nothing
 
 otherConstructorIdentity :: SymbolIdentity
 otherConstructorIdentity =
@@ -2335,11 +2372,27 @@ duplicateDataIdentityProgram =
     ]
     (intLit 1)
 
+conflictingDataIdentityPayloadProgram :: BackendProgram
+conflictingDataIdentityPayloadProgram =
+  programWithDataAndMainExpr
+    [ dataWithIdentity "LeftBox" duplicateDataIdentity,
+      dataWithIdentity "RightBox" conflictingDataIdentity
+    ]
+    (intLit 1)
+
 duplicateModuleIdentityProgram :: BackendProgram
 duplicateModuleIdentityProgram =
   BackendProgram
     [ moduleWithIdentity "Main" duplicateModuleIdentity,
       moduleWithIdentity "$stale_Main" duplicateModuleIdentity
+    ]
+    "main"
+
+conflictingModuleIdentityPayloadProgram :: BackendProgram
+conflictingModuleIdentityPayloadProgram =
+  BackendProgram
+    [ moduleWithIdentity "Main" duplicateModuleIdentity,
+      moduleWithIdentity "$stale_Main" conflictingModuleIdentity
     ]
     "main"
 
@@ -2466,6 +2519,14 @@ duplicateConstructorIdentityProgram =
   programWithDataAndMainExpr
     [ BackendData "LeftBox" [] [constructorWithIdentity "LeftBox" duplicateConstructorIdentity],
       BackendData "RightBox" [] [constructorWithIdentity "RightBox" duplicateConstructorIdentity]
+    ]
+    (intLit 1)
+
+conflictingConstructorIdentityPayloadProgram :: BackendProgram
+conflictingConstructorIdentityPayloadProgram =
+  programWithDataAndMainExpr
+    [ BackendData "LeftBox" [] [constructorWithIdentity "LeftBox" duplicateConstructorIdentity],
+      BackendData "RightBox" [] [constructorWithIdentity "RightBox" conflictingConstructorIdentity]
     ]
     (intLit 1)
 
