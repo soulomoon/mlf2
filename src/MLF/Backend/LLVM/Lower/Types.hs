@@ -45,6 +45,8 @@ module MLF.Backend.LLVM.Lower.Types
     constructorWordBytes,
     lowerLocalKey,
     lookupProgramBindingByIdentityExact,
+    lookupProgramConstructorByIdentityExact,
+    lookupProgramDataByIdentityExact,
     mergeConstructedValues,
     pattern LowerValue,
   )
@@ -149,6 +151,14 @@ bindingInfoRef =
 lookupProgramBindingByIdentityExact :: ProgramBase -> Maybe SymbolIdentity -> Maybe BindingInfo
 lookupProgramBindingByIdentityExact base mbIdentity =
   mbIdentity >>= (`lookupSymbolIdentityExact` pbBindingsByIdentity base)
+
+lookupProgramConstructorByIdentityExact :: ProgramBase -> Maybe SymbolIdentity -> Maybe ConstructorRuntime
+lookupProgramConstructorByIdentityExact base mbIdentity =
+  mbIdentity >>= (`lookupSymbolIdentityExact` pbConstructorsByIdentity base)
+
+lookupProgramDataByIdentityExact :: ProgramBase -> Maybe SymbolIdentity -> Maybe DataRuntime
+lookupProgramDataByIdentityExact base mbIdentity =
+  mbIdentity >>= (`lookupSymbolIdentityExact` pbDataByIdentity base)
 
 instance Eq BindingInfo where
   left == right =

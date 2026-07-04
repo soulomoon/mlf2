@@ -1167,7 +1167,7 @@ nativeDataRuntimeForType base =
 lookupDataRuntimeByHead :: ProgramBase -> Maybe SymbolIdentity -> String -> Maybe DataRuntime
 lookupDataRuntimeByHead base mbIdentity name =
   case mbIdentity of
-    Just identity -> Map.lookup identity (pbDataByIdentity base)
+    Just identity -> lookupProgramDataByIdentityExact base (Just identity)
     Nothing -> lookupDataRuntimeByName base name
 
 lookupDataRuntimeForStructuralMu :: ProgramBase -> Maybe TypeBinderIdentity -> String -> Maybe DataRuntime
@@ -6025,7 +6025,7 @@ constructorRuntimes generator dataDecl =
 lookupConstructorRuntime :: ProgramBase -> Maybe SymbolIdentity -> String -> Maybe ConstructorRuntime
 lookupConstructorRuntime base mbIdentity _name =
   case mbIdentity of
-    Just identity -> Map.lookup identity (pbConstructorsByIdentity base)
+    Just identity -> lookupProgramConstructorByIdentityExact base (Just identity)
     Nothing -> Nothing
 
 dataRuntime :: IdentityGenerator -> BackendData -> (IdentityGenerator, DataRuntime)

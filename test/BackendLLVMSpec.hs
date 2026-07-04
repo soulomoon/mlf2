@@ -49,6 +49,8 @@ import MLF.Backend.LLVM.Lower.Types
   ( BindingInfo (..),
     ClosureCaptureSlot (..),
     ClosureEntry (..),
+    ConstructorRuntime (..),
+    DataRuntime (..),
     ExprEnv (..),
     FunctionForm (..),
     LocalFunction (..),
@@ -63,7 +65,10 @@ import MLF.Backend.LLVM.Lower.Types
     backendBindingRefFromIdentity,
     constructedFieldValueKind,
     constructedValueForConstructor,
+    constructorValueKeyFromIdentity,
     lookupProgramBindingByIdentityExact,
+    lookupProgramConstructorByIdentityExact,
+    lookupProgramDataByIdentityExact,
     mergeConstructedValues,
   )
 import MLF.Backend.LLVM.Ppr (renderLLVMModule)
@@ -2272,20 +2277,36 @@ spec = describe "MLF.Backend.LLVM" $ do
     stableBinding `shouldBe` staleBinding
     stableBinding `shouldNotBe` nameOnlyBinding
 
-  it "does not resolve program bindings through stale identity payloads" $ do
-    let binding = BindingInfo (backendBindingRefFromIdentity staleHelperIdentity) (Just staleHelperIdentity) "helper" stableForm False
-        stableForm = FunctionForm [] [] [] Set.empty (intLit 41) intTy
-        base =
-          ProgramBase
-            { pbBindingsByIdentity = Map.singleton staleHelperIdentity binding,
-              pbBindingsByRef = Map.empty,
-              pbBindingOrder = [],
-              pbConstructorsByIdentity = Map.empty,
-              pbDataByIdentity = Map.empty,
-              pbIdentityGenerator = initialIdentityGenerator
-            }
-    lookupProgramBindingByIdentityExact base (Just staleHelperIdentity) `shouldBe` Just binding
-    lookupProgramBindingByIdentityExact base (Just conflictingStaleHelperIdentity) `shouldBe` Nothing
+  it "does not resolve program metadata through stale identity payloads" $ do
+    case backendDataConstructors immediateChoiceDataWithConstructorIdentity of
+      constructor0 : _ -> do
+        let binding = BindingInfo (backendBindingRefFromIdentity staleHelperIdentity) (Just staleHelperIdentity) "helper" stableForm False
+            stableForm = FunctionForm [] [] [] Set.empty (intLit 41) intTy
+            dataRuntime0 = DataRuntime dataIdentityBoxData []
+            constructorRuntime0 =
+              ConstructorRuntime
+                { crConstructor = constructor0,
+                  crData = immediateChoiceDataWithConstructorIdentity,
+                  crTag = 0,
+                  crValueKey = constructorValueKeyFromIdentity immediateChoiceConstructorIdentity
+                }
+            base =
+              ProgramBase
+                { pbBindingsByIdentity = Map.singleton staleHelperIdentity binding,
+                  pbBindingsByRef = Map.empty,
+                  pbBindingOrder = [],
+                  pbConstructorsByIdentity = Map.singleton immediateChoiceConstructorIdentity constructorRuntime0,
+                  pbDataByIdentity = Map.singleton dataIdentityBoxIdentity dataRuntime0,
+                  pbIdentityGenerator = initialIdentityGenerator
+                }
+        lookupProgramBindingByIdentityExact base (Just staleHelperIdentity) `shouldBe` Just binding
+        lookupProgramBindingByIdentityExact base (Just conflictingStaleHelperIdentity) `shouldBe` Nothing
+        lookupProgramDataByIdentityExact base (Just dataIdentityBoxIdentity) `shouldBe` Just dataRuntime0
+        lookupProgramDataByIdentityExact base (Just conflictingStaleDataIdentity) `shouldBe` Nothing
+        lookupProgramConstructorByIdentityExact base (Just immediateChoiceConstructorIdentity) `shouldBe` Just constructorRuntime0
+        lookupProgramConstructorByIdentityExact base (Just conflictingStaleConstructorIdentity) `shouldBe` Nothing
+      [] ->
+        expectationFailure "expected immediate choice constructor fixture"
 
   it "compares closure capture slots by identity when names are stale" $ do
     let captureIdentity = LocalId (localRefFromIdentity (GeneratedLocalId (UniqueIdentity 991709)) "captured")
@@ -5292,6 +5313,10 @@ letBoundNativeOptionSomeIdentity =
 dataIdentityBoxIdentity :: SymbolIdentity
 dataIdentityBoxIdentity =
   symbolIdentityFromParts (UniqueIdentity 990004) SymbolType "Main" "IdentityBox" Nothing
+
+conflictingStaleDataIdentity :: SymbolIdentity
+conflictingStaleDataIdentity =
+  renameSymbolDefiningName "$stale.IdentityBox" dataIdentityBoxIdentity
 
 otherDataIdentityBoxIdentity :: SymbolIdentity
 otherDataIdentityBoxIdentity =
@@ -11001,6 +11026,10 @@ immediateChoiceDataWithStaleConstructorDisplayIdentity =
 immediateChoiceConstructorIdentity :: SymbolIdentity
 immediateChoiceConstructorIdentity =
   symbolIdentityFromParts (UniqueIdentity 990006) SymbolConstructor "Main" "WithStatic" Nothing
+
+conflictingStaleConstructorIdentity :: SymbolIdentity
+conflictingStaleConstructorIdentity =
+  renameSymbolDefiningName "$stale_WithStatic" immediateChoiceConstructorIdentity
 
 otherImmediateChoiceConstructorIdentity :: SymbolIdentity
 otherImmediateChoiceConstructorIdentity =
