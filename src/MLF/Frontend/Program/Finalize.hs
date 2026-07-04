@@ -76,7 +76,7 @@ import MLF.Frontend.ConstraintGen
   )
 import MLF.Frontend.Normalize (normalizeExpr, normalizeType)
 import qualified MLF.Frontend.Program.Builtins as Builtins
-import MLF.Frontend.Symbol (symbolIdentityAliasMap, symbolIdentityAliasMapWith, symbolIdentityStableName)
+import MLF.Frontend.Symbol (lookupSymbolIdentityExact, sameSymbolIdentity, symbolIdentityAliasMap, symbolIdentityAliasMapWith, symbolIdentityStableName)
 import MLF.Frontend.Program.Elaborate
   ( ElaborateScope,
     elaborateScopeDataTypes,
@@ -1089,7 +1089,7 @@ metadataConstructorTerm context lowered = do
 constructorMetadataFastPathSupported :: ElaborateScope -> DataInfo -> ConstructorInfo -> Bool
 constructorMetadataFastPathSupported scope dataInfo ctorInfo =
   null (ctorForalls ctorInfo)
-    && dataInfoSymbol dataInfo == ctorOwningTypeIdentity ctorInfo
+    && sameSymbolIdentity (dataInfoSymbol dataInfo) (ctorOwningTypeIdentity ctorInfo)
     && constructorOwnerRuntimeTypeTrackable (elaborateScopeDataTypesByIdentity scope) ctorInfo
 
 constructorBindingQuantifiedOwnerParams :: LoweredBinding -> DataInfo -> [(String, TypeBinderIdentity)]
@@ -2198,7 +2198,7 @@ lookupConstructorRuntimeBySymbol scope identity =
     [ (dataInfo, ctor)
       | dataInfo <- elaborateScopeUniqueDataTypes scope,
         ctor <- dataConstructors dataInfo,
-        ctorInfoSymbol ctor == identity
+        sameSymbolIdentity (ctorInfoSymbol ctor) identity
     ]
   of
     [match] -> Just match
@@ -3934,9 +3934,9 @@ resolveDeferredMethods scope deferredMethods env0 term0 = do
         localMatches =
           [ (methodEvidence, subst)
           | evidence <- deferredMethodLocalEvidence deferred,
-            evidenceClassSymbol evidence == methodInfoOwnerClassSymbolIdentity methodInfo,
+            sameSymbolIdentity (evidenceClassSymbol evidence) (methodInfoOwnerClassSymbolIdentity methodInfo),
             Just subst <- [matchMethodTypeViews scope Map.empty (evidenceTypeViews evidence) targetViews],
-            methodEvidence <- maybe [] (: []) (Map.lookup (methodInfoSymbolIdentity methodInfo) (evidenceMethodsByIdentity evidence)),
+            methodEvidence <- maybe [] (: []) (lookupSymbolIdentityExact (methodInfoSymbolIdentity methodInfo) (evidenceMethodsByIdentity evidence)),
             Just _ <- [evidenceMethodResolvedVar methodEvidence]
           ]
         fallbackEvidence = do
@@ -4092,9 +4092,9 @@ lookupEvidenceMethodMatch scope evidenceInfos classIdentity headViews methodIden
   preferredEvidenceMethodMatch
     [ (methodEvidence, subst)
       | evidence <- evidenceInfos,
-        evidenceClassSymbol evidence == classIdentity,
+        sameSymbolIdentity (evidenceClassSymbol evidence) classIdentity,
         Just subst <- [matchMethodTypeViews scope Map.empty (evidenceTypeViews evidence) headViews],
-        methodEvidence <- maybe [] (: []) (Map.lookup methodIdentity (evidenceMethodsByIdentity evidence))
+        methodEvidence <- maybe [] (: []) (lookupSymbolIdentityExact methodIdentity (evidenceMethodsByIdentity evidence))
     ]
 
 preferredEvidenceMethodMatch :: [(EvidenceMethod, TypeViewSubst)] -> Maybe (EvidenceMethod, TypeViewSubst)
@@ -4115,7 +4115,7 @@ zeroMethodConstraintCoveredByEvidence :: ElaborateScope -> [EvidenceInfo] -> Con
 zeroMethodConstraintCoveredByEvidence scope evidenceInfos constraint =
   any
     ( \evidence ->
-        evidenceClassSymbol evidence == constraintClassSymbol constraint
+        sameSymbolIdentity (evidenceClassSymbol evidence) (constraintClassSymbol constraint)
           && case matchMethodTypeViews scope Map.empty (evidenceTypeViews evidence) (constraintTypeViews constraint) of
             Just _ -> True
             Nothing -> False
@@ -4537,7 +4537,7 @@ dataInfoHeadNames scope info =
       ]
 
     sameDataIdentity left right =
-      dataInfoSymbol left == dataInfoSymbol right
+      sameSymbolIdentity (dataInfoSymbol left) (dataInfoSymbol right)
 
 {- Note [recoverSourceType]
 

@@ -128,7 +128,7 @@ import MLF.Frontend.Program.Types
     ordinaryValueTypeView,
     resolvedVarFromValueInfo,
   )
-import MLF.Frontend.Symbol (symbolIdentityPayloadKey, symbolIdentityStableName, symbolUniqueIdentity)
+import MLF.Frontend.Symbol (lookupSymbolIdentityExact, sameSymbolIdentity, symbolIdentityPayloadKey, symbolIdentityStableName, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit (..), SrcBound (..), SrcTy (..), SrcType)
 import qualified MLF.Frontend.Syntax.Program as ProgramSyntax
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
@@ -325,7 +325,7 @@ isPreludeUnitElabType context ty =
 
 isPreludeUnitIdentity :: RuntimeContext -> SymbolIdentity -> Bool
 isPreludeUnitIdentity context identity =
-  maybe False ((== identity) . dataInfoSymbol) (preludeUnitDataInfo context)
+  maybe False (sameSymbolIdentity identity . dataInfoSymbol) (preludeUnitDataInfo context)
 
 preludeUnitElabType :: RuntimeContext -> Maybe ElabType
 preludeUnitElabType context = do
@@ -355,7 +355,7 @@ preludeUnitTypeView context = do
 preludeUnitDataInfo :: RuntimeContext -> Maybe DataInfo
 preludeUnitDataInfo context = do
   ctor <- lookupPreludeUnitConstructor context
-  Map.lookup (ctorOwningTypeIdentity ctor) (runtimeDataByIdentity context)
+  lookupSymbolIdentityExact (ctorOwningTypeIdentity ctor) (runtimeDataByIdentity context)
 
 unsupportedIOMainError :: SrcType -> ProgramError
 unsupportedIOMainError ty =
@@ -653,12 +653,12 @@ preludeBindingKey :: CheckedBinding -> Maybe PreludeBindingKey
 preludeBindingKey binding =
   case resolvedVarBindingSymbolIdentity (checkedBindingResolvedVar binding) of
     Just symbol
-      | symbol == Builtins.builtinValueIdentity PrimitiveInventory.stringFromListPrimitiveName -> Just PreludeStringFromList
+      | sameSymbolIdentity symbol (Builtins.builtinValueIdentity PrimitiveInventory.stringFromListPrimitiveName) -> Just PreludeStringFromList
     _ -> Nothing
 
 preludeConstructorKey :: CheckedModule -> DataInfo -> ConstructorInfo -> Maybe PreludeConstructorKey
 preludeConstructorKey checkedModule dataInfo ctor =
-  if ctorOwningTypeIdentity ctor == dataInfoSymbol dataInfo
+  if symbolUniqueIdentity (ctorOwningTypeIdentity ctor) == symbolUniqueIdentity (dataInfoSymbol dataInfo)
     then case (preludeDataNameByIdentity checkedModule (dataInfoSymbol dataInfo), ctorIndex ctor) of
       (Just "Unit", 0) -> Just PreludeUnitUnit
       (Just "Nat", 0) -> Just PreludeNatZero
@@ -1022,7 +1022,7 @@ runtimeConstructorBinders context ctor
     viewBinders =
       typeViewBinderIdentityAliasEntries (ctorTypeView ctor)
     ownerBinders =
-      case Map.lookup (ctorOwningTypeIdentity ctor) (elaborateScopeDataTypesByIdentity (runtimeElaborateScope context)) of
+      case lookupSymbolIdentityExact (ctorOwningTypeIdentity ctor) (elaborateScopeDataTypesByIdentity (runtimeElaborateScope context)) of
         Just dataInfo ->
           Map.toList (typeBinderAliasIdentityMap (dataParamBinders dataInfo))
         Nothing -> []
@@ -1213,7 +1213,7 @@ constructorBelongsToCase deferred ctor =
 
 sameRuntimeConstructor :: ConstructorInfo -> ConstructorInfo -> Bool
 sameRuntimeConstructor left right =
-  ctorInfoSymbol left == ctorInfoSymbol right
+  sameSymbolIdentity (ctorInfoSymbol left) (ctorInfoSymbol right)
 
 runtimeCaseHandler :: DeferredCaseCall -> ConstructorInfo -> [RuntimeValue] -> Either ProgramError RuntimeValue
 runtimeCaseHandler deferred ctor handlers
@@ -1450,9 +1450,9 @@ lookupRuntimeMethodEvidence context deferred classArgView =
     localMatches =
       [ (methodEvidence, subst)
       | evidence <- deferredMethodLocalEvidence deferred,
-        evidenceClassSymbol evidence == methodInfoOwnerClassSymbolIdentity methodInfo,
+        sameSymbolIdentity (evidenceClassSymbol evidence) (methodInfoOwnerClassSymbolIdentity methodInfo),
         Just subst <- [matchMethodTypeViews scope Map.empty (evidenceTypeViews evidence) targetViews],
-        methodEvidence <- maybe [] (: []) (Map.lookup (methodInfoSymbolIdentity methodInfo) (evidenceMethodsByIdentity evidence))
+        methodEvidence <- maybe [] (: []) (lookupSymbolIdentityExact (methodInfoSymbolIdentity methodInfo) (evidenceMethodsByIdentity evidence))
       ]
     fallbackEvidence = do
       evidence <- deferredMethodEvidence deferred
@@ -1621,9 +1621,9 @@ lookupRuntimeEvidenceMethod scope evidenceInfos classIdentity headViews methodId
   uniqueEvidenceMethod
     [ methodEvidence
       | evidence <- evidenceInfos,
-        evidenceClassSymbol evidence == classIdentity,
+        sameSymbolIdentity (evidenceClassSymbol evidence) classIdentity,
         Just _ <- [matchMethodTypeViews scope Map.empty (evidenceTypeViews evidence) headViews],
-        methodEvidence <- maybe [] (: []) (Map.lookup methodIdentity (evidenceMethodsByIdentity evidence))
+        methodEvidence <- maybe [] (: []) (lookupSymbolIdentityExact methodIdentity (evidenceMethodsByIdentity evidence))
     ]
 
 lookupRuntimeEvidenceMethodValue ::
@@ -1661,7 +1661,7 @@ zeroMethodConstraintCoveredByRuntimeEvidence :: ElaborateScope -> [EvidenceInfo]
 zeroMethodConstraintCoveredByRuntimeEvidence scope evidenceInfos constraint =
   any
     ( \evidence ->
-        evidenceClassSymbol evidence == constraintClassSymbol constraint
+        sameSymbolIdentity (evidenceClassSymbol evidence) (constraintClassSymbol constraint)
           && case matchMethodTypeViews scope Map.empty (evidenceTypeViews evidence) (constraintTypeViews constraint) of
             Just _ -> True
             Nothing -> False
@@ -2826,7 +2826,7 @@ decodeChurchData context sourceView dataInfo subst term = do
 
 dataTypeSubst :: DataInfo -> TypeView -> TypeBinderSubst
 dataTypeSubst dataInfo view =
-  if sourceTypeDataHeadIdentity view == Just (dataInfoSymbol dataInfo)
+  if maybe False (sameSymbolIdentity (dataInfoSymbol dataInfo)) (sourceTypeDataHeadIdentity view)
     then
       case (dataParamBinders dataInfo, typeViewIdentity view) of
         ([], STBase {}) -> emptyTypeBinderSubst

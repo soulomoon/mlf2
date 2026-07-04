@@ -1755,7 +1755,9 @@ prepareBulkImportedValue _ scope valueInfo = (scope, valueInfo)
 
 constructorOwnerVisibleInExports :: ConstructorInfo -> ModuleExports -> Bool
 constructorOwnerVisibleInExports ctorInfo exports =
-  Map.member (ctorOwningTypeIdentity ctorInfo) (exportedTypesByIdentity exports)
+  case lookupSymbolIdentityExact (ctorOwningTypeIdentity ctorInfo) (exportedTypesByIdentity exports) of
+    Just _ -> True
+    Nothing -> False
 
 qualifyModuleExports :: P.ModuleName -> ModuleExports -> ModuleExports
 qualifyModuleExports alias exports =
@@ -1768,14 +1770,13 @@ qualifyModuleExports alias exports =
     qualifiedTypes =
       Map.fromList
         [ let qualifiedDataInfo = qualifyDataInfo dataInfo
-              visibleCtorIdentities = Map.keysSet (exportedTypeConstructorsByIdentity typeInfo)
               qualifiedCtorsByIdentity =
                 Map.fromList [(ctorInfoSymbol ctor, ctor) | ctor <- dataConstructors qualifiedDataInfo]
               qualifiedCtors =
                 [ (qualifiedName sourceName, qualifiedCtor)
                   | (sourceName, ctor) <- Map.toList (exportedTypeConstructorsForDisplay typeInfo),
-                    ctorInfoSymbol ctor `Set.member` visibleCtorIdentities,
-                    Just qualifiedCtor <- [Map.lookup (ctorInfoSymbol ctor) qualifiedCtorsByIdentity]
+                    Just _ <- [lookupSymbolIdentityExact (ctorInfoSymbol ctor) (exportedTypeConstructorsByIdentity typeInfo)],
+                    Just qualifiedCtor <- [lookupSymbolIdentityExact (ctorInfoSymbol ctor) qualifiedCtorsByIdentity]
                 ]
            in ( qualifiedName typeName,
                 mkExportedTypeInfo qualifiedDataInfo qualifiedCtors
@@ -2354,7 +2355,7 @@ rewriteOwnerTypeHeads ownerIdentity ownerNames hiddenName view = go
 
 importedHiddenConstructorInfo :: ConstructorInfo -> DataInfo -> ConstructorInfo
 importedHiddenConstructorInfo ctorInfo hiddenDataInfo =
-  case find ((== ctorInfoSymbol ctorInfo) . ctorInfoSymbol) (dataConstructors hiddenDataInfo) of
+  case find (sameSymbolIdentity (ctorInfoSymbol ctorInfo) . ctorInfoSymbol) (dataConstructors hiddenDataInfo) of
     Just hiddenCtorInfo ->
       hiddenCtorInfo
         { ctorRuntimeName = ctorRuntimeName ctorInfo
@@ -3794,7 +3795,7 @@ buildInstanceSkeletons moduleIdentity generator0 displayEnv scope mod0 derived =
        in fmap (values !!) indices
 
     classInfoForInstance info =
-      case Map.lookup (instanceInfoClassSymbolIdentity info) (scopeClassesByIdentity scope) of
+      case lookupSymbolIdentityExact (instanceInfoClassSymbolIdentity info) (scopeClassesByIdentity scope) of
         Just classInfo -> Just classInfo
         Nothing -> Nothing
 

@@ -291,7 +291,7 @@ mkElaborateScope values0 dataTypes0 classes0 instances0 =
         ]
       where
         ownerParamIdentities =
-          case Map.lookup (ctorOwningTypeIdentity ctorInfo) dataTypesByIdentity of
+          case lookupSymbolIdentityExact (ctorOwningTypeIdentity ctorInfo) dataTypesByIdentity of
             Just dataInfo ->
               typeBinderAliasIdentityMap (dataParamBinders dataInfo)
             Nothing -> Map.empty
@@ -677,7 +677,7 @@ constraintEvidenceClosureInfoRaw classesByIdentity =
   go Set.empty
   where
     go seen constraint =
-      case Map.lookup (constraintClassSymbol constraint) classesByIdentity of
+      case lookupSymbolIdentityExact (constraintClassSymbol constraint) classesByIdentity of
         Just classInfo ->
           let key = classConstraintEvidenceKeyInfo classInfo constraint
            in if key `Set.member` seen
@@ -2754,7 +2754,7 @@ zeroMethodConstraintCoveredByEvidenceInfo :: ElaborateScope -> ConstraintInfo ->
 zeroMethodConstraintCoveredByEvidenceInfo scope constraint =
   any
     ( \evidence ->
-        evidenceClassSymbol evidence == constraintClassSymbol constraint
+        sameSymbolIdentity (evidenceClassSymbol evidence) (constraintClassSymbol constraint)
           && case matchMethodTypeViews scope Map.empty (evidenceTypeViews evidence) (constraintTypeViews constraint) of
             Just _ -> True
             Nothing -> False
@@ -2780,14 +2780,14 @@ lookupEvidenceMethodByClassViews scope classIdentity0 headViews methodIdentity =
   uniqueEvidenceMethod
     [ methodEvidence
       | evidence <- esEvidence scope,
-        evidenceClassSymbol evidence == classIdentity0,
+        sameSymbolIdentity (evidenceClassSymbol evidence) classIdentity0,
         Just _ <- [matchMethodTypeViews scope Map.empty (evidenceTypeViews evidence) headViews],
-        methodEvidence <- maybe [] (: []) (Map.lookup methodIdentity (evidenceMethodsByIdentity evidence))
+        methodEvidence <- maybe [] (: []) (lookupSymbolIdentityExact methodIdentity (evidenceMethodsByIdentity evidence))
     ]
 
 classInfoForConstraint :: ElaborateScope -> ConstraintInfo -> Maybe ClassInfo
 classInfoForConstraint scope constraint =
-  case Map.lookup (constraintClassSymbol constraint) (esClassesByIdentity scope) of
+  case lookupSymbolIdentityExact (constraintClassSymbol constraint) (esClassesByIdentity scope) of
     Just classInfo -> Just classInfo
     Nothing -> Nothing
 
@@ -3008,7 +3008,7 @@ constructorStructuralPlaceholderTypeFor dataTypesByIdentity ctorInfo =
     (constructorStructuralArgs ctorInfo ++ map handlerType ownerShapes)
   where
     ownerShapes =
-      case Map.lookup (ctorOwningTypeIdentity ctorInfo) dataTypesByIdentity of
+      case lookupSymbolIdentityExact (ctorOwningTypeIdentity ctorInfo) dataTypesByIdentity of
         Just dataInfo -> map constructorShapeFromInfo (dataConstructors dataInfo)
         Nothing -> constructorOwnerShapes ctorInfo
 
@@ -3315,7 +3315,7 @@ lookupMethodClassArgViews scope methodInfo subst = do
 
 classInfoForMethod :: ElaborateScope -> MethodInfo -> Maybe ClassInfo
 classInfoForMethod scope methodInfo =
-  case Map.lookup (methodInfoOwnerClassSymbolIdentity methodInfo) (esClassesByIdentity scope) of
+  case lookupSymbolIdentityExact (methodInfoOwnerClassSymbolIdentity methodInfo) (esClassesByIdentity scope) of
     Just classInfo -> Just classInfo
     Nothing -> Nothing
 
@@ -3364,11 +3364,11 @@ closeFunctionalDependencies scope classInfo subst0 =
     candidateClassHeadViews =
       [ instanceHeadTypeViews info
         | info <- esInstances scope,
-          instanceInfoClassSymbolIdentity info == classInfoSymbolIdentity classInfo
+          sameSymbolIdentity (instanceInfoClassSymbolIdentity info) (classInfoSymbolIdentity classInfo)
       ]
         ++ [ evidenceTypeViews evidence
              | evidence <- esEvidence scope,
-               evidenceClassSymbol evidence == classInfoSymbolIdentity classInfo
+               sameSymbolIdentity (evidenceClassSymbol evidence) (classInfoSymbolIdentity classInfo)
            ]
 
     matchDeterminers determiners subst headViews =
@@ -4294,7 +4294,7 @@ constructorOwnerTypeDisplayName =
 
 resolveConstructorDataInfo :: ElaborateScope -> ConstructorInfo -> Maybe DataInfo
 resolveConstructorDataInfo scope ctorInfo =
-  case Map.lookup (ctorOwningTypeIdentity ctorInfo) (esTypesByIdentity scope) of
+  case lookupSymbolIdentityExact (ctorOwningTypeIdentity ctorInfo) (esTypesByIdentity scope) of
     Just info
       | constructorBelongsToDataInfo ctorInfo info -> Just info
       | otherwise -> Nothing
@@ -4302,7 +4302,7 @@ resolveConstructorDataInfo scope ctorInfo =
 
 sameDataInfo :: DataInfo -> DataInfo -> Bool
 sameDataInfo left right =
-  dataInfoSymbolIdentity left == dataInfoSymbolIdentity right
+  sameSymbolIdentity (dataInfoSymbolIdentity left) (dataInfoSymbolIdentity right)
 
 constructorBelongsToDataInfo :: ConstructorInfo -> DataInfo -> Bool
 constructorBelongsToDataInfo ctorInfo =
@@ -4322,7 +4322,7 @@ constructorSymbolMatches scope ctorSymbol ctorInfo =
 
 sameConstructorInfo :: ConstructorInfo -> ConstructorInfo -> Bool
 sameConstructorInfo left right =
-  ctorInfoSymbol left == ctorInfoSymbol right
+  sameSymbolIdentity (ctorInfoSymbol left) (ctorInfoSymbol right)
 
 handlerSurfaceType :: ElaborateScope -> ConstructorInfo -> SrcType -> SrcType
 handlerSurfaceType scope ctorInfo resultTy =
@@ -4362,7 +4362,7 @@ visibleDataHeadType scope info =
   dataHeadTypeWithName visibleName info
   where
     visibleName =
-      case Map.lookup (dataInfoSymbolIdentity info) (esTypeDisplayNamesByIdentity scope) of
+      case lookupSymbolIdentityExact (dataInfoSymbolIdentity info) (esTypeDisplayNamesByIdentity scope) of
         Just names ->
           case preferredDisplayName (dataInfoSymbolIdentity info) names of
             Just name -> name

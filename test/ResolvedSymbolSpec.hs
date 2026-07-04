@@ -5,7 +5,7 @@ module ResolvedSymbolSpec (spec) where
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
 import qualified MLF.Frontend.Program.Builtins as Builtins
-import MLF.Frontend.Program.Elaborate (lowerType, mkElaborateScope, sourceTypeViewInScope)
+import MLF.Frontend.Program.Elaborate (classInfoForConstraint, lowerType, mkElaborateScope, sourceTypeViewInScope)
 import MLF.Frontend.Program.Types
 import MLF.Frontend.Syntax.Program (ClassConstraintF (..), resolvedExportTypeRefFromSymbols, refDisplayName)
 import qualified MLF.Frontend.Symbol as Symbol
@@ -617,6 +617,24 @@ spec = do
         `shouldBe` constraint "$stale.Eq" eqClassIdentity
       constraint "Eq" eqClassIdentity
         `shouldNotBe` constraint "Eq" otherClassIdentity
+
+    it "does not look up class constraint metadata through stale identity payloads" $ do
+      let tokenView = sourceTypeViewInScope (mkElaborateScope Map.empty (Map.singleton "Token" tokenDataInfo) Map.empty []) (STBase "Token")
+          staleClassIdentity = renameSymbolDefiningName "$stale.Eq" eqClassIdentity
+          constraint classIdentity =
+            ConstraintInfo
+              { constraintDisplayClass = "Eq",
+                constraintClassSymbol = classIdentity,
+                constraintTypeViews = tokenView :| []
+              }
+          scope =
+            mkElaborateScope Map.empty Map.empty (Map.singleton "Eq" eqClassInfo) []
+          staleScope =
+            mkElaborateScope Map.empty Map.empty (Map.singleton "Eq" (eqClassInfo {classInfoSymbol = staleClassIdentity})) []
+
+      classInfoForConstraint scope (constraint eqClassIdentity) `shouldBe` Just eqClassInfo
+      classInfoForConstraint scope (constraint staleClassIdentity) `shouldBe` Nothing
+      classInfoForConstraint staleScope (constraint eqClassIdentity) `shouldBe` Nothing
 
     it "compares evidence methods by symbol identity when runtime names are stale" $ do
       let methodView = methodTypeView eqMethodInfo
