@@ -113,6 +113,7 @@ import MLF.Elab.Types
     typeBinderRefIdentity,
     typeBinderRefFromIdentity,
     typeBinderRefName,
+    typeBinderRefAliasNames,
     typeBinderRefsSameIdentity,
     typeBinderRefFromIdentityOrFresh,
     TypeCheckError,
@@ -124,10 +125,10 @@ import MLF.Elab.Types
     generatedIdentitiesInTerm,
     localResolvedVarFromRef,
     mapResolvedVarType,
+    freshTypeBinderRef,
     freshenResolvedLocalVar,
     idDetailsIdentityKey,
     renameResolvedLocalVar,
-    renameTypeBinderRef,
     resolvedVarAliasNames,
     resolvedVarBoundBy,
     resolvedVarConstructorRef,
@@ -1297,21 +1298,22 @@ elabTypeVariableNames :: ElabType -> Set.Set String
 elabTypeVariableNames =
   \case
     TVarRef ref ->
-      Set.singleton (typeBinderRefName ref)
+      typeBinderRefAliasNames ref
     TArrow dom cod ->
       elabTypeVariableNames dom `Set.union` elabTypeVariableNames cod
     TConWithIdentity _ _ args ->
       Set.unions (map elabTypeVariableNames (NE.toList args))
     TVarAppRef ref args ->
-      Set.insert (typeBinderRefName ref) (Set.unions (map elabTypeVariableNames (NE.toList args)))
+      typeBinderRefAliasNames ref `Set.union` Set.unions (map elabTypeVariableNames (NE.toList args))
     TBaseWithIdentity {} ->
       Set.empty
     TForallRef ref mbBound body ->
-      Set.insert (typeBinderRefName ref) $
+      typeBinderRefAliasNames ref
+        `Set.union`
         maybe Set.empty (elabTypeVariableNames . tyToElab) mbBound
           `Set.union` elabTypeVariableNames body
     TMuRef ref body ->
-      Set.insert (typeBinderRefName ref) (elabTypeVariableNames body)
+      typeBinderRefAliasNames ref `Set.union` elabTypeVariableNames body
     TBottom ->
       Set.empty
 
@@ -1329,9 +1331,9 @@ instantiationTypeVariableNames =
     InstElim ->
       Set.empty
     InstAbstrRef ref ->
-      Set.singleton (typeBinderRefName ref)
+      typeBinderRefAliasNames ref
     InstUnderRef ref inner ->
-      Set.insert (typeBinderRefName ref) (instantiationTypeVariableNames inner)
+      typeBinderRefAliasNames ref `Set.union` instantiationTypeVariableNames inner
     InstInside inner ->
       instantiationTypeVariableNames inner
     InstSeq left right ->
@@ -1397,7 +1399,10 @@ replaceFreeTermVariable needle replacement =
                         elabTermTypeVariableNames replacement
                       ]
                   name' = freshNameLike name used
-                  ref' = renameTypeBinderRef name' ref
+                  (ref', _) =
+                    freshTypeBinderRef
+                      name'
+                      (identityGeneratorAfterTerm (ETyAbsRef ref mbBound (EApp replacement body)))
                   body' = renameTermTypeVariable ref ref' body
                in ETyAbsRef ref' mbBound (go body')
           | otherwise ->

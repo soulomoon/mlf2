@@ -69,7 +69,7 @@ import MLF.Frontend.Syntax (Lit (..), SrcBound (..), SrcTy (..), SrcType, TypePa
 import MLF.Frontend.Syntax.Program (Program)
 import MLF.Pipeline (checkProgram)
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
-import MLF.Types.Identity (deferredRefFromIdentity, deferredRefName, idDetailsStableName, UniqueIdentity (..), typeBinderIdentityFromUnique, typeBinderIdentityGeneratedUnique, typeBinderIdentityStableName)
+import MLF.Types.Identity (deferredRefFromIdentity, deferredRefName, idDetailsStableName, UniqueIdentity (..), TypeBinderIdentity, typeBinderIdentityFromUnique, typeBinderIdentityGeneratedUnique, typeBinderIdentityStableName)
 import System.Directory (createDirectoryIfMissing)
 import System.Environment (lookupEnv)
 import System.FilePath (takeDirectory)
@@ -2299,6 +2299,26 @@ spec = describe "MLF.Backend.Convert" $ do
         unaryIntBackendTy
     backendBindingExpr helper `shouldSatisfy` containsFreshenedTypeAbsWithOuterBound
 
+  it "freshens recursive helper type-abstraction identity during substitution" $ do
+    checked0 <- requireChecked simpleFunctionProgram
+    let checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingType = recursiveTypeIdentityCaptureElabTy,
+                    checkedBindingTerm = recursiveTypeIdentityCaptureTerm
+                  }
+            )
+            checked0
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    helper <- requireSingleLiftedHelper backend
+    let capturedIdentity = Elab.typeBinderRefIdentity recursiveTypeIdentityCaptureRef
+        typeAbsIdentities = [identity | (_, Just identity) <- backendTypeAbsBinders (backendBindingExpr helper)]
+    length (filter (== capturedIdentity) typeAbsIdentities) `shouldBe` 1
+    typeAbsIdentities `shouldSatisfy` any (/= capturedIdentity)
+
   it "renames shadowing type abstraction bounds that refer to outer binders" $ do
     checked0 <- requireChecked simpleFunctionProgram
     let checked =
@@ -4224,6 +4244,28 @@ containsFreshenedTypeAbsWithOuterBound expr =
     BackendUnroll {backendUnrollPayload = body} -> containsFreshenedTypeAbsWithOuterBound body
     _ -> False
 
+backendTypeAbsBinders :: BackendExpr -> [(String, Maybe TypeBinderIdentity)]
+backendTypeAbsBinders expr =
+  case expr of
+    BackendTyAbsWithIdentity {backendTyParamName = name, backendTyParamIdentity = identity, backendTyAbsBody = body} ->
+      (name, identity) : backendTypeAbsBinders body
+    BackendCase {backendScrutinee = scrutinee, backendAlternatives = alternatives} ->
+      backendTypeAbsBinders scrutinee ++ concatMap (backendTypeAbsBinders . backendAltBody) (toList alternatives)
+    BackendLamWithIdentity {backendBody = body} -> backendTypeAbsBinders body
+    BackendApp {backendFunction = fun, backendArgument = arg} ->
+      backendTypeAbsBinders fun ++ backendTypeAbsBinders arg
+    BackendLetWithIdentity {backendLetRhs = rhs, backendLetBody = body} ->
+      backendTypeAbsBinders rhs ++ backendTypeAbsBinders body
+    BackendTyApp {backendTyFunction = fun} -> backendTypeAbsBinders fun
+    BackendConstructWithIdentity {backendConstructArgs = args} -> concatMap backendTypeAbsBinders args
+    BackendRoll {backendRollPayload = body} -> backendTypeAbsBinders body
+    BackendUnroll {backendUnrollPayload = body} -> backendTypeAbsBinders body
+    BackendClosureWithParamIdentities {backendClosureCaptures = captures, backendClosureBody = body} ->
+      concatMap (backendTypeAbsBinders . backendClosureCaptureExpr) captures ++ backendTypeAbsBinders body
+    BackendClosureCall {backendClosureFunction = fun, backendClosureArguments = args} ->
+      backendTypeAbsBinders fun ++ concatMap backendTypeAbsBinders args
+    _ -> []
+
 containsBackendVar :: String -> BackendExpr -> Bool
 containsBackendVar expected expr =
   case expr of
@@ -4870,6 +4912,40 @@ recursiveTypeBoundScopeOuterRef =
 recursiveTypeBoundScopeInnerRef :: Elab.TypeBinderRef
 recursiveTypeBoundScopeInnerRef =
   backendFixtureTypeRef 9011 "a"
+
+recursiveTypeIdentityCaptureElabTy :: Elab.ElabType
+recursiveTypeIdentityCaptureElabTy =
+  Elab.TForallRef recursiveTypeIdentityCaptureRef Nothing intElabTy
+
+recursiveTypeIdentityCaptureTerm :: Elab.XmlfTerm
+recursiveTypeIdentityCaptureTerm =
+  Elab.ETyAbsRef
+    recursiveTypeIdentityCaptureRef
+    Nothing
+    ( mkTestRecursiveLocalLet
+        "loop"
+        (schemeFromType unaryIntElabTy)
+        recursiveTypeIdentityCaptureRhs
+        (Elab.EApp (mkTestDeferredVar "loop") (Elab.ELit (LInt 0)))
+    )
+
+recursiveTypeIdentityCaptureRhs :: Elab.XmlfTerm
+recursiveTypeIdentityCaptureRhs =
+  mkTestLocalLam
+    "n"
+    intElabTy
+    ( Elab.ETyInst
+        ( Elab.ETyAbsRef
+            recursiveTypeIdentityCaptureRef
+            Nothing
+            (Elab.EApp (mkTestDeferredVar "loop") (mkTestDeferredVar "n"))
+        )
+        (Elab.InstApp (Elab.TVarRef recursiveTypeIdentityCaptureRef))
+    )
+
+recursiveTypeIdentityCaptureRef :: Elab.TypeBinderRef
+recursiveTypeIdentityCaptureRef =
+  backendFixtureTypeRef 9012 "a"
 
 recursiveNestedTypeBoundScopeElabTy :: Elab.ElabType
 recursiveNestedTypeBoundScopeElabTy =
