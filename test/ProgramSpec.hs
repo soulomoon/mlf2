@@ -156,7 +156,22 @@ poisonResolvedEqIdentityNames resolved =
             }
 
     poisonSyntax syntax =
-        syntax {moduleDecls = map poisonDecl (moduleDecls syntax)}
+        syntax
+            { moduleExports = fmap (map poisonExport) (moduleExports syntax)
+            , moduleDecls = map poisonDecl (moduleDecls syntax)
+            }
+
+    poisonExport exportItem =
+        case exportItem of
+            ExportValue symbol ->
+                ExportValue (poisonMethodSymbol symbol)
+            ExportType ref ->
+                ExportType (poisonExportTypeRef ref)
+            ExportTypeWithConstructors ref ->
+                ExportTypeWithConstructors (poisonExportTypeRef ref)
+
+    poisonExportTypeRef ref =
+        ref {resolvedExportTypeSymbols = map poisonClassSymbol (resolvedExportTypeSymbols ref)}
 
     poisonDecl decl =
         case decl of
@@ -6835,6 +6850,36 @@ spec = do
                     let poisoned = poisonDiagnostics resolved
                     checkedSemanticResult (checkResolvedProgram poisoned)
                         `shouldBe` checkedSemanticResult (checkResolvedProgram resolved)
+
+        it "rejects export symbols whose unique id matches but payload is stale" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  def main : Int = 1;"
+                        , "}"
+                        ]
+                poisonExports resolved =
+                    resolved {resolvedProgramModules = map poisonModule (resolvedProgramModules resolved)}
+                poisonModule resolvedModule =
+                    resolvedModule
+                        { resolvedModuleSemantic =
+                            (resolvedModuleSemantic resolvedModule)
+                                { resolvedSemanticModuleSyntax =
+                                    poisonSyntax (resolvedModuleSyntax resolvedModule)
+                                }
+                        }
+                poisonSyntax syntax =
+                    syntax {moduleExports = fmap (map poisonExport) (moduleExports syntax)}
+                poisonExport item =
+                    case item of
+                        ExportValue symbol ->
+                            ExportValue (mapResolvedSymbolIdentity (renameSymbolDefiningName "$stale_main_export") symbol)
+                        _ -> item
+            program <- requireParsed programText
+            case resolveProgram program of
+                Left err -> expectationFailure ("expected resolve success, got " ++ show err)
+                Right resolved ->
+                    checkResolvedProgram (poisonExports resolved) `shouldBe` Left (ProgramExportNotLocal "main")
 
         it "derives Eq from resolved display metadata when identity names are stale" $ do
             let programText =

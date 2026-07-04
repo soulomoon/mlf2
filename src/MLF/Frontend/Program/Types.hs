@@ -323,6 +323,7 @@ import MLF.Frontend.Symbol
     resolvedSymbolSpelling,
     sameResolvedSymbol,
     sameSymbolIdentity,
+    lookupSymbolIdentityExact,
     symbolIdentityAliasMap,
     symbolIdentityAliasMapWith,
     symbolIdentityAliasNamesWith,
@@ -1111,7 +1112,7 @@ typeViewIdentityTypesMatch leftView rightView =
 
     sameTypeHead leftName rightName =
       case (typeViewHeadIdentityForAlias leftView leftName, typeViewHeadIdentityForAlias rightView rightName) of
-        (Just leftIdentity, Just rightIdentity) -> leftIdentity == rightIdentity
+        (Just leftIdentity, Just rightIdentity) -> sameSymbolIdentity leftIdentity rightIdentity
         (Nothing, Nothing) -> leftName == rightName
         _ -> False
 
@@ -2663,7 +2664,7 @@ displayMap values displays =
         (++)
         [ (displayName, [value])
         | (identity, value) <- Map.toList values,
-          Just displayName <- [Map.lookup identity displays]
+          Just displayName <- [lookupSymbolIdentityExact identity displays]
         ]
 
 data LoweredBinding = LoweredBinding

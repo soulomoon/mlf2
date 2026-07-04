@@ -113,7 +113,7 @@ import MLF.Frontend.Program.Package
     trivialProgramPackage,
   )
 import MLF.Frontend.Program.Resolve (resolveProgram)
-import MLF.Frontend.Symbol (symbolIdentityAliasMap, symbolIdentityAliasMapWith, symbolIdentityPayloadKey, symbolIdentityStableName, symbolUniqueIdentity)
+import MLF.Frontend.Symbol (lookupSymbolIdentityExact, symbolIdentityAliasMap, symbolIdentityAliasMapWith, symbolIdentityPayloadKey, symbolIdentityStableName, symbolUniqueIdentity)
 import MLF.Frontend.Program.TypeFamilies (normalizeTypeFamiliesInProgram)
 import MLF.Frontend.Program.Types
   ( CheckedBinding (..),
@@ -2363,13 +2363,13 @@ importedHiddenConstructorInfo ctorInfo hiddenDataInfo =
 
 exportedConstructorOwnerType :: ConstructorInfo -> ModuleExports -> Maybe DataInfo
 exportedConstructorOwnerType ctorInfo exports =
-  case Map.lookup (ctorOwningTypeIdentity ctorInfo) (exportedTypesByIdentity exports) of
+  case lookupSymbolIdentityExact (ctorOwningTypeIdentity ctorInfo) (exportedTypesByIdentity exports) of
     Just typeInfo -> Just (exportedTypeData typeInfo)
     Nothing -> Just (constructorOwnerDataInfoFromShapes ctorInfo)
 
 exportedValueByIdentity :: SymbolIdentity -> ModuleExports -> Maybe (String, ValueInfo)
 exportedValueByIdentity identity exports =
-  (,) <$> Map.lookup identity (exportedValueDisplaysByIdentity exports) <*> Map.lookup identity (exportedValuesByIdentity exports)
+  (,) <$> lookupSymbolIdentityExact identity (exportedValueDisplaysByIdentity exports) <*> lookupSymbolIdentityExact identity (exportedValuesByIdentity exports)
 
 exportedMainIdentity :: P.ResolvedModuleSyntax -> ModuleExports -> Maybe SymbolIdentity
 exportedMainIdentity mod0 exports = do
@@ -2415,11 +2415,11 @@ exportedClassByRef ref exports =
 
 exportedTypeByIdentity :: SymbolIdentity -> ModuleExports -> Maybe (String, ExportedTypeInfo)
 exportedTypeByIdentity identity exports =
-  (,) <$> Map.lookup identity (exportedTypeDisplaysByIdentity exports) <*> Map.lookup identity (exportedTypesByIdentity exports)
+  (,) <$> lookupSymbolIdentityExact identity (exportedTypeDisplaysByIdentity exports) <*> lookupSymbolIdentityExact identity (exportedTypesByIdentity exports)
 
 exportedClassByIdentity :: ClassIdentity -> ModuleExports -> Maybe (String, ClassInfo)
 exportedClassByIdentity identity exports =
-  (,) <$> Map.lookup identity (exportedClassDisplaysByIdentity exports) <*> Map.lookup identity (exportedClassesByIdentity exports)
+  (,) <$> lookupSymbolIdentityExact identity (exportedClassDisplaysByIdentity exports) <*> lookupSymbolIdentityExact identity (exportedClassesByIdentity exports)
 
 displaySrcTypeForResolved :: DisplayNameEnv -> ResolvedSrcType -> TcM SrcType
 displaySrcTypeForResolved env = \case
@@ -4155,7 +4155,7 @@ identityExportIndex identityFor values =
 
 lookupIdentityExport :: SymbolIdentity -> IdentityExportIndex a -> Maybe (String, a)
 lookupIdentityExport identity (infos, displays) =
-  (,) <$> Map.lookup identity displays <*> Map.lookup identity infos
+  (,) <$> lookupSymbolIdentityExact identity displays <*> lookupSymbolIdentityExact identity infos
 
 type SelectedExports a = Map SymbolIdentity (String, a)
 
