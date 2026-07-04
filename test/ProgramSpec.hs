@@ -18,7 +18,7 @@ import MLF.API
     , renderProgramParseError
     )
 import MLF.Frontend.Program.Check (checkResolvedProgram)
-import MLF.Frontend.Program.Elaborate (ElaborateScope, constructorTypeView, elaborateScopeRuntimeTypeViews, lowerConstructorBinding, lowerExprBinding, lowerResolvedConstrainedExprBinding, lowerType, matchTypeViewsAgainstIdentity, mkElaborateScope, sourceTypeIdentityInScope, sourceTypeViewInScope)
+import MLF.Frontend.Program.Elaborate (ElaborateScope, constructorTypeView, elaborateScopeRuntimeTypeViews, lowerConstructorBinding, lowerExprBinding, lowerResolvedConstrainedExprBinding, lowerType, lowerTypeView, matchTypeViewsAgainstIdentity, mkElaborateScope, sourceTypeIdentityInScope, sourceTypeViewInScope)
 import MLF.Frontend.Program.Finalize
     ( finalizeBindingAllowOpaqueWithModuleContext
     , finalizeBindingWithContext
@@ -2470,6 +2470,41 @@ spec = do
                 scope = mkElaborateScope Map.empty (Map.singleton "Box" dataInfo) Map.empty []
             sourceTypeIdentityInScope scope (STBase "Main.Box")
                 `shouldBe` STBase stableHead
+
+        it "lowers type-view data heads by identity before same display names" $ do
+            let mainIdentity =
+                    generatedSymbolIdentity 991656 SymbolType "Main" "Box" Nothing
+                otherIdentity =
+                    generatedSymbolIdentity 991657 SymbolType "Other" "Box" Nothing
+                mainInfo =
+                    DataInfo
+                        { dataInfoSymbol = mainIdentity
+                        , dataTypeParams = []
+                        , dataConstructors = []
+                        }
+                otherInfo =
+                    DataInfo
+                        { dataInfoSymbol = otherIdentity
+                        , dataTypeParams = []
+                        , dataConstructors = []
+                        }
+                scope =
+                    mkElaborateScope
+                        Map.empty
+                        ( Map.fromList
+                            [ ("Box", otherInfo)
+                            , ("Main.Box", mainInfo)
+                            ]
+                        )
+                        Map.empty
+                        []
+                view =
+                    ProgramTypes.mkTypeView (STBase "Box") (STBase "Main.Box")
+            case lowerTypeView scope view of
+                STMu selfName _ ->
+                    selfName `shouldBe` "$Main.Box_self"
+                other ->
+                    expectationFailure ("expected lowered Main.Box mu type, got " ++ show other)
 
         it "does not match same-named type-view data heads with different identities" $ do
             let expectedIdentity =

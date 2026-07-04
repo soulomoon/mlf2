@@ -442,6 +442,15 @@ diagnosticTypeViewDisplay scope view =
 visibleTypeForIdentity :: Map String DataInfo -> SrcType -> SrcType -> SrcType
 visibleTypeForIdentity dataTypes = go
   where
+    dataTypesByIdentity =
+      indexInfoByIdentity dataInfoSymbolIdentity dataTypes
+
+    dataTypeDisplayNamesByIdentity =
+      indexDisplayNamesByIdentity dataInfoSymbolIdentity dataTypes
+
+    dataTypeHeadIdentities =
+      dataTypeHeadIdentityAliases dataTypesByIdentity dataTypeDisplayNamesByIdentity
+
     go display identityTy =
       case (display, identityTy) of
         (STBase displayName, STBase identityName) -> STBase (visibleHeadName identityName displayName)
@@ -467,15 +476,15 @@ visibleTypeForIdentity dataTypes = go
         _ -> display
 
     visibleHeadName identityName displayName =
-      case
-        [ visibleName
-          | (visibleName, info) <- Map.toList dataTypes,
-            dataIdentityTypeName info == identityName,
-            not (dataInfoIdentityAliasName visibleName info)
-        ]
-      of
-        visibleName : _ -> visibleName
-        [] -> displayName
+      case (resolveDataHead displayName, resolveDataHead identityName) of
+        (Just displayIdentity, Just identity)
+          | sameSymbolIdentity displayIdentity identity -> displayName
+          | otherwise -> identityName
+        (_, Just {}) -> identityName
+        _ -> displayName
+
+    resolveDataHead =
+      lookupSymbolIdentityAlias dataTypeHeadIdentities
 
     zipBound (Just (SrcBound displayBound)) (Just (SrcBound identityBound)) =
       Just (SrcBound (go displayBound identityBound))
@@ -4722,11 +4731,6 @@ preferVisibleTypeHeadName scope name
     Just visibleName <- lookupSymbolIdentityExact identity (esTypeDisplayNamesByIdentity scope) >>= preferredDisplayName identity =
       visibleName
   | otherwise = name
-
-dataInfoIdentityAliasName :: String -> DataInfo -> Bool
-dataInfoIdentityAliasName name info =
-  name == dataIdentityTypeName info
-    || name == dataInfoIdentityQualifiedName info
 
 rewriteSrcTypeOccurrences :: SrcType -> SrcType -> SrcType -> SrcType
 rewriteSrcTypeOccurrences needle replacement = go
