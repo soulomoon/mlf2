@@ -4321,6 +4321,38 @@ spec = do
                         checked
             (programRunOutput <$> runCheckedProgramOutput checked') `shouldBe` Right "ctor-identity\n"
 
+        it "does not resolve checked runtime constructor references through stale identity payloads" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO, bind, pure, putStrLn);"
+                        , "  data Option ="
+                        , "      None : Option;"
+                        , "  def action : IO Option = pure None;"
+                        , "  def after : Option -> IO Unit = λvalue case value of {"
+                        , "    None -> putStrLn \"ctor-identity\""
+                        , "  };"
+                        , "  def main : IO Unit = bind action after;"
+                        , "}"
+                        ]
+            checked <- requireCheckedLocated (withPreludeLocated located)
+            dataInfo <- requireCheckedData "Main" "Option" checked
+            noneCtor <- requireDataConstructor "None" dataInfo
+            actionBinding <- requireCheckedBinding "Main__action" checked
+            let noneIdentity = ctorInfoSymbol noneCtor
+                staleNoneIdentity = renameSymbolDefiningName "$stale_none" noneIdentity
+                checked' =
+                    replaceCheckedBindingTerm
+                        "Main__action"
+                        (poisonConstructorTermIdentity noneIdentity staleNoneIdentity "$stale_none" (checkedBindingTerm actionBinding))
+                        checked
+            case runCheckedProgramOutput checked' of
+                Left (ProgramUnknownValue name) ->
+                    name `shouldBe` "$stale_none"
+                other ->
+                    expectationFailure ("expected stale constructor identity rejection, got " ++ show other)
+
         it "rejects duplicate checked runtime binding identities before run context lookup" $ do
             program <-
                 requireParsed $
@@ -8809,6 +8841,28 @@ poisonTopLevelTermIdentity target replacement replacementName term =
         Elab.EUnroll body -> Elab.EUnroll (go body)
   where
     go = poisonTopLevelTermIdentity target replacement replacementName
+
+poisonConstructorTermIdentity :: SymbolIdentity -> SymbolIdentity -> String -> Elab.XmlfTerm -> Elab.XmlfTerm
+poisonConstructorTermIdentity target replacement replacementName term =
+    case term of
+        Elab.EVarNode resolved@ResolvedVar {resolvedVarDetails = ConstructorId ref}
+            | Symbol.sameSymbolIdentity (constructorRefSymbol ref) target ->
+                Elab.EVarNode
+                    resolved
+                        { resolvedVarRuntimeName = replacementName
+                        , resolvedVarDetails = ConstructorId (ProgramTypes.constructorRefFromSymbol replacement)
+                        }
+        Elab.EVarNode {} -> term
+        Elab.ELit {} -> term
+        Elab.ELam resolved body -> Elab.ELam resolved (go body)
+        Elab.EApp fun arg -> Elab.EApp (go fun) (go arg)
+        Elab.ELet resolved scheme rhs body -> Elab.ELet resolved scheme (go rhs) (go body)
+        Elab.ETyAbsRef ref mbBound body -> Elab.ETyAbsRef ref mbBound (go body)
+        Elab.ETyInst body inst -> Elab.ETyInst (go body) inst
+        Elab.ERoll ty body -> Elab.ERoll ty (go body)
+        Elab.EUnroll body -> Elab.EUnroll (go body)
+  where
+    go = poisonConstructorTermIdentity target replacement replacementName
 
 primitiveTerm :: String -> Elab.XmlfTerm
 primitiveTerm name =

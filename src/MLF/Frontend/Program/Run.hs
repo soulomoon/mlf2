@@ -128,7 +128,7 @@ import MLF.Frontend.Program.Types
     ordinaryValueTypeView,
     resolvedVarFromValueInfo,
   )
-import MLF.Frontend.Symbol (lookupSymbolIdentityExact, memberSymbolIdentityExact, sameSymbolIdentity, symbolIdentityPayloadKey, symbolIdentityStableName, symbolUniqueIdentity)
+import MLF.Frontend.Symbol (SymbolOwnerIdentity (..), lookupSymbolIdentityExact, memberSymbolIdentityExact, sameSymbolIdentity, symbolIdentityPayloadKey, symbolIdentityStableName, symbolOwnerIdentity, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit (..), SrcBound (..), SrcTy (..), SrcType)
 import qualified MLF.Frontend.Syntax.Program as ProgramSyntax
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
@@ -822,8 +822,24 @@ runtimeVarKeyMatches left right =
 lookupRuntimeConstructorResolved :: RuntimeContext -> ResolvedVar -> Maybe ConstructorInfo
 lookupRuntimeConstructorResolved context resolved =
   case resolvedVarConstructorRef resolved of
-    Just ref -> Map.lookup (constructorRefSymbol ref) (runtimeConstructorsByIdentity context)
+    Just ref ->
+      let symbol = constructorRefSymbol ref
+       in lookupSymbolIdentityExact symbol (runtimeConstructorsByIdentity context)
+            <|> lookupRuntimePreludeConstructorBySymbol context symbol
     Nothing -> Nothing
+
+lookupRuntimePreludeConstructorBySymbol :: RuntimeContext -> SymbolIdentity -> Maybe ConstructorInfo
+lookupRuntimePreludeConstructorBySymbol context symbol =
+  find (runtimePreludeConstructorSymbolMatches symbol . ctorInfoSymbol) (Map.elems (runtimePreludeConstructorsByKey context))
+
+runtimePreludeConstructorSymbolMatches :: SymbolIdentity -> SymbolIdentity -> Bool
+runtimePreludeConstructorSymbolMatches requested stored =
+  symbolUniqueIdentity requested == symbolUniqueIdentity stored
+    && case (symbolOwnerIdentity requested, symbolOwnerIdentity stored) of
+      (Just (SymbolOwnerType requestedOwner), Just (SymbolOwnerType storedOwner)) ->
+        sameSymbolIdentity requestedOwner storedOwner
+      _ ->
+        False
 
 lookupRuntimeBindingResolved :: RuntimeContext -> ResolvedVar -> Maybe CheckedBinding
 lookupRuntimeBindingResolved context resolved =
