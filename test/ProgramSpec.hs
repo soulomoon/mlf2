@@ -1173,6 +1173,35 @@ spec = do
                         ]
             Map.lookup stableName aliases `shouldBe` Nothing
 
+        it "does not compare deferred constructors equal when type head payloads conflict" $ do
+            let dataIdentity = generatedSymbolIdentity 991637 SymbolType "Lib" "Token" Nothing
+                ctorIdentity = generatedSymbolIdentity 991638 SymbolConstructor "Lib" "MkToken" (Just (SymbolOwnerType dataIdentity))
+                originalHeadIdentity = generatedSymbolIdentity 991639 SymbolType "Lib" "Token" Nothing
+                conflictingHeadIdentity = generatedSymbolIdentity 991639 SymbolType "Other" "StaleToken" Nothing
+                ctorInfo =
+                    ConstructorInfo
+                        { ctorInfoSymbol = ctorIdentity
+                        , ctorRuntimeName = "Lib__MkToken"
+                        , ctorTypeView = ProgramTypes.mkTypeView (STBase "Token") (STBase "Token")
+                        , ctorForallBinderInfo = []
+                        , ctorOwningTypeIdentity = dataIdentity
+                        , ctorIndex = 0
+                        , ctorOwnerConstructors = []
+                        }
+                deferred identity =
+                    DeferredConstructorCall
+                        { deferredConstructorRef = deferredRefFromIdentity (UniqueIdentity 991640) "$ctor"
+                        , deferredConstructorInfo = ctorInfo
+                        , deferredConstructorArgCount = 0
+                        , deferredConstructorSourceType = STBase "Token"
+                        , deferredConstructorOccurrenceType = STBase "Token"
+                        , deferredConstructorTypeHeadIdentities = Map.singleton "Token" identity
+                        , deferredConstructorInstBinders = []
+                        , deferredConstructorInitialSubst = ProgramTypes.emptyTypeBinderSubst
+                        , deferredConstructorBindingMode = ProgramTypes.DeferredBindingMonomorphic
+                        }
+            deferred originalHeadIdentity `shouldNotBe` deferred conflictingHeadIdentity
+
         it "drops ambiguous constraint binder display identities from ordinary value views" $ do
             let valueIdentity = generatedSymbolIdentity 991423 SymbolValue "Main" "f" Nothing
                 classIdentity = generatedSymbolIdentity 991424 SymbolClass "Main" "C" Nothing

@@ -306,6 +306,7 @@ import MLF.Frontend.Symbol
     ResolvedReferenceKind (..),
     ResolvedSymbol,
     SymbolIdentity,
+    SymbolIdentityPayloadKey,
     SymbolNamespace (..),
     SymbolOrigin (..),
     SymbolOwnerIdentity (..),
@@ -1112,9 +1113,9 @@ typeViewIdentityTypesMatch leftView rightView =
         (Nothing, Nothing) -> leftName == rightName
         _ -> False
 
-typeViewHeadIdentitySet :: TypeView -> Set SymbolIdentity
+typeViewHeadIdentitySet :: TypeView -> Set SymbolIdentityPayloadKey
 typeViewHeadIdentitySet =
-  Set.fromList . Map.elems . typeViewHeadIdentities
+  typeHeadIdentityPayloadSet . typeViewHeadIdentities
 
 typeViewBinderIdentitySet :: TypeView -> Set TypeBinderIdentity
 typeViewBinderIdentitySet =
@@ -2457,7 +2458,11 @@ instance Eq DeferredConstructorCall where
 
 typeHeadIdentityMapMatches :: Map String SymbolIdentity -> Map String SymbolIdentity -> Bool
 typeHeadIdentityMapMatches left right =
-  Set.fromList (Map.elems left) == Set.fromList (Map.elems right)
+  typeHeadIdentityPayloadSet left == typeHeadIdentityPayloadSet right
+
+typeHeadIdentityPayloadSet :: Map String SymbolIdentity -> Set SymbolIdentityPayloadKey
+typeHeadIdentityPayloadSet =
+  Set.fromList . map symbolIdentityPayloadKey . Map.elems
 
 deferredConstructorPlaceholder :: DeferredConstructorCall -> String
 deferredConstructorPlaceholder =

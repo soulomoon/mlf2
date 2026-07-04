@@ -521,6 +521,19 @@ spec = do
       view "Token" "a"
         `shouldNotBe` staleView {typeViewHeadIdentities = Map.empty}
 
+    it "does not compare type views equal when carried head payloads conflict" $ do
+      let originalIdentity = generatedSymbolIdentity 210 SymbolType "Lib" "Token" Nothing
+          conflictingIdentity = generatedSymbolIdentity 210 SymbolType "Other" "StaleToken" Nothing
+          headName = symbolIdentityStableName originalIdentity
+          view identity =
+            TypeView
+              { typeViewDisplay = STBase "Token",
+                typeViewIdentity = STBase headName,
+                typeViewHeadIdentities = Map.singleton "Token" identity,
+                typeViewBinderIdentities = Map.empty
+              }
+      view originalIdentity `shouldNotBe` view conflictingIdentity
+
     it "compares constraint infos by class identity when display names are stale" $ do
       let tokenView = sourceTypeViewInScope (mkElaborateScope Map.empty (Map.singleton "Token" tokenDataInfo) Map.empty []) (STBase "Token")
           constraint displayName classIdentity =
