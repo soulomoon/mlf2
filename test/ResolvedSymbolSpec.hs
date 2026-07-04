@@ -636,6 +636,19 @@ spec = do
       classInfoForConstraint scope (constraint staleClassIdentity) `shouldBe` Nothing
       classInfoForConstraint staleScope (constraint eqClassIdentity) `shouldBe` Nothing
 
+    it "does not look up constructor owner metadata through stale identity payloads" $ do
+      let staleTokenIdentity = renameSymbolDefiningName "$stale.Token" tokenTypeIdentity
+          staleOwnerInfo =
+            DataInfo
+              { dataInfoSymbol = staleTokenIdentity,
+                dataTypeParams = [],
+                dataConstructors = [higherCtor]
+              }
+          staleOwnersByIdentity = Map.singleton staleTokenIdentity staleOwnerInfo
+
+      constructorOwnerRuntimeTypeTrackable staleOwnersByIdentity someCtor `shouldBe` True
+      constructorOwnerHasVariableHeadApplication staleOwnersByIdentity someCtor `shouldBe` False
+
     it "compares evidence methods by symbol identity when runtime names are stale" $ do
       let methodView = methodTypeView eqMethodInfo
           evidence runtimeName symbol =

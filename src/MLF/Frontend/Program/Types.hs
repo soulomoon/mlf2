@@ -2817,13 +2817,13 @@ ctorOwningType =
 
 constructorOwnerRuntimeTypeTrackable :: Map SymbolIdentity DataInfo -> ConstructorInfo -> Bool
 constructorOwnerRuntimeTypeTrackable dataInfosByIdentity ctor =
-  case Map.lookup (ctorOwningTypeIdentity ctor) dataInfosByIdentity of
+  case lookupSymbolIdentityExact (ctorOwningTypeIdentity ctor) dataInfosByIdentity of
     Just dataInfo -> dataConstructorsRuntimeTypeTrackable dataInfo
     Nothing -> all constructorShapeRuntimeTypeTrackable (constructorOwnerShapes ctor)
 
 constructorOwnerHasVariableHeadApplication :: Map SymbolIdentity DataInfo -> ConstructorInfo -> Bool
 constructorOwnerHasVariableHeadApplication dataInfosByIdentity ctor =
-  case Map.lookup (ctorOwningTypeIdentity ctor) dataInfosByIdentity of
+  case lookupSymbolIdentityExact (ctorOwningTypeIdentity ctor) dataInfosByIdentity of
     Just dataInfo -> any constructorRuntimeTypeHasVariableHeadApplication (dataConstructors dataInfo)
     Nothing -> any constructorShapeHasVariableHeadApplication (constructorOwnerShapes ctor)
 
