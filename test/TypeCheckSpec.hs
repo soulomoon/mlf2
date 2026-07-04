@@ -1049,10 +1049,19 @@ spec = describe "Phase 7 typecheck" $ do
         idDetailsRefMatches (Just localDetails) "$x#0" Nothing (uniqueIdentityStableName (UniqueIdentity 0)) `shouldBe` False
         idDetailsRefMatches Nothing "$x#0" Nothing "$x#0" `shouldBe` True
         let otherLocalDetails = LocalId (generatedLocalRef 1 "$x#0")
+            renamedSameIdentityDetails = idDetailsRenameLocal "$x#renamed" localDetails
             detailsByAlias = idDetailsAliasMap [("runtime-x", localDetails), ("runtime-y", otherLocalDetails)]
+            sameIdentityConflictAliases =
+                idDetailsAliasMap
+                    [ ("runtime-x", localDetails)
+                    , ("runtime-renamed", renamedSameIdentityDetails)
+                    ]
         Map.lookup "$x#0" detailsByAlias `shouldBe` Nothing
         Map.lookup (uniqueIdentityStableName (UniqueIdentity 0)) detailsByAlias `shouldBe` Just localDetails
         Map.lookup (uniqueIdentityStableName (UniqueIdentity 1)) detailsByAlias `shouldBe` Just otherLocalDetails
+        Map.lookup (uniqueIdentityStableName (UniqueIdentity 0)) sameIdentityConflictAliases `shouldBe` Nothing
+        fmap (idDetailsReferenceName "fallback") (Map.lookup "$x#0" sameIdentityConflictAliases) `shouldBe` Just "$x#0"
+        fmap (idDetailsReferenceName "fallback") (Map.lookup "$x#renamed" sameIdentityConflictAliases) `shouldBe` Just "$x#renamed"
         localDetails `shouldBe` idDetailsRenameLocal "$x#1" localDetails
         localDetails `shouldBe` EvidenceId (generatedLocalRef 0 "$x#evidence")
         deferredDetails `shouldNotBe` sameNamedDeferredDetails

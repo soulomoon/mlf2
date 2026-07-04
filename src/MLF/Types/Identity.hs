@@ -357,6 +357,17 @@ data ResolvedTermIdentityKey
   | ResolvedTermDeferredKey DeferredRef
   deriving (Eq, Ord, Show)
 
+data IdDetailsAliasPayloadKey
+  = AliasPayloadLocalKey LocalIdentity String Bool
+  | AliasPayloadEvidenceKey LocalIdentity String Bool
+  | AliasPayloadEnvKey UniqueIdentity String
+  | AliasPayloadTopLevelKey SymbolIdentity
+  | AliasPayloadConstructorKey SymbolIdentity
+  | AliasPayloadMethodKey SymbolIdentity
+  | AliasPayloadPrimitiveKey SymbolIdentity
+  | AliasPayloadDeferredKey UniqueIdentity String
+  deriving (Eq, Ord, Show)
+
 idDetailsIdentityKey :: IdDetails -> ResolvedTermIdentityKey
 idDetailsIdentityKey details =
   case details of
@@ -368,6 +379,18 @@ idDetailsIdentityKey details =
     MethodId symbol -> ResolvedTermMethodKey symbol
     PrimitiveId ref -> ResolvedTermPrimitiveKey (primitiveRefSymbol ref)
     DeferredId ref -> ResolvedTermDeferredKey ref
+
+idDetailsAliasPayloadKey :: IdDetails -> IdDetailsAliasPayloadKey
+idDetailsAliasPayloadKey details =
+  case details of
+    LocalId ref -> AliasPayloadLocalKey (localRefIdentity ref) (localRefName ref) (localRefDiscard ref)
+    EvidenceId ref -> AliasPayloadEvidenceKey (localRefIdentity ref) (localRefName ref) (localRefDiscard ref)
+    EnvId ref -> AliasPayloadEnvKey (envRefIdentity ref) (envRefName ref)
+    TopLevelId symbol -> AliasPayloadTopLevelKey symbol
+    ConstructorId ref -> AliasPayloadConstructorKey (constructorRefSymbol ref)
+    MethodId symbol -> AliasPayloadMethodKey symbol
+    PrimitiveId ref -> AliasPayloadPrimitiveKey (primitiveRefSymbol ref)
+    DeferredId ref -> AliasPayloadDeferredKey (deferredRefIdentity ref) (deferredRefName ref)
 
 idDetailsStableName :: IdDetails -> String
 idDetailsStableName details =
@@ -402,7 +425,7 @@ idDetailsAliasMap identities =
     identitiesByAlias =
       Map.fromListWith
         Map.union
-        [ (alias, Map.singleton (idDetailsIdentityKey details) details)
+        [ (alias, Map.singleton (idDetailsAliasPayloadKey details) details)
         | (name, details) <- identities,
           alias <- idDetailsAliasNames name details
         ]
