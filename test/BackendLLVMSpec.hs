@@ -1968,6 +1968,26 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldSatisfy` isInfixOf "ret i64 42"
     validateLLVMAssembly output
 
+  it "does not rewrite name-only vars through stale identity binder aliases" $ do
+    let outer = localIdentity 2069137 "x"
+        inner = localIdentity 2069138 "x"
+        rewritten =
+          Lower.rewriteBackendVarsByName
+            (Map.fromList [("x", Just outer)])
+            ( BackendLetWithIdentity
+                intTy
+                (Just inner)
+                "$stale_x"
+                intTy
+                (intLit 99)
+                (BackendVar intTy "x")
+            )
+    case rewritten of
+      BackendLetWithIdentity _ _ _ _ _ (BackendVarWithIdentity _ Nothing "x") ->
+        pure ()
+      other ->
+        expectationFailure ("expected stale binder alias shadowing to keep name-only var, got: " ++ show other)
+
   it "resolves same-named lambda parameters by identity before name fallback" $ do
     output <- requireRight (renderBackendProgramLLVM lambdaIdentityShadowedParamProgram)
 

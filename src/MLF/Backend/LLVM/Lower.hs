@@ -134,6 +134,7 @@ module MLF.Backend.LLVM.Lower
     lowerBackendProgram,
     lowerBackendProgramNative,
     renderBackendLLVMError,
+    rewriteBackendVarsByName,
   )
 where
 
@@ -6213,11 +6214,11 @@ rewriteBackendVarsByName identities0 =
         BackendLit ty lit ->
           BackendLit ty lit
         BackendLamWithIdentity resultTy identity name paramTy body ->
-          BackendLamWithIdentity resultTy identity name paramTy (go (Map.delete name identities) body)
+          BackendLamWithIdentity resultTy identity name paramTy (go (withoutTermBinder (identity, name) identities) body)
         BackendApp resultTy fun arg ->
           BackendApp resultTy (go identities fun) (go identities arg)
         BackendLetWithIdentity resultTy identity name bindingTy rhs body ->
-          BackendLetWithIdentity resultTy identity name bindingTy (go identities rhs) (go (Map.delete name identities) body)
+          BackendLetWithIdentity resultTy identity name bindingTy (go identities rhs) (go (withoutTermBinder (identity, name) identities) body)
         BackendTyAbsWithIdentity resultTy identity name mbBound body ->
           BackendTyAbsWithIdentity resultTy identity name mbBound (go identities body)
         BackendTyApp resultTy fun ty ->
@@ -6242,13 +6243,23 @@ rewriteBackendVarsByName identities0 =
       capture {backendClosureCaptureExpr = go identities (backendClosureCaptureExpr capture)}
 
     withoutClosureLocals captures params =
-      withoutNames (map backendClosureCaptureName captures ++ map backendClosureParamName params)
+      withoutTermBinders
+        ( [(backendClosureCaptureIdentity capture, backendClosureCaptureName capture) | capture <- captures]
+            ++ [(backendClosureParamIdentity param, backendClosureParamName param) | param <- params]
+        )
 
     withoutPatternBinders =
-      withoutNames . map backendPatternBinderName . patternLocalBinders
+      withoutTermBinders
+        . map (\binder -> (backendPatternBinderIdentity binder, backendPatternBinderName binder))
+        . patternLocalBinders
 
-    withoutNames names identities =
-      foldr Map.delete identities names
+    withoutTermBinder (Just identity, name) identities =
+      Map.foldrWithKey (\alias _ -> Map.delete alias) identities (idDetailsAliasMap [(name, identity)])
+    withoutTermBinder (Nothing, name) identities =
+      Map.delete name identities
+
+    withoutTermBinders refs identities =
+      foldr withoutTermBinder identities refs
 
     patternLocalBinders =
       \case
