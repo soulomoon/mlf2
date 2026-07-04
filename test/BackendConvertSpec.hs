@@ -1676,6 +1676,37 @@ spec = describe "MLF.Backend.Convert" $ do
       _ ->
         expectationFailure "expected at least two checked modules"
 
+  it "rejects duplicate embedded resolved module identities before building backend context maps" $ do
+    checked0 <- requireChecked duplicateDataNameProgram
+    case resolvedProgramModules (checkedProgramResolved checked0) of
+      firstModule : secondModule : _ -> do
+        let duplicateIdentity = resolvedSemanticModuleIdentity (resolvedModuleSemantic firstModule)
+            checked =
+              replaceResolvedModuleIdentity
+                (resolvedSemanticModuleName (resolvedModuleSemantic secondModule))
+                duplicateIdentity
+                checked0
+        convertCheckedProgram checked
+          `shouldBe` Left (BackendValidationFailed (BackendDuplicateModule (symbolIdentityStableName duplicateIdentity)))
+      _ ->
+        expectationFailure "expected at least two resolved modules"
+
+  it "rejects embedded resolved module identity payload conflicts before building backend context maps" $ do
+    checked0 <- requireChecked duplicateDataNameProgram
+    case resolvedProgramModules (checkedProgramResolved checked0) of
+      firstModule : secondModule : _ -> do
+        let duplicateIdentity = resolvedSemanticModuleIdentity (resolvedModuleSemantic firstModule)
+            conflictingIdentity = renameSymbolDefiningName "$stale_resolved_module" duplicateIdentity
+            checked =
+              replaceResolvedModuleIdentity
+                (resolvedSemanticModuleName (resolvedModuleSemantic secondModule))
+                conflictingIdentity
+                checked0
+        convertCheckedProgram checked
+          `shouldBe` Left (BackendValidationFailed (BackendConflictingIdentityPayload "resolved module" (symbolIdentityStableName duplicateIdentity)))
+      _ ->
+        expectationFailure "expected at least two resolved modules"
+
   it "rejects duplicate checked data identities before building backend context maps" $ do
     checked0 <- requireChecked duplicateDataNameProgram
     case checkedDataInfos checked0 of
@@ -5127,6 +5158,30 @@ replaceCheckedModuleIdentity moduleName0 replacement checked =
           checkedModule {checkedModuleIdentity = replacement}
       | otherwise =
           checkedModule
+
+replaceResolvedModuleIdentity :: String -> SymbolIdentity -> CheckedProgram -> CheckedProgram
+replaceResolvedModuleIdentity moduleName0 replacement checked =
+  checked
+    { checkedProgramResolved =
+        updateProgram (checkedProgramResolved checked)
+    }
+  where
+    updateProgram (ResolvedProgram modules0) =
+      ResolvedProgram (map updateModule modules0)
+
+    updateModule resolvedModule
+      | resolvedSemanticModuleName semantic == moduleName0 =
+          resolvedModule
+            { resolvedModuleSemantic =
+                semantic
+                  { resolvedSemanticModuleIdentity = replacement
+                  }
+            }
+      | otherwise =
+          resolvedModule
+      where
+        semantic =
+          resolvedModuleSemantic resolvedModule
 
 renameCheckedModuleName :: String -> String -> CheckedProgram -> CheckedProgram
 renameCheckedModuleName oldName newName checked =

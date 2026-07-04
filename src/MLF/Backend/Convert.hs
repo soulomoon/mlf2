@@ -1818,11 +1818,12 @@ buildConvertContext :: CheckedProgram -> Either BackendConversionError ConvertCo
 buildConvertContext checked = do
   let dataInfos = allDataInfos checked
   _modulesByIdentity <- uniqueModulesByIdentity checked
+  resolvedModulesByIdentity <- uniqueResolvedModulesByIdentity checked
   _bindingsByIdentity <- uniqueBindingsByIdentity checked
   dataByIdentity <- uniqueDataInfosByIdentity dataInfos
   termRuntimeNames <- checkedProgramTermRuntimeNamesByIdentity checked
   let dataModuleIdentities = dataInfoModuleIdentityMap checked
-      moduleScopes = moduleElaborateScopes checked dataByIdentity
+      moduleScopes = moduleElaborateScopes resolvedModulesByIdentity dataByIdentity
   dataMetas <- mapM (buildDataMetaForDataInfo moduleScopes dataModuleIdentities dataInfos) dataInfos
   constructorMetasByIdentity <-
     uniqueConstructorMetasByIdentity
@@ -1871,6 +1872,10 @@ buildConvertContext checked = do
 uniqueModulesByIdentity :: CheckedProgram -> Either BackendConversionError (Map SymbolIdentity CheckedModule)
 uniqueModulesByIdentity checked =
   uniqueCheckedInfoByIdentity "module" BackendDuplicateModule checkedModuleIdentity (checkedProgramModules checked)
+
+uniqueResolvedModulesByIdentity :: CheckedProgram -> Either BackendConversionError (Map SymbolIdentity ResolvedModule)
+uniqueResolvedModulesByIdentity checked =
+  uniqueCheckedInfoByIdentity "resolved module" BackendDuplicateModule resolvedModuleIdentity (resolvedProgramModules (checkedProgramResolved checked))
 
 uniqueBindingsByIdentity :: CheckedProgram -> Either BackendConversionError (Map SymbolIdentity CheckedBinding)
 uniqueBindingsByIdentity checked =
@@ -2261,12 +2266,9 @@ dataInfoModuleIdentityMap checked =
         info <- Map.elems (checkedModuleData checkedModule)
     ]
 
-moduleElaborateScopes :: CheckedProgram -> Map SymbolIdentity DataInfo -> Map SymbolIdentity ElaborateScope
-moduleElaborateScopes checked dataByIdentity =
-  Map.fromList
-    [ (resolvedModuleIdentity resolvedModule, elaborateScopeForResolvedModule dataByIdentity resolvedModule)
-      | resolvedModule <- resolvedProgramModules (checkedProgramResolved checked)
-    ]
+moduleElaborateScopes :: Map SymbolIdentity ResolvedModule -> Map SymbolIdentity DataInfo -> Map SymbolIdentity ElaborateScope
+moduleElaborateScopes resolvedModulesByIdentity dataByIdentity =
+  Map.map (elaborateScopeForResolvedModule dataByIdentity) resolvedModulesByIdentity
 
 elaborateScopeForResolvedModule :: Map SymbolIdentity DataInfo -> ResolvedModule -> ElaborateScope
 elaborateScopeForResolvedModule dataByIdentity resolvedModule =
