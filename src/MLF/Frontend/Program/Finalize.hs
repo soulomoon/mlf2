@@ -20,6 +20,7 @@ module MLF.Frontend.Program.Finalize
     recoverSourceType,
     elabTypeToRecoveredTypeView,
     typeViewToElabType,
+    srcTypeToElabTypeInScope,
     resolvedForallSubst,
     sourceForallMatches,
     sourceForallMatchesInScope,
@@ -3493,9 +3494,17 @@ inlineConstructorHead scope extraHeadIdentities ownerParamBinders ctorInfo subst
             STBottom -> STBottom
 
         headName name =
-          case Builtins.builtinTypeHeadIdentity name <|> lookupSymbolIdentityAlias headIdentities name of
+          case scopedTypeHeadIdentity name of
             Just identity -> symbolIdentityStableName identity
             Nothing -> name
+
+        scopedHeadIdentities =
+          dataTypeHeadIdentitiesInScope scope
+
+        scopedTypeHeadIdentity name =
+          lookupSymbolIdentityAlias scopedHeadIdentities name
+            <|> Builtins.builtinTypeHeadIdentity name
+            <|> lookupSymbolIdentityAlias headIdentities name
 
     constructorShapeResultMatchView shape =
       TypeView
@@ -4996,7 +5005,7 @@ srcTypeToElabTypeInScopeWithHeadIdentities :: ElaborateScope -> Map String Symbo
 srcTypeToElabTypeInScopeWithHeadIdentities scope extraHeadIdentities ty =
   let headIdentities = mergeSymbolIdentityMaps [extraHeadIdentities, typeHeadIdentitiesInScope scope]
       (refs, generator) = sourceTypeBinderRefsInScope headIdentities scope Map.empty ty
-   in fst <$> srcTypeToElabTypeWithHeadIdentities headIdentities refs generator ty
+   in fst <$> srcTypeToElabTypeWithScopedHeadIdentities scope headIdentities refs generator ty
 
 srcTypeToElabTypeMaybeInScope :: ElaborateScope -> SrcTy n v -> Maybe ElabType
 srcTypeToElabTypeMaybeInScope scope =
@@ -5004,7 +5013,7 @@ srcTypeToElabTypeMaybeInScope scope =
 
 typeViewToElabType :: ElaborateScope -> TypeView -> Either ProgramError ElabType
 typeViewToElabType scope view =
-  fst <$> srcTypeToElabTypeWithHeadIdentities headIdentities refs generator ty
+  fst <$> srcTypeToElabTypeWithScopedHeadIdentities scope headIdentities refs generator ty
   where
     ty =
       lowerTypeView scope view
@@ -5135,7 +5144,7 @@ freshTypeBinderRefs names generator0 =
 
 srcTypeToElabTypeWithScope :: ElaborateScope -> Map String X.TypeBinderRef -> IdentityGenerator -> SrcTy n v -> Either ProgramError (ElabType, IdentityGenerator)
 srcTypeToElabTypeWithScope scope refs generator ty =
-  srcTypeToElabTypeWithHeadIdentities headIdentities refs' generator ty
+  srcTypeToElabTypeWithScopedHeadIdentities scope headIdentities refs' generator ty
   where
     headIdentities =
       typeHeadIdentitiesInScope scope
@@ -5152,14 +5161,36 @@ srcTypeToElabTypeWithHeadIdentities ::
 srcTypeToElabTypeWithHeadIdentities =
   srcTypeToElabTypeWithHeadIdentitiesBound Set.empty
 
-srcTypeToElabTypeWithHeadIdentitiesBound ::
-  Set String ->
+srcTypeToElabTypeWithScopedHeadIdentities ::
+  ElaborateScope ->
   Map String SymbolIdentity ->
   Map String X.TypeBinderRef ->
   IdentityGenerator ->
   SrcTy n v ->
   Either ProgramError (ElabType, IdentityGenerator)
-srcTypeToElabTypeWithHeadIdentitiesBound boundNames headIdentities refs generator ty = case ty of
+srcTypeToElabTypeWithScopedHeadIdentities scope =
+  srcTypeToElabTypeWithHeadIdentityResolverBound Set.empty resolveHead
+  where
+    scopedHeadIdentities =
+      dataTypeHeadIdentitiesInScope scope
+
+    fallbackHeadIdentities =
+      typeHeadIdentitiesInScope scope
+
+    resolveHead name =
+      lookupSymbolIdentityAlias scopedHeadIdentities name
+        <|> Builtins.builtinTypeHeadIdentity name
+        <|> lookupSymbolIdentityAlias fallbackHeadIdentities name
+
+srcTypeToElabTypeWithHeadIdentityResolverBound ::
+  Set String ->
+  (String -> Maybe SymbolIdentity) ->
+  Map String SymbolIdentity ->
+  Map String X.TypeBinderRef ->
+  IdentityGenerator ->
+  SrcTy n v ->
+  Either ProgramError (ElabType, IdentityGenerator)
+srcTypeToElabTypeWithHeadIdentityResolverBound boundNames resolveHead headIdentities refs generator ty = case ty of
   STVar name -> do
     ref <- sourceTypeBinderRef refs name
     Right (X.TVarRef ref, generator)
@@ -5188,24 +5219,24 @@ srcTypeToElabTypeWithHeadIdentitiesBound boundNames headIdentities refs generato
         refs' = Map.insert name ref refs
         boundNames' = Set.insert name boundNames
      in do
-          (mb', generator2) <- maybe (Right (Nothing, generator1)) (srcBoundToElabBoundWithHeadIdentitiesBound boundNames headIdentities refs generator1) mb
-          (body', generator3) <- srcTypeToElabTypeWithHeadIdentitiesBound boundNames' headIdentities refs' generator2 body
+          (mb', generator2) <- maybe (Right (Nothing, generator1)) (srcBoundToElabBoundWithHeadIdentityResolverBound boundNames resolveHead headIdentities refs generator1) mb
+          (body', generator3) <- srcTypeToElabTypeWithHeadIdentityResolverBound boundNames' resolveHead headIdentities refs' generator2 body
           Right (X.TForallRef ref mb' body', generator3)
   STMu name body ->
     let (ref, generator1) = sourceTypeBinderRefOrFresh (Set.member name boundNames) refs name generator
         refs' = Map.insert name ref refs
         boundNames' = Set.insert name boundNames
      in do
-          (body', generator2) <- srcTypeToElabTypeWithHeadIdentitiesBound boundNames' headIdentities refs' generator1 body
+          (body', generator2) <- srcTypeToElabTypeWithHeadIdentityResolverBound boundNames' resolveHead headIdentities refs' generator1 body
           Right (X.TMuRef ref body', generator2)
   STBottom ->
     Right (X.TBottom, generator)
   where
     go =
-      srcTypeToElabTypeWithHeadIdentitiesBound boundNames headIdentities
+      srcTypeToElabTypeWithHeadIdentityResolverBound boundNames resolveHead headIdentities
 
     sourceTypeHeadIdentity name =
-      Builtins.builtinTypeHeadIdentity name <|> lookupSymbolIdentityAlias headIdentities name
+      resolveHead name <|> lookupSymbolIdentityAlias headIdentities name
 
     sourceTypeBinderRef env name =
       case Map.lookup name env of
@@ -5232,16 +5263,29 @@ srcTypeToElabTypeWithHeadIdentitiesBound boundNames headIdentities refs generato
           args
       Right (arg' :| reverse argsRev, generator')
 
-
-srcBoundToElabBoundWithHeadIdentitiesBound ::
+srcTypeToElabTypeWithHeadIdentitiesBound ::
   Set String ->
+  Map String SymbolIdentity ->
+  Map String X.TypeBinderRef ->
+  IdentityGenerator ->
+  SrcTy n v ->
+  Either ProgramError (ElabType, IdentityGenerator)
+srcTypeToElabTypeWithHeadIdentitiesBound boundNames headIdentities =
+  srcTypeToElabTypeWithHeadIdentityResolverBound boundNames sourceTypeHeadIdentity headIdentities
+  where
+    sourceTypeHeadIdentity name =
+      Builtins.builtinTypeHeadIdentity name <|> lookupSymbolIdentityAlias headIdentities name
+
+srcBoundToElabBoundWithHeadIdentityResolverBound ::
+  Set String ->
+  (String -> Maybe SymbolIdentity) ->
   Map String SymbolIdentity ->
   Map String X.TypeBinderRef ->
   IdentityGenerator ->
   SrcBound n ->
   Either ProgramError (Maybe X.BoundType, IdentityGenerator)
-srcBoundToElabBoundWithHeadIdentitiesBound boundNames headIdentities refs generator (SrcBound boundTy) =
-  case srcTypeToElabTypeWithHeadIdentitiesBound boundNames headIdentities refs generator boundTy of
+srcBoundToElabBoundWithHeadIdentityResolverBound boundNames resolveHead headIdentities refs generator (SrcBound boundTy) =
+  case srcTypeToElabTypeWithHeadIdentityResolverBound boundNames resolveHead headIdentities refs generator boundTy of
     Left err -> Left err
     Right (X.TVarRef {}, generator') -> Right (Nothing, generator')
     Right (X.TBottom, generator') -> Right (Nothing, generator')
@@ -5255,9 +5299,15 @@ srcBoundToElabBoundWithHeadIdentitiesBound boundNames headIdentities refs genera
 typeHeadIdentitiesInScope :: ElaborateScope -> Map String SymbolIdentity
 typeHeadIdentitiesInScope scope =
   mergeSymbolIdentityMaps
-    [ Map.map dataInfoSymbol dataTypes,
-      unambiguousDataTypeHeadIdentities dataTypes,
+    [ dataTypeHeadIdentitiesInScope scope,
       builtinTypeHeadIdentities
+    ]
+
+dataTypeHeadIdentitiesInScope :: ElaborateScope -> Map String SymbolIdentity
+dataTypeHeadIdentitiesInScope scope =
+  mergeSymbolIdentityMaps
+    [ Map.map dataInfoSymbol dataTypes,
+      unambiguousDataTypeHeadIdentities dataTypes
     ]
   where
     dataTypes = elaborateScopeDataTypes scope

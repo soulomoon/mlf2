@@ -30,6 +30,7 @@ import MLF.Frontend.Program.Finalize
     , resolvedForallSubst
     , sourceForallMatches
     , sourceForallMatchesInScope
+    , srcTypeToElabTypeInScope
     , stripVacuousForallsAndTypeAbs
     , typeViewToElabType
     )
@@ -2386,6 +2387,17 @@ spec = do
                             (builtinIntTy :| [])
                         )
             typeViewToElabType scope (ProgramTypes.mkTypeView sourceTy sourceTy) `shouldBe` Right expected
+
+        it "prefers scoped source type identities before builtin spellings during finalization" $ do
+            let localIntIdentity = generatedSymbolIdentity 991667 SymbolType "Main" "Int" Nothing
+                scope =
+                    mkElaborateScope
+                        Map.empty
+                        (Map.singleton "Int" (DataInfo localIntIdentity [] []))
+                        Map.empty
+                        []
+            srcTypeToElabTypeInScope scope (STBase "Int")
+                `shouldBe` Right (Elab.TBaseWithIdentity (Just localIntIdentity) (BaseTy "Int"))
 
         it "does not resolve resolved forall substitutions by stale name when binder identity differs" $ do
             let expectedIdentity = typeBinderIdentityFromNode (NodeId 991302)
