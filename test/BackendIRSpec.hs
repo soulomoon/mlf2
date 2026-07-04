@@ -1393,6 +1393,30 @@ spec = describe "MLF.Backend.IR" $ do
       other ->
         expectationFailure ("expected substitution-key-seeded freshening, got " ++ show other)
 
+  it "freshens away from backend type binder display aliases during substitution" $ do
+    let binderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991610)
+        targetIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991611)
+        replacement = BTVarWithIdentity (Just binderIdentity) "a1"
+        forallSource = BTForallWithIdentity (Just binderIdentity) "a" Nothing (BTVarWithIdentity (Just targetIdentity) "target")
+        muSource = BTMuWithIdentity (Just binderIdentity) "a" (BTVarWithIdentity (Just targetIdentity) "target")
+        substitution = Map.singleton (backendTypeSubstitutionKeyFromIdentity targetIdentity) replacement
+
+    case substituteBackendTypesByKey substitution forallSource of
+      BTForallWithIdentity (Just freshIdentity) "a2" Nothing body -> do
+        freshIdentity `shouldNotBe` binderIdentity
+        freshIdentity `shouldNotBe` targetIdentity
+        body `shouldBe` replacement
+      other ->
+        expectationFailure ("expected alias-aware forall freshening, got " ++ show other)
+
+    case substituteBackendTypesByKey substitution muSource of
+      BTMuWithIdentity (Just freshIdentity) "a2" body -> do
+        freshIdentity `shouldNotBe` binderIdentity
+        freshIdentity `shouldNotBe` targetIdentity
+        body `shouldBe` replacement
+      other ->
+        expectationFailure ("expected alias-aware mu freshening, got " ++ show other)
+
   it "reports free backend type variables by identity key" $ do
     let binderIdentity = typeBinderIdentityFromNode (NodeId 991207)
         freeIdentity = typeBinderIdentityFromNode (NodeId 991208)

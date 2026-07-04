@@ -136,6 +136,7 @@ import MLF.Types.Identity
     identityGeneratorAfter,
     symbolGeneratedIdentities,
     typeBinderGeneratedIdentities,
+    typeBinderIdentityAliasNames,
     typeBinderIdentityFromUnique,
     typeBinderIdentityStableName,
   )
@@ -544,6 +545,14 @@ backendTypeSubstitutionKeyName =
     BackendTypeSubstitutionByIdentity identity -> typeBinderIdentityStableName identity
     BackendTypeSubstitutionByName name -> name
 
+backendTypeSubstitutionKeyAliasNames :: BackendTypeSubstitutionKey -> Set.Set String
+backendTypeSubstitutionKeyAliasNames key =
+  case key of
+    BackendTypeSubstitutionByIdentity identity ->
+      Set.singleton (typeBinderIdentityStableName identity)
+    BackendTypeSubstitutionByName name ->
+      Set.singleton name
+
 -- | Typed backend expression. `backendExprType` is the result type of the node.
 data BackendExpr
   = BackendVarWithIdentity
@@ -797,6 +806,22 @@ freeBackendTypeVars =
 freeBackendTypeVarsInKeyed :: Map.Map BackendTypeSubstitutionKey BackendType -> Set.Set String
 freeBackendTypeVarsInKeyed replacements =
   Set.unions (map freeBackendTypeVars (Map.elems replacements))
+
+freeBackendTypeVarAliasNames :: BackendType -> Set.Set String
+freeBackendTypeVarAliasNames =
+  Set.unions . map backendDataParameterRefAliasNames . Set.toList . freeBackendTypeVarRefs
+
+freeBackendTypeVarAliasNamesInKeyed :: Map.Map BackendTypeSubstitutionKey BackendType -> Set.Set String
+freeBackendTypeVarAliasNamesInKeyed replacements =
+  Set.unions (map freeBackendTypeVarAliasNames (Map.elems replacements))
+
+backendDataParameterRefAliasNames :: BackendDataParameterRef -> Set.Set String
+backendDataParameterRefAliasNames ref =
+  case backendDataParameterRefIdentity ref of
+    Just identity ->
+      Set.fromList (typeBinderIdentityAliasNames (backendDataParameterRefName ref) identity)
+    Nothing ->
+      Set.singleton (backendDataParameterRefName ref)
 
 freeBackendTypeVarRefs :: BackendType -> Set.Set BackendDataParameterRef
 freeBackendTypeVarRefs =
@@ -1066,10 +1091,10 @@ substituteBackendTypesByKey replacements0 ty0 =
                           then
                             let used =
                                   Set.unions
-                                    [ freeBackendTypeVarsInKeyed bodyReplacements,
-                                      freeBackendTypeVars body,
-                                      maybe Set.empty freeBackendTypeVars mbBound,
-                                      Set.map backendTypeSubstitutionKeyName (Map.keysSet bodyReplacements),
+                                    [ freeBackendTypeVarAliasNamesInKeyed bodyReplacements,
+                                      freeBackendTypeVarAliasNames body,
+                                      maybe Set.empty freeBackendTypeVarAliasNames mbBound,
+                                      Set.unions (map backendTypeSubstitutionKeyAliasNames (Map.keys bodyReplacements)),
                                       Set.singleton name
                                     ]
                                 name' = freshNameLike name used
@@ -1092,9 +1117,9 @@ substituteBackendTypesByKey replacements0 ty0 =
                           then
                             let used =
                                   Set.unions
-                                    [ freeBackendTypeVarsInKeyed bodyReplacements,
-                                      freeBackendTypeVars body,
-                                      Set.map backendTypeSubstitutionKeyName (Map.keysSet bodyReplacements),
+                                    [ freeBackendTypeVarAliasNamesInKeyed bodyReplacements,
+                                      freeBackendTypeVarAliasNames body,
+                                      Set.unions (map backendTypeSubstitutionKeyAliasNames (Map.keys bodyReplacements)),
                                       Set.singleton name
                                     ]
                                 name' = freshNameLike name used
