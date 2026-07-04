@@ -15,7 +15,7 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
-import MLF.Frontend.Symbol (symbolIdentityStableName)
+import MLF.Frontend.Symbol (sameSymbolIdentity, symbolIdentityPayloadKey, symbolIdentityStableName)
 import qualified MLF.Frontend.Program.Builtins as Builtins
 import MLF.Frontend.Program.Package
     ( PackageId (..)
@@ -255,7 +255,7 @@ validateModuleInterface interface = do
         forM_ (dataConstructors dataInfo) $ \ctorInfo -> do
             let ctorIdentity = constructorInfoSymbolIdentity dataInfo ctorInfo
             requireIdentityDefinedHere moduleId moduleName0 ctorIdentity
-            unless (ctorOwningTypeIdentity ctorInfo == dataIdentity) $
+            unless (sameSymbolIdentity (ctorOwningTypeIdentity ctorInfo) dataIdentity) $
                 Left
                     ( ProgramInterfaceExportConstructorOwnerMismatch
                         moduleId
@@ -275,7 +275,7 @@ validateModuleInterface interface = do
             let ctorIdentity = constructorInfoSymbolIdentity dataInfo ctorInfo
             requireIdentityKey moduleId identity ctorIdentity
             requireIdentityDefinedHere moduleId moduleName0 ctorIdentity
-            unless (ctorOwningTypeIdentity ctorInfo == dataIdentity) $
+            unless (sameSymbolIdentity (ctorOwningTypeIdentity ctorInfo) dataIdentity) $
                 Left
                     ( ProgramInterfaceExportConstructorOwnerMismatch
                         moduleId
@@ -298,7 +298,7 @@ validateModuleInterface interface = do
                 ownerIdentity = methodInfoOwnerClassSymbolIdentity methodInfo
             requireIdentityKey moduleId identity methodIdentity
             requireIdentityDefinedHere moduleId moduleName0 methodIdentity
-            unless (ownerIdentity == classIdentity) $
+            unless (sameSymbolIdentity ownerIdentity classIdentity) $
                 Left
                     ( ProgramInterfaceClassMethodOwnerMismatch
                         moduleId
@@ -307,7 +307,7 @@ validateModuleInterface interface = do
                     )
 
     validateInstance instanceInfo = do
-        unless (instanceOriginModuleIdentity instanceInfo == moduleInterfaceIdentity interface) $
+        unless (sameSymbolIdentity (instanceOriginModuleIdentity instanceInfo) (moduleInterfaceIdentity interface)) $
             Left (ProgramInterfaceInstanceOriginMismatch moduleId (instanceOriginModuleIdentity instanceInfo))
         requireClassIdentity (instanceInfoClassSymbolIdentity instanceInfo)
 
@@ -317,13 +317,16 @@ validateModuleInterface interface = do
 
 requireIdentityKey :: PackageModuleId -> SymbolIdentity -> SymbolIdentity -> Either ProgramInterfaceError ()
 requireIdentityKey moduleId key payload =
-    unless (key == payload) $
+    unless (sameSymbolIdentity key payload) $
         Left (ProgramInterfaceIdentityKeyMismatch moduleId key payload)
 
 requireIdentityKeySet :: PackageModuleId -> Set.Set SymbolIdentity -> Set.Set SymbolIdentity -> Either ProgramInterfaceError ()
 requireIdentityKeySet moduleId expected actual =
-    unless (expected == actual) $
+    unless (identityPayloadSet expected == identityPayloadSet actual) $
         Left (ProgramInterfaceIdentityKeySetMismatch moduleId (Set.toList expected) (Set.toList actual))
+  where
+    identityPayloadSet =
+        Set.map symbolIdentityPayloadKey
 
 requireIdentityDisplayMap :: PackageModuleId -> Map SymbolIdentity a -> Map SymbolIdentity String -> Either ProgramInterfaceError ()
 requireIdentityDisplayMap moduleId values displays = do

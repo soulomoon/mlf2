@@ -37,6 +37,7 @@ import MLF.Frontend.Program.Types
     , ConstructorInfo (..)
     , DataInfo (..)
     , ExportedTypeInfo (..)
+    , InstanceInfo (..)
     , ModuleExports (..)
     , ProgramError (..)
     , SymbolIdentity
@@ -53,6 +54,7 @@ import MLF.Frontend.Program.Types
     , mkExportedTypeInfo
     , mkTypeView
     , moduleExportsFromMaps
+    , renameSymbolDefiningName
     , valueInfoIdentityName
     )
 import MLF.Frontend.Syntax (SrcTy (..))
@@ -252,6 +254,94 @@ spec = do
                         (singleInterfaceGraph libInterface)
                         (PackageInterface [staleInterface])
                         `shouldBe` Left (ProgramInterfaceIdentityKeyMismatch libId staleKey (dataInfoSymbolIdentity dataInfo))
+
+        it "rejects interface identities whose unique id matches but payload is stale" $ do
+            (_graph, _checked, packageInterface) <- requireCheckedPackageInterface interfacePackage
+            let libId = PackageModuleId testPackageId "Lib"
+            libInterface <- requireInterface libId packageInterface
+            case Map.toList (moduleInterfaceDataByIdentity libInterface) of
+                [] -> expectationFailure "expected interface data entries"
+                (dataIdentity, dataInfo) : _ -> do
+                    let staleDataIdentity = renameSymbolDefiningName "$stale.data" dataIdentity
+                        staleDataKeyInterface =
+                            libInterface
+                                { moduleInterfaceDataByIdentity =
+                                    Map.insert
+                                        staleDataIdentity
+                                        dataInfo
+                                        (Map.delete dataIdentity (moduleInterfaceDataByIdentity libInterface))
+                                }
+                    validatePackageInterface
+                        (singleInterfaceGraph staleDataKeyInterface)
+                        (PackageInterface [staleDataKeyInterface])
+                        `shouldBe` Left
+                            ( ProgramInterfaceIdentityKeyMismatch
+                                libId
+                                staleDataIdentity
+                                (dataInfoSymbolIdentity dataInfo)
+                            )
+            case Map.toList (exportedValueDisplaysByIdentity (moduleInterfaceExports libInterface)) of
+                [] -> expectationFailure "expected exported value displays"
+                (valueIdentity, displayName) : _ -> do
+                    let staleValueIdentity = renameSymbolDefiningName "$stale.value" valueIdentity
+                        exports = moduleInterfaceExports libInterface
+                        staleExports =
+                            exports
+                                { exportedValueDisplaysByIdentity =
+                                    Map.insert
+                                        staleValueIdentity
+                                        displayName
+                                        (Map.delete valueIdentity (exportedValueDisplaysByIdentity exports))
+                                }
+                        staleDisplayInterface =
+                            libInterface {moduleInterfaceExports = staleExports}
+                    validatePackageInterface
+                        (singleInterfaceGraph staleDisplayInterface)
+                        (PackageInterface [staleDisplayInterface])
+                        `shouldBe` Left
+                            ( ProgramInterfaceIdentityKeySetMismatch
+                                libId
+                                (Map.keys (exportedValuesByIdentity exports))
+                                (Map.keys (exportedValueDisplaysByIdentity staleExports))
+                            )
+            let constructorEntries =
+                    [ (dataIdentity, dataInfo, ctorInfo)
+                    | (dataIdentity, dataInfo) <- Map.toList (moduleInterfaceDataByIdentity libInterface)
+                    , ctorInfo : _ <- [dataConstructors dataInfo]
+                    ]
+            case constructorEntries of
+                [] -> expectationFailure "expected interface data with constructors"
+                (dataIdentity, dataInfo, ctorInfo) : _ -> do
+                    let staleOwner = renameSymbolDefiningName "$stale.owner" dataIdentity
+                        staleDataInfo =
+                            dataInfo
+                                { dataConstructors =
+                                    ctorInfo {ctorOwningTypeIdentity = staleOwner}
+                                        : drop 1 (dataConstructors dataInfo)
+                                }
+                        staleOwnerInterface =
+                            libInterface
+                                { moduleInterfaceDataByIdentity =
+                                    Map.insert dataIdentity staleDataInfo (moduleInterfaceDataByIdentity libInterface)
+                                }
+                    validatePackageInterface
+                        (singleInterfaceGraph staleOwnerInterface)
+                        (PackageInterface [staleOwnerInterface])
+                        `shouldBe` Left (ProgramInterfaceExportConstructorOwnerMismatch libId dataIdentity staleOwner)
+            case moduleInterfaceInstances libInterface of
+                [] -> expectationFailure "expected interface instances"
+                instanceInfo : rest -> do
+                    let staleModuleIdentity =
+                            renameSymbolDefiningName "$stale.Lib" (moduleInterfaceIdentity libInterface)
+                        staleInstanceInterface =
+                            libInterface
+                                { moduleInterfaceInstances =
+                                    instanceInfo {instanceOriginModuleIdentity = staleModuleIdentity} : rest
+                                }
+                    validatePackageInterface
+                        (singleInterfaceGraph staleInstanceInterface)
+                        (PackageInterface [staleInstanceInterface])
+                        `shouldBe` Left (ProgramInterfaceInstanceOriginMismatch libId staleModuleIdentity)
 
         it "rejects duplicate constructor identities inside interface data metadata" $ do
             (_graph, _checked, packageInterface) <- requireCheckedPackageInterface constructorInterfacePackage

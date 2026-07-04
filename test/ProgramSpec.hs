@@ -77,6 +77,7 @@ import MLF.Frontend.Program.Types
     )
 import qualified MLF.Frontend.Program.Types as ProgramTypes
 import MLF.Frontend.Program.Prelude (withPrelude, withPreludeLocated)
+import qualified MLF.Frontend.Symbol as Symbol
 import MLF.Frontend.Symbol (renameSymbolDefiningName, symbolIdentityStableName)
 import MLF.Frontend.Syntax (ResolvedSrcTy (..), ResolvedTypeBinderRef, SrcBound (..), SrcType, mkSrcBound, resolvedTypeBinderIdentity, resolvedTypeBinderName, resolvedTypeBinderRefFromIdentity)
 import qualified MLF.Frontend.Syntax as Surface
@@ -177,12 +178,34 @@ poisonResolvedEqIdentityNames resolved =
     poisonClassSymbol =
         poisonSymbolIdentityName
             (\identity -> symbolNamespace identity == SymbolClass && symbolDefiningName identity == "Eq")
-            "$stale_eq_class_identity_name"
+            staleEqClassIdentityName
 
     poisonMethodSymbol =
-        poisonSymbolIdentityName
-            (\identity -> symbolNamespace identity == SymbolMethod && symbolDefiningName identity == "eq")
-            "$stale_eq_method_identity_name"
+        mapResolvedSymbolIdentity poisonMethodIdentity
+
+    poisonMethodIdentity identity
+        | symbolNamespace identity == SymbolMethod && symbolDefiningName identity == "eq" =
+            case Symbol.symbolOwnerIdentity identity of
+                Just (SymbolOwnerClass classIdentity)
+                    | symbolNamespace classIdentity == SymbolClass && symbolDefiningName classIdentity == "Eq" ->
+                        Symbol.symbolIdentityFromParts
+                            (Symbol.symbolUniqueIdentity identity)
+                            (Symbol.symbolNamespace identity)
+                            (Symbol.symbolDefiningModule identity)
+                            staleEqMethodIdentityName
+                            (Just (SymbolOwnerClass (renameEqClassIdentity classIdentity)))
+                _ ->
+                    renameSymbolDefiningName staleEqMethodIdentityName identity
+        | otherwise = identity
+
+    renameEqClassIdentity =
+        renameSymbolDefiningName staleEqClassIdentityName
+
+    staleEqClassIdentityName =
+        "$stale_eq_class_identity_name"
+
+    staleEqMethodIdentityName =
+        "$stale_eq_method_identity_name"
 
 poisonResolvedDataParamBinderName :: String -> String -> ResolvedProgram -> ResolvedProgram
 poisonResolvedDataParamBinderName targetDataName replacement resolved =
