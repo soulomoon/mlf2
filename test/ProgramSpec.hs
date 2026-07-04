@@ -4198,6 +4198,27 @@ spec = do
                 other ->
                     expectationFailure ("expected duplicate binding identity rejection, got " ++ show other)
 
+        it "rejects checked runtime binding identity payload conflicts before run context lookup" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  def helper : Int = 0;"
+                        , "  def main : Int = helper;"
+                        , "}"
+                        ]
+            checked <- requireChecked program
+            mainBinding <- requireCheckedBinding "Main__main" checked
+            duplicateIdentity <- requireTopLevelIdentity mainBinding
+            let conflictingIdentity = renameSymbolDefiningName "$stale_main" duplicateIdentity
+                checked' = replaceCheckedBindingTopLevelIdentity "Main__helper" conflictingIdentity checked
+            case runCheckedProgramOutput checked' of
+                Left (ProgramPipelineError message) -> do
+                    message `shouldSatisfy` isInfixOf "conflicting checked binding identity payload"
+                    message `shouldSatisfy` isInfixOf (symbolIdentityStableName duplicateIdentity)
+                other ->
+                    expectationFailure ("expected binding identity payload conflict rejection, got " ++ show other)
+
         it "rejects duplicate checked runtime module identities before run context lookup" $ do
             program <-
                 requireParsed $

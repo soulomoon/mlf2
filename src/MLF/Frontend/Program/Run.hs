@@ -128,7 +128,7 @@ import MLF.Frontend.Program.Types
     ordinaryValueTypeView,
     resolvedVarFromValueInfo,
   )
-import MLF.Frontend.Symbol (symbolIdentityStableName)
+import MLF.Frontend.Symbol (symbolIdentityPayloadKey, symbolIdentityStableName, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit (..), SrcBound (..), SrcTy (..), SrcType)
 import qualified MLF.Frontend.Syntax.Program as ProgramSyntax
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
@@ -613,14 +613,21 @@ mkRuntimeContext checked = do
 
 uniqueRuntimeInfoByIdentity :: String -> [(SymbolIdentity, a)] -> Either ProgramError (Map.Map SymbolIdentity a)
 uniqueRuntimeInfoByIdentity label =
-  go Map.empty
+  go Map.empty Map.empty
   where
-    go entries [] = Right entries
-    go entries ((identity, info) : rest)
-      | Map.member identity entries =
-          Left (ProgramPipelineError ("run-program duplicate checked " ++ label ++ " identity: " ++ symbolIdentityStableName identity))
-      | otherwise =
-          go (Map.insert identity info entries) rest
+    go _ entries [] = Right entries
+    go seen entries ((identity, info) : rest) =
+      case Map.lookup (symbolUniqueIdentity identity) seen of
+        Just existing
+          | symbolIdentityPayloadKey existing == symbolIdentityPayloadKey identity ->
+              Left (ProgramPipelineError ("run-program duplicate checked " ++ label ++ " identity: " ++ symbolIdentityStableName identity))
+          | otherwise ->
+              Left (ProgramPipelineError ("run-program conflicting checked " ++ label ++ " identity payload: " ++ symbolIdentityStableName identity))
+        Nothing ->
+          go
+            (Map.insert (symbolUniqueIdentity identity) identity seen)
+            (Map.insert identity info entries)
+            rest
 
 uniqueRuntimeInfoByKey :: (Ord key) => String -> (key -> String) -> [(key, a)] -> Either ProgramError (Map.Map key a)
 uniqueRuntimeInfoByKey label keyName =
