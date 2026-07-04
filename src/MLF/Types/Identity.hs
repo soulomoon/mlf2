@@ -77,7 +77,7 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import MLF.Constraint.Types.Graph (NodeId (..))
-import MLF.Frontend.Symbol (SymbolIdentity, SymbolIdentityPayloadKey, SymbolOwnerIdentity (..), symbolDefiningName, symbolIdentityPayloadKey, symbolIdentityStableName, symbolOwnerIdentity, symbolUniqueIdentity)
+import MLF.Frontend.Symbol (SymbolIdentity, SymbolIdentityPayloadKey, SymbolOwnerIdentity (..), symbolDefiningName, symbolIdentityAliasNames, symbolIdentityPayloadKey, symbolIdentityStableName, symbolOwnerIdentity, symbolUniqueIdentity)
 import MLF.Types.Unique
 
 data StructuralTypeBinderRole
@@ -393,11 +393,22 @@ idDetailsAliasNames :: String -> IdDetails -> [String]
 idDetailsAliasNames runtimeName details =
   Set.toList $
     Set.fromList
-      [ runtimeName,
-        idDetailsReferenceName runtimeName details,
-        idDetailsDisplayName runtimeName details,
-        idDetailsStableName details
-      ]
+      ( [ runtimeName,
+          idDetailsReferenceName runtimeName details,
+          idDetailsDisplayName runtimeName details,
+          idDetailsStableName details
+        ]
+          ++ idDetailsSymbolAliasNames details
+      )
+
+idDetailsSymbolAliasNames :: IdDetails -> [String]
+idDetailsSymbolAliasNames details =
+  case details of
+    TopLevelId symbol -> symbolIdentityAliasNames symbol
+    ConstructorId ref -> symbolIdentityAliasNames (constructorRefSymbol ref)
+    MethodId symbol -> symbolIdentityAliasNames symbol
+    PrimitiveId ref -> symbolIdentityAliasNames (primitiveRefSymbol ref)
+    _ -> []
 
 idDetailsAliasMap :: [(String, IdDetails)] -> Map String IdDetails
 idDetailsAliasMap identities =

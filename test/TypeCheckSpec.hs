@@ -1096,7 +1096,9 @@ spec = describe "Phase 7 typecheck" $ do
         Map.lookup "runtime-value" conflictingPayloadAliases `shouldBe` Nothing
         Map.lookup (symbolIdentityStableName (generatedSymbolIdentity 42 SymbolValue "Main" "value" Nothing)) conflictingPayloadAliases `shouldBe` Nothing
         fmap (idDetailsDisplayName "fallback") (Map.lookup "value" conflictingPayloadAliases) `shouldBe` Just "value"
+        fmap (idDetailsDisplayName "fallback") (Map.lookup "Main.value" conflictingPayloadAliases) `shouldBe` Just "value"
         fmap (idDetailsDisplayName "fallback") (Map.lookup "stale-value" conflictingPayloadAliases) `shouldBe` Just "stale-value"
+        fmap (idDetailsDisplayName "fallback") (Map.lookup "Main.stale-value" conflictingPayloadAliases) `shouldBe` Just "stale-value"
         localDetails `shouldBe` idDetailsRenameLocal "$x#1" localDetails
         localDetails `shouldBe` EvidenceId (generatedLocalRef 0 "$x#evidence")
         deferredDetails `shouldNotBe` sameNamedDeferredDetails
