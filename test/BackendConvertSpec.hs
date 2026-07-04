@@ -2505,6 +2505,28 @@ spec = describe "MLF.Backend.Convert" $ do
     convertCheckedProgram checked
       `shouldBe` Left (BackendValidationFailed (BackendUnknownVariable "$stale_maker"))
 
+  it "rejects stale top-level identity payloads even when runtime spelling is unchanged" $ do
+    checked0 <- requireChecked topLevelClosureCallProgram
+    makerBinding <- requireCheckedBinding "Main__maker" checked0
+    mainBinding <- requireCheckedBinding (checkedProgramMain checked0) checked0
+    makerIdentity <- requireTopLevelBindingIdentity makerBinding
+    let staleMakerIdentity = renameSymbolDefiningName "$stale_maker" makerIdentity
+        checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingTerm =
+                      poisonTopLevelTermIdentity
+                        makerIdentity
+                        staleMakerIdentity
+                        "Main__maker"
+                        (checkedBindingTerm mainBinding)
+                  }
+            )
+            checked0
+    convertCheckedProgram checked
+      `shouldBe` Left (BackendValidationFailed (BackendUnknownVariable "Main__maker"))
+
   it "looks up top-level closure demands by resolved identity instead of runtime spelling" $ do
     checked0 <- requireChecked localDirectAliasPartialApplicationBaseProgram
     let checked =

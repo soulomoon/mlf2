@@ -703,7 +703,7 @@ convertCheckedBinding context env checkedModule generator0 binding = do
           }
       bindingEvidenceParams =
         case checkedBindingSymbolIdentity binding of
-          Just symbol -> Map.findWithDefault Set.empty symbol (ccEvidenceValueArgumentsByIdentity context)
+          Just symbol -> lookupSymbolDemand symbol (ccEvidenceValueArgumentsByIdentity context)
           Nothing -> Set.empty
   Right (convertedBinding : liftedBindings, generator')
 
@@ -2186,7 +2186,7 @@ lookupClosureValueArgumentDemand context scope rawHeadTerm =
         Nothing -> Set.empty
     identityDemand contextMap =
       case termHeadSymbolIdentity context headTerm of
-        Just symbol -> Map.findWithDefault Set.empty symbol contextMap
+        Just symbol -> lookupSymbolDemand symbol contextMap
         Nothing -> Set.empty
     deferredDemand contextMap =
       case termHeadDeferredRef headTerm of
@@ -2206,7 +2206,7 @@ lookupEvidenceValueArguments context scope rawHeadTerm =
         Nothing -> Set.empty
     identityDemand contextMap =
       case termHeadSymbolIdentity context headTerm of
-        Just symbol -> Map.findWithDefault Set.empty symbol contextMap
+        Just symbol -> lookupSymbolDemand symbol contextMap
         Nothing -> Set.empty
     deferredDemand contextMap =
       case termHeadDeferredRef headTerm of
@@ -2220,6 +2220,10 @@ termHeadSymbolIdentity _context term =
       resolvedVarSymbolIdentity resolved
     _ ->
       Nothing
+
+lookupSymbolDemand :: SymbolIdentity -> Map SymbolIdentity (Set.Set Int) -> Set.Set Int
+lookupSymbolDemand symbol =
+  fromMaybe Set.empty . lookupSymbolIdentityExact symbol
 
 termHeadDeferredRef :: XmlfTerm -> Maybe DeferredRef
 termHeadDeferredRef term =
