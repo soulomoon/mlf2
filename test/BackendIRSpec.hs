@@ -9,7 +9,7 @@ import MLF.Backend.IR
 import MLF.Backend.StructuralRecursiveData (structuralDataDeclarationMatches)
 import MLF.Constraint.Types.Graph (BaseTy (..), NodeId (..))
 import MLF.Frontend.Program.Builtins (builtinTypeIdentity, builtinValueIdentity)
-import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), symbolIdentityFromParts, symbolIdentityStableName, symbolUniqueIdentity)
+import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), renameSymbolDefiningName, symbolIdentityFromParts, symbolIdentityStableName, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit (..))
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
 import MLF.Types.Identity (deferredRefFromIdentity, IdDetails (DeferredId, LocalId, PrimitiveId, TopLevelId), LocalIdentity (GeneratedLocalId), localRefFromIdentity, StructuralTypeBinderRole (..), TypeBinderIdentity, initialIdentityGenerator, primitiveRefFromSymbol, typeBinderIdentityFromNode, typeBinderIdentityFromStructural, typeBinderIdentityFromUnique, typeBinderIdentityStableName, uniqueIdentityStableName)
@@ -117,6 +117,14 @@ spec = describe "MLF.Backend.IR" $ do
         placeholderTy = BTVarWithIdentity (Just (typeBinderIdentityFromUnique (UniqueIdentity 991205))) "$runtime_placeholder"
         primitiveDetails = PrimitiveId (primitiveRefFromSymbol (builtinValueIdentity primitiveName))
         expr = BackendVarWithIdentity placeholderTy (Just primitiveDetails) "__renamed_string_length"
+    validateBackendProgram (programWithMainExpr expr) `shouldBe` Right ()
+
+  it "looks up stale-named primitive runtime variables by inventory identity" $ do
+    let primitiveName = PrimitiveInventory.nativeAndPrimitiveName
+        primitiveTy = BTArrow boolTy (BTArrow boolTy boolTy)
+        stalePrimitiveIdentity = renameSymbolDefiningName "$stale_and" (builtinValueIdentity primitiveName)
+        primitiveDetails = PrimitiveId (primitiveRefFromSymbol stalePrimitiveIdentity)
+        expr = BackendVarWithIdentity primitiveTy (Just primitiveDetails) "$stale_and"
     validateBackendProgram (programWithMainExpr expr) `shouldBe` Right ()
 
   it "types primitive Prelude data heads by identity during backend validation" $ do
@@ -299,6 +307,9 @@ spec = describe "MLF.Backend.IR" $ do
     validateBackendProgram identityMainProgram
       `shouldBe` Right ()
 
+    validateBackendProgram conflictingIdentityMainProgram
+      `shouldBe` Left (BackendMainNotFound "$stale-main")
+
   it "does not find an identity-bearing main binding by stable identity name without metadata" $ do
     validateBackendProgram identityMainStableNameProgram
       `shouldBe` Left (BackendMainNotFound (symbolIdentityStableName duplicateValueIdentity))
@@ -328,6 +339,9 @@ spec = describe "MLF.Backend.IR" $ do
       `shouldBe` Left (BackendVariableTypeMismatch "helper" intTy (BTVar "a"))
 
     validateBackendProgram mismatchedGlobalBindingIdentityProgram
+      `shouldBe` Left (BackendUnknownVariable "helper")
+
+    validateBackendProgram conflictingGlobalBindingPayloadProgram
       `shouldBe` Left (BackendUnknownVariable "helper")
 
     validateBackendProgram identityGlobalReferencedByNameOnlyProgram
@@ -1858,6 +1872,9 @@ spec = describe "MLF.Backend.IR" $ do
     validateBackendProgram mismatchedConstructorIdentityProgram
       `shouldBe` Left (BackendUnknownConstructor "Box")
 
+    validateBackendProgram conflictingConstructorIdentityReferenceProgram
+      `shouldBe` Left (BackendUnknownConstructor "Box")
+
     validateBackendProgram identityConstructorReferencedByNameOnlyProgram
       `shouldBe` Left (BackendUnknownConstructor "Box")
 
@@ -1979,6 +1996,13 @@ mismatchedGlobalBindingIdentityProgram =
   programWithBindings
     [ bindingWithIdentity "helper" duplicateValueIdentity,
       mainBinding (BackendVarWithIdentity intTy (Just (TopLevelId otherValueIdentity)) "helper")
+    ]
+
+conflictingGlobalBindingPayloadProgram :: BackendProgram
+conflictingGlobalBindingPayloadProgram =
+  programWithBindings
+    [ bindingWithIdentity "helper" duplicateValueIdentity,
+      mainBinding (BackendVarWithIdentity intTy (Just (TopLevelId conflictingValueIdentity)) "helper")
     ]
 
 identityGlobalReferencedByNameOnlyProgram :: BackendProgram
@@ -2417,6 +2441,10 @@ identityMainProgram =
       backendProgramMainWithIdentity = "$stale-main"
     }
 
+conflictingIdentityMainProgram :: BackendProgram
+conflictingIdentityMainProgram =
+  identityMainProgram {backendProgramMainIdentity = Just conflictingValueIdentity}
+
 identityMainNameOnlyProgram :: BackendProgram
 identityMainNameOnlyProgram =
   BackendProgram
@@ -2535,6 +2563,12 @@ mismatchedConstructorIdentityProgram =
   programWithDataAndMainExpr
     [BackendData "Box" [] [constructorWithIdentity "Box" duplicateConstructorIdentity]]
     (BackendConstructWithIdentity boxTy (Just otherConstructorIdentity) "Box" [intLit 1])
+
+conflictingConstructorIdentityReferenceProgram :: BackendProgram
+conflictingConstructorIdentityReferenceProgram =
+  programWithDataAndMainExpr
+    [BackendData "Box" [] [constructorWithIdentity "Box" duplicateConstructorIdentity]]
+    (BackendConstructWithIdentity boxTy (Just conflictingConstructorIdentity) "Box" [intLit 1])
 
 identityConstructorReferencedByNameOnlyProgram :: BackendProgram
 identityConstructorReferencedByNameOnlyProgram =

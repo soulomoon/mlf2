@@ -556,7 +556,7 @@ backendProgramMainExists :: BackendProgram -> [BackendBinding] -> Bool
 backendProgramMainExists program bindings =
   case backendProgramMainIdentity program of
     Just identity ->
-      any ((== Just identity) . backendBindingIdentity) bindings
+      any (maybe False (symbolIdentityPayloadMatches identity) . backendBindingIdentity) bindings
     Nothing ->
       any
         ( \binding ->
@@ -613,10 +613,6 @@ backendRuntimePrimitiveTypesWithHeadIdentities headIdentities =
       )
       initialIdentityGenerator
       PrimitiveInventory.primitiveValueSpecs
-
-backendRuntimePrimitiveTypesByIdentity :: Map.Map SymbolIdentity BackendType
-backendRuntimePrimitiveTypesByIdentity =
-  backendRuntimePrimitiveTypesByIdentityFrom backendRuntimePrimitiveTypes
 
 backendRuntimePrimitiveTypesByIdentityFrom :: Map.Map String BackendType -> Map.Map SymbolIdentity BackendType
 backendRuntimePrimitiveTypesByIdentityFrom runtimePrimitiveTypes =
@@ -848,9 +844,9 @@ lookupLocalCallableBindingKindByIdentity context0 key
 
 lookupGlobalCallableBindingKindByIdentity :: BackendValidationContext -> SymbolIdentity -> Maybe BackendCallableBindingKind
 lookupGlobalCallableBindingKindByIdentity context0 identity
-  | Set.member identity (bvcClosureGlobalsByIdentity context0) =
+  | memberSymbolIdentityExact identity (bvcClosureGlobalsByIdentity context0) =
       Just BackendCallableBindingClosure
-  | Map.member identity (bvcGlobalsByIdentity context0) =
+  | maybe False (const True) (lookupSymbolIdentityExact identity (bvcGlobalsByIdentity context0)) =
       Just BackendCallableBindingDirect
   | otherwise =
       Nothing
@@ -1217,7 +1213,9 @@ primitiveRuntimeVariableTypeMatches mbIdentity _name expectedTy actualTy
     primitiveRuntimeVariableReference Nothing =
       False
     primitiveRuntimeVariableReference (Just details) =
-      maybe False (`Map.member` backendRuntimePrimitiveTypesByIdentity) (idDetailsSymbolIdentity details)
+      case idDetailsSymbolIdentity details >>= PrimitiveInventory.primitiveValueNameByIdentity of
+        Just primitiveName -> Map.member primitiveName backendRuntimePrimitiveTypes
+        Nothing -> False
 
     go expected actual
       | structuralMuTypesHaveBinderIdentityMismatch expected actual =
@@ -1624,7 +1622,7 @@ backendTypeMatchesWith typeVariableInstantiation typeBounds mbDataDecls expected
 
     lookupDataByIdentity identity = do
       dataDeclsByIdentity <- backendDataScopeByIdentity <$> mbDataDecls
-      Map.lookup identity dataDeclsByIdentity
+      lookupSymbolIdentityExact identity dataDeclsByIdentity
 
     lookupDataByStructuralSelfIdentity muIdentity = do
       unique <- structuralSelfIdentityUnique muIdentity
@@ -1704,12 +1702,18 @@ lookupBackendVariable context0 mbIdentity name =
       | Just key <- idDetailsLocalKey details ->
           Map.lookup key (bvcLocalsByIdentity context0)
       | Just identity <- idDetailsSymbolIdentity details ->
-          Map.lookup identity (bvcGlobalsByIdentity context0)
+          lookupSymbolIdentityExact identity (bvcGlobalsByIdentity context0)
+            <|> lookupPrimitiveRuntimeVariable context0 identity
     _ ->
       lookupByName
   where
     lookupByName =
       Map.lookup name (bvcLocals context0) <|> Map.lookup name (bvcGlobals context0)
+
+lookupPrimitiveRuntimeVariable :: BackendValidationContext -> SymbolIdentity -> Maybe BackendType
+lookupPrimitiveRuntimeVariable context0 identity = do
+  primitiveName <- PrimitiveInventory.primitiveValueNameByIdentity identity
+  lookupSymbolIdentityExact (builtinValueIdentity primitiveName) (bvcGlobalsByIdentity context0)
 
 idDetailsLocalKey :: IdDetails -> Maybe BackendLocalKey
 idDetailsLocalKey =
@@ -1965,7 +1969,7 @@ extendTypeBounds context0 bounds =
 lookupBackendConstructorInfo :: BackendValidationContext -> Maybe SymbolIdentity -> String -> Maybe BackendConstructorInfo
 lookupBackendConstructorInfo context0 mbIdentity name =
   case mbIdentity of
-    Just identity -> Map.lookup identity (bvcConstructorsByIdentity context0)
+    Just identity -> lookupSymbolIdentityExact identity (bvcConstructorsByIdentity context0)
     Nothing -> Map.lookup name (bvcConstructors context0)
 
 canonicalizeBackendTypeDataHeads :: BackendValidationContext -> BackendType -> BackendType
@@ -2011,7 +2015,7 @@ canonicalizeBackendTypeDataHeadsWith dataDecls dataDeclsByIdentity =
     canonicalHead mbIdentity name =
       case mbIdentity of
         Just identity ->
-          case Map.lookup identity dataDeclsByIdentity of
+          case lookupSymbolIdentityExact identity dataDeclsByIdentity of
             Just dataDecl -> (backendDataIdentity dataDecl <|> mbIdentity, backendDataName dataDecl)
             Nothing -> (mbIdentity, name)
         Nothing ->
@@ -2569,6 +2573,28 @@ requireUniqueSymbolIdentities label mkError =
             else Left (BackendConflictingIdentityPayload label (symbolIdentityStableName identity))
       | otherwise =
           go (Map.insert (symbolUniqueIdentity identity) identity seen) rest
+
+symbolIdentityPayloadMatches :: SymbolIdentity -> SymbolIdentity -> Bool
+symbolIdentityPayloadMatches left right =
+  symbolUniqueIdentity left == symbolUniqueIdentity right
+    && symbolIdentityPayloadKey left == symbolIdentityPayloadKey right
+
+lookupSymbolIdentityExact :: SymbolIdentity -> Map.Map SymbolIdentity a -> Maybe a
+lookupSymbolIdentityExact identity entries =
+  case Map.lookupGE identity entries of
+    Just (storedIdentity, value)
+      | symbolIdentityPayloadMatches storedIdentity identity ->
+          Just value
+    _ ->
+      Nothing
+
+memberSymbolIdentityExact :: SymbolIdentity -> Set.Set SymbolIdentity -> Bool
+memberSymbolIdentityExact identity entries =
+  case Set.lookupGE identity entries of
+    Just storedIdentity ->
+      symbolIdentityPayloadMatches storedIdentity identity
+    Nothing ->
+      False
 
 data TermBinderKey
   = TermBinderIdentity BackendLocalKey
