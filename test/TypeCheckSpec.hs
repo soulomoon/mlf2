@@ -1339,6 +1339,22 @@ spec = describe "Phase 7 typecheck" $ do
                 resolvedVarType occurrence' `shouldBe` expectedTy
             other -> expectationFailure ("Expected nested freshened type abstractions, got: " ++ show other)
 
+    it "freshens type abstraction displays away from visible stable aliases" $ do
+        let reserved = typeRef 61 "captured"
+            stableAlias = typeBinderIdentityStableName (typeBinderRefIdentity reserved)
+            binder = typeRef 62 stableAlias
+            captured = resolvedLocal "$env#0" "runtime-env" (tVarWithRef reserved)
+            env = mkTypeCheckEnvWithResolvedTerms [(captured, tVarWithRef reserved)] Map.empty
+            param = resolvedLocal "$x#0" "runtime-x" (tVarWithRef binder)
+            term = eTyAbsWithRef binder Nothing (ELam param (EVarNode param))
+        case freshenTypeAbsAgainstEnv env term of
+            ETyAbsRef binder' Nothing (ELam param' (EVarNode occurrence')) -> do
+                typeBinderRefIdentity binder' `shouldBe` typeBinderRefIdentity binder
+                typeBinderRefName binder' `shouldNotBe` stableAlias
+                resolvedVarType param' `shouldBe` tVarWithRef binder'
+                resolvedVarType occurrence' `shouldBe` tVarWithRef binder'
+            other -> expectationFailure ("Expected stable-alias freshened type abstraction, got: " ++ show other)
+
     it "typechecks applications" $ do
         let term = EApp (mkTestLocalLam "x" intTy (mkTestDeferredVar "x")) (ELit (LInt 1))
         typeCheck term `shouldBe` Right intTy

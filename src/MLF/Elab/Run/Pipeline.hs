@@ -136,7 +136,7 @@ import MLF.Frontend.Program.Types (mergeSymbolIdentityMaps, mergeTypeBinderIdent
 import MLF.Frontend.Symbol (SymbolIdentity, lookupSymbolIdentityAlias, symbolIdentityAliasMap, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (NormSrcType, NormSurfaceExpr, StructBound, VarName)
 import qualified MLF.Frontend.Syntax as Surface
-import MLF.Reify.TypeOps (freeTypeVarRefsType, freeTypeVarsType, freshNameLike, substTypeCaptureRef)
+import MLF.Reify.TypeOps (freeTypeVarRefsType, freshNameLike, substTypeCaptureRef)
 import MLF.Util.Timing
   ( TimingConfig,
     emitProgramOperationMetricIO,
@@ -1580,9 +1580,9 @@ retainedChildRepresentativeTerm initialTcEnv term =
 retainedChildRepresentativeScheme :: XmlfTerm -> ElabType -> ElabScheme
 retainedChildRepresentativeScheme term ty =
   let generator0 = identityGeneratorAfterTerm term
-      used0 = freeTypeVarsType ty
+      used0 = freeTypeVarAliasNamesType ty
       (outerRef, generator1) = freshTypeBinderRefFromNames used0 generator0
-      used1 = Set.insert (typeBinderRefName outerRef) used0
+      used1 = typeBinderRefAliasNames outerRef `Set.union` used0
       (innerRef, _generator2) = freshTypeBinderRefFromNames used1 generator1
    in mkElabSchemeWithRefs [(outerRef, Nothing), (innerRef, Nothing)] ty
 
@@ -1603,7 +1603,7 @@ freshenTypeAbsAgainstEnv env term0 =
     go generator used visibleRefs term = case term of
       ETyAbsRef ref mb body ->
         let name = typeBinderRefName ref
-            usedForBinder = Set.union used (maybe Set.empty freeTypeVarsType mb)
+            usedForBinder = Set.union used (maybe Set.empty freeTypeVarAliasNamesType mb)
             refInScope =
               any (typeBinderRefsSameIdentity ref) visibleRefs
             needsFreshening =
@@ -1619,13 +1619,13 @@ freshenTypeAbsAgainstEnv env term0 =
                       bodyRenamed = renameTypeVarInTerm ref freshRef body
                    in (freshRef, generator1, bodyRenamed)
                 else (ref, generator, body)
-            usedBody = Set.insert (typeBinderRefName ref') usedForBinder
+            usedBody = typeBinderRefAliasNames ref' `Set.union` usedForBinder
             visibleBody = unionTypeRefs [ref'] visibleRefs
             (body', generator'') = go generator' usedBody visibleBody bodyForName
          in (ETyAbsRef ref' mb body', generator'')
       ELam resolved body ->
         let ty = resolvedVarType resolved
-            used' = Set.union used (freeTypeVarsType ty)
+            used' = Set.union used (freeTypeVarAliasNamesType ty)
             visibleRefs' = unionTypeRefs (freeTypeVarRefsType ty) visibleRefs
             (body', generator') = go generator used' visibleRefs' body
          in (ELam resolved body', generator')
@@ -1635,7 +1635,7 @@ freshenTypeAbsAgainstEnv env term0 =
          in (EApp f' a', generator'')
       ELet resolved sch rhs body ->
         let ty = schemeToType sch
-            used' = Set.union used (freeTypeVarsType ty)
+            used' = Set.union used (freeTypeVarAliasNamesType ty)
             visibleRefs' = unionTypeRefs (freeTypeVarRefsType ty) visibleRefs
             (rhs', generator') = go generator used' visibleRefs' rhs
             (body', generator'') = go generator' used' visibleRefs' body
@@ -1678,7 +1678,15 @@ insertPipelineTypeSummary ref ty env summary =
 pipelineFreshenReservedTypeVars :: PipelineTypeCheckEnvSummary -> Set.Set String
 pipelineFreshenReservedTypeVars summary =
   freeVarCountsNames (ptcesTermFreeVars summary)
-    `Set.union` Set.fromList (map typeBinderRefName (ptcesTypeRefs summary))
+    `Set.union` typeVarRefAliasNames (ptcesTypeRefs summary)
+
+freeTypeVarAliasNamesType :: Ty v -> Set.Set String
+freeTypeVarAliasNamesType =
+  typeVarRefAliasNames . freeTypeVarRefsType
+
+typeVarRefAliasNames :: [TypeBinderRef] -> Set.Set String
+typeVarRefAliasNames =
+  Set.unions . map typeBinderRefAliasNames
 
 pipelineVisibleTypeVarRefs :: PipelineTypeCheckEnvSummary -> [TypeBinderRef]
 pipelineVisibleTypeVarRefs summary =
@@ -1701,7 +1709,7 @@ freeVarCountsRefs (FreeVarCounts counts) = map fst counts
 
 freeVarCountsNames :: FreeVarCounts -> Set.Set String
 freeVarCountsNames =
-  Set.fromList . map typeBinderRefName . freeVarCountsRefs
+  typeVarRefAliasNames . freeVarCountsRefs
 
 replaceTypeFreeVars :: Maybe ElabType -> ElabType -> FreeVarCounts -> FreeVarCounts
 replaceTypeFreeVars oldTy newTy =
