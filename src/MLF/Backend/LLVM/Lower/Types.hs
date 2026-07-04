@@ -44,6 +44,7 @@ module MLF.Backend.LLVM.Lower.Types
     constructorTagOffset,
     constructorWordBytes,
     lowerLocalKey,
+    lookupProgramBindingByIdentityExact,
     mergeConstructedValues,
     pattern LowerValue,
   )
@@ -58,7 +59,7 @@ import Data.Set (Set)
 import MLF.Backend.IR
 import MLF.Backend.IR.Types (backendTermRefMatches, closureEntryRefMatches, symbolRefMatches)
 import MLF.Backend.LLVM.Syntax (LLVMBasicBlock, LLVMFunction, LLVMInstruction, LLVMOperand, LLVMType)
-import MLF.Frontend.Symbol (SymbolIdentity)
+import MLF.Frontend.Symbol (SymbolIdentity, lookupSymbolIdentityExact)
 import MLF.Types.Identity (DeferredRef, EnvRef, IdDetails (..), IdentityGenerator, LocalRef, UniqueIdentity)
 
 data BackendLLVMError
@@ -144,6 +145,10 @@ backendBindingRefIdentity =
 bindingInfoRef :: BindingInfo -> BackendBindingRef
 bindingInfoRef =
   biRef
+
+lookupProgramBindingByIdentityExact :: ProgramBase -> Maybe SymbolIdentity -> Maybe BindingInfo
+lookupProgramBindingByIdentityExact base mbIdentity =
+  mbIdentity >>= (`lookupSymbolIdentityExact` pbBindingsByIdentity base)
 
 instance Eq BindingInfo where
   left == right =

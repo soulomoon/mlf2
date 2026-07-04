@@ -5962,7 +5962,7 @@ lookupNonLocalBindingInfo base mbIdentity =
     (Just _, _) ->
       Nothing
     (_, Just identity) ->
-      Map.lookup identity (pbBindingsByIdentity base)
+      lookupProgramBindingByIdentityExact base (Just identity)
     _ ->
       Nothing
 
@@ -6747,7 +6747,7 @@ lookupBindingRef base ref =
   case Map.lookup ref (pbBindingsByRef base) of
     Just binding -> Just binding
     Nothing ->
-      backendBindingRefIdentity ref >>= (`Map.lookup` pbBindingsByIdentity base)
+      lookupProgramBindingByIdentityExact base (backendBindingRefIdentity ref)
 
 reachableBindings :: ProgramBase -> BindingInfo -> Either BackendLLVMError [BindingInfo]
 reachableBindings base mainBinding =
@@ -6780,7 +6780,7 @@ requireProgramMainBinding :: ProgramBase -> BackendProgram -> Either BackendLLVM
 requireProgramMainBinding base program =
   case backendProgramMainIdentity program of
     Just identity ->
-      case Map.lookup identity (pbBindingsByIdentity base) of
+      case lookupProgramBindingByIdentityExact base (Just identity) of
         Just binding -> Right binding
         Nothing -> Left (BackendLLVMUnknownFunction (backendProgramMain program))
     Nothing ->
@@ -6790,7 +6790,7 @@ requireSpecRequestBinding :: ProgramBase -> SpecRequest -> Either BackendLLVMErr
 requireSpecRequestBinding base request =
   case srBindingIdentity request of
     Just identity ->
-      case Map.lookup identity (pbBindingsByIdentity base) of
+      case lookupProgramBindingByIdentityExact base (Just identity) of
         Just binding -> Right binding
         Nothing -> Left (BackendLLVMUnknownFunction (srBindingName request))
     Nothing ->
@@ -7787,7 +7787,7 @@ lookupSpecializationBinding base mbIdentity =
     (Just _, _) ->
       Nothing
     (_, Just identity) ->
-      Map.lookup identity (pbBindingsByIdentity base)
+      lookupProgramBindingByIdentityExact base (Just identity)
     _ ->
       Nothing
 
@@ -9782,7 +9782,7 @@ lookupFunctionFormByRef env mbRef =
 
 lookupFunctionFormByIdentity :: ProgramEnv -> Maybe SymbolIdentity -> Maybe FunctionForm
 lookupFunctionFormByIdentity env mbIdentity =
-  biForm <$> (mbIdentity >>= (`Map.lookup` pbBindingsByIdentity (peBase env)))
+  biForm <$> lookupProgramBindingByIdentityExact (peBase env) mbIdentity
 
 functionFormFromType :: BackendType -> FunctionForm
 functionFormFromType ty =

@@ -54,6 +54,7 @@ import MLF.Backend.LLVM.Lower.Types
     LocalFunction (..),
     LowerValueKind (..),
     NativeRenderSpec (..),
+    ProgramBase (..),
     SpecRequest (..),
     Specialization (..),
     Wrapper (..),
@@ -62,6 +63,7 @@ import MLF.Backend.LLVM.Lower.Types
     backendBindingRefFromIdentity,
     constructedFieldValueKind,
     constructedValueForConstructor,
+    lookupProgramBindingByIdentityExact,
     mergeConstructedValues,
   )
 import MLF.Backend.LLVM.Ppr (renderLLVMModule)
@@ -73,7 +75,7 @@ import MLF.Frontend.Syntax (Lit (..))
 import MLF.Pipeline (checkProgram)
 import qualified MLF.Program.CLI as CLI
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
-import MLF.Types.Identity (IdDetails (..), LocalIdentity (..), TypeBinderIdentity, idDetailsStableName, localRefFromIdentity, primitiveRefFromSymbol, typeBinderIdentityFromUnique, typeBinderIdentityStableName)
+import MLF.Types.Identity (IdDetails (..), LocalIdentity (..), TypeBinderIdentity, idDetailsStableName, initialIdentityGenerator, localRefFromIdentity, primitiveRefFromSymbol, typeBinderIdentityFromUnique, typeBinderIdentityStableName)
 import MLF.Types.Unique (UniqueIdentity (..))
 import Parity.ProgramMatrix
   ( ProgramMatrixCase (..),
@@ -2269,6 +2271,21 @@ spec = describe "MLF.Backend.LLVM" $ do
     stableForm `shouldNotBe` nameOnlyForm
     stableBinding `shouldBe` staleBinding
     stableBinding `shouldNotBe` nameOnlyBinding
+
+  it "does not resolve program bindings through stale identity payloads" $ do
+    let binding = BindingInfo (backendBindingRefFromIdentity staleHelperIdentity) (Just staleHelperIdentity) "helper" stableForm False
+        stableForm = FunctionForm [] [] [] Set.empty (intLit 41) intTy
+        base =
+          ProgramBase
+            { pbBindingsByIdentity = Map.singleton staleHelperIdentity binding,
+              pbBindingsByRef = Map.empty,
+              pbBindingOrder = [],
+              pbConstructorsByIdentity = Map.empty,
+              pbDataByIdentity = Map.empty,
+              pbIdentityGenerator = initialIdentityGenerator
+            }
+    lookupProgramBindingByIdentityExact base (Just staleHelperIdentity) `shouldBe` Just binding
+    lookupProgramBindingByIdentityExact base (Just conflictingStaleHelperIdentity) `shouldBe` Nothing
 
   it "compares closure capture slots by identity when names are stale" $ do
     let captureIdentity = LocalId (localRefFromIdentity (GeneratedLocalId (UniqueIdentity 991709)) "captured")
@@ -6597,6 +6614,10 @@ staleMainIdentity =
 staleHelperIdentity :: SymbolIdentity
 staleHelperIdentity =
   symbolIdentityFromParts (UniqueIdentity 990012) SymbolValue "Main" "helper" Nothing
+
+conflictingStaleHelperIdentity :: SymbolIdentity
+conflictingStaleHelperIdentity =
+  renameSymbolDefiningName "$stale-helper" staleHelperIdentity
 
 
 nativeMainNameCollisionProgram :: BackendProgram
