@@ -87,6 +87,7 @@ import MLF.Types.Identity
     identityGeneratorAfter,
     initialIdentityGenerator,
     localIdentityStableUnique,
+    lookupTypeBinderIdentityAlias,
     renameLocalRef,
     typeBinderIdentityFromStructural,
   )
@@ -2970,7 +2971,7 @@ constructorInstBinders scope ctorInfo quantifiedTy =
   traverse binderEntry (fst (splitForalls quantifiedTy))
   where
     binderEntry (name, _) =
-      case Map.lookup name binderIdentities of
+      case lookupTypeBinderIdentityAlias binderIdentities name of
         Just identity -> Right (name, identity)
         Nothing ->
           Left (ProgramPipelineError ("constructor instantiation binder `" ++ name ++ "` is missing identity"))
