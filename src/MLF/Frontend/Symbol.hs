@@ -59,6 +59,20 @@ data SymbolIdentity
   = SymbolIdentity UniqueIdentity SymbolNamespace String String (Maybe SymbolOwnerIdentity)
   deriving (Show)
 
+data SymbolIdentityPayloadKey
+  = SymbolIdentityPayloadKey
+      UniqueIdentity
+      SymbolNamespace
+      String
+      String
+      (Maybe SymbolOwnerIdentityPayloadKey)
+  deriving (Eq, Ord, Show)
+
+data SymbolOwnerIdentityPayloadKey
+  = SymbolOwnerTypePayloadKey SymbolIdentityPayloadKey
+  | SymbolOwnerClassPayloadKey SymbolIdentityPayloadKey
+  deriving (Eq, Ord, Show)
+
 symbolUniqueIdentity :: SymbolIdentity -> UniqueIdentity
 symbolUniqueIdentity (SymbolIdentity unique _ _ _ _) =
   unique
@@ -78,6 +92,21 @@ symbolDefiningName (SymbolIdentity _ _ _ name _) =
 symbolOwnerIdentity :: SymbolIdentity -> Maybe SymbolOwnerIdentity
 symbolOwnerIdentity (SymbolIdentity _ _ _ _ owner) =
   owner
+
+symbolIdentityPayloadKey :: SymbolIdentity -> SymbolIdentityPayloadKey
+symbolIdentityPayloadKey identity =
+  SymbolIdentityPayloadKey
+    (symbolUniqueIdentity identity)
+    (symbolNamespace identity)
+    (symbolDefiningModule identity)
+    (symbolDefiningName identity)
+    (symbolOwnerIdentityPayloadKey <$> symbolOwnerIdentity identity)
+
+symbolOwnerIdentityPayloadKey :: SymbolOwnerIdentity -> SymbolOwnerIdentityPayloadKey
+symbolOwnerIdentityPayloadKey owner =
+  case owner of
+    SymbolOwnerType identity -> SymbolOwnerTypePayloadKey (symbolIdentityPayloadKey identity)
+    SymbolOwnerClass identity -> SymbolOwnerClassPayloadKey (symbolIdentityPayloadKey identity)
 
 symbolIdentityFromParts :: UniqueIdentity -> SymbolNamespace -> String -> String -> Maybe SymbolOwnerIdentity -> SymbolIdentity
 symbolIdentityFromParts =
@@ -222,13 +251,13 @@ symbolIdentityAliasMapWith identities =
   Map.fromList
     [ (alias, identity)
     | (alias, identitiesForAlias) <- Map.toList identitiesByAlias,
-      [identity] <- [Set.toList identitiesForAlias]
+      [(_, identity)] <- [Set.toList identitiesForAlias]
     ]
   where
     identitiesByAlias =
       Map.fromListWith
         Set.union
-        [ (alias, Set.singleton identity)
+        [ (alias, Set.singleton (symbolIdentityPayloadKey identity, identity))
         | (identity, names) <- identities,
           alias <- symbolIdentityAliasNamesWith names identity
         ]

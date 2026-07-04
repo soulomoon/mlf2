@@ -8,7 +8,12 @@ import qualified MLF.Frontend.Program.Builtins as Builtins
 import MLF.Frontend.Program.Elaborate (lowerType, mkElaborateScope, sourceTypeViewInScope)
 import MLF.Frontend.Program.Types
 import MLF.Frontend.Syntax.Program (ClassConstraintF (..), resolvedExportTypeRefFromSymbols, refDisplayName)
-import MLF.Frontend.Symbol (symbolIdentityAliasMapWith, symbolIdentityStableName, symbolRefMatches)
+import qualified MLF.Frontend.Symbol as Symbol
+import MLF.Frontend.Symbol
+  ( symbolIdentityAliasMapWith,
+    symbolIdentityStableName,
+    symbolRefMatches,
+  )
 import MLF.Frontend.Syntax
   ( ResolvedSrcTy (..),
     ResolvedTypeBinderRef,
@@ -238,6 +243,21 @@ spec = do
       Map.lookup (symbolIdentityStableName rightIdentity) aliases `shouldBe` Just rightIdentity
       Map.lookup "VisibleLeft" aliases `shouldBe` Just leftIdentity
       Map.lookup "VisibleRight" aliases `shouldBe` Just rightIdentity
+
+    it "does not choose an arbitrary symbol alias payload when one identity has conflicting metadata" $ do
+      let originalIdentity = generatedSymbolIdentity 303 SymbolType "Lib" "Token" Nothing
+          conflictingIdentity = generatedSymbolIdentity 303 SymbolType "Other" "StaleToken" Nothing
+          aliases =
+            symbolIdentityAliasMapWith
+              [ (originalIdentity, ["VisibleOriginal"]),
+                (conflictingIdentity, ["VisibleRenamed"])
+              ]
+
+      Map.lookup (symbolIdentityStableName originalIdentity) aliases `shouldBe` Nothing
+      fmap Symbol.symbolDefiningModule (Map.lookup "VisibleOriginal" aliases)
+        `shouldBe` Just "Lib"
+      fmap Symbol.symbolDefiningName (Map.lookup "VisibleRenamed" aliases)
+        `shouldBe` Just "StaleToken"
 
     it "keeps method type head identities in type views" $ do
       let stableToken = symbolIdentityStableName tokenTypeIdentity
