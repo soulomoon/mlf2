@@ -191,7 +191,7 @@ import MLF.Frontend.Program.Types
     typeViewHeadIdentityForAlias,
     typeViewMentionedHeadIdentities,
   )
-import MLF.Frontend.Symbol (symbolIdentityAliasMap, symbolIdentityAliasNames, symbolIdentityPayloadKey, symbolIdentityStableName, symbolUniqueIdentity)
+import MLF.Frontend.Symbol (sameSymbolIdentity, symbolIdentityAliasMap, symbolIdentityAliasNames, symbolIdentityPayloadKey, symbolIdentityStableName, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit, SrcBound (..), SrcTy (..), SrcType)
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
 import MLF.Types.Identity (DeferredRef, IdDetails (..), IdentityGenerator, LocalRef, StructuralTypeBinderRole (..), UniqueIdentity (..), advanceIdentityGeneratorPast, deferredRefIdentity, deferredRefName, freshDeferredRef, freshIdentity, freshLocalRef, idDetailsGeneratedIdentities, idDetailsSymbolIdentity, identityGeneratorAfter, symbolGeneratedIdentities, typeBinderIdentityAliasMap, typeBinderIdentityFromStructural, typeBinderIdentityNode, typeBinderIdentityStructural)
@@ -5816,7 +5816,7 @@ data BackendStructuralDataHead
 
 constructorDataNameMatches :: ConvertContext -> ConstructorMeta -> BackendStructuralDataHead -> Bool
 constructorDataNameMatches _context constructorMeta (BackendStructuralDataHeadByIdentity resultIdentity) =
-  resultIdentity == dataInfoSymbol (dmInfo (cmData constructorMeta))
+  sameSymbolIdentity resultIdentity (dataInfoSymbol (dmInfo (cmData constructorMeta)))
 constructorDataNameMatches context constructorMeta (BackendStructuralDataHeadBySelfIdentity resultIdentity resultDataName) =
   case structuralSelfIdentityUnique (Just resultIdentity) of
     Just unique ->
@@ -5845,7 +5845,7 @@ structuralDataNameMatches :: ConvertContext -> DataMeta -> String -> Bool
 structuralDataNameMatches context dataMeta resultDataName =
   case dataMetaByStructuralName context resultDataName of
     Just resolvedDataMeta ->
-      dataInfoSymbol (dmInfo resolvedDataMeta) == dataInfoSymbol (dmInfo dataMeta)
+      sameSymbolIdentity (dataInfoSymbol (dmInfo resolvedDataMeta)) (dataInfoSymbol (dmInfo dataMeta))
     Nothing -> False
 
 backendTypeStructuralDataHead :: BackendType -> Either BackendConversionError BackendStructuralDataHead
