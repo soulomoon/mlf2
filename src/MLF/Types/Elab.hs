@@ -72,6 +72,7 @@ module MLF.Types.Elab (
     typeBinderRefIdentity,
     typeBinderRefNode,
     typeBinderRefName,
+    typeBinderRefAliasNames,
     typeBinderRefsSameIdentity,
     typeBinderRefsSameIdentityAndName,
     renameTypeBinderRef,
@@ -213,6 +214,7 @@ import MLF.Types.Identity
     , lookupTypeBinderIdentityAlias
     , renameDeferredRef
     , symbolGeneratedIdentities
+    , typeBinderIdentityAliasNames
     , typeBinderGeneratedIdentities
     , typeBinderIdentityFromNode
     , typeBinderIdentityFromUnique
@@ -494,6 +496,10 @@ typeBinderRefFromIdentity identity name =
 typeBinderRefNode :: TypeBinderRef -> Maybe NodeId
 typeBinderRefNode =
     typeBinderIdentityNode . typeBinderRefIdentity
+
+typeBinderRefAliasNames :: TypeBinderRef -> Set.Set String
+typeBinderRefAliasNames ref =
+    Set.fromList (typeBinderIdentityAliasNames (typeBinderRefName ref) (typeBinderRefIdentity ref))
 
 renameTypeBinderRef :: String -> TypeBinderRef -> TypeBinderRef
 renameTypeBinderRef name ref =

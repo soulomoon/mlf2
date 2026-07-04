@@ -83,6 +83,7 @@ module MLF.Elab.Types (
     typeBinderRefIdentity,
     typeBinderRefNode,
     typeBinderRefName,
+    typeBinderRefAliasNames,
     typeBinderRefsSameIdentity,
     typeBinderRefsSameIdentityAndName,
     renameTypeBinderRef,

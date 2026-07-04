@@ -42,11 +42,12 @@ import MLF.Types.Elab
     tVarWithRef,
     typeBinderIdentityFromNode,
     typeBinderIdentityFromUnique,
+    typeBinderRefAliasNames,
     typeBinderRefFromIdentity,
     typeBinderRefIdentity,
     typeBinderRefName,
   )
-import MLF.Types.Identity (UniqueIdentity (..))
+import MLF.Types.Identity (UniqueIdentity (..), typeBinderIdentityStableName)
 import Test.Hspec
 
 intTy :: ElabType
@@ -206,6 +207,21 @@ spec = describe "MLF.Reify.TypeOps" $ do
               typeBinderRefName ref' `shouldBe` "b1"
               bodyRef `shouldBe` refB
             other -> expectationFailure ("expected freshened forall, got: " ++ show other)
+
+    it "freshens away from type binder stable aliases during capture avoidance" $
+      let target = typeRef 39 "target"
+          replacement = generatedTypeRef 1201 "free"
+          stableAlias = typeBinderIdentityStableName (typeBinderRefIdentity replacement)
+          binder = typeBinderRefFromIdentity (typeBinderRefIdentity replacement) "$typevar#120"
+          ty = tForallWithRef binder Nothing (tVarWithRef target)
+          result = substTypeCaptureRef target (tVarWithRef replacement) ty
+       in case result of
+            TForallRef ref' Nothing (TVarRef bodyRef) -> do
+              typeBinderRefAliasNames replacement `shouldSatisfy` Set.member stableAlias
+              typeBinderRefIdentity ref' `shouldBe` typeBinderRefIdentity replacement
+              typeBinderRefName ref' `shouldNotBe` stableAlias
+              bodyRef `shouldBe` replacement
+            other -> expectationFailure ("expected stable-alias freshened forall, got: " ++ show other)
 
     it "does not freshen same-named binders with different identities" $
       let target = typeRef 36 "x"

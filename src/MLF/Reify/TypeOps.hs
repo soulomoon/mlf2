@@ -65,6 +65,10 @@ freeTypeVarsType :: Ty v -> Set.Set String
 freeTypeVarsType =
   Set.fromList . map typeBinderRefName . freeTypeVarRefsType
 
+freeTypeVarAliasNamesType :: Ty v -> Set.Set String
+freeTypeVarAliasNamesType =
+  Set.unions . map typeBinderRefAliasNames . freeTypeVarRefsType
+
 freeTypeVarRefsType :: Ty v -> [TypeBinderRef]
 freeTypeVarRefsType = freeTypeVarRefsFromWith False []
 
@@ -133,7 +137,7 @@ substTypeCaptureRef :: TypeBinderRef -> ElabType -> ElabType -> ElabType
 substTypeCaptureRef target s = goSub
   where
     freeSRefs = freeTypeVarRefsType s
-    freeSNames = Set.fromList (map typeBinderRefName freeSRefs)
+    freeSNames = Set.unions (map typeBinderRefAliasNames freeSRefs)
 
     replacementMentionsRef :: TypeBinderRef -> Bool
     replacementMentionsRef ref =
@@ -163,8 +167,8 @@ substTypeCaptureRef target s = goSub
             let used =
                   Set.unions
                     [ freeSNames,
-                      freeTypeVarsType body,
-                      maybe Set.empty freeTypeVarsType mb,
+                      freeTypeVarAliasNamesType body,
+                      maybe Set.empty freeTypeVarAliasNamesType mb,
                       Set.singleton v
                     ]
                 v' = freshNameLike v used
@@ -183,7 +187,7 @@ substTypeCaptureRef target s = goSub
             let used =
                   Set.unions
                     [ freeSNames,
-                      freeTypeVarsType body,
+                      freeTypeVarAliasNamesType body,
                       Set.singleton v
                     ]
                 v' = freshNameLike v used
@@ -219,8 +223,8 @@ substTypeCaptureRef target s = goSub
                 let used =
                       Set.unions
                         [ freeSNames,
-                          freeTypeVarsType (fst (unIxPair body)),
-                          maybe Set.empty (freeTypeVarsType . fst . unIxPair) mb,
+                          freeTypeVarAliasNamesType (fst (unIxPair body)),
+                          maybe Set.empty (freeTypeVarAliasNamesType . fst . unIxPair) mb,
                           Set.singleton v
                         ]
                     v' = freshNameLike v used
@@ -239,7 +243,7 @@ substTypeCaptureRef target s = goSub
                 let used =
                       Set.unions
                         [ freeSNames,
-                          freeTypeVarsType (fst (unIxPair body)),
+                          freeTypeVarAliasNamesType (fst (unIxPair body)),
                           Set.singleton v
                         ]
                     v' = freshNameLike v used
