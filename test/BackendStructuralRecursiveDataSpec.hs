@@ -8,7 +8,7 @@ import qualified Data.Set as Set
 import MLF.Backend.IR
 import MLF.Backend.StructuralRecursiveData
 import MLF.Constraint.Types.Graph (BaseTy (..), NodeId (..))
-import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), symbolIdentityFromParts, symbolIdentityStableName, symbolIdentityWithUnique)
+import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), renameSymbolDefiningName, symbolIdentityFromParts, symbolIdentityStableName, symbolIdentityWithUnique)
 import MLF.Types.Identity (StructuralTypeBinderRole (..), TypeBinderIdentity, typeBinderIdentityFromNode, typeBinderIdentityFromStructural, typeBinderIdentityFromUnique, typeBinderIdentityStableName)
 import MLF.Types.Unique (UniqueIdentity (..))
 import Test.Hspec
@@ -93,6 +93,8 @@ spec = describe "MLF.Backend.StructuralRecursiveData" $ do
             (Map.singleton listIdentity identityListData)
         staleNominalTy =
           BTConWithIdentity (Just listIdentity) (BaseTy "$stale_List") (intTy :| [])
+        stalePayloadNominalTy =
+          BTConWithIdentity (Just (renameSymbolDefiningName "$stale_List" listIdentity)) (BaseTy "$stale_List") (intTy :| [])
         wrongIdentity =
           symbolIdentityWithUnique (UniqueIdentity 990102) listIdentity
         wrongNominalTy =
@@ -102,6 +104,9 @@ spec = describe "MLF.Backend.StructuralRecursiveData" $ do
 
     backendStructuralDataBoundaryMatches Map.empty (Just dataScope) staleNominalTy structuralTy
       `shouldBe` True
+
+    backendStructuralDataBoundaryMatches Map.empty (Just dataScope) stalePayloadNominalTy structuralTy
+      `shouldBe` False
 
     backendStructuralDataBoundaryMatches Map.empty (Just dataScope) wrongNominalTy structuralTy
       `shouldBe` False

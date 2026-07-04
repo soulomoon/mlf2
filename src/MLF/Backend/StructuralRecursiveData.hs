@@ -55,7 +55,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import MLF.Backend.IR.Types
 import MLF.Constraint.Types.Graph (BaseTy (..))
-import MLF.Frontend.Symbol (SymbolIdentity, symbolUniqueIdentity)
+import MLF.Frontend.Symbol (SymbolIdentity, lookupSymbolIdentityExact, symbolUniqueIdentity)
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
 import MLF.Types.Identity (StructuralTypeBinderRole (..), TypeBinderIdentity, typeBinderIdentityGeneratedUnique, typeBinderIdentityStructural)
 import MLF.Util.Names (freshNameLike)
@@ -657,7 +657,7 @@ backendStructuralDataBoundaryMatches typeBounds mbDataDecls expectedTy actualTy 
 
     lookupDataByIdentity identity = do
       BackendDataScope _ dataDeclsByIdentity <- mbDataDecls
-      Map.lookup identity dataDeclsByIdentity
+      lookupSymbolIdentityExact identity dataDeclsByIdentity
 
     lookupDataByStructuralSelfIdentity muIdentity = do
       unique <- structuralSelfIdentityUnique muIdentity
