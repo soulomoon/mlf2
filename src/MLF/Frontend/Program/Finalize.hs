@@ -5274,7 +5274,7 @@ srcTypeToElabTypeWithHeadIdentitiesBound boundNames headIdentities =
   srcTypeToElabTypeWithHeadIdentityResolverBound boundNames sourceTypeHeadIdentity headIdentities
   where
     sourceTypeHeadIdentity name =
-      Builtins.builtinTypeHeadIdentity name <|> lookupSymbolIdentityAlias headIdentities name
+      lookupSymbolIdentityAlias headIdentities name <|> Builtins.builtinTypeHeadIdentity name
 
 srcBoundToElabBoundWithHeadIdentityResolverBound ::
   Set String ->
