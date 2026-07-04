@@ -61,7 +61,7 @@ import MLF.Frontend.Program.Surface
     surfaceVar,
   )
 import MLF.Frontend.Program.Types
-import MLF.Frontend.Symbol (symbolIdentityAliasMap, symbolIdentityAliasMapWith, symbolIdentityAliasNames, symbolIdentityStableName)
+import MLF.Frontend.Symbol (symbolIdentityAliasMap, symbolIdentityAliasMapWith, symbolIdentityAliasNames, symbolIdentityPayloadKey, symbolIdentityStableName)
 import MLF.Frontend.Syntax
   ( Lit (..),
     ResolvedSrcBound (..),
@@ -222,7 +222,7 @@ mkElaborateScope values0 dataTypes0 classes0 instances0 =
         ]
 
     uniqueRuntimeTypeInfo infos =
-      case (Set.toList (Set.fromList (map valueInfoSymbolIdentity infos)), infos) of
+      case (Set.toList (Set.fromList (map (symbolIdentityPayloadKey . valueInfoSymbolIdentity) infos)), infos) of
         ([_], info : rest)
           | all (== info) rest -> Just info
         _ -> Nothing
