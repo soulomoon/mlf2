@@ -61,7 +61,7 @@ import MLF.Frontend.Program.Surface
     surfaceVar,
   )
 import MLF.Frontend.Program.Types
-import MLF.Frontend.Symbol (lookupSymbolIdentityExact, sameSymbolIdentity, symbolIdentityAliasMap, symbolIdentityAliasMapWith, symbolIdentityAliasNames, symbolIdentityPayloadKey, symbolIdentityStableName)
+import MLF.Frontend.Symbol (lookupSymbolIdentityExact, memberSymbolIdentityExact, sameSymbolIdentity, symbolIdentityAliasMap, symbolIdentityAliasMapWith, symbolIdentityAliasNames, symbolIdentityPayloadKey, symbolIdentityStableName)
 import MLF.Frontend.Syntax
   ( Lit (..),
     ResolvedSrcBound (..),
@@ -239,7 +239,7 @@ mkElaborateScope values0 dataTypes0 classes0 instances0 =
 
     valueRuntimeTypeViewFor valueInfo@OrdinaryValue {valueConstraintInfos = constraints}
       | null constraints,
-        not (Set.member (valueInfoSymbolIdentity valueInfo) instanceMethodValueIdentities) =
+        not (memberSymbolIdentityExact (valueInfoSymbolIdentity valueInfo) instanceMethodValueIdentities) =
           loweredRuntimeTypeViewFor valueInfo
       | otherwise =
           constrainedRuntimeTypeInfoViewRaw dataTypes classesByIdentity constraints (ordinaryValueTypeView valueInfo)

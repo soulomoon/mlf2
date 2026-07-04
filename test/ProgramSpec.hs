@@ -1673,6 +1673,53 @@ spec = do
             (Map.lookup "Main__box" (elaborateScopeRuntimeTypeViews scope) >>= Map.lookup staleHead . ProgramTypes.typeViewHeadIdentities)
                 `shouldBe` Just typeIdentity
 
+        it "does not classify runtime values as instance methods through stale identity payloads" $ do
+            let valueIdentity = generatedSymbolIdentity 991662 SymbolValue "Main" "box" Nothing
+                staleMethodValueIdentity = renameSymbolDefiningName "$stale_box_method" valueIdentity
+                typeIdentity = generatedSymbolIdentity 991663 SymbolType "Main" "Box" Nothing
+                classIdentity = generatedSymbolIdentity 991664 SymbolClass "Main" "C" Nothing
+                originIdentity = generatedSymbolIdentity 991665 SymbolModule "Main" "Main" Nothing
+                methodIdentity = generatedSymbolIdentity 991666 SymbolMethod "Main" "method" (Just (SymbolOwnerClass classIdentity))
+                boxData =
+                    DataInfo
+                        { dataInfoSymbol = typeIdentity
+                        , dataTypeParams = []
+                        , dataConstructors = []
+                        }
+                valueInfo =
+                    OrdinaryValue
+                        { valueInfoSymbol = valueIdentity
+                        , valueRuntimeName = "Main__box"
+                        , valueTypeView = ProgramTypes.mkTypeView (STBase "Box") (STBase "Box")
+                        , valueConstraints = []
+                        , valueConstraintInfos = []
+                        }
+                methodValue =
+                    OrdinaryValue
+                        { valueInfoSymbol = staleMethodValueIdentity
+                        , valueRuntimeName = "Main__method"
+                        , valueTypeView = ProgramTypes.mkTypeView (STBase "Int") (STBase "Int")
+                        , valueConstraints = []
+                        , valueConstraintInfos = []
+                        }
+                instanceInfo =
+                    InstanceInfo
+                        { instanceClassSymbol = classIdentity
+                        , instanceOriginModuleIdentity = originIdentity
+                        , instanceConstraints = []
+                        , instanceConstraintInfos = []
+                        , instanceHeadTypeViews = ProgramTypes.mkTypeView (STBase "Int") (STBase "Int") :| []
+                        , instanceMethodsByIdentity = Map.singleton methodIdentity methodValue
+                        }
+                scope =
+                    mkElaborateScope
+                        (Map.singleton "box" valueInfo)
+                        (Map.singleton "Box" boxData)
+                        Map.empty
+                        [instanceInfo]
+            fmap ProgramTypes.typeViewDisplay (Map.lookup "Main__box" (elaborateScopeRuntimeTypeViews scope))
+                `shouldBe` Just (lowerType scope (STBase "Box"))
+
         it "does not keep an arbitrary runtime type view for duplicate runtime-name values" $ do
             let runtimeName = "Main__shared"
                 leftIdentity = generatedSymbolIdentity 991438 SymbolValue "Main" "left" Nothing
