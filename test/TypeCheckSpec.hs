@@ -70,7 +70,7 @@ import MLF.Types.Elab
     )
 import qualified MLF.Types.Elab as ElabTypes
 import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace(..), SymbolOwnerIdentity(..), symbolIdentityFromParts, symbolIdentityStableName, symbolUniqueIdentity)
-import MLF.Frontend.ConstraintGen (ExternalBinding(..), ExternalBindingMode(..), externalBindingIdentityFromDetails)
+import MLF.Frontend.ConstraintGen (ExternalBinding(..), ExternalBindingIdentity, ExternalBindingMode(..), externalBindingIdentityFromResolvedVar)
 import MLF.Frontend.Program.Builtins (builtinTypeIdentity, builtinValueIdentity)
 import MLF.Frontend.Program.Types (LoweredBindingIdentity, loweredBindingIdentityFromResolvedVar)
 import MLF.Frontend.Syntax (Lit(..), SrcBound(..))
@@ -131,6 +131,15 @@ shouldBeRightAlphaEq actual expected =
 loweredBindingIdentityFromDetails :: String -> IdDetails -> LoweredBindingIdentity
 loweredBindingIdentityFromDetails runtimeName details =
     loweredBindingIdentityFromResolvedVar
+        ResolvedVar
+            { resolvedVarRuntimeName = runtimeName
+            , resolvedVarType = TBottom
+            , resolvedVarDetails = details
+            }
+
+externalBindingIdentityFromDetails :: String -> IdDetails -> ExternalBindingIdentity
+externalBindingIdentityFromDetails runtimeName details =
+    externalBindingIdentityFromResolvedVar
         ResolvedVar
             { resolvedVarRuntimeName = runtimeName
             , resolvedVarType = TBottom

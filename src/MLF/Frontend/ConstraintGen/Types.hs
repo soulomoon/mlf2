@@ -16,7 +16,8 @@ module MLF.Frontend.ConstraintGen.Types
     ExternalBindingMode (..),
     ExternalBinding (..),
     ExternalBindingIdentity,
-    externalBindingIdentityFromDetails,
+    externalBindingIdentityFromResolvedVar,
+    externalBindingIdentityFromDeferredRef,
     externalBindingRuntimeName,
     externalBindingDetails,
     ExternalBindings,
@@ -31,7 +32,8 @@ import MLF.Constraint.RootOwnership (ModuleRootId (..), RootOwnershipIndex (..))
 import MLF.Constraint.Types.Graph
 import MLF.Frontend.Symbol (SymbolIdentity)
 import MLF.Frontend.Syntax (Lit, NormSrcType, VarName)
-import MLF.Types.Identity (IdDetails, TypeBinderIdentity)
+import MLF.Types.Elab (ResolvedVar (..))
+import MLF.Types.Identity (DeferredRef, IdDetails (..), TypeBinderIdentity, deferredRefName)
 
 -- | Errors that can surface during constraint generation.
 data ConstraintError
@@ -174,6 +176,18 @@ externalBindingIdentityFromDetails runtimeName details =
     { externalBindingRuntimeName = runtimeName,
       externalBindingDetails = details
     }
+
+externalBindingIdentityFromResolvedVar :: ResolvedVar -> ExternalBindingIdentity
+externalBindingIdentityFromResolvedVar resolved =
+  externalBindingIdentityFromDetails
+    (resolvedVarRuntimeName resolved)
+    (resolvedVarDetails resolved)
+
+externalBindingIdentityFromDeferredRef :: DeferredRef -> ExternalBindingIdentity
+externalBindingIdentityFromDeferredRef ref =
+  externalBindingIdentityFromDetails
+    (deferredRefName ref)
+    (DeferredId ref)
 
 instance Eq ExternalBindingIdentity where
   left == right =

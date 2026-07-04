@@ -66,7 +66,13 @@ import MLF.Elab.TermClosure (closeTermWithSchemeSubstRefsIfNeeded)
 import MLF.Elab.Types (XmlfTerm, ElabType)
 import qualified MLF.Elab.Types as X
 import qualified MLF.Elab.TypeCheck as TypeCheck
-import MLF.Frontend.ConstraintGen (ExternalBinding (..), ExternalBindingIdentity, ExternalBindingMode (..), externalBindingIdentityFromDetails)
+import MLF.Frontend.ConstraintGen
+  ( ExternalBinding (..),
+    ExternalBindingIdentity,
+    ExternalBindingMode (..),
+    externalBindingIdentityFromDeferredRef,
+    externalBindingIdentityFromResolvedVar,
+  )
 import MLF.Frontend.Normalize (normalizeExpr, normalizeType)
 import qualified MLF.Frontend.Program.Builtins as Builtins
 import MLF.Frontend.Symbol (lookupSymbolIdentityAlias, symbolIdentityAliasMap, symbolIdentityAliasMapWith, symbolIdentityStableName)
@@ -2114,7 +2120,7 @@ runtimeExternalBindingIndexFromScope scope runtimeTypes =
 runtimeExternalBindingIdentity :: RuntimeExternalBindingIndex -> String -> Maybe ExternalBindingIdentity
 runtimeExternalBindingIdentity index name = do
   resolved <- lookupRuntimeExternalBindingByName name index
-  pure (externalBindingIdentityFromDetails (X.resolvedVarRuntimeName resolved) (X.resolvedVarDetails resolved))
+  pure (externalBindingIdentityFromResolvedVar resolved)
 
 runtimeSourceTypesWithIdentityAliases :: Map String SrcType -> RuntimeExternalBindingIndex -> Map String SrcType
 runtimeSourceTypesWithIdentityAliases runtimeSourceTypes index =
@@ -2163,7 +2169,7 @@ deferredExternalBindingIdentity :: DeferredExternalBindingIndex -> String -> May
 deferredExternalBindingIdentity index name = do
   obligation <- lookupDeferredExternalBinding name index
   let ref = deferredProgramObligationRef obligation
-  pure (externalBindingIdentityFromDetails (deferredRefName ref) (DeferredId ref))
+  pure (externalBindingIdentityFromDeferredRef ref)
 
 constructorBindingNeedsUnchecked :: ElaborateScope -> LoweredBinding -> Bool
 constructorBindingNeedsUnchecked scope lowered =
