@@ -55,7 +55,7 @@ data SymbolNamespace
 data SymbolOwnerIdentity
   = SymbolOwnerType SymbolIdentity
   | SymbolOwnerClass SymbolIdentity
-  deriving (Eq, Ord, Show)
+  deriving (Show)
 
 data SymbolIdentity
   = SymbolIdentity UniqueIdentity SymbolNamespace String String (Maybe SymbolOwnerIdentity)
@@ -109,6 +109,14 @@ symbolOwnerIdentityPayloadKey owner =
   case owner of
     SymbolOwnerType identity -> SymbolOwnerTypePayloadKey (symbolIdentityPayloadKey identity)
     SymbolOwnerClass identity -> SymbolOwnerClassPayloadKey (symbolIdentityPayloadKey identity)
+
+instance Eq SymbolOwnerIdentity where
+  left == right =
+    symbolOwnerIdentityPayloadKey left == symbolOwnerIdentityPayloadKey right
+
+instance Ord SymbolOwnerIdentity where
+  compare left right =
+    compare (symbolOwnerIdentityPayloadKey left) (symbolOwnerIdentityPayloadKey right)
 
 symbolIdentityFromParts :: UniqueIdentity -> SymbolNamespace -> String -> String -> Maybe SymbolOwnerIdentity -> SymbolIdentity
 symbolIdentityFromParts =

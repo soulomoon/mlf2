@@ -245,6 +245,13 @@ spec = do
         `shouldBe` Nothing
       constructorRefFromSymbol ctor `shouldNotBe` constructorRefFromSymbol ctorConflict
 
+    it "uses exact payload identity for symbol owners" $ do
+      let owner = SymbolOwnerType (generatedSymbolIdentity 991803 SymbolType "Main" "Box" Nothing)
+          conflictingOwner = SymbolOwnerType (generatedSymbolIdentity 991803 SymbolType "Other" "Box" Nothing)
+
+      owner `shouldNotBe` conflictingOwner
+      Map.lookup conflictingOwner (Map.singleton owner "hit") `shouldBe` Nothing
+
     it "uses semantic identity for resolved export type references" $ do
       let typeUnqualified = resolvedDataInfoSymbol (SymbolUnqualifiedImport "Lib") "Token" tokenDataInfo
           typeQualified = resolvedDataInfoSymbol (SymbolQualifiedImport "Lib" "L") "L.Token" tokenDataInfo
