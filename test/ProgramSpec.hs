@@ -4224,6 +4224,26 @@ spec = do
             let checked' = renameCheckedExportedTypeDisplaysWhere (== "List") "$stale_list_export_display" checked
             (programRunOutput <$> runCheckedProgramOutput checked') `shouldBe` Right "\"\"\n"
 
+        it "does not index runtime Prelude constructors through stale owner identity payloads" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (List(..), stringFromList);"
+                        , "  def main : String = stringFromList Nil;"
+                        , "}"
+                        ]
+            checked <- requireCheckedLocated (withPreludeLocated located)
+            listData <- requireCheckedData "Prelude" "List" checked
+            nilCtor <- requireDataConstructor "Nil" listData
+            let staleListOwner = renameSymbolDefiningName "$stale_list_owner" (dataInfoSymbol listData)
+                checked' = replaceCheckedConstructorOwner (ctorInfoSymbol nilCtor) staleListOwner checked
+            case runCheckedProgramOutput checked' of
+                Left (ProgramPipelineError message) ->
+                    message `shouldSatisfy` isInfixOf "stringFromList expected a List Char argument"
+                other ->
+                    expectationFailure ("expected stale Prelude constructor owner rejection, got " ++ show other)
+
         it "runs checked IO terms by resolved identity instead of retained surface names" $ do
             located <-
                 requireLocated $
@@ -9020,6 +9040,30 @@ replaceCheckedConstructorIndex target replacement checked =
     replaceConstructor ctorInfo
         | ctorInfoSymbol ctorInfo == target =
             ctorInfo {ctorIndex = replacement}
+        | otherwise = ctorInfo
+
+replaceCheckedConstructorOwner :: SymbolIdentity -> SymbolIdentity -> CheckedProgram -> CheckedProgram
+replaceCheckedConstructorOwner target replacement checked =
+    checked
+        { checkedProgramModules =
+            map replaceModule (checkedProgramModules checked)
+        }
+  where
+    replaceModule checkedModule =
+        checkedModule
+            { checkedModuleData =
+                fmap replaceData (checkedModuleData checkedModule)
+            }
+
+    replaceData dataInfo =
+        dataInfo
+            { dataConstructors =
+                map replaceConstructor (dataConstructors dataInfo)
+            }
+
+    replaceConstructor ctorInfo
+        | Symbol.sameSymbolIdentity (ctorInfoSymbol ctorInfo) target =
+            ctorInfo {ctorOwningTypeIdentity = replacement}
         | otherwise = ctorInfo
 
 renameCheckedModuleName :: String -> String -> CheckedProgram -> CheckedProgram
