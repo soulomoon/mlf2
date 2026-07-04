@@ -191,7 +191,7 @@ import MLF.Frontend.Program.Types
     typeViewHeadIdentityForAlias,
     typeViewMentionedHeadIdentities,
   )
-import MLF.Frontend.Symbol (lookupSymbolIdentityAlias, symbolIdentityAliasMap, symbolIdentityAliasNames, symbolIdentityStableName, symbolUniqueIdentity)
+import MLF.Frontend.Symbol (symbolIdentityAliasMap, symbolIdentityAliasNames, symbolIdentityStableName, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit, SrcBound (..), SrcTy (..), SrcType)
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
 import MLF.Types.Identity (DeferredRef, IdDetails (..), IdentityGenerator, LocalRef, StructuralTypeBinderRole (..), UniqueIdentity (..), advanceIdentityGeneratorPast, deferredRefIdentity, deferredRefName, freshDeferredRef, freshIdentity, freshLocalRef, idDetailsGeneratedIdentities, idDetailsSymbolIdentity, identityGeneratorAfter, symbolGeneratedIdentities, typeBinderIdentityAliasMap, typeBinderIdentityFromStructural, typeBinderIdentityNode, typeBinderIdentityStructural)
@@ -3177,7 +3177,27 @@ unambiguousDataTypeHeadIdentities =
 
 convertSourceType :: SrcType -> Either BackendConversionError BackendType
 convertSourceType =
-  convertSourceTypeWithHeadIdentities Map.empty
+  \case
+    STVar name -> Right (BTVarWithIdentity Nothing name)
+    STArrow dom cod ->
+      BTArrow
+        <$> convertSourceType dom
+        <*> convertSourceType cod
+    STBase name ->
+      Right (BTBaseWithIdentity (builtinTypeHeadIdentity name) (backendBaseTy name))
+    STCon name args ->
+      BTConWithIdentity (builtinTypeHeadIdentity name) (backendBaseTy name)
+        <$> traverse convertSourceType args
+    STVarApp name args ->
+      BTVarAppWithIdentity Nothing name <$> traverse convertSourceType args
+    STTyLam {} -> Left (BackendUnsupportedCaseShape "residual type lambda reached backend type conversion")
+    STTyApp {} -> Left (BackendUnsupportedCaseShape "residual type application reached backend type conversion")
+    STForall name mb body ->
+      BTForallWithIdentity Nothing name
+        <$> traverse (convertSourceType . unSrcBound) mb
+        <*> convertSourceType body
+    STMu name body -> BTMuWithIdentity Nothing name <$> convertSourceType body
+    STBottom -> Right BTBottom
 
 convertSourceTypeWithTypeViewIdentities :: TypeView -> SrcType -> Either BackendConversionError BackendType
 convertSourceTypeWithTypeViewIdentities view =
@@ -3223,36 +3243,6 @@ convertSourceTypeWithTypeViewIdentities view =
       if Map.member name binderIdentities
         then Nothing
         else typeViewBinderIdentityForAlias view name
-
-convertSourceTypeWithHeadIdentities :: Map String SymbolIdentity -> SrcType -> Either BackendConversionError BackendType
-convertSourceTypeWithHeadIdentities headIdentities0 =
-  \case
-    STVar name -> Right (BTVarWithIdentity (sourceTypeBinderIdentity name) name)
-    STArrow dom cod ->
-      BTArrow
-        <$> convertSourceTypeWithHeadIdentities headIdentities0 dom
-        <*> convertSourceTypeWithHeadIdentities headIdentities0 cod
-    STBase name ->
-      Right (BTBaseWithIdentity (sourceTypeHeadIdentity name) (backendBaseTy name))
-    STCon name args ->
-      BTConWithIdentity (sourceTypeHeadIdentity name) (backendBaseTy name)
-        <$> traverse (convertSourceTypeWithHeadIdentities headIdentities0) args
-    STVarApp name args ->
-      BTVarAppWithIdentity (sourceTypeBinderIdentity name) name <$> traverse (convertSourceTypeWithHeadIdentities headIdentities0) args
-    STTyLam {} -> Left (BackendUnsupportedCaseShape "residual type lambda reached backend type conversion")
-    STTyApp {} -> Left (BackendUnsupportedCaseShape "residual type application reached backend type conversion")
-    STForall name mb body ->
-      BTForallWithIdentity (sourceTypeBinderIdentity name) name
-        <$> traverse (convertSourceTypeWithHeadIdentities headIdentities0 . unSrcBound) mb
-        <*> convertSourceTypeWithHeadIdentities headIdentities0 body
-    STMu name body -> BTMuWithIdentity (sourceTypeBinderIdentity name) name <$> convertSourceTypeWithHeadIdentities headIdentities0 body
-    STBottom -> Right BTBottom
-  where
-    sourceTypeHeadIdentity name =
-      lookupSymbolIdentityAlias headIdentities0 name <|> builtinTypeHeadIdentity name
-
-    sourceTypeBinderIdentity _ =
-      Nothing
 
 type BackendTypeBinderNames = Map TypeBinderIdentity String
 
