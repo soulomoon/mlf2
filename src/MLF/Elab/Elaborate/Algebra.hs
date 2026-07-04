@@ -3176,7 +3176,7 @@ srcTypeToElabTypeWithBound boundNames algebraContext refs generator ty = case ty
   STBottom -> Right (TBottom, generator)
   where
     sourceTypeHeadIdentity name =
-      Builtins.builtinTypeHeadIdentity name <|> lookupSymbolIdentityAlias (algSourceTypeHeadIdentities algebraContext) name
+      lookupSymbolIdentityAlias (algSourceTypeHeadIdentities algebraContext) name <|> Builtins.builtinTypeHeadIdentity name
 
     sourceTypeBinderRef env name =
       case Map.lookup name env of

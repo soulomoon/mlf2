@@ -2002,7 +2002,7 @@ srcTypeToElabTypeWithBound boundNames headIdentities binderIdentities refs gener
         Nothing -> Left (InternalConstraintError ("unresolved source type binder `" ++ name ++ "` reached pipeline external binding preparation"))
 
     sourceTypeHeadIdentity name =
-      Builtins.builtinTypeHeadIdentity name <|> lookupSymbolIdentityAlias headIdentities name
+      lookupSymbolIdentityAlias headIdentities name <|> Builtins.builtinTypeHeadIdentity name
 
     srcTypesToElabTypesWith boundNames' refs0 generator0 (arg :| args) = do
       (arg', generator1) <- srcTypeToElabTypeWithBound boundNames' headIdentities binderIdentities refs0 generator0 arg

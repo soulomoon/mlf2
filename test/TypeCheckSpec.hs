@@ -567,6 +567,24 @@ spec = describe "Phase 7 typecheck" $ do
                         generatedIdentitiesInType ty `shouldSatisfy` elem (symbolUniqueIdentity (builtinTypeIdentity "Int"))
                     other -> expectationFailure ("Expected Int identity in prepared external binding, got: " ++ show other)
 
+    it "uses supplied type head identity before builtin spelling in external binding types" $ do
+        let typeIdentity = generatedSymbolIdentity 9041 SymbolType "Main" "Int" Nothing
+            externalBinding =
+                ExternalBinding
+                    { externalBindingType = Surf.STBase "Int"
+                    , externalBindingMode = ExternalBindingScheme
+                    , externalBindingIdentity = Nothing
+                    , externalBindingTypeHeadIdentities = Map.singleton "Int" typeIdentity
+                    , externalBindingTypeBinderIdentities = Map.empty
+                    }
+        case prepareExternalBindings (Map.singleton "int" externalBinding) of
+            Left err -> expectationFailure ("Expected external binding preparation, got: " ++ show err)
+            Right prepared ->
+                case [ ty | (resolved, ty) <- resolvedTermEnvEntries (resolvedTermEnv (preparedExternalTypeCheckEnv prepared)), resolvedVarReferenceName resolved == "int" ] of
+                    [ElabTypes.TBaseWithIdentity (Just actualIdentity) (BaseTy "Int")] ->
+                        actualIdentity `shouldBe` typeIdentity
+                    other -> expectationFailure ("Expected supplied Int identity in prepared external binding, got: " ++ show other)
+
     it "collects owner identities from type heads" $ do
         let ownerIdentity = generatedSymbolIdentity 6001 SymbolType "Main" "Box" Nothing
             headIdentity = generatedSymbolIdentity 6002 SymbolType "Main" "Box.Alias" (Just (SymbolOwnerType ownerIdentity))

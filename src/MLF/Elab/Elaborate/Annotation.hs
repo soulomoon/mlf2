@@ -1033,7 +1033,7 @@ srcTypeToElabTypeWithBound boundNames headIdentities binderIdentities refs gener
         Nothing -> Left (InstantiationError ("unresolved source type binder `" ++ name ++ "` reached annotation elaboration"))
 
     sourceTypeHeadIdentity name =
-      Builtins.builtinTypeHeadIdentity name <|> lookupSymbolIdentityAlias headIdentities name
+      lookupSymbolIdentityAlias headIdentities name <|> Builtins.builtinTypeHeadIdentity name
 
     srcTypesToElabTypesWith boundNames' refs0 generator0 (arg :| args) = do
       (arg', generator1) <- srcTypeToElabTypeWithBound boundNames' headIdentities binderIdentities refs0 generator0 arg
@@ -1105,7 +1105,7 @@ structBoundToElabBoundWithBound boundNames headIdentities binderIdentities refs 
         Nothing -> Left (InstantiationError ("unresolved source type binder `" ++ name ++ "` reached annotation elaboration"))
 
     sourceTypeHeadIdentity name =
-      Builtins.builtinTypeHeadIdentity name <|> lookupSymbolIdentityAlias headIdentities name
+      lookupSymbolIdentityAlias headIdentities name <|> Builtins.builtinTypeHeadIdentity name
 
     srcTypesToElabTypesWith refs0 generator0 (arg :| args) = do
       (arg', generator1) <- srcTypeToElabTypeWith headIdentities binderIdentities refs0 generator0 arg
