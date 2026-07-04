@@ -7258,7 +7258,7 @@ spec = do
                         [] ->
                             expectationFailure "expected resolved modules"
 
-        it "rejects duplicate resolved symbol identities before checking local metadata" $ do
+        it "rejects duplicate and conflicting resolved symbol identities before checking local metadata" $ do
             let boxType =
                     mkResolvedSymbol
                         (generatedSymbolIdentity 9401 SymbolType "Main" "Box" Nothing)
@@ -7272,6 +7272,7 @@ spec = do
                         "Main"
                         "A"
                         (Just (generatedSymbolOwnerType 9401 "Main" "Box"))
+                conflictingCtorIdentity = renameSymbolDefiningName "$stale_A" sharedCtorIdentity
                 ctorA =
                     mkResolvedSymbol
                         sharedCtorIdentity
@@ -7284,20 +7285,26 @@ spec = do
                         "B"
                         "B"
                         (SymbolLocal "Main")
+                ctorConflict =
+                    mkResolvedSymbol
+                        conflictingCtorIdentity
+                        "B"
+                        "B"
+                        (SymbolLocal "Main")
                 mainValue =
                     mkResolvedSymbol
                         (generatedSymbolIdentity 9403 SymbolValue "Main" "main" Nothing)
                         "main"
                         "main"
                         (SymbolLocal "Main")
-                resolvedScope =
+                resolvedScopeFor secondCtor =
                     ResolvedScope
-                        { resolvedScopeValues = Map.fromList [("A", ctorA), ("B", ctorB), ("main", mainValue)]
+                        { resolvedScopeValues = Map.fromList [("A", ctorA), ("B", secondCtor), ("main", mainValue)]
                         , resolvedScopeTypes = Map.singleton "Box" boxType
                         , resolvedScopeClasses = Map.empty
                         , resolvedScopeModules = Map.empty
                         }
-                resolvedModule =
+                resolvedModuleFor secondCtor =
                     ResolvedModule
                         { resolvedModuleSemantic =
                             ResolvedSemanticModule
@@ -7319,7 +7326,7 @@ spec = do
                                                             , constructorDeclType = RSTBase boxType
                                                             }
                                                         , ConstructorDecl
-                                                            { constructorDeclName = ctorB
+                                                            { constructorDeclName = secondCtor
                                                             , constructorDeclType = RSTBase boxType
                                                             }
                                                         ]
@@ -7335,24 +7342,30 @@ spec = do
                                         }
                                 , resolvedSemanticModuleLocalSymbols =
                                     ResolvedLocalSymbols
-                                        { resolvedLocalValues = Map.fromList [("A", [ctorA]), ("B", [ctorB]), ("main", [mainValue])]
+                                        { resolvedLocalValues = Map.fromList [("A", [ctorA]), ("B", [secondCtor]), ("main", [mainValue])]
                                         , resolvedLocalTypes = Map.singleton "Box" [boxType]
                                         , resolvedLocalClasses = Map.empty
                                         }
-                                , resolvedSemanticModuleScope = resolvedScope
-                                , resolvedSemanticModuleExports = resolvedScope
+                                , resolvedSemanticModuleScope = resolvedScopeFor secondCtor
+                                , resolvedSemanticModuleExports = resolvedScopeFor secondCtor
                                 }
                         , resolvedModuleDiagnosticAdapter =
                             ResolvedModuleDiagnosticAdapter
                                 { resolvedDiagnosticReferences = []
                                 }
                         }
-            case checkResolvedProgram (ResolvedProgram [resolvedModule]) of
+            case checkResolvedProgram (ResolvedProgram [resolvedModuleFor ctorB]) of
                 Left (ProgramPipelineError message) -> do
                     message `shouldSatisfy` isInfixOf "duplicate resolved symbol identity"
                     message `shouldSatisfy` isInfixOf (symbolIdentityStableName sharedCtorIdentity)
                 other ->
                     expectationFailure ("expected duplicate resolved symbol identity rejection, got " ++ show other)
+            case checkResolvedProgram (ResolvedProgram [resolvedModuleFor ctorConflict]) of
+                Left (ProgramPipelineError message) -> do
+                    message `shouldSatisfy` isInfixOf "conflicting resolved symbol identity payload"
+                    message `shouldSatisfy` isInfixOf (symbolIdentityStableName sharedCtorIdentity)
+                other ->
+                    expectationFailure ("expected conflicting resolved symbol identity payload rejection, got " ++ show other)
 
         it "assigns generated identity layer ids to checked instance method values" $ do
             let programText =

@@ -113,7 +113,7 @@ import MLF.Frontend.Program.Package
     trivialProgramPackage,
   )
 import MLF.Frontend.Program.Resolve (resolveProgram)
-import MLF.Frontend.Symbol (symbolIdentityAliasMap, symbolIdentityAliasMapWith, symbolIdentityStableName)
+import MLF.Frontend.Symbol (symbolIdentityAliasMap, symbolIdentityAliasMapWith, symbolIdentityPayloadKey, symbolIdentityStableName, symbolUniqueIdentity)
 import MLF.Frontend.Program.TypeFamilies (normalizeTypeFamiliesInProgram)
 import MLF.Frontend.Program.Types
   ( CheckedBinding (..),
@@ -4330,18 +4330,23 @@ resolvedSemanticModuleSymbolIdentities resolvedModule =
 
 ensureDistinctSymbolIdentities :: String -> [SymbolIdentity] -> TcM ()
 ensureDistinctSymbolIdentities label =
-  go Set.empty
+  go Map.empty
   where
     go _ [] =
       pure ()
     go seen (identity : rest)
-      | identity `Set.member` seen =
-          throwError (duplicateIdentityError identity)
+      | Just existing <- Map.lookup (symbolUniqueIdentity identity) seen =
+          if symbolIdentityPayloadKey existing == symbolIdentityPayloadKey identity
+            then throwError (duplicateIdentityError identity)
+            else throwError (conflictingIdentityPayloadError identity)
       | otherwise =
-          go (Set.insert identity seen) rest
+          go (Map.insert (symbolUniqueIdentity identity) identity seen) rest
 
     duplicateIdentityError identity =
       ProgramPipelineError ("duplicate " ++ label ++ " identity: " ++ symbolIdentityStableName identity)
+
+    conflictingIdentityPayloadError identity =
+      ProgramPipelineError ("conflicting " ++ label ++ " identity payload: " ++ symbolIdentityStableName identity)
 
 ensureDistinctImportAliases :: [P.ImportF p] -> TcM ()
 ensureDistinctImportAliases imports0 =
