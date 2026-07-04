@@ -2224,6 +2224,10 @@ spec = describe "MLF.Backend.LLVM" $ do
     renderBackendProgramLLVM nameOnlyConstructorUseIdentityProgram
       `shouldSatisfyLeft` isInfixOf "escaping type abstraction"
 
+  it "resolves constructor display aliases before field lowerability checks" $ do
+    renderBackendProgramLLVM displayAliasConstructorUseIdentityProgram
+      `shouldSatisfyLeft` isInfixOf "escaping type abstraction"
+
   it "evaluates immediate constructor fields before unmatched alternatives" $ do
     renderBackendProgramLLVM strictImmediateUnmatchedProgram
       `shouldSatisfyLeft` isInfixOf "representation-changing roll"
@@ -8295,6 +8299,30 @@ nameOnlyConstructorUseIdentityProgram =
       backendProgramMain = "main"
     }
 
+displayAliasConstructorUseIdentityProgram :: BackendProgram
+displayAliasConstructorUseIdentityProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [immediateChoiceDataWithStaleConstructorDisplayIdentity],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = immediateChoiceTy,
+                      backendBindingExpr =
+                        BackendConstruct
+                          immediateChoiceTy
+                          "WithStatic"
+                          [polyIdExpr, intLit 1],
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
 strictImmediateUnmatchedProgram :: BackendProgram
 strictImmediateUnmatchedProgram =
   BackendProgram
@@ -10930,6 +10958,21 @@ immediateChoiceDataWithConstructorIdentity =
         [ BackendConstructorWithIdentity
             { backendConstructorIdentity = Just immediateChoiceConstructorIdentity,
               backendConstructorNameWithIdentity = "WithStatic",
+              backendConstructorForallsWithIdentity = [],
+              backendConstructorFieldsWithIdentity = [polyIdTy, intTy],
+              backendConstructorResultWithIdentity = immediateChoiceTy
+            },
+          BackendConstructor "Other" [] [] immediateChoiceTy
+        ]
+    }
+
+immediateChoiceDataWithStaleConstructorDisplayIdentity :: BackendData
+immediateChoiceDataWithStaleConstructorDisplayIdentity =
+  immediateChoiceData
+    { backendDataConstructors =
+        [ BackendConstructorWithIdentity
+            { backendConstructorIdentity = Just immediateChoiceConstructorIdentity,
+              backendConstructorNameWithIdentity = "$stale_WithStatic",
               backendConstructorForallsWithIdentity = [],
               backendConstructorFieldsWithIdentity = [polyIdTy, intTy],
               backendConstructorResultWithIdentity = immediateChoiceTy

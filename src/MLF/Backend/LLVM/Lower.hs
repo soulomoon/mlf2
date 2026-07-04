@@ -172,7 +172,7 @@ import MLF.Backend.LLVM.Lower.Types
 import MLF.Backend.LLVM.Syntax
 import qualified MLF.Backend.StructuralRecursiveData as Structural
 import MLF.Constraint.Types.Graph (BaseTy (..))
-import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), SymbolOwnerIdentity (..), symbolIdentityFromParts, symbolIdentityStableName, symbolRefMatches, symbolUniqueIdentity)
+import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), SymbolOwnerIdentity (..), symbolDefiningModule, symbolDefiningName, symbolIdentityFromParts, symbolIdentityStableName, symbolRefMatches, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit (..))
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
 import MLF.Types.Identity (constructorRefSymbol, deferredRefIdentity, envRefIdentity, IdDetails (..), IdentityGenerator, LocalRef, localRefIdentity, primitiveRefSymbol, idDetailsAliasMap, idDetailsSymbolIdentity, StructuralTypeBinderRole (..), TypeBinderIdentity, UniqueIdentity (..), freshIdentity, freshLocalRef, identityGeneratorAfter, initialIdentityGenerator, localIdentityStableUnique, typeBinderIdentityAliasMap, typeBinderIdentityAliasNames, typeBinderIdentityFromUnique, typeBinderIdentityStableName, typeBinderIdentityStructural)
@@ -407,18 +407,40 @@ validateRawBackendBinderUniqueness program =
           | otherwise = go (Set.insert key seen) rest
 
 type BackendTypeBinderEnv = Map String (Maybe TypeBinderIdentity)
-type BackendDataEnv = Map String SymbolIdentity
-type BackendConstructorEnv = Map String SymbolIdentity
-type BackendGlobalEnv = Map String SymbolIdentity
+type BackendDataEnv = Map String (Maybe SymbolIdentity)
+type BackendConstructorEnv = Map String (Maybe SymbolIdentity)
+type BackendGlobalEnv = Map String (Maybe SymbolIdentity)
 type BackendTermEnv = Map String (Maybe IdDetails)
 
-insertBackendSymbolIdentity :: String -> SymbolIdentity -> Map String SymbolIdentity -> Map String SymbolIdentity
-insertBackendSymbolIdentity name identity =
-  Map.insert name identity
+insertBackendSymbolIdentity :: String -> SymbolIdentity -> Map String (Maybe SymbolIdentity) -> Map String (Maybe SymbolIdentity)
+insertBackendSymbolIdentity name identity env =
+  foldr insertOne env (backendSymbolIdentityEntries name identity)
+  where
+    insertOne (alias, next) =
+      Map.alter (merge next) alias
+
+    merge next Nothing =
+      Just (Just next)
+    merge next (Just (Just existing))
+      | symbolUniqueIdentity existing == symbolUniqueIdentity next = Just (Just existing)
+      | otherwise = Just Nothing
+    merge _ (Just Nothing) =
+      Just Nothing
 
 backendSymbolIdentityEntries :: String -> SymbolIdentity -> [(String, SymbolIdentity)]
 backendSymbolIdentityEntries name identity =
-  [(name, identity)]
+  [(alias, identity) | alias <- backendSymbolIdentityAliases name identity]
+
+backendSymbolIdentityAliases :: String -> SymbolIdentity -> [String]
+backendSymbolIdentityAliases name identity =
+  filter
+    (not . null)
+    ( nub
+        [ name,
+          symbolDefiningName identity,
+          symbolDefiningModule identity ++ "." ++ symbolDefiningName identity
+        ]
+    )
 
 insertUniqueBackendTypeBinderIdentity :: String -> TypeBinderIdentity -> BackendTypeBinderEnv -> BackendTypeBinderEnv
 insertUniqueBackendTypeBinderIdentity name identity env =
@@ -466,7 +488,7 @@ assignBackendIdentitiesInProgram :: BackendProgram -> BackendProgram
 assignBackendIdentitiesInProgram program =
   program
     { backendProgramModulesWithIdentity = modules',
-      backendProgramMainIdentity = backendProgramMainIdentity program <|> Map.lookup (backendProgramMain program) globalEnv
+      backendProgramMainIdentity = backendProgramMainIdentity program <|> (Map.lookup (backendProgramMain program) globalEnv >>= id)
     }
   where
     generator0 =
@@ -511,14 +533,19 @@ assignGlobalDataIdentities generator modules0 =
 
 backendConstructorEnv :: [BackendModule] -> BackendConstructorEnv
 backendConstructorEnv modules0 =
-  Map.fromList
-    [ entry
-    | backendModule <- modules0,
-      dataDecl <- backendModuleData backendModule,
-      constructor <- backendDataConstructors dataDecl,
-      Just identity <- [backendConstructorIdentity constructor],
-      entry <- backendSymbolIdentityEntries (backendConstructorName constructor) identity
-    ]
+  foldl insertConstructor Map.empty constructors
+  where
+    constructors =
+      [ constructor
+      | backendModule <- modules0,
+        dataDecl <- backendModuleData backendModule,
+        constructor <- backendDataConstructors dataDecl
+      ]
+
+    insertConstructor env constructor =
+      case backendConstructorIdentity constructor of
+        Just identity -> insertBackendSymbolIdentity (backendConstructorName constructor) identity env
+        Nothing -> env
 
 assignModuleData :: BackendDataEnv -> IdentityGenerator -> BackendModule -> (IdentityGenerator, BackendModule)
 assignModuleData dataEnv generator backendModule =
@@ -876,15 +903,15 @@ typeRefIdentity env identity name =
 
 dataHeadIdentity :: BackendDataEnv -> Maybe SymbolIdentity -> String -> Maybe SymbolIdentity
 dataHeadIdentity env identity name =
-  identity <|> Map.lookup name env
+  identity <|> (Map.lookup name env >>= id)
 
 termRefIdentity :: BackendGlobalEnv -> BackendTermEnv -> Maybe IdDetails -> String -> Maybe IdDetails
 termRefIdentity globalEnv env identity name =
-  identity <|> (Map.lookup name env >>= id) <|> (TopLevelId <$> Map.lookup name globalEnv)
+  identity <|> (Map.lookup name env >>= id) <|> (TopLevelId <$> (Map.lookup name globalEnv >>= id))
 
 constructorRefIdentity :: BackendConstructorEnv -> Maybe SymbolIdentity -> String -> Maybe SymbolIdentity
 constructorRefIdentity env identity name =
-  identity <|> Map.lookup name env
+  identity <|> (Map.lookup name env >>= id)
 
 lowerNativeProgram :: LoweredProgram -> Either BackendLLVMError LLVMModule
 lowerNativeProgram lowered = do
