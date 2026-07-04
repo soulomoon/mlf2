@@ -4487,6 +4487,39 @@ spec = do
                 other ->
                     expectationFailure ("expected stale binding identity rejection, got " ++ show other)
 
+        it "keeps runtime env keys exact when stale payloads share a top-level unique" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO);"
+                        , "  def main : IO Unit = __io_putStrLn \"placeholder\";"
+                        , "}"
+                        ]
+            checked <- requireCheckedLocated (withPreludeLocated located)
+            let stringTy = Elab.TBase (BaseTy "String")
+                correctIdentity = generatedSymbolIdentity 991730 SymbolValue "Synthetic" "message" Nothing
+                staleIdentity = renameSymbolDefiningName "$stale_message" correctIdentity
+                correctResolved =
+                    ResolvedVar
+                        { resolvedVarRuntimeName = "synthetic_message"
+                        , resolvedVarType = stringTy
+                        , resolvedVarDetails = TopLevelId correctIdentity
+                        }
+                staleResolved =
+                    ResolvedVar
+                        { resolvedVarRuntimeName = "$stale_message"
+                        , resolvedVarType = stringTy
+                        , resolvedVarDetails = TopLevelId staleIdentity
+                        }
+                stringScheme = Elab.mkElabSchemeWithRefs [] stringTy
+                checkedTerm =
+                    Elab.ELet correctResolved stringScheme (Elab.ELit (LString "exact-env")) $
+                        Elab.ELet staleResolved stringScheme (Elab.ELit (LString "stale-env")) $
+                            Elab.EApp (primitiveTerm "__io_putStrLn") (Elab.EVarNode correctResolved)
+                checked' = replaceCheckedBindingTerm "Main__main" checkedTerm checked
+            (programRunOutput <$> runCheckedProgramOutput checked') `shouldBe` Right "exact-env\n"
+
         it "rejects duplicate checked runtime module identities before run context lookup" $ do
             program <-
                 requireParsed $

@@ -128,7 +128,7 @@ import MLF.Frontend.Program.Types
     ordinaryValueTypeView,
     resolvedVarFromValueInfo,
   )
-import MLF.Frontend.Symbol (SymbolOwnerIdentity (..), lookupSymbolIdentityExact, memberSymbolIdentityExact, sameSymbolIdentity, symbolIdentityPayloadKey, symbolIdentityStableName, symbolOwnerIdentity, symbolUniqueIdentity)
+import MLF.Frontend.Symbol (SymbolIdentityPayloadKey, SymbolOwnerIdentity (..), lookupSymbolIdentityExact, memberSymbolIdentityExact, sameSymbolIdentity, symbolIdentityPayloadKey, symbolIdentityStableName, symbolOwnerIdentity, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit (..), SrcBound (..), SrcTy (..), SrcType)
 import qualified MLF.Frontend.Syntax.Program as ProgramSyntax
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
@@ -433,7 +433,36 @@ data RuntimeVarKey
   | RuntimeMethodKey SymbolIdentity
   | RuntimePrimitiveKey PrimitiveRef
   | RuntimeDeferredKey DeferredRef
-  deriving (Eq, Ord, Show)
+  deriving (Show)
+
+data RuntimeVarKeyExact
+  = RuntimeLocalExact LocalRef
+  | RuntimeEnvExact EnvRef
+  | RuntimeTopLevelExact SymbolIdentityPayloadKey
+  | RuntimeConstructorExact SymbolIdentityPayloadKey
+  | RuntimeMethodExact SymbolIdentityPayloadKey
+  | RuntimePrimitiveExact SymbolIdentityPayloadKey
+  | RuntimeDeferredExact DeferredRef
+  deriving (Eq, Ord)
+
+runtimeVarKeyExact :: RuntimeVarKey -> RuntimeVarKeyExact
+runtimeVarKeyExact key =
+  case key of
+    RuntimeLocalKey ref -> RuntimeLocalExact ref
+    RuntimeEnvKey ref -> RuntimeEnvExact ref
+    RuntimeTopLevelKey identity -> RuntimeTopLevelExact (symbolIdentityPayloadKey identity)
+    RuntimeConstructorKey identity -> RuntimeConstructorExact (symbolIdentityPayloadKey identity)
+    RuntimeMethodKey identity -> RuntimeMethodExact (symbolIdentityPayloadKey identity)
+    RuntimePrimitiveKey ref -> RuntimePrimitiveExact (symbolIdentityPayloadKey (primitiveRefSymbol ref))
+    RuntimeDeferredKey ref -> RuntimeDeferredExact ref
+
+instance Eq RuntimeVarKey where
+  left == right =
+    runtimeVarKeyExact left == runtimeVarKeyExact right
+
+instance Ord RuntimeVarKey where
+  compare left right =
+    compare (runtimeVarKeyExact left) (runtimeVarKeyExact right)
 
 data RuntimeDeferredValue
   = RuntimeDeferredConstructor DeferredConstructorCall
@@ -798,20 +827,8 @@ runtimeVarKey resolved =
     DeferredId ref -> RuntimeDeferredKey ref
 
 lookupRuntimeVarKeyExact :: RuntimeVarKey -> RuntimeEnv -> Maybe RuntimeValue
-lookupRuntimeVarKeyExact key env =
-  snd <$> find (runtimeVarKeyMatches key . fst) (Map.toList env)
-
-runtimeVarKeyMatches :: RuntimeVarKey -> RuntimeVarKey -> Bool
-runtimeVarKeyMatches left right =
-  case (left, right) of
-    (RuntimeTopLevelKey leftIdentity, RuntimeTopLevelKey rightIdentity) ->
-      sameSymbolIdentity leftIdentity rightIdentity
-    (RuntimeConstructorKey leftIdentity, RuntimeConstructorKey rightIdentity) ->
-      sameSymbolIdentity leftIdentity rightIdentity
-    (RuntimeMethodKey leftIdentity, RuntimeMethodKey rightIdentity) ->
-      sameSymbolIdentity leftIdentity rightIdentity
-    _ ->
-      left == right
+lookupRuntimeVarKeyExact =
+  Map.lookup
 
 lookupRuntimeConstructorResolved :: RuntimeContext -> ResolvedVar -> Maybe ConstructorInfo
 lookupRuntimeConstructorResolved context resolved =
@@ -841,7 +858,7 @@ lookupRuntimeBindingResolved context resolved =
 
 evalRuntimeBindingByIdentity :: RuntimeContext -> RuntimeLookupStack -> CheckedBinding -> Either ProgramError RuntimeValue
 evalRuntimeBindingByIdentity context stack binding
-  | any (runtimeVarKeyMatches (runtimeLookupFrameKey frame) . runtimeLookupFrameKey) stack =
+  | any ((== runtimeLookupFrameKey frame) . runtimeLookupFrameKey) stack =
       Left (recursiveRuntimeBindingError frame stack)
   | otherwise = evalRuntimeBinding context (frame : stack) binding
   where
