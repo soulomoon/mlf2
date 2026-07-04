@@ -191,7 +191,7 @@ import MLF.Frontend.Program.Types
     typeViewHeadIdentityForAlias,
     typeViewMentionedHeadIdentities,
   )
-import MLF.Frontend.Symbol (symbolIdentityAliasMap, symbolIdentityAliasNames, symbolIdentityStableName, symbolUniqueIdentity)
+import MLF.Frontend.Symbol (symbolIdentityAliasMap, symbolIdentityAliasNames, symbolIdentityPayloadKey, symbolIdentityStableName, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit, SrcBound (..), SrcTy (..), SrcType)
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
 import MLF.Types.Identity (DeferredRef, IdDetails (..), IdentityGenerator, LocalRef, StructuralTypeBinderRole (..), UniqueIdentity (..), advanceIdentityGeneratorPast, deferredRefIdentity, deferredRefName, freshDeferredRef, freshIdentity, freshLocalRef, idDetailsGeneratedIdentities, idDetailsSymbolIdentity, identityGeneratorAfter, symbolGeneratedIdentities, typeBinderIdentityAliasMap, typeBinderIdentityFromStructural, typeBinderIdentityNode, typeBinderIdentityStructural)
@@ -1870,12 +1870,12 @@ buildConvertContext checked = do
 
 uniqueModulesByIdentity :: CheckedProgram -> Either BackendConversionError (Map SymbolIdentity CheckedModule)
 uniqueModulesByIdentity checked =
-  uniqueCheckedInfoByIdentity BackendDuplicateModule checkedModuleIdentity (checkedProgramModules checked)
+  uniqueCheckedInfoByIdentity "module" BackendDuplicateModule checkedModuleIdentity (checkedProgramModules checked)
 
 uniqueBindingsByIdentity :: CheckedProgram -> Either BackendConversionError (Map SymbolIdentity CheckedBinding)
 uniqueBindingsByIdentity checked =
   Map.map snd
-    <$> uniqueCheckedInfoByIdentity BackendDuplicateBinding fst
+    <$> uniqueCheckedInfoByIdentity "binding" BackendDuplicateBinding fst
       [ (symbol, binding)
       | checkedModule <- checkedProgramModules checked,
         binding <- checkedModuleBindings checkedModule,
@@ -1884,28 +1884,35 @@ uniqueBindingsByIdentity checked =
 
 uniqueDataInfosByIdentity :: [DataInfo] -> Either BackendConversionError (Map SymbolIdentity DataInfo)
 uniqueDataInfosByIdentity =
-  uniqueCheckedInfoByIdentity BackendDuplicateData dataInfoSymbol
+  uniqueCheckedInfoByIdentity "data" BackendDuplicateData dataInfoSymbol
 
 uniqueConstructorMetasByIdentity :: [ConstructorMeta] -> Either BackendConversionError (Map SymbolIdentity ConstructorMeta)
 uniqueConstructorMetasByIdentity =
-  uniqueCheckedInfoByIdentity BackendDuplicateConstructor (ctorInfoSymbol . cmInfo)
+  uniqueCheckedInfoByIdentity "constructor" BackendDuplicateConstructor (ctorInfoSymbol . cmInfo)
 
 uniqueCheckedInfoByIdentity ::
+  String ->
   (String -> BackendValidationError) ->
   (a -> SymbolIdentity) ->
   [a] ->
   Either BackendConversionError (Map SymbolIdentity a)
-uniqueCheckedInfoByIdentity mkError identityFor =
-  go Map.empty
+uniqueCheckedInfoByIdentity label mkError identityFor =
+  go Map.empty Map.empty
   where
-    go entries [] = Right entries
-    go entries (info : rest) =
+    go _ entries [] = Right entries
+    go seen entries (info : rest) =
       let identity = identityFor info
-       in case Map.lookup identity entries of
-            Just _ ->
-              Left (BackendValidationFailed (mkError (symbolIdentityStableName identity)))
+       in case Map.lookup (symbolUniqueIdentity identity) seen of
+            Just existing
+              | symbolIdentityPayloadKey existing == symbolIdentityPayloadKey identity ->
+                  Left (BackendValidationFailed (mkError (symbolIdentityStableName identity)))
+              | otherwise ->
+                  Left (BackendValidationFailed (BackendConflictingIdentityPayload label (symbolIdentityStableName identity)))
             Nothing ->
-              go (Map.insert identity info entries) rest
+              go
+                (Map.insert (symbolUniqueIdentity identity) identity seen)
+                (Map.insert identity info entries)
+                rest
 
 checkedProgramIdentityGenerator :: CheckedProgram -> IdentityGenerator
 checkedProgramIdentityGenerator checked =
@@ -2232,7 +2239,7 @@ allDataInfos checked =
 checkedProgramTermRuntimeNamesByIdentity :: CheckedProgram -> Either BackendConversionError (Map SymbolIdentity String)
 checkedProgramTermRuntimeNamesByIdentity checked =
   Map.map snd
-    <$> uniqueCheckedInfoByIdentity BackendDuplicateBinding fst (checkedBindings ++ builtinBindings)
+    <$> uniqueCheckedInfoByIdentity "binding" BackendDuplicateBinding fst (checkedBindings ++ builtinBindings)
   where
     checkedBindings =
       [ (symbol, checkedBindingRuntimeName binding)

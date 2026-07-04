@@ -270,6 +270,7 @@ data BackendValidationError
   | BackendDuplicateDataParameter String String
   | BackendConstructorUnknownTypeVariable String String
   | BackendConstructorTypeBinderIdentityMissing String String
+  | BackendConflictingIdentityPayload String String
   | BackendDuplicateBinding String
   | BackendDuplicateConstructor String
   | BackendMainNotFound String

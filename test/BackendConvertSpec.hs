@@ -30,7 +30,7 @@ import MLF.Elab.Types (schemeFromType)
 import qualified MLF.Types.Elab as Elab
 import MLF.Frontend.Program.Builtins (builtinTypeIdentity, builtinValueIdentity)
 import MLF.Frontend.Program.Prelude (withPrelude)
-import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), SymbolOrigin (..), symbolDefiningName, symbolIdentityFromParts, symbolIdentityStableName, symbolUniqueIdentity)
+import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), SymbolOrigin (..), renameSymbolDefiningName, symbolDefiningName, symbolIdentityFromParts, symbolIdentityStableName, symbolUniqueIdentity)
 import MLF.Frontend.Program.Types
   ( CheckedBinding (..),
     CheckedModule (..),
@@ -1702,6 +1702,19 @@ spec = describe "MLF.Backend.Convert" $ do
             checked0
     convertCheckedProgram checked
       `shouldBe` Left (BackendValidationFailed (BackendDuplicateBinding (symbolIdentityStableName duplicateIdentity)))
+
+  it "rejects checked binding identity payload conflicts before building backend context maps" $ do
+    checked0 <- requireChecked duplicateBindingIdentityProgram
+    mainBinding <- requireCheckedBinding "Main__main" checked0
+    duplicateIdentity <- requireTopLevelBindingIdentity mainBinding
+    let conflictingIdentity = renameSymbolDefiningName "$stale_main" duplicateIdentity
+        checked =
+          replaceBindingTopLevelIdentity
+            "Main__helper"
+            conflictingIdentity
+            checked0
+    convertCheckedProgram checked
+      `shouldBe` Left (BackendValidationFailed (BackendConflictingIdentityPayload "binding" (symbolIdentityStableName duplicateIdentity)))
 
   it "rejects checked binding identities that collide with primitive identities" $ do
     checked0 <- requireChecked duplicateBindingIdentityProgram
