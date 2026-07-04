@@ -1181,6 +1181,14 @@ spec = do
                         [(originalIdentity, "same"), (conflictingIdentity, "same")]
             Map.lookup originalIdentity infos `shouldBe` Nothing
 
+        it "drops unique display names when one symbol identity has conflicting payloads" $ do
+            let originalIdentity = generatedSymbolIdentity 991661 SymbolType "Lib" "Token" Nothing
+                conflictingIdentity = generatedSymbolIdentity 991661 SymbolType "Other" "StaleToken" Nothing
+                names =
+                    ProgramTypes.uniqueDisplayNamesByIdentity
+                        [(originalIdentity, "Token"), (conflictingIdentity, "Token")]
+            Map.lookup originalIdentity names `shouldBe` Nothing
+
         it "drops exported constructor metadata when one constructor symbol payload conflicts" $ do
             let dataIdentity = generatedSymbolIdentity 991659 SymbolType "Lib" "Token" Nothing
                 originalCtorIdentity =

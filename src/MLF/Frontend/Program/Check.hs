@@ -202,6 +202,7 @@ import MLF.Frontend.Program.Types
     mkExportedTypeInfo,
     moduleExportsFromMaps,
     uniqueDisplayByIdentity,
+    uniqueDisplayNamesByIdentity,
     uniqueInfoEntriesByIdentity,
     uniqueInfoListByIdentity,
     uniqueInfoByIdentity,
@@ -377,27 +378,34 @@ emptyDisplayNameEnv =
 preferDisplayNames :: DisplayNameEnv -> DisplayNameEnv -> DisplayNameEnv
 preferDisplayNames preferred fallback =
   DisplayNameEnv
-    { dneValues = Map.unionWith (++) (dneValues preferred) (dneValues fallback),
-      dneTypes = Map.unionWith (++) (dneTypes preferred) (dneTypes fallback),
-      dneClasses = Map.unionWith (++) (dneClasses preferred) (dneClasses fallback)
+    { dneValues = preferNames (dneValues preferred) (dneValues fallback),
+      dneTypes = preferNames (dneTypes preferred) (dneTypes fallback),
+      dneClasses = preferNames (dneClasses preferred) (dneClasses fallback)
     }
+  where
+    preferNames left right =
+      uniqueDisplayNamesByIdentity
+        [ (identity, name)
+        | (identity, names) <- Map.toList left ++ Map.toList right,
+          name <- names
+        ]
 
 displayNameEnvFromScope :: Scope -> DisplayNameEnv
 displayNameEnvFromScope scope =
   DisplayNameEnv
     { dneValues =
-        Map.fromListWith (++)
-          [ (valueInfoSymbolIdentity info, [name])
+        uniqueDisplayNamesByIdentity
+          [ (valueInfoSymbolIdentity info, name)
             | (name, info) <- Map.toList (scopeValues scope)
           ],
       dneTypes =
-        Map.fromListWith (++)
-          [ (dataInfoSymbolIdentity info, [name])
+        uniqueDisplayNamesByIdentity
+          [ (dataInfoSymbolIdentity info, name)
             | (name, info) <- Map.toList (scopeTypes scope)
           ],
       dneClasses =
-        Map.fromListWith (++)
-          [ (classInfoSymbolIdentity info, [name])
+        uniqueDisplayNamesByIdentity
+          [ (classInfoSymbolIdentity info, name)
             | (name, info) <- Map.toList (scopeClasses scope)
           ]
     }
@@ -412,8 +420,8 @@ displayNameEnvFromResolvedLocals resolvedModule =
   where
     localSymbols = resolvedSemanticModuleLocalSymbols resolvedModule
     localNames symbolsByName =
-      Map.fromListWith (++)
-        [ (resolvedSymbolIdentity symbol, [name])
+      uniqueDisplayNamesByIdentity
+        [ (resolvedSymbolIdentity symbol, name)
           | (name, symbols) <- Map.toList symbolsByName,
             symbol <- symbols
         ]
@@ -426,14 +434,14 @@ displayNameEnvFromData :: Map String DataInfo -> DisplayNameEnv
 displayNameEnvFromData dataInfos =
   emptyDisplayNameEnv
     { dneValues =
-        Map.fromListWith (++)
-          [ (ctorInfoSymbol ctor, [ctorName ctor])
+        uniqueDisplayNamesByIdentity
+          [ (ctorInfoSymbol ctor, ctorName ctor)
             | dataInfo <- Map.elems dataInfos,
               ctor <- dataConstructors dataInfo
           ],
       dneTypes =
-        Map.fromListWith (++)
-          [ (dataInfoSymbolIdentity dataInfo, [name])
+        uniqueDisplayNamesByIdentity
+          [ (dataInfoSymbolIdentity dataInfo, name)
             | (name, dataInfo) <- Map.toList dataInfos
           ]
     }
@@ -442,14 +450,14 @@ displayNameEnvFromClasses :: Map String ClassInfo -> DisplayNameEnv
 displayNameEnvFromClasses classInfos =
   emptyDisplayNameEnv
     { dneValues =
-        Map.fromListWith (++)
-          [ (methodInfoSymbolIdentity methodInfo, [methodName methodInfo])
+        uniqueDisplayNamesByIdentity
+          [ (methodInfoSymbolIdentity methodInfo, methodName methodInfo)
             | classInfo <- Map.elems classInfos,
               methodInfo <- Map.elems (classMethodsByIdentity classInfo)
           ],
       dneClasses =
-        Map.fromListWith (++)
-          [ (classInfoSymbolIdentity classInfo, [name])
+        uniqueDisplayNamesByIdentity
+          [ (classInfoSymbolIdentity classInfo, name)
             | (name, classInfo) <- Map.toList classInfos
           ]
     }
@@ -458,8 +466,8 @@ displayNameEnvFromValues :: Map String ValueInfo -> DisplayNameEnv
 displayNameEnvFromValues values0 =
   emptyDisplayNameEnv
     { dneValues =
-        Map.fromListWith (++)
-          [ (valueInfoSymbolIdentity valueInfo, [name])
+        uniqueDisplayNamesByIdentity
+          [ (valueInfoSymbolIdentity valueInfo, name)
             | (name, valueInfo) <- Map.toList values0
           ]
     }

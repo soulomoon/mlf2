@@ -345,7 +345,7 @@ indexInfoListByIdentity identityOf =
 
 indexDisplayNamesByIdentity :: (a -> SymbolIdentity) -> Map String a -> Map SymbolIdentity [String]
 indexDisplayNamesByIdentity identityOf =
-  Map.fromListWith (++) . map (\(name, info) -> (identityOf info, [name])) . Map.toList
+  uniqueDisplayNamesByIdentity . map (\(name, info) -> (identityOf info, name)) . Map.toList
 
 dataTypeHeadIdentityAliases :: Map SymbolIdentity DataInfo -> Map SymbolIdentity [String] -> Map String SymbolIdentity
 dataTypeHeadIdentityAliases dataTypesByIdentity displayNamesByIdentity =

@@ -257,6 +257,7 @@ module MLF.Frontend.Program.Types
     uniqueInfoListByIdentity,
     uniqueInfoByIdentity,
     uniqueDisplayByIdentity,
+    uniqueDisplayNamesByIdentity,
     exportedValuesForDisplay,
     exportedTypesForDisplay,
     exportedClassesForDisplay,
@@ -2617,6 +2618,10 @@ uniqueDisplayByIdentity identityFor values =
     [ (identityFor info, displayName)
     | (displayName, info) <- Map.toList values
     ]
+
+uniqueDisplayNamesByIdentity :: [(SymbolIdentity, String)] -> Map SymbolIdentity [String]
+uniqueDisplayNamesByIdentity entries =
+  Map.fromList (uniquePayloadIdentityGroups entries)
 
 uniqueDisplayEntriesByIdentity :: [(SymbolIdentity, String)] -> Map SymbolIdentity String
 uniqueDisplayEntriesByIdentity entries =
