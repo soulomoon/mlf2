@@ -837,10 +837,14 @@ resolveTypeWith typeBinders scope = \case
         Nothing -> liftResolve (Left (ProgramPipelineError ("unresolved type binder `" ++ name ++ "` reached resolver")))
 
 resolveTypeName :: CandidateScope -> String -> ResolveM ResolvedReference
-resolveTypeName scope name
-  | name `Set.member` PrimitiveInventory.builtinTypeNames =
-      pure (mkResolvedReference ResolvedTypeReference name (builtinTypeSymbol name))
-  | otherwise = resolveReference ResolvedTypeReference ProgramUnknownType candidateTypes scope name
+resolveTypeName scope name =
+  case resolveReference ResolvedTypeReference ProgramUnknownType candidateTypes scope name of
+    Right ref -> Right ref
+    Left err@(ProgramUnknownType _)
+      | name `Set.member` PrimitiveInventory.builtinTypeNames ->
+          Right (mkResolvedReference ResolvedTypeReference name (builtinTypeSymbol name))
+      | otherwise -> Left err
+    Left err -> Left err
 
 resolveClassRef :: CandidateScope -> P.ClassName -> ResolveM ResolvedReference
 resolveClassRef scope name =

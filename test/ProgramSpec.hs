@@ -7404,6 +7404,17 @@ spec = do
                     sameResolvedSymbol (symbolFor ResolvedMethodReference "eq") (symbolFor ResolvedMethodReference "C.eq") `shouldBe` True
                 Left err -> expectationFailure ("expected check success, got " ++ show err)
 
+        it "does not bypass visible type identities for builtin spellings" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (Int(..)) {"
+                        , "  data Int ="
+                        , "      LocalInt : Int;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            resolveProgram program `shouldBe` Left (ProgramAmbiguousUnqualifiedReference "Int")
+
         it "stores resolved AST global references as symbols and local references as local refs" $ do
             let programText =
                     unlines
