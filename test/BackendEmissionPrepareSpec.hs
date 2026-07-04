@@ -116,6 +116,12 @@ spec =
 
             map checkedBindingName (checkedModuleBindings preludeModule) `shouldBe` ["$stale_keep"]
 
+        it "does not retain Prelude bindings through stale identity payloads" $ do
+            let checked = prepareCheckedProgramForBackendEmission stalePreludeBindingPayloadProgram
+            preludeModule <- requirePreludeModule checked
+
+            checkedModuleBindings preludeModule `shouldBe` []
+
         it "retains Prelude bindings by module identity when checked module names are stale" $ do
             let checked = prepareCheckedProgramForBackendEmission stalePreludeModuleNameProgram
             preludeModule <- requireModuleByIdentity (moduleIdentity "Prelude") checked
@@ -143,6 +149,12 @@ spec =
 
             Set.fromList (map dataInfoSymbol (Map.elems (checkedModuleData preludeModule)))
                 `shouldBe` Set.singleton (typeIdentity "Prelude" "Unit")
+
+        it "does not retain Prelude data through stale type identity payloads" $ do
+            let checked = prepareCheckedProgramForBackendEmission stalePreludeDataPayloadProgram
+            preludeModule <- requirePreludeModule checked
+
+            checkedModuleData preludeModule `shouldBe` Map.empty
 
         it "retains Prelude data by constructor identity when constructor owner names are stale" $ do
             let checked = prepareCheckedProgramForBackendEmission stalePreludeConstructorOwnerProgram
@@ -253,6 +265,27 @@ stalePreludeBindingNameProgram =
     preludeDropVar = topLevelVar 21 "Prelude__drop" "Prelude" "drop" intTy
     mainVar = topLevelVar 22 "Main__main" "Main" "main" intTy
 
+stalePreludeBindingPayloadProgram :: CheckedProgram
+stalePreludeBindingPayloadProgram =
+    CheckedProgram
+        { checkedProgramModules =
+            [ checkedModule
+                "Prelude"
+                [ testBinding "Prelude__keep" preludeKeepVar (Elab.ELit (Surface.LInt 1))
+                , testBinding "Prelude__drop" preludeDropVar (Elab.ELit (Surface.LInt 0))
+                ]
+            , checkedModule "Main" [testBinding "Main__main" mainVar (Elab.EVarNode stalePreludeKeepVar)]
+            ]
+        , checkedProgramMainResolvedVar = mainVar
+        , checkedProgramResolved = ResolvedProgram []
+        }
+  where
+    intTy = Elab.TBase (BaseTy "Int")
+    preludeKeepVar = topLevelVar 20 "Prelude__keep" "Prelude" "keep" intTy
+    stalePreludeKeepVar = topLevelVar 20 "$stale_keep" "Prelude" "$stale_keep" intTy
+    preludeDropVar = topLevelVar 21 "Prelude__drop" "Prelude" "drop" intTy
+    mainVar = topLevelVar 22 "Main__main" "Main" "main" intTy
+
 stalePreludeModuleNameProgram :: CheckedProgram
 stalePreludeModuleNameProgram =
     CheckedProgram
@@ -291,7 +324,7 @@ ambiguousPreludeModuleIdentityProgram =
                     [ testBinding "OtherPrelude__drop" otherPreludeDropVar (Elab.ELit (Surface.LInt 0))
                     ]
               )
-                { checkedModuleIdentity = generatedSymbolIdentity 211 SymbolModule "PreludeRight" "Prelude" Nothing }
+                { checkedModuleIdentity = generatedSymbolIdentity 210 SymbolModule "PreludeRight" "Prelude" Nothing }
             , checkedModule "Main" [testBinding "Main__main" mainVar (Elab.EVarNode preludeKeepVar)]
             ]
         , checkedProgramMainResolvedVar = mainVar
@@ -303,6 +336,31 @@ ambiguousPreludeModuleIdentityProgram =
     preludeDropVar = topLevelVar 27 "Prelude__drop" "Prelude" "drop" intTy
     otherPreludeDropVar = topLevelVar 28 "OtherPrelude__drop" "OtherPrelude" "drop" intTy
     mainVar = topLevelVar 29 "Main__main" "Main" "main" intTy
+
+stalePreludeDataPayloadProgram :: CheckedProgram
+stalePreludeDataPayloadProgram =
+    CheckedProgram
+        { checkedProgramModules =
+            [ (checkedModule "Prelude" [])
+                { checkedModuleData = Map.singleton (dataInfoSymbol unitData) unitData }
+            , checkedModule "Main" [testBinding "Main__main" mainVar (Elab.ELit (Surface.LInt 1))]
+            ]
+        , checkedProgramMainResolvedVar = mainVar
+        , checkedProgramResolved =
+            ResolvedProgram
+                [ resolvedModuleWithReferences "Main" [typeReference staleUnitIdentity]
+                ]
+        }
+  where
+    intTy = Elab.TBase (BaseTy "Int")
+    mainVar = topLevelVar 32 "Main__main" "Main" "main" intTy
+    staleUnitIdentity = generatedSymbolIdentity 100 SymbolType "Prelude" "$stale_Unit" Nothing
+    unitData =
+        DataInfo
+            { dataInfoSymbol = typeIdentity "Prelude" "Unit"
+            , dataTypeParams = []
+            , dataConstructors = []
+            }
 
 stalePreludeDataNameProgram :: CheckedProgram
 stalePreludeDataNameProgram =
@@ -593,6 +651,13 @@ constructorReference ctor =
         ResolvedConstructorReference
         (ctorName ctor)
         (mkResolvedSymbol (ctorInfoSymbol ctor) (ctorName ctor) (ctorName ctor) (SymbolUnqualifiedImport "Prelude"))
+
+typeReference :: SymbolIdentity -> ResolvedReference
+typeReference identity =
+    mkResolvedReference
+        ResolvedTypeReference
+        (symbolDefiningName identity)
+        (mkResolvedSymbol identity (symbolDefiningName identity) (symbolDefiningName identity) (SymbolUnqualifiedImport "Prelude"))
 
 resolvedModuleWithReferences :: String -> [ResolvedReference] -> ResolvedModule
 resolvedModuleWithReferences name references =

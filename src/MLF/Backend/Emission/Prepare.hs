@@ -10,6 +10,7 @@ module MLF.Backend.Emission.Prepare
     ) where
 
 import Data.Bifunctor (first)
+import Data.List (nubBy)
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
@@ -55,6 +56,7 @@ import MLF.Frontend.Program.Types
     , diagnosticForProgramError
     , renderProgramDiagnostic
     )
+import MLF.Frontend.Symbol (lookupSymbolIdentityExact, memberSymbolIdentityExact, sameSymbolIdentity)
 
 data BackendEmissionPreparationError
     = BackendEmissionProgramParseError ProgramParseError
@@ -104,7 +106,7 @@ prepareCheckedProgramForBackendEmission checked =
 
 preludeModuleIdentity :: [CheckedModule] -> Maybe SymbolIdentity
 preludeModuleIdentity modules0 =
-    case Set.toList (Set.fromList preludeIdentities) of
+    case nubBy sameSymbolIdentity preludeIdentities of
         [identity] -> Just identity
         _ -> Nothing
   where
@@ -121,7 +123,7 @@ isPreludeModuleIdentity identity =
 
 isPreludeModule :: Maybe SymbolIdentity -> CheckedModule -> Bool
 isPreludeModule preludeIdentity checkedModule =
-    Just (checkedModuleIdentity checkedModule) == preludeIdentity
+    maybe False (\identity -> sameSymbolIdentity identity (checkedModuleIdentity checkedModule)) preludeIdentity
 
 prepareModule :: Maybe SymbolIdentity -> Set SymbolIdentity -> Set SymbolIdentity -> CheckedModule -> CheckedModule
 prepareModule preludeIdentity retainedPreludeBindings retainedPreludeData checkedModule
@@ -133,7 +135,7 @@ prepareModule preludeIdentity retainedPreludeBindings retainedPreludeData checke
                     (checkedModuleBindings checkedModule)
             , checkedModuleData =
                 Map.filter
-                    ((`Set.member` retainedPreludeData) . dataInfoSymbol)
+                    ((`memberSymbolIdentityExact` retainedPreludeData) . dataInfoSymbol)
                     (checkedModuleData checkedModule)
             }
     | otherwise = checkedModule
@@ -141,7 +143,7 @@ prepareModule preludeIdentity retainedPreludeBindings retainedPreludeData checke
 retainedPreludeBinding :: Set SymbolIdentity -> CheckedBinding -> Bool
 retainedPreludeBinding retainedPreludeBindings binding =
     case checkedBindingSymbolIdentity binding of
-        Just symbol -> symbol `Set.member` retainedPreludeBindings
+        Just symbol -> symbol `memberSymbolIdentityExact` retainedPreludeBindings
         Nothing -> False
 
 checkedBindingSymbolIdentity :: CheckedBinding -> Maybe SymbolIdentity
@@ -177,7 +179,7 @@ preludeBindingDependencyClosure preludeIdentity modules0 =
         case Set.minView (pendingPreludeBindings pending retained) of
             Nothing -> retained
             Just (symbol, pendingRest) ->
-                case Map.lookup symbol preludeBindingsByIdentity of
+                case lookupSymbolIdentityExact symbol preludeBindingsByIdentity of
                     Nothing -> close pendingRest retained
                     Just binding ->
                         close
@@ -185,8 +187,9 @@ preludeBindingDependencyClosure preludeIdentity modules0 =
                             (Set.insert symbol retained)
 
     pendingPreludeBindings pending retained =
-        (pending `Set.intersection` Map.keysSet preludeBindingsByIdentity)
-            `Set.difference` retained
+        exactSetDifference
+            (Set.filter (`identityInMap` preludeBindingsByIdentity) pending)
+            retained
 
 preludeDataDependencyClosure :: Maybe SymbolIdentity -> CheckedProgram -> Set SymbolIdentity -> Set SymbolIdentity
 preludeDataDependencyClosure preludeIdentity checked retainedPreludeBindings =
@@ -224,7 +227,7 @@ preludeDataDependencyClosure preludeIdentity checked retainedPreludeBindings =
             , Set.fromList
                 [ dataIdentity
                 | bindingSymbol <- Set.toList retainedPreludeBindings
-                , Just dataIdentity <- [Map.lookup bindingSymbol preludeDataByConstructorBinding]
+                , Just dataIdentity <- [lookupSymbolIdentityExact bindingSymbol preludeDataByConstructorBinding]
                 ]
             ]
 
@@ -232,7 +235,7 @@ preludeDataDependencyClosure preludeIdentity checked retainedPreludeBindings =
         case Set.minView (pendingPreludeData pending retained) of
             Nothing -> retained
             Just (dataIdentity, pendingRest) ->
-                case Map.lookup dataIdentity preludeDataByIdentity of
+                case lookupSymbolIdentityExact dataIdentity preludeDataByIdentity of
                     Nothing -> close pendingRest retained
                     Just dataInfo ->
                         close
@@ -240,8 +243,9 @@ preludeDataDependencyClosure preludeIdentity checked retainedPreludeBindings =
                             (Set.insert dataIdentity retained)
 
     pendingPreludeData pending retained =
-        (pending `Set.intersection` Map.keysSet preludeDataByIdentity)
-            `Set.difference` retained
+        exactSetDifference
+            (Set.filter (`identityInMap` preludeDataByIdentity) pending)
+            retained
 
 referencedPreludeData ::
     Maybe SymbolIdentity ->
@@ -266,10 +270,10 @@ preludeDataReference ::
 preludeDataReference preludeDataByIdentity preludeDataByConstructorBinding reference =
     case resolvedReferenceKind reference of
         ResolvedTypeReference
-            | symbolIdentity `Map.member` preludeDataByIdentity ->
+            | symbolIdentity `identityInMap` preludeDataByIdentity ->
                 Just symbolIdentity
         ResolvedConstructorReference ->
-            Map.lookup symbolIdentity preludeDataByConstructorBinding
+            lookupSymbolIdentityExact symbolIdentity preludeDataByConstructorBinding
         _ -> Nothing
   where
     symbolIdentity = resolvedSymbolIdentity (resolvedReferenceSymbol reference)
@@ -282,12 +286,12 @@ retainedPreludeBindingData preludeDataIdentities preludeBindings retainedPrelude
         [ elabTypePreludeData preludeDataIdentities (checkedBindingType binding)
         | binding <- preludeBindings
         , Just bindingSymbol <- [checkedBindingSymbolIdentity binding]
-        , bindingSymbol `Set.member` retainedPreludeBindings
+        , bindingSymbol `memberSymbolIdentityExact` retainedPreludeBindings
         ]
 
 elabTypePreludeData :: Set SymbolIdentity -> ElabType -> Set SymbolIdentity
 elabTypePreludeData preludeDataIdentities ty =
-    Set.filter (`Set.member` preludeDataIdentities) (elabTypeHeadIdentities ty)
+    Set.filter (`memberSymbolIdentityExact` preludeDataIdentities) (elabTypeHeadIdentities ty)
 
 elabTypeHeadIdentities :: Ty v -> Set SymbolIdentity
 elabTypeHeadIdentities =
@@ -314,9 +318,17 @@ elabTypeHeadIdentities =
 preludeDataDependencies :: Set SymbolIdentity -> DataInfo -> Set SymbolIdentity
 preludeDataDependencies preludeDataIdentities dataInfo =
     Set.unions
-        [ Set.filter (`Set.member` preludeDataIdentities) (Set.fromList (Map.elems (typeViewHeadIdentities (ctorTypeView constructorInfo))))
+        [ Set.filter (`memberSymbolIdentityExact` preludeDataIdentities) (Set.fromList (Map.elems (typeViewHeadIdentities (ctorTypeView constructorInfo))))
         | constructorInfo <- dataConstructors dataInfo
         ]
+
+identityInMap :: SymbolIdentity -> Map.Map SymbolIdentity a -> Bool
+identityInMap identity =
+    maybe False (const True) . lookupSymbolIdentityExact identity
+
+exactSetDifference :: Set SymbolIdentity -> Set SymbolIdentity -> Set SymbolIdentity
+exactSetDifference values removed =
+    Set.filter (not . (`memberSymbolIdentityExact` removed)) values
 
 referencedBindingSymbols :: [CheckedBinding] -> Set SymbolIdentity
 referencedBindingSymbols bindings =
