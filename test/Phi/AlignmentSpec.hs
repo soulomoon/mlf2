@@ -9,7 +9,7 @@ import MLF.Constraint.Presolution (PresolutionResult(..), EdgeTrace(..))
 import MLF.Constraint.Types.Graph (BaseTy(..), typeRef)
 import MLF.Elab.Pipeline (runPipelineElab, typeCheck)
 import MLF.Frontend.Syntax (Expr(..), SrcTy(..), Lit(..))
-import MLF.Types.Elab (Ty(..))
+import MLF.Types.Elab (tBase)
 import qualified MLF.Binding.Tree as Binding
 import SpecUtil (unsafeNormalizeExpr, runPipelineArtifactsDefault, PipelineArtifacts(..), mkForalls)
 
@@ -110,7 +110,7 @@ spec = describe "Phi alignment" $ do
                             (EApp (EAnn (EVar "c") ann) (ELit (LInt 1)))
                             (ELit (LInt 2)))
                 normExpr = unsafeNormalizeExpr expr
-                expectedTy = TBase (BaseTy "Int")
+                expectedTy = tBase (BaseTy "Int")
             let expectInt label result =
                     case result of
                         Left err ->

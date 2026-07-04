@@ -23,13 +23,13 @@ import SpecUtil (emptyConstraint)
 import Test.Hspec
 
 intTy :: ElabType
-intTy = TBase (BaseTy "Int")
+intTy = tBase (BaseTy "Int")
 
 boolTy :: ElabType
-boolTy = TBase (BaseTy "Bool")
+boolTy = tBase (BaseTy "Bool")
 
 intBound :: BoundType
-intBound = TBase (BaseTy "Int")
+intBound = tBase (BaseTy "Int")
 
 forallTy :: ElabType
 forallTy = testTForall "a" Nothing (testTVar "a")
@@ -74,7 +74,7 @@ spec = describe "MLF.Elab.Run.ResultType.Util" $ do
         `shouldBe` False
       containsBoundForall boundedByForall `shouldBe` True
       containsBoundForall (TArrow intTy boundedByForall) `shouldBe` True
-      containsBoundForall (TCon (BaseTy "Box") (boundedByForall :| [boolTy]))
+      containsBoundForall (tCon (BaseTy "Box") (boundedByForall :| [boolTy]))
         `shouldBe` True
       containsBoundForall (testTVarApp "F" (boundedByForall :| []))
         `shouldBe` True

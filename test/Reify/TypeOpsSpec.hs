@@ -36,6 +36,7 @@ import MLF.Types.Elab
   ( ElabType,
     Ty (..),
     TypeBinderRef,
+    tBase,
     tForallWithRef,
     tMuWithRef,
     tVarAppWithRef,
@@ -51,10 +52,10 @@ import MLF.Types.Identity (UniqueIdentity (..), typeBinderIdentityStableName)
 import Test.Hspec
 
 intTy :: ElabType
-intTy = TBase (BaseTy "int")
+intTy = tBase (BaseTy "int")
 
 boolTy :: ElabType
-boolTy = TBase (BaseTy "bool")
+boolTy = tBase (BaseTy "bool")
 
 typeRef :: Int -> String -> TypeBinderRef
 typeRef key name =

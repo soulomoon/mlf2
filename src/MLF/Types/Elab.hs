@@ -9,16 +9,13 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE InstanceSigs #-}
-{-# LANGUAGE PatternSynonyms #-}
 module MLF.Types.Elab (
     Ty
         ( TVarRef,
           TArrow,
           TConWithIdentity,
-          TCon,
           TVarAppRef,
           TBaseWithIdentity,
-          TBase,
           TForallRef,
           TMuRef,
           TBottom
@@ -28,16 +25,16 @@ module MLF.Types.Elab (
     BoundType,
     tVarWithRef,
     tVarAppWithRef,
+    tCon,
+    tBase,
     tForallWithRef,
     tMuWithRef,
     TyIF
         ( TVarIFRef,
           TArrowIF,
           TConIFWithIdentity,
-          TConIF,
           TVarAppIFRef,
           TBaseIFWithIdentity,
-          TBaseIF,
           TForallIFRef,
           TMuIFRef,
           TBottomIF
@@ -246,9 +243,9 @@ import Util.IndexedRecursion
 -- Constructors:
 --   * TVarRef: Type variables (α), identified by 'TypeBinderRef'.
 --   * TArrow: Function types (τ -> τ)
---   * TCon: Constructor application (C σ), per thesis Fig. 14.2.1.
+--   * TConWithIdentity: Constructor application (C σ), per thesis Fig. 14.2.1.
 --   * TVarAppRef: Erased higher-kinded variable application (f σ).
---   * TBase: Base types (Int, Bool, etc.). This is a 0-ary constructor convenience.
+--   * TBaseWithIdentity: Base types (Int, Bool, etc.).
 --   * TForallRef: Flexible quantification ∀(α ⩾ τ). σ.
 --       - Nothing bound implies ⩾ ⊥ (standard System F unbounded quantification)
 --       - Just bound implies explicit instance bound
@@ -265,22 +262,6 @@ data Ty (v :: TopVar) where
     TForallRef :: TypeBinderRef -> Maybe (Ty 'NoTopVar) -> Ty AllowVar -> Ty a -- ∀(α ⩾ τ?). σ
     TMuRef :: TypeBinderRef -> Ty 'AllowVar -> Ty a
     TBottom :: Ty a
-
-pattern TCon :: BaseTy -> NonEmpty (Ty AllowVar) -> Ty a
-pattern TCon con args <-
-    TConWithIdentity _ con args
-  where
-    TCon con@(BaseTy name) args =
-        TConWithIdentity (PrimitiveIdentity.builtinTypeHeadIdentity name) con args
-
-pattern TBase :: BaseTy -> Ty a
-pattern TBase base <-
-    TBaseWithIdentity _ base
-  where
-    TBase base@(BaseTy name) =
-        TBaseWithIdentity (PrimitiveIdentity.builtinTypeHeadIdentity name) base
-
-{-# COMPLETE TVarRef, TArrow, TCon, TVarAppRef, TBase, TForallRef, TMuRef, TBottom #-}
 
 instance Eq (Ty v) where
     left == right =
@@ -319,6 +300,14 @@ tVarWithRef = TVarRef
 tVarAppWithRef :: TypeBinderRef -> NonEmpty (Ty AllowVar) -> Ty a
 tVarAppWithRef = TVarAppRef
 
+tCon :: BaseTy -> NonEmpty (Ty AllowVar) -> Ty a
+tCon con@(BaseTy name) args =
+    TConWithIdentity (PrimitiveIdentity.builtinTypeHeadIdentity name) con args
+
+tBase :: BaseTy -> Ty a
+tBase base@(BaseTy name) =
+    TBaseWithIdentity (PrimitiveIdentity.builtinTypeHeadIdentity name) base
+
 tForallWithRef :: TypeBinderRef -> Maybe BoundType -> ElabType -> Ty a
 tForallWithRef = TForallRef
 
@@ -335,22 +324,6 @@ data TyIF (v :: TopVar) (r :: TopVar -> Type) where
     TForallIFRef :: TypeBinderRef -> Maybe (r 'NoTopVar) -> r 'AllowVar -> TyIF v r
     TMuIFRef :: TypeBinderRef -> r 'AllowVar -> TyIF v r
     TBottomIF :: TyIF v r
-
-pattern TConIF :: BaseTy -> NonEmpty (r 'AllowVar) -> TyIF v r
-pattern TConIF con args <-
-    TConIFWithIdentity _ con args
-  where
-    TConIF con@(BaseTy name) args =
-        TConIFWithIdentity (PrimitiveIdentity.builtinTypeHeadIdentity name) con args
-
-pattern TBaseIF :: BaseTy -> TyIF v r
-pattern TBaseIF base <-
-    TBaseIFWithIdentity _ base
-  where
-    TBaseIF base@(BaseTy name) =
-        TBaseIFWithIdentity (PrimitiveIdentity.builtinTypeHeadIdentity name) base
-
-{-# COMPLETE TVarIFRef, TArrowIF, TConIF, TVarAppIFRef, TBaseIF, TForallIFRef, TMuIFRef, TBottomIF #-}
 
 instance IxFunctor TyIF where
     imap f node = case node of

@@ -1,5 +1,4 @@
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE PatternSynonyms #-}
 
 module ElabTermTestSupport
   ( generatedLocalRef,
@@ -50,6 +49,7 @@ import MLF.Types.Elab
     resolvedVarSameIdentity,
     schemeBinderRefs,
     schemeBody,
+    tCon,
     tForallWithRef,
     tMuWithRef,
     tVarAppWithRef,
@@ -267,11 +267,11 @@ resolveFixtureTypeNameInType name target =
           | otherwise -> ty
         TArrow left right ->
           TArrow (go left) (go right)
-        TCon con args ->
-          TCon con (fmap go args)
+        TConWithIdentity _ con args ->
+          tCon con (fmap go args)
         TVarAppRef ref args ->
           TVarAppRef (resolveRef ref) (fmap go args)
-        TBase {} -> ty
+        TBaseWithIdentity _ _ -> ty
         TBottom -> TBottom
         TForallRef ref mb body
           | shadows ref -> TForallRef ref (fmap resolveBound mb) body

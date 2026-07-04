@@ -3866,7 +3866,7 @@ spec = do
                         ]
             checked <- requireChecked (withPrelude program)
             let handlerType = testTVar "r"
-                handlerArgType = Elab.TBase (BaseTy "Int")
+                handlerArgType = Elab.tBase (BaseTy "Int")
                 handlerRef = generatedLocalRefForName "$Option-handler"
                 noneHandler =
                     ResolvedVar
@@ -3914,7 +3914,7 @@ spec = do
                         ]
             checked <- requireChecked program
             let handlerType = testTVar "r"
-                handlerArgType = Elab.TBase (BaseTy "Int")
+                handlerArgType = Elab.tBase (BaseTy "Int")
                 handlerRef = generatedLocalRefForName "$Option-fallback-handler"
                 noneHandler =
                     ResolvedVar
@@ -4123,7 +4123,7 @@ spec = do
                         stringFromInt =
                             ResolvedVar
                                 { resolvedVarRuntimeName = PrimitiveInventory.stringFromIntPrimitiveName
-                                , resolvedVarType = Elab.TArrow (Elab.TBase (BaseTy "Int")) (Elab.TBase (BaseTy "String"))
+                                , resolvedVarType = Elab.TArrow (Elab.tBase (BaseTy "Int")) (Elab.tBase (BaseTy "String"))
                                 , resolvedVarDetails =
                                     PrimitiveId (primitiveRefFromSymbol (Builtins.builtinValueIdentity PrimitiveInventory.stringFromIntPrimitiveName))
                                 }
@@ -4186,7 +4186,7 @@ spec = do
                         stringFromInt =
                             ResolvedVar
                                 { resolvedVarRuntimeName = PrimitiveInventory.stringFromIntPrimitiveName
-                                , resolvedVarType = Elab.TArrow (Elab.TBase (BaseTy "Int")) (Elab.TBase (BaseTy "String"))
+                                , resolvedVarType = Elab.TArrow (Elab.tBase (BaseTy "Int")) (Elab.tBase (BaseTy "String"))
                                 , resolvedVarDetails =
                                     PrimitiveId (primitiveRefFromSymbol (Builtins.builtinValueIdentity PrimitiveInventory.stringFromIntPrimitiveName))
                                 }
@@ -4296,8 +4296,8 @@ spec = do
                         , "}"
                         ]
             checked <- requireChecked (withPrelude program)
-            let intTy = Elab.TBase (BaseTy "Int")
-                stringTy = Elab.TBase (BaseTy "String")
+            let intTy = Elab.tBase (BaseTy "Int")
+                stringTy = Elab.tBase (BaseTy "String")
                 primitiveTy = Elab.TArrow intTy stringTy
                 staleStringFromInt =
                     ResolvedVar
@@ -4319,8 +4319,8 @@ spec = do
                         , "}"
                         ]
             checked <- requireChecked (withPrelude program)
-            let intTy = Elab.TBase (BaseTy "Int")
-                stringTy = Elab.TBase (BaseTy "String")
+            let intTy = Elab.tBase (BaseTy "Int")
+                stringTy = Elab.tBase (BaseTy "String")
                 primitiveTy = Elab.TArrow intTy stringTy
                 fakePrimitiveSpelling =
                     ResolvedVar
@@ -4630,7 +4630,7 @@ spec = do
                         , "}"
                         ]
             checked <- requireCheckedLocated (withPreludeLocated located)
-            let stringTy = Elab.TBase (BaseTy "String")
+            let stringTy = Elab.tBase (BaseTy "String")
                 correctIdentity = generatedSymbolIdentity 991730 SymbolValue "Synthetic" "message" Nothing
                 staleIdentity = renameSymbolDefiningName "$stale_message" correctIdentity
                 correctResolved =
@@ -4760,7 +4760,7 @@ spec = do
                         , "}"
                         ]
             checked <- requireCheckedLocated (withPreludeLocated located)
-            let intElabTy = Elab.TBase (BaseTy "Int")
+            let intElabTy = Elab.tBase (BaseTy "Int")
                 outer = generatedResolvedLocal 100 "x" "runtime-x" intElabTy
                 inner = generatedResolvedLocal 101 "x" "runtime-x" intElabTy
                 ioBind = primitiveTerm "__io_bind"

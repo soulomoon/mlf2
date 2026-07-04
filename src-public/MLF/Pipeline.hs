@@ -30,10 +30,8 @@ module MLF.Pipeline
         ( TVarRef
         , TArrow
         , TConWithIdentity
-        , TCon
         , TVarAppRef
         , TBaseWithIdentity
-        , TBase
         , TForallRef
         , TMuRef
         , TBottom
@@ -46,6 +44,8 @@ module MLF.Pipeline
     , typeBinderRefIdentity
     , typeBinderRefName
     , typeBinderRefsSameIdentity
+    , tCon
+    , tBase
     , ElabScheme
     , mkElabSchemeWithRefs
     , schemeBinderRefs
@@ -237,10 +237,8 @@ import MLF.Elab.Pipeline
         ( TVarRef
         , TArrow
         , TConWithIdentity
-        , TCon
         , TVarAppRef
         , TBaseWithIdentity
-        , TBase
         , TForallRef
         , TMuRef
         , TBottom
@@ -253,6 +251,8 @@ import MLF.Elab.Pipeline
     , typeBinderRefIdentity
     , typeBinderRefName
     , typeBinderRefsSameIdentity
+    , tCon
+    , tBase
     , mkElabSchemeWithRefs
     , schemeBinderRefs
     , schemeBody

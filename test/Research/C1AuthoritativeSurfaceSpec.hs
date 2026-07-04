@@ -52,6 +52,7 @@ import MLF.Types.Elab
     ( BoundType
     , ElabType
     , Ty(..)
+    , tBase
     )
 import SpecUtil
     ( PipelineArtifacts(..)
@@ -67,7 +68,7 @@ spec =
     describe "C1 authoritative-surface harness" $ do
         it "keeps the admitted non-local Int packet visibly non-recursive on the fallback surface" $ do
             fallbackTy <- c1FallbackTypeFor c1IntExpr (BaseTy "Int")
-            fallbackTy `shouldBe` TBase (BaseTy "Int")
+            fallbackTy `shouldBe` tBase (BaseTy "Int")
             containsMu fallbackTy `shouldBe` False
 
         it "keeps the exact Int source packet recursive on both current pipeline entrypoints" $ do
@@ -83,7 +84,7 @@ spec =
 
         it "keeps the admitted non-local Bool packet visibly non-recursive on the fallback surface" $ do
             fallbackTy <- c1FallbackTypeFor c1BoolExpr (BaseTy "Bool")
-            fallbackTy `shouldBe` TBase (BaseTy "Bool")
+            fallbackTy `shouldBe` tBase (BaseTy "Bool")
             containsMu fallbackTy `shouldBe` False
 
         it "keeps the exact Bool source packet recursive on both current pipeline entrypoints" $ do
@@ -245,15 +246,15 @@ containsMu :: ElabType -> Bool
 containsMu ty = case ty of
     TMuRef _ _ -> True
     TArrow dom cod -> containsMu dom || containsMu cod
-    TCon _ args -> any containsMu args
+    TConWithIdentity _ _ args -> any containsMu args
     TForallRef _ mb body -> maybe False containsMuBound mb || containsMu body
     _ -> False
   where
     containsMuBound :: BoundType -> Bool
     containsMuBound bound = case bound of
         TArrow dom cod -> containsMu dom || containsMu cod
-        TBase _ -> False
-        TCon _ args -> any containsMu args
+        TBaseWithIdentity _ _ -> False
+        TConWithIdentity _ _ args -> any containsMu args
         TVarAppRef _ args -> any containsMu args
         TForallRef _ mb body -> maybe False containsMuBound mb || containsMu body
         TMuRef _ _ -> True

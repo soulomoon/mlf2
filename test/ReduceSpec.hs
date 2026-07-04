@@ -28,6 +28,8 @@ import MLF.Types.Elab
     , instUnderWithRef
     , resolvedVarReferenceName
     , resolvedVarSameIdentity
+    , tBase
+    , tCon
     , tVarWithRef
     , typeBinderIdentityFromNode
     , typeBinderRefIdentity
@@ -54,7 +56,7 @@ import SpecUtil (mkForalls, requireRight, unsafeNormalizeExpr)
 
 spec :: Spec
 spec = do
-    let intTy = TBase (BaseTy "Int")
+    let intTy = tBase (BaseTy "Int")
         idLam = mkTestLocalLam "x" intTy (mkTestDeferredVar "x")
         polyLam = mkTestLocalLam "x" (testTVar "a") (mkTestDeferredVar "x")
         recursiveIntTy = testTMu "self" (TArrow (testTVar "self") intTy)
@@ -67,9 +69,9 @@ spec = do
         boundFromType ty = case ty of
             TVarRef ref -> error ("boundFromType: unexpected variable bound " ++ show (typeBinderRefName ref))
             TArrow a b -> TArrow a b
-            TCon c args -> TCon c args
+            TConWithIdentity _ c args -> tCon c args
             TVarAppRef ref args -> TVarAppRef ref args
-            TBase b -> TBase b
+            TBaseWithIdentity _ b -> tBase b
             TBottom -> TBottom
             TForallRef ref mb body -> TForallRef ref mb body
             TMuRef ref body -> TMuRef ref body
@@ -179,7 +181,7 @@ spec = do
                 other -> expectationFailure ("Expected stable-alias capture freshening, got: " ++ show other)
 
         it "reduces primitive and by resolved identity instead of runtime spelling" $ do
-            let boolTy = TBase (BaseTy "Bool")
+            let boolTy = tBase (BaseTy "Bool")
                 andResolved =
                     ResolvedVar
                         { resolvedVarRuntimeName = "stale-and"

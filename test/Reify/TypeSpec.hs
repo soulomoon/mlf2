@@ -24,6 +24,7 @@ import MLF.Reify.Type
 import MLF.Types.Elab
   ( ElabType
   , Ty (..)
+  , tBase
   , typeBinderIdentityFromNode
   , typeBinderIdentityKey
   , typeBinderRefFromIdentity
@@ -211,7 +212,7 @@ spec = describe "MLF.Reify.Type" $ do
           asString :: ElabType -> Either ElabError String
           asString ty = Right (show ty)
       expectRight (reifyWithAsRefs "test" view refFor isNamed RootType asString root) $ \s ->
-        s `shouldBe` show (TBase (BaseTy "Int"))
+        s `shouldBe` show (tBase (BaseTy "Int"))
 
     it "propagates conversion failure" $ do
       artifacts <- pipelineFor (ELit (LInt 1))
@@ -240,7 +241,7 @@ spec = describe "MLF.Reify.Type" $ do
 
 -- Predicates for structural assertions on ElabType
 isBaseType :: ElabType -> Bool
-isBaseType (TBase _) = True
+isBaseType (TBaseWithIdentity _ _) = True
 isBaseType _ = False
 
 isVarType :: ElabType -> Bool

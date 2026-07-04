@@ -58,6 +58,8 @@ import MLF.Types.Elab
     , resolvedVarConstructorRef
     , resolvedVarIsLocal
     , resolvedVarReferenceName
+    , tBase
+    , tCon
     , schemeBinderRefs
     , tForallWithRef
     , tVarWithRef
@@ -149,14 +151,14 @@ externalBindingIdentityFromDetails runtimeName details =
 
 spec :: Spec
 spec = describe "Phase 7 typecheck" $ do
-    let intTy = TBase (BaseTy "Int")
+    let intTy = tBase (BaseTy "Int")
         builtinIntTy =
             ElabTypes.TBaseWithIdentity (Just (builtinTypeIdentity "Int")) (BaseTy "Int")
-        listSelfTy = testTMu "self" (TCon (BaseTy "List") (testTVar "self" :| []))
+        listSelfTy = testTMu "self" (tCon (BaseTy "List") (testTVar "self" :| []))
         bareRecursiveTy = testTMu "self" (testTVar "self")
         forallRecursiveTy = testTMu "self" (testTForall "b" Nothing (testTVar "self"))
         recursiveIntTy = testTMu "self" (TArrow (testTVar "self") intTy)
-        boolTy = TBase (BaseTy "Bool")
+        boolTy = tBase (BaseTy "Bool")
         recursiveBody = mkTestLocalLam "self" recursiveIntTy (ELit (LInt 1))
         resolvedLocal ref runtime ty =
             generatedResolvedLocal 0 ref runtime ty
@@ -165,9 +167,9 @@ spec = describe "Phase 7 typecheck" $ do
             typeBinderRefFromIdentity (typeBinderIdentityFromNode (NodeId key)) name
 
     it "promotes builtin elab type patterns to stored identities" $ do
-        TBase (BaseTy "Int")
+        tBase (BaseTy "Int")
             `shouldBe` ElabTypes.TBaseWithIdentity (Just (builtinTypeIdentity "Int")) (BaseTy "Int")
-        TCon (BaseTy "String") (intTy :| [])
+        tCon (BaseTy "String") (intTy :| [])
             `shouldBe` ElabTypes.TConWithIdentity (Just (builtinTypeIdentity "String")) (BaseTy "String") (intTy :| [])
 
     it "compares checked type heads by identity when names are stale" $ do
@@ -563,7 +565,7 @@ spec = describe "Phase 7 typecheck" $ do
             Left err -> expectationFailure ("Expected external binding preparation, got: " ++ show err)
             Right prepared ->
                 case [ ty | (resolved, ty) <- resolvedTermEnvEntries (resolvedTermEnv (preparedExternalTypeCheckEnv prepared)), resolvedVarReferenceName resolved == "x" ] of
-                    [ty@(TBase (BaseTy "Int"))] ->
+                    [ty@(TBaseWithIdentity _ (BaseTy "Int"))] ->
                         generatedIdentitiesInType ty `shouldSatisfy` elem (symbolUniqueIdentity (builtinTypeIdentity "Int"))
                     other -> expectationFailure ("Expected Int identity in prepared external binding, got: " ++ show other)
 

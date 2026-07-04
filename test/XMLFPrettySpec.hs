@@ -39,7 +39,7 @@ spec = describe "xMLF pretty printer" $ do
 
     it "prints canonical term syntax" $ do
         let aTy = testTVar "a"
-            intTy = Elab.TBase (BaseTy "Int")
+            intTy = Elab.tBase (BaseTy "Int")
             idTy = testTForall "a" Nothing (Elab.TArrow aTy aTy)
             tm =
                 mkTestLocalLet "id" (schemeFromType idTy)
@@ -49,12 +49,12 @@ spec = describe "xMLF pretty printer" $ do
             `shouldBe` "let id = Λ(a ⩾ ⊥) λ(x : a) x in id[∀(⩾ ⊲Int); N]"
 
     it "prints canonical recursive roll syntax" $ do
-        let recursiveTy = testTMu "self" (Elab.TArrow (testTVar "self") (Elab.TBase (BaseTy "Int")))
+        let recursiveTy = testTMu "self" (Elab.TArrow (testTVar "self") (Elab.tBase (BaseTy "Int")))
             tm = Elab.ERoll recursiveTy (mkTestDeferredVar "x")
         prettyXmlfTerm tm `shouldBe` "roll[μself. self -> Int] x"
 
     it "prints canonical recursive unroll syntax" $ do
-        let recursiveTy = testTMu "self" (Elab.TArrow (testTVar "self") (Elab.TBase (BaseTy "Int")))
+        let recursiveTy = testTMu "self" (Elab.TArrow (testTVar "self") (Elab.tBase (BaseTy "Int")))
             tm = Elab.EUnroll (Elab.ERoll recursiveTy (mkTestDeferredVar "x"))
         prettyXmlfTerm tm `shouldBe` "unroll (roll[μself. self -> Int] x)"
 

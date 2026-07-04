@@ -1834,7 +1834,7 @@ spec = describe "MLF.Backend.Convert" $ do
             ( \binding ->
                 binding
                   { checkedBindingSourceTypeView = mkTypeView (STBase "Main.T") (STBase "Main.T"),
-                    checkedBindingType = Elab.TBase (BaseTy "Main.T"),
+                    checkedBindingType = Elab.tBase (BaseTy "Main.T"),
                     checkedBindingTerm = unqualifiedStructuralNullaryConstructorTerm
                   }
             )
@@ -1860,7 +1860,7 @@ spec = describe "MLF.Backend.Convert" $ do
                 ( \binding ->
                     binding
                       { checkedBindingSourceTypeView = mkTypeView (STBase "Main.T") (STBase "Main.T"),
-                        checkedBindingType = Elab.TBase (BaseTy "Main.T"),
+                        checkedBindingType = Elab.tBase (BaseTy "Main.T"),
                         checkedBindingTerm = structuralNullaryConstructorTermWithResult staleResultTy
                       }
                 )
@@ -1888,7 +1888,7 @@ spec = describe "MLF.Backend.Convert" $ do
                 ( \binding ->
                     binding
                       { checkedBindingSourceTypeView = mkTypeView (STBase "Main.T") (STBase "Main.T"),
-                        checkedBindingType = Elab.TBase (BaseTy "Main.T"),
+                        checkedBindingType = Elab.tBase (BaseTy "Main.T"),
                         checkedBindingTerm = structuralNullaryConstructorTermWithResult staleResultTy
                       }
                 )
@@ -1904,8 +1904,8 @@ spec = describe "MLF.Backend.Convert" $ do
             ( \binding ->
                 binding
                   { checkedBindingSourceTypeView = mkTypeView (STBase "Main.T") (STBase "Main.T"),
-                    checkedBindingType = Elab.TBase (BaseTy "Main.T"),
-                    checkedBindingTerm = structuralNullaryConstructorTermWithResult (Elab.TBase (BaseTy "Main.T"))
+                    checkedBindingType = Elab.tBase (BaseTy "Main.T"),
+                    checkedBindingTerm = structuralNullaryConstructorTermWithResult (Elab.tBase (BaseTy "Main.T"))
                   }
             )
             checked0
@@ -1921,7 +1921,7 @@ spec = describe "MLF.Backend.Convert" $ do
             ( \binding ->
                 binding
                   { checkedBindingSourceTypeView = mkTypeView (STBase "Main.T") (STBase "Main.T"),
-                    checkedBindingType = Elab.TBase (BaseTy "Main.T"),
+                    checkedBindingType = Elab.tBase (BaseTy "Main.T"),
                     checkedBindingTerm = structuralNullaryConstructorTermWithResult nonStructuralSelfIdentityTElabTy
                   }
             )
@@ -4578,7 +4578,7 @@ polymorphicOptionElabTy =
     Nothing
     ( Elab.TArrow
         (testTVar "a")
-        (Elab.TCon (BaseTy "Main.Option") (testTVar "a" :| []))
+        (Elab.tCon (BaseTy "Main.Option") (testTVar "a" :| []))
     )
 
 staleSomeInPolymorphicOptionTerm :: CheckedProgram -> Elab.XmlfTerm
@@ -4609,7 +4609,7 @@ identityPlaceholderPolymorphicOptionElabTy =
     Nothing
     ( Elab.TArrow
         (Elab.TVarRef identityPlaceholderExpectedRef)
-        (Elab.TCon (BaseTy "Main.Option") (Elab.TVarRef identityPlaceholderExpectedRef :| []))
+        (Elab.tCon (BaseTy "Main.Option") (Elab.TVarRef identityPlaceholderExpectedRef :| []))
     )
 
 identityPlaceholderSomeTerm :: CheckedProgram -> Elab.XmlfTerm
@@ -5101,7 +5101,7 @@ intIdentityXmlfTerm =
 
 intElabBoundTy :: Elab.BoundType
 intElabBoundTy =
-  Elab.TBase (BaseTy "Int")
+  Elab.tBase (BaseTy "Int")
 
 boundedWrapElabTy :: Elab.ElabType -> Elab.ElabType
 boundedWrapElabTy resultTy =

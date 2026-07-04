@@ -217,7 +217,7 @@ spec = describe "Public surface contracts" $ do
             Pipeline.typeBinderRefFromIdentity
               (Pipeline.typeBinderIdentityFromUnique (Pipeline.UniqueIdentity 0))
               "self"
-          recursiveTy = Pipeline.TMuRef self (Pipeline.TArrow (Pipeline.TVarRef self) (Pipeline.TBase (Pipeline.BaseTy "Int")))
+          recursiveTy = Pipeline.TMuRef self (Pipeline.TArrow (Pipeline.TVarRef self) (Pipeline.tBase (Pipeline.BaseTy "Int")))
           term = XMLF.EUnroll (XMLF.ERoll recursiveTy (XMLF.ELit (LInt 1)))
       XMLF.prettyXmlfTerm term `shouldBe` "unroll (roll[μself. self -> Int] 1)"
 

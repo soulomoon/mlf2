@@ -40,6 +40,7 @@ import MLF.Types.Elab
     , instUnderWithRef
     , renameResolvedLocalVar
     , resolvedVarSameIdentity
+    , tBase
     , typeBinderIdentityFromNode
     , typeBinderRefFromIdentity
     )
@@ -48,7 +49,7 @@ import MLF.Frontend.Syntax (Lit(..))
 spec :: Spec
 spec = describe "Phase 7 theorem obligations" $ do
     it "checks closedness by resolved identity when names are stale" $ do
-        let intType = TBase (BaseTy "Int")
+        let intType = tBase (BaseTy "Int")
             binder = generatedResolvedLocal 91701 "x" "x" intType
             occurrence = renameResolvedLocalVar "$stale_x" binder
         isClosedTerm (ELam binder (EVarNode occurrence)) `shouldBe` True
@@ -207,8 +208,8 @@ spec = describe "Phase 7 theorem obligations" $ do
                         valueTerm = isValue term
                         baseValue =
                             case checked of
-                                Right (TBase (BaseTy "Int")) -> valueTerm
-                                Right (TBase (BaseTy "Bool")) -> valueTerm
+                                Right (TBaseWithIdentity _ (BaseTy "Int")) -> valueTerm
+                                Right (TBaseWithIdentity _ (BaseTy "Bool")) -> valueTerm
                                 _ -> False
                     in checkCoverage $
                         cover 20 valueTerm "value" $
@@ -224,11 +225,11 @@ spec = describe "Phase 7 theorem obligations" $ do
                                         False
                                 Right ty
                                     | not valueTerm -> property True  -- only check values
-                                    | ty == TBase (BaseTy "Int") ->
+                                    | ty == tBase (BaseTy "Int") ->
                                         counterexample
                                             ("canonical-forms (Int) failed on value: " ++ show term)
                                             (isLitInt term)
-                                    | ty == TBase (BaseTy "Bool") ->
+                                    | ty == tBase (BaseTy "Bool") ->
                                         counterexample
                                             ("canonical-forms (Bool) failed on value: " ++ show term)
                                             (isLitBool term)
@@ -396,8 +397,8 @@ type TyCtx = Map.Map String ElabType
 
 -- | Base types used in generation.
 intTy, boolTy :: ElabType
-intTy  = TBase (BaseTy "Int")
-boolTy = TBase (BaseTy "Bool")
+intTy  = tBase (BaseTy "Int")
+boolTy = tBase (BaseTy "Bool")
 
 -- | Pick a random ground type.
 genGroundTy :: Gen ElabType
@@ -568,9 +569,9 @@ genInstUnderTrivial fresh term = do
         tv2 = "t" ++ show (fresh + 1)
     pure (ETyInst (mkTestTyAbs tv Nothing term) (instUnderWithRef (typeRef (fresh + 1) tv2) InstId))
 
--- | Generate a ground BoundType (TBase is polymorphic in TopVar).
+-- | Generate a ground BoundType (tBase is polymorphic in TopVar).
 genGroundBound :: Gen BoundType
-genGroundBound = elements [TBase (BaseTy "Int"), TBase (BaseTy "Bool")]
+genGroundBound = elements [tBase (BaseTy "Int"), tBase (BaseTy "Bool")]
 
 typeRef :: Int -> String -> TypeBinderRef
 typeRef key name =

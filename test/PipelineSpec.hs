@@ -1,6 +1,5 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE PatternSynonyms #-}
 
 module PipelineSpec (spec) where
 
@@ -88,7 +87,7 @@ import MLF.Elab.Run.Util
 import MLF.Frontend.ConstraintGen
 import MLF.Frontend.Syntax
 import MLF.Reify.Core (reifyType)
-import MLF.Types.Elab (Ty (..), containsArrowTy, containsForallTy, typeBinderRefName)
+import MLF.Types.Elab (Ty (..), containsArrowTy, containsForallTy, tBase, tCon, typeBinderRefName)
 import ElabTermTestSupport (testTForall, testTMu, testTVar)
 import SolvedFacadeTestUtil qualified as SolvedTest
 import SpecUtil
@@ -163,8 +162,8 @@ matchesRecursiveMu actual expected = case (actual, expected) of
     stripMuNames ty = case ty of
       TVarRef _ -> testTVar "_"
       TArrow dom cod -> TArrow (stripMuNames dom) (stripMuNames cod)
-      TBase base -> TBase base
-      TCon con args -> TCon con (fmap stripMuNames args)
+      TBaseWithIdentity _ base -> tBase base
+      TConWithIdentity _ con args -> tCon con (fmap stripMuNames args)
       TVarAppRef ref args -> TVarAppRef ref (fmap stripMuNames args)
       TForallRef _ mb body -> testTForall "_" (fmap stripBoundNames mb) (stripMuNames body)
       TMuRef _ body -> testTMu "_" (stripMuNames body)
@@ -172,8 +171,8 @@ matchesRecursiveMu actual expected = case (actual, expected) of
 
     stripBoundNames bound = case bound of
       TArrow dom cod -> TArrow (stripMuNames dom) (stripMuNames cod)
-      TBase base -> TBase base
-      TCon con args -> TCon con (fmap stripMuNames args)
+      TBaseWithIdentity _ base -> tBase base
+      TConWithIdentity _ con args -> tCon con (fmap stripMuNames args)
       TVarAppRef ref args -> TVarAppRef ref (fmap stripMuNames args)
       TForallRef _ mb body -> testTForall "_" (fmap stripBoundNames mb) (stripMuNames body)
       TMuRef _ body -> testTMu "_" (stripMuNames body)
@@ -191,29 +190,29 @@ stripLeadingUnboundedForalls ty = case ty of
 
 expectedSameLaneAliasFrameClearBoundaryArrow :: ElabType
 expectedSameLaneAliasFrameClearBoundaryArrow =
-  let recursiveTy = testTMu "a" (TArrow (testTVar "a") (TBase (BaseTy "Int")))
+  let recursiveTy = testTMu "a" (TArrow (testTVar "a") (tBase (BaseTy "Int")))
    in TArrow recursiveTy recursiveTy
 
 expectedUriR2C1RecursiveIntCarrier :: ElabType
 expectedUriR2C1RecursiveIntCarrier =
-  testTMu "a" (TArrow (testTVar "a") (TBase (BaseTy "Int")))
+  testTMu "a" (TArrow (testTVar "a") (tBase (BaseTy "Int")))
 
 expectedUriR2C1RecursiveBoolCarrier :: ElabType
 expectedUriR2C1RecursiveBoolCarrier =
-  testTMu "a" (TArrow (testTVar "a") (TBase (BaseTy "Bool")))
+  testTMu "a" (TArrow (testTVar "a") (tBase (BaseTy "Bool")))
 
 containsMu :: ElabType -> Bool
 containsMu ty = case ty of
   TMuRef _ _ -> True
   TArrow dom cod -> containsMu dom || containsMu cod
-  TCon _ args -> any containsMu args
+  TConWithIdentity _ _ args -> any containsMu args
   TForallRef _ mb body -> maybe False containsMuBound mb || containsMu body
   _ -> False
   where
     containsMuBound bound = case bound of
       TArrow dom cod -> containsMu dom || containsMu cod
-      TBase _ -> False
-      TCon _ args -> any containsMu args
+      TBaseWithIdentity _ _ -> False
+      TConWithIdentity _ _ args -> any containsMu args
       TVarAppRef _ args -> any containsMu args
       TForallRef _ mb body -> maybe False containsMuBound mb || containsMu body
       TMuRef _ _ -> True
@@ -449,8 +448,8 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 Left err -> expectationFailure $ "Generalize error: " ++ show err
             _ -> expectationFailure "Expected ALet annotation"
 
-    it "reifies TyCon nodes to TCon in elaborated types" $ do
-      -- Test that a constraint containing TyCon nodes reifies correctly to TCon
+    it "reifies TyCon nodes to TConWithIdentity in elaborated types" $ do
+      -- Test that a constraint containing TyCon nodes reifies correctly to an identity-aware constructor head.
       -- Create a simple constraint with TyCon: List Int
       let intBase = BaseTy "Int"
           listBase = BaseTy "List"
@@ -464,16 +463,16 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       case reifyType (viewFromSolved res) var1 of
         Right ty ->
           case ty of
-            TCon con args -> do
+            TConWithIdentity _ con args -> do
               con `shouldBe` listBase
               length args `shouldBe` 1
               case args of
-                (TBase b :| []) -> b `shouldBe` intBase
-                _ -> expectationFailure "Expected TBase Int as argument"
-            _ -> expectationFailure $ "Expected TCon, got: " ++ show ty
+                (TBaseWithIdentity _ b :| []) -> b `shouldBe` intBase
+                _ -> expectationFailure "Expected TBaseWithIdentity Int as argument"
+            _ -> expectationFailure $ "Expected TConWithIdentity, got: " ++ show ty
         Left err -> expectationFailure $ "Reify error: " ++ show err
 
-    it "reifies nested TyCon nodes to nested TCon" $ do
+    it "reifies nested TyCon nodes to nested TConWithIdentity" $ do
       -- Test nested TyCon: List (Maybe Int)
       let intBase = BaseTy "Int"
           maybeBase = BaseTy "Maybe"
@@ -490,16 +489,16 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       case reifyType (viewFromSolved res) var2 of
         Right ty ->
           case ty of
-            TCon outerCon outerArgs -> do
+            TConWithIdentity _ outerCon outerArgs -> do
               outerCon `shouldBe` listBase
               case outerArgs of
-                (TCon innerCon innerArgs :| []) -> do
+                (TConWithIdentity _ innerCon innerArgs :| []) -> do
                   innerCon `shouldBe` maybeBase
                   case innerArgs of
-                    (TBase b :| []) -> b `shouldBe` intBase
-                    _ -> expectationFailure "Expected TBase Int as innermost arg"
-                _ -> expectationFailure "Expected nested TCon (Maybe Int)"
-            _ -> expectationFailure $ "Expected TCon, got: " ++ show ty
+                    (TBaseWithIdentity _ b :| []) -> b `shouldBe` intBase
+                    _ -> expectationFailure "Expected TBaseWithIdentity Int as innermost arg"
+                _ -> expectationFailure "Expected nested TConWithIdentity (Maybe Int)"
+            _ -> expectationFailure $ "Expected TConWithIdentity, got: " ++ show ty
         Left err -> expectationFailure $ "Reify error: " ++ show err
 
     it "reifies TyMu without binder child (non-local proxy fallback)" $ do
@@ -585,11 +584,11 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       let viewBound = ResultTypeView.rtvWithBoundOverlay rootN intN view
       ResultTypeView.rtvLookupVarBound viewBound rootN `shouldBe` Just intN
       ResultTypeView.rtvReifyNoFallback viewBound rootN
-        `shouldBe` Right (TBase intBase)
+        `shouldBe` Right (tBase intBase)
       ResultTypeView.rtvReifyBaseNoFallback viewBound baseRootN
-        `shouldBe` Right (TBase intBase)
+        `shouldBe` Right (tBase intBase)
       (scheme, _subst) <- requireRight (ResultTypeView.rtvGeneralizeTarget viewBound (typeRef rootN) rootN)
-      scheme `shouldBe` Elab.schemeFromType (TBase intBase)
+      scheme `shouldBe` Elab.schemeFromType (tBase intBase)
 
     it "single-solved refactor keeps canonical pipeline authoritative on representative corpus" $ do
       forM_ representativeMigrationCorpus assertCanonicalPipelineTypeChecks
@@ -676,8 +675,8 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           expr = ELamAnn "x" recursiveAnn (EVar "x")
           expectedTy =
             TArrow
-              (testTMu "a" (TArrow (testTVar "a") (TBase (BaseTy "Int"))))
-              (testTMu "a" (TArrow (testTVar "a") (TBase (BaseTy "Int"))))
+              (testTMu "a" (TArrow (testTVar "a") (tBase (BaseTy "Int"))))
+              (testTMu "a" (TArrow (testTVar "a") (tBase (BaseTy "Int"))))
       case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
         Left err -> expectationFailure (renderPipelineError err)
         Right (term, ty) -> do
@@ -3419,8 +3418,8 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 (ELamAnn "x" recursiveAnn (EVar "x"))
             expectedTy =
               TArrow
-                (testTMu "a" (TArrow (testTVar "a") (TBase (BaseTy "Int"))))
-                (testTMu "a" (TArrow (testTVar "a") (TBase (BaseTy "Int"))))
+                (testTMu "a" (TArrow (testTVar "a") (tBase (BaseTy "Int"))))
+                (testTMu "a" (TArrow (testTVar "a") (tBase (BaseTy "Int"))))
             pipelineRuns =
               [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
@@ -4818,12 +4817,12 @@ spec = describe "Pipeline (Phases 1-5)" $ do
 
       it "keeps local empty-candidate scheme-alias/base-like fallback on the local TypeRef lane" $ do
         fallbackTy <- localEmptyCandidateSchemeAliasBaseLikeFallback True
-        fallbackTy `shouldBe` TBase (BaseTy "Int")
+        fallbackTy `shouldBe` tBase (BaseTy "Int")
 
       it "keeps the preserved local scheme-alias/base-like continuity on the quantified rootFinal lane" $ do
         fallbackTy <- schemeAliasBaseLikeFallback True
         case fallbackTy of
-          TForallRef _ Nothing (TBase (BaseTy "Int")) -> pure ()
+          TForallRef _ Nothing (TBaseWithIdentity _ (BaseTy "Int")) -> pure ()
           other ->
             expectationFailure
               ( "expected quantified Int result for local scheme-alias/base-like continuity lane, got "
@@ -4832,16 +4831,16 @@ spec = describe "Pipeline (Phases 1-5)" $ do
 
       it "keeps local single-base fallback on the local TypeRef lane" $ do
         fallbackTy <- localSingleBaseFallback True
-        fallbackTy `shouldBe` TBase (BaseTy "Int")
+        fallbackTy `shouldBe` tBase (BaseTy "Int")
 
       it "keeps the same single-base wrapper on a unique non-local baseTarget lane" $ do
         fallbackTy <- localSingleBaseFallback False
-        fallbackTy `shouldBe` TBase (BaseTy "Int")
+        fallbackTy `shouldBe` tBase (BaseTy "Int")
         containsMu fallbackTy `shouldBe` False
 
       it "keeps the selected non-local scheme-alias/base-like packet on the baseTarget -> baseC lane" $ do
         fallbackTy <- schemeAliasBaseLikeFallback False
-        fallbackTy `shouldBe` TBase (BaseTy "Int")
+        fallbackTy `shouldBe` tBase (BaseTy "Int")
         containsMu fallbackTy `shouldBe` False
 
       it "keeps the selected non-local scheme-alias/base-like packet recursive on the canonical pipeline entrypoint" $ do
@@ -4898,11 +4897,11 @@ spec = describe "Pipeline (Phases 1-5)" $ do
 
       it "keeps local inst-arg-only singleton-base fallback on the local TypeRef lane" $ do
         fallbackTy <- localInstArgSingleBaseFallback True
-        fallbackTy `shouldBe` TBase (BaseTy "Int")
+        fallbackTy `shouldBe` tBase (BaseTy "Int")
 
       it "keeps the same inst-arg-only singleton-base wrapper on a unique non-local baseTarget lane" $ do
         fallbackTy <- localInstArgSingleBaseFallback False
-        fallbackTy `shouldBe` TBase (BaseTy "Int")
+        fallbackTy `shouldBe` tBase (BaseTy "Int")
         containsMu fallbackTy `shouldBe` False
 
       it "does not infer recursive shape for the corresponding unannotated variant" $ do
@@ -4955,7 +4954,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 "g"
                 (ELamAnn "x" recursiveAnn (EVar "x"))
                 (EVar "g")
-            muTy = testTMu "t6" (TArrow (testTVar "t6") (TBase (BaseTy "Int")))
+            muTy = testTMu "t6" (TArrow (testTVar "t6") (tBase (BaseTy "Int")))
             expectedTy = TArrow muTy muTy
             pipelineRuns =
               [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
@@ -5484,7 +5483,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 (ELit (LInt 2))
             )
         normExpr = unsafeNormalizeExpr expr
-        expectedTy = TBase (BaseTy "Int")
+        expectedTy = tBase (BaseTy "Int")
     let expectInt label result =
           case result of
             Left err ->
@@ -5951,7 +5950,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
         Left err -> expectationFailure $ "Pipeline failed: " ++ renderPipelineError err
         Right (term, ty) -> do
-          ty `shouldBe` TBase (BaseTy "Bool")
+          ty `shouldBe` tBase (BaseTy "Bool")
           typeCheck (normalize term) `shouldBe` Right ty
           normalize term `shouldBe` Elab.ELit (LBool True)
 

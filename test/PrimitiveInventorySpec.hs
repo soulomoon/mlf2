@@ -280,11 +280,11 @@ typeIdentitiesInType ty =
       [typeBinderRefIdentity ref]
     TArrow dom cod ->
       typeIdentitiesInType dom ++ typeIdentitiesInType cod
-    TCon _ args ->
+    TConWithIdentity _ _ args ->
       foldMap typeIdentitiesInType args
     TVarAppRef ref args ->
       typeBinderRefIdentity ref : foldMap typeIdentitiesInType args
-    TBase {} ->
+    TBaseWithIdentity _ _ ->
       []
     TForallRef ref mb body ->
       [typeBinderRefIdentity ref]

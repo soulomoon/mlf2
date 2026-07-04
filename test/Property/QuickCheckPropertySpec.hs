@@ -34,6 +34,7 @@ import MLF.Types.Elab
     ElabType,
     Ty (..),
     TypeBinderRef,
+    tBase,
     tForallWithRef,
     tMuWithRef,
     tVarWithRef,
@@ -74,13 +75,13 @@ genElabType n
   | n <= 0 =
       oneof
         [ tVarWithRef . namedTypeRef <$> elements ["a", "b", "c", "d", "e"],
-          TBase . BaseTy <$> elements ["int", "bool"],
+          tBase . BaseTy <$> elements ["int", "bool"],
           pure TBottom
         ]
   | otherwise =
       oneof
         [ tVarWithRef . namedTypeRef <$> elements ["a", "b", "c", "d", "e"],
-          TBase . BaseTy <$> elements ["int", "bool"],
+          tBase . BaseTy <$> elements ["int", "bool"],
           pure TBottom,
           TArrow <$> genElabType half <*> genElabType half,
           tForallWithRef
@@ -99,12 +100,12 @@ genBoundType :: Int -> Gen BoundType
 genBoundType n
   | n <= 0 =
       oneof
-        [ TBase . BaseTy <$> elements ["int", "bool"],
+        [ tBase . BaseTy <$> elements ["int", "bool"],
           pure TBottom
         ]
   | otherwise =
       oneof
-        [ TBase . BaseTy <$> elements ["int", "bool"],
+        [ tBase . BaseTy <$> elements ["int", "bool"],
           pure TBottom,
           TArrow <$> genElabType half <*> genElabType half,
           tForallWithRef

@@ -1452,9 +1452,9 @@ boundFromType ty =
   case ty of
     Elab.TVarRef ref -> error ("boundFromType: unexpected variable bound " ++ show ref)
     Elab.TArrow a b -> Elab.TArrow a b
-    Elab.TCon c args -> Elab.TCon c args
+    Elab.TConWithIdentity _ c args -> Elab.tCon c args
     Elab.TVarAppRef ref args -> Elab.TVarAppRef ref args
-    Elab.TBase b -> Elab.TBase b
+    Elab.TBaseWithIdentity _ b -> Elab.tBase b
     Elab.TBottom -> Elab.TBottom
     Elab.TForallRef ref mb body -> Elab.TForallRef ref mb body
     Elab.TMuRef ref body -> Elab.TMuRef ref body
@@ -1774,13 +1774,13 @@ inertConstraint size =
       }
 
 intTy :: Elab.ElabType
-intTy = Elab.TBase (BaseTy "Int")
+intTy = Elab.tBase (BaseTy "Int")
 
 builtinIntTy :: Elab.ElabType
 builtinIntTy = ElabTypes.TBaseWithIdentity (Just (Builtins.builtinTypeIdentity "Int")) (BaseTy "Int")
 
 boolTy :: Elab.ElabType
-boolTy = Elab.TBase (BaseTy "Bool")
+boolTy = Elab.tBase (BaseTy "Bool")
 
 elabTypeRef :: Int -> String -> ElabTypes.TypeBinderRef
 elabTypeRef key name =

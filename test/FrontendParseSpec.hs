@@ -20,7 +20,7 @@ import MLF.API
     , renderEmlfParseError
     , renderNormParseError
     )
-import MLF.Pipeline (BaseTy (..), Ty (..), renderPipelineError, runPipelineElab)
+import MLF.Pipeline (BaseTy (..), renderPipelineError, runPipelineElab, tBase)
 
 spec :: Spec
 spec = describe "Frontend eMLF parser" $ do
@@ -222,7 +222,7 @@ spec = describe "Frontend eMLF parser" $ do
                         Left err ->
                             expectationFailure ("runPipelineElab failed: " ++ renderPipelineError err)
                         Right (_term, ty) ->
-                            ty `shouldBe` TBase (BaseTy "Int")
+                            ty `shouldBe` tBase (BaseTy "Int")
 
     describe "API exports" $ do
         it "exports staged SrcTy aliases for raw and normalized paths" $ do

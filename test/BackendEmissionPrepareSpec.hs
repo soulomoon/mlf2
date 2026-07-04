@@ -236,7 +236,7 @@ resolvedShadowProgram =
         , checkedProgramResolved = ResolvedProgram []
         }
   where
-    intTy = Elab.TBase (BaseTy "Int")
+    intTy = Elab.tBase (BaseTy "Int")
     preludeKeepVar = topLevelVar 10 "Prelude__keep" "Prelude" "keep" intTy
     preludeDropVar = topLevelVar 11 "Prelude__drop" "Prelude" "drop" intTy
     mainVar = topLevelVar 12 "Main__main" "Main" "main" intTy
@@ -260,7 +260,7 @@ stalePreludeBindingNameProgram =
         , checkedProgramResolved = ResolvedProgram []
         }
   where
-    intTy = Elab.TBase (BaseTy "Int")
+    intTy = Elab.tBase (BaseTy "Int")
     preludeKeepVar = topLevelVar 20 "Prelude__keep" "Prelude" "keep" intTy
     preludeDropVar = topLevelVar 21 "Prelude__drop" "Prelude" "drop" intTy
     mainVar = topLevelVar 22 "Main__main" "Main" "main" intTy
@@ -280,7 +280,7 @@ stalePreludeBindingPayloadProgram =
         , checkedProgramResolved = ResolvedProgram []
         }
   where
-    intTy = Elab.TBase (BaseTy "Int")
+    intTy = Elab.tBase (BaseTy "Int")
     preludeKeepVar = topLevelVar 20 "Prelude__keep" "Prelude" "keep" intTy
     stalePreludeKeepVar = topLevelVar 20 "$stale_keep" "Prelude" "$stale_keep" intTy
     preludeDropVar = topLevelVar 21 "Prelude__drop" "Prelude" "drop" intTy
@@ -303,7 +303,7 @@ stalePreludeModuleNameProgram =
         , checkedProgramResolved = ResolvedProgram []
         }
   where
-    intTy = Elab.TBase (BaseTy "Int")
+    intTy = Elab.tBase (BaseTy "Int")
     preludeKeepVar = topLevelVar 23 "Prelude__keep" "Prelude" "keep" intTy
     preludeDropVar = topLevelVar 24 "Prelude__drop" "Prelude" "drop" intTy
     mainVar = topLevelVar 25 "Main__main" "Main" "main" intTy
@@ -331,7 +331,7 @@ ambiguousPreludeModuleIdentityProgram =
         , checkedProgramResolved = ResolvedProgram []
         }
   where
-    intTy = Elab.TBase (BaseTy "Int")
+    intTy = Elab.tBase (BaseTy "Int")
     preludeKeepVar = topLevelVar 26 "Prelude__keep" "Prelude" "keep" intTy
     preludeDropVar = topLevelVar 27 "Prelude__drop" "Prelude" "drop" intTy
     otherPreludeDropVar = topLevelVar 28 "OtherPrelude__drop" "OtherPrelude" "drop" intTy
@@ -352,7 +352,7 @@ stalePreludeDataPayloadProgram =
                 ]
         }
   where
-    intTy = Elab.TBase (BaseTy "Int")
+    intTy = Elab.tBase (BaseTy "Int")
     mainVar = topLevelVar 32 "Main__main" "Main" "main" intTy
     staleUnitIdentity = generatedSymbolIdentity 100 SymbolType "Prelude" "$stale_Unit" Nothing
     unitData =
@@ -386,7 +386,7 @@ stalePreludeDataNameProgram =
         , checkedProgramResolved = ResolvedProgram []
         }
   where
-    intTy = Elab.TBase (BaseTy "Int")
+    intTy = Elab.tBase (BaseTy "Int")
     preludeKeepVar = topLevelVar 30 "Prelude__keep" "Prelude" "keep" intTy
     mainVar = topLevelVar 31 "Main__main" "Main" "main" intTy
     staleUnitData =
@@ -411,7 +411,7 @@ stalePreludeConstructorOwnerProgram =
                 ]
         }
   where
-    intTy = Elab.TBase (BaseTy "Int")
+    intTy = Elab.tBase (BaseTy "Int")
     mainVar = topLevelVar 40 "Main__main" "Main" "main" intTy
     unitData =
         DataInfo
@@ -445,7 +445,7 @@ staleResolvedModuleNameProgram =
                 ]
         }
   where
-    intTy = Elab.TBase (BaseTy "Int")
+    intTy = Elab.tBase (BaseTy "Int")
     mainVar = topLevelVar 50 "Main__main" "Main" "main" intTy
     unitData =
         DataInfo
@@ -484,7 +484,7 @@ stalePreludeConstructorTypeProgram =
                 ]
         }
   where
-    intTy = Elab.TBase (BaseTy "Int")
+    intTy = Elab.tBase (BaseTy "Int")
     mainVar = topLevelVar 60 "Main__main" "Main" "main" intTy
     unitData =
         DataInfo
@@ -548,7 +548,7 @@ conflictingPreludeConstructorOwnerProgram =
                 ]
         }
   where
-    intTy = Elab.TBase (BaseTy "Int")
+    intTy = Elab.tBase (BaseTy "Int")
     mainVar = topLevelVar 61 "Main__main" "Main" "main" intTy
     unitData =
         DataInfo
@@ -603,7 +603,7 @@ testBinding name resolved term =
         , checkedBindingSurfaceExpr = Surface.ELit (Surface.LInt 0)
         , checkedBindingDeferredObligations = Map.empty
         , checkedBindingTerm = term
-        , checkedBindingType = Elab.TBase (BaseTy "Int")
+        , checkedBindingType = Elab.tBase (BaseTy "Int")
         , checkedBindingExportedAsMain = name == "Main__main"
         }
 

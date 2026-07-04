@@ -24,6 +24,8 @@ import MLF.Types.Elab
     ( ElabType
     , Ty(..)
     , TypeBinderRef
+    , tBase
+    , tCon
     , tForallWithRef
     , tMuWithRef
     , tVarAppWithRef
@@ -96,11 +98,11 @@ spec = do
                 baseY = typeRef 55 "y"
                 solvedTy =
                     tForallWithRef solvedA (Just (TArrow (tVarWithRef solvedFreeA) (tVarWithRef solvedFreeA)))
-                        (tForallWithRef solvedB (Just (TCon (BaseTy "Box") (tVarWithRef solvedFreeA :| [tVarWithRef solvedFreeB])))
+                        (tForallWithRef solvedB (Just (tCon (BaseTy "Box") (tVarWithRef solvedFreeA :| [tVarWithRef solvedFreeB])))
                             (TArrow (tVarWithRef solvedB) (tVarWithRef solvedA)))
                 baseTy =
                     tForallWithRef baseX (Just (TArrow (tVarWithRef baseFreeX) (tVarWithRef baseFreeX)))
-                        (tForallWithRef baseY (Just (TCon (BaseTy "Box") (tVarWithRef baseFreeX :| [tVarWithRef baseFreeY])))
+                        (tForallWithRef baseY (Just (tCon (BaseTy "Box") (tVarWithRef baseFreeX :| [tVarWithRef baseFreeY])))
                             (TArrow (tVarWithRef baseY) (tVarWithRef baseX)))
             shadowCompareTypes "ctx" solvedTy baseTy `shouldBe` Right ()
 
@@ -129,10 +131,10 @@ spec = do
         it "accepts renamed variables through constructor arguments" $ do
             let solvedTy =
                     testTForall "a" Nothing
-                        (testTForall "b" Nothing (TCon (BaseTy "Pair") (testTVar "a" :| [testTVar "b"])))
+                        (testTForall "b" Nothing (tCon (BaseTy "Pair") (testTVar "a" :| [testTVar "b"])))
                 baseTy =
                     testTForall "x" Nothing
-                        (testTForall "y" Nothing (TCon (BaseTy "Pair") (testTVar "x" :| [testTVar "y"])))
+                        (testTForall "y" Nothing (tCon (BaseTy "Pair") (testTVar "x" :| [testTVar "y"])))
             shadowCompareTypes "ctx" solvedTy baseTy `shouldBe` Right ()
 
         it "rejects same-named type heads with different identities" $ do
@@ -157,7 +159,7 @@ spec = do
 
         it "rejects semantic mismatch with shadow reify mismatch diagnostics" $ do
             let solvedTy = testTForall "a" Nothing (TArrow (testTVar "a") (testTVar "a"))
-                baseTy = testTForall "a" Nothing (TArrow (testTVar "a") (TBase (BaseTy "Int")))
+                baseTy = testTForall "a" Nothing (TArrow (testTVar "a") (tBase (BaseTy "Int")))
             case shadowCompareTypes "ctx" solvedTy baseTy of
                 Left (ValidationFailed msgs) ->
                     msgs `shouldSatisfy` any (isInfixOf "shadow reify mismatch")
@@ -177,7 +179,7 @@ spec = do
 
         it "fails hard on solved/base shadow mismatch when base shadow is present" $ do
             let solvedTy = testTForall "a" Nothing (TArrow (testTVar "a") (testTVar "a"))
-                baseTy = testTForall "a" Nothing (TArrow (testTVar "a") (TBase (BaseTy "Int")))
+                baseTy = testTForall "a" Nothing (TArrow (testTVar "a") (tBase (BaseTy "Int")))
             case selectSolvedOrderWithShadow "ctx" solvedTy (Just baseTy) of
                 Left (ValidationFailed msgs) ->
                     msgs `shouldSatisfy` any (isInfixOf "shadow reify mismatch")
@@ -186,7 +188,7 @@ spec = do
 
         it "reports context and normalized type diagnostics on mismatch" $ do
             let solvedTy = testTVar "a"
-                baseTy = TBase (BaseTy "Int")
+                baseTy = tBase (BaseTy "Int")
             case selectSolvedOrderWithShadow "generalizeAt:caseX" solvedTy (Just baseTy) of
                 Left (ValidationFailed msgs) -> do
                     msgs `shouldSatisfy` any (isInfixOf "context=generalizeAt:caseX")
@@ -202,9 +204,9 @@ spec = do
         it "returns Nothing when a bounded body variable only matches via fallback recovery" $ do
             let refA = typeRef 10 "a"
             inferInstAppArgsFromSchemeRefs
-                [(refA, Just (TBase (BaseTy "Bool")))]
+                [(refA, Just (tBase (BaseTy "Bool")))]
                 (tVarWithRef refA)
-                (TBase (BaseTy "Int"))
+                (tBase (BaseTy "Int"))
                 `shouldBe` Nothing
 
         it "preserves identity refs during selective substitution walks" $ do
@@ -225,8 +227,8 @@ spec = do
             inferInstAppArgsFromSchemeRefs
                 [(refA, Nothing)]
                 (tVarWithRef refA')
-                (TBase (BaseTy "Int"))
-                `shouldBe` Just [TBase (BaseTy "Int")]
+                (tBase (BaseTy "Int"))
+                `shouldBe` Just [tBase (BaseTy "Int")]
 
         it "does not infer instantiation args for same-named different identities" $ do
             let refA = typeRef 31 "a"
@@ -234,13 +236,13 @@ spec = do
             inferInstAppArgsFromSchemeRefs
                 [(refA, Nothing)]
                 (tVarWithRef refB)
-                (TBase (BaseTy "Int"))
+                (tBase (BaseTy "Int"))
                 `shouldBe` Nothing
 
         it "does not selectively substitute same-named different identities" $ do
             let refA = typeRef 33 "a"
                 refB = typeRef 34 "a"
-                subst = Map.singleton refA (TBase (BaseTy "Int"))
+                subst = Map.singleton refA (tBase (BaseTy "Int"))
             substTypeSelectiveRefs [] subst (tVarWithRef refB)
                 `shouldBe` tVarWithRef refB
 
@@ -249,13 +251,13 @@ spec = do
             let refA = typeRef 60 "a"
                 refARenamed = typeRef 60 "renamed"
                 refB = typeRef 61 "a"
-                rigidBounds = Map.singleton refA (TBase (BaseTy "Int"))
+                rigidBounds = Map.singleton refA (tBase (BaseTy "Int"))
                 ty = TArrow (tVarWithRef refARenamed) (tVarWithRef refB)
             inlineRigidTypes rigidBounds ty
-                `shouldBe` TArrow (TBase (BaseTy "Int")) (tVarWithRef refB)
+                `shouldBe` TArrow (tBase (BaseTy "Int")) (tVarWithRef refB)
 
         it "does not inline under a binder with the same identity" $ do
             let refA = typeRef 62 "a"
-                rigidBounds = Map.singleton refA (TBase (BaseTy "Int"))
+                rigidBounds = Map.singleton refA (tBase (BaseTy "Int"))
                 ty = tForallWithRef refA Nothing (tVarWithRef refA)
             inlineRigidTypes rigidBounds ty `shouldBe` ty

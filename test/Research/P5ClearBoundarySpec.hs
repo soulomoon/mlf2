@@ -764,15 +764,15 @@ containsMu :: ElabType -> Bool
 containsMu ty = case ty of
     TMuRef _ _ -> True
     TArrow dom cod -> containsMu dom || containsMu cod
-    TCon _ args -> any containsMu args
+    TConWithIdentity _ _ args -> any containsMu args
     TForallRef _ mb body -> maybe False containsMuBound mb || containsMu body
     _ -> False
   where
     containsMuBound :: BoundType -> Bool
     containsMuBound bound = case bound of
         TArrow dom cod -> containsMu dom || containsMu cod
-        TBase _ -> False
-        TCon _ args -> any containsMu args
+        TBaseWithIdentity _ _ -> False
+        TConWithIdentity _ _ args -> any containsMu args
         TVarAppRef _ args -> any containsMu args
         TForallRef _ mb body -> maybe False containsMuBound mb || containsMu body
         TMuRef _ _ -> True
