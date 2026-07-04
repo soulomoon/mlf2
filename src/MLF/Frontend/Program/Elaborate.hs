@@ -61,7 +61,7 @@ import MLF.Frontend.Program.Surface
     surfaceVar,
   )
 import MLF.Frontend.Program.Types
-import MLF.Frontend.Symbol (symbolIdentityAliasMap, symbolIdentityAliasMapWith, symbolIdentityAliasNames, symbolIdentityPayloadKey, symbolIdentityStableName)
+import MLF.Frontend.Symbol (lookupSymbolIdentityExact, sameSymbolIdentity, symbolIdentityAliasMap, symbolIdentityAliasMapWith, symbolIdentityAliasNames, symbolIdentityPayloadKey, symbolIdentityStableName)
 import MLF.Frontend.Syntax
   ( Lit (..),
     ResolvedSrcBound (..),
@@ -331,7 +331,7 @@ addIdentityTypeAliases dataTypes =
       case Map.lookup name acc of
         Just {} -> acc
         Nothing ->
-          case Map.lookup identity dataTypesByIdentity of
+          case lookupSymbolIdentityExact identity dataTypesByIdentity of
             Just info -> Map.insert name info acc
             Nothing -> acc
 
@@ -416,7 +416,7 @@ diagnosticTypeViewDisplay scope view =
       | displayName /= unqualifiedSymbolName displayName,
         Just displayIdentity <- typeHeadIdentityInScope scope displayName,
         Just identity <- typeHeadIdentityInScope scope identityName,
-        displayIdentity == identity =
+        sameSymbolIdentity displayIdentity identity =
           displayName
       | let builtinName = Builtins.normalizeBuiltinTypeReference identityName,
         Builtins.isBuiltinTypeName builtinName =
@@ -631,7 +631,7 @@ sourceTypeHeadIdentityEntriesInScope scope =
     headIdentity name =
       case typeHeadIdentityInScope scope name of
         Just identity ->
-          case Map.lookup identity (esTypesByIdentity scope) of
+          case lookupSymbolIdentityExact identity (esTypesByIdentity scope) of
             Just info -> dataHeadIdentityEntries name info
             Nothing -> builtinHeadIdentityEntries name identity
         Nothing -> []
@@ -929,7 +929,7 @@ lowerTypeRaw dataTypes = lower Map.empty Nothing
 
     lookupDataType name =
       Map.lookup name dataTypes
-        <|> (Map.lookup name dataTypeHeadIdentities >>= \identity -> Map.lookup identity dataTypesByIdentity)
+        <|> (Map.lookup name dataTypeHeadIdentities >>= \identity -> lookupSymbolIdentityExact identity dataTypesByIdentity)
 
     encodeDataType subst info actualArgs =
       let actualArgs' =
@@ -1622,7 +1622,7 @@ lookupResolvedValueInfo scope ref =
 
 lookupValueInfoBySymbol :: ElaborateScope -> ResolvedSymbol -> Maybe ValueInfo
 lookupValueInfoBySymbol scope symbol =
-  case Map.lookup (resolvedSymbolIdentity symbol) (esValuesByIdentity scope) of
+  case lookupSymbolIdentityExact (resolvedSymbolIdentity symbol) (esValuesByIdentity scope) of
     Just info -> Just info
     Nothing -> Nothing
 
@@ -2577,7 +2577,7 @@ sourceTypeMentionsVisibleData scope ty =
 sourceTypeHeadIsVisibleData :: ElaborateScope -> String -> Bool
 sourceTypeHeadIsVisibleData scope name =
   case typeHeadIdentityInScope scope name of
-    Just identity -> Map.member identity (esTypesByIdentity scope)
+    Just identity -> maybe False (const True) (lookupSymbolIdentityExact identity (esTypesByIdentity scope))
     Nothing -> False
 
 resolveMethodHeadExprInfo :: ElaborateScope -> Set (SymbolIdentity, [SrcType]) -> MethodInfo -> NonEmpty TypeView -> ElaborateM SurfaceExpr
@@ -4444,7 +4444,7 @@ resolveInstanceInfoWithTypeViews scope className0 expectedClassIdentity headView
 
     instanceMatchesClassIdentity info =
       case expectedClassIdentity of
-        Just identity -> instanceInfoClassIdentity info == identity
+        Just identity -> sameSymbolIdentity (instanceInfoClassIdentity info) identity
         Nothing -> False
 
     instanceInfoClassIdentity info =
@@ -4718,7 +4718,7 @@ preferVisibleSourceType scope = go
 preferVisibleTypeHeadName :: ElaborateScope -> String -> String
 preferVisibleTypeHeadName scope name
   | Just identity <- typeHeadIdentityInScope scope name,
-    Just visibleName <- Map.lookup identity (esTypeDisplayNamesByIdentity scope) >>= preferredDisplayName identity =
+    Just visibleName <- lookupSymbolIdentityExact identity (esTypeDisplayNamesByIdentity scope) >>= preferredDisplayName identity =
       visibleName
   | otherwise = name
 

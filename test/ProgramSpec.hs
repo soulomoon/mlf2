@@ -149,10 +149,27 @@ poisonResolvedEqIdentityNames resolved =
     poisonModule resolvedModule =
         resolvedModule
             { resolvedModuleSemantic =
-                (resolvedModuleSemantic resolvedModule)
-                    { resolvedSemanticModuleSyntax =
-                        poisonSyntax (resolvedSemanticModuleSyntax (resolvedModuleSemantic resolvedModule))
-                    }
+                poisonSemantic (resolvedModuleSemantic resolvedModule)
+            }
+
+    poisonSemantic semantic =
+        semantic
+            { resolvedSemanticModuleSyntax = poisonSyntax (resolvedSemanticModuleSyntax semantic)
+            , resolvedSemanticModuleLocalSymbols = poisonLocalSymbols (resolvedSemanticModuleLocalSymbols semantic)
+            , resolvedSemanticModuleScope = poisonScope (resolvedSemanticModuleScope semantic)
+            , resolvedSemanticModuleExports = poisonScope (resolvedSemanticModuleExports semantic)
+            }
+
+    poisonLocalSymbols localSymbols =
+        localSymbols
+            { resolvedLocalValues = fmap (map poisonMethodSymbol) (resolvedLocalValues localSymbols)
+            , resolvedLocalClasses = fmap (map poisonClassSymbol) (resolvedLocalClasses localSymbols)
+            }
+
+    poisonScope scope =
+        scope
+            { resolvedScopeValues = fmap poisonMethodSymbol (resolvedScopeValues scope)
+            , resolvedScopeClasses = fmap poisonClassSymbol (resolvedScopeClasses scope)
             }
 
     poisonSyntax syntax =
@@ -179,16 +196,104 @@ poisonResolvedEqIdentityNames resolved =
                 DeclClass
                     classDecl
                         { classDeclName = poisonClassSymbol (classDeclName classDecl)
+                        , classDeclSuperclasses = map poisonClassConstraint (classDeclSuperclasses classDecl)
                         , classDeclMethods = map poisonMethodSig (classDeclMethods classDecl)
+                        }
+            DeclInstance instanceDecl ->
+                DeclInstance
+                    instanceDecl
+                        { instanceDeclConstraints = map poisonClassConstraint (instanceDeclConstraints instanceDecl)
+                        , instanceDeclClass = poisonClassSymbol (instanceDeclClass instanceDecl)
+                        , instanceDeclTypes = fmap poisonType (instanceDeclTypes instanceDecl)
+                        , instanceDeclMethods = map poisonMethodDef (instanceDeclMethods instanceDecl)
                         }
             DeclData dataDecl ->
                 DeclData
                     dataDecl
-                        {dataDeclDeriving = map poisonClassSymbol (dataDeclDeriving dataDecl)}
+                        { dataDeclConstructors = map poisonConstructorDecl (dataDeclConstructors dataDecl)
+                        , dataDeclDeriving = map poisonClassSymbol (dataDeclDeriving dataDecl)
+                        }
+            DeclDef defDecl ->
+                DeclDef
+                    defDecl
+                        { defDeclType = poisonConstrainedType (defDeclType defDecl)
+                        , defDeclExpr = poisonExpr (defDeclExpr defDecl)
+                        }
             _ -> decl
 
     poisonMethodSig sig =
-        sig {methodSigName = poisonMethodSymbol (methodSigName sig)}
+        sig
+            { methodSigName = poisonMethodSymbol (methodSigName sig)
+            , methodSigType = poisonConstrainedType (methodSigType sig)
+            }
+
+    poisonMethodDef methodDef =
+        methodDef
+            { methodDefName = poisonMethodSymbol (methodDefName methodDef)
+            , methodDefExpr = poisonExpr (methodDefExpr methodDef)
+            }
+
+    poisonConstructorDecl constructorDecl =
+        constructorDecl {constructorDeclType = poisonType (constructorDeclType constructorDecl)}
+
+    poisonConstrainedType constrained =
+        constrained
+            { constrainedConstraints = map poisonClassConstraint (constrainedConstraints constrained)
+            , constrainedBody = poisonType (constrainedBody constrained)
+            }
+
+    poisonClassConstraint constraint =
+        constraint
+            { constraintClassName = poisonClassSymbol (constraintClassName constraint)
+            , constraintTypes = fmap poisonType (constraintTypes constraint)
+            }
+
+    poisonExpr expr =
+        case expr of
+            EVar ref -> EVar (poisonValueRef ref)
+            ELit lit -> ELit lit
+            ELam param body -> ELam (poisonParam param) (poisonExpr body)
+            EApp fun arg -> EApp (poisonExpr fun) (poisonExpr arg)
+            ELet name mbTy rhs body ->
+                ELet name (fmap poisonType mbTy) (poisonExpr rhs) (poisonExpr body)
+            EAnn inner ty -> EAnn (poisonExpr inner) (poisonType ty)
+            ECase scrutinee alts -> ECase (poisonExpr scrutinee) (map poisonAlt alts)
+
+    poisonValueRef ref =
+        case ref of
+            ResolvedGlobalValue symbol -> ResolvedGlobalValue (poisonMethodSymbol symbol)
+            ResolvedLocalValue localRef -> ResolvedLocalValue localRef
+
+    poisonParam param =
+        param {paramType = fmap poisonType (paramType param)}
+
+    poisonAlt alt =
+        alt {altPattern = poisonPattern (altPattern alt), altExpr = poisonExpr (altExpr alt)}
+
+    poisonPattern pattern0 =
+        case pattern0 of
+            PatCtor ctor args -> PatCtor ctor (map poisonPattern args)
+            PatVar localRef -> PatVar localRef
+            PatWildcard -> PatWildcard
+            PatAnn inner ty -> PatAnn (poisonPattern inner) (poisonType ty)
+
+    poisonType :: ResolvedSrcTy n v -> ResolvedSrcTy n v
+    poisonType ty =
+        case ty of
+            RSTVar ref -> RSTVar ref
+            RSTArrow dom cod -> RSTArrow (poisonType dom) (poisonType cod)
+            RSTBase symbol -> RSTBase symbol
+            RSTCon symbol args -> RSTCon symbol (fmap poisonType args)
+            RSTVarApp ref args -> RSTVarApp ref (fmap poisonType args)
+            RSTTyLam ref body -> RSTTyLam ref (poisonType body)
+            RSTTyApp fun arg -> RSTTyApp (poisonType fun) (poisonType arg)
+            RSTForall ref mb body ->
+                RSTForall ref (fmap poisonBound mb) (poisonType body)
+            RSTMu ref body -> RSTMu ref (poisonType body)
+            RSTBottom -> RSTBottom
+
+    poisonBound (Surface.ResolvedSrcBound bound) =
+        Surface.ResolvedSrcBound (poisonType bound)
 
     poisonClassSymbol =
         poisonSymbolIdentityName
@@ -7905,6 +8010,74 @@ spec = do
                                 }
                         }
             checkResolvedProgram (ResolvedProgram [resolvedModule]) `shouldSatisfy` isRight
+
+        it "rejects resolved references whose unique id matches but payload is stale" $ do
+            let valueProgramText =
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  def helper : Int = 1;"
+                        , "  def main : Int = helper;"
+                        , "}"
+                        ]
+                typeProgramText =
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  data Box = Box : Box;"
+                        , "  def main : Box = Box;"
+                        , "}"
+                        ]
+                poisonMainDef f resolved =
+                    resolved {resolvedProgramModules = map poisonModule (resolvedProgramModules resolved)}
+                  where
+                    poisonModule resolvedModule =
+                        resolvedModule
+                            { resolvedModuleSemantic =
+                                (resolvedModuleSemantic resolvedModule)
+                                    { resolvedSemanticModuleSyntax =
+                                        poisonSyntax (resolvedModuleSyntax resolvedModule)
+                                    }
+                            }
+                    poisonSyntax syntax =
+                        syntax {moduleDecls = map poisonDecl (moduleDecls syntax)}
+                    poisonDecl decl =
+                        case decl of
+                            DeclDef defDecl
+                                | refDisplayName (defDeclName defDecl) == "main" ->
+                                    DeclDef (f defDecl)
+                            _ -> decl
+                staleSymbol replacement sourceName symbol =
+                    mkResolvedSymbol
+                        (renameSymbolDefiningName replacement (Symbol.resolvedSymbolIdentity symbol))
+                        sourceName
+                        sourceName
+                        (Symbol.symbolSpellingOrigin (Symbol.resolvedSymbolSpelling symbol))
+                poisonValueRef =
+                    poisonMainDef (\defDecl -> defDecl {defDeclExpr = poisonExpr (defDeclExpr defDecl)})
+                  where
+                    poisonExpr expr =
+                        case expr of
+                            EVar (ResolvedGlobalValue symbol)
+                                | refDisplayName symbol == "helper" ->
+                                    EVar (ResolvedGlobalValue (staleSymbol "$stale_helper" "wrong.helper" symbol))
+                            _ -> expr
+                poisonTypeHead =
+                    poisonMainDef (\defDecl -> defDecl {defDeclType = poisonConstrainedType (defDeclType defDecl)})
+                  where
+                    poisonConstrainedType constrained =
+                        constrained {constrainedBody = poisonType (constrainedBody constrained)}
+                    poisonType ty =
+                        case ty of
+                            RSTBase symbol
+                                | refDisplayName symbol == "Box" ->
+                                    RSTBase (staleSymbol "$stale_Box" "wrong.Box" symbol)
+                            _ -> ty
+            valueProgram <- requireParsed valueProgramText
+            typeProgram <- requireParsed typeProgramText
+            case (resolveProgram valueProgram, resolveProgram typeProgram) of
+                (Right valueResolved, Right typeResolved) -> do
+                    checkResolvedProgram (poisonValueRef valueResolved) `shouldBe` Left (ProgramUnknownValue "wrong.helper")
+                    checkResolvedProgram (poisonTypeHead typeResolved) `shouldBe` Left (ProgramUnknownType "wrong.Box")
+                other -> expectationFailure ("expected resolve success, got " ++ show other)
 
         it "rejects unknown value references at the resolver boundary" $ do
             let programText =

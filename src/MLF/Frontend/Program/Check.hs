@@ -113,7 +113,7 @@ import MLF.Frontend.Program.Package
     trivialProgramPackage,
   )
 import MLF.Frontend.Program.Resolve (resolveProgram)
-import MLF.Frontend.Symbol (lookupSymbolIdentityExact, symbolIdentityAliasMap, symbolIdentityAliasMapWith, symbolIdentityPayloadKey, symbolIdentityStableName, symbolUniqueIdentity)
+import MLF.Frontend.Symbol (lookupSymbolIdentityExact, sameSymbolIdentity, symbolIdentityAliasMap, symbolIdentityAliasMapWith, symbolIdentityPayloadKey, symbolIdentityStableName, symbolUniqueIdentity)
 import MLF.Frontend.Program.TypeFamilies (normalizeTypeFamiliesInProgram)
 import MLF.Frontend.Program.Types
   ( CheckedBinding (..),
@@ -486,7 +486,7 @@ addVisibleByIdentity identityFor base incoming =
     ( \acc (name, info) ->
         case Map.lookup name acc of
           Just existing
-            | identityFor existing == identityFor info -> Right acc
+            | sameSymbolIdentity (identityFor existing) (identityFor info) -> Right acc
             | otherwise -> Left (ProgramDuplicateVisibleName name)
           Nothing -> Right (Map.insert name info acc)
     )
@@ -507,13 +507,13 @@ addClasses =
 
 lookupValueInfoBySymbol :: Scope -> ResolvedSymbol -> TcM ValueInfo
 lookupValueInfoBySymbol scope symbol =
-  case Map.lookup (resolvedSymbolIdentity symbol) (scopeValuesByIdentity scope) of
+  case lookupSymbolIdentityExact (resolvedSymbolIdentity symbol) (scopeValuesByIdentity scope) of
     Just info -> pure info
     Nothing -> throwError (ProgramUnknownValue (resolvedSymbolDisplayName symbol))
 
 lookupClassInfoBySymbol :: Scope -> ResolvedSymbol -> TcM ClassInfo
 lookupClassInfoBySymbol scope symbol =
-  case Map.lookup (resolvedSymbolIdentity symbol) (scopeClassesByIdentity scope) of
+  case lookupSymbolIdentityExact (resolvedSymbolIdentity symbol) (scopeClassesByIdentity scope) of
     Just info -> pure info
     Nothing -> throwError (ProgramUnknownClass (resolvedSymbolDisplayName symbol))
 
@@ -2507,7 +2507,7 @@ displayClassName env symbol =
 
 displayNameForSymbol :: Map SymbolIdentity [String] -> ResolvedSymbol -> Maybe String
 displayNameForSymbol namesByIdentity symbol =
-  resolvedSymbolDisplayName symbol <$ Map.lookup (resolvedSymbolIdentity symbol) namesByIdentity
+  resolvedSymbolDisplayName symbol <$ lookupSymbolIdentityExact (resolvedSymbolIdentity symbol) namesByIdentity
 
 -- Source kind checking -------------------------------------------------------
 
@@ -2883,11 +2883,11 @@ resolvedTypeHeadKind env symbol =
 resolvedTypeHeadKindMaybe :: KindEnv -> ResolvedSymbol -> Maybe P.SrcKind
 resolvedTypeHeadKindMaybe env symbol
   | Just kind0 <- builtinTypeKindByIdentity (resolvedSymbolIdentity symbol) = Just kind0
-  | otherwise = Map.lookup (resolvedSymbolIdentity symbol) (kindTypeConstructors env)
+  | otherwise = lookupSymbolIdentityExact (resolvedSymbolIdentity symbol) (kindTypeConstructors env)
 
 builtinTypeKindByIdentity :: SymbolIdentity -> Maybe P.SrcKind
 builtinTypeKindByIdentity identity =
-  Map.lookup identity builtinTypeKindsByIdentity
+  lookupSymbolIdentityExact identity builtinTypeKindsByIdentity
 
 builtinTypeKindsByIdentity :: Map SymbolIdentity P.SrcKind
 builtinTypeKindsByIdentity =
@@ -3215,7 +3215,7 @@ synthesizeDerivedInstances moduleIdentity displayEnv scope mod0 = do
             (SymbolLocal (classInfoIdentityModule classInfo))
 
     hasDisplayName namesByIdentity identity predicate =
-      maybe False (any predicate) (Map.lookup identity namesByIdentity)
+      maybe False (any predicate) (lookupSymbolIdentityExact identity namesByIdentity)
 
     isEqName name =
       unqualifiedDisplayName name == "Eq"
@@ -3913,7 +3913,7 @@ buildInstanceSkeletons moduleIdentity generator0 displayEnv scope mod0 derived =
     overlapHeadDataIdentities headIdentities name =
       case Map.lookup name headIdentities of
         Just identity
-          | Map.member identity overlapDataByIdentity -> Set.singleton identity
+          | Just dataInfo <- lookupSymbolIdentityExact identity overlapDataByIdentity -> Set.singleton (dataInfoSymbolIdentity dataInfo)
           | otherwise -> Set.empty
         Nothing -> Set.empty
 
@@ -4169,7 +4169,7 @@ selectedExportDisplays =
 
 insertSelectedExport :: (a -> SymbolIdentity) -> String -> a -> SelectedExports a -> Either ProgramError (SelectedExports a)
 insertSelectedExport identityFor displayName info acc =
-  case Map.lookup identity acc of
+  case lookupSymbolIdentityExact identity acc of
     Just {} -> Right acc
     Nothing
       | displayName `elem` map (fst . snd) (Map.toList acc) ->
