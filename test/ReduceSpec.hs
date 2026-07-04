@@ -37,9 +37,10 @@ import MLF.Frontend.Program.Builtins (builtinValueIdentity)
 import MLF.Frontend.Syntax (Lit(..))
 import qualified MLF.Frontend.Syntax as Surf (Expr(..), SrcTy(..))
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
-import MLF.Types.Identity (IdDetails(..), primitiveRefFromSymbol, freshLocalRef, initialIdentityGenerator)
+import MLF.Types.Identity (IdDetails(..), idDetailsStableName, primitiveRefFromSymbol, freshLocalRef, initialIdentityGenerator)
 import ElabTermTestSupport
-    ( generatedResolvedLocalForName
+    ( generatedLocalRef
+    , generatedResolvedLocalForName
     , mkTestDeferredVar
     , mkTestLocalLam
     , mkTestLocalLet
@@ -152,6 +153,29 @@ spec = do
                     resolvedVarSameIdentity occurrence' yReplacement `shouldBe` True
                     resolvedVarSameIdentity binder' yReplacement `shouldBe` False
                 other -> expectationFailure ("Expected capture-avoiding identity freshening, got: " ++ show other)
+
+        it "freshens away from resolved identity stable aliases during capture avoidance" $ do
+            let x = resolvedLocal "x" "x-runtime" intTy
+                yReplacement =
+                    ResolvedVar
+                        { resolvedVarRuntimeName = "free-y-runtime"
+                        , resolvedVarType = intTy
+                        , resolvedVarDetails = LocalId (generatedLocalRef 1 "free-y")
+                        }
+                stableAlias = idDetailsStableName (resolvedVarDetails yReplacement)
+                yBinder =
+                    ResolvedVar
+                        { resolvedVarRuntimeName = "inner-y-runtime"
+                        , resolvedVarType = intTy
+                        , resolvedVarDetails = LocalId (generatedLocalRef 1 stableAlias)
+                        }
+                term = EApp (ELam x (ELam yBinder (EVarNode x))) (EVarNode yReplacement)
+            case step term of
+                Just (ELam binder' (EVarNode occurrence')) -> do
+                    resolvedVarSameIdentity occurrence' yReplacement `shouldBe` True
+                    resolvedVarSameIdentity binder' yReplacement `shouldBe` False
+                    resolvedVarReferenceName binder' `shouldNotBe` stableAlias
+                other -> expectationFailure ("Expected stable-alias capture freshening, got: " ++ show other)
 
         it "reduces primitive and by resolved identity instead of runtime spelling" $ do
             let boolTy = TBase (BaseTy "Bool")

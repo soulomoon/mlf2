@@ -194,7 +194,7 @@ import MLF.Frontend.Program.Types
 import MLF.Frontend.Symbol (lookupSymbolIdentityExact, memberSymbolIdentityExact, sameSymbolIdentity, symbolIdentityAliasMap, symbolIdentityAliasNames, symbolIdentityPayloadKey, symbolIdentityStableName, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit, SrcBound (..), SrcTy (..), SrcType)
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
-import MLF.Types.Identity (DeferredRef, IdDetails (..), IdentityGenerator, LocalRef, StructuralTypeBinderRole (..), UniqueIdentity (..), advanceIdentityGeneratorPast, deferredRefIdentity, deferredRefName, freshDeferredRef, freshIdentity, freshLocalRef, idDetailsGeneratedIdentities, idDetailsSymbolIdentity, identityGeneratorAfter, symbolGeneratedIdentities, typeBinderIdentityAliasMap, typeBinderIdentityFromStructural, typeBinderIdentityNode, typeBinderIdentityStructural)
+import MLF.Types.Identity (DeferredRef, IdDetails (..), IdentityGenerator, LocalRef, StructuralTypeBinderRole (..), UniqueIdentity (..), advanceIdentityGeneratorPast, deferredRefIdentity, deferredRefName, freshDeferredRef, freshIdentity, freshLocalRef, idDetailsAliasNames, idDetailsGeneratedIdentities, idDetailsSymbolIdentity, identityGeneratorAfter, symbolGeneratedIdentities, typeBinderIdentityAliasMap, typeBinderIdentityFromStructural, typeBinderIdentityNode, typeBinderIdentityStructural)
 import MLF.Util.Names (freshNameLike)
 
 data BackendConversionError
@@ -396,7 +396,7 @@ extendClosureScopeEvidenceArguments resolved evidence scope =
 
 closureScopeBoundTermNames :: ClosureScope -> Set.Set String
 closureScopeBoundTermNames =
-  Set.fromList . map resolvedVarReferenceName . closureScopeBoundResolvedTerms
+  Set.unions . map resolvedVarAliasNames . closureScopeBoundResolvedTerms
 
 extendClosureScopePatternFields :: [((ResolvedVar, ElabType), BackendType)] -> ClosureScope -> ClosureScope
 extendClosureScopePatternFields bindings scope =
@@ -1122,7 +1122,11 @@ freeResolvedTermVariables =
 
 freeResolvedTermReferenceNames :: XmlfTerm -> Set.Set String
 freeResolvedTermReferenceNames =
-  Set.fromList . map resolvedVarReferenceName . freeResolvedTermVariables
+  Set.unions . map resolvedVarAliasNames . freeResolvedTermVariables
+
+resolvedVarAliasNames :: ResolvedVar -> Set.Set String
+resolvedVarAliasNames resolved =
+  Set.fromList (idDetailsAliasNames (resolvedVarRuntimeName resolved) (resolvedVarDetails resolved))
 
 freeElabTypeVarRefs :: Ty var -> [TypeBinderRef]
 freeElabTypeVarRefs =
@@ -1245,15 +1249,15 @@ termVariableNames :: XmlfTerm -> Set.Set String
 termVariableNames =
   \case
     EVarNode resolved ->
-      Set.singleton (resolvedVarReferenceName resolved)
+      resolvedVarAliasNames resolved
     ELam resolved body ->
-      Set.insert (resolvedVarReferenceName resolved) (termVariableNames body)
+      resolvedVarAliasNames resolved `Set.union` termVariableNames body
     ELit {} ->
       Set.empty
     EApp fun arg ->
       termVariableNames fun `Set.union` termVariableNames arg
     ELet resolved _ rhs body ->
-      Set.insert (resolvedVarReferenceName resolved) (termVariableNames rhs `Set.union` termVariableNames body)
+      Set.unions [resolvedVarAliasNames resolved, termVariableNames rhs, termVariableNames body]
     ETyAbsRef _ _ body ->
       termVariableNames body
     ETyInst inner _ ->
