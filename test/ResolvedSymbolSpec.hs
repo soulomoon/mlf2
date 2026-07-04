@@ -232,6 +232,13 @@ spec = do
       conflictingPayloadRef `shouldNotBe` firstRef
       Map.lookup firstAliasRef (Map.singleton firstRef "hit") `shouldBe` Just "hit"
 
+    it "compares bare symbol identities by exact payload" $ do
+      let original = generatedSymbolIdentity 991905 SymbolValue "Main" "value" Nothing
+          stalePayload = generatedSymbolIdentity 991905 SymbolValue "Other" "staleValue" Nothing
+
+      stalePayload `shouldNotBe` original
+      Map.lookup stalePayload (Map.singleton original "hit") `shouldBe` Nothing
+
     it "does not look up class or instance methods through stale identity payloads" $ do
       let methodSymbol = resolvedMethodInfoSymbol (SymbolLocal "Lib") "eq" eqMethodInfo
           staleMethodIdentity = renameSymbolDefiningName "$stale.eq" eqMethodIdentity

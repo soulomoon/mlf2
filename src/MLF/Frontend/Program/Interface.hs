@@ -15,7 +15,7 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
-import MLF.Frontend.Symbol (sameSymbolIdentity, symbolIdentityPayloadKey, symbolIdentityStableName)
+import MLF.Frontend.Symbol (sameSymbolIdentity, symbolIdentityPayloadKey, symbolIdentityStableName, symbolUniqueIdentity)
 import qualified MLF.Frontend.Program.Builtins as Builtins
 import MLF.Frontend.Program.Package
     ( PackageId (..)
@@ -187,14 +187,14 @@ validatePackageInterface graph packageInterface = do
 
 requireUniqueModuleIdentities :: [ModuleInterface] -> Either ProgramInterfaceError ()
 requireUniqueModuleIdentities =
-    go Set.empty
+    go Map.empty
   where
     go _ [] = Right ()
     go seen (interface : rest)
-        | identity `Set.member` seen =
+        | Map.member (symbolUniqueIdentity identity) seen =
             Left (ProgramInterfaceDuplicateMetadataIdentity (moduleInterfaceId interface) "module" identity)
         | otherwise =
-            go (Set.insert identity seen) rest
+            go (Map.insert (symbolUniqueIdentity identity) identity seen) rest
       where
         identity = moduleInterfaceIdentity interface
 
@@ -349,15 +349,15 @@ requireDistinctDisplayNames moduleId displays =
 
 requireUniqueIdentities :: PackageModuleId -> String -> [SymbolIdentity] -> Either ProgramInterfaceError ()
 requireUniqueIdentities moduleId label identities =
-    case find ((> 1) . snd) (Map.toList countsByIdentity) of
-        Just (identity, _) ->
+    case find ((> 1) . fst . snd) (Map.toList countsByIdentity) of
+        Just (_, (_, identity)) ->
             Left (ProgramInterfaceDuplicateMetadataIdentity moduleId label identity)
         Nothing -> Right ()
   where
     countsByIdentity =
         Map.fromListWith
-            (+)
-            [(identity, 1 :: Int) | identity <- identities]
+            (\(leftCount, identity) (rightCount, _) -> (leftCount + rightCount, identity))
+            [(symbolUniqueIdentity identity, (1 :: Int, identity)) | identity <- identities]
 
 requireIdentityDefinedHere ::
     PackageModuleId ->

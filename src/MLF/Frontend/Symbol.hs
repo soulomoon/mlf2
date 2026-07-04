@@ -135,11 +135,11 @@ renameSymbolDefiningName name identity =
 
 instance Eq SymbolIdentity where
   left == right =
-    symbolUniqueIdentity left == symbolUniqueIdentity right
+    symbolIdentityPayloadKey left == symbolIdentityPayloadKey right
 
 instance Ord SymbolIdentity where
   compare left right =
-    compare (symbolUniqueIdentity left) (symbolUniqueIdentity right)
+    compare (symbolIdentityPayloadKey left) (symbolIdentityPayloadKey right)
 
 data SymbolOrigin
   = SymbolLocal String
