@@ -29,6 +29,7 @@ module MLF.Elab.Run.Pipeline
   )
 where
 
+import Control.Applicative ((<|>))
 import Control.Concurrent (forkIO, newEmptyMVar, putMVar, rtsSupportsBoundThreads, takeMVar)
 import Control.Exception (SomeException, evaluate, throwIO, try)
 import Control.Monad (foldM)
@@ -2001,9 +2002,7 @@ srcTypeToElabTypeWithBound boundNames headIdentities binderIdentities refs gener
         Nothing -> Left (InternalConstraintError ("unresolved source type binder `" ++ name ++ "` reached pipeline external binding preparation"))
 
     sourceTypeHeadIdentity name =
-      case lookupSymbolIdentityAlias headIdentities name of
-        Just identity -> Just identity
-        Nothing -> Builtins.builtinTypeHeadIdentity name
+      Builtins.builtinTypeHeadIdentity name <|> lookupSymbolIdentityAlias headIdentities name
 
     srcTypesToElabTypesWith boundNames' refs0 generator0 (arg :| args) = do
       (arg', generator1) <- srcTypeToElabTypeWithBound boundNames' headIdentities binderIdentities refs0 generator0 arg

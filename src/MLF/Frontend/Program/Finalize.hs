@@ -76,7 +76,7 @@ import MLF.Frontend.ConstraintGen
   )
 import MLF.Frontend.Normalize (normalizeExpr, normalizeType)
 import qualified MLF.Frontend.Program.Builtins as Builtins
-import MLF.Frontend.Symbol (lookupSymbolIdentityExact, sameSymbolIdentity, symbolIdentityAliasMap, symbolIdentityAliasMapWith, symbolIdentityStableName)
+import MLF.Frontend.Symbol (lookupSymbolIdentityAlias, lookupSymbolIdentityExact, sameSymbolIdentity, symbolIdentityAliasMap, symbolIdentityAliasMapWith, symbolIdentityStableName)
 import MLF.Frontend.Program.Elaborate
   ( ElaborateScope,
     elaborateScopeDataTypes,
@@ -3493,7 +3493,7 @@ inlineConstructorHead scope extraHeadIdentities ownerParamBinders ctorInfo subst
             STBottom -> STBottom
 
         headName name =
-          case Map.lookup name headIdentities of
+          case Builtins.builtinTypeHeadIdentity name <|> lookupSymbolIdentityAlias headIdentities name of
             Just identity -> symbolIdentityStableName identity
             Nothing -> name
 
@@ -5205,7 +5205,7 @@ srcTypeToElabTypeWithHeadIdentitiesBound boundNames headIdentities refs generato
       srcTypeToElabTypeWithHeadIdentitiesBound boundNames headIdentities
 
     sourceTypeHeadIdentity name =
-      Map.lookup name headIdentities <|> Builtins.builtinTypeHeadIdentity name
+      Builtins.builtinTypeHeadIdentity name <|> lookupSymbolIdentityAlias headIdentities name
 
     sourceTypeBinderRef env name =
       case Map.lookup name env of

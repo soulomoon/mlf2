@@ -61,7 +61,7 @@ import MLF.Frontend.Program.Surface
     surfaceVar,
   )
 import MLF.Frontend.Program.Types
-import MLF.Frontend.Symbol (lookupSymbolIdentityExact, memberSymbolIdentityExact, sameSymbolIdentity, symbolIdentityAliasMap, symbolIdentityAliasMapWith, symbolIdentityAliasNames, symbolIdentityPayloadKey, symbolIdentityStableName)
+import MLF.Frontend.Symbol (lookupSymbolIdentityAlias, lookupSymbolIdentityExact, memberSymbolIdentityExact, sameSymbolIdentity, symbolIdentityAliasMap, symbolIdentityAliasMapWith, symbolIdentityAliasNames, symbolIdentityPayloadKey, symbolIdentityStableName)
 import MLF.Frontend.Syntax
   ( Lit (..),
     ResolvedSrcBound (..),
@@ -4840,8 +4840,8 @@ sameTypeHeadInScope scope left right =
 
 typeHeadIdentityInScope :: ElaborateScope -> String -> Maybe SymbolIdentity
 typeHeadIdentityInScope scope name =
-  Map.lookup name (esTypeHeadIdentities scope)
-    <|> Builtins.builtinTypeHeadIdentity name
+  Builtins.builtinTypeHeadIdentity name
+    <|> lookupSymbolIdentityAlias (esTypeHeadIdentities scope) name
 
 dataIdentityTypeName :: DataInfo -> String
 dataIdentityTypeName =
