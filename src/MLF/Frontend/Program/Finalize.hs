@@ -76,7 +76,7 @@ import MLF.Frontend.ConstraintGen
   )
 import MLF.Frontend.Normalize (normalizeExpr, normalizeType)
 import qualified MLF.Frontend.Program.Builtins as Builtins
-import MLF.Frontend.Symbol (lookupSymbolIdentityAlias, symbolIdentityAliasMap, symbolIdentityAliasMapWith, symbolIdentityStableName)
+import MLF.Frontend.Symbol (symbolIdentityAliasMap, symbolIdentityAliasMapWith, symbolIdentityStableName)
 import MLF.Frontend.Program.Elaborate
   ( ElaborateScope,
     elaborateScopeDataTypes,
@@ -3374,7 +3374,7 @@ inlineConstructorHead scope extraHeadIdentities ownerParamBinders ctorInfo subst
           Set.delete resultVar $
             Set.unions (map freeSrcTypeVars (loweredResultSrcTy : loweredArgSrcTys ++ loweredHandlerSrcTys))
       headIdentities =
-        Map.union extraHeadIdentities (typeHeadIdentitiesInScope scope)
+        mergeSymbolIdentityMaps [extraHeadIdentities, typeHeadIdentitiesInScope scope]
       ownerParamRefsByAlias =
         Map.mapWithKey ownerParamRefForAlias (typeBinderIdentityAliasMap ownerParamBinders)
       ownerParamRefForAlias alias identity =
@@ -3477,7 +3477,7 @@ inlineConstructorHead scope extraHeadIdentities ownerParamBinders ctorInfo subst
       go
       where
         headIdentities =
-          Map.union extraHeadIdentities (typeHeadIdentitiesInScope scope)
+          mergeSymbolIdentityMaps [extraHeadIdentities, typeHeadIdentitiesInScope scope]
 
         go ty =
           case ty of
@@ -3493,7 +3493,7 @@ inlineConstructorHead scope extraHeadIdentities ownerParamBinders ctorInfo subst
             STBottom -> STBottom
 
         headName name =
-          case lookupSymbolIdentityAlias headIdentities name of
+          case Map.lookup name headIdentities of
             Just identity -> symbolIdentityStableName identity
             Nothing -> name
 
@@ -4994,7 +4994,7 @@ srcTypeToElabTypeInScope scope ty =
 
 srcTypeToElabTypeInScopeWithHeadIdentities :: ElaborateScope -> Map String SymbolIdentity -> SrcTy n v -> Either ProgramError ElabType
 srcTypeToElabTypeInScopeWithHeadIdentities scope extraHeadIdentities ty =
-  let headIdentities = Map.union extraHeadIdentities (typeHeadIdentitiesInScope scope)
+  let headIdentities = mergeSymbolIdentityMaps [extraHeadIdentities, typeHeadIdentitiesInScope scope]
       (refs, generator) = sourceTypeBinderRefsInScope headIdentities scope Map.empty ty
    in fst <$> srcTypeToElabTypeWithHeadIdentities headIdentities refs generator ty
 
@@ -5010,7 +5010,7 @@ typeViewToElabType scope view =
       lowerTypeView scope view
 
     headIdentities =
-      Map.union (typeViewHeadIdentityLookupAliases view) (typeHeadIdentitiesInScope scope)
+      mergeSymbolIdentityMaps [typeViewHeadIdentityLookupAliases view, typeHeadIdentitiesInScope scope]
 
     (refs, generator) =
       typeViewBinderRefs headIdentities view ty
@@ -5205,7 +5205,7 @@ srcTypeToElabTypeWithHeadIdentitiesBound boundNames headIdentities refs generato
       srcTypeToElabTypeWithHeadIdentitiesBound boundNames headIdentities
 
     sourceTypeHeadIdentity name =
-      lookupSymbolIdentityAlias headIdentities name <|> Builtins.builtinTypeHeadIdentity name
+      Map.lookup name headIdentities <|> Builtins.builtinTypeHeadIdentity name
 
     sourceTypeBinderRef env name =
       case Map.lookup name env of
@@ -5254,7 +5254,7 @@ srcBoundToElabBoundWithHeadIdentitiesBound boundNames headIdentities refs genera
 
 typeHeadIdentitiesInScope :: ElaborateScope -> Map String SymbolIdentity
 typeHeadIdentitiesInScope scope =
-  Map.unions
+  mergeSymbolIdentityMaps
     [ Map.map dataInfoSymbol dataTypes,
       unambiguousDataTypeHeadIdentities dataTypes,
       builtinTypeHeadIdentities

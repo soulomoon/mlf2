@@ -1952,6 +1952,17 @@ spec = do
                     Elab.TBaseWithIdentity Nothing (BaseTy "Token")
             typeViewToElabType scope view `shouldBe` Right expected
 
+        it "does not let conflicting type-view head aliases override builtin identities" $ do
+            let fakeIdentity = generatedSymbolIdentity 991647 SymbolType "Fake" "Int" Nothing
+                scope = mkElaborateScope Map.empty Map.empty Map.empty []
+                view =
+                    (ProgramTypes.mkTypeView (STBase "Int") (STBase "Int"))
+                        { ProgramTypes.typeViewHeadIdentities = Map.singleton "Int" fakeIdentity
+                        }
+                expected =
+                    Elab.TBaseWithIdentity (Just (Builtins.builtinTypeIdentity "Int")) (BaseTy "Int")
+            typeViewToElabType scope view `shouldBe` Right expected
+
         it "seeds fresh type-view binders after scoped type head identities" $ do
             program <-
                 requireParsed $
