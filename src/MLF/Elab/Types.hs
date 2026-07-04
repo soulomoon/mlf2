@@ -116,6 +116,7 @@ module MLF.Elab.Types (
     identityGeneratorAfterTerm,
     generatedIdentitiesInTerm,
     resolvedVarName,
+    resolvedVarAliasNames,
     resolvedVarReferenceName,
     resolvedVarConstructorRef,
     resolvedVarLocalRef,

@@ -106,6 +106,7 @@ module MLF.Types.Elab (
     identityGeneratorAfterTerm,
     generatedIdentitiesInTerm,
     resolvedVarName,
+    resolvedVarAliasNames,
     resolvedVarReferenceName,
     resolvedVarConstructorRef,
     resolvedVarLocalRef,
@@ -191,6 +192,7 @@ import MLF.Types.Identity
     , TypeBinderIdentity
     , UniqueIdentity(..)
     , idDetailsConstructorRef
+    , idDetailsAliasNames
     , idDetailsDisplayName
     , idDetailsGeneratedIdentities
     , idDetailsBindingSymbolIdentity
@@ -646,6 +648,10 @@ instance Eq ResolvedVar where
 resolvedVarReferenceName :: ResolvedVar -> String
 resolvedVarReferenceName resolved =
     idDetailsReferenceName (resolvedVarRuntimeName resolved) (resolvedVarDetails resolved)
+
+resolvedVarAliasNames :: ResolvedVar -> Set.Set String
+resolvedVarAliasNames resolved =
+    Set.fromList (idDetailsAliasNames (resolvedVarRuntimeName resolved) (resolvedVarDetails resolved))
 
 resolvedVarName :: ResolvedVar -> String
 resolvedVarName resolved =

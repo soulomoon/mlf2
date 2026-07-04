@@ -128,6 +128,7 @@ import MLF.Elab.Types
     idDetailsIdentityKey,
     renameResolvedLocalVar,
     renameTypeBinderRef,
+    resolvedVarAliasNames,
     resolvedVarBoundBy,
     resolvedVarConstructorRef,
     resolvedVarIdentityKey,
@@ -194,7 +195,7 @@ import MLF.Frontend.Program.Types
 import MLF.Frontend.Symbol (lookupSymbolIdentityExact, memberSymbolIdentityExact, sameSymbolIdentity, symbolIdentityAliasMap, symbolIdentityAliasNames, symbolIdentityPayloadKey, symbolIdentityStableName, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit, SrcBound (..), SrcTy (..), SrcType)
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
-import MLF.Types.Identity (DeferredRef, IdDetails (..), IdentityGenerator, LocalRef, StructuralTypeBinderRole (..), UniqueIdentity (..), advanceIdentityGeneratorPast, deferredRefIdentity, deferredRefName, freshDeferredRef, freshIdentity, freshLocalRef, idDetailsAliasNames, idDetailsGeneratedIdentities, idDetailsSymbolIdentity, identityGeneratorAfter, symbolGeneratedIdentities, typeBinderIdentityAliasMap, typeBinderIdentityFromStructural, typeBinderIdentityNode, typeBinderIdentityStructural)
+import MLF.Types.Identity (DeferredRef, IdDetails (..), IdentityGenerator, LocalRef, StructuralTypeBinderRole (..), UniqueIdentity (..), advanceIdentityGeneratorPast, deferredRefIdentity, deferredRefName, freshDeferredRef, freshIdentity, freshLocalRef, idDetailsGeneratedIdentities, idDetailsSymbolIdentity, identityGeneratorAfter, symbolGeneratedIdentities, typeBinderIdentityAliasMap, typeBinderIdentityFromStructural, typeBinderIdentityNode, typeBinderIdentityStructural)
 import MLF.Util.Names (freshNameLike)
 
 data BackendConversionError
@@ -1123,10 +1124,6 @@ freeResolvedTermVariables =
 freeResolvedTermReferenceNames :: XmlfTerm -> Set.Set String
 freeResolvedTermReferenceNames =
   Set.unions . map resolvedVarAliasNames . freeResolvedTermVariables
-
-resolvedVarAliasNames :: ResolvedVar -> Set.Set String
-resolvedVarAliasNames resolved =
-  Set.fromList (idDetailsAliasNames (resolvedVarRuntimeName resolved) (resolvedVarDetails resolved))
 
 freeElabTypeVarRefs :: Ty var -> [TypeBinderRef]
 freeElabTypeVarRefs =
@@ -4660,7 +4657,7 @@ collectClosureLams =
         ELam resolved body ->
           let name = resolvedVarReferenceName resolved
               ty = resolvedVarType resolved
-              paramNames = Set.fromList (map (resolvedVarReferenceName . fst) params)
+              paramNames = Set.unions (map (resolvedVarAliasNames . fst) params)
               needsFreshName =
                 Set.member name avoid || Set.member name paramNames
               used =
@@ -4685,8 +4682,8 @@ collectClosureLams =
               avoidForBody =
                 Set.insert name $
                   Set.unions
-                    [ avoid,
-                      Set.fromList (map (resolvedVarReferenceName . fst) params),
+                      [ avoid,
+                      Set.unions (map (resolvedVarAliasNames . fst) params),
                       termVariableNames rhs
                     ]
            in case go avoidForBody [] body of

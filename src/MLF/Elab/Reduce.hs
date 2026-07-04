@@ -16,7 +16,7 @@ import MLF.Frontend.Program.Builtins (builtinValueIdentity)
 import MLF.Frontend.Syntax (Lit (..))
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
 import MLF.Reify.TypeOps (freeTypeVarRefsType, substTypeCaptureRef)
-import MLF.Types.Identity (IdDetails (..), idDetailsAliasNames, primitiveRefSymbol)
+import MLF.Types.Identity (IdDetails (..), primitiveRefSymbol)
 import MLF.Util.RecursionSchemes (cataMaybe, foldXmlfTerm, foldInstantiation)
 
 isValue :: XmlfTerm -> Bool
@@ -243,10 +243,6 @@ freeResolvedTermVars =
 freeResolvedTermReferenceNames :: XmlfTerm -> Set.Set String
 freeResolvedTermReferenceNames =
   Set.unions . map resolvedVarAliasNames . freeResolvedTermVars
-
-resolvedVarAliasNames :: ResolvedVar -> Set.Set String
-resolvedVarAliasNames resolved =
-  Set.fromList (idDetailsAliasNames (resolvedVarRuntimeName resolved) (resolvedVarDetails resolved))
 
 freeResolvedTermIdentityKeys :: XmlfTerm -> Set.Set ResolvedTermIdentityKey
 freeResolvedTermIdentityKeys =

@@ -69,7 +69,7 @@ import MLF.Frontend.Syntax (Lit (..), SrcBound (..), SrcTy (..), SrcType, TypePa
 import MLF.Frontend.Syntax.Program (Program)
 import MLF.Pipeline (checkProgram)
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
-import MLF.Types.Identity (deferredRefFromIdentity, deferredRefName, UniqueIdentity (..), typeBinderIdentityFromUnique, typeBinderIdentityGeneratedUnique, typeBinderIdentityStableName)
+import MLF.Types.Identity (deferredRefFromIdentity, deferredRefName, idDetailsStableName, UniqueIdentity (..), typeBinderIdentityFromUnique, typeBinderIdentityGeneratedUnique, typeBinderIdentityStableName)
 import System.Directory (createDirectoryIfMissing)
 import System.Environment (lookupEnv)
 import System.FilePath (takeDirectory)
@@ -2702,6 +2702,35 @@ spec = describe "MLF.Backend.Convert" $ do
     mainBinding <- requireBinding (backendProgramMain backend) backend
     backendBindingExpr mainBinding `shouldSatisfy` containsAlphaRenamedShadowingClosure
 
+  it "freshens returned closure parameters away from resolved identity stable aliases" $ do
+    checked0 <- requireChecked returnedLetLambdaClosureProgram
+    let firstParam = generatedResolvedLocal 9191 "x" "runtime-x" intElabTy
+        stableAlias = idDetailsStableName (Elab.resolvedVarDetails firstParam)
+        secondParam = generatedResolvedLocal 9192 stableAlias "runtime-stable-alias" intElabTy
+        fBinder = generatedResolvedLocal 9193 "f" "runtime-f" binaryIntElabTy
+        checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingTerm =
+                      Elab.ELet
+                        fBinder
+                        (schemeFromType binaryIntElabTy)
+                        (Elab.ELam firstParam (Elab.ELam secondParam (Elab.EVarNode secondParam)))
+                        (Elab.EVarNode fBinder)
+                  }
+            )
+            checked0
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    case filter ((== 2) . length) (closureParamNameGroups (backendBindingExpr mainBinding)) of
+      [[_, secondName]] ->
+        secondName `shouldNotBe` stableAlias
+      groups ->
+        expectationFailure ("expected one two-parameter closure, got " ++ show groups)
+
   it "keeps direct first-order local calls on the direct application path" $ do
     checked <- requireChecked directLocalCallProgram
     backend <- requireRight (convertCheckedProgram checked)
@@ -4107,6 +4136,27 @@ closureParamCounts expr =
     BackendUnroll {backendUnrollPayload = body} -> closureParamCounts body
     BackendClosureCall {backendClosureFunction = fun, backendClosureArguments = args} ->
       closureParamCounts fun ++ concatMap closureParamCounts args
+    _ -> []
+
+closureParamNameGroups :: BackendExpr -> [[String]]
+closureParamNameGroups expr =
+  case expr of
+    BackendClosure _ _ captures params body ->
+      map fst params : concatMap (closureParamNameGroups . backendClosureCaptureExpr) captures ++ closureParamNameGroups body
+    BackendCase {backendScrutinee = scrutinee, backendAlternatives = alternatives} ->
+      closureParamNameGroups scrutinee ++ concatMap (closureParamNameGroups . backendAltBody) (toList alternatives)
+    BackendLamWithIdentity {backendBody = body} -> closureParamNameGroups body
+    BackendApp {backendFunction = fun, backendArgument = arg} ->
+      closureParamNameGroups fun ++ closureParamNameGroups arg
+    BackendLetWithIdentity {backendLetRhs = rhs, backendLetBody = body} ->
+      closureParamNameGroups rhs ++ closureParamNameGroups body
+    BackendTyAbsWithIdentity {backendTyAbsBody = body} -> closureParamNameGroups body
+    BackendTyApp {backendTyFunction = fun} -> closureParamNameGroups fun
+    BackendConstructWithIdentity {backendConstructArgs = args} -> concatMap closureParamNameGroups args
+    BackendRoll {backendRollPayload = body} -> closureParamNameGroups body
+    BackendUnroll {backendUnrollPayload = body} -> closureParamNameGroups body
+    BackendClosureCall {backendClosureFunction = fun, backendClosureArguments = args} ->
+      closureParamNameGroups fun ++ concatMap closureParamNameGroups args
     _ -> []
 
 containsBackendClosureCapture :: String -> BackendExpr -> Bool
