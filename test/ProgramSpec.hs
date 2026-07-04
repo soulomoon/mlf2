@@ -4362,6 +4362,32 @@ spec = do
                 other ->
                     expectationFailure ("expected binding identity payload conflict rejection, got " ++ show other)
 
+        it "does not resolve checked runtime binding references through stale identity payloads" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO, pure);"
+                        , "  def helper : IO Unit = pure Unit;"
+                        , "  def main : IO Unit = helper;"
+                        , "}"
+                        ]
+            checked <- requireCheckedLocated (withPreludeLocated located)
+            helperBinding <- requireCheckedBinding "Main__helper" checked
+            mainBinding <- requireCheckedBinding "Main__main" checked
+            helperIdentity <- requireTopLevelIdentity helperBinding
+            let staleHelperIdentity = renameSymbolDefiningName "$stale_helper" helperIdentity
+                checked' =
+                    replaceCheckedBindingTerm
+                        "Main__main"
+                        (poisonTopLevelTermIdentity helperIdentity staleHelperIdentity "$stale_helper" (checkedBindingTerm mainBinding))
+                        checked
+            case runCheckedProgramOutput checked' of
+                Left (ProgramUnknownValue name) ->
+                    name `shouldBe` "$stale_helper"
+                other ->
+                    expectationFailure ("expected stale binding identity rejection, got " ++ show other)
+
         it "rejects duplicate checked runtime module identities before run context lookup" $ do
             program <-
                 requireParsed $
@@ -8761,6 +8787,28 @@ poisonPrimitiveRuntimeNames replacement term =
         Elab.EUnroll body -> Elab.EUnroll (go body)
   where
     go = poisonPrimitiveRuntimeNames replacement
+
+poisonTopLevelTermIdentity :: SymbolIdentity -> SymbolIdentity -> String -> Elab.XmlfTerm -> Elab.XmlfTerm
+poisonTopLevelTermIdentity target replacement replacementName term =
+    case term of
+        Elab.EVarNode resolved@ResolvedVar {resolvedVarDetails = TopLevelId identity}
+            | Symbol.sameSymbolIdentity identity target ->
+                Elab.EVarNode
+                    resolved
+                        { resolvedVarRuntimeName = replacementName
+                        , resolvedVarDetails = TopLevelId replacement
+                        }
+        Elab.EVarNode {} -> term
+        Elab.ELit {} -> term
+        Elab.ELam resolved body -> Elab.ELam resolved (go body)
+        Elab.EApp fun arg -> Elab.EApp (go fun) (go arg)
+        Elab.ELet resolved scheme rhs body -> Elab.ELet resolved scheme (go rhs) (go body)
+        Elab.ETyAbsRef ref mbBound body -> Elab.ETyAbsRef ref mbBound (go body)
+        Elab.ETyInst body inst -> Elab.ETyInst (go body) inst
+        Elab.ERoll ty body -> Elab.ERoll ty (go body)
+        Elab.EUnroll body -> Elab.EUnroll (go body)
+  where
+    go = poisonTopLevelTermIdentity target replacement replacementName
 
 primitiveTerm :: String -> Elab.XmlfTerm
 primitiveTerm name =

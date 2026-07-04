@@ -781,7 +781,7 @@ lookupRuntimeResolvedValue context stack deferredValues env resolved =
 
 lookupRuntimeEnvResolved :: ResolvedVar -> RuntimeEnv -> Maybe RuntimeValue
 lookupRuntimeEnvResolved resolved env =
-  Map.lookup (runtimeVarKey resolved) env
+  lookupRuntimeVarKeyExact (runtimeVarKey resolved) env
 
 lookupRuntimeDeferredResolved :: ResolvedVar -> RuntimeDeferredValues -> Maybe RuntimeDeferredValue
 lookupRuntimeDeferredResolved resolved deferredValues =
@@ -803,6 +803,22 @@ runtimeVarKey resolved =
     PrimitiveId ref -> RuntimePrimitiveKey ref
     DeferredId ref -> RuntimeDeferredKey ref
 
+lookupRuntimeVarKeyExact :: RuntimeVarKey -> RuntimeEnv -> Maybe RuntimeValue
+lookupRuntimeVarKeyExact key env =
+  snd <$> find (runtimeVarKeyMatches key . fst) (Map.toList env)
+
+runtimeVarKeyMatches :: RuntimeVarKey -> RuntimeVarKey -> Bool
+runtimeVarKeyMatches left right =
+  case (left, right) of
+    (RuntimeTopLevelKey leftIdentity, RuntimeTopLevelKey rightIdentity) ->
+      sameSymbolIdentity leftIdentity rightIdentity
+    (RuntimeConstructorKey leftIdentity, RuntimeConstructorKey rightIdentity) ->
+      sameSymbolIdentity leftIdentity rightIdentity
+    (RuntimeMethodKey leftIdentity, RuntimeMethodKey rightIdentity) ->
+      sameSymbolIdentity leftIdentity rightIdentity
+    _ ->
+      left == right
+
 lookupRuntimeConstructorResolved :: RuntimeContext -> ResolvedVar -> Maybe ConstructorInfo
 lookupRuntimeConstructorResolved context resolved =
   case resolvedVarConstructorRef resolved of
@@ -811,11 +827,11 @@ lookupRuntimeConstructorResolved context resolved =
 
 lookupRuntimeBindingResolved :: RuntimeContext -> ResolvedVar -> Maybe CheckedBinding
 lookupRuntimeBindingResolved context resolved =
-  resolvedVarBindingSymbolIdentity resolved >>= (`Map.lookup` runtimeBindingsByIdentity context)
+  resolvedVarBindingSymbolIdentity resolved >>= (`lookupSymbolIdentityExact` runtimeBindingsByIdentity context)
 
 evalRuntimeBindingByIdentity :: RuntimeContext -> RuntimeLookupStack -> CheckedBinding -> Either ProgramError RuntimeValue
 evalRuntimeBindingByIdentity context stack binding
-  | any ((== runtimeLookupFrameKey frame) . runtimeLookupFrameKey) stack =
+  | any (runtimeVarKeyMatches (runtimeLookupFrameKey frame) . runtimeLookupFrameKey) stack =
       Left (recursiveRuntimeBindingError frame stack)
   | otherwise = evalRuntimeBinding context (frame : stack) binding
   where
@@ -2721,9 +2737,9 @@ lookupDataInfoByElabTypeIdentity :: RuntimeContext -> ElabType -> Maybe DataInfo
 lookupDataInfoByElabTypeIdentity context ty =
   case ty of
     X.TBaseWithIdentity (Just identity) _ ->
-      Map.lookup identity (runtimeDataByIdentity context)
+      lookupSymbolIdentityExact identity (runtimeDataByIdentity context)
     X.TConWithIdentity (Just identity) _ _ ->
-      Map.lookup identity (runtimeDataByIdentity context)
+      lookupSymbolIdentityExact identity (runtimeDataByIdentity context)
     X.TForallRef _ _ body ->
       lookupDataInfoByElabTypeIdentity context body
     _ ->
@@ -2736,7 +2752,7 @@ sourceTypeDataInfo context binding =
 lookupDataInfoForTypeView :: RuntimeContext -> TypeView -> Maybe DataInfo
 lookupDataInfoForTypeView context view = do
   identity <- sourceTypeDataHeadIdentity view
-  Map.lookup identity (runtimeDataByIdentity context)
+  lookupSymbolIdentityExact identity (runtimeDataByIdentity context)
 
 sourceTypeDataHeadIdentity :: TypeView -> Maybe SymbolIdentity
 sourceTypeDataHeadIdentity view =
@@ -2967,7 +2983,7 @@ canonicalFieldTypeView context _ownerInfo view =
        in (arg' NE.:| reverse argsRev, identities)
 
     lookupDataInfoByViewHead name =
-      case typeViewHeadIdentityForAlias view name >>= (`Map.lookup` runtimeDataByIdentity context) of
+      case typeViewHeadIdentityForAlias view name >>= (`lookupSymbolIdentityExact` runtimeDataByIdentity context) of
         Just info -> Just info
         Nothing -> Nothing
 
