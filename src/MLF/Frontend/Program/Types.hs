@@ -322,6 +322,7 @@ import MLF.Frontend.Symbol
     resolvedSymbolIdentity,
     resolvedSymbolSpelling,
     sameResolvedSymbol,
+    sameSymbolIdentity,
     symbolIdentityAliasMap,
     symbolIdentityAliasMapWith,
     symbolIdentityAliasNamesWith,
@@ -1215,7 +1216,7 @@ data ConstraintInfo = ConstraintInfo
 
 instance Eq ConstraintInfo where
   left == right =
-    constraintClassSymbol left == constraintClassSymbol right
+    sameSymbolIdentity (constraintClassSymbol left) (constraintClassSymbol right)
       && constraintTypeViews left == constraintTypeViews right
 
 constraintMetadataMatches :: [P.ClassConstraint] -> [ConstraintInfo] -> [P.ClassConstraint] -> [ConstraintInfo] -> Bool
@@ -1919,7 +1920,7 @@ data EvidenceMethod = EvidenceMethod
 
 instance Eq EvidenceMethod where
   left == right =
-    evidenceMethodSymbol left == evidenceMethodSymbol right
+    sameSymbolIdentity (evidenceMethodSymbol left) (evidenceMethodSymbol right)
       && evidenceMethodResolvedVar left == evidenceMethodResolvedVar right
       && evidenceMethodTypeView left == evidenceMethodTypeView right
 
@@ -1940,7 +1941,13 @@ data EvidenceInfo = EvidenceInfo
     evidenceTypeViews :: NonEmpty TypeView,
     evidenceMethodsByIdentity :: Map SymbolIdentity EvidenceMethod
   }
-  deriving (Eq, Show)
+  deriving (Show)
+
+instance Eq EvidenceInfo where
+  left == right =
+    sameSymbolIdentity (evidenceClassSymbol left) (evidenceClassSymbol right)
+      && evidenceTypeViews left == evidenceTypeViews right
+      && symbolIdentityMapMatches (evidenceMethodsByIdentity left) (evidenceMethodsByIdentity right)
 
 data ConstructorForallBinder = ConstructorForallBinder
   { constructorForallDisplayName :: String,
@@ -1964,7 +1971,7 @@ data ConstructorShape = ConstructorShape
 
 instance Eq ConstructorShape where
   left == right =
-    constructorShapeSymbol left == constructorShapeSymbol right
+    sameSymbolIdentity (constructorShapeSymbol left) (constructorShapeSymbol right)
       && constructorShapeTypeView left == constructorShapeTypeView right
       && constructorShapeForallBinderInfo left == constructorShapeForallBinderInfo right
       && constructorShapeIndex left == constructorShapeIndex right
@@ -2023,10 +2030,10 @@ data ConstructorInfo = ConstructorInfo
 
 instance Eq ConstructorInfo where
   left == right =
-    ctorInfoSymbol left == ctorInfoSymbol right
+    sameSymbolIdentity (ctorInfoSymbol left) (ctorInfoSymbol right)
       && ctorTypeView left == ctorTypeView right
       && ctorForallBinderInfo left == ctorForallBinderInfo right
-      && ctorOwningTypeIdentity left == ctorOwningTypeIdentity right
+      && sameSymbolIdentity (ctorOwningTypeIdentity left) (ctorOwningTypeIdentity right)
       && ctorIndex left == ctorIndex right
       && ctorOwnerConstructors left == ctorOwnerConstructors right
 
@@ -2063,7 +2070,13 @@ data DataInfo = DataInfo
     dataTypeParams :: [P.TypeParam],
     dataConstructors :: [ConstructorInfo]
   }
-  deriving (Eq, Show)
+  deriving (Show)
+
+instance Eq DataInfo where
+  left == right =
+    sameSymbolIdentity (dataInfoSymbol left) (dataInfoSymbol right)
+      && dataTypeParams left == dataTypeParams right
+      && dataConstructors left == dataConstructors right
 
 data MethodInfo = MethodInfo
   { methodInfoSymbol :: SymbolIdentity,
@@ -2077,7 +2090,7 @@ data MethodInfo = MethodInfo
 
 instance Eq MethodInfo where
   left == right =
-    methodInfoSymbol left == methodInfoSymbol right
+    sameSymbolIdentity (methodInfoSymbol left) (methodInfoSymbol right)
       && methodTypeViewRaw left == methodTypeViewRaw right
       && constraintMetadataMatches
         (methodConstraints left)
@@ -2117,7 +2130,7 @@ data ClassInfo = ClassInfo
 
 instance Eq ClassInfo where
   left == right =
-    classInfoSymbol left == classInfoSymbol right
+    sameSymbolIdentity (classInfoSymbol left) (classInfoSymbol right)
       && classTypeParams left == classTypeParams right
       && constraintMetadataMatches
         (classSuperclasses left)
@@ -2125,7 +2138,7 @@ instance Eq ClassInfo where
         (classSuperclasses right)
         (classSuperclassInfos right)
       && classFunctionalDependencies left == classFunctionalDependencies right
-      && classMethodsByIdentity left == classMethodsByIdentity right
+      && symbolIdentityMapMatches (classMethodsByIdentity left) (classMethodsByIdentity right)
 
 data ValueInfo
   = OrdinaryValue
@@ -2150,7 +2163,7 @@ instance Eq ValueInfo where
   left == right =
     case (left, right) of
       (OrdinaryValue {}, OrdinaryValue {}) ->
-        valueInfoSymbol left == valueInfoSymbol right
+        sameSymbolIdentity (valueInfoSymbol left) (valueInfoSymbol right)
           && valueTypeView left == valueTypeView right
           && constraintMetadataMatches
             (valueConstraints left)
@@ -2158,10 +2171,10 @@ instance Eq ValueInfo where
             (valueConstraints right)
             (valueConstraintInfos right)
       (ConstructorValue {}, ConstructorValue {}) ->
-        valueInfoSymbol left == valueInfoSymbol right
+        sameSymbolIdentity (valueInfoSymbol left) (valueInfoSymbol right)
           && valueCtorInfo left == valueCtorInfo right
       (OverloadedMethod {}, OverloadedMethod {}) ->
-        valueInfoSymbol left == valueInfoSymbol right
+        sameSymbolIdentity (valueInfoSymbol left) (valueInfoSymbol right)
           && valueMethodInfo left == valueMethodInfo right
       _ ->
         False
@@ -2207,15 +2220,15 @@ data InstanceInfo = InstanceInfo
 
 instance Eq InstanceInfo where
   left == right =
-    instanceClassSymbol left == instanceClassSymbol right
-      && instanceOriginModuleIdentity left == instanceOriginModuleIdentity right
+    sameSymbolIdentity (instanceClassSymbol left) (instanceClassSymbol right)
+      && sameSymbolIdentity (instanceOriginModuleIdentity left) (instanceOriginModuleIdentity right)
       && constraintMetadataMatches
         (instanceConstraints left)
         (instanceConstraintInfos left)
         (instanceConstraints right)
         (instanceConstraintInfos right)
       && instanceHeadTypeViews left == instanceHeadTypeViews right
-      && instanceMethodsByIdentity left == instanceMethodsByIdentity right
+      && symbolIdentityMapMatches (instanceMethodsByIdentity left) (instanceMethodsByIdentity right)
 
 instanceHeadTypes :: InstanceInfo -> NonEmpty SrcType
 instanceHeadTypes =
@@ -2461,6 +2474,13 @@ typeHeadIdentityMapMatches :: Map String SymbolIdentity -> Map String SymbolIden
 typeHeadIdentityMapMatches left right =
   typeHeadIdentityPayloadSet left == typeHeadIdentityPayloadSet right
 
+symbolIdentityMapMatches :: Eq a => Map SymbolIdentity a -> Map SymbolIdentity a -> Bool
+symbolIdentityMapMatches left right =
+  payloadMap left == payloadMap right
+  where
+    payloadMap =
+      Map.fromList . map (\(identity, value) -> (symbolIdentityPayloadKey identity, value)) . Map.toList
+
 typeHeadIdentityPayloadSet :: Map String SymbolIdentity -> Set SymbolIdentityPayloadKey
 typeHeadIdentityPayloadSet =
   Set.fromList . map symbolIdentityPayloadKey . Map.elems
@@ -2507,7 +2527,7 @@ data ExportedTypeInfo = ExportedTypeInfo
 instance Eq ExportedTypeInfo where
   left == right =
     exportedTypeData left == exportedTypeData right
-      && exportedTypeConstructorsByIdentity left == exportedTypeConstructorsByIdentity right
+      && symbolIdentityMapMatches (exportedTypeConstructorsByIdentity left) (exportedTypeConstructorsByIdentity right)
 
 mkExportedTypeInfo :: DataInfo -> [(String, ConstructorInfo)] -> ExportedTypeInfo
 mkExportedTypeInfo dataInfo constructors =
@@ -2535,9 +2555,9 @@ data ModuleExports = ModuleExports
 
 instance Eq ModuleExports where
   left == right =
-    exportedValuesByIdentity left == exportedValuesByIdentity right
-      && exportedTypesByIdentity left == exportedTypesByIdentity right
-      && exportedClassesByIdentity left == exportedClassesByIdentity right
+    symbolIdentityMapMatches (exportedValuesByIdentity left) (exportedValuesByIdentity right)
+      && symbolIdentityMapMatches (exportedTypesByIdentity left) (exportedTypesByIdentity right)
+      && symbolIdentityMapMatches (exportedClassesByIdentity left) (exportedClassesByIdentity right)
 
 moduleExportsFromMaps ::
   Map String ValueInfo ->
@@ -2714,10 +2734,10 @@ data CheckedModule = CheckedModule
 
 instance Eq CheckedModule where
   left == right =
-    checkedModuleIdentity left == checkedModuleIdentity right
+    sameSymbolIdentity (checkedModuleIdentity left) (checkedModuleIdentity right)
       && checkedModuleBindings left == checkedModuleBindings right
-      && checkedModuleData left == checkedModuleData right
-      && checkedModuleClasses left == checkedModuleClasses right
+      && symbolIdentityMapMatches (checkedModuleData left) (checkedModuleData right)
+      && symbolIdentityMapMatches (checkedModuleClasses left) (checkedModuleClasses right)
       && checkedModuleInstances left == checkedModuleInstances right
       && checkedModuleExports left == checkedModuleExports right
 

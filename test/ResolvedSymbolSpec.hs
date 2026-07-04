@@ -750,6 +750,87 @@ spec = do
       checkedModule "Lib" moduleIdentity
         `shouldNotBe` checkedModule "Lib" otherModuleIdentity
 
+    it "rejects metadata equality when symbol identity payloads conflict" $ do
+      let staleValueIdentity = renameSymbolDefiningName "$stale.answer" valueInfoIdentity
+          staleTokenIdentity = renameSymbolDefiningName "$stale.Token" tokenTypeIdentity
+          staleCtorIdentity = renameSymbolDefiningName "$stale.Some" someCtorIdentity
+          staleClassIdentity = renameSymbolDefiningName "$stale.Eq" eqClassIdentity
+          staleMethodIdentity = renameSymbolDefiningName "$stale.eq" eqMethodIdentity
+          moduleIdentity = generatedSymbolIdentity 136 SymbolModule "Lib" "Lib" Nothing
+          staleModuleIdentity = renameSymbolDefiningName "$stale.Lib" moduleIdentity
+          methodEvidence =
+            EvidenceMethod
+              { evidenceMethodRuntimeName = "Lib__eq",
+                evidenceMethodSymbol = eqMethodIdentity,
+                evidenceMethodResolvedVar = Nothing,
+                evidenceMethodTypeView = methodTypeView eqMethodInfo
+              }
+          evidence =
+            EvidenceInfo
+              { evidenceClassSymbol = eqClassIdentity,
+                evidenceTypeViews = methodTypeView eqMethodInfo :| [],
+                evidenceMethodsByIdentity = Map.singleton eqMethodIdentity methodEvidence
+              }
+          tokenView =
+            sourceTypeViewInScope
+              (mkElaborateScope Map.empty (Map.singleton "Token" tokenDataInfo) Map.empty [])
+              (STBase "Token")
+          instanceInfo =
+            InstanceInfo
+              { instanceClassSymbol = eqClassIdentity,
+                instanceOriginModuleIdentity = moduleIdentity,
+                instanceConstraints = [],
+                instanceConstraintInfos = [],
+                instanceHeadTypeViews = tokenView :| [],
+                instanceMethodsByIdentity = Map.singleton eqMethodIdentity eqMethodValue
+              }
+          exportedType =
+            mkExportedTypeInfo tokenDataInfo [("Some", someCtor)]
+          exports =
+            moduleExportsFromMaps
+              (Map.singleton "answer" valueInfo)
+              (Map.singleton "Token" exportedType)
+              (Map.singleton "Eq" eqClassInfo)
+          checkedModule =
+            CheckedModule
+              { checkedModuleName = "Lib",
+                checkedModuleIdentity = moduleIdentity,
+                checkedModuleBindings = [],
+                checkedModuleData = Map.singleton tokenTypeIdentity tokenDataInfo,
+                checkedModuleClasses = Map.singleton eqClassIdentity eqClassInfo,
+                checkedModuleInstances = [],
+                checkedModuleExports = exports
+              }
+
+      valueInfo `shouldNotBe` valueInfo {valueInfoSymbol = staleValueIdentity}
+      eqMethodInfo `shouldNotBe` eqMethodInfo {methodInfoSymbol = staleMethodIdentity}
+      eqClassInfo `shouldNotBe` eqClassInfo {classInfoSymbol = staleClassIdentity}
+      eqClassInfo
+        `shouldNotBe` eqClassInfo {classMethodsByIdentity = Map.singleton staleMethodIdentity eqMethodInfo}
+      someCtor `shouldNotBe` someCtor {ctorInfoSymbol = staleCtorIdentity}
+      someCtor `shouldNotBe` someCtor {ctorOwningTypeIdentity = staleTokenIdentity}
+      tokenDataInfo `shouldNotBe` tokenDataInfo {dataInfoSymbol = staleTokenIdentity}
+      evidence `shouldNotBe` evidence {evidenceClassSymbol = staleClassIdentity}
+      evidence
+        `shouldNotBe` evidence {evidenceMethodsByIdentity = Map.singleton staleMethodIdentity methodEvidence}
+      instanceInfo `shouldNotBe` instanceInfo {instanceClassSymbol = staleClassIdentity}
+      instanceInfo `shouldNotBe` instanceInfo {instanceOriginModuleIdentity = staleModuleIdentity}
+      instanceInfo
+        `shouldNotBe` instanceInfo {instanceMethodsByIdentity = Map.singleton staleMethodIdentity eqMethodValue}
+      exportedType
+        `shouldNotBe` exportedType {exportedTypeConstructorsByIdentity = Map.singleton staleCtorIdentity someCtor}
+      exports
+        `shouldNotBe` exports {exportedValuesByIdentity = Map.singleton staleValueIdentity valueInfo}
+      exports
+        `shouldNotBe` exports {exportedTypesByIdentity = Map.singleton staleTokenIdentity exportedType}
+      exports
+        `shouldNotBe` exports {exportedClassesByIdentity = Map.singleton staleClassIdentity eqClassInfo}
+      checkedModule `shouldNotBe` checkedModule {checkedModuleIdentity = staleModuleIdentity}
+      checkedModule
+        `shouldNotBe` checkedModule {checkedModuleData = Map.singleton staleTokenIdentity tokenDataInfo}
+      checkedModule
+        `shouldNotBe` checkedModule {checkedModuleClasses = Map.singleton staleClassIdentity eqClassInfo}
+
     it "compares deferred constructor inst binders by identity when names are stale" $ do
       let binderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 212)
           otherBinderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 213)
