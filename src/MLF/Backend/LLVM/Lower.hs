@@ -172,7 +172,7 @@ import MLF.Backend.LLVM.Lower.Types
 import MLF.Backend.LLVM.Syntax
 import qualified MLF.Backend.StructuralRecursiveData as Structural
 import MLF.Constraint.Types.Graph (BaseTy (..))
-import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), SymbolOwnerIdentity (..), symbolDefiningModule, symbolDefiningName, symbolIdentityFromParts, symbolIdentityStableName, symbolRefMatches, symbolUniqueIdentity)
+import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), SymbolOwnerIdentity (..), sameSymbolIdentity, symbolDefiningModule, symbolDefiningName, symbolIdentityFromParts, symbolIdentityStableName, symbolRefMatches, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit (..))
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
 import MLF.Types.Identity (constructorRefSymbol, deferredRefIdentity, envRefIdentity, IdDetails (..), IdentityGenerator, LocalRef, localRefIdentity, primitiveRefSymbol, idDetailsAliasMap, idDetailsSymbolIdentity, StructuralTypeBinderRole (..), TypeBinderIdentity, UniqueIdentity (..), freshIdentity, freshLocalRef, identityGeneratorAfter, initialIdentityGenerator, localIdentityStableUnique, typeBinderIdentityAliasMap, typeBinderIdentityAliasNames, typeBinderIdentityFromUnique, typeBinderIdentityStableName, typeBinderIdentityStructural)
@@ -422,7 +422,7 @@ insertBackendSymbolIdentity name identity env =
     merge next Nothing =
       Just (Just next)
     merge next (Just (Just existing))
-      | symbolUniqueIdentity existing == symbolUniqueIdentity next = Just (Just existing)
+      | sameSymbolIdentity existing next = Just (Just existing)
       | otherwise = Just Nothing
     merge _ (Just Nothing) =
       Just Nothing
