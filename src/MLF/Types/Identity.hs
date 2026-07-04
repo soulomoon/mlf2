@@ -283,11 +283,14 @@ primitiveRefFromSymbol symbol =
 
 instance Eq PrimitiveRef where
   left == right =
-    primitiveRefSymbol left == primitiveRefSymbol right
+    symbolIdentityPayloadKey (primitiveRefSymbol left)
+      == symbolIdentityPayloadKey (primitiveRefSymbol right)
 
 instance Ord PrimitiveRef where
   compare left right =
-    compare (primitiveRefSymbol left) (primitiveRefSymbol right)
+    compare
+      (symbolIdentityPayloadKey (primitiveRefSymbol left))
+      (symbolIdentityPayloadKey (primitiveRefSymbol right))
 
 data DeferredRef = DeferredRef
   { deferredRefIdentity :: UniqueIdentity,
@@ -330,7 +333,8 @@ constructorRefFromSymbol symbol =
 
 instance Eq ConstructorRef where
   left == right =
-    constructorRefSymbol left == constructorRefSymbol right
+    symbolIdentityPayloadKey (constructorRefSymbol left)
+      == symbolIdentityPayloadKey (constructorRefSymbol right)
 
 data IdDetails
   = LocalId LocalRef

@@ -232,6 +232,19 @@ spec = do
       conflictingPayloadRef `shouldNotBe` firstRef
       Map.lookup firstAliasRef (Map.singleton firstRef "hit") `shouldBe` Just "hit"
 
+    it "uses exact payload identity for primitive and constructor refs" $ do
+      let primitive = generatedSymbolIdentity 991800 SymbolValue "Main" "__p" Nothing
+          primitiveConflict = generatedSymbolIdentity 991800 SymbolValue "Other" "__p" Nothing
+          dataIdentity = generatedSymbolIdentity 991801 SymbolType "Main" "Box" Nothing
+          owner = SymbolOwnerType dataIdentity
+          ctor = generatedSymbolIdentity 991802 SymbolConstructor "Main" "Box" (Just owner)
+          ctorConflict = generatedSymbolIdentity 991802 SymbolConstructor "Other" "Box" (Just owner)
+
+      primitiveRefFromSymbol primitive `shouldNotBe` primitiveRefFromSymbol primitiveConflict
+      Map.lookup (primitiveRefFromSymbol primitiveConflict) (Map.singleton (primitiveRefFromSymbol primitive) "hit")
+        `shouldBe` Nothing
+      constructorRefFromSymbol ctor `shouldNotBe` constructorRefFromSymbol ctorConflict
+
     it "uses semantic identity for resolved export type references" $ do
       let typeUnqualified = resolvedDataInfoSymbol (SymbolUnqualifiedImport "Lib") "Token" tokenDataInfo
           typeQualified = resolvedDataInfoSymbol (SymbolQualifiedImport "Lib" "L") "L.Token" tokenDataInfo
