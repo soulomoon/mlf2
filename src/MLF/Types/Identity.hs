@@ -350,10 +350,10 @@ instance Eq IdDetails where
 data ResolvedTermIdentityKey
   = ResolvedTermLocalKey LocalRef
   | ResolvedTermEnvKey EnvRef
-  | ResolvedTermTopLevelKey SymbolIdentity
-  | ResolvedTermConstructorKey SymbolIdentity
-  | ResolvedTermMethodKey SymbolIdentity
-  | ResolvedTermPrimitiveKey SymbolIdentity
+  | ResolvedTermTopLevelKey SymbolIdentityPayloadKey
+  | ResolvedTermConstructorKey SymbolIdentityPayloadKey
+  | ResolvedTermMethodKey SymbolIdentityPayloadKey
+  | ResolvedTermPrimitiveKey SymbolIdentityPayloadKey
   | ResolvedTermDeferredKey DeferredRef
   deriving (Eq, Ord, Show)
 
@@ -374,10 +374,10 @@ idDetailsIdentityKey details =
     LocalId ref -> ResolvedTermLocalKey ref
     EvidenceId ref -> ResolvedTermLocalKey ref
     EnvId ref -> ResolvedTermEnvKey ref
-    TopLevelId symbol -> ResolvedTermTopLevelKey symbol
-    ConstructorId ref -> ResolvedTermConstructorKey (constructorRefSymbol ref)
-    MethodId symbol -> ResolvedTermMethodKey symbol
-    PrimitiveId ref -> ResolvedTermPrimitiveKey (primitiveRefSymbol ref)
+    TopLevelId symbol -> ResolvedTermTopLevelKey (symbolIdentityPayloadKey symbol)
+    ConstructorId ref -> ResolvedTermConstructorKey (symbolIdentityPayloadKey (constructorRefSymbol ref))
+    MethodId symbol -> ResolvedTermMethodKey (symbolIdentityPayloadKey symbol)
+    PrimitiveId ref -> ResolvedTermPrimitiveKey (symbolIdentityPayloadKey (primitiveRefSymbol ref))
     DeferredId ref -> ResolvedTermDeferredKey ref
 
 idDetailsAliasPayloadKey :: IdDetails -> IdDetailsAliasPayloadKey

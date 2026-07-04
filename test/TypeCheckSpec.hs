@@ -321,6 +321,25 @@ spec = describe "Phase 7 typecheck" $ do
         typeCheckWithEnv env (EVarNode actual) `shouldBe` Right intTy
         typeCheckWithEnv env (EVarNode stale) `shouldBe` Left (TCUnboundVar "x")
 
+    it "does not resolve top-level references through conflicting identity payloads" $ do
+        let actual =
+                ResolvedVar
+                    { resolvedVarRuntimeName = "x"
+                    , resolvedVarType = intTy
+                    , resolvedVarDetails =
+                        TopLevelId (generatedSymbolIdentity 10 SymbolValue "Actual" "x" Nothing)
+                    }
+            stale =
+                ResolvedVar
+                    { resolvedVarRuntimeName = "x"
+                    , resolvedVarType = intTy
+                    , resolvedVarDetails =
+                        TopLevelId (generatedSymbolIdentity 10 SymbolValue "Actual" "stale-x" Nothing)
+                    }
+            env = mkTypeCheckEnvWithResolvedTerms [(actual, intTy)] Map.empty
+        typeCheckWithEnv env (EVarNode actual) `shouldBe` Right intTy
+        typeCheckWithEnv env (EVarNode stale) `shouldBe` Left (TCUnboundVar "x")
+
     it "does not resolve top-level identity through a same-named environment identity" $ do
         let envResolved =
                 ResolvedVar
