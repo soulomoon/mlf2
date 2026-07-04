@@ -30,7 +30,7 @@ import MLF.Elab.Types (schemeFromType)
 import qualified MLF.Types.Elab as Elab
 import MLF.Frontend.Program.Builtins (builtinTypeIdentity, builtinValueIdentity)
 import MLF.Frontend.Program.Prelude (withPrelude)
-import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), SymbolOrigin (..), renameSymbolDefiningName, symbolDefiningName, symbolIdentityFromParts, symbolIdentityStableName, symbolUniqueIdentity)
+import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), SymbolOrigin (..), renameSymbolDefiningName, sameSymbolIdentity, symbolDefiningName, symbolIdentityFromParts, symbolIdentityStableName, symbolUniqueIdentity)
 import MLF.Frontend.Program.Types
   ( CheckedBinding (..),
     CheckedModule (..),
@@ -2482,6 +2482,28 @@ spec = describe "MLF.Backend.Convert" $ do
     mainBinding <- requireBinding (backendProgramMain backend) backend
     backendBindingExpr mainBinding `shouldSatisfy` containsBackendClosureCall
     backendBindingExpr mainBinding `shouldNotSatisfy` containsBackendApp
+
+  it "does not classify top-level closure heads through stale identity payloads" $ do
+    checked0 <- requireChecked topLevelClosureCallProgram
+    makerBinding <- requireCheckedBinding "Main__maker" checked0
+    mainBinding <- requireCheckedBinding (checkedProgramMain checked0) checked0
+    makerIdentity <- requireTopLevelBindingIdentity makerBinding
+    let staleMakerIdentity = renameSymbolDefiningName "$stale_maker" makerIdentity
+        checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingTerm =
+                      poisonTopLevelTermIdentity
+                        makerIdentity
+                        staleMakerIdentity
+                        "$stale_maker"
+                        (checkedBindingTerm mainBinding)
+                  }
+            )
+            checked0
+    convertCheckedProgram checked
+      `shouldBe` Left (BackendValidationFailed (BackendUnknownVariable "$stale_maker"))
 
   it "looks up top-level closure demands by resolved identity instead of runtime spelling" $ do
     checked0 <- requireChecked localDirectAliasPartialApplicationBaseProgram
@@ -5297,6 +5319,36 @@ staleTopLevelOccurrenceRuntime target replacement =
         Elab.EVarNode resolved
           | Elab.resolvedVarReferenceName resolved == target ->
               Elab.EVarNode (resolved {Elab.resolvedVarRuntimeName = replacement})
+        Elab.ELam resolved body ->
+          Elab.ELam resolved (go body)
+        Elab.EApp fun arg ->
+          Elab.EApp (go fun) (go arg)
+        Elab.ELet resolved scheme rhs body ->
+          Elab.ELet resolved scheme (go rhs) (go body)
+        Elab.ETyAbsRef ref mbBound body ->
+          Elab.ETyAbsRef ref mbBound (go body)
+        Elab.ETyInst inner inst ->
+          Elab.ETyInst (go inner) inst
+        Elab.ERoll ty body ->
+          Elab.ERoll ty (go body)
+        Elab.EUnroll body ->
+          Elab.EUnroll (go body)
+        _ ->
+          term
+
+poisonTopLevelTermIdentity :: SymbolIdentity -> SymbolIdentity -> String -> Elab.XmlfTerm -> Elab.XmlfTerm
+poisonTopLevelTermIdentity target replacement replacementName =
+  go
+  where
+    go term =
+      case term of
+        Elab.EVarNode resolved@Elab.ResolvedVar {Elab.resolvedVarDetails = TopLevelId identity}
+          | sameSymbolIdentity identity target ->
+              Elab.EVarNode
+                resolved
+                  { Elab.resolvedVarRuntimeName = replacementName,
+                    Elab.resolvedVarDetails = TopLevelId replacement
+                  }
         Elab.ELam resolved body ->
           Elab.ELam resolved (go body)
         Elab.EApp fun arg ->

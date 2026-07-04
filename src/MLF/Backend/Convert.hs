@@ -191,7 +191,7 @@ import MLF.Frontend.Program.Types
     typeViewHeadIdentityForAlias,
     typeViewMentionedHeadIdentities,
   )
-import MLF.Frontend.Symbol (lookupSymbolIdentityExact, sameSymbolIdentity, symbolIdentityAliasMap, symbolIdentityAliasNames, symbolIdentityPayloadKey, symbolIdentityStableName, symbolUniqueIdentity)
+import MLF.Frontend.Symbol (lookupSymbolIdentityExact, memberSymbolIdentityExact, sameSymbolIdentity, symbolIdentityAliasMap, symbolIdentityAliasNames, symbolIdentityPayloadKey, symbolIdentityStableName, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit, SrcBound (..), SrcTy (..), SrcType)
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
 import MLF.Types.Identity (DeferredRef, IdDetails (..), IdentityGenerator, LocalRef, StructuralTypeBinderRole (..), UniqueIdentity (..), advanceIdentityGeneratorPast, deferredRefIdentity, deferredRefName, freshDeferredRef, freshIdentity, freshLocalRef, idDetailsGeneratedIdentities, idDetailsSymbolIdentity, identityGeneratorAfter, symbolGeneratedIdentities, typeBinderIdentityAliasMap, typeBinderIdentityFromStructural, typeBinderIdentityNode, typeBinderIdentityStructural)
@@ -3909,7 +3909,7 @@ termResolvedVar =
 
 resolvedBackendReferenceName :: ConvertContext -> ResolvedVar -> String
 resolvedBackendReferenceName context resolved =
-  case resolvedVarSymbolIdentity resolved >>= (`Map.lookup` ccTermRuntimeNamesByIdentity context) of
+  case resolvedVarSymbolIdentity resolved >>= (`lookupSymbolIdentityExact` ccTermRuntimeNamesByIdentity context) of
     Just runtimeName -> runtimeName
     Nothing -> resolvedVarReferenceName resolved
 
@@ -3956,7 +3956,7 @@ localClosureCapturesForTerm context scope term = do
 resolvedIsGlobalTerm :: ConvertContext -> ResolvedVar -> Bool
 resolvedIsGlobalTerm context resolved =
   case resolvedVarSymbolIdentity resolved of
-    Just symbol -> Map.member symbol (ccTermRuntimeNamesByIdentity context)
+    Just symbol -> maybe False (const True) (lookupSymbolIdentityExact symbol (ccTermRuntimeNamesByIdentity context))
     Nothing -> False
 
 stripBackendHeadTypeApps :: BackendExpr -> BackendExpr
@@ -4488,10 +4488,10 @@ callableBindingKindByIdentity context scope details
   | closureScopeHasBoundDetails details scope =
       Just BackendCallableBindingDirect
   | Just symbol <- idDetailsSymbolIdentity details,
-    Set.member symbol (ccClosureGlobalsByIdentity context) =
+    memberSymbolIdentityExact symbol (ccClosureGlobalsByIdentity context) =
       Just BackendCallableBindingClosure
   | Just symbol <- idDetailsSymbolIdentity details,
-    Map.member symbol (ccTermRuntimeNamesByIdentity context) =
+    maybe False (const True) (lookupSymbolIdentityExact symbol (ccTermRuntimeNamesByIdentity context)) =
       Just BackendCallableBindingDirect
   | otherwise =
       Nothing
@@ -4507,7 +4507,7 @@ termUsesClosureCallPath context scope headTerm =
     Nothing ->
       case termHeadSymbolIdentity context headTerm of
         Just symbol
-          | Set.member symbol (ccClosureGlobalsByIdentity context) -> True
+          | memberSymbolIdentityExact symbol (ccClosureGlobalsByIdentity context) -> True
         _ -> False
   where
     localClosurePath =
