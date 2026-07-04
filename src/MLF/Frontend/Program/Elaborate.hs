@@ -4841,8 +4841,8 @@ sameTypeHeadInScope scope left right =
 
 typeHeadIdentityInScope :: ElaborateScope -> String -> Maybe SymbolIdentity
 typeHeadIdentityInScope scope name =
-  Builtins.builtinTypeHeadIdentity name
-    <|> lookupSymbolIdentityAlias (esTypeHeadIdentities scope) name
+  lookupSymbolIdentityAlias (esTypeHeadIdentities scope) name
+    <|> Builtins.builtinTypeHeadIdentity name
 
 dataIdentityTypeName :: DataInfo -> String
 dataIdentityTypeName =

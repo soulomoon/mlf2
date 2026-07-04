@@ -5,7 +5,7 @@ module ResolvedSymbolSpec (spec) where
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
 import qualified MLF.Frontend.Program.Builtins as Builtins
-import MLF.Frontend.Program.Elaborate (classInfoForConstraint, lowerType, mkElaborateScope, sourceTypeViewInScope)
+import MLF.Frontend.Program.Elaborate (classInfoForConstraint, lowerType, mkElaborateScope, sourceTypeIdentityInScope, sourceTypeViewInScope)
 import MLF.Frontend.Program.Types
 import MLF.Frontend.Syntax.Program (ClassConstraintF (..), resolvedExportTypeRefFromSymbols, refDisplayName)
 import qualified MLF.Frontend.Symbol as Symbol
@@ -489,6 +489,20 @@ spec = do
           view = sourceTypeViewInScope scope (STBase stableToken)
       typeViewDisplay view `shouldBe` STBase stableToken
       typeViewIdentity view `shouldBe` STBase stableToken
+
+    it "prefers scoped type head identities before builtin spellings" $ do
+      let localIntIdentity = generatedSymbolIdentity 135 SymbolType "Main" "Int" Nothing
+          stableInt = symbolIdentityStableName localIntIdentity
+          scope =
+            mkElaborateScope
+              Map.empty
+              (Map.singleton "Int" (DataInfo localIntIdentity [] []))
+              Map.empty
+              []
+          heads = typeViewHeadIdentities (sourceTypeViewInScope scope (STBase "Int"))
+      sourceTypeIdentityInScope scope (STBase "Int") `shouldBe` STBase stableInt
+      Map.lookup stableInt heads `shouldBe` Just localIntIdentity
+      Map.lookup "Int" heads `shouldBe` Just localIntIdentity
 
     it "keys qualified builtin type heads by builtin identity" $ do
       let intIdentity = Builtins.builtinTypeIdentity "Int"
