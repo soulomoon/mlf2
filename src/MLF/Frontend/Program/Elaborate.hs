@@ -1215,7 +1215,7 @@ displayTypeHeadNameForResolved scope symbol =
 
 displayNameForSymbol :: Map SymbolIdentity [String] -> ResolvedSymbol -> Maybe String
 displayNameForSymbol namesByIdentity symbol =
-  case Map.lookup (resolvedSymbolIdentity symbol) namesByIdentity of
+  case lookupSymbolIdentityExact (resolvedSymbolIdentity symbol) namesByIdentity of
     Just names ->
       case filter (== P.refDisplayName symbol) names of
         name : _ -> Just name

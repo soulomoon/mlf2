@@ -3247,11 +3247,11 @@ instanceOriginModuleName =
 
 lookupClassMethod :: ResolvedSymbol -> ClassInfo -> Maybe MethodInfo
 lookupClassMethod symbol classInfo =
-  Map.lookup (resolvedSymbolIdentity symbol) (classMethodsByIdentity classInfo)
+  lookupSymbolIdentityExact (resolvedSymbolIdentity symbol) (classMethodsByIdentity classInfo)
 
 lookupInstanceMethod :: MethodInfo -> InstanceInfo -> Maybe ValueInfo
 lookupInstanceMethod methodInfo instanceInfo =
-  Map.lookup (methodInfoSymbolIdentity methodInfo) (instanceMethodsByIdentity instanceInfo)
+  lookupSymbolIdentityExact (methodInfoSymbolIdentity methodInfo) (instanceMethodsByIdentity instanceInfo)
 
 resolvedValueInfoSymbol :: SymbolOrigin -> String -> ValueInfo -> ResolvedSymbol
 resolvedValueInfoSymbol origin displayName valueInfo =

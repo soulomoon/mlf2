@@ -2982,7 +2982,7 @@ buildLocalDataInfo displayEnv mod0 = do
           invalid = throwError (ProgramInvalidConstructorResult (P.refDisplayName (P.constructorDeclName ctorDecl)) (resolvedSrcTypeToSrcType resultTy) owner)
        in case constructorResultHead resultTy of
             Just (symbol, argCount)
-              | resolvedSymbolIdentity symbol == dataIdentity && argCount == length params -> pure ()
+              | sameSymbolIdentity (resolvedSymbolIdentity symbol) dataIdentity && argCount == length params -> pure ()
             _ -> invalid
 
     constructorResultHead :: ResolvedSrcType -> Maybe (ResolvedSymbol, Int)
@@ -4258,7 +4258,7 @@ builtinOpaqueDataByRef ref =
   case
     [ dataInfo
       | symbol <- P.resolvedExportTypeSymbols ref,
-        Just dataInfo <- [Map.lookup (resolvedSymbolIdentity symbol) builtinOpaqueTypesByIdentity]
+        Just dataInfo <- [lookupSymbolIdentityExact (resolvedSymbolIdentity symbol) builtinOpaqueTypesByIdentity]
     ]
   of
     dataInfo : _ -> Just dataInfo

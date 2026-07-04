@@ -232,6 +232,35 @@ spec = do
       conflictingPayloadRef `shouldNotBe` firstRef
       Map.lookup firstAliasRef (Map.singleton firstRef "hit") `shouldBe` Just "hit"
 
+    it "does not look up class or instance methods through stale identity payloads" $ do
+      let methodSymbol = resolvedMethodInfoSymbol (SymbolLocal "Lib") "eq" eqMethodInfo
+          staleMethodIdentity = renameSymbolDefiningName "$stale.eq" eqMethodIdentity
+          staleMethodSymbol =
+            mkResolvedSymbol
+              staleMethodIdentity
+              "$stale.eq"
+              "$stale.eq"
+              (SymbolLocal "Lib")
+          instanceInfo =
+            InstanceInfo
+              { instanceClassSymbol = eqClassIdentity,
+                instanceOriginModuleIdentity = generatedSymbolIdentity 905 SymbolModule "Lib" "Lib" Nothing,
+                instanceConstraints = [],
+                instanceConstraintInfos = [],
+                instanceHeadTypeViews = mkTypeView (STBase "Token") (STBase "Token") :| [],
+                instanceMethodsByIdentity = Map.singleton eqMethodIdentity eqMethodValue
+              }
+
+      lookupClassMethod methodSymbol eqClassInfo `shouldBe` Just eqMethodInfo
+      lookupClassMethod staleMethodSymbol eqClassInfo `shouldBe` Nothing
+      lookupClassMethod methodSymbol (eqClassInfo {classMethodsByIdentity = Map.singleton staleMethodIdentity eqMethodInfo})
+        `shouldBe` Nothing
+      lookupInstanceMethod eqMethodInfo instanceInfo `shouldBe` Just eqMethodValue
+      lookupInstanceMethod (eqMethodInfo {methodInfoSymbol = staleMethodIdentity}) instanceInfo
+        `shouldBe` Nothing
+      lookupInstanceMethod eqMethodInfo (instanceInfo {instanceMethodsByIdentity = Map.singleton staleMethodIdentity eqMethodValue})
+        `shouldBe` Nothing
+
     it "uses exact payload identity for primitive and constructor refs" $ do
       let primitive = generatedSymbolIdentity 991800 SymbolValue "Main" "__p" Nothing
           primitiveConflict = generatedSymbolIdentity 991800 SymbolValue "Other" "__p" Nothing
