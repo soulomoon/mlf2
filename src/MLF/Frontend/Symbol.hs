@@ -28,6 +28,9 @@ module MLF.Frontend.Symbol
     sameSymbolIdentity,
     sameResolvedSymbol,
     symbolRefMatches,
+    symbolIdentityPayloadMatches,
+    lookupSymbolIdentityExact,
+    memberSymbolIdentityExact,
     symbolIdentityStableName,
     symbolIdentityAliasNames,
     symbolIdentityAliasNamesWith,
@@ -238,6 +241,27 @@ symbolRefMatches Nothing leftName Nothing rightName =
   leftName == rightName
 symbolRefMatches _ _ _ _ =
   False
+
+symbolIdentityPayloadMatches :: SymbolIdentity -> SymbolIdentity -> Bool
+symbolIdentityPayloadMatches =
+  sameSymbolIdentity
+
+lookupSymbolIdentityExact :: SymbolIdentity -> Map SymbolIdentity a -> Maybe a
+lookupSymbolIdentityExact identity entries =
+  case Map.lookupGE identity entries of
+    Just (storedIdentity, value)
+      | symbolIdentityPayloadMatches storedIdentity identity ->
+          Just value
+    _ ->
+      Nothing
+
+memberSymbolIdentityExact :: SymbolIdentity -> Set.Set SymbolIdentity -> Bool
+memberSymbolIdentityExact identity entries =
+  case Set.lookupGE identity entries of
+    Just storedIdentity ->
+      symbolIdentityPayloadMatches storedIdentity identity
+    Nothing ->
+      False
 
 symbolIdentityStableName :: SymbolIdentity -> String
 symbolIdentityStableName identity =

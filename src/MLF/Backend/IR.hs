@@ -239,7 +239,7 @@ import MLF.Backend.StructuralRecursiveData
   )
 import MLF.Constraint.Types.Graph (BaseTy (..))
 import MLF.Frontend.Program.Builtins (builtinTypeHeadIdentity, builtinValueIdentity)
-import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), symbolDefiningModule, symbolDefiningName, symbolIdentityAliasMap, symbolIdentityPayloadKey, symbolIdentityStableName, symbolNamespace, symbolUniqueIdentity)
+import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), lookupSymbolIdentityExact, memberSymbolIdentityExact, symbolDefiningModule, symbolDefiningName, symbolIdentityAliasMap, symbolIdentityPayloadKey, symbolIdentityPayloadMatches, symbolIdentityStableName, symbolNamespace, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit (..))
 import MLF.Types.Identity
   ( DeferredRef,
@@ -2574,27 +2574,6 @@ requireUniqueSymbolIdentities label mkError =
       | otherwise =
           go (Map.insert (symbolUniqueIdentity identity) identity seen) rest
 
-symbolIdentityPayloadMatches :: SymbolIdentity -> SymbolIdentity -> Bool
-symbolIdentityPayloadMatches left right =
-  symbolUniqueIdentity left == symbolUniqueIdentity right
-    && symbolIdentityPayloadKey left == symbolIdentityPayloadKey right
-
-lookupSymbolIdentityExact :: SymbolIdentity -> Map.Map SymbolIdentity a -> Maybe a
-lookupSymbolIdentityExact identity entries =
-  case Map.lookupGE identity entries of
-    Just (storedIdentity, value)
-      | symbolIdentityPayloadMatches storedIdentity identity ->
-          Just value
-    _ ->
-      Nothing
-
-memberSymbolIdentityExact :: SymbolIdentity -> Set.Set SymbolIdentity -> Bool
-memberSymbolIdentityExact identity entries =
-  case Set.lookupGE identity entries of
-    Just storedIdentity ->
-      symbolIdentityPayloadMatches storedIdentity identity
-    Nothing ->
-      False
 
 data TermBinderKey
   = TermBinderIdentity BackendLocalKey

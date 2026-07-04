@@ -191,7 +191,7 @@ import MLF.Frontend.Program.Types
     typeViewHeadIdentityForAlias,
     typeViewMentionedHeadIdentities,
   )
-import MLF.Frontend.Symbol (sameSymbolIdentity, symbolIdentityAliasMap, symbolIdentityAliasNames, symbolIdentityPayloadKey, symbolIdentityStableName, symbolUniqueIdentity)
+import MLF.Frontend.Symbol (lookupSymbolIdentityExact, sameSymbolIdentity, symbolIdentityAliasMap, symbolIdentityAliasNames, symbolIdentityPayloadKey, symbolIdentityStableName, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit, SrcBound (..), SrcTy (..), SrcType)
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
 import MLF.Types.Identity (DeferredRef, IdDetails (..), IdentityGenerator, LocalRef, StructuralTypeBinderRole (..), UniqueIdentity (..), advanceIdentityGeneratorPast, deferredRefIdentity, deferredRefName, freshDeferredRef, freshIdentity, freshLocalRef, idDetailsGeneratedIdentities, idDetailsSymbolIdentity, identityGeneratorAfter, symbolGeneratedIdentities, typeBinderIdentityAliasMap, typeBinderIdentityFromStructural, typeBinderIdentityNode, typeBinderIdentityStructural)
@@ -710,7 +710,7 @@ convertCheckedBinding context env checkedModule generator0 binding = do
 constructorMetaForBinding :: ConvertContext -> CheckedBinding -> Maybe ConstructorMeta
 constructorMetaForBinding context binding = do
   constructorRef <- checkedBindingConstructorRef binding
-  Map.lookup (constructorRefSymbol constructorRef) (ccConstructorsByIdentity context)
+  lookupSymbolIdentityExact (constructorRefSymbol constructorRef) (ccConstructorsByIdentity context)
 
 extendContextWithLiftedRecursiveLets :: ConvertContext -> [LiftedRecursiveLet] -> ConvertContext
 extendContextWithLiftedRecursiveLets context liftedSpecs =
@@ -1690,7 +1690,7 @@ typeViewMentionsPreludePrimitiveData dataMetasByIdentity view =
   any mentionsPreludePrimitiveData (Set.toList (typeViewMentionedHeadIdentities view))
   where
     mentionsPreludePrimitiveData identity =
-      case Map.lookup identity dataMetasByIdentity of
+      case lookupSymbolIdentityExact identity dataMetasByIdentity of
         Just dataMeta -> preludePrimitiveDataMeta dataMeta
         Nothing -> False
 
@@ -2280,7 +2280,7 @@ elaborateScopeForResolvedModule dataByIdentity resolvedModule =
 
 visibleDataInfoMap :: Map SymbolIdentity DataInfo -> Map String ResolvedSymbol -> Map String DataInfo
 visibleDataInfoMap dataByIdentity =
-  Map.mapMaybe (\symbol -> canonicalDataInfo <$> Map.lookup (resolvedSymbolIdentity symbol) dataByIdentity)
+  Map.mapMaybe (\symbol -> canonicalDataInfo <$> lookupSymbolIdentityExact (resolvedSymbolIdentity symbol) dataByIdentity)
 
 qualifiedDataInfoMap :: [DataInfo] -> Map String DataInfo
 qualifiedDataInfoMap dataInfos =
@@ -2304,10 +2304,10 @@ localDataInfoMap dataModuleIdentities dataInfos info =
     ]
   where
     sameDataModule candidate =
-      case Map.lookup (dataInfoSymbol info) dataModuleIdentities of
+      case lookupSymbolIdentityExact (dataInfoSymbol info) dataModuleIdentities of
         Nothing -> False
         Just moduleIdentity ->
-          Map.lookup (dataInfoSymbol candidate) dataModuleIdentities == Just moduleIdentity
+          maybe False (sameSymbolIdentity moduleIdentity) (lookupSymbolIdentityExact (dataInfoSymbol candidate) dataModuleIdentities)
 
 
 uniqueUnqualifiedDataInfoMap :: [DataInfo] -> Map String DataInfo
@@ -2366,9 +2366,9 @@ elabTypeDataMeta :: Map SymbolIdentity DataMeta -> ElabType -> Maybe DataMeta
 elabTypeDataMeta dataMetasByIdentity ty =
   case dropElabForalls ty of
     TBaseWithIdentity (Just identity) _ ->
-      Map.lookup identity dataMetasByIdentity
+      lookupSymbolIdentityExact identity dataMetasByIdentity
     TConWithIdentity (Just identity) _ _ ->
-      Map.lookup identity dataMetasByIdentity
+      lookupSymbolIdentityExact identity dataMetasByIdentity
     _ ->
       Nothing
 
@@ -2383,8 +2383,8 @@ sourceTypeDataMetaForView dataMetasByIdentity view =
   case (sourceTypeDataHead (sourceTypeResult (typeViewDisplay view)), sourceTypeDataHead (sourceTypeResult (typeViewIdentity view))) of
     (displayHead, identityHead) ->
       firstMaybe
-        [ identityHead >>= typeViewHeadIdentityForAlias view >>= (`Map.lookup` dataMetasByIdentity),
-          displayHead >>= typeViewHeadIdentityForAlias view >>= (`Map.lookup` dataMetasByIdentity)
+        [ identityHead >>= typeViewHeadIdentityForAlias view >>= (`lookupSymbolIdentityExact` dataMetasByIdentity),
+          displayHead >>= typeViewHeadIdentityForAlias view >>= (`lookupSymbolIdentityExact` dataMetasByIdentity)
         ]
   where
     sourceTypeResult =
@@ -2456,7 +2456,7 @@ canonicalizeSourceBackendTypeHeads dataMetasByIdentity =
     canonicalHead mbIdentity name =
       case mbIdentity of
         Just identity ->
-          case Map.lookup identity dataMetasByIdentity of
+          case lookupSymbolIdentityExact identity dataMetasByIdentity of
             Just dataMeta -> (Just (dataInfoSymbol (dmInfo dataMeta)), backendDataName (dmBackend dataMeta))
             Nothing -> (mbIdentity, name)
         Nothing ->
@@ -2520,8 +2520,8 @@ preludePrimitiveDataTypeNames =
 preludePrimitiveBackendTypeHead :: ConvertContext -> BackendType -> Bool
 preludePrimitiveBackendTypeHead context =
   \case
-    BTBaseWithIdentity (Just identity) _ -> maybe False preludePrimitiveDataMeta (Map.lookup identity (ccDataByIdentity context))
-    BTConWithIdentity (Just identity) _ _ -> maybe False preludePrimitiveDataMeta (Map.lookup identity (ccDataByIdentity context))
+    BTBaseWithIdentity (Just identity) _ -> maybe False preludePrimitiveDataMeta (lookupSymbolIdentityExact identity (ccDataByIdentity context))
+    BTConWithIdentity (Just identity) _ _ -> maybe False preludePrimitiveDataMeta (lookupSymbolIdentityExact identity (ccDataByIdentity context))
     _ -> False
 
 backendTypeIsDataLike :: BackendType -> Bool
@@ -2573,13 +2573,13 @@ elaborateScopeForDataInfo ::
   DataInfo ->
   ElaborateScope
 elaborateScopeForDataInfo moduleScopes dataModuleIdentities dataInfos info =
-  case lookupDataInfoModuleIdentity dataModuleIdentities info >>= (`Map.lookup` moduleScopes) of
+  case lookupDataInfoModuleIdentity dataModuleIdentities info >>= (`lookupSymbolIdentityExact` moduleScopes) of
     Just scope -> scope
     Nothing -> fallbackElaborateScopeForDataInfo dataModuleIdentities dataInfos info
 
 lookupDataInfoModuleIdentity :: Map SymbolIdentity SymbolIdentity -> DataInfo -> Maybe SymbolIdentity
 lookupDataInfoModuleIdentity dataModuleIdentities info =
-  Map.lookup (dataInfoSymbol info) dataModuleIdentities
+  lookupSymbolIdentityExact (dataInfoSymbol info) dataModuleIdentities
 
 qualifiedDataName :: DataInfo -> String
 qualifiedDataName =
@@ -2786,7 +2786,7 @@ constructorMetasForData dataMeta =
 
 convertDataInfo :: ConvertContext -> DataInfo -> Either BackendConversionError BackendData
 convertDataInfo context info =
-  case Map.lookup (dataInfoSymbol info) (ccDataByIdentity context) of
+  case lookupSymbolIdentityExact (dataInfoSymbol info) (ccDataByIdentity context) of
     Just dataMeta -> Right (dmBackend dataMeta)
     Nothing ->
       buildDataMeta
@@ -3527,8 +3527,8 @@ canonicalizeBackendType context =
 
     identityBearingDataTypeHead =
       \case
-        BTBaseWithIdentity (Just identity) _ -> maybe False preludePrimitiveDataMeta (Map.lookup identity (ccDataByIdentity context))
-        BTConWithIdentity (Just identity) _ _ -> maybe False preludePrimitiveDataMeta (Map.lookup identity (ccDataByIdentity context))
+        BTBaseWithIdentity (Just identity) _ -> maybe False preludePrimitiveDataMeta (lookupSymbolIdentityExact identity (ccDataByIdentity context))
+        BTConWithIdentity (Just identity) _ _ -> maybe False preludePrimitiveDataMeta (lookupSymbolIdentityExact identity (ccDataByIdentity context))
         _ -> False
 
 candidateDataResultTypes :: ConvertContext -> BackendType -> [BackendType]
@@ -6050,7 +6050,7 @@ lookupConstructorHeadKey :: ConvertContext -> ConstructorHeadKey -> Maybe Constr
 lookupConstructorHeadKey context key =
   case key of
     ConstructorHeadIdentity symbol ->
-      Map.lookup symbol (ccConstructorsByIdentity context)
+      lookupSymbolIdentityExact symbol (ccConstructorsByIdentity context)
 
 constructorHeadKey :: XmlfTerm -> Maybe ConstructorHeadKey
 constructorHeadKey =
@@ -6216,7 +6216,7 @@ scrutineeDataHint :: ConvertContext -> XmlfTerm -> Maybe DataMeta
 scrutineeDataHint context term =
   case stripTypeInsts term of
     EVarNode resolved ->
-      resolvedVarSymbolIdentity resolved >>= (`Map.lookup` ccBindingData context)
+      resolvedVarSymbolIdentity resolved >>= (`lookupSymbolIdentityExact` ccBindingData context)
     _ -> Nothing
 
 backendTypeDataMeta :: ConvertContext -> BackendType -> Maybe DataMeta
@@ -6333,7 +6333,7 @@ dataMetaByStructuralName context name =
 dataMetaByCurrentScopeStructuralName :: ConvertContext -> String -> Maybe DataMeta
 dataMetaByCurrentScopeStructuralName context name = do
   moduleIdentity <- ccCurrentModuleIdentity context
-  scope <- Map.lookup moduleIdentity (ccModuleScopes context)
+  scope <- lookupSymbolIdentityExact moduleIdentity (ccModuleScopes context)
   info <- firstMaybe [Map.lookup candidate (elaborateScopeDataTypes scope) | candidate <- structuralNameCandidates name]
   dataMetaBySymbol context (dataInfoSymbol info)
 
@@ -6377,7 +6377,7 @@ firstMaybe =
 
 dataMetaBySymbol :: ConvertContext -> SymbolIdentity -> Maybe DataMeta
 dataMetaBySymbol context symbol =
-  Map.lookup symbol (ccDataByIdentity context)
+  lookupSymbolIdentityExact symbol (ccDataByIdentity context)
 
 canonicalizeStructuralMuNames :: ConvertContext -> BackendType -> BackendType
 canonicalizeStructuralMuNames context =

@@ -929,6 +929,35 @@ spec = describe "MLF.Backend.Convert" $ do
         convertCheckedProgram checked `shouldSatisfy` isLeft
       [] -> expectationFailure "expected checked data info"
 
+  it "does not recover source data hints when head identity payloads conflict" $ do
+    checked0 <- requireChecked parameterizedConstructorProgram
+    case checkedDataInfos checked0 of
+      dataInfo : _ -> do
+        let staleIdentityDataHead = dataInfoIdentityQualifiedName dataInfo
+            conflictingOptionIdentity =
+              renameSymbolDefiningName "$stale_Option" (dataInfoSymbol dataInfo)
+            checked =
+              mapMainBinding
+                ( \binding ->
+                    binding
+                      { checkedBindingSourceTypeView =
+                          ( mkTypeView
+                              (STCon "$stale_source_option" (STBase "Int" :| []))
+                              (STCon staleIdentityDataHead (STBase "Int" :| []))
+                          )
+                            { typeViewHeadIdentities = Map.singleton staleIdentityDataHead conflictingOptionIdentity
+                            },
+                        checkedBindingType =
+                          Elab.TConWithIdentity
+                            Nothing
+                            (BaseTy "$stale_elab_option")
+                            (Elab.TBaseWithIdentity (Just (builtinTypeIdentity "Int")) (BaseTy "Int") :| [])
+                      }
+                )
+                checked0
+        convertCheckedProgram checked `shouldSatisfy` isLeft
+      [] -> expectationFailure "expected checked data info"
+
   it "does not recover source data hints from identity names without head metadata" $ do
     checked0 <- requireChecked parameterizedConstructorProgram
     case checkedDataInfos checked0 of
@@ -1865,11 +1894,7 @@ spec = describe "MLF.Backend.Convert" $ do
                 )
                 checked0
 
-        backend <- requireRight (convertCheckedProgram checked)
-
-        validateBackendProgram backend `shouldBe` Right ()
-        mainBinding <- requireBinding (backendProgramMain backend) backend
-        collectConstructNames (backendBindingExpr mainBinding) `shouldBe` []
+        convertCheckedProgram checked `shouldSatisfy` isLeft
       Nothing -> expectationFailure "missing Main.T data info"
 
   it "does not recover structural constructors through name-only nominal result heads for identity-bearing data" $ do
