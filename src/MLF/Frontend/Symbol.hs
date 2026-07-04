@@ -156,7 +156,9 @@ instance Eq ResolvedSymbol where
 
 instance Ord ResolvedSymbol where
   compare left right =
-    compare (resolvedSymbolIdentity left) (resolvedSymbolIdentity right)
+    compare
+      (symbolIdentityPayloadKey (resolvedSymbolIdentity left))
+      (symbolIdentityPayloadKey (resolvedSymbolIdentity right))
 
 data ResolvedReferenceKind
   = ResolvedValueReference
@@ -182,8 +184,12 @@ instance Eq ResolvedReference where
 instance Ord ResolvedReference where
   compare left right =
     compare
-      (resolvedReferenceKind left, resolvedSymbolIdentity (resolvedReferenceSymbol left))
-      (resolvedReferenceKind right, resolvedSymbolIdentity (resolvedReferenceSymbol right))
+      ( resolvedReferenceKind left,
+        symbolIdentityPayloadKey (resolvedSymbolIdentity (resolvedReferenceSymbol left))
+      )
+      ( resolvedReferenceKind right,
+        symbolIdentityPayloadKey (resolvedSymbolIdentity (resolvedReferenceSymbol right))
+      )
 
 mkResolvedSymbol :: SymbolIdentity -> String -> String -> SymbolOrigin -> ResolvedSymbol
 mkResolvedSymbol identity sourceName displayName origin =
@@ -211,7 +217,7 @@ mkResolvedReference kind name symbol =
 
 sameSymbolIdentity :: SymbolIdentity -> SymbolIdentity -> Bool
 sameSymbolIdentity left right =
-  symbolUniqueIdentity left == symbolUniqueIdentity right
+  symbolIdentityPayloadKey left == symbolIdentityPayloadKey right
 
 sameResolvedSymbol :: ResolvedSymbol -> ResolvedSymbol -> Bool
 sameResolvedSymbol left right =

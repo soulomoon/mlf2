@@ -158,19 +158,25 @@ spec = do
         `shouldBe` generatedSymbolIdentity 10 SymbolModule "Lib" "Lib" Nothing
       symbolDisplayName (resolvedSymbolSpelling importedModule) `shouldBe` "L"
 
-    it "compares symbol identities by generated identity" $ do
+    it "compares resolved symbols by exact identity payload" $ do
       let first =
             mkResolvedSymbol
               (generatedSymbolIdentity 1 SymbolValue "Main" "x" Nothing)
               "x"
               "x"
               (SymbolLocal "Main")
-          firstAlias =
+          renamed =
             mkResolvedSymbol
-              (generatedSymbolIdentity 1 SymbolValue "Other" "stale-x" Nothing)
+              (generatedSymbolIdentity 1 SymbolValue "Main" "x" Nothing)
               "Main.x"
               "Main.x"
               (SymbolQualifiedImport "Main" "Main")
+          conflictingPayload =
+            mkResolvedSymbol
+              (generatedSymbolIdentity 1 SymbolValue "Other" "stale-x" Nothing)
+              "Other.x"
+              "Other.x"
+              (SymbolQualifiedImport "Other" "Other")
           second =
             mkResolvedSymbol
               (generatedSymbolIdentity 2 SymbolValue "Main" "x" Nothing)
@@ -178,10 +184,9 @@ spec = do
               "x"
               (SymbolLocal "Main")
 
-      sameResolvedSymbol first firstAlias `shouldBe` True
+      sameResolvedSymbol first renamed `shouldBe` True
+      sameResolvedSymbol first conflictingPayload `shouldBe` False
       sameResolvedSymbol first second `shouldBe` False
-      Map.lookup (resolvedSymbolIdentity firstAlias) (Map.singleton (resolvedSymbolIdentity first) "hit")
-        `shouldBe` Just "hit"
 
     it "does not match symbol refs through stable identity names without metadata" $ do
       let stableName = symbolIdentityStableName valueInfoIdentity
@@ -206,16 +211,25 @@ spec = do
               (SymbolLocal "Main")
           firstAlias =
             mkResolvedSymbol
+              (generatedSymbolIdentity 901 SymbolValue "Main" "x" Nothing)
+              "Main.x"
+              "Main.x"
+              (SymbolQualifiedImport "Main" "Main")
+          conflictingPayload =
+            mkResolvedSymbol
               (generatedSymbolIdentity 901 SymbolValue "Other" "stale-x" Nothing)
               "Other.x"
               "Other.x"
               (SymbolQualifiedImport "Other" "Other")
           firstRef = mkResolvedReference ResolvedValueReference "x" first
-          firstAliasRef = mkResolvedReference ResolvedValueReference "Other.x" firstAlias
+          firstAliasRef = mkResolvedReference ResolvedValueReference "Main.x" firstAlias
+          conflictingPayloadRef = mkResolvedReference ResolvedValueReference "Other.x" conflictingPayload
 
       firstAlias `shouldBe` first
+      conflictingPayload `shouldNotBe` first
       Map.lookup firstAlias (Map.singleton first "hit") `shouldBe` Just "hit"
       firstAliasRef `shouldBe` firstRef
+      conflictingPayloadRef `shouldNotBe` firstRef
       Map.lookup firstAliasRef (Map.singleton firstRef "hit") `shouldBe` Just "hit"
 
     it "uses semantic identity for resolved export type references" $ do
