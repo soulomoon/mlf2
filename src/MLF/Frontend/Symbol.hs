@@ -219,7 +219,7 @@ sameResolvedSymbol left right =
 
 symbolRefMatches :: Maybe SymbolIdentity -> String -> Maybe SymbolIdentity -> String -> Bool
 symbolRefMatches (Just leftIdentity) _ (Just rightIdentity) _ =
-  symbolUniqueIdentity leftIdentity == symbolUniqueIdentity rightIdentity
+  symbolIdentityPayloadKey leftIdentity == symbolIdentityPayloadKey rightIdentity
 symbolRefMatches Nothing leftName Nothing rightName =
   leftName == rightName
 symbolRefMatches _ _ _ _ =

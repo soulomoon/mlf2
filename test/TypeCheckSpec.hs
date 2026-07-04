@@ -1067,8 +1067,10 @@ spec = describe "Phase 7 typecheck" $ do
         idDetailsSameIdentity localDetails (LocalId (generatedLocalRef 1 "$x#1")) `shouldBe` False
         idDetailsSameIdentity constructorDetails (ConstructorId ctorRef) `shouldBe` True
         idDetailsSameIdentity primitiveDetails renamedPrimitiveDetails `shouldBe` True
+        idDetailsSameIdentity topLevelDetails conflictingTopLevelDetails `shouldBe` False
         idDetailsSameIdentity deferredDetails sameNamedDeferredDetails `shouldBe` False
         idDetailsRefMatches (Just localDetails) "$x#0" (Just (idDetailsRenameLocal "$x#1" localDetails)) "$x#1" `shouldBe` True
+        idDetailsRefMatches (Just topLevelDetails) "value" (Just conflictingTopLevelDetails) "stale-value" `shouldBe` False
         idDetailsRefMatches (Just localDetails) "$x#0" Nothing "$x#0" `shouldBe` False
         idDetailsRefMatches (Just localDetails) "$x#0" Nothing (uniqueIdentityStableName (UniqueIdentity 0)) `shouldBe` False
         idDetailsRefMatches Nothing "$x#0" Nothing "$x#0" `shouldBe` True

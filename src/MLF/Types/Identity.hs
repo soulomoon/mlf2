@@ -519,11 +519,14 @@ idDetailsSameIdentity left right =
     (LocalId leftRef, EvidenceId rightRef) -> leftRef == rightRef
     (EvidenceId leftRef, LocalId rightRef) -> leftRef == rightRef
     (EnvId leftRef, EnvId rightRef) -> leftRef == rightRef
-    (TopLevelId leftSymbol, TopLevelId rightSymbol) -> leftSymbol == rightSymbol
+    (TopLevelId leftSymbol, TopLevelId rightSymbol) ->
+      symbolIdentityPayloadKey leftSymbol == symbolIdentityPayloadKey rightSymbol
     (ConstructorId leftRef, ConstructorId rightRef) ->
-      leftRef == rightRef
-    (MethodId leftSymbol, MethodId rightSymbol) -> leftSymbol == rightSymbol
-    (PrimitiveId leftRef, PrimitiveId rightRef) -> leftRef == rightRef
+      symbolIdentityPayloadKey (constructorRefSymbol leftRef) == symbolIdentityPayloadKey (constructorRefSymbol rightRef)
+    (MethodId leftSymbol, MethodId rightSymbol) ->
+      symbolIdentityPayloadKey leftSymbol == symbolIdentityPayloadKey rightSymbol
+    (PrimitiveId leftRef, PrimitiveId rightRef) ->
+      symbolIdentityPayloadKey (primitiveRefSymbol leftRef) == symbolIdentityPayloadKey (primitiveRefSymbol rightRef)
     (DeferredId leftRef, DeferredId rightRef) -> leftRef == rightRef
     _ -> False
 

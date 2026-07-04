@@ -189,6 +189,13 @@ spec = do
       symbolRefMatches (Just valueInfoIdentity) "stale-answer" Nothing stableName `shouldBe` False
       symbolRefMatches Nothing stableName (Just valueInfoIdentity) "answer" `shouldBe` False
       symbolRefMatches (Just valueInfoIdentity) "answer" Nothing "answer" `shouldBe` False
+      symbolRefMatches
+        (Just valueInfoIdentity)
+        "answer"
+        (Just (generatedSymbolIdentity 101 SymbolValue "Lib" "stale-answer" Nothing))
+        "stale-answer"
+        `shouldBe` False
+      symbolRefMatches (Just valueInfoIdentity) "answer" (Just valueInfoIdentity) "renamed-answer" `shouldBe` True
 
     it "uses semantic identity for resolved symbol and reference equality" $ do
       let first =
