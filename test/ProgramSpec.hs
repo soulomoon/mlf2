@@ -7042,6 +7042,54 @@ spec = do
                         other ->
                             expectationFailure ("expected duplicate resolved class method identity rejection, got " ++ show other)
 
+        it "rejects stale resolved instance method identities as missing canonical methods" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  class Eq a {"
+                        , "    eq : a -> a -> Bool;"
+                        , "  }"
+                        , "  instance Eq Int {"
+                        , "    eq = λleft λright true;"
+                        , "  }"
+                        , "  def main : Bool = eq 1 1;"
+                        , "}"
+                        ]
+                poisonInstanceMethodIdentity resolved =
+                    resolved {resolvedProgramModules = map poisonModule (resolvedProgramModules resolved)}
+                  where
+                    poisonModule resolvedModule =
+                        resolvedModule
+                            { resolvedModuleSemantic =
+                                (resolvedModuleSemantic resolvedModule)
+                                    { resolvedSemanticModuleSyntax =
+                                        poisonSyntax (resolvedSemanticModuleSyntax (resolvedModuleSemantic resolvedModule))
+                                    }
+                            }
+
+                    poisonSyntax syntax =
+                        syntax {moduleDecls = map poisonDecl (moduleDecls syntax)}
+
+                    poisonDecl decl =
+                        case decl of
+                            DeclInstance instanceDecl ->
+                                DeclInstance instanceDecl {instanceDeclMethods = map poisonMethodDef (instanceDeclMethods instanceDecl)}
+                            _ -> decl
+
+                    poisonMethodDef methodDef =
+                        methodDef
+                            { methodDefName =
+                                mapResolvedSymbolIdentity
+                                    (renameSymbolDefiningName "$stale_eq_method")
+                                    (methodDefName methodDef)
+                            }
+            program <- requireParsed programText
+            case resolveProgram program of
+                Left err -> expectationFailure ("expected resolve success, got " ++ show err)
+                Right resolved ->
+                    checkResolvedProgram (poisonInstanceMethodIdentity resolved)
+                        `shouldBe` Left (ProgramMissingInstanceMethod "Eq" "eq")
+
         it "checks the semantic artifact independently of diagnostic reference adapters" $ do
             let programText =
                     unlines

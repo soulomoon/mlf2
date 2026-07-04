@@ -3589,18 +3589,28 @@ buildInstanceSkeletons moduleIdentity generator0 displayEnv scope mod0 derived =
           instanceConstraints0 = declaredInstanceConstraints0 ++ superclassConstraints0
           instanceConstraintInfos0 = declaredInstanceConstraintInfos0 ++ superclassConstraintInfos0
       let methodMapByIdentity = classMethodsByIdentity classInfo
-          expected = Map.keysSet methodMapByIdentity
-          provided = Set.fromList (map (resolvedSymbolIdentity . P.methodDefName) (P.instanceDeclMethods instDecl))
-      case Set.toList (expected Set.\\ provided) of
+          expected = Map.keys methodMapByIdentity
+          provided = map (resolvedSymbolIdentity . P.methodDefName) (P.instanceDeclMethods instDecl)
+          missingMethods =
+            [ identity
+            | identity <- expected
+            , not (any (sameSymbolIdentity identity) provided)
+            ]
+          extraMethods =
+            [ identity
+            | identity <- provided
+            , not (any (sameSymbolIdentity identity) expected)
+            ]
+      case missingMethods of
         (missing : _) ->
           case Map.lookup missing methodMapByIdentity of
             Just methodInfo -> throwError (ProgramMissingInstanceMethod instanceClassName0 (methodName methodInfo))
             Nothing -> throwError (ProgramMissingInstanceMethod instanceClassName0 (symbolDefiningName missing))
         [] -> pure ()
-      case Set.toList (provided Set.\\ expected) of
+      case extraMethods of
         (extra : _) ->
           let extraName =
-                case find ((== extra) . resolvedSymbolIdentity . P.methodDefName) (P.instanceDeclMethods instDecl) of
+                case find (sameSymbolIdentity extra . resolvedSymbolIdentity . P.methodDefName) (P.instanceDeclMethods instDecl) of
                   Just methodDef -> P.refDisplayName (P.methodDefName methodDef)
                   Nothing -> symbolDefiningName extra
            in throwError (ProgramUnexpectedInstanceMethod instanceClassName0 extraName)
