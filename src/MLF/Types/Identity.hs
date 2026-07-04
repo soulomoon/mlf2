@@ -361,17 +361,6 @@ data ResolvedTermIdentityKey
   | ResolvedTermDeferredKey DeferredRef
   deriving (Eq, Ord, Show)
 
-data IdDetailsAliasPayloadKey
-  = AliasPayloadLocalKey LocalIdentity String Bool
-  | AliasPayloadEvidenceKey LocalIdentity String Bool
-  | AliasPayloadEnvKey UniqueIdentity String
-  | AliasPayloadTopLevelKey SymbolIdentityPayloadKey
-  | AliasPayloadConstructorKey SymbolIdentityPayloadKey
-  | AliasPayloadMethodKey SymbolIdentityPayloadKey
-  | AliasPayloadPrimitiveKey SymbolIdentityPayloadKey
-  | AliasPayloadDeferredKey UniqueIdentity String
-  deriving (Eq, Ord, Show)
-
 idDetailsIdentityKey :: IdDetails -> ResolvedTermIdentityKey
 idDetailsIdentityKey details =
   case details of
@@ -384,17 +373,9 @@ idDetailsIdentityKey details =
     PrimitiveId ref -> ResolvedTermPrimitiveKey (symbolIdentityPayloadKey (primitiveRefSymbol ref))
     DeferredId ref -> ResolvedTermDeferredKey ref
 
-idDetailsAliasPayloadKey :: IdDetails -> IdDetailsAliasPayloadKey
-idDetailsAliasPayloadKey details =
-  case details of
-    LocalId ref -> AliasPayloadLocalKey (localRefIdentity ref) (localRefName ref) (localRefDiscard ref)
-    EvidenceId ref -> AliasPayloadEvidenceKey (localRefIdentity ref) (localRefName ref) (localRefDiscard ref)
-    EnvId ref -> AliasPayloadEnvKey (envRefIdentity ref) (envRefName ref)
-    TopLevelId symbol -> AliasPayloadTopLevelKey (symbolIdentityPayloadKey symbol)
-    ConstructorId ref -> AliasPayloadConstructorKey (symbolIdentityPayloadKey (constructorRefSymbol ref))
-    MethodId symbol -> AliasPayloadMethodKey (symbolIdentityPayloadKey symbol)
-    PrimitiveId ref -> AliasPayloadPrimitiveKey (symbolIdentityPayloadKey (primitiveRefSymbol ref))
-    DeferredId ref -> AliasPayloadDeferredKey (deferredRefIdentity ref) (deferredRefName ref)
+idDetailsAliasPayloadKey :: IdDetails -> ResolvedTermIdentityKey
+idDetailsAliasPayloadKey =
+  idDetailsIdentityKey
 
 idDetailsStableName :: IdDetails -> String
 idDetailsStableName details =

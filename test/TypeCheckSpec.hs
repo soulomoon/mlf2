@@ -1090,7 +1090,7 @@ spec = describe "Phase 7 typecheck" $ do
         Map.lookup "$x#0" detailsByAlias `shouldBe` Nothing
         Map.lookup (uniqueIdentityStableName (UniqueIdentity 0)) detailsByAlias `shouldBe` Just localDetails
         Map.lookup (uniqueIdentityStableName (UniqueIdentity 1)) detailsByAlias `shouldBe` Just otherLocalDetails
-        Map.lookup (uniqueIdentityStableName (UniqueIdentity 0)) sameIdentityConflictAliases `shouldBe` Nothing
+        Map.lookup (uniqueIdentityStableName (UniqueIdentity 0)) sameIdentityConflictAliases `shouldBe` Just localDetails
         fmap (idDetailsReferenceName "fallback") (Map.lookup "$x#0" sameIdentityConflictAliases) `shouldBe` Just "$x#0"
         fmap (idDetailsReferenceName "fallback") (Map.lookup "$x#renamed" sameIdentityConflictAliases) `shouldBe` Just "$x#renamed"
         Map.lookup "runtime-value" conflictingPayloadAliases `shouldBe` Nothing
