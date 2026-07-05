@@ -294,6 +294,7 @@ lowerBackendProgramNative program = do
 lowerBackendProgramCore :: BackendProgram -> Either BackendLLVMError LoweredProgram
 lowerBackendProgramCore program0 = do
   first BackendLLVMValidationFailed (validateRawBackendBinderUniqueness program0)
+  first BackendLLVMValidationFailed (validateBackendIdentityPayloadsBeforeAssignment program0)
   let program = assignBackendIdentitiesInProgram program0
   first BackendLLVMValidationFailed (validateBackendProgram program)
   base <- buildProgramBase program
@@ -484,6 +485,57 @@ unionUniqueBackendTermEnv =
       | otherwise = Nothing
     merge _ _ =
       Nothing
+
+validateBackendIdentityPayloadsBeforeAssignment :: BackendProgram -> Either BackendValidationError ()
+validateBackendIdentityPayloadsBeforeAssignment program =
+  mapM_ validateModule (backendProgramModules program)
+  where
+    validateModule backendModule =
+      case backendModuleIdentity backendModule of
+        Just {} -> do
+          mapM_ requireDataIdentity (backendModuleData backendModule)
+          mapM_ requireBindingIdentity (backendModuleBindings backendModule)
+        Nothing ->
+          mapM_ validateData (backendModuleData backendModule)
+      where
+        moduleName0 =
+          backendModuleName backendModule
+
+        requireDataIdentity dataDecl =
+          case backendDataIdentity dataDecl of
+            Just {} -> validateData dataDecl
+            Nothing -> Left (BackendModuleDataIdentityMissing moduleName0 (backendDataName dataDecl))
+
+        requireBindingIdentity binding =
+          case backendBindingIdentity binding of
+            Just {} -> pure ()
+            Nothing -> Left (BackendModuleBindingIdentityMissing moduleName0 (backendBindingName binding))
+
+    validateData dataDecl =
+      case backendDataIdentity dataDecl of
+        Just {} -> do
+          mapM_ requireParameterIdentity (backendDataParameterRefs dataDecl)
+          mapM_ validateConstructor (backendDataConstructors dataDecl)
+        Nothing -> pure ()
+      where
+        dataName =
+          backendDataName dataDecl
+
+        requireParameterIdentity ref =
+          case backendDataParameterRefIdentity ref of
+            Just {} -> pure ()
+            Nothing -> Left (BackendDataParameterIdentityMissing dataName (backendDataParameterRefName ref))
+
+        validateConstructor constructor = do
+          case backendConstructorIdentity constructor of
+            Just {} -> pure ()
+            Nothing -> Left (BackendDataConstructorIdentityMissing dataName (backendConstructorName constructor))
+          mapM_ requireConstructorBinderIdentity (backendConstructorForalls constructor)
+          where
+            requireConstructorBinderIdentity binder =
+              case backendTypeBinderIdentity binder of
+                Just {} -> pure ()
+                Nothing -> Left (BackendConstructorTypeBinderIdentityMissing (backendConstructorName constructor) (backendTypeBinderName binder))
 
 assignBackendIdentitiesInProgram :: BackendProgram -> BackendProgram
 assignBackendIdentitiesInProgram program =

@@ -1467,6 +1467,10 @@ spec = describe "MLF.Backend.LLVM" $ do
       renderBackendProgramNativeLLVM nativeMainIdentityNameCollisionProgram
         `shouldSatisfyLeft` isInfixOf "reserved native LLVM symbol \"main\""
 
+    it "rejects identity-bearing modules before late LLVM identity assignment" $
+      renderBackendProgramLLVM identityBearingModuleNameOnlyBindingProgram
+        `shouldSatisfyLeft` isInfixOf "BackendModuleBindingIdentityMissing \"Main\" \"main\""
+
   it "runs a linked native executable and captures process output" $ do
     result <- runLLVMNativeExecutable nativeOutputCaptureLLVM
 
@@ -6711,6 +6715,29 @@ nativeMainIdentityNameCollisionProgram =
 nativeMainCollisionIdentity :: SymbolIdentity
 nativeMainCollisionIdentity =
   symbolIdentityFromParts (UniqueIdentity 991735) SymbolValue "Main" "main" Nothing
+
+identityBearingModuleNameOnlyBindingProgram :: BackendProgram
+identityBearingModuleNameOnlyBindingProgram =
+  BackendProgram
+    [ BackendModuleWithIdentity
+        { backendModuleIdentity = Just identityBearingModuleIdentity,
+          backendModuleNameWithIdentity = "Main",
+          backendModuleDataWithIdentity = [],
+          backendModuleBindingsWithIdentity =
+            [ BackendBinding
+                { backendBindingName = "main",
+                  backendBindingType = intTy,
+                  backendBindingExpr = intLit 1,
+                  backendBindingExportedAsMain = True
+                }
+            ]
+        }
+    ]
+    "main"
+
+identityBearingModuleIdentity :: SymbolIdentity
+identityBearingModuleIdentity =
+  symbolIdentityFromParts (UniqueIdentity 991736) SymbolModule "Main" "Main" Nothing
 
 specializationNameCollisionProgram :: BackendProgram
 specializationNameCollisionProgram =
