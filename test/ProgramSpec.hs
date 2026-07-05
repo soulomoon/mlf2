@@ -3303,7 +3303,7 @@ spec = do
                     Right lowered0 -> pure lowered0
             case Map.elems (loweredBindingDeferredObligations lowered) of
                 [DeferredConstructor deferred] ->
-                    deferredRefIdentity (deferredConstructorRef deferred) `shouldBe` UniqueIdentity 3
+                    deferredRefIdentity (deferredConstructorRef deferred) `shouldBe` UniqueIdentity 4
                 obligations ->
                     expectationFailure ("expected one deferred constructor obligation, got " ++ show obligations)
             (loweredBindingSourceTypeView lowered >>= Map.lookup dataDisplayHead . ProgramTypes.typeViewHeadIdentities)

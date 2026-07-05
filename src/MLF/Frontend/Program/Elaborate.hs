@@ -85,7 +85,6 @@ import MLF.Types.Identity
     freshIdentity,
     freshLocalRef,
     identityGeneratorAfter,
-    initialIdentityGenerator,
     localIdentityStableUnique,
     lookupTypeBinderIdentityAlias,
     renameLocalRef,
@@ -112,8 +111,7 @@ elaborateScopeValues :: ElaborateScope -> Map String ValueInfo
 elaborateScopeValues = esValues
 
 data ElaborateState = ElaborateState
-  { elaborateNameGenerator :: IdentityGenerator,
-    elaborateIdentityGenerator :: IdentityGenerator,
+  { elaborateIdentityGenerator :: IdentityGenerator,
     elaborateDeferredObligations :: DeferredObligations,
     elaborateExternalTypeViews :: Map String TypeView,
     elaborateResolvedLocalIdentities :: [LoweredResolvedLocalIdentity]
@@ -138,8 +136,7 @@ runElaborateMWithSeed :: [UniqueIdentity] -> ElaborateM a -> Either ProgramError
 runElaborateMWithSeed seedIdentities action =
   let initialState =
         ElaborateState
-          { elaborateNameGenerator = initialIdentityGenerator,
-            elaborateIdentityGenerator = identityGeneratorAfter seedIdentities,
+          { elaborateIdentityGenerator = identityGeneratorAfter seedIdentities,
             elaborateDeferredObligations = Map.empty,
             elaborateExternalTypeViews = Map.empty,
             elaborateResolvedLocalIdentities = []
@@ -5252,6 +5249,6 @@ freshDeferredCaseName typeName = do
 freshNameSuffix :: ElaborateM Int
 freshNameSuffix = do
   state <- get
-  let (UniqueIdentity n, generator') = freshIdentity (elaborateNameGenerator state)
-  modify (\state' -> state' {elaborateNameGenerator = generator'})
+  let (UniqueIdentity n, generator') = freshIdentity (elaborateIdentityGenerator state)
+  modify (\state' -> state' {elaborateIdentityGenerator = generator'})
   pure n
