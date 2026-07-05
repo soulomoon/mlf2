@@ -266,7 +266,10 @@ import MLF.Util.Names (freshNameLike)
 data BackendValidationError
   = BackendDuplicateModule String
   | BackendDuplicateData String
+  | BackendModuleDataIdentityMissing String String
+  | BackendModuleBindingIdentityMissing String String
   | BackendDataParameterIdentityMissing String String
+  | BackendDataConstructorIdentityMissing String String
   | BackendDuplicateDataParameter String String
   | BackendConstructorUnknownTypeVariable String String
   | BackendConstructorTypeBinderIdentityMissing String String
@@ -389,8 +392,10 @@ validateBackendProgram :: BackendProgram -> Either BackendValidationError ()
 validateBackendProgram program = do
   requireUnique BackendDuplicateModule (map backendModuleName modules0)
   requireUniqueSymbolIdentities "module" BackendDuplicateModule [identity | module0 <- modules0, Just identity <- [backendModuleIdentity module0]]
+  mapM_ validateBackendModuleIdentities modules0
   requireUnique BackendDuplicateData (map backendDataName dataDecls)
   requireUniqueSymbolIdentities "data" BackendDuplicateData [identity | dataDecl <- dataDecls, Just identity <- [backendDataIdentity dataDecl]]
+  mapM_ validateBackendDataConstructorIdentities dataDecls
   mapM_ validateBackendDataParameterIdentities dataDecls
   mapM_ validateBackendDataConstructorBinderIdentities dataDecls
   mapM_ validateBackendDataConstructorTypeVariables dataDecls
@@ -482,6 +487,38 @@ validateBackendProgram program = do
         { bvcClosureGlobals = closureGlobals,
           bvcClosureGlobalsByIdentity = closureGlobalIdentities
         }
+
+validateBackendModuleIdentities :: BackendModule -> Either BackendValidationError ()
+validateBackendModuleIdentities backendModule =
+  case backendModuleIdentity backendModule of
+    Just {} -> do
+      mapM_ requireDataIdentity (backendModuleData backendModule)
+      mapM_ requireBindingIdentity (backendModuleBindings backendModule)
+    Nothing -> pure ()
+  where
+    moduleName0 =
+      backendModuleName backendModule
+
+    requireDataIdentity dataDecl =
+      case backendDataIdentity dataDecl of
+        Just {} -> pure ()
+        Nothing -> Left (BackendModuleDataIdentityMissing moduleName0 (backendDataName dataDecl))
+
+    requireBindingIdentity binding =
+      case backendBindingIdentity binding of
+        Just {} -> pure ()
+        Nothing -> Left (BackendModuleBindingIdentityMissing moduleName0 (backendBindingName binding))
+
+validateBackendDataConstructorIdentities :: BackendData -> Either BackendValidationError ()
+validateBackendDataConstructorIdentities dataDecl =
+  case backendDataIdentity dataDecl of
+    Just {} -> mapM_ requireConstructorIdentity (backendDataConstructors dataDecl)
+    Nothing -> pure ()
+  where
+    requireConstructorIdentity constructor =
+      case backendConstructorIdentity constructor of
+        Just {} -> pure ()
+        Nothing -> Left (BackendDataConstructorIdentityMissing (backendDataName dataDecl) (backendConstructorName constructor))
 
 validateBackendDataParameterIdentities :: BackendData -> Either BackendValidationError ()
 validateBackendDataParameterIdentities dataDecl = do

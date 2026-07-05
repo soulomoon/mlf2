@@ -54,9 +54,29 @@ spec = describe "MLF.Backend.IR" $ do
     validateBackendProgram conflictingConstructorIdentityPayloadProgram
       `shouldBe` Left (BackendConflictingIdentityPayload "constructor" (symbolIdentityStableName conflictingConstructorIdentity))
 
+  it "rejects identity-bearing modules with name-only backend payloads" $ do
+    let moduleIdentity =
+          testSymbolIdentity 991748 SymbolModule "Main" "Main"
+        programWithNameOnlyData =
+          BackendProgram
+            [BackendModuleWithIdentity (Just moduleIdentity) "Main" [BackendData "Payload" [] []] []]
+            "main"
+        programWithNameOnlyBinding =
+          BackendProgram
+            [BackendModuleWithIdentity (Just moduleIdentity) "Main" [] [mainLiteralBinding]]
+            "main"
+    validateBackendProgram programWithNameOnlyData
+      `shouldBe` Left (BackendModuleDataIdentityMissing "Main" "Payload")
+    validateBackendProgram programWithNameOnlyBinding
+      `shouldBe` Left (BackendModuleBindingIdentityMissing "Main" "main")
+
   it "rejects identity-bearing data declarations with name-only parameters" $
     validateBackendProgram identityDataWithNameOnlyParameterProgram
       `shouldBe` Left (BackendDataParameterIdentityMissing "NamedBox" "a")
+
+  it "rejects identity-bearing data declarations with name-only constructors" $
+    validateBackendProgram identityDataWithNameOnlyConstructorProgram
+      `shouldBe` Left (BackendDataConstructorIdentityMissing "NamedBox" "NamedBox")
 
   it "rejects duplicate backend data parameter keys" $ do
     let parameterIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991666)
@@ -2385,6 +2405,14 @@ dataIdentityBoxIdentity :: SymbolIdentity
 dataIdentityBoxIdentity =
   testSymbolIdentity 991003 SymbolType "Main" "IdentityBox"
 
+dataIdentityBoxConstructorIdentity :: SymbolIdentity
+dataIdentityBoxConstructorIdentity =
+  testSymbolIdentity 991751 SymbolConstructor "Main" "IdentityBox"
+
+namedBoxConstructorIdentity :: SymbolIdentity
+namedBoxConstructorIdentity =
+  testSymbolIdentity 991752 SymbolConstructor "Main" "NamedBox"
+
 intIdentityExpr :: BackendExpr
 intIdentityExpr =
   BackendLamWithIdentity
@@ -2512,6 +2540,28 @@ identityDataWithNameOnlyParameterProgram =
     ]
     "main"
 
+identityDataWithNameOnlyConstructorProgram :: BackendProgram
+identityDataWithNameOnlyConstructorProgram =
+  BackendProgram
+    [ BackendModule
+        "Main"
+        [ BackendDataWithIdentity
+            { backendDataIdentity = Just dataIdentityBoxIdentity,
+              backendDataNameWithIdentity = "NamedBox",
+              backendDataParameterRefsWithIdentity = [],
+              backendDataConstructorsWithIdentity =
+                [ BackendConstructor
+                    "NamedBox"
+                    []
+                    []
+                    (BTBaseWithIdentity (Just dataIdentityBoxIdentity) (BaseTy "NamedBox"))
+                ]
+            }
+        ]
+        [mainLiteralBinding]
+    ]
+    "main"
+
 legacyDataParameterRef :: String -> BackendDataParameterRef
 legacyDataParameterRef name =
   case backendDataParameterRefs (BackendData "__Legacy" [name] []) of
@@ -2528,11 +2578,14 @@ identityDataWithNameOnlyConstructorParameterProgram =
               backendDataNameWithIdentity = "NamedBox",
               backendDataParameterRefsWithIdentity = [backendDataParameterRefFromIdentity dataIdentityBoxParamIdentity "a"],
               backendDataConstructorsWithIdentity =
-                [ BackendConstructor
-                    "NamedBox"
-                    []
-                    [BTVar "a"]
-                    (BTConWithIdentity (Just dataIdentityBoxIdentity) (BaseTy "NamedBox") (BTVarWithIdentity (Just dataIdentityBoxParamIdentity) "a" :| []))
+                [ BackendConstructorWithIdentity
+                    { backendConstructorIdentity = Just namedBoxConstructorIdentity,
+                      backendConstructorNameWithIdentity = "NamedBox",
+                      backendConstructorForallsWithIdentity = [],
+                      backendConstructorFieldsWithIdentity = [BTVar "a"],
+                      backendConstructorResultWithIdentity =
+                        BTConWithIdentity (Just dataIdentityBoxIdentity) (BaseTy "NamedBox") (BTVarWithIdentity (Just dataIdentityBoxParamIdentity) "a" :| [])
+                    }
                 ]
             }
         ]
@@ -2554,11 +2607,13 @@ identityDataWithNameOnlyConstructorForallProgram =
               backendDataNameWithIdentity = "NamedBox",
               backendDataParameterRefsWithIdentity = [],
               backendDataConstructorsWithIdentity =
-                [ BackendConstructor
-                    "NamedBox"
-                    [BackendTypeBinder "a" Nothing]
-                    []
-                    (BTBaseWithIdentity (Just dataIdentityBoxIdentity) (BaseTy "NamedBox"))
+                [ BackendConstructorWithIdentity
+                    { backendConstructorIdentity = Just namedBoxConstructorIdentity,
+                      backendConstructorNameWithIdentity = "NamedBox",
+                      backendConstructorForallsWithIdentity = [BackendTypeBinder "a" Nothing],
+                      backendConstructorFieldsWithIdentity = [],
+                      backendConstructorResultWithIdentity = BTBaseWithIdentity (Just dataIdentityBoxIdentity) (BaseTy "NamedBox")
+                    }
                 ]
             }
         ]
@@ -2620,25 +2675,25 @@ dataIdentityConstructorResultProgram :: BackendProgram
 dataIdentityConstructorResultProgram =
   programWithDataAndMainExpr
     [dataIdentityBoxData]
-    (BackendConstruct dataIdentityBoxStableTy "IdentityBox" [])
+    (BackendConstructWithIdentity dataIdentityBoxStableTy (Just dataIdentityBoxConstructorIdentity) "IdentityBox" [])
 
 dataIdentityConstructorDisplayResultProgram :: BackendProgram
 dataIdentityConstructorDisplayResultProgram =
   programWithDataAndMainExpr
     [dataIdentityBoxData]
-    (BackendConstruct dataIdentityBoxNameOnlyTy "IdentityBox" [])
+    (BackendConstructWithIdentity dataIdentityBoxNameOnlyTy (Just dataIdentityBoxConstructorIdentity) "IdentityBox" [])
 
 dataIdentityConstructorStaleResultProgram :: BackendProgram
 dataIdentityConstructorStaleResultProgram =
   programWithDataAndMainExpr
     [dataIdentityBoxData]
-    (BackendConstruct dataIdentityBoxStaleTy "IdentityBox" [])
+    (BackendConstructWithIdentity dataIdentityBoxStaleTy (Just dataIdentityBoxConstructorIdentity) "IdentityBox" [])
 
 dataIdentityConstructorMismatchedResultProgram :: BackendProgram
 dataIdentityConstructorMismatchedResultProgram =
   programWithDataAndMainExpr
     [dataIdentityBoxData]
-    (BackendConstruct dataIdentityBoxMismatchedStableTy "IdentityBox" [])
+    (BackendConstructWithIdentity dataIdentityBoxMismatchedStableTy (Just dataIdentityBoxConstructorIdentity) "IdentityBox" [])
 
 dataIdentityStructuralNameOnlyBoundaryProgram :: BackendProgram
 dataIdentityStructuralNameOnlyBoundaryProgram =
@@ -2680,7 +2735,15 @@ dataIdentityBoxData =
     { backendDataIdentity = Just dataIdentityBoxIdentity,
       backendDataNameWithIdentity = "IdentityBox",
       backendDataParameterRefsWithIdentity = [],
-      backendDataConstructorsWithIdentity = [BackendConstructor "IdentityBox" [] [] dataIdentityBoxCanonicalTy]
+      backendDataConstructorsWithIdentity =
+        [ BackendConstructorWithIdentity
+            { backendConstructorIdentity = Just dataIdentityBoxConstructorIdentity,
+              backendConstructorNameWithIdentity = "IdentityBox",
+              backendConstructorForallsWithIdentity = [],
+              backendConstructorFieldsWithIdentity = [],
+              backendConstructorResultWithIdentity = dataIdentityBoxCanonicalTy
+            }
+        ]
     }
 
 dataIdentityBoxNameOnlyTy :: BackendType
