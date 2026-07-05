@@ -4573,6 +4573,28 @@ spec = do
                 other ->
                     expectationFailure ("expected duplicate binding identity rejection, got " ++ show other)
 
+        it "rejects checked runtime bindings with no symbol identity before run context lookup" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  def helper : Int = 0;"
+                        , "  def main : Int = helper;"
+                        , "}"
+                        ]
+            checked <- requireChecked program
+            let checked' =
+                    replaceCheckedBindingDetails
+                        "Main__helper"
+                        (LocalId (localRefFromIdentity (GeneratedLocalId (UniqueIdentity 991754)) "helper"))
+                        checked
+            case runCheckedProgramOutput checked' of
+                Left (ProgramPipelineError message) -> do
+                    message `shouldSatisfy` isInfixOf "missing symbol identity"
+                    message `shouldSatisfy` isInfixOf "Main__helper"
+                other ->
+                    expectationFailure ("expected missing binding identity rejection, got " ++ show other)
+
         it "rejects checked runtime binding identity payload conflicts before run context lookup" $ do
             program <-
                 requireParsed $
@@ -9215,6 +9237,10 @@ requireTopLevelIdentity binding =
 
 replaceCheckedBindingTopLevelIdentity :: String -> SymbolIdentity -> CheckedProgram -> CheckedProgram
 replaceCheckedBindingTopLevelIdentity name replacement checked =
+    replaceCheckedBindingDetails name (TopLevelId replacement) checked
+
+replaceCheckedBindingDetails :: String -> IdDetails -> CheckedProgram -> CheckedProgram
+replaceCheckedBindingDetails name replacement checked =
     checked
         { checkedProgramModules =
             map replaceModule (checkedProgramModules checked)
@@ -9231,7 +9257,7 @@ replaceCheckedBindingTopLevelIdentity name replacement checked =
             binding
                 { checkedBindingResolvedVar =
                     (checkedBindingResolvedVar binding)
-                        { resolvedVarDetails = TopLevelId replacement
+                        { resolvedVarDetails = replacement
                         }
                 }
         | otherwise = binding

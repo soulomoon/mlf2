@@ -593,13 +593,7 @@ mkRuntimeContext checked = do
     uniqueRuntimeInfoByIdentity
       "module"
       [(checkedModuleIdentity checkedModule, checkedModule) | checkedModule <- checkedProgramModules checked]
-  bindingsByIdentity <-
-    uniqueRuntimeInfoByIdentity
-      "binding"
-      [ (symbol, binding)
-      | binding <- allCheckedBindings checked,
-        Just symbol <- [resolvedVarBindingSymbolIdentity (checkedBindingResolvedVar binding)]
-      ]
+  bindingsByIdentity <- uniqueRuntimeBindingsByIdentity checked
   dataByIdentity <-
     uniqueRuntimeInfoByIdentity
       "data"
@@ -657,6 +651,33 @@ uniqueRuntimeInfoByIdentity label =
             (Map.insert (symbolUniqueIdentity identity) identity seen)
             (Map.insert identity info entries)
             rest
+
+uniqueRuntimeBindingsByIdentity :: CheckedProgram -> Either ProgramError (Map.Map SymbolIdentity CheckedBinding)
+uniqueRuntimeBindingsByIdentity checked = do
+  entries <-
+    foldM
+      ( \acc (checkedModule, binding) ->
+          let resolved = checkedBindingResolvedVar binding
+           in case resolvedVarBindingSymbolIdentity resolved of
+                Just symbol -> Right ((symbol, binding) : acc)
+                Nothing
+                  | Just _ <- resolvedVarConstructorRef resolved -> Right acc
+                Nothing ->
+                  Left $
+                    ProgramPipelineError
+                      ( "run-program checked binding `"
+                          ++ checkedBindingRuntimeName binding
+                          ++ "` in module `"
+                          ++ checkedModuleName checkedModule
+                          ++ "` is missing symbol identity"
+                      )
+      )
+      []
+      [ (checkedModule, binding)
+      | checkedModule <- checkedProgramModules checked,
+        binding <- checkedModuleBindings checkedModule
+      ]
+  uniqueRuntimeInfoByIdentity "binding" (reverse entries)
 
 uniqueRuntimeInfoByKey :: (Ord key) => String -> (key -> String) -> [(key, a)] -> Either ProgramError (Map.Map key a)
 uniqueRuntimeInfoByKey label keyName =
