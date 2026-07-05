@@ -1825,9 +1825,9 @@ buildConvertContext checked = do
   let dataInfos = allDataInfos checked
   _modulesByIdentity <- uniqueModulesByIdentity checked
   resolvedModulesByIdentity <- uniqueResolvedModulesByIdentity checked
-  _bindingsByIdentity <- uniqueBindingsByIdentity checked
+  bindingsByIdentity <- uniqueBindingsByIdentity checked
   dataByIdentity <- uniqueDataInfosByIdentity dataInfos
-  termRuntimeNames <- checkedProgramTermRuntimeNamesByIdentity checked
+  termRuntimeNames <- checkedProgramTermRuntimeNamesByIdentity bindingsByIdentity
   let dataModuleIdentities = dataInfoModuleIdentityMap checked
       moduleScopes = moduleElaborateScopes resolvedModulesByIdentity dataByIdentity
   dataMetas <- mapM (buildDataMetaForDataInfo moduleScopes dataModuleIdentities dataInfos) dataInfos
@@ -1842,7 +1842,7 @@ buildConvertContext checked = do
           [ (dataInfoSymbol (dmInfo dataMeta), dataMeta)
           | dataMeta <- dataMetas
           ]
-      bindingData = bindingDataHints dataMetasByIdentity checked
+      bindingData = bindingDataHints dataMetasByIdentity bindingsByIdentity
   let context0 =
         ConvertContext
           { ccModuleScopes = moduleScopes,
@@ -2260,16 +2260,14 @@ allDataInfos checked =
       dataInfo <- Map.elems (checkedModuleData checkedModule)
   ]
 
-checkedProgramTermRuntimeNamesByIdentity :: CheckedProgram -> Either BackendConversionError (Map SymbolIdentity String)
-checkedProgramTermRuntimeNamesByIdentity checked =
+checkedProgramTermRuntimeNamesByIdentity :: Map SymbolIdentity CheckedBinding -> Either BackendConversionError (Map SymbolIdentity String)
+checkedProgramTermRuntimeNamesByIdentity bindingsByIdentity =
   Map.map snd
     <$> uniqueCheckedInfoByIdentity "binding" BackendDuplicateBinding fst (checkedBindings ++ builtinBindings)
   where
     checkedBindings =
       [ (symbol, checkedBindingRuntimeName binding)
-      | checkedModule <- checkedProgramModules checked,
-        binding <- checkedModuleBindings checkedModule,
-        Just symbol <- [checkedBindingSymbolIdentity binding]
+      | (symbol, binding) <- Map.toList bindingsByIdentity
       ]
 
     builtinBindings =
@@ -2350,15 +2348,9 @@ dataInfoUnqualifiedName =
 canonicalDataInfo :: DataInfo -> DataInfo
 canonicalDataInfo = id
 
-bindingDataHints :: Map SymbolIdentity DataMeta -> CheckedProgram -> Map SymbolIdentity DataMeta
-bindingDataHints dataMetasByIdentity checked =
-  Map.fromList
-    [ (symbol, dataMeta)
-      | checkedModule <- checkedProgramModules checked,
-        binding <- checkedModuleBindings checkedModule,
-        Just symbol <- [checkedBindingSymbolIdentity binding],
-        Just dataMeta <- [bindingDataHint dataMetasByIdentity binding]
-    ]
+bindingDataHints :: Map SymbolIdentity DataMeta -> Map SymbolIdentity CheckedBinding -> Map SymbolIdentity DataMeta
+bindingDataHints dataMetasByIdentity =
+  Map.mapMaybe (bindingDataHint dataMetasByIdentity)
 
 checkedBindingSymbolIdentity :: CheckedBinding -> Maybe SymbolIdentity
 checkedBindingSymbolIdentity =
