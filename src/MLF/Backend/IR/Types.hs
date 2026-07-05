@@ -49,6 +49,8 @@ module MLF.Backend.IR.Types
     backendDataParameters,
     BackendDataParameterRef,
     backendDataParameterRefFromIdentity,
+    backendDataParameterRefFromMetadataLightName,
+    backendDataParameterRefFromMaybeMetadataLight,
     backendDataParameterRefIdentity,
     backendDataParameterRefName,
     backendDataParameterRefKey,
@@ -74,6 +76,8 @@ module MLF.Backend.IR.Types
     BackendType (..),
     BackendTypeSubstitutionKey,
     backendTypeSubstitutionKeyFromIdentity,
+    backendTypeSubstitutionKeyFromMetadataLightName,
+    backendTypeSubstitutionKeyFromMaybeMetadataLight,
     backendTypeSubstitutionKeyFor,
     backendTypeSubstitutionKeyIdentity,
     backendTypeSubstitutionKeyName,
@@ -84,6 +88,11 @@ module MLF.Backend.IR.Types
     pattern BTForall,
     pattern BTMu,
     BackendExpr (..),
+    backendVarWithResolvedIdentity,
+    backendLamWithResolvedIdentity,
+    backendLetWithResolvedIdentity,
+    backendClosureWithResolvedEntry,
+    backendConstructWithResolvedIdentity,
     pattern BackendVar,
     pattern BackendLam,
     pattern BackendLet,
@@ -92,8 +101,12 @@ module MLF.Backend.IR.Types
     backendClosureParams,
     pattern BackendConstruct,
     BackendAlternative (..),
+    backendClosureCaptureWithResolvedIdentity,
+    backendClosureParamWithResolvedIdentity,
     BackendPatternBinder (..),
+    backendPatternBinderWithResolvedIdentity,
     BackendPattern (..),
+    backendConstructorPatternWithResolvedIdentity,
     pattern BackendConstructorPattern,
     freeBackendTypeVars,
     freeBackendTypeVarsInKeyed,
@@ -137,10 +150,26 @@ import MLF.Types.Identity
     symbolGeneratedIdentities,
     typeBinderGeneratedIdentities,
     typeBinderIdentityAliasNames,
+    typeBinderIdentityFromStructural,
     typeBinderIdentityFromUnique,
     typeBinderIdentityStableName,
+    typeBinderIdentityStructural,
   )
 import MLF.Util.Names (freshNameLike)
+
+{- Note [Backend IR identity-complete production references]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Post-resolution Backend IR references are semantic identities plus
+display/runtime names. The names remain useful for diagnostics and generated
+symbols, but production construction should go through the resolved helpers in
+this module and production validation in MLF.Backend.IR rejects missing
+identities.
+
+The Maybe-identity constructors and name-only keys are retained as explicit
+metadata-light and test-boundary compatibility shapes. Keep their helper names
+marked with "MetadataLight" so a caller cannot accidentally treat a String as
+post-resolution identity.
+-}
 
 -- | A checked backend program. Module order is preserved from the source
 -- program for diagnostics/debug output, but backend binding names are global
@@ -157,6 +186,8 @@ instance Eq BackendProgram where
     backendProgramModules left == backendProgramModules right
       && symbolRefMatches (backendProgramMainIdentity left) (backendProgramMain left) (backendProgramMainIdentity right) (backendProgramMain right)
 
+-- Metadata-light/test boundary constructor; production programs should carry
+-- 'backendProgramMainIdentity'.
 pattern BackendProgram :: [BackendModule] -> String -> BackendProgram
 pattern BackendProgram
   { backendProgramModules,
@@ -189,6 +220,8 @@ instance Eq BackendModule where
       && backendModuleData left == backendModuleData right
       && backendModuleBindings left == backendModuleBindings right
 
+-- Metadata-light/test boundary constructor; production modules should carry
+-- 'backendModuleIdentity'.
 pattern BackendModule :: String -> [BackendData] -> [BackendBinding] -> BackendModule
 pattern BackendModule
   { backendModuleName,
@@ -229,8 +262,8 @@ instance Ord BackendDataParameterRef where
       (BackendDataParameterByName leftName, BackendDataParameterByName rightName) ->
         compare leftName rightName
 
-backendDataParameterRef :: Maybe TypeBinderIdentity -> String -> BackendDataParameterRef
-backendDataParameterRef mbIdentity name =
+backendDataParameterRefFromMaybeMetadataLight :: Maybe TypeBinderIdentity -> String -> BackendDataParameterRef
+backendDataParameterRefFromMaybeMetadataLight mbIdentity name =
   case mbIdentity of
     Just identity -> BackendDataParameterByIdentity identity name
     Nothing -> BackendDataParameterByName name
@@ -238,6 +271,10 @@ backendDataParameterRef mbIdentity name =
 backendDataParameterRefFromIdentity :: TypeBinderIdentity -> String -> BackendDataParameterRef
 backendDataParameterRefFromIdentity =
   BackendDataParameterByIdentity
+
+backendDataParameterRefFromMetadataLightName :: String -> BackendDataParameterRef
+backendDataParameterRefFromMetadataLightName =
+  BackendDataParameterByName
 
 backendDataParameterRefIdentity :: BackendDataParameterRef -> Maybe TypeBinderIdentity
 backendDataParameterRefIdentity =
@@ -265,6 +302,8 @@ instance Eq BackendData where
       && backendDataParameterRefs left == backendDataParameterRefs right
       && backendDataConstructors left == backendDataConstructors right
 
+-- Metadata-light/test boundary constructor for identityless data shapes.
+-- Production data parameters should use 'backendDataParameterRefFromIdentity'.
 pattern BackendData :: String -> [String] -> [BackendConstructor] -> BackendData
 pattern BackendData
   { backendDataName,
@@ -278,7 +317,7 @@ pattern BackendData
     backendDataConstructors
   where
     BackendData name parameters constructors =
-      BackendDataWithIdentity Nothing name (map (backendDataParameterRef Nothing) parameters) constructors
+      BackendDataWithIdentity Nothing name (map backendDataParameterRefFromMetadataLightName parameters) constructors
 
 {-# COMPLETE BackendData #-}
 
@@ -286,7 +325,7 @@ backendDataParameterRefKey :: BackendDataParameterRef -> BackendTypeSubstitution
 backendDataParameterRefKey =
   \case
     BackendDataParameterByIdentity identity _ -> backendTypeSubstitutionKeyFromIdentity identity
-    BackendDataParameterByName name -> BackendTypeSubstitutionByName name
+    BackendDataParameterByName name -> backendTypeSubstitutionKeyFromMetadataLightName name
 
 backendDataParameterRefType :: BackendDataParameterRef -> BackendType
 backendDataParameterRefType ref =
@@ -316,6 +355,8 @@ instance Eq BackendConstructor where
       && backendConstructorFields left == backendConstructorFields right
       && backendConstructorResult left == backendConstructorResult right
 
+-- Metadata-light/test boundary constructor; production constructors should
+-- carry 'backendConstructorIdentity'.
 pattern BackendConstructor :: String -> [BackendTypeBinder] -> [BackendType] -> BackendType -> BackendConstructor
 pattern BackendConstructor
   { backendConstructorName,
@@ -373,6 +414,8 @@ instance Eq BackendTypeBinder where
     typeBinderRefMatches (backendTypeBinderIdentity left) (backendTypeBinderName left) (backendTypeBinderIdentity right) (backendTypeBinderName right)
       && backendTypeBinderBound left == backendTypeBinderBound right
 
+-- Metadata-light/test boundary constructor; production type binders should
+-- carry 'backendTypeBinderIdentity'.
 pattern BackendTypeBinder :: String -> Maybe BackendType -> BackendTypeBinder
 pattern BackendTypeBinder name bound <-
   BackendTypeBinderWithIdentity _ name bound
@@ -400,6 +443,8 @@ instance Eq BackendBinding where
       && backendBindingExportedAsMain left == backendBindingExportedAsMain right
       && backendBindingEvidenceParamIndices left == backendBindingEvidenceParamIndices right
 
+-- Metadata-light/test boundary constructor; production bindings should carry
+-- 'backendBindingIdentity'.
 pattern BackendBinding :: String -> BackendType -> BackendExpr -> Bool -> BackendBinding
 pattern BackendBinding
   { backendBindingName,
@@ -450,6 +495,8 @@ instance Eq BackendType where
       _ ->
         False
 
+-- Fallback name matching supports metadata-light/test boundary values only.
+-- Production references are checked for identities by validateBackendProgram.
 typeBinderRefMatches :: Maybe TypeBinderIdentity -> String -> Maybe TypeBinderIdentity -> String -> Bool
 typeBinderRefMatches (Just left) _ (Just right) _ =
   left == right
@@ -474,6 +521,8 @@ closureEntryRefMatches Nothing leftName Nothing rightName =
 closureEntryRefMatches _ _ _ _ =
   False
 
+-- Name-only type patterns are metadata-light/test boundary constructors.
+-- Production type references should carry binder/head identities.
 pattern BTVar :: String -> BackendType
 pattern BTVar name <-
   BTVarWithIdentity _ name
@@ -527,11 +576,22 @@ backendTypeSubstitutionKeyFromIdentity :: TypeBinderIdentity -> BackendTypeSubst
 backendTypeSubstitutionKeyFromIdentity =
   BackendTypeSubstitutionByIdentity
 
-backendTypeSubstitutionKeyFor :: Maybe TypeBinderIdentity -> String -> BackendTypeSubstitutionKey
-backendTypeSubstitutionKeyFor mbIdentity name =
+backendTypeSubstitutionKeyFromMetadataLightName :: String -> BackendTypeSubstitutionKey
+backendTypeSubstitutionKeyFromMetadataLightName =
+  BackendTypeSubstitutionByName
+
+backendTypeSubstitutionKeyFromMaybeMetadataLight :: Maybe TypeBinderIdentity -> String -> BackendTypeSubstitutionKey
+backendTypeSubstitutionKeyFromMaybeMetadataLight mbIdentity name =
   case mbIdentity of
     Just identity -> BackendTypeSubstitutionByIdentity identity
     Nothing -> BackendTypeSubstitutionByName name
+
+-- Compatibility alias for older callers. New code that may accept a missing
+-- identity should use 'backendTypeSubstitutionKeyFromMaybeMetadataLight' so
+-- the metadata-light boundary is explicit.
+backendTypeSubstitutionKeyFor :: Maybe TypeBinderIdentity -> String -> BackendTypeSubstitutionKey
+backendTypeSubstitutionKeyFor =
+  backendTypeSubstitutionKeyFromMaybeMetadataLight
 
 backendTypeSubstitutionKeyIdentity :: BackendTypeSubstitutionKey -> Maybe TypeBinderIdentity
 backendTypeSubstitutionKeyIdentity =
@@ -630,6 +690,33 @@ data BackendExpr
       }
   deriving (Show)
 
+backendVarWithResolvedIdentity :: BackendType -> IdDetails -> String -> BackendExpr
+backendVarWithResolvedIdentity resultTy identity name =
+  BackendVarWithIdentity resultTy (Just identity) name
+
+backendLamWithResolvedIdentity :: BackendType -> IdDetails -> String -> BackendType -> BackendExpr -> BackendExpr
+backendLamWithResolvedIdentity resultTy identity name paramTy body =
+  BackendLamWithIdentity resultTy (Just identity) name paramTy body
+
+backendLetWithResolvedIdentity :: BackendType -> IdDetails -> String -> BackendType -> BackendExpr -> BackendExpr -> BackendExpr
+backendLetWithResolvedIdentity resultTy identity name bindingTy rhs body =
+  BackendLetWithIdentity resultTy (Just identity) name bindingTy rhs body
+
+backendClosureWithResolvedEntry ::
+  BackendType ->
+  UniqueIdentity ->
+  String ->
+  [BackendClosureCapture] ->
+  [BackendClosureParam] ->
+  BackendExpr ->
+  BackendExpr
+backendClosureWithResolvedEntry resultTy identity entryName captures params body =
+  BackendClosureWithParamIdentities resultTy (Just identity) entryName captures params body
+
+backendConstructWithResolvedIdentity :: BackendType -> SymbolIdentity -> String -> [BackendExpr] -> BackendExpr
+backendConstructWithResolvedIdentity resultTy identity name args =
+  BackendConstructWithIdentity resultTy (Just identity) name args
+
 instance Eq BackendExpr where
   left == right =
     case (left, right) of
@@ -678,6 +765,9 @@ instance Eq BackendExpr where
       _ ->
         False
 
+-- Name-only pattern synonyms are metadata-light/test boundary constructors.
+-- Production construction should use the resolved helper functions above, and
+-- validateBackendProgram rejects identityless semantic references.
 pattern BackendVar :: BackendType -> String -> BackendExpr
 pattern BackendVar resultTy name <-
   BackendVarWithIdentity resultTy _ name
@@ -744,6 +834,23 @@ backendClosureParams :: [(String, BackendType)] -> [BackendClosureParam]
 backendClosureParams params =
   [BackendClosureParam Nothing name ty | (name, ty) <- params]
 
+backendClosureCaptureWithResolvedIdentity :: IdDetails -> String -> BackendType -> BackendExpr -> BackendClosureCapture
+backendClosureCaptureWithResolvedIdentity identity name ty expr =
+  BackendClosureCapture
+    { backendClosureCaptureIdentity = Just identity,
+      backendClosureCaptureName = name,
+      backendClosureCaptureType = ty,
+      backendClosureCaptureExpr = expr
+    }
+
+backendClosureParamWithResolvedIdentity :: IdDetails -> String -> BackendType -> BackendClosureParam
+backendClosureParamWithResolvedIdentity identity name ty =
+  BackendClosureParam
+    { backendClosureParamIdentity = Just identity,
+      backendClosureParamName = name,
+      backendClosureParamType = ty
+    }
+
 data BackendAlternative = BackendAlternative
   { backendAltPattern :: BackendPattern,
     backendAltBody :: BackendExpr
@@ -756,6 +863,10 @@ data BackendPatternBinder = BackendPatternBinder
   }
   deriving (Show)
 
+backendPatternBinderWithResolvedIdentity :: IdDetails -> String -> BackendPatternBinder
+backendPatternBinderWithResolvedIdentity identity name =
+  BackendPatternBinder (Just identity) name
+
 instance Eq BackendPatternBinder where
   left == right =
     backendTermRefMatches (backendPatternBinderIdentity left) (backendPatternBinderName left) (backendPatternBinderIdentity right) (backendPatternBinderName right)
@@ -764,6 +875,10 @@ data BackendPattern
   = BackendDefaultPattern
   | BackendConstructorPatternWithBinderIdentities (Maybe SymbolIdentity) String [BackendPatternBinder]
   deriving (Show)
+
+backendConstructorPatternWithResolvedIdentity :: SymbolIdentity -> String -> [BackendPatternBinder] -> BackendPattern
+backendConstructorPatternWithResolvedIdentity identity name binders =
+  BackendConstructorPatternWithBinderIdentities (Just identity) name binders
 
 instance Eq BackendPattern where
   left == right =
@@ -775,6 +890,8 @@ instance Eq BackendPattern where
       _ ->
         False
 
+-- Metadata-light/test boundary pattern constructor; production case
+-- alternatives should carry constructor and binder identities.
 pattern BackendConstructorPattern :: String -> [String] -> BackendPattern
 pattern BackendConstructorPattern name binders <-
   BackendConstructorPatternWithBinderIdentities _ name (map backendPatternBinderName -> binders)
@@ -830,7 +947,7 @@ freeBackendTypeVarRefs =
     go bound =
       \case
         BTVarWithIdentity identity name
-          | Set.member (backendTypeSubstitutionKeyFor identity name) bound -> Set.empty
+          | Set.member (backendTypeSubstitutionKeyFromMaybeMetadataLight identity name) bound -> Set.empty
           | otherwise -> freeBackendTypeVarRef identity name
         BTArrow dom cod ->
           Set.union (go bound dom) (go bound cod)
@@ -840,16 +957,16 @@ freeBackendTypeVarRefs =
           Set.unions (map (go bound) (NE.toList args))
         BTVarAppWithIdentity identity name args ->
           let headRefs =
-                if Set.member (backendTypeSubstitutionKeyFor identity name) bound
+                if Set.member (backendTypeSubstitutionKeyFromMaybeMetadataLight identity name) bound
                   then Set.empty
                   else freeBackendTypeVarRef identity name
            in Set.union headRefs (Set.unions (map (go bound) (NE.toList args)))
         BTForallWithIdentity identity name mbBound body ->
           Set.union
             (maybe Set.empty (go bound) mbBound)
-            (go (Set.insert (backendTypeSubstitutionKeyFor identity name) bound) body)
+            (go (Set.insert (backendTypeSubstitutionKeyFromMaybeMetadataLight identity name) bound) body)
         BTMuWithIdentity identity name body ->
-          go (Set.insert (backendTypeSubstitutionKeyFor identity name) bound) body
+          go (Set.insert (backendTypeSubstitutionKeyFromMaybeMetadataLight identity name) bound) body
         BTBottom ->
           Set.empty
 
@@ -864,7 +981,7 @@ freeBackendTypeVarKeys :: BackendType -> Set.Set BackendTypeSubstitutionKey
 freeBackendTypeVarKeys =
   \case
     BTVarWithIdentity identity name ->
-      Set.singleton (backendTypeSubstitutionKeyFor identity name)
+      Set.singleton (backendTypeSubstitutionKeyFromMaybeMetadataLight identity name)
     BTArrow dom cod ->
       Set.union (freeBackendTypeVarKeys dom) (freeBackendTypeVarKeys cod)
     BTBaseWithIdentity {} ->
@@ -873,14 +990,14 @@ freeBackendTypeVarKeys =
       Set.unions (map freeBackendTypeVarKeys (NE.toList args))
     BTVarAppWithIdentity identity name args ->
       Set.insert
-        (backendTypeSubstitutionKeyFor identity name)
+        (backendTypeSubstitutionKeyFromMaybeMetadataLight identity name)
         (Set.unions (map freeBackendTypeVarKeys (NE.toList args)))
     BTForallWithIdentity identity name mbBound body ->
       Set.union
         (maybe Set.empty freeBackendTypeVarKeys mbBound)
-        (Set.delete (backendTypeSubstitutionKeyFor identity name) (freeBackendTypeVarKeys body))
+        (Set.delete (backendTypeSubstitutionKeyFromMaybeMetadataLight identity name) (freeBackendTypeVarKeys body))
     BTMuWithIdentity identity name body ->
-      Set.delete (backendTypeSubstitutionKeyFor identity name) (freeBackendTypeVarKeys body)
+      Set.delete (backendTypeSubstitutionKeyFromMaybeMetadataLight identity name) (freeBackendTypeVarKeys body)
     BTBottom ->
       Set.empty
 
@@ -1085,7 +1202,7 @@ substituteBackendTypesByKey replacements0 ty0 =
              in if Map.null bodyReplacements
                   then (BTForallWithIdentity identity name mbBound' body, generator')
                   else
-                    let binderKey = backendTypeSubstitutionKeyFor identity name
+                    let binderKey = backendTypeSubstitutionKeyFromMaybeMetadataLight identity name
                         freeBodyReplacementKeys = freeBackendTypeVarKeysInKeyed bodyReplacements
                      in if Set.member binderKey freeBodyReplacementKeys
                           then
@@ -1111,7 +1228,7 @@ substituteBackendTypesByKey replacements0 ty0 =
              in if Map.null bodyReplacements
                   then (ty, generator)
                   else
-                    let binderKey = backendTypeSubstitutionKeyFor identity name
+                    let binderKey = backendTypeSubstitutionKeyFromMaybeMetadataLight identity name
                         freeBodyReplacementKeys = freeBackendTypeVarKeysInKeyed bodyReplacements
                      in if Set.member binderKey freeBodyReplacementKeys
                           then
@@ -1159,13 +1276,16 @@ lookupTypeReplacement identity name replacements fallback =
 
 lookupTypeReplacementMaybe :: Maybe TypeBinderIdentity -> String -> Map.Map BackendTypeSubstitutionKey BackendType -> Maybe BackendType
 lookupTypeReplacementMaybe identity name replacements =
-  Map.lookup (backendTypeSubstitutionKeyFor identity name) replacements
+  Map.lookup (backendTypeSubstitutionKeyFromMaybeMetadataLight identity name) replacements
 
 deleteTypeReplacement :: Maybe TypeBinderIdentity -> String -> Map.Map BackendTypeSubstitutionKey BackendType -> Map.Map BackendTypeSubstitutionKey BackendType
 deleteTypeReplacement identity name =
-  Map.delete (backendTypeSubstitutionKeyFor identity name)
+  Map.delete (backendTypeSubstitutionKeyFromMaybeMetadataLight identity name)
 
 freshBackendBinderIdentity :: Maybe TypeBinderIdentity -> IdentityGenerator -> (Maybe TypeBinderIdentity, IdentityGenerator)
+freshBackendBinderIdentity (Just identity) generator
+  | Just (unique, role) <- typeBinderIdentityStructural identity =
+      (Just (typeBinderIdentityFromStructural unique role), generator)
 freshBackendBinderIdentity _ generator =
   let (unique, generator') = freshIdentity generator
    in (Just (typeBinderIdentityFromUnique unique), generator')

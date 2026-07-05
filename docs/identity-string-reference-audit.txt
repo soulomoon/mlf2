@@ -16,6 +16,38 @@ linking, generated code, and user-facing output.
 Current baseline
 ================
 
+Post-pass update, 2026-07-05
+----------------------------
+
+The backend production identity pass has now addressed the main production
+blockers from areas 4-8 below:
+
+- Backend conversion no longer falls back from a resolved identity to a runtime
+  name when projecting checked bindings or resolved references. Missing
+  identity metadata is reported as an identity-incomplete backend reference.
+- Backend IR now has a production validation gate. Production lowering rejects
+  missing identities for semantic references, while the old name-only shapes are
+  kept only as metadata-light/test-boundary compatibility shapes.
+- LLVM lowering no longer exports or runs rewriteBackendVarsByName. The
+  production lowering entrypoint validates identity completeness after identity
+  assignment.
+- Structural recursive data matching is fenced so identity-bearing production
+  data does not match through name-only structural fallbacks. Metadata-light
+  skeleton matching remains an explicit compatibility path.
+- Program checking's type-head overlap/fundep path compares resolved head
+  identities from TypeView metadata instead of falling back to plain head names.
+- Finalization's runtime/deferred external indexes are key-first internally,
+  with String aliases retained only at the free-variable/runtime-name boundary.
+
+Still intentionally not eliminated:
+
+- ABI, runtime, generated-code, and diagnostic spellings remain String.
+- Parser/resolver and source-boundary lookup remain String-based before
+  semantic identities exist.
+- Frontend elaboration still lowers resolved frontend references through
+  runtime-name-shaped surface variables. That is the remaining earlier-IR
+  design gap before the whole checked frontend can be called identity-complete.
+
 - Resolved term variables are now identity-carrying:
   src/MLF/Types/Elab.hs:611-614
   data ResolvedVar = ResolvedVar

@@ -1881,7 +1881,7 @@ spec = describe "MLF.Backend.LLVM" $ do
 
   it "does not resolve data type heads named only by encoded data identity" $ do
     renderBackendProgramLLVM dataIdentityTypeHeadProgram
-      `shouldSatisfyLeft` isInfixOf "Unsupported backend LLVM type"
+      `shouldSatisfyLeft` isInfixOf "BackendTypeHeadIdentityMissing \"$identity#990004\""
 
   it "resolves data type heads named only by identity-bearing display name" $ do
     output <- requireRight (renderBackendProgramLLVM dataIdentityDisplayTypeHeadProgram)
@@ -1902,7 +1902,7 @@ spec = describe "MLF.Backend.LLVM" $ do
 
   it "does not assign arbitrary identities to duplicate name-only data parameters" $
     renderBackendProgramLLVM ambiguousNameOnlyDataParameterProgram
-      `shouldSatisfyLeft` isInfixOf "BackendConstructorUnknownTypeVariable \"Pair\" \"a\""
+      `shouldSatisfyLeft` isInfixOf "BackendTypeVariableIdentityMissing \"a\""
 
   it "case-analyzes let-bound native primitive results by checked data identity" $ do
     output <- requireRight (renderBackendProgramLLVM letBoundNativeOptionCaseProgram)
@@ -1916,7 +1916,7 @@ spec = describe "MLF.Backend.LLVM" $ do
 
   it "does not lower name-only builtin type heads as builtin scalars" $ do
     renderBackendProgramLLVM nameOnlyBuiltinIntProgram
-      `shouldSatisfyLeft` isInfixOf "Unsupported backend LLVM type"
+      `shouldSatisfyLeft` isInfixOf "BackendTypeHeadIdentityMissing \"Int\""
 
   it "rejects unsupported static function arguments instead of erasing them" $ do
     renderBackendProgramLLVM staticPartialApplicationArgumentProgram
@@ -1972,25 +1972,19 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldSatisfy` isInfixOf "ret i64 42"
     validateLLVMAssembly output
 
-  it "does not rewrite name-only vars through stale identity binder aliases" $ do
+  it "rejects name-only vars instead of rewriting through stale identity binder aliases" $ do
     let outer = localIdentity 2069137 "x"
         inner = localIdentity 2069138 "x"
-        rewritten =
-          Lower.rewriteBackendVarsByName
-            (Map.fromList [("x", Just outer)])
-            ( BackendLetWithIdentity
-                intTy
-                (Just inner)
-                "$stale_x"
-                intTy
-                (intLit 99)
-                (BackendVar intTy "x")
-            )
-    case rewritten of
-      BackendLetWithIdentity _ _ _ _ _ (BackendVarWithIdentity _ Nothing "x") ->
-        pure ()
-      other ->
-        expectationFailure ("expected stale binder alias shadowing to keep name-only var, got: " ++ show other)
+        staleBody =
+          BackendLetWithIdentity
+            intTy
+            (Just inner)
+            "$stale_x"
+            intTy
+            (intLit 99)
+            (BackendVar intTy "x")
+    outer `seq` validateBackendProgram (singleBindingProgram "main" staleBody)
+      `shouldBe` Left (BackendVariableIdentityMissing "x")
 
   it "resolves same-named lambda parameters by identity before name fallback" $ do
     output <- requireRight (renderBackendProgramLLVM lambdaIdentityShadowedParamProgram)
@@ -2064,7 +2058,7 @@ spec = describe "MLF.Backend.LLVM" $ do
 
   it "does not resolve name-only closure parameter uses when identity-bearing parameter names collide" $
     renderBackendProgramLLVM ambiguousIdentityClosureParamUseProgram
-      `shouldSatisfyLeft` isInfixOf "BackendUnknownVariable \"x\""
+      `shouldSatisfyLeft` isInfixOf "BackendVariableIdentityMissing \"x\""
 
   it "classifies stale-named closure captures by identity before name fallback" $ do
     output <- requireRight (renderBackendProgramLLVM closureCaptureValueKindIdentityProgram)
@@ -2115,7 +2109,7 @@ spec = describe "MLF.Backend.LLVM" $ do
 
   it "does not dispatch name-only primitive spelling without primitive identity" $
     renderBackendProgramLLVM nameOnlyRuntimePrimitiveProgram
-      `shouldSatisfyLeft` isInfixOf "BackendUnknownVariable \"__mlfp_and\""
+      `shouldSatisfyLeft` isInfixOf "BackendVariableIdentityMissing \"__mlfp_and\""
 
   it "does not dispatch primitive calls through stale identity payloads" $
     renderBackendProgramLLVM staleNamedRuntimePrimitiveProgram
@@ -3429,7 +3423,7 @@ spec = describe "MLF.Backend.LLVM" $ do
 
   it "rejects unknown base types" $ do
     renderBackendProgramLLVM unknownBaseProgram
-      `shouldSatisfyLeft` isInfixOf "Unsupported backend LLVM type"
+      `shouldSatisfyLeft` isInfixOf "BackendTypeHeadIdentityMissing \"Mystery\""
 
   it "rejects representation-changing roll/unroll nodes" $ do
     case Lower.lowerBackendProgram rollMismatchProgram of
@@ -11144,6 +11138,38 @@ programWithBindings bindings =
         ],
       backendProgramMain = "main"
     }
+
+singleBindingProgram :: String -> BackendExpr -> BackendProgram
+singleBindingProgram name expr =
+  BackendProgramWithIdentity
+    { backendProgramModulesWithIdentity =
+        [ BackendModuleWithIdentity
+            { backendModuleIdentity = Just singleBindingModuleIdentity,
+              backendModuleNameWithIdentity = "Main",
+              backendModuleDataWithIdentity = [],
+              backendModuleBindingsWithIdentity =
+                [ BackendBindingWithMetadata
+                    { backendBindingIdentity = Just singleBindingMainIdentity,
+                      backendBindingNameWithMetadata = name,
+                      backendBindingTypeWithMetadata = backendExprType expr,
+                      backendBindingExprWithMetadata = expr,
+                      backendBindingExportedAsMainWithMetadata = True,
+                      backendBindingEvidenceParamIndices = Set.empty
+                    }
+                ]
+            }
+        ],
+      backendProgramMainIdentity = Just singleBindingMainIdentity,
+      backendProgramMainWithIdentity = name
+    }
+
+singleBindingModuleIdentity :: SymbolIdentity
+singleBindingModuleIdentity =
+  symbolIdentityFromParts (UniqueIdentity 2069135) SymbolModule "Main" "Main" Nothing
+
+singleBindingMainIdentity :: SymbolIdentity
+singleBindingMainIdentity =
+  symbolIdentityFromParts (UniqueIdentity 2069136) SymbolValue "Main" "main" Nothing
 
 programWithEvidenceParamIndices :: [(String, [Int])] -> [BackendBinding] -> BackendProgram
 programWithEvidenceParamIndices evidenceParamIndices bindings =

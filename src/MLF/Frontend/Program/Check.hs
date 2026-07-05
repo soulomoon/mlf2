@@ -3915,21 +3915,14 @@ buildInstanceSkeletons moduleIdentity generator0 displayEnv scope mod0 derived =
         _ -> Nothing
 
     sameOverlapHead headIdentities leftName rightName =
-      let leftIdentities = overlapHeadDataIdentities headIdentities leftName
-          rightIdentities = overlapHeadDataIdentities headIdentities rightName
-       in if Set.null leftIdentities && Set.null rightIdentities
-            then leftName == rightName
-            else not (Set.null (Set.intersection leftIdentities rightIdentities))
+      let leftIdentities = overlapHeadSymbolIdentities headIdentities leftName
+          rightIdentities = overlapHeadSymbolIdentities headIdentities rightName
+       in not (Set.null (Set.intersection leftIdentities rightIdentities))
 
-    overlapHeadDataIdentities headIdentities name =
+    overlapHeadSymbolIdentities headIdentities name =
       case lookupSymbolIdentityAlias headIdentities name of
-        Just identity
-          | Just dataInfo <- lookupSymbolIdentityExact identity overlapDataByIdentity -> Set.singleton (dataInfoSymbolIdentity dataInfo)
-          | otherwise -> Set.empty
+        Just identity -> Set.singleton identity
         Nothing -> Set.empty
-
-    overlapDataByIdentity =
-      checkedDataByIdentity (scopeElaborateTypes scope)
 
     unifyOverlapTypeHead headIdentities subst name templateArgs actual =
       case actual of

@@ -134,7 +134,6 @@ module MLF.Backend.LLVM.Lower
     lowerBackendProgram,
     lowerBackendProgramNative,
     renderBackendLLVMError,
-    rewriteBackendVarsByName,
   )
 where
 
@@ -296,7 +295,7 @@ lowerBackendProgramCore program0 = do
   first BackendLLVMValidationFailed (validateRawBackendBinderUniqueness program0)
   first BackendLLVMValidationFailed (validateBackendIdentityPayloadsBeforeAssignment program0)
   let program = assignBackendIdentitiesInProgram program0
-  first BackendLLVMValidationFailed (validateBackendProgram program)
+  first BackendLLVMValidationFailed (validateBackendProgramProduction program)
   base <- buildProgramBase program
   mainBinding <- requireProgramMainBinding base program
   reachable <- reachableBindings base mainBinding
@@ -546,16 +545,36 @@ assignBackendIdentitiesInProgram program =
   where
     generator0 =
       identityGeneratorAfter (generatedIdentitiesInBackendProgram program)
-    (generator1, modulesWithDataIdentities, dataEnv) =
-      assignGlobalDataIdentities generator0 (backendProgramModulesWithIdentity program)
-    (generator2, modulesWithData) =
-      mapAccumL (assignModuleData dataEnv) generator1 modulesWithDataIdentities
-    (generator3, modulesWithBindingIdentities, globalEnv) =
-      assignGlobalBindingIdentities generator2 modulesWithData
+    (generator1, modulesWithModuleIdentities) =
+      assignModuleIdentities generator0 (backendProgramModulesWithIdentity program)
+    (generator2, modulesWithDataIdentities, dataEnv) =
+      assignGlobalDataIdentities generator1 modulesWithModuleIdentities
+    (generator3, modulesWithData) =
+      mapAccumL (assignModuleData dataEnv) generator2 modulesWithDataIdentities
+    (generator4, modulesWithBindingIdentities, globalEnv) =
+      assignGlobalBindingIdentities generator3 modulesWithData
     (_, modules') =
-      mapAccumL (assignModuleBindingBodies dataEnv constructorEnv globalEnv) generator3 modulesWithBindingIdentities
+      mapAccumL (assignModuleBindingBodies dataEnv constructorEnv globalEnv) generator4 modulesWithBindingIdentities
     constructorEnv =
       backendConstructorEnv modulesWithData
+
+assignModuleIdentities :: IdentityGenerator -> [BackendModule] -> (IdentityGenerator, [BackendModule])
+assignModuleIdentities =
+  mapAccumL assignModuleIdentity
+  where
+    assignModuleIdentity generator backendModule =
+      let name = backendModuleName backendModule
+          (identity, generator') =
+            case backendModuleIdentity backendModule of
+              Just existing -> (existing, generator)
+              Nothing ->
+                let (unique, generatorNext) = freshIdentity generator
+                 in (generatedBackendModuleIdentity name unique, generatorNext)
+       in (generator', backendModule {backendModuleIdentity = Just identity})
+
+generatedBackendModuleIdentity :: String -> UniqueIdentity -> SymbolIdentity
+generatedBackendModuleIdentity name identity =
+  symbolIdentityFromParts identity SymbolModule name name Nothing
 
 assignGlobalDataIdentities :: IdentityGenerator -> [BackendModule] -> (IdentityGenerator, [BackendModule], BackendDataEnv)
 assignGlobalDataIdentities generator modules0 =
@@ -952,19 +971,30 @@ generatedBackendConstructorIdentity moduleName mbDataIdentity name identity =
 
 typeRefIdentity :: BackendTypeBinderEnv -> Maybe TypeBinderIdentity -> String -> Maybe TypeBinderIdentity
 typeRefIdentity env identity name =
-  identity <|> (Map.lookup name env >>= id)
+  case identity of
+    Just {} -> identity
+    Nothing -> Map.lookup name env >>= id
 
 dataHeadIdentity :: BackendDataEnv -> Maybe SymbolIdentity -> String -> Maybe SymbolIdentity
 dataHeadIdentity env identity name =
-  identity <|> (Map.lookup name env >>= id)
+  case identity of
+    Just {} -> identity
+    Nothing -> Map.lookup name env >>= id
 
 termRefIdentity :: BackendGlobalEnv -> BackendTermEnv -> Maybe IdDetails -> String -> Maybe IdDetails
 termRefIdentity globalEnv env identity name =
-  identity <|> (Map.lookup name env >>= id) <|> (TopLevelId <$> (Map.lookup name globalEnv >>= id))
+  case identity of
+    Just {} -> identity
+    Nothing ->
+      case Map.lookup name env of
+        Just (Just localIdentity) -> Just localIdentity
+        _ -> TopLevelId <$> (Map.lookup name globalEnv >>= id)
 
 constructorRefIdentity :: BackendConstructorEnv -> Maybe SymbolIdentity -> String -> Maybe SymbolIdentity
 constructorRefIdentity env identity name =
-  identity <|> (Map.lookup name env >>= id)
+  case identity of
+    Just {} -> identity
+    Nothing -> Map.lookup name env >>= id
 
 lowerNativeProgram :: LoweredProgram -> Either BackendLLVMError LLVMModule
 lowerNativeProgram lowered = do
@@ -1211,17 +1241,17 @@ constructorNameGlobals base spec =
 nativeDataRuntimeForType :: ProgramBase -> BackendType -> Maybe DataRuntime
 nativeDataRuntimeForType base =
   \case
-    BTBaseWithIdentity identity (BaseTy name) -> lookupDataRuntimeByHead base identity name
-    BTConWithIdentity identity (BaseTy name) _ -> lookupDataRuntimeByHead base identity name
+    BTBaseWithIdentity identity (BaseTy _name) -> lookupDataRuntimeByHead base identity
+    BTConWithIdentity identity (BaseTy _name) _ -> lookupDataRuntimeByHead base identity
     BTMuWithIdentity identity name _ -> lookupDataRuntimeForStructuralMu base identity name
     BTMu name _ -> lookupDataRuntimeForStructuralMu base Nothing name
     _ -> Nothing
 
-lookupDataRuntimeByHead :: ProgramBase -> Maybe SymbolIdentity -> String -> Maybe DataRuntime
-lookupDataRuntimeByHead base mbIdentity name =
+lookupDataRuntimeByHead :: ProgramBase -> Maybe SymbolIdentity -> Maybe DataRuntime
+lookupDataRuntimeByHead base mbIdentity =
   case mbIdentity of
     Just identity -> lookupProgramDataByIdentityExact base (Just identity)
-    Nothing -> lookupDataRuntimeByName base name
+    Nothing -> Nothing
 
 lookupDataRuntimeForStructuralMu :: ProgramBase -> Maybe TypeBinderIdentity -> String -> Maybe DataRuntime
 lookupDataRuntimeForStructuralMu base mbIdentity name =
@@ -1354,15 +1384,15 @@ nativeRenderableKind base ty =
       | backendBuiltinHeadMatches "String" identity baseTy -> NativeString
       | backendBuiltinHeadMatches ioTypeName identity baseTy -> NativeIO
       | otherwise ->
-          maybe (NativeUnsupported ("unknown native result type " ++ show name)) NativeData (lookupDataRuntimeByHead base identity name)
+          maybe (NativeUnsupported ("unknown native result type " ++ show name)) NativeData (lookupDataRuntimeByHead base identity)
     BTConWithIdentity identity baseTy@(BaseTy name) _
       | backendBuiltinHeadMatches ioTypeName identity baseTy -> NativeIO
       | otherwise ->
-          maybe (NativeUnsupported ("unknown native result type " ++ show name)) NativeData (lookupDataRuntimeByHead base identity name)
+          maybe (NativeUnsupported ("unknown native result type " ++ show name)) NativeData (lookupDataRuntimeByHead base identity)
     BTBase (BaseTy name) ->
-      maybe (NativeUnsupported ("unknown native result type " ++ show name)) NativeData (lookupDataRuntimeByHead base Nothing name)
+      NativeUnsupported ("missing identity for native result type " ++ show name)
     BTCon (BaseTy name) _ ->
-      maybe (NativeUnsupported ("unknown native result type " ++ show name)) NativeData (lookupDataRuntimeByHead base Nothing name)
+      NativeUnsupported ("missing identity for native result type " ++ show name)
     BTArrow {} -> NativeFunction
     BTForall {} -> NativeUnsupported "polymorphic main values are not native-renderable"
     BTVar {} -> NativeUnsupported "type-variable main values are not native-renderable"
@@ -6023,8 +6053,8 @@ backendVarSymbolIdentity :: Maybe IdDetails -> Maybe SymbolIdentity
 backendVarSymbolIdentity =
   (>>= idDetailsSymbolIdentity)
 
-primitiveRuntimeName :: Maybe IdDetails -> String -> Maybe String
-primitiveRuntimeName mbIdentity _name =
+primitiveRuntimeName :: Maybe IdDetails -> Maybe String
+primitiveRuntimeName mbIdentity =
   case mbIdentity of
     Just (PrimitiveId ref) -> primitiveSymbolRuntimeName (primitiveRefSymbol ref)
     Just (TopLevelId symbol) -> primitiveSymbolRuntimeName symbol
@@ -6035,15 +6065,15 @@ primitiveSymbolRuntimeName :: SymbolIdentity -> Maybe String
 primitiveSymbolRuntimeName =
   PrimitiveInventory.primitiveValueNameByIdentity
 
-ioPrimitiveRuntimeName :: Maybe IdDetails -> String -> Maybe String
-ioPrimitiveRuntimeName mbIdentity name =
-  case primitiveRuntimeName mbIdentity name of
+ioPrimitiveRuntimeName :: Maybe IdDetails -> Maybe String
+ioPrimitiveRuntimeName mbIdentity =
+  case primitiveRuntimeName mbIdentity of
     Just primitiveName | Set.member primitiveName ioPrimitiveNames -> Just primitiveName
     _ -> Nothing
 
-nativePrimitiveRuntimeName :: Maybe IdDetails -> String -> Maybe String
-nativePrimitiveRuntimeName mbIdentity name =
-  case primitiveRuntimeName mbIdentity name of
+nativePrimitiveRuntimeName :: Maybe IdDetails -> Maybe String
+nativePrimitiveRuntimeName mbIdentity =
+  case primitiveRuntimeName mbIdentity of
     Just primitiveName | Set.member primitiveName nativePrimitiveNames -> Just primitiveName
     _ -> Nothing
 
@@ -6222,101 +6252,19 @@ functionFormFromExpectedM expectedTy expr = do
 freshenFunctionFormMissingParamIdentities :: IdentityGenerator -> FunctionForm -> (FunctionForm, IdentityGenerator)
 freshenFunctionFormMissingParamIdentities generator form =
   ( form
-      { ffParamIdentities = paramIdentities,
-        ffBody = rewriteBackendVarsByName generatedIdentities (ffBody form)
+      { ffParamIdentities = paramIdentities
       },
     generator'
   )
   where
     (generator', paramIdentities) =
       mapAccumL assignIdentity generator (zip (ffParamIdentities form ++ repeat Nothing) (ffParams form))
-    generatedIdentities =
-      generatedBackendTermEnv
-        [ (name, Just identity)
-        | ((originalIdentity, (name, _)), Just identity) <- zip (zip (ffParamIdentities form ++ repeat Nothing) (ffParams form)) paramIdentities,
-          Nothing <- [originalIdentity]
-        ]
 
     assignIdentity generator0 (Just identity, _) =
       (generator0, Just identity)
     assignIdentity generator0 (Nothing, (name, _)) =
       let (localRef, generator1) = freshLocalRef name generator0
        in (generator1, Just (LocalId localRef))
-
-generatedBackendTermEnv :: [(String, Maybe IdDetails)] -> BackendTermEnv
-generatedBackendTermEnv =
-  foldl insertOne Map.empty
-  where
-    insertOne env (name, Just identity) =
-      insertUniqueBackendTermIdentity name identity env
-    insertOne env (_, Nothing) =
-      env
-
-rewriteBackendVarsByName :: BackendTermEnv -> BackendExpr -> BackendExpr
-rewriteBackendVarsByName identities0 =
-  go identities0
-  where
-    go identities =
-      \case
-        BackendVarWithIdentity ty Nothing name
-          | Just (Just identity) <- Map.lookup name identities ->
-              BackendVarWithIdentity ty (Just identity) name
-        BackendVarWithIdentity ty mbIdentity name ->
-          BackendVarWithIdentity ty mbIdentity name
-        BackendLit ty lit ->
-          BackendLit ty lit
-        BackendLamWithIdentity resultTy identity name paramTy body ->
-          BackendLamWithIdentity resultTy identity name paramTy (go (withoutTermBinder (identity, name) identities) body)
-        BackendApp resultTy fun arg ->
-          BackendApp resultTy (go identities fun) (go identities arg)
-        BackendLetWithIdentity resultTy identity name bindingTy rhs body ->
-          BackendLetWithIdentity resultTy identity name bindingTy (go identities rhs) (go (withoutTermBinder (identity, name) identities) body)
-        BackendTyAbsWithIdentity resultTy identity name mbBound body ->
-          BackendTyAbsWithIdentity resultTy identity name mbBound (go identities body)
-        BackendTyApp resultTy fun ty ->
-          BackendTyApp resultTy (go identities fun) ty
-        BackendConstructWithIdentity resultTy identity name args ->
-          BackendConstructWithIdentity resultTy identity name (map (go identities) args)
-        BackendCase resultTy scrutinee alternatives ->
-          BackendCase resultTy (go identities scrutinee) (fmap (rewriteAlternative identities) alternatives)
-        BackendRoll resultTy payload ->
-          BackendRoll resultTy (go identities payload)
-        BackendUnroll resultTy payload ->
-          BackendUnroll resultTy (go identities payload)
-        BackendClosureWithParamIdentities resultTy entryIdentity entryName captures params body ->
-          BackendClosureWithParamIdentities resultTy entryIdentity entryName (map (rewriteCapture identities) captures) params (go (withoutClosureLocals captures params identities) body)
-        BackendClosureCall resultTy fun args ->
-          BackendClosureCall resultTy (go identities fun) (map (go identities) args)
-
-    rewriteAlternative identities alternative =
-      alternative {backendAltBody = go (withoutPatternBinders (backendAltPattern alternative) identities) (backendAltBody alternative)}
-
-    rewriteCapture identities capture =
-      capture {backendClosureCaptureExpr = go identities (backendClosureCaptureExpr capture)}
-
-    withoutClosureLocals captures params =
-      withoutTermBinders
-        ( [(backendClosureCaptureIdentity capture, backendClosureCaptureName capture) | capture <- captures]
-            ++ [(backendClosureParamIdentity param, backendClosureParamName param) | param <- params]
-        )
-
-    withoutPatternBinders =
-      withoutTermBinders
-        . map (\binder -> (backendPatternBinderIdentity binder, backendPatternBinderName binder))
-        . patternLocalBinders
-
-    withoutTermBinder (Just identity, name) identities =
-      Map.foldrWithKey (\alias _ -> Map.delete alias) identities (idDetailsAliasMapWith [(name, identity)])
-    withoutTermBinder (Nothing, name) identities =
-      Map.delete name identities
-
-    withoutTermBinders refs identities =
-      foldr withoutTermBinder identities refs
-
-    patternLocalBinders =
-      \case
-        BackendDefaultPattern -> []
-        BackendConstructorPatternWithBinderIdentities _ _ binders -> binders
 
 markFunctionFormEvidenceParams :: Set Int -> FunctionForm -> FunctionForm
 markFunctionFormEvidenceParams evidenceIndices form =
@@ -6708,6 +6656,70 @@ renameBackendVars renaming0 =
           renaming
         BackendConstructorPatternWithBinderIdentities _ _ binders ->
           withoutBinders [(backendPatternBinderIdentity binder, backendPatternBinderName binder) | binder <- binders] renaming
+
+annotateBackendVarsByName :: Map String IdDetails -> BackendExpr -> BackendExpr
+annotateBackendVarsByName identities0 =
+  go identities0
+  where
+    go identities =
+      \case
+        BackendVarWithIdentity resultTy Nothing name ->
+          BackendVarWithIdentity resultTy (Map.lookup name identities) name
+        BackendVarWithIdentity resultTy mbIdentity name ->
+          BackendVarWithIdentity resultTy mbIdentity name
+        BackendLit resultTy lit ->
+          BackendLit resultTy lit
+        BackendLamWithIdentity resultTy mbIdentity name paramTy body ->
+          BackendLamWithIdentity resultTy mbIdentity name paramTy (go (withoutBinder (mbIdentity, name) identities) body)
+        BackendApp resultTy fun arg ->
+          BackendApp resultTy (go identities fun) (go identities arg)
+        BackendLetWithIdentity resultTy mbIdentity name bindingTy rhs body ->
+          BackendLetWithIdentity resultTy mbIdentity name bindingTy (go identities rhs) (go (withoutBinder (mbIdentity, name) identities) body)
+        BackendTyAbsWithIdentity resultTy identity name mbBound body ->
+          BackendTyAbsWithIdentity resultTy identity name mbBound (go identities body)
+        BackendTyApp resultTy fun ty ->
+          BackendTyApp resultTy (go identities fun) ty
+        BackendConstructWithIdentity resultTy mbIdentity name args ->
+          BackendConstructWithIdentity resultTy mbIdentity name (map (go identities) args)
+        BackendCase resultTy scrutinee alternatives ->
+          BackendCase resultTy (go identities scrutinee) (fmap (annotateAlternative identities) alternatives)
+        BackendRoll resultTy payload ->
+          BackendRoll resultTy (go identities payload)
+        BackendUnroll resultTy payload ->
+          BackendUnroll resultTy (go identities payload)
+        BackendClosureWithParamIdentities resultTy entryIdentity entryName captures params body ->
+          BackendClosureWithParamIdentities
+            resultTy
+            entryIdentity
+            entryName
+            (map (annotateCapture identities) captures)
+            params
+            (go (withoutBinders (closureBinderRefs captures params) identities) body)
+        BackendClosureCall resultTy fun args ->
+          BackendClosureCall resultTy (go identities fun) (map (go identities) args)
+
+    annotateAlternative identities (BackendAlternative pattern0 body) =
+      BackendAlternative pattern0 (go (withoutPatternBinders pattern0 identities) body)
+
+    annotateCapture identities capture =
+      capture {backendClosureCaptureExpr = go identities (backendClosureCaptureExpr capture)}
+
+    withoutBinder (_mbIdentity, name) identities =
+      Map.delete name identities
+
+    withoutBinders refs identities =
+      foldr withoutBinder identities refs
+
+    closureBinderRefs captures params =
+      [(backendClosureCaptureIdentity capture, backendClosureCaptureName capture) | capture <- captures]
+        ++ [(backendClosureParamIdentity param, backendClosureParamName param) | param <- params]
+
+    withoutPatternBinders pattern0 identities =
+      case pattern0 of
+        BackendDefaultPattern ->
+          identities
+        BackendConstructorPatternWithBinderIdentities _ _ binders ->
+          withoutBinders [(backendPatternBinderIdentity binder, backendPatternBinderName binder) | binder <- binders] identities
 
 freeBackendExprVars :: BackendExpr -> Set String
 freeBackendExprVars =
@@ -7240,24 +7252,24 @@ collectReferencedFunctionsInExpr base specializationsByKey substitution localFor
     referencedFunctionArgument arg =
       case collectTyApps arg of
         (BackendVarWithIdentity _ mbIdentity name, typeArgs) ->
-          referencedFunctionByName Set.empty mbIdentity name typeArgs
+          referencedFunctionByIdentity Set.empty mbIdentity name typeArgs
         _ -> Nothing
 
-    referencedFunctionByName seen mbIdentity name typeArgs
+    referencedFunctionByIdentity seen mbIdentity displayName typeArgs
       | Just key <- mbKey,
         Set.member key seen =
           Nothing
       | Just key <- mbKey,
         Just form <- lookupLocalFunctionForm mbIdentity localForms =
-          case instantiateFunctionFormWithTypeArgs ("referenced local function argument " ++ name) form typeArgs [] of
+          case instantiateFunctionFormWithTypeArgs ("referenced local function argument " ++ displayName) form typeArgs [] of
             Right (_, instantiated) ->
               case etaAliasTarget instantiated of
-                Just (targetIdentity, targetName, targetTypeArgs) ->
-                  referencedFunctionByName (Set.insert key seen) targetIdentity targetName targetTypeArgs
+                Just (targetIdentity, targetDisplayName, targetTypeArgs) ->
+                  referencedFunctionByIdentity (Set.insert key seen) targetIdentity targetDisplayName targetTypeArgs
                 Nothing -> Nothing
             Left _ -> Nothing
       | Just binding <- lookupSpecializationBinding base mbIdentity =
-          case instantiateFunctionFormWithTypeArgs ("referenced function argument " ++ name) (biForm binding) typeArgs [] of
+          case instantiateFunctionFormWithTypeArgs ("referenced function argument " ++ displayName) (biForm binding) typeArgs [] of
             Right (resolvedTypeArgs, _)
               | null (ffTypeBinders (biForm binding)) -> Just (ReferencedBinding (bindingInfoRef binding))
               | otherwise ->
@@ -8252,20 +8264,19 @@ assignGeneratedClosureEntryIdentities =
       | returnedPartialClosureEntry entry || ceEntryIdentity entry == Nothing =
           let captureInputs = [(ccsName capture, ccsIdentity capture) | capture <- ceCaptures entry]
               paramInputs = zip (map fst (ceParams entry)) (ceParamIdentities entry ++ repeat Nothing)
-              (generator', captureIdentities, generatedCaptures) = completeLocalIdentities generator captureInputs
-              (generator'', paramIdentities, generatedParams) = completeLocalIdentities generator' paramInputs
+              (generator', captureIdentities) = completeLocalIdentities generator captureInputs
+              (generator'', paramIdentities) = completeLocalIdentities generator' paramInputs
               (entryIdentity, generator''') =
                 case ceEntryIdentity entry of
                   Just identity -> (identity, generator'')
                   Nothing -> freshIdentity generator''
-              identities =
-                generatedBackendTermEnv (generatedCaptures ++ generatedParams)
+              captures' = zipWith setCaptureIdentity captureIdentities (ceCaptures entry)
            in ( generator''',
                 entry
                   { ceEntryIdentity = Just entryIdentity,
-                    ceCaptures = zipWith setCaptureIdentity captureIdentities (ceCaptures entry),
+                    ceCaptures = captures',
                     ceParamIdentities = paramIdentities,
-                    ceBody = rewriteBackendVarsByName identities (ceBody entry)
+                    ceBody = annotateSyntheticClosureEntryRefs captures' (ceParams entry) paramIdentities (ceBody entry)
                   }
               )
       | otherwise =
@@ -8277,8 +8288,22 @@ assignGeneratedClosureEntryIdentities =
     setCaptureIdentity identity capture =
       capture {ccsIdentity = identity}
 
+    annotateSyntheticClosureEntryRefs captures params paramIdentities body =
+      annotateBackendVarsByName identitiesByName body
+      where
+        identitiesByName =
+          Map.fromList
+            ( [ (ccsName capture, identity)
+              | capture <- captures,
+                Just identity <- [ccsIdentity capture]
+              ]
+                ++ [ (name, identity)
+                   | ((name, _), Just identity) <- zip params paramIdentities
+                   ]
+            )
+
     completeLocalIdentities generator [] =
-      (generator, [], [])
+      (generator, [])
     completeLocalIdentities generator ((name, mbIdentity) : rest) =
       let (identity, generator') =
             case mbIdentity of
@@ -8286,12 +8311,8 @@ assignGeneratedClosureEntryIdentities =
               Nothing ->
                 let (localRef, nextGenerator) = freshLocalRef name generator
                  in (LocalId localRef, nextGenerator)
-          (generator'', identities, generated) = completeLocalIdentities generator' rest
-          generated' =
-            case mbIdentity of
-              Just _ -> generated
-              Nothing -> (name, Just identity) : generated
-       in (generator'', Just identity : identities, generated')
+          (generator'', identities) = completeLocalIdentities generator' rest
+       in (generator'', Just identity : identities)
 
 qualifiedSpecializationForm :: Specialization -> FunctionForm
 qualifiedSpecializationForm specialization =
@@ -9283,9 +9304,9 @@ lowerTyApp env exprEnv context expr =
       | Just binding <- lookupNonLocalBindingInfo (peBase env) mbIdentity,
         not (null (ffTypeBinders (biForm binding))) ->
           lowerGlobalValue env exprEnv context (backendExprType expr) (biName binding) binding typeArgs
-      | Just primitiveName <- ioPrimitiveRuntimeName mbIdentity name ->
+      | Just primitiveName <- ioPrimitiveRuntimeName mbIdentity ->
           resolveIOPrimitiveAsValue (backendExprType expr) primitiveName
-      | Just primitiveName <- nativePrimitiveRuntimeName mbIdentity name ->
+      | Just primitiveName <- nativePrimitiveRuntimeName mbIdentity ->
           resolveNativePrimitiveAsValue (backendExprType expr) primitiveName
     (fun, typeArgs) ->
       lowerDirectFunctionValue env exprEnv context (backendExprType expr) fun typeArgs
@@ -9470,10 +9491,10 @@ lowerVar env exprEnv context ty mbIdentity name =
             Just binding ->
               lowerGlobalValue env exprEnv context ty (biName binding) binding []
             Nothing
-              | Just primitiveName <- ioPrimitiveRuntimeName mbIdentity name ->
+              | Just primitiveName <- ioPrimitiveRuntimeName mbIdentity ->
                   resolveIOPrimitiveAsValue ty primitiveName
             Nothing
-              | Just primitiveName <- nativePrimitiveRuntimeName mbIdentity name ->
+              | Just primitiveName <- nativePrimitiveRuntimeName mbIdentity ->
                   resolveNativePrimitiveAsValue ty primitiveName
             Nothing ->
               liftEither (BackendLLVMUnknownFunction name)
@@ -11164,7 +11185,7 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
             _ ->
               liftEither (BackendLLVMArityMismatch name 1 (length args))
     Nothing
-      | Just primitiveName <- ioPrimitiveRuntimeName mbIdentity name -> do
+      | Just primitiveName <- ioPrimitiveRuntimeName mbIdentity -> do
           callArgs <- traverse (lowerExpr env exprEnv context) args
           let wrapperName = nativeIOWrapperName primitiveName
           result <- emitAssign "io.call" LLVMPtr (LLVMCall wrapperName [(lvLLVMType arg, lvOperand arg) | arg <- callArgs])
@@ -11173,7 +11194,7 @@ lowerGlobalCall env exprEnv context resultTy mbIdentity name typeArgs args =
       liftEither (BackendLLVMUnknownFunction name)
   where
     primitiveCallMatches expected =
-      primitiveRuntimeName mbIdentity name == Just expected
+      primitiveRuntimeName mbIdentity == Just expected
 
     lowerSaturatedGlobalCall binding resolvedTypeArgs form =
       if requiresInlineCall form
@@ -12642,24 +12663,20 @@ lowerBackendTypeM env context ty =
 lowerBackendType :: ProgramEnv -> String -> BackendType -> Either BackendLLVMError LLVMType
 lowerBackendType env context ty =
   case ty of
-    BTBaseWithIdentity identity base@(BaseTy name)
+    BTBaseWithIdentity identity base@(BaseTy _)
       | backendBuiltinHeadMatches "Int" identity base -> Right (LLVMInt 64)
       | backendBuiltinHeadMatches "Bool" identity base -> Right (LLVMInt 1)
       | backendBuiltinHeadMatches "Char" identity base -> Right (LLVMInt 32)
       | backendBuiltinHeadMatches "String" identity base -> Right LLVMPtr
       | backendBuiltinHeadMatches ioTypeName identity base -> Right LLVMPtr
-      | maybe False (const True) (lookupDataRuntimeByHead (peBase env) identity name) -> Right LLVMPtr
+      | maybe False (const True) (lookupDataRuntimeByHead (peBase env) identity) -> Right LLVMPtr
       | otherwise -> Left (BackendLLVMUnsupportedType context ty)
-    BTConWithIdentity identity base@(BaseTy name) _
+    BTConWithIdentity identity base@(BaseTy _) _
       | backendBuiltinHeadMatches ioTypeName identity base -> Right LLVMPtr
-      | maybe False (const True) (lookupDataRuntimeByHead (peBase env) identity name) -> Right LLVMPtr
+      | maybe False (const True) (lookupDataRuntimeByHead (peBase env) identity) -> Right LLVMPtr
       | otherwise -> Left (BackendLLVMUnsupportedType context ty)
-    BTBase (BaseTy name)
-      | maybe False (const True) (lookupDataRuntimeByHead (peBase env) Nothing name) -> Right LLVMPtr
-      | otherwise -> Left (BackendLLVMUnsupportedType context ty)
-    BTCon (BaseTy name) _
-      | maybe False (const True) (lookupDataRuntimeByHead (peBase env) Nothing name) -> Right LLVMPtr
-      | otherwise -> Left (BackendLLVMUnsupportedType context ty)
+    BTBase {} -> Left (BackendLLVMUnsupportedType context ty)
+    BTCon {} -> Left (BackendLLVMUnsupportedType context ty)
     BTMu {} -> Right LLVMPtr
     BTVar {} -> Left (BackendLLVMUnsupportedType context ty)
     BTVarApp {} -> Left (BackendLLVMUnsupportedType context ty)

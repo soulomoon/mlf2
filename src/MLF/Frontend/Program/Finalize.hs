@@ -258,13 +258,13 @@ data ModuleBindingReadContext = ModuleBindingReadContext
   }
 
 data DeferredExternalBindingIndex = DeferredExternalBindingIndex
-  { deferredExternalBindingRefByName :: Map String DeferredRef,
-    deferredExternalBindingByRef :: Map DeferredRef DeferredProgramObligation
+  { deferredExternalBindingByRef :: Map DeferredRef DeferredProgramObligation,
+    deferredExternalBindingRefByAlias :: Map String DeferredRef
   }
 
 data RuntimeExternalBindingIndex = RuntimeExternalBindingIndex
-  { runtimeExternalBindingKeyByName :: Map String ModuleBindingReadKey,
-    runtimeExternalBindingByKey :: Map ModuleBindingReadKey X.ResolvedVar
+  { runtimeExternalBindingByKey :: Map ModuleBindingReadKey X.ResolvedVar,
+    runtimeExternalBindingKeyByAlias :: Map String ModuleBindingReadKey
   }
 
 data BindingCheckReadContext = BindingCheckReadContext
@@ -2053,17 +2053,17 @@ runtimeExternalBindingIndex context =
 runtimeExternalBindingIndexFromScope :: ElaborateScope -> Map String ElabType -> RuntimeExternalBindingIndex
 runtimeExternalBindingIndexFromScope scope runtimeTypes =
   RuntimeExternalBindingIndex
-    { runtimeExternalBindingKeyByName =
-        Map.fromList
-          [ (runtimeName, key)
-          | (runtimeName, keys) <- Map.toList keysByRuntimeName
-          , [key] <- [Set.toList keys]
-          ],
-      runtimeExternalBindingByKey =
+    { runtimeExternalBindingByKey =
         Map.fromList
           [ (key, resolved)
           | (key, resolved : rest) <- Map.toList resolvedByKey,
             all (sameRuntimeExternalBinding resolved) rest
+          ],
+      runtimeExternalBindingKeyByAlias =
+        Map.fromList
+          [ (alias, key)
+          | (alias, keys) <- Map.toList keysByAlias
+          , [key] <- [Set.toList keys]
           ]
     }
   where
@@ -2071,13 +2071,13 @@ runtimeExternalBindingIndexFromScope scope runtimeTypes =
       [ (runtimeName, key, resolved)
       | valueInfo <- Map.elems (elaborateScopeValues scope),
         Just (runtimeName, details) <- [valueResolvedDetails valueInfo],
-        Just ty <- [Map.lookup runtimeName runtimeTypes],
-            Just key <- [idDetailsReadKeyMaybe details],
-            let resolved =
-                  X.ResolvedVar
-                    { X.resolvedVarType = ty,
-                      X.resolvedVarDetails = details
-                    }
+        Just ty <- [lookupUniqueAliasValue runtimeTypes runtimeName details],
+        Just key <- [idDetailsReadKeyMaybe details],
+        let resolved =
+              X.ResolvedVar
+                { X.resolvedVarType = ty,
+                  X.resolvedVarDetails = details
+                }
       ]
 
     valueResolvedDetails valueInfo =
@@ -2098,7 +2098,7 @@ runtimeExternalBindingIndexFromScope scope runtimeTypes =
         OverloadedMethod {} ->
           Nothing
 
-    keysByRuntimeName =
+    keysByAlias =
       Map.fromListWith
         Set.union
         [ (alias, Set.singleton key)
@@ -2120,7 +2120,7 @@ runtimeExternalBindingIndexFromScope scope runtimeTypes =
 runtimeExternalBindingIdentity :: RuntimeExternalBindingIndex -> String -> Maybe ExternalBindingIdentity
 runtimeExternalBindingIdentity index name = do
   resolved <- lookupRuntimeExternalBindingByName name index
-  pure (externalBindingIdentityFromDetails name (X.resolvedVarDetails resolved))
+  pure (externalBindingIdentityFromDetails (X.resolvedVarRuntimeName resolved) (X.resolvedVarDetails resolved))
 
 runtimeSourceTypesWithIdentityAliases :: Map String SrcType -> RuntimeExternalBindingIndex -> Map String SrcType
 runtimeSourceTypesWithIdentityAliases runtimeSourceTypes index =
@@ -2130,9 +2130,9 @@ runtimeSourceTypesWithIdentityAliases runtimeSourceTypes index =
       Map.fromListWith
         (++)
         [ (alias, [(X.resolvedVarIdentityKey resolved, ty)])
-        | (runtimeName, key) <- Map.toList (runtimeExternalBindingKeyByName index),
+        | (runtimeName, key) <- Map.toList (runtimeExternalBindingKeyByAlias index),
           Just resolved <- [Map.lookup key (runtimeExternalBindingByKey index)],
-          Just ty <- [Map.lookup runtimeName runtimeSourceTypes],
+          Just ty <- [lookupUniqueAliasValue runtimeSourceTypes runtimeName (X.resolvedVarDetails resolved)],
           alias <- idDetailsAliasNamesWith runtimeName (X.resolvedVarDetails resolved)
         ]
 
@@ -2145,15 +2145,15 @@ runtimeSourceTypesWithIdentityAliases runtimeSourceTypes index =
 deferredExternalBindingIndex :: DeferredObligations -> DeferredExternalBindingIndex
 deferredExternalBindingIndex obligations =
   DeferredExternalBindingIndex
-    { deferredExternalBindingRefByName =
-        Map.fromList
-          [ (alias, ref)
-          | (alias, DeferredId ref) <- Map.toList refAliases
-          ],
-      deferredExternalBindingByRef =
+    { deferredExternalBindingByRef =
         Map.fromList
           [ (deferredProgramObligationRef obligation, obligation)
           | obligation <- Map.elems obligations
+          ],
+      deferredExternalBindingRefByAlias =
+        Map.fromList
+          [ (alias, ref)
+          | (alias, DeferredId ref) <- Map.toList refAliases
           ]
     }
   where
@@ -2454,13 +2454,35 @@ sourceArrowCountAfterForalls ty =
 
 lookupDeferredExternalBinding :: String -> DeferredExternalBindingIndex -> Maybe DeferredProgramObligation
 lookupDeferredExternalBinding name index =
-  Map.lookup name (deferredExternalBindingRefByName index)
-    >>= (`Map.lookup` deferredExternalBindingByRef index)
+  Map.lookup name (deferredExternalBindingRefByAlias index)
+    >>= lookupDeferredExternalBindingByRef index
+
+lookupDeferredExternalBindingByRef :: DeferredExternalBindingIndex -> DeferredRef -> Maybe DeferredProgramObligation
+lookupDeferredExternalBindingByRef index ref =
+  Map.lookup ref (deferredExternalBindingByRef index)
 
 lookupRuntimeExternalBindingByName :: String -> RuntimeExternalBindingIndex -> Maybe X.ResolvedVar
 lookupRuntimeExternalBindingByName name index =
-  Map.lookup name (runtimeExternalBindingKeyByName index)
-    >>= (`Map.lookup` runtimeExternalBindingByKey index)
+  Map.lookup name (runtimeExternalBindingKeyByAlias index)
+    >>= lookupRuntimeExternalBindingByKey index
+
+lookupRuntimeExternalBindingByKey :: RuntimeExternalBindingIndex -> ModuleBindingReadKey -> Maybe X.ResolvedVar
+lookupRuntimeExternalBindingByKey index key =
+  Map.lookup key (runtimeExternalBindingByKey index)
+
+lookupUniqueAliasValue :: Eq a => Map String a -> String -> IdDetails -> Maybe a
+lookupUniqueAliasValue values runtimeName details =
+  case valuesForAliases of
+    [] -> Nothing
+    value : rest
+      | all (== value) rest -> Just value
+      | otherwise -> Nothing
+  where
+    valuesForAliases =
+      [ value
+      | alias <- idDetailsAliasNamesWith runtimeName details,
+        Just value <- [Map.lookup alias values]
+      ]
 
 sourceTypeHasForall :: SrcType -> Bool
 sourceTypeHasForall ty =
@@ -2732,7 +2754,7 @@ runtimeTypeCheckEnv context =
     resolvedRuntimeNames =
       Set.fromList
         [ name
-        | name <- Map.keys (runtimeExternalBindingKeyByName runtimeIndex),
+        | name <- Map.keys (runtimeExternalBindingKeyByAlias runtimeIndex),
           Map.member name runtimeTypes
         ]
 

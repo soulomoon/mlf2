@@ -2533,7 +2533,7 @@ spec = describe "MLF.Backend.Convert" $ do
             )
             checked0
     convertCheckedProgram checked
-      `shouldBe` Left (BackendValidationFailed (BackendUnknownVariable "Main__$stale_maker"))
+      `shouldBe` Left (BackendUnsupportedCaseShape "identity-incomplete backend resolved reference `Main__$stale_maker`")
 
   it "rejects stale top-level identity payloads" $ do
     checked0 <- requireChecked topLevelClosureCallProgram
@@ -2555,7 +2555,7 @@ spec = describe "MLF.Backend.Convert" $ do
             )
             checked0
     convertCheckedProgram checked
-      `shouldBe` Left (BackendValidationFailed (BackendUnknownVariable "Main__$stale_maker"))
+      `shouldBe` Left (BackendUnsupportedCaseShape "identity-incomplete backend resolved reference `Main__$stale_maker`")
 
   it "looks up top-level closure demands by resolved identity instead of runtime spelling" $ do
     checked0 <- requireChecked localDirectAliasPartialApplicationBaseProgram

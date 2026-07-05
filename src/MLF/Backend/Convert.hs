@@ -197,7 +197,7 @@ import MLF.Frontend.Program.Types
 import MLF.Frontend.Symbol (lookupSymbolIdentityExact, memberSymbolIdentityExact, sameSymbolIdentity, symbolIdentityAliasMap, symbolIdentityAliasNames, symbolIdentityPayloadKey, symbolIdentityStableName, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit, SrcBound (..), SrcTy (..), SrcType)
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
-import MLF.Types.Identity (DeferredRef, IdDetails (..), IdentityGenerator, LocalRef, StructuralTypeBinderRole (..), UniqueIdentity (..), advanceIdentityGeneratorPast, deferredRefIdentity, deferredRefName, freshDeferredRef, freshIdentity, freshLocalRef, idDetailsGeneratedIdentities, idDetailsSymbolIdentity, identityGeneratorAfter, primitiveRefFromSymbol, symbolGeneratedIdentities, typeBinderIdentityAliasMap, typeBinderIdentityFromStructural, typeBinderIdentityNode, typeBinderIdentityStructural)
+import MLF.Types.Identity (DeferredRef, IdDetails (..), IdentityGenerator, LocalRef, StructuralTypeBinderRole (..), UniqueIdentity (..), advanceIdentityGeneratorPast, deferredRefIdentity, deferredRefName, freshDeferredRef, freshIdentity, freshLocalRef, idDetailsGeneratedIdentities, idDetailsSymbolIdentity, identityGeneratorAfter, primitiveRefFromSymbol, symbolGeneratedIdentities, typeBinderIdentityAliasMap, typeBinderIdentityFromStructural, typeBinderIdentityGeneratedUnique, typeBinderIdentityNode, typeBinderIdentityStructural)
 import MLF.Util.Names (freshNameLike)
 
 data BackendConversionError
@@ -461,14 +461,14 @@ convertCheckedProgram checked = do
           }
   modules0 <- convertCheckedModules context initialEnv (checkedProgramModules checked)
   let mainIdentity = resolvedVarSymbolIdentity (checkedProgramMainResolvedVar checked)
-      mainName = backendMainName mainIdentity modules0 (checkedProgramMain checked)
+  mainName <- backendMainName context mainIdentity (checkedProgramMain checked)
   let program =
         BackendProgramWithIdentity
           { backendProgramModulesWithIdentity = modules0,
             backendProgramMainIdentity = mainIdentity,
             backendProgramMainWithIdentity = mainName
           }
-  case validateBackendProgram program of
+  case validateBackendProgramProduction program of
     Right () -> Right program
     Left err -> Left (BackendValidationFailed err)
 
@@ -507,18 +507,12 @@ convertedProgramClosureGlobals context0 env checked =
         then pure globalIdentities
         else closureGlobalFixedPoint globalIdentities'
 
-backendMainName :: Maybe SymbolIdentity -> [BackendModule] -> String -> String
-backendMainName mbIdentity modules0 fallback =
+backendMainName :: ConvertContext -> Maybe SymbolIdentity -> String -> Either BackendConversionError String
+backendMainName context mbIdentity fallback =
   case mbIdentity of
-    Just identity ->
-      case find ((== Just identity) . backendBindingIdentity) bindings of
-        Just binding -> backendBindingName binding
-        Nothing -> fallback
+    Just identity -> requireTermRuntimeNameByIdentity context "main binding" fallback identity
     Nothing ->
-      fallback
-  where
-    bindings =
-      concatMap backendModuleBindings modules0
+      Left (identityIncompleteBackendReference "main binding" fallback)
 
 buildInitialEnv :: ConvertContext -> CheckedProgram -> Either BackendConversionError Env
 buildInitialEnv context checked = do
@@ -628,10 +622,11 @@ rejectOpaqueBuiltinMain _checked =
 
 convertCheckedBinding :: ConvertContext -> Env -> CheckedModule -> IdentityGenerator -> CheckedBinding -> Either BackendConversionError ([BackendBinding], IdentityGenerator)
 convertCheckedBinding context env checkedModule generator0 binding = do
+  bindingName <- checkedBindingBackendRuntimeName context binding
   let bindingContext =
         context
           { ccCurrentModuleIdentity = Just (checkedModuleIdentity checkedModule),
-            ccCurrentBindingName = checkedBindingRuntimeName binding
+            ccCurrentBindingName = bindingName
           }
   canonicalElabTyOpen <- checkedBindingCanonicalTypeOpen context checkedModule binding
   let freeTypeBinders = sortTypeBinderRefsByIdentity (freeElabTypeVarRefs canonicalElabTyOpen)
@@ -641,7 +636,7 @@ convertCheckedBinding context env checkedModule generator0 binding = do
           alignLeadingTypeAbsRefsToType canonicalElabTy (checkedBindingTerm binding)
   rawBindingTy <- convertElabType canonicalElabTy
   let bindingTy =
-        canonicalizeBackendType context $
+        normalizeBackendTypeForContext context $
           applySourceTypeIdentity
             context
             (scopeForModule context (checkedModuleIdentity checkedModule))
@@ -697,7 +692,7 @@ convertCheckedBinding context env checkedModule generator0 binding = do
   let convertedBinding =
         BackendBindingWithMetadata
           { backendBindingIdentity = checkedBindingSymbolIdentity binding,
-            backendBindingNameWithMetadata = checkedBindingRuntimeName binding,
+            backendBindingNameWithMetadata = bindingName,
             backendBindingTypeWithMetadata = convertedBindingTy,
             backendBindingExprWithMetadata = expr,
             backendBindingExportedAsMainWithMetadata = checkedBindingExportedAsMain binding,
@@ -1120,10 +1115,6 @@ freeResolvedTermVariables =
           go bound body
         EUnroll body ->
           go bound body
-
-freeResolvedTermReferenceNames :: XmlfTerm -> Set.Set String
-freeResolvedTermReferenceNames =
-  Set.unions . map resolvedVarAliasNames . freeResolvedTermVariables
 
 freeElabTypeVarRefs :: Ty var -> [TypeBinderRef]
 freeElabTypeVarRefs =
@@ -2358,6 +2349,14 @@ checkedBindingSymbolIdentity =
 checkedBindingRuntimeName :: CheckedBinding -> String
 checkedBindingRuntimeName =
   resolvedVarRuntimeName . checkedBindingResolvedVar
+
+checkedBindingBackendRuntimeName :: ConvertContext -> CheckedBinding -> Either BackendConversionError String
+checkedBindingBackendRuntimeName context binding =
+  case checkedBindingSymbolIdentity binding of
+    Just symbol ->
+      requireTermRuntimeNameByIdentity context "binding" (checkedBindingRuntimeName binding) symbol
+    Nothing ->
+      Left (identityIncompleteBackendReference "binding" (checkedBindingRuntimeName binding))
 
 bindingDataHint :: Map SymbolIdentity DataMeta -> CheckedBinding -> Maybe DataMeta
 bindingDataHint dataMetasByIdentity binding =
@@ -3742,25 +3741,18 @@ packageDirectFunctionValue ::
   ConvertM BackendExpr
 packageDirectFunctionValue context scope resultTy headTerm headExpr = do
   (entryIdentity, entryName) <- freshClosureEntryName context (partialApplicationHint headTerm)
+  usedNames <- liftEitherConvert (closureGeneratedNameScope context scope headTerm)
   let (paramTys, _) = splitBackendArrows resultTy
       (paramNames, _) =
         freshNamesLike
-          (closureGeneratedNameScope context scope headTerm)
+          usedNames
           (take (length paramTys) closureArgNameCandidates)
   params <- freshBackendClosureParams (zip paramNames paramTys)
   let paramVars = map backendClosureParamVar params
   (captures, functionExpr) <-
     case directLocalCalleeCapture context scope headTerm of
       Just captureResolved -> do
-        let captureName = resolvedBackendReferenceName context captureResolved
-            captureIdentity = Just (resolvedVarDetails captureResolved)
-            funCapture =
-              BackendClosureCapture
-                { backendClosureCaptureIdentity = captureIdentity,
-                  backendClosureCaptureName = captureName,
-                  backendClosureCaptureType = resultTy,
-                  backendClosureCaptureExpr = headExpr
-                }
+        funCapture <- resolvedBackendClosureCapture context captureResolved resultTy headExpr
         pure ([funCapture], backendClosureCaptureVar funCapture)
       Nothing ->
         do
@@ -3794,9 +3786,10 @@ packagePartialApplication ::
   ConvertM BackendExpr
 packagePartialApplication context env scope resultTy headTerm headTy suppliedParamTys suppliedArgExprs remainingParamTys finalTy = do
   (entryIdentity, entryName) <- freshClosureEntryName context (partialApplicationHint headTerm)
+  usedNames <- liftEitherConvert (closureGeneratedNameScope context scope headTerm)
   let (suppliedCaptureNames, usedAfterSuppliedCaptures) =
         freshNamesLike
-          (closureGeneratedNameScope context scope headTerm)
+          usedNames
           (take (length suppliedParamTys) suppliedCaptureNameCandidates)
       (remainingParamNames, _) =
         freshNamesLike
@@ -3846,16 +3839,8 @@ packagePartialApplication context env scope resultTy headTerm headTy suppliedPar
           else do
             case directLocalCalleeCapture context scope headTerm of
               Just captureResolved -> do
-                let captureName = resolvedBackendReferenceName context captureResolved
-                    captureIdentity = Just (resolvedVarDetails captureResolved)
-                    funCapture =
-                      BackendClosureCapture
-                        { backendClosureCaptureIdentity = captureIdentity,
-                          backendClosureCaptureName = captureName,
-                          backendClosureCaptureType = headTy,
-                          backendClosureCaptureExpr = headExpr
-                        }
-                    funVar = backendClosureCaptureVar funCapture
+                funCapture <- resolvedBackendClosureCapture context captureResolved headTy headExpr
+                let funVar = backendClosureCaptureVar funCapture
                 bodyExpr <- liftEitherConvert (applyPartialDirectArguments funVar headTy allArgs)
                 pure (funCapture : suppliedCaptures, bodyExpr)
               Nothing -> do
@@ -3887,13 +3872,15 @@ freshNamesLike used0 =
       let name = freshNameLike candidate used
        in go (Set.insert name used) (name : names) rest
 
-closureGeneratedNameScope :: ConvertContext -> ClosureScope -> XmlfTerm -> Set.Set String
-closureGeneratedNameScope context scope term =
-  Set.unions
-    [ closureScopeBoundTermNames scope,
-      globalTermRuntimeNames context,
-      freeResolvedTermReferenceNames term
-    ]
+closureGeneratedNameScope :: ConvertContext -> ClosureScope -> XmlfTerm -> Either BackendConversionError (Set.Set String)
+closureGeneratedNameScope context scope term = do
+  freeNames <- freeResolvedTermGeneratedNames context term
+  Right $
+    Set.unions
+      [ closureScopeBoundTermNames scope,
+        globalTermRuntimeNames context,
+        freeNames
+      ]
 
 globalTermRuntimeNames :: ConvertContext -> Set.Set String
 globalTermRuntimeNames =
@@ -3917,11 +3904,56 @@ termResolvedVar =
     EVarNode resolved -> Just resolved
     _ -> Nothing
 
-resolvedBackendReferenceName :: ConvertContext -> ResolvedVar -> String
+freeResolvedTermGeneratedNames :: ConvertContext -> XmlfTerm -> Either BackendConversionError (Set.Set String)
+freeResolvedTermGeneratedNames context term =
+  Set.unions <$> traverse (resolvedBackendReferenceNameAliases context) (freeResolvedTermVariables term)
+
+resolvedBackendReferenceNameAliases :: ConvertContext -> ResolvedVar -> Either BackendConversionError (Set.Set String)
+resolvedBackendReferenceNameAliases context resolved =
+  case resolvedVarSymbolIdentity resolved of
+    Just symbol ->
+      Set.singleton <$> requireTermRuntimeNameByIdentity context "free resolved reference" (resolvedVarReferenceName resolved) symbol
+    Nothing ->
+      Right (resolvedVarAliasNames resolved)
+
+resolvedBackendReferenceName :: ConvertContext -> ResolvedVar -> Either BackendConversionError String
 resolvedBackendReferenceName context resolved =
-  case resolvedVarSymbolIdentity resolved >>= (`lookupSymbolIdentityExact` ccTermRuntimeNamesByIdentity context) of
-    Just runtimeName -> runtimeName
-    Nothing -> resolvedVarReferenceName resolved
+  case resolvedVarSymbolIdentity resolved of
+    Just symbol ->
+      requireTermRuntimeNameByIdentity context "resolved reference" (resolvedVarReferenceName resolved) symbol
+    Nothing ->
+      Right (resolvedVarReferenceName resolved)
+
+requireTermRuntimeNameByIdentity :: ConvertContext -> String -> String -> SymbolIdentity -> Either BackendConversionError String
+requireTermRuntimeNameByIdentity context label fallback symbol =
+  case lookupSymbolIdentityExact symbol (ccTermRuntimeNamesByIdentity context) of
+    Just runtimeName -> Right runtimeName
+    Nothing -> Left (identityIncompleteBackendReference label fallback)
+
+identityIncompleteBackendReference :: String -> String -> BackendConversionError
+identityIncompleteBackendReference label name =
+  BackendUnsupportedCaseShape ("identity-incomplete backend " ++ label ++ " `" ++ name ++ "`")
+
+resolvedBackendVar :: ConvertContext -> BackendType -> ResolvedVar -> ConvertM BackendExpr
+resolvedBackendVar context ty resolved = do
+  name <- liftEitherConvert (resolvedBackendReferenceName context resolved)
+  pure
+    BackendVarWithIdentity
+      { backendExprType = ty,
+        backendVarIdentity = Just (resolvedVarDetails resolved),
+        backendVarName = name
+      }
+
+resolvedBackendClosureCapture :: ConvertContext -> ResolvedVar -> BackendType -> BackendExpr -> ConvertM BackendClosureCapture
+resolvedBackendClosureCapture context resolved ty expr = do
+  name <- liftEitherConvert (resolvedBackendReferenceName context resolved)
+  pure
+    BackendClosureCapture
+      { backendClosureCaptureIdentity = Just (resolvedVarDetails resolved),
+        backendClosureCaptureName = name,
+        backendClosureCaptureType = ty,
+        backendClosureCaptureExpr = expr
+      }
 
 partialFunctionCaptureNameFor :: XmlfTerm -> String
 partialFunctionCaptureNameFor term =
@@ -3944,14 +3976,8 @@ localClosureCapturesForTerm context scope term = do
   where
     convertCapture (resolved, elabTy) = do
       captureTy <- normalizeBackendTypeForContext context <$> liftEitherConvert (convertElabType elabTy)
-      let name = resolvedVarReferenceName resolved
-      pure
-        BackendClosureCapture
-          { backendClosureCaptureIdentity = Just (resolvedVarDetails resolved),
-            backendClosureCaptureName = name,
-            backendClosureCaptureType = captureTy,
-            backendClosureCaptureExpr = BackendVarWithIdentity captureTy (Just (resolvedVarDetails resolved)) name
-          }
+      captureExpr <- resolvedBackendVar context captureTy resolved
+      resolvedBackendClosureCapture context resolved captureTy captureExpr
 
     freeResolvedVarKeys =
       Set.fromList (map resolvedVarIdentityKey (freeResolvedTermVariables term))
@@ -4177,12 +4203,7 @@ convertOrdinaryTerm mode context env scope term resultTy0 =
       case lookupResolvedTermEnvEntry (resolvedTermEnv env) resolved of
         Just (_, envTy) -> do
           backendTy <- normalizeBackendTypeForContext context <$> liftEitherConvert (convertElabType envTy)
-          let varExpr =
-                BackendVarWithIdentity
-                  { backendExprType = backendTy,
-                    backendVarIdentity = Just (resolvedVarDetails resolved),
-                    backendVarName = resolvedBackendReferenceName context resolved
-                  }
+          varExpr <- resolvedBackendVar context backendTy resolved
           case inferExpectedTypeApplications context fallbackTy backendTy of
             Just args
               | not (null args) ->
@@ -4196,16 +4217,12 @@ convertOrdinaryTerm mode context env scope term resultTy0 =
               | backendTypesCompatible context backendTy fallbackTy ->
                   pure varExpr
               | otherwise ->
-                  pure (fallbackReferenceExpr resolved fallbackTy)
+                  fallbackReferenceExpr resolved fallbackTy
         Nothing ->
-          pure (fallbackReferenceExpr resolved fallbackTy)
+          fallbackReferenceExpr resolved fallbackTy
 
     fallbackReferenceExpr resolved fallbackTy =
-      BackendVarWithIdentity
-        { backendExprType = fallbackTy,
-          backendVarIdentity = Just (resolvedVarDetails resolved),
-          backendVarName = resolvedBackendReferenceName context resolved
-        }
+      resolvedBackendVar context fallbackTy resolved
 
     convertLambdaTerm termForClosure resultTy resolved body
       | shouldClosureConvertLambda mode resultTy =
@@ -4633,16 +4650,9 @@ convertLambdaClosure mode context env scope resultTy term = do
       }
   where
     convertCapture (resolved, ty) = do
-      let name = resolvedVarReferenceName resolved
       backendTy <- normalizeBackendTypeForContext context <$> liftEitherConvert (convertElabType ty)
       expr <- convertTermExpectedMode DirectLambda context env scope (Just backendTy) (EVarNode (mapResolvedVarType (const ty) resolved))
-      pure
-        BackendClosureCapture
-          { backendClosureCaptureIdentity = Just (resolvedVarDetails resolved),
-            backendClosureCaptureName = name,
-            backendClosureCaptureType = backendTy,
-            backendClosureCaptureExpr = expr
-          }
+      resolvedBackendClosureCapture context resolved backendTy expr
 
 closureHint :: LambdaMode -> [TermCapture] -> String
 closureHint mode params =
@@ -4704,11 +4714,13 @@ closureBackendParams context resultTy rawParams =
       pure ([], bodyTy)
     go (BTArrow expectedParam restTy) ((resolved, _) : rest) = do
       (params, finalTy) <- go restTy rest
-      pure (resolvedBackendClosureParam resolved expectedParam : params, finalTy)
+      param <- resolvedBackendClosureParam context resolved expectedParam
+      pure (param : params, finalTy)
     go otherTy ((resolved, rawTy) : rest) = do
       rawBackendTy <- normalizeBackendTypeForContext context <$> liftEitherConvert (convertElabType rawTy)
       (params, finalTy) <- go otherTy rest
-      pure (resolvedBackendClosureParam resolved rawBackendTy : params, finalTy)
+      param <- resolvedBackendClosureParam context resolved rawBackendTy
+      pure (param : params, finalTy)
 
 freshClosureEntryName :: ConvertContext -> String -> ConvertM (UniqueIdentity, String)
 freshClosureEntryName context hint = do
@@ -4762,13 +4774,15 @@ freshBackendClosureParams :: [(String, BackendType)] -> ConvertM [BackendClosure
 freshBackendClosureParams =
   traverse (uncurry freshBackendClosureParam)
 
-resolvedBackendClosureParam :: ResolvedVar -> BackendType -> BackendClosureParam
-resolvedBackendClosureParam resolved ty =
-  BackendClosureParam
-    { backendClosureParamIdentity = Just (resolvedVarDetails resolved),
-      backendClosureParamName = resolvedVarReferenceName resolved,
-      backendClosureParamType = ty
-    }
+resolvedBackendClosureParam :: ConvertContext -> ResolvedVar -> BackendType -> ConvertM BackendClosureParam
+resolvedBackendClosureParam context resolved ty = do
+  name <- liftEitherConvert (resolvedBackendReferenceName context resolved)
+  pure
+    BackendClosureParam
+      { backendClosureParamIdentity = Just (resolvedVarDetails resolved),
+        backendClosureParamName = name,
+        backendClosureParamType = ty
+      }
 
 backendClosureParamVar :: BackendClosureParam -> BackendExpr
 backendClosureParamVar param =
@@ -5813,7 +5827,7 @@ structuralConstructorHeadMatches context constructorMeta headTerm =
 
 structuralConstructorResultMatches :: ConvertContext -> ConstructorMeta -> ElabType -> Bool
 structuralConstructorResultMatches context constructorMeta resultTy =
-  case convertElabType resultTy >>= backendTypeStructuralDataHead of
+  case convertElabType resultTy >>= backendTypeStructuralDataHead . canonicalizeStructuralMuNames context of
     Right resultDataHead -> constructorDataNameMatches context constructorMeta resultDataHead
     Left _ -> False
 
@@ -6401,19 +6415,41 @@ canonicalizeStructuralMuNames context =
         BTVarAppWithIdentity identity name args -> BTVarAppWithIdentity identity name (fmap go args)
         BTForallWithIdentity identity name mb body -> BTForallWithIdentity identity name (fmap go mb) (go body)
         BTMuWithIdentity identity name body ->
-          let (name', body') = canonicalizeStructuralMuBinder context identity name body
-           in BTMuWithIdentity identity name' (go body')
+          let (identity', name', body') = canonicalizeStructuralMuBinder context identity name body
+           in BTMuWithIdentity identity' name' (go body')
         BTBottom -> BTBottom
 
-canonicalizeStructuralMuBinder :: ConvertContext -> Maybe TypeBinderIdentity -> String -> BackendType -> (String, BackendType)
+canonicalizeStructuralMuBinder :: ConvertContext -> Maybe TypeBinderIdentity -> String -> BackendType -> (Maybe TypeBinderIdentity, String, BackendType)
 canonicalizeStructuralMuBinder context identity name body =
   case structuralRecursiveDataMetaByIdentity context identity <|> structuralRecursiveDataMetaByFallback context identity name of
     Just dataMeta ->
-      let canonicalName = "$" ++ backendDataName (dmBackend dataMeta) ++ "_self"
-       in if name == canonicalName
-            then (name, body)
-            else (canonicalName, substituteBackendTypeForBinder identity name (BTVarWithIdentity identity canonicalName) body)
-    Nothing -> (name, body)
+      let canonicalIdentity =
+            typeBinderIdentityFromStructural . symbolUniqueIdentity <$> backendDataIdentity (dmBackend dataMeta) <*> pure StructuralSelfBinder
+          canonicalName = "$" ++ backendDataName (dmBackend dataMeta) ++ "_self"
+          replacement = BTVarWithIdentity canonicalIdentity canonicalName
+          selfBody =
+            if identity == canonicalIdentity && name == canonicalName
+              then body
+              else substituteBackendTypeForBinder identity name replacement body
+       in (canonicalIdentity, canonicalName, canonicalizeStructuralMuResultBinder dataMeta selfBody)
+    Nothing -> (identity, name, body)
+
+canonicalizeStructuralMuResultBinder :: DataMeta -> BackendType -> BackendType
+canonicalizeStructuralMuResultBinder dataMeta =
+  \case
+    BTForallWithIdentity resultIdentity resultName mbBound body ->
+      let canonicalIdentity =
+            typeBinderIdentityFromStructural . symbolUniqueIdentity <$> backendDataIdentity (dmBackend dataMeta) <*> pure StructuralResultBinder
+          canonicalName = "$" ++ backendDataName (dmBackend dataMeta) ++ "_result"
+          replacement = BTVarWithIdentity canonicalIdentity canonicalName
+          replaceResultBinder =
+            substituteBackendTypeForBinder resultIdentity resultName replacement
+       in BTForallWithIdentity
+            canonicalIdentity
+            canonicalName
+            (fmap replaceResultBinder mbBound)
+            (replaceResultBinder body)
+    body -> body
 
 structuralRecursiveDataMetaByIdentity :: ConvertContext -> Maybe TypeBinderIdentity -> Maybe DataMeta
 structuralRecursiveDataMetaByIdentity context identity = do
@@ -6431,6 +6467,7 @@ structuralRecursiveDataMetaByIdentity context identity = do
 structuralRecursiveDataMetaByFallback :: ConvertContext -> Maybe TypeBinderIdentity -> String -> Maybe DataMeta
 structuralRecursiveDataMetaByFallback context identity name
   | Structural.structuralIdentityAllowsNameFallback identity = structuralRecursiveDataMeta context name
+  | maybe False (const True) (identity >>= typeBinderIdentityGeneratedUnique) = structuralRecursiveDataMeta context name
   | otherwise = Nothing
 
 structuralSelfIdentityUnique :: Maybe TypeBinderIdentity -> Maybe UniqueIdentity
@@ -6452,18 +6489,18 @@ recoverStructuralBackendType context =
         BTVarAppWithIdentity identity name args -> BTVarAppWithIdentity identity name (fmap (go seen) args)
         BTForallWithIdentity identity name mb body -> BTForallWithIdentity identity name (fmap (go seen) mb) (go seen body)
         BTMuWithIdentity identity name body ->
-          let (name', body') = canonicalizeStructuralMuBinder context identity name body
+          let (identity', name', body') = canonicalizeStructuralMuBinder context identity name body
               seen' = Set.insert name' (Set.insert name seen)
            in if Set.member name seen || Set.member name' seen
-                then BTMuWithIdentity identity name' (canonicalizeStructuralMuNames context body')
-                else case structuralRecursiveDataMetaByIdentity context identity <|> structuralRecursiveDataMetaByFallback context identity name' <|> structuralRecursiveDataMetaByBody identity name' (go seen') body' of
+                then BTMuWithIdentity identity' name' (canonicalizeStructuralMuNames context body')
+                else case structuralRecursiveDataMetaByIdentity context identity' <|> structuralRecursiveDataMetaByFallback context identity' name' <|> structuralRecursiveDataMetaByBody identity' name' (go seen') body' of
                   Just dataMeta
                     | null (backendDataParameterRefs (dmBackend dataMeta)) ->
                         backendDataType (backendDataIdentity (dmBackend dataMeta)) (backendDataName (dmBackend dataMeta)) []
                   Just dataMeta
-                    | Just args <- structuralBackendDataArguments identity name' (go seen') dataMeta body' ->
+                    | Just args <- structuralBackendDataArguments identity' name' (go seen') dataMeta body' ->
                         backendDataType (backendDataIdentity (dmBackend dataMeta)) (backendDataName (dmBackend dataMeta)) args
-                  _ -> BTMuWithIdentity identity name' (go seen' body')
+                  _ -> BTMuWithIdentity identity' name' (go seen' body')
         BTBottom -> BTBottom
 
     structuralRecursiveDataMetaByBody muIdentity muName recoverFieldTy body =
