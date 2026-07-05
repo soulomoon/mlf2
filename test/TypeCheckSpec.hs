@@ -58,6 +58,7 @@ import MLF.Types.Elab
     , resolvedVarConstructorRef
     , resolvedVarIsLocal
     , resolvedVarReferenceName
+    , resolvedVarRuntimeName
     , tBase
     , tCon
     , schemeBinderRefs
@@ -93,7 +94,7 @@ import MLF.Types.Identity
     , UniqueIdentity(..)
     , freshDeferredRef
     , freshLocalRef
-    , idDetailsAliasMap
+    , idDetailsAliasMapWith
     , idDetailsConstructorRef
     , idDetailsDisplayName
     , idDetailsIsLocal
@@ -132,20 +133,20 @@ shouldBeRightAlphaEq actual expected =
         other -> other `shouldBe` Right expected
 
 loweredBindingIdentityFromDetails :: String -> IdDetails -> LoweredBindingIdentity
-loweredBindingIdentityFromDetails runtimeName details =
+loweredBindingIdentityFromDetails _runtimeName details =
     loweredBindingIdentityFromResolvedVar
         ResolvedVar
-            { resolvedVarRuntimeName = runtimeName
-            , resolvedVarType = TBottom
+            {
+            resolvedVarType = TBottom
             , resolvedVarDetails = details
             }
 
 externalBindingIdentityFromDetails :: String -> IdDetails -> ExternalBindingIdentity
-externalBindingIdentityFromDetails runtimeName details =
+externalBindingIdentityFromDetails _runtimeName details =
     externalBindingIdentityFromResolvedVar
         ResolvedVar
-            { resolvedVarRuntimeName = runtimeName
-            , resolvedVarType = TBottom
+            {
+            resolvedVarType = TBottom
             , resolvedVarDetails = details
             }
 
@@ -312,8 +313,8 @@ spec = describe "Phase 7 typecheck" $ do
     it "rejects same-spelled top-level references with different explicit identity" $ do
         let topLevelResolved unique moduleName ty =
                 ResolvedVar
-                    { resolvedVarRuntimeName = "x"
-                    , resolvedVarType = ty
+                    {
+                    resolvedVarType = ty
                     , resolvedVarDetails =
                         TopLevelId (generatedSymbolIdentity unique SymbolValue moduleName "x" Nothing)
                     }
@@ -321,50 +322,50 @@ spec = describe "Phase 7 typecheck" $ do
             stale = topLevelResolved 11 "Stale" intTy
             env = mkTypeCheckEnvWithResolvedTerms [(actual, intTy)] Map.empty
         typeCheckWithEnv env (EVarNode actual) `shouldBe` Right intTy
-        typeCheckWithEnv env (EVarNode stale) `shouldBe` Left (TCUnboundVar "x")
+        typeCheckWithEnv env (EVarNode stale) `shouldBe` Left (TCUnboundVar "Stale__x")
 
     it "does not resolve top-level references through conflicting identity payloads" $ do
         let actual =
                 ResolvedVar
-                    { resolvedVarRuntimeName = "x"
-                    , resolvedVarType = intTy
+                    {
+                    resolvedVarType = intTy
                     , resolvedVarDetails =
                         TopLevelId (generatedSymbolIdentity 10 SymbolValue "Actual" "x" Nothing)
                     }
             stale =
                 ResolvedVar
-                    { resolvedVarRuntimeName = "x"
-                    , resolvedVarType = intTy
+                    {
+                    resolvedVarType = intTy
                     , resolvedVarDetails =
                         TopLevelId (generatedSymbolIdentity 10 SymbolValue "Actual" "stale-x" Nothing)
                     }
             env = mkTypeCheckEnvWithResolvedTerms [(actual, intTy)] Map.empty
         typeCheckWithEnv env (EVarNode actual) `shouldBe` Right intTy
-        typeCheckWithEnv env (EVarNode stale) `shouldBe` Left (TCUnboundVar "x")
+        typeCheckWithEnv env (EVarNode stale) `shouldBe` Left (TCUnboundVar "Actual__stale-x")
 
     it "does not resolve top-level identity through a same-named environment identity" $ do
         let envResolved =
                 ResolvedVar
-                    { resolvedVarRuntimeName = "x"
-                    , resolvedVarType = intTy
+                    {
+                    resolvedVarType = intTy
                     , resolvedVarDetails =
                         EnvId (envRefFromIdentity (UniqueIdentity 12) "x")
                     }
             resolved =
                 ResolvedVar
-                    { resolvedVarRuntimeName = "x"
-                    , resolvedVarType = intTy
+                    {
+                    resolvedVarType = intTy
                     , resolvedVarDetails =
                         TopLevelId (generatedSymbolIdentity 12 SymbolValue "Actual" "x" Nothing)
                     }
             env = mkTypeCheckEnvWithResolvedTerms [(envResolved, intTy)] Map.empty
-        typeCheckWithEnv env (EVarNode resolved) `shouldBe` Left (TCUnboundVar "x")
+        typeCheckWithEnv env (EVarNode resolved) `shouldBe` Left (TCUnboundVar "Actual__x")
 
     it "does not resolve stale environment identity through a same-named environment identity" $ do
         let envResolved identity =
                 ResolvedVar
-                    { resolvedVarRuntimeName = "x"
-                    , resolvedVarType = intTy
+                    {
+                    resolvedVarType = intTy
                     , resolvedVarDetails =
                         EnvId (envRefFromIdentity (UniqueIdentity identity) "x")
                     }
@@ -377,8 +378,8 @@ spec = describe "Phase 7 typecheck" $ do
     it "seeds fresh identities after environment identities already present in terms" $ do
         let envResolved identity =
                 ResolvedVar
-                    { resolvedVarRuntimeName = "external"
-                    , resolvedVarType = intTy
+                    {
+                    resolvedVarType = intTy
                     , resolvedVarDetails =
                         EnvId (envRefFromIdentity (UniqueIdentity identity) "external")
                     }
@@ -389,8 +390,8 @@ spec = describe "Phase 7 typecheck" $ do
     it "seeds fresh identities after top-level symbol identities already present in terms" $ do
         let topLevelResolved identity =
                 ResolvedVar
-                    { resolvedVarRuntimeName = "external"
-                    , resolvedVarType = intTy
+                    {
+                    resolvedVarType = intTy
                     , resolvedVarDetails =
                         TopLevelId
                             (symbolIdentityFromParts (UniqueIdentity identity) SymbolValue "Actual" "external" Nothing)
@@ -407,8 +408,8 @@ spec = describe "Phase 7 typecheck" $ do
             term =
                 EVarNode
                     ResolvedVar
-                        { resolvedVarRuntimeName = "show"
-                        , resolvedVarType = intTy
+                        {
+                        resolvedVarType = intTy
                         , resolvedVarDetails = MethodId methodIdentity
                         }
             (freshRef, _) = freshLocalRef "local" (identityGeneratorAfterTerm term)
@@ -425,8 +426,8 @@ spec = describe "Phase 7 typecheck" $ do
             term =
                 EVarNode
                     ResolvedVar
-                        { resolvedVarRuntimeName = "x"
-                        , resolvedVarType = tVarWithRef generatedRef
+                        {
+                        resolvedVarType = tVarWithRef generatedRef
                         , resolvedVarDetails = LocalId (localRefFromNodeId "x" (NodeId 0))
                         }
             (freshRef, _) = freshLocalRef "local" (identityGeneratorAfterTerm term)
@@ -442,8 +443,8 @@ spec = describe "Phase 7 typecheck" $ do
             body =
                 EVarNode
                     ResolvedVar
-                        { resolvedVarRuntimeName = "y"
-                        , resolvedVarType = tVarWithRef generatedRef
+                        {
+                        resolvedVarType = tVarWithRef generatedRef
                         , resolvedVarDetails = LocalId (localRefFromNodeId "y" (NodeId 1))
                         }
         case mkTestLocalLam "x" (tVarWithRef generatedRef) body of
@@ -481,8 +482,8 @@ spec = describe "Phase 7 typecheck" $ do
                 generatedSymbolIdentity unique SymbolValue moduleName "x" Nothing
             topLevelResolved unique moduleName =
                 ResolvedVar
-                    { resolvedVarRuntimeName = "x"
-                    , resolvedVarType = builtinIntTy
+                    {
+                    resolvedVarType = builtinIntTy
                     , resolvedVarDetails = TopLevelId (symbol unique moduleName)
                     }
             externalIdentity =
@@ -500,7 +501,7 @@ spec = describe "Phase 7 typecheck" $ do
             Right prepared -> do
                 let env = preparedExternalTypeCheckEnv prepared
                 typeCheckWithEnv env (EVarNode (topLevelResolved 20 "Actual")) `shouldBe` Right builtinIntTy
-                typeCheckWithEnv env (EVarNode (topLevelResolved 21 "Stale")) `shouldBe` Left (TCUnboundVar "x")
+                typeCheckWithEnv env (EVarNode (topLevelResolved 21 "Stale")) `shouldBe` Left (TCUnboundVar "Stale__x")
 
     it "uses external binding identity aliases during constraint generation" $ do
         let symbol =
@@ -598,8 +599,8 @@ spec = describe "Phase 7 typecheck" $ do
                 generatedSymbolIdentity unique SymbolValue moduleName "x" Nothing
             topLevelResolved unique moduleName =
                 ResolvedVar
-                    { resolvedVarRuntimeName = "x"
-                    , resolvedVarType = builtinIntTy
+                    {
+                    resolvedVarType = builtinIntTy
                     , resolvedVarDetails = TopLevelId (symbol unique moduleName)
                     }
             externalBinding unique moduleName =
@@ -621,7 +622,7 @@ spec = describe "Phase 7 typecheck" $ do
                             (preferred `unionPreparedExternalBindings` fallback)
                     env = preparedExternalTypeCheckEnv restricted
                 typeCheckWithEnv env (EVarNode (topLevelResolved 22 "Preferred")) `shouldBe` Right builtinIntTy
-                typeCheckWithEnv env (EVarNode (topLevelResolved 23 "Fallback")) `shouldBe` Left (TCUnboundVar "x")
+                typeCheckWithEnv env (EVarNode (topLevelResolved 23 "Fallback")) `shouldBe` Left (TCUnboundVar "Fallback__x")
             (Left err, _) -> expectationFailure ("Expected preferred external binding preparation, got: " ++ show err)
             (_, Left err) -> expectationFailure ("Expected fallback external binding preparation, got: " ++ show err)
 
@@ -1050,39 +1051,37 @@ spec = describe "Phase 7 typecheck" $ do
                 loweredBindingIdentityFromDetails "$RenamedBox" constructorDetails
             localResolved =
                 ResolvedVar
-                    { resolvedVarRuntimeName = "runtime-x"
-                    , resolvedVarType = intTy
+                    {
+                    resolvedVarType = intTy
                     , resolvedVarDetails = localDetails
                     }
             envResolved =
                 ResolvedVar
-                    { resolvedVarRuntimeName = "runtime-env"
-                    , resolvedVarType = intTy
+                    {
+                    resolvedVarType = intTy
                     , resolvedVarDetails = envDetails
                     }
             constructorResolved =
                 ResolvedVar
-                    { resolvedVarRuntimeName = "$Box"
-                    , resolvedVarType = intTy
+                    {
+                    resolvedVarType = intTy
                     , resolvedVarDetails = constructorDetails
                     }
             renamedLocalResolved =
-                localResolved
-                    { resolvedVarRuntimeName = "renamed-runtime-x"
-                    }
+                renameResolvedLocalVar "$x#1" localResolved
             staleTypedLocalResolved =
                 localResolved {resolvedVarType = boolTy}
-        idDetailsReferenceName "runtime-x" localDetails `shouldBe` "$x#0"
-        idDetailsReferenceName "runtime-env" envDetails `shouldBe` "external-x"
-        idDetailsReferenceName "runtime-prim" primitiveDetails `shouldBe` "runtime-prim"
-        idDetailsReferenceName "runtime-deferred" deferredDetails `shouldBe` "x"
+        idDetailsReferenceName localDetails `shouldBe` "$x#0"
+        idDetailsReferenceName envDetails `shouldBe` "external-x"
+        idDetailsReferenceName primitiveDetails `shouldBe` stringLengthPrimitiveName
+        idDetailsReferenceName deferredDetails `shouldBe` "x"
         idDetailsIsLocal localDetails `shouldBe` True
         idDetailsIsLocal envDetails `shouldBe` False
         idDetailsIsLocal primitiveDetails `shouldBe` False
         idDetailsConstructorRef localDetails `shouldBe` Nothing
         idDetailsConstructorRef constructorDetails `shouldBe` Just ctorRef
         renamedLoweredIdentity `shouldBe` loweredIdentity
-        idDetailsReferenceName "runtime-x" (idDetailsRenameLocal "$x#1" localDetails) `shouldBe` "$x#1"
+        idDetailsReferenceName (idDetailsRenameLocal "$x#1" localDetails) `shouldBe` "$x#1"
         idDetailsSameIdentity localDetails (idDetailsRenameLocal "$x#1" localDetails) `shouldBe` True
         idDetailsSameIdentity localDetails (LocalId (generatedLocalRef 1 "$x#1")) `shouldBe` False
         idDetailsSameIdentity constructorDetails (ConstructorId ctorRef) `shouldBe` True
@@ -1096,14 +1095,14 @@ spec = describe "Phase 7 typecheck" $ do
         idDetailsRefMatches Nothing "$x#0" Nothing "$x#0" `shouldBe` True
         let otherLocalDetails = LocalId (generatedLocalRef 1 "$x#0")
             renamedSameIdentityDetails = idDetailsRenameLocal "$x#renamed" localDetails
-            detailsByAlias = idDetailsAliasMap [("runtime-x", localDetails), ("runtime-y", otherLocalDetails)]
+            detailsByAlias = idDetailsAliasMapWith [("runtime-x", localDetails), ("runtime-y", otherLocalDetails)]
             sameIdentityConflictAliases =
-                idDetailsAliasMap
+                idDetailsAliasMapWith
                     [ ("runtime-x", localDetails)
                     , ("runtime-renamed", renamedSameIdentityDetails)
                     ]
             conflictingPayloadAliases =
-                idDetailsAliasMap
+                idDetailsAliasMapWith
                     [ ("runtime-value", topLevelDetails)
                     , ("runtime-value", conflictingTopLevelDetails)
                     ]
@@ -1111,14 +1110,14 @@ spec = describe "Phase 7 typecheck" $ do
         Map.lookup (uniqueIdentityStableName (UniqueIdentity 0)) detailsByAlias `shouldBe` Just localDetails
         Map.lookup (uniqueIdentityStableName (UniqueIdentity 1)) detailsByAlias `shouldBe` Just otherLocalDetails
         Map.lookup (uniqueIdentityStableName (UniqueIdentity 0)) sameIdentityConflictAliases `shouldBe` Just localDetails
-        fmap (idDetailsReferenceName "fallback") (Map.lookup "$x#0" sameIdentityConflictAliases) `shouldBe` Just "$x#0"
-        fmap (idDetailsReferenceName "fallback") (Map.lookup "$x#renamed" sameIdentityConflictAliases) `shouldBe` Just "$x#renamed"
+        fmap idDetailsReferenceName (Map.lookup "$x#0" sameIdentityConflictAliases) `shouldBe` Just "$x#0"
+        fmap idDetailsReferenceName (Map.lookup "$x#renamed" sameIdentityConflictAliases) `shouldBe` Just "$x#renamed"
         Map.lookup "runtime-value" conflictingPayloadAliases `shouldBe` Nothing
         Map.lookup (symbolIdentityStableName (generatedSymbolIdentity 42 SymbolValue "Main" "value" Nothing)) conflictingPayloadAliases `shouldBe` Nothing
-        fmap (idDetailsDisplayName "fallback") (Map.lookup "value" conflictingPayloadAliases) `shouldBe` Just "value"
-        fmap (idDetailsDisplayName "fallback") (Map.lookup "Main.value" conflictingPayloadAliases) `shouldBe` Just "value"
-        fmap (idDetailsDisplayName "fallback") (Map.lookup "stale-value" conflictingPayloadAliases) `shouldBe` Just "stale-value"
-        fmap (idDetailsDisplayName "fallback") (Map.lookup "Main.stale-value" conflictingPayloadAliases) `shouldBe` Just "stale-value"
+        fmap idDetailsDisplayName (Map.lookup "value" conflictingPayloadAliases) `shouldBe` Just "value"
+        fmap idDetailsDisplayName (Map.lookup "Main.value" conflictingPayloadAliases) `shouldBe` Just "value"
+        fmap idDetailsDisplayName (Map.lookup "stale-value" conflictingPayloadAliases) `shouldBe` Just "stale-value"
+        fmap idDetailsDisplayName (Map.lookup "Main.stale-value" conflictingPayloadAliases) `shouldBe` Just "stale-value"
         localDetails `shouldBe` idDetailsRenameLocal "$x#1" localDetails
         localDetails `shouldBe` EvidenceId (generatedLocalRef 0 "$x#evidence")
         deferredDetails `shouldNotBe` sameNamedDeferredDetails
@@ -1127,15 +1126,15 @@ spec = describe "Phase 7 typecheck" $ do
         staleTypedLocalResolved `shouldNotBe` localResolved
         resolvedVarReferenceName localResolved `shouldBe` "$x#0"
         resolvedVarReferenceName envResolved `shouldBe` "external-x"
-        resolvedVarReferenceName constructorResolved `shouldBe` "$Box"
+        resolvedVarReferenceName constructorResolved `shouldBe` "Main__Box"
         resolvedVarIsLocal localResolved `shouldBe` True
         resolvedVarIsLocal envResolved `shouldBe` False
         resolvedVarConstructorRef constructorResolved `shouldBe` Just ctorRef
         resolvedVarRuntimeName (renameResolvedLocalVar "$x#1" localResolved) `shouldBe` "$x#1"
         renameResolvedLocalVar "$x#1" localResolved
             `shouldBe` localResolved
-                { resolvedVarRuntimeName = "$x#1"
-                , resolvedVarDetails = idDetailsRenameLocal "$x#1" localDetails
+                {
+                resolvedVarDetails = idDetailsRenameLocal "$x#1" localDetails
                 }
         renameResolvedLocalVar "$Box1" constructorResolved `shouldBe` constructorResolved
 
@@ -1156,7 +1155,7 @@ spec = describe "Phase 7 typecheck" $ do
                 resolvedVarType binder' `shouldBe` tVarWithRef refA
                 resolvedVarType occurrence' `shouldBe` tVarWithRef refA
                 resolvedVarDetails binder' `shouldBe` LocalId (generatedLocalRef 0 "$x#0")
-                resolvedVarRuntimeName occurrence' `shouldBe` "different-runtime"
+                resolvedVarRuntimeName occurrence' `shouldBe` "$x#0"
             other -> expectationFailure ("Expected resolved term after substitution, got: " ++ show other)
 
     it "does not substitute identity-bearing type refs by stale parsed names" $ do

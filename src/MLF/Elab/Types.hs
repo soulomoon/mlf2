@@ -102,6 +102,7 @@ module MLF.Elab.Types (
     ResolvedTermIdentityKey,
     idDetailsIdentityKey,
     resolvedVarIdentityKey,
+    resolvedVarRuntimeName,
     deferredResolvedVarFromRef,
     deferredResolvedVarRef,
     localResolvedVarFromRef,

@@ -1784,7 +1784,7 @@ spec = describe "MLF.Backend.Convert" $ do
             (LocalId (localRefFromIdentity (GeneratedLocalId (UniqueIdentity 991753)) "helper"))
             checked0
     convertCheckedProgram checked
-      `shouldBe` Left (BackendValidationFailed (BackendModuleBindingIdentityMissing "Main" "Main__helper"))
+      `shouldBe` Left (BackendValidationFailed (BackendModuleBindingIdentityMissing "Main" "helper"))
 
   it "rejects checked binding identities that collide with primitive identities" $ do
     checked0 <- requireChecked duplicateBindingIdentityProgram
@@ -2533,9 +2533,9 @@ spec = describe "MLF.Backend.Convert" $ do
             )
             checked0
     convertCheckedProgram checked
-      `shouldBe` Left (BackendValidationFailed (BackendUnknownVariable "$stale_maker"))
+      `shouldBe` Left (BackendValidationFailed (BackendUnknownVariable "Main__$stale_maker"))
 
-  it "rejects stale top-level identity payloads even when runtime spelling is unchanged" $ do
+  it "rejects stale top-level identity payloads" $ do
     checked0 <- requireChecked topLevelClosureCallProgram
     makerBinding <- requireCheckedBinding "Main__maker" checked0
     mainBinding <- requireCheckedBinding (checkedProgramMain checked0) checked0
@@ -2555,7 +2555,7 @@ spec = describe "MLF.Backend.Convert" $ do
             )
             checked0
     convertCheckedProgram checked
-      `shouldBe` Left (BackendValidationFailed (BackendUnknownVariable "Main__maker"))
+      `shouldBe` Left (BackendValidationFailed (BackendUnknownVariable "Main__$stale_maker"))
 
   it "looks up top-level closure demands by resolved identity instead of runtime spelling" $ do
     checked0 <- requireChecked localDirectAliasPartialApplicationBaseProgram
@@ -5232,13 +5232,8 @@ mapMainBinding f checked =
   mapBinding (checkedProgramMain checked) f checked
 
 renameCheckedProgramMainRuntimeName :: String -> CheckedProgram -> CheckedProgram
-renameCheckedProgramMainRuntimeName replacement checked =
+renameCheckedProgramMainRuntimeName _replacement checked =
   checked
-    { checkedProgramMainResolvedVar =
-        (checkedProgramMainResolvedVar checked)
-          { Elab.resolvedVarRuntimeName = replacement
-          }
-    }
 
 addDataInfo :: DataInfo -> CheckedProgram -> CheckedProgram
 addDataInfo dataInfo checked =
@@ -5444,7 +5439,7 @@ resolvedConstructorTerm checked runtimeName =
     Just ctorInfo ->
       Elab.EVarNode
         Elab.ResolvedVar
-          { Elab.resolvedVarRuntimeName = ctorRuntimeName ctorInfo,
+          {
             Elab.resolvedVarType = Elab.TBottom,
             Elab.resolvedVarDetails = ConstructorId (constructorRefFromInfo ctorInfo)
           }
@@ -5479,33 +5474,11 @@ findConstructorInfo runtimeName checked =
     ]
 
 staleTopLevelOccurrenceRuntime :: String -> String -> Elab.XmlfTerm -> Elab.XmlfTerm
-staleTopLevelOccurrenceRuntime target replacement =
-  go
-  where
-    go term =
-      case term of
-        Elab.EVarNode resolved
-          | Elab.resolvedVarReferenceName resolved == target ->
-              Elab.EVarNode (resolved {Elab.resolvedVarRuntimeName = replacement})
-        Elab.ELam resolved body ->
-          Elab.ELam resolved (go body)
-        Elab.EApp fun arg ->
-          Elab.EApp (go fun) (go arg)
-        Elab.ELet resolved scheme rhs body ->
-          Elab.ELet resolved scheme (go rhs) (go body)
-        Elab.ETyAbsRef ref mbBound body ->
-          Elab.ETyAbsRef ref mbBound (go body)
-        Elab.ETyInst inner inst ->
-          Elab.ETyInst (go inner) inst
-        Elab.ERoll ty body ->
-          Elab.ERoll ty (go body)
-        Elab.EUnroll body ->
-          Elab.EUnroll (go body)
-        _ ->
-          term
+staleTopLevelOccurrenceRuntime _target _replacement =
+  id
 
 poisonTopLevelTermIdentity :: SymbolIdentity -> SymbolIdentity -> String -> Elab.XmlfTerm -> Elab.XmlfTerm
-poisonTopLevelTermIdentity target replacement replacementName =
+poisonTopLevelTermIdentity target replacement _replacementName =
   go
   where
     go term =
@@ -5514,7 +5487,7 @@ poisonTopLevelTermIdentity target replacement replacementName =
           | sameSymbolIdentity identity target ->
               Elab.EVarNode
                 resolved
-                  { Elab.resolvedVarRuntimeName = replacementName,
+                  {
                     Elab.resolvedVarDetails = TopLevelId replacement
                   }
         Elab.ELam resolved body ->
@@ -5535,30 +5508,8 @@ poisonTopLevelTermIdentity target replacement replacementName =
           term
 
 staleLocalOccurrenceRuntimes :: String -> Elab.XmlfTerm -> Elab.XmlfTerm
-staleLocalOccurrenceRuntimes replacement =
-  go
-  where
-    go term =
-      case term of
-        Elab.EVarNode resolved
-          | Elab.resolvedVarIsLocal resolved ->
-              Elab.EVarNode (resolved {Elab.resolvedVarRuntimeName = replacement})
-        Elab.ELam resolved body ->
-          Elab.ELam resolved (go body)
-        Elab.EApp fun arg ->
-          Elab.EApp (go fun) (go arg)
-        Elab.ELet resolved scheme rhs body ->
-          Elab.ELet resolved scheme (go rhs) (go body)
-        Elab.ETyAbsRef ref mbBound body ->
-          Elab.ETyAbsRef ref mbBound (go body)
-        Elab.ETyInst inner inst ->
-          Elab.ETyInst (go inner) inst
-        Elab.ERoll ty body ->
-          Elab.ERoll ty (go body)
-        Elab.EUnroll body ->
-          Elab.EUnroll (go body)
-        _ ->
-          term
+staleLocalOccurrenceRuntimes _replacement =
+  id
 
 rewriteFirstLetBindingType :: Elab.ElabType -> Elab.XmlfTerm -> Elab.XmlfTerm
 rewriteFirstLetBindingType replacementTy =

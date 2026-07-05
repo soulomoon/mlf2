@@ -1,0 +1,529 @@
+Identity/string reference audit
+Generated: 2026-07-05
+
+Scope
+=====
+
+This file records the remaining places where resolved references still depend
+on String names, or where a String name can still decide lookup/matching after
+parser/name-resolution has already run.
+
+"String-dependent" here means a semantic reference is still keyed, matched, or
+recovered by String. Display names, source names, and ABI/runtime spellings are
+called out separately, because those names are still required for diagnostics,
+linking, generated code, and user-facing output.
+
+Current baseline
+================
+
+- Resolved term variables are now identity-carrying:
+  src/MLF/Types/Elab.hs:611-614
+  data ResolvedVar = ResolvedVar
+    { resolvedVarType :: ElabType
+    , resolvedVarDetails :: IdDetails
+    }
+
+- The old direct runtime-name field on ResolvedVar is gone. Runtime spelling is
+  now projected from IdDetails:
+  src/MLF/Types/Elab.hs:621-623
+  resolvedVarRuntimeName = idDetailsRuntimeName . resolvedVarDetails
+
+- ResolvedVar equality can use identity details:
+  src/MLF/Types/Elab.hs:663-665
+  resolvedVarSameIdentity uses idDetailsSameIdentity.
+
+- Type checking already keys resolved-term environments by identity:
+  src/MLF/Elab/TypeCheck.hs:102-107
+  src/MLF/Elab/TypeCheck.hs:462-464
+  src/MLF/Elab/TypeCheck.hs:483-490
+  src/MLF/Elab/TypeCheck.hs:497-511
+
+- IdDetails still carries both identity and spellings:
+  src/MLF/Types/Identity.hs:396-407
+  src/MLF/Types/Identity.hs:419-448
+
+- IdDetails reference matching still has a name fallback when both sides lack an
+  identity:
+  src/MLF/Types/Identity.hs:564-570
+  idDetailsRefMatches falls back to leftName == rightName if both identities are
+  Nothing.
+
+Legend
+======
+
+- BLOCKER: a post-resolution semantic lookup/match can still be decided by a
+  String name.
+- BOUNDARY: a parser, resolver, finalization, FFI, or ABI boundary still needs
+  a String spelling, but should not use it as semantic identity once metadata is
+  resolved.
+- DISPLAY: expected source/display/runtime spelling; keep it non-semantic.
+
+Remaining areas
+===============
+
+1. Program metadata still stores runtime spellings next to identities
+--------------------------------------------------------------------
+
+Status: BOUNDARY, with local BLOCKER risk when consumers use the name as a key.
+
+- Evidence methods keep a runtime name, symbol identity, and optional resolved
+  variable:
+  src/MLF/Frontend/Program/Types.hs:1930-1935
+  EvidenceMethod
+    { evidenceMethodRuntimeName :: String
+    , evidenceMethodSymbol :: SymbolIdentity
+    , evidenceMethodResolvedVar :: Maybe ResolvedVar
+    , ...
+    }
+
+- ConstructorInfo keeps both identity and runtime spelling:
+  src/MLF/Frontend/Program/Types.hs:2037-2045
+  ConstructorInfo
+    { ctorInfoSymbol :: SymbolIdentity
+    , ctorRuntimeName :: String
+    , ...
+    }
+
+- ValueInfo has OrdinaryValue and ConstructorValue with valueRuntimeName ::
+  String:
+  src/MLF/Frontend/Program/Types.hs:2160-2178
+
+- LoweredBindingIdentity still stores loweredIdentityRuntimeName :: String
+  next to loweredIdentityDetails :: IdDetails:
+  src/MLF/Frontend/Program/Types.hs:2362-2365
+
+- CheckedBinding derives checkedBindingName from checkedBindingResolvedVar:
+  src/MLF/Frontend/Program/Types.hs:2713-2726
+  This is fine as a projection, but callers should not use the name as identity.
+
+Why it matters:
+Program metadata has mostly become identity-bearing, but runtime spellings are
+still threaded everywhere. That is acceptable only if all semantic consumers use
+the SymbolIdentity, IdDetails, ConstructorInfo, or ResolvedVar fields first.
+
+2. External-binding indexes still expose name-first lookup APIs
+--------------------------------------------------------------
+
+Status: BLOCKER/BOUNDARY.
+
+- Finalization builds String-keyed deferred and runtime external indexes:
+  src/MLF/Frontend/Program/Finalize.hs:260-268
+  DeferredExternalBindingIndex
+    { deferredExternalBindingRefByName :: Map String DeferredRef
+    , ...
+    }
+  RuntimeExternalBindingIndex
+    { runtimeExternalBindingKeyByName :: Map String ModuleBindingReadKey
+    , runtimeExternalBindingByKey :: Map ModuleBindingReadKey X.ResolvedVar
+    }
+
+- Runtime external binding index entries are built from valueRuntimeName and
+  ctorRuntimeName:
+  src/MLF/Frontend/Program/Finalize.hs:2049-2081
+
+- Runtime-name aliases are inserted through idDetailsAliasNamesWith:
+  src/MLF/Frontend/Program/Finalize.hs:2101-2107
+
+- runtimeExternalBindingIdentity reconstructs an ExternalBindingIdentity from
+  the lookup name plus resolved details:
+  src/MLF/Frontend/Program/Finalize.hs:2120-2123
+
+- runtimeSourceTypesWithIdentityAliases maps alias strings to source types while
+  using identity keys to avoid duplicate identity entries:
+  src/MLF/Frontend/Program/Finalize.hs:2125-2144
+
+- Deferred external binding index remains alias/name-keyed:
+  src/MLF/Frontend/Program/Finalize.hs:2145-2165
+
+- Name lookup is still public inside finalization:
+  src/MLF/Frontend/Program/Finalize.hs:2455-2463
+  lookupDeferredExternalBinding
+  lookupRuntimeExternalBindingByName
+
+Why it matters:
+This is one of the main remaining name-dependence zones. The index should become
+identity-first, with String aliases only at the surface/free-variable boundary.
+
+3. Frontend elaboration still lowers resolved references through names
+---------------------------------------------------------------------
+
+Status: BLOCKER.
+
+- Unresolved EVar lookup still uses esValues :: Map String ... and then emits a
+  surface variable using the runtime name:
+  src/MLF/Frontend/Program/Elaborate.hs:1322-1335
+
+- Resolved expression lookup obtains ValueInfo by resolved reference, but emits
+  surfaceVar runtimeName:
+  src/MLF/Frontend/Program/Elaborate.hs:1401-1412
+
+- Resolved locals are given fresh runtime names and those names are threaded
+  through local extension/finalization:
+  src/MLF/Frontend/Program/Elaborate.hs:1415-1423
+  src/MLF/Frontend/Program/Elaborate.hs:1440-1453
+  src/MLF/Frontend/Program/Elaborate.hs:1515-1523
+  src/MLF/Frontend/Program/Elaborate.hs:3766-3772
+
+- Evidence methods create fresh runtime names:
+  src/MLF/Frontend/Program/Elaborate.hs:4910-4920
+
+- Resolved local identity records both a runtime-ref and the underlying local
+  ref, with runtime-ref produced by renaming the LocalRef:
+  src/MLF/Frontend/Program/Elaborate.hs:4974-4999
+
+- Local extension metadata still stores valueRuntimeName = runtimeName and
+  inserts runtime type views by runtimeName:
+  src/MLF/Frontend/Program/Elaborate.hs:5012-5085
+  esRuntimeTypeViews is keyed by runtime String.
+
+Why it matters:
+This is the place where resolved references are still round-tripped back into
+name-shaped surface syntax. A fully identity-based checked IR needs an
+identity-bearing lowered expression path instead of relying on surfaceVar names
+after resolution.
+
+4. Program checking creates identity metadata but still generates runtime names
+------------------------------------------------------------------------------
+
+Status: BOUNDARY with specific BLOCKER fallbacks.
+
+- Constructors exported into ValueInfo use valueRuntimeName = ctorRuntimeName:
+  src/MLF/Frontend/Program/Check.hs:1794-1800
+
+- ConstructorInfo runtime names are generated with qualify module definingName:
+  src/MLF/Frontend/Program/Check.hs:2934-2945
+
+- ValueInfo runtime names are generated with qualify module valueIdentityName:
+  src/MLF/Frontend/Program/Check.hs:3140-3155
+
+- Constructor values are added through ctorRuntimeName:
+  src/MLF/Frontend/Program/Check.hs:3161-3169
+
+- Instance method value runtime names are generated/rendered as String and
+  stored in valueRuntimeName:
+  src/MLF/Frontend/Program/Check.hs:3644-3656
+
+- Type-class overlap unification still falls back to leftName == rightName when
+  head identities are unavailable:
+  src/MLF/Frontend/Program/Check.hs:3903-3922
+
+Why it matters:
+The runtime names are expected ABI/display spellings. The dangerous part is the
+fallback equality path when resolved head identity is absent.
+
+5. Backend conversion maps resolved identity back to runtime names
+-----------------------------------------------------------------
+
+Status: BOUNDARY/BLOCKER.
+
+- ConvertContext still carries identity-to-runtime-name maps and the current
+  binding name:
+  src/MLF/Backend/Convert.hs:228-245
+  ccTermRuntimeNamesByIdentity :: Map SymbolIdentity String
+  ccCurrentBindingName :: String
+
+- backendMainName uses an identity if present but falls back to the main name
+  String:
+  src/MLF/Backend/Convert.hs:510-515
+
+- Checked-program runtime names are collected by identity, plus builtin names:
+  src/MLF/Backend/Convert.hs:2262-2275
+
+- checkedBindingRuntimeName is projected from ResolvedVar:
+  src/MLF/Backend/Convert.hs:2358-2360
+
+- Closure generated-name scope still includes globalTermRuntimeNames as a
+  Set String:
+  src/MLF/Backend/Convert.hs:3890-3900
+
+- resolvedBackendReferenceName converts a resolved identity back to a runtime
+  String if found, otherwise uses resolvedVarReferenceName:
+  src/MLF/Backend/Convert.hs:3906-3924
+
+- resolvedIsGlobalTerm checks the identity map:
+  src/MLF/Backend/Convert.hs:3966-3970
+  This part is good identity-first behavior.
+
+- Callable binding kind checks locals/globals by identity details:
+  src/MLF/Backend/Convert.hs:4494-4507
+  This part is also good.
+
+- Fresh closure names are based on current binding String and global runtime
+  name collisions:
+  src/MLF/Backend/Convert.hs:4728-4738
+
+- Structural data metadata lookup still tries structural/name candidates in the
+  current scope:
+  src/MLF/Backend/Convert.hs:6337-6347
+
+Why it matters:
+Backend conversion has identity-aware inputs, but the backend IR still wants
+many name-bearing references. This forces repeated projection from identity to
+runtime name, and leaves fallback paths for identity gaps.
+
+6. Backend IR still models many references as optional identity plus name
+------------------------------------------------------------------------
+
+Status: BLOCKER.
+
+- Validation still requires unique names for modules, data declarations,
+  bindings, constructors, and closure entries, plus unique identities when
+  present:
+  src/MLF/Backend/IR.hs:390-407
+
+- Backend scopes build name maps for identityless declarations/bindings and
+  identity maps for identity-bearing ones:
+  src/MLF/Backend/IR.hs:417-465
+
+- Callable binding kind uses identity if available, otherwise name fallback:
+  src/MLF/Backend/IR.hs:852-858
+
+- lookupCallableBindingKindByName still checks local/global String maps:
+  src/MLF/Backend/IR.hs:891-904
+
+- Metadata-backed type head lookup falls back to Map.member name when no data
+  identity exists:
+  src/MLF/Backend/IR.hs:1569-1578
+
+- Structural mu/data matching includes name and structural-name fallbacks:
+  src/MLF/Backend/IR.hs:1579-1658
+
+- Backend variable lookup uses identity when present, otherwise name fallback:
+  src/MLF/Backend/IR.hs:1735-1748
+
+- Type bounds are inserted with backendTypeSubstitutionKeyFor identity name:
+  src/MLF/Backend/IR.hs:1995-1997
+
+- Constructor lookup uses identity if present, otherwise name:
+  src/MLF/Backend/IR.hs:2003-2007
+
+- Structural data fallback by name remains:
+  src/MLF/Backend/IR.hs:2088-2097
+
+- Backend IR type definitions explicitly allow name-only or optional-identity
+  references:
+  src/MLF/Backend/IR/Types.hs:211-236
+  BackendDataParameterRef =
+      BackendDataParameterByIdentity TypeBinderIdentity String
+    | BackendDataParameterByName String
+
+  src/MLF/Backend/IR/Types.hs:521-534
+  BackendTypeSubstitutionKey =
+      BackendTypeSubstitutionByIdentity TypeBinderIdentity
+    | BackendTypeSubstitutionByName String
+
+  src/MLF/Backend/IR/Types.hs:557-562
+  BackendVarWithIdentity has backendVarIdentity :: Maybe IdDetails and
+  backendVarName :: String.
+
+  src/MLF/Backend/IR/Types.hs:567-570
+  BackendLamWithIdentity has backendParamIdentity :: Maybe IdDetails and
+  backendParamName :: String.
+
+  src/MLF/Backend/IR/Types.hs:607-612
+  BackendClosureEntry has backendClosureEntryIdentity :: Maybe UniqueIdentity
+  and backendClosureEntryName :: String.
+
+  src/MLF/Backend/IR/Types.hs:620-624
+  BackendConstructWithIdentity has backendConstructIdentity ::
+  Maybe SymbolIdentity and backendConstructName :: String.
+
+  src/MLF/Backend/IR/Types.hs:753-756
+  BackendPatternBinder has optional identity plus name.
+
+Why it matters:
+This is the largest remaining gap. As long as backend semantic references are
+Maybe identity plus name, the compiler must keep fallback name maps alive.
+
+7. LLVM lowering still rehydrates missing identities by name
+-----------------------------------------------------------
+
+Status: BLOCKER.
+
+- Type, data-head, term, and constructor references use identity when present
+  and otherwise look up by name:
+  src/MLF/Backend/LLVM/Lower.hs:953-967
+  typeRefIdentity
+  dataHeadIdentity
+  termRefIdentity
+  constructorRefIdentity
+
+- The lowerer has an explicit name-based rewrite pass that retrofits
+  BackendVarWithIdentity values with missing identities from BackendTermEnv:
+  src/MLF/Backend/LLVM/Lower.hs:6255-6311
+  rewriteBackendVarsByName
+
+- Runtime program binding names are collected as Set String:
+  src/MLF/Backend/LLVM/Lower.hs:6000-6006
+
+- Primitive, IO, and native runtime names are derived from identity where
+  possible, but remain runtime String boundaries:
+  src/MLF/Backend/LLVM/Lower.hs:6026-6048
+
+- Referenced function argument resolution still threads name alongside optional
+  identity:
+  src/MLF/Backend/LLVM/Lower.hs:7240-7267
+
+Why it matters:
+rewriteBackendVarsByName is direct evidence that backend conversion can still
+produce identity-incomplete variables. This should disappear once backend IR is
+identity-complete for production paths.
+
+8. Structural recursive data has metadata-light name fallbacks
+-------------------------------------------------------------
+
+Status: BLOCKER unless intentionally fenced as a compatibility path.
+
+- BackendDataScope carries a by-name map:
+  src/MLF/Backend/StructuralRecursiveData.hs:69
+  backendDataScopeByName :: Map String BackendData
+
+- Identityless heads need scoped data lookup by name:
+  src/MLF/Backend/StructuralRecursiveData.hs:500-506
+
+- Data lookup by name remains:
+  src/MLF/Backend/StructuralRecursiveData.hs:523-524
+  src/MLF/Backend/StructuralRecursiveData.hs:651-652
+
+- Structural recursive data names and structural mu-name matching parse/compare
+  names:
+  src/MLF/Backend/StructuralRecursiveData.hs:769-785
+
+- Data refs are matched by identity when possible, but generated alias/name
+  fallback remains:
+  src/MLF/Backend/StructuralRecursiveData.hs:1490-1502
+
+Why it matters:
+This area likely predates complete metadata. It should either become
+identity-complete or be clearly isolated as a metadata-light compatibility path
+with a validation gate that production checked programs do not enter.
+
+9. Parser/resolver boundary is still string-based, as expected
+-------------------------------------------------------------
+
+Status: ACCEPTABLE BOUNDARY.
+
+- Local symbol lookup begins from source names:
+  src/MLF/Frontend/Program/Resolve.hs:536-546
+
+- resolveTypeName takes a String from source syntax:
+  src/MLF/Frontend/Program/Resolve.hs:839
+
+- qualifyName constructs qualified source/runtime spellings:
+  src/MLF/Frontend/Program/Resolve.hs:1042
+
+Why it matters:
+This is not the target to eliminate. Strings are expected before resolution.
+The invariant we want is: after resolution and checked IR generation, semantic
+references must carry identities, not require another name lookup.
+
+10. Runtime execution is mostly identity-keyed now
+-------------------------------------------------
+
+Status: mostly OK, with display maps still string-based.
+
+- Runtime frame insertion uses runtimeVarKey resolved:
+  src/MLF/Frontend/Program/Run.hs:836
+
+- Runtime lookup frames display checkedBindingRuntimeName:
+  src/MLF/Frontend/Program/Run.hs:889-894
+
+- Runtime Prelude binding and constructor lookup use keys:
+  src/MLF/Frontend/Program/Run.hs:2070
+  src/MLF/Frontend/Program/Run.hs:2220
+
+- Reachability over checked bindings uses identity keys:
+  src/MLF/Frontend/Program/Run.hs:2498-2546
+
+- Data/class display maps and source display reconstruction remain string-side:
+  src/MLF/Frontend/Program/Run.hs:2760-2770
+  src/MLF/Frontend/Program/Run.hs:2920-2952
+
+Why it matters:
+Runtime is not the main blocker. It already uses identity keys for the important
+execution lookups. The remaining strings are mostly display/source recovery.
+
+11. Primitive, native, and generated-code names remain ABI strings
+-----------------------------------------------------------------
+
+Status: ACCEPTABLE DISPLAY/ABI.
+
+These names should remain strings, but should be projected from identity-bearing
+metadata whenever possible:
+
+- ResolvedVar runtime spelling is idDetailsRuntimeName:
+  src/MLF/Types/Elab.hs:621-623
+
+- Backend conversion and LLVM lowering still need generated names for main,
+  closures, primitives, IO, native calls, and emitted function names:
+  src/MLF/Backend/Convert.hs:510-515
+  src/MLF/Backend/Convert.hs:4728-4738
+  src/MLF/Backend/LLVM/Lower.hs:6000-6048
+
+Why it matters:
+The goal is not "no strings anywhere". The goal is "no semantic post-resolution
+reference depends on String when an identity should exist".
+
+Recommended removal order
+=========================
+
+1. Declare the production invariant:
+   CheckedProgram and BackendProgram must be identity-complete for term
+   variables, constructors, data heads, and type binders. Any Nothing identity
+   in a production semantic reference should be a validation failure unless it
+   is explicitly fenced as parser/test/metadata-light input.
+
+2. Split backend semantic references from display/runtime names:
+   - BackendVar should require IdDetails in production.
+   - BackendConstruct should require SymbolIdentity in production.
+   - BackendDataParameterRef should require TypeBinderIdentity in production.
+   - BackendTypeSubstitutionKey should stop accepting ByName for production
+     checked programs.
+   Keep name-only constructors only in test helpers or clearly marked boundary
+   modules.
+
+3. Replace RuntimeExternalBindingIndex's name-first API with identity-first API.
+   Keep String alias maps only for resolving current surface/free variables at
+   the final boundary.
+
+4. Stop round-tripping resolved frontend references through surfaceVar runtime
+   names. Add an identity-bearing lowered expression path, or convert directly
+   to ElabTerm/Backend references after resolution.
+
+5. Remove LLVM rewriteBackendVarsByName after backend conversion guarantees
+   identity-complete BackendVar references.
+
+6. Fence structural/name fallbacks behind an explicit metadata-light path, then
+   make normal checked-program lowering reject missing identities.
+
+7. After those changes, audit remaining search terms:
+   - "Maybe IdDetails"
+   - "Maybe SymbolIdentity"
+   - "ByName"
+   - "lookup...ByName"
+   - "Map String" in semantic scope/env/index modules
+   - "idDetailsRefMatches" fallback callers
+
+Distance from "all references use Identity"
+==========================================
+
+Close:
+- Checked term variables and runtime execution already have identity-keyed
+  paths.
+- ResolvedVar no longer carries its own runtime-name String field.
+- CheckedBinding derives names from ResolvedVar details instead of storing a
+  separate authoritative name.
+
+Not close yet:
+- Backend IR still encodes many semantic references as Maybe identity plus name.
+- Finalization still exposes name-first external-binding indexes.
+- Frontend elaboration still converts resolved references back into name-shaped
+  surface variables.
+- LLVM lowering still contains a name-based identity retrofit pass.
+- Structural recursive data still has identityless/name fallback behavior.
+
+Practical conclusion:
+The remaining work is not mainly in ResolvedVar anymore. The next meaningful
+speed/correctness milestone is to make Backend IR production references
+identity-complete, then delete the finalization/backend/LLVM name fallback
+passes that exist only because identities may be missing.

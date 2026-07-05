@@ -87,16 +87,12 @@ generatedDeferredRefForName name =
   generatedDeferredRef (stableFixtureIdentity name) name
 
 generatedResolvedLocal :: Int -> String -> String -> ElabType -> ResolvedVar
-generatedResolvedLocal unique referenceName runtimeName ty =
-  (localResolvedVarFromRef (generatedLocalRef unique referenceName) ty)
-    { resolvedVarRuntimeName = runtimeName
-    }
+generatedResolvedLocal unique referenceName _runtimeName ty =
+  localResolvedVarFromRef (generatedLocalRef unique referenceName) ty
 
 generatedResolvedLocalForName :: String -> String -> ElabType -> ResolvedVar
-generatedResolvedLocalForName referenceName runtimeName ty =
-  (localResolvedVarFromRef (generatedLocalRefForName referenceName) ty)
-    { resolvedVarRuntimeName = runtimeName
-    }
+generatedResolvedLocalForName referenceName _runtimeName ty =
+  localResolvedVarFromRef (generatedLocalRefForName referenceName) ty
 
 mkTestDeferredVar :: String -> XmlfTerm
 mkTestDeferredVar =

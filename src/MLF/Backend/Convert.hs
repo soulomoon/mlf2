@@ -136,6 +136,7 @@ import MLF.Elab.Types
     resolvedVarIsLocal,
     resolvedVarLocalRef,
     resolvedVarReferenceName,
+    resolvedVarRuntimeName,
     resolvedVarSameIdentity,
     resolvedVarSymbolIdentity,
     resolvedVarType,
@@ -196,7 +197,7 @@ import MLF.Frontend.Program.Types
 import MLF.Frontend.Symbol (lookupSymbolIdentityExact, memberSymbolIdentityExact, sameSymbolIdentity, symbolIdentityAliasMap, symbolIdentityAliasNames, symbolIdentityPayloadKey, symbolIdentityStableName, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit, SrcBound (..), SrcTy (..), SrcType)
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
-import MLF.Types.Identity (DeferredRef, IdDetails (..), IdentityGenerator, LocalRef, StructuralTypeBinderRole (..), UniqueIdentity (..), advanceIdentityGeneratorPast, deferredRefIdentity, deferredRefName, freshDeferredRef, freshIdentity, freshLocalRef, idDetailsGeneratedIdentities, idDetailsSymbolIdentity, identityGeneratorAfter, symbolGeneratedIdentities, typeBinderIdentityAliasMap, typeBinderIdentityFromStructural, typeBinderIdentityNode, typeBinderIdentityStructural)
+import MLF.Types.Identity (DeferredRef, IdDetails (..), IdentityGenerator, LocalRef, StructuralTypeBinderRole (..), UniqueIdentity (..), advanceIdentityGeneratorPast, deferredRefIdentity, deferredRefName, freshDeferredRef, freshIdentity, freshLocalRef, idDetailsGeneratedIdentities, idDetailsSymbolIdentity, identityGeneratorAfter, primitiveRefFromSymbol, symbolGeneratedIdentities, typeBinderIdentityAliasMap, typeBinderIdentityFromStructural, typeBinderIdentityNode, typeBinderIdentityStructural)
 import MLF.Util.Names (freshNameLike)
 
 data BackendConversionError
@@ -586,9 +587,8 @@ canonicalizeBuiltinEnvType context ty =
 builtinResolvedVar :: String -> ElabType -> ResolvedVar
 builtinResolvedVar name ty =
   ResolvedVar
-    { resolvedVarRuntimeName = name,
-      resolvedVarType = ty,
-      resolvedVarDetails = TopLevelId (builtinValueIdentity name)
+    { resolvedVarType = ty,
+      resolvedVarDetails = PrimitiveId (primitiveRefFromSymbol (builtinValueIdentity name))
     }
 
 convertCheckedModules :: ConvertContext -> Env -> [CheckedModule] -> Either BackendConversionError [BackendModule]
@@ -843,8 +843,7 @@ liftRecursiveLetsInTerm context lexicalTerms lexicalTypes term =
           let helperSymbol = liftedRecursiveLetSymbol context helperRef
               helperResolved =
                 ResolvedVar
-                  { resolvedVarRuntimeName = deferredRefName helperRef,
-                    resolvedVarType = helperElabType,
+                  { resolvedVarType = helperElabType,
                     resolvedVarDetails = TopLevelId helperSymbol
                   }
           rhs' <- liftRecursiveLetsInTerm context bodyTerms lexicalTypes rhs
@@ -5993,8 +5992,7 @@ checkedConstructorTypeApplicationParameterNames env constructorMeta =
 resolvedVarFromConstructorMeta :: ConstructorMeta -> ResolvedVar
 resolvedVarFromConstructorMeta constructorMeta =
   ResolvedVar
-    { resolvedVarRuntimeName = ctorRuntimeName ctorInfo,
-      resolvedVarType = TBottom,
+    { resolvedVarType = TBottom,
       resolvedVarDetails = ConstructorId (constructorRefFromInfo ctorInfo)
     }
   where

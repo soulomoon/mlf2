@@ -54,8 +54,11 @@ module MLF.Types.Identity
     ResolvedTermIdentityKey (..),
     idDetailsIdentityKey,
     idDetailsStableName,
+    idDetailsRuntimeName,
     idDetailsAliasNames,
+    idDetailsAliasNamesWith,
     idDetailsAliasMap,
+    idDetailsAliasMapWith,
     idDetailsReferenceName,
     idDetailsDisplayName,
     idDetailsConstructorRef,
@@ -73,11 +76,12 @@ module MLF.Types.Identity
   )
 where
 
+import Data.List (isPrefixOf)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import MLF.Constraint.Types.Graph (NodeId (..))
-import MLF.Frontend.Symbol (SymbolIdentity, SymbolIdentityPayloadKey, SymbolOwnerIdentity (..), symbolDefiningName, symbolIdentityAliasNames, symbolIdentityPayloadKey, symbolIdentityStableName, symbolOwnerIdentity, symbolUniqueIdentity)
+import MLF.Frontend.Symbol (SymbolIdentity, SymbolIdentityPayloadKey, SymbolOwnerIdentity (..), symbolDefiningModule, symbolDefiningName, symbolIdentityAliasNames, symbolIdentityPayloadKey, symbolIdentityStableName, symbolOwnerIdentity, symbolUniqueIdentity)
 import MLF.Types.Unique
 
 data StructuralTypeBinderRole
@@ -389,13 +393,40 @@ idDetailsStableName details =
     PrimitiveId ref -> symbolIdentityStableName (primitiveRefSymbol ref)
     DeferredId ref -> uniqueIdentityStableName (deferredRefIdentity ref)
 
-idDetailsAliasNames :: String -> IdDetails -> [String]
-idDetailsAliasNames runtimeName details =
+idDetailsRuntimeName :: IdDetails -> String
+idDetailsRuntimeName details =
+  case details of
+    LocalId localRef -> localRefName localRef
+    EvidenceId localRef -> localRefName localRef
+    EnvId envRef -> envRefName envRef
+    TopLevelId symbol -> symbolRuntimeName symbol
+    ConstructorId ref -> symbolRuntimeName (constructorRefSymbol ref)
+    MethodId symbol -> symbolDefiningName symbol
+    PrimitiveId ref -> symbolDefiningName (primitiveRefSymbol ref)
+    DeferredId ref -> deferredRefName ref
+
+symbolRuntimeName :: SymbolIdentity -> String
+symbolRuntimeName symbol =
+  case symbolDefiningModule symbol of
+    "" -> name
+    "<builtin>" -> name
+    moduleName
+      | (moduleName ++ "__") `isPrefixOf` name -> name
+      | otherwise -> moduleName ++ "__" ++ name
+  where
+    name = symbolDefiningName symbol
+
+idDetailsAliasNames :: IdDetails -> [String]
+idDetailsAliasNames details =
+  idDetailsAliasNamesWith (idDetailsRuntimeName details) details
+
+idDetailsAliasNamesWith :: String -> IdDetails -> [String]
+idDetailsAliasNamesWith runtimeName details =
   Set.toList $
     Set.fromList
       ( [ runtimeName,
-          idDetailsReferenceName runtimeName details,
-          idDetailsDisplayName runtimeName details,
+          idDetailsReferenceName details,
+          idDetailsDisplayName details,
           idDetailsStableName details
         ]
           ++ idDetailsSymbolAliasNames details
@@ -410,8 +441,12 @@ idDetailsSymbolAliasNames details =
     PrimitiveId ref -> symbolIdentityAliasNames (primitiveRefSymbol ref)
     _ -> []
 
-idDetailsAliasMap :: [(String, IdDetails)] -> Map String IdDetails
+idDetailsAliasMap :: [IdDetails] -> Map String IdDetails
 idDetailsAliasMap identities =
+  idDetailsAliasMapWith [(idDetailsRuntimeName details, details) | details <- identities]
+
+idDetailsAliasMapWith :: [(String, IdDetails)] -> Map String IdDetails
+idDetailsAliasMapWith identities =
   Map.fromList
     [ (alias, details)
     | (alias, detailsForAlias) <- Map.toList identitiesByAlias,
@@ -423,24 +458,24 @@ idDetailsAliasMap identities =
         Map.union
         [ (alias, Map.singleton (idDetailsAliasPayloadKey details) details)
         | (name, details) <- identities,
-          alias <- idDetailsAliasNames name details
+          alias <- idDetailsAliasNamesWith name details
         ]
 
 localRefStableName :: LocalRef -> String
 localRefStableName ref =
   uniqueIdentityStableName (localIdentityStableUnique (localRefIdentity ref))
 
-idDetailsReferenceName :: String -> IdDetails -> String
-idDetailsReferenceName runtimeName details =
+idDetailsReferenceName :: IdDetails -> String
+idDetailsReferenceName details =
   case details of
     LocalId localRef -> localRefName localRef
     EvidenceId localRef -> localRefName localRef
     EnvId envRef -> envRefName envRef
     DeferredId ref -> deferredRefName ref
-    _ -> runtimeName
+    _ -> idDetailsRuntimeName details
 
-idDetailsDisplayName :: String -> IdDetails -> String
-idDetailsDisplayName _runtimeName details =
+idDetailsDisplayName :: IdDetails -> String
+idDetailsDisplayName details =
   case details of
     LocalId localRef -> localRefName localRef
     EvidenceId localRef -> localRefName localRef

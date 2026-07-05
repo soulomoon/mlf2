@@ -151,7 +151,7 @@ import MLF.Types.Identity
     IdDetails (..),
     IdentityGenerator,
     freshEnvRef,
-    idDetailsAliasNames,
+    idDetailsAliasNamesWith,
     idDetailsGeneratedIdentities,
     identityGeneratorAfter,
     localRefMatchesNodeId,
@@ -509,8 +509,8 @@ externalBindingAliases name binding =
     Just identity ->
       Set.toList $
         Set.fromList $
-          idDetailsAliasNames name (externalBindingDetails identity)
-            ++ idDetailsAliasNames (externalBindingRuntimeName identity) (externalBindingDetails identity)
+          idDetailsAliasNamesWith name (externalBindingDetails identity)
+            ++ idDetailsAliasNamesWith (externalBindingRuntimeName identity) (externalBindingDetails identity)
     Nothing -> [name]
 
 extendPreparedExternalBindingTypeIdentities ::
@@ -609,16 +609,14 @@ externalBindingsGeneratedIdentities extBindings =
 resolvedExternalBindingVar :: ExternalBindingIdentity -> SchemeInfo -> ResolvedVar
 resolvedExternalBindingVar identity schemeInfo =
   ResolvedVar
-    { resolvedVarRuntimeName = externalBindingRuntimeName identity,
-      resolvedVarType = schemeToType (siScheme schemeInfo),
+    { resolvedVarType = schemeToType (siScheme schemeInfo),
       resolvedVarDetails = externalBindingDetails identity
     }
 
 resolvedGeneratedExternalBindingVar :: EnvRef -> VarName -> SchemeInfo -> ResolvedVar
-resolvedGeneratedExternalBindingVar envRef name schemeInfo =
+resolvedGeneratedExternalBindingVar envRef _name schemeInfo =
   ResolvedVar
-    { resolvedVarRuntimeName = name,
-      resolvedVarType = schemeToType (siScheme schemeInfo),
+    { resolvedVarType = schemeToType (siScheme schemeInfo),
       resolvedVarDetails = EnvId envRef
     }
 

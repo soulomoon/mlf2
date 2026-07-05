@@ -114,7 +114,7 @@ spec =
             let checked = prepareCheckedProgramForBackendEmission stalePreludeBindingNameProgram
             preludeModule <- requirePreludeModule checked
 
-            map checkedBindingName (checkedModuleBindings preludeModule) `shouldBe` ["$stale_keep"]
+            map checkedBindingName (checkedModuleBindings preludeModule) `shouldBe` ["Prelude__keep"]
 
         it "does not retain Prelude bindings through stale identity payloads" $ do
             let checked = prepareCheckedProgramForBackendEmission stalePreludeBindingPayloadProgram
@@ -598,7 +598,7 @@ checkedModule name bindings =
 testBinding :: String -> ResolvedVar -> Elab.XmlfTerm -> CheckedBinding
 testBinding name resolved term =
     CheckedBinding
-        { checkedBindingResolvedVar = resolved {Elab.resolvedVarRuntimeName = name}
+        { checkedBindingResolvedVar = resolved
         , checkedBindingSourceTypeView = mkTypeView (Surface.STBase "Int") (Surface.STBase "Int")
         , checkedBindingSurfaceExpr = Surface.ELit (Surface.LInt 0)
         , checkedBindingDeferredObligations = Map.empty
@@ -608,10 +608,10 @@ testBinding name resolved term =
         }
 
 topLevelVar :: Int -> String -> String -> String -> Elab.ElabType -> ResolvedVar
-topLevelVar unique runtimeName moduleName sourceName ty =
+topLevelVar unique _runtimeName moduleName sourceName ty =
     ResolvedVar
-        { resolvedVarRuntimeName = runtimeName
-        , resolvedVarType = ty
+        {
+        resolvedVarType = ty
         , resolvedVarDetails =
             TopLevelId (generatedSymbolIdentity unique SymbolValue moduleName sourceName Nothing)
         }

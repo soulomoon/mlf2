@@ -13,6 +13,7 @@ module MLF.Frontend.ConstraintGen
     ExternalBindingMode (..),
     ExternalBinding (..),
     ExternalBindingIdentity,
+    externalBindingIdentityFromDetails,
     externalBindingIdentityFromResolvedVar,
     externalBindingIdentityFromDeferredRef,
     externalBindingRuntimeName,

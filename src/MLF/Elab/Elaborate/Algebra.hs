@@ -100,6 +100,7 @@ import MLF.Elab.Types
     typeBinderRefsSameIdentity,
     typeBinderRefsSameIdentityAndName,
     localResolvedVarFromRef,
+    resolvedVarRuntimeName,
     resolvedVarReferenceName,
     resolvedVarSameIdentity,
     resolvedVarType,
@@ -294,8 +295,7 @@ localBinderIsDiscard name nodeId =
 resolvedLocalBinderFromNode :: VarName -> NodeId -> ElabType -> ResolvedVar
 resolvedLocalBinderFromNode name nodeId ty =
   ResolvedVar
-    { resolvedVarRuntimeName = name,
-      resolvedVarType = ty,
+    { resolvedVarType = ty,
       resolvedVarDetails = LocalId (localRefFromNodeId name nodeId)
     }
 
@@ -430,8 +430,7 @@ envBindingDetailsKey details =
 resolvedEnvBindingVar :: VarName -> EnvBinding -> ResolvedVar
 resolvedEnvBindingVar _name binding =
   ResolvedVar
-    { resolvedVarRuntimeName = ebRuntimeName binding,
-      resolvedVarType = ebSchemeType binding,
+    { resolvedVarType = ebSchemeType binding,
       resolvedVarDetails = ebIdentityDetails binding
     }
 

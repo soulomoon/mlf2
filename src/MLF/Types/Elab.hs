@@ -90,6 +90,7 @@ module MLF.Types.Elab (
     ResolvedTermIdentityKey,
     idDetailsIdentityKey,
     resolvedVarIdentityKey,
+    resolvedVarRuntimeName,
     deferredResolvedVarFromRef,
     deferredResolvedVarRef,
     localResolvedVarFromRef,
@@ -201,13 +202,12 @@ import MLF.Types.Identity
     , idDetailsIsLocal
     , idDetailsRenameLocal
     , idDetailsReferenceName
+    , idDetailsRuntimeName
     , idDetailsSameIdentity
     , idDetailsSymbolIdentity
     , freshIdentity
     , freshenLocalRef
     , identityGeneratorAfter
-    , deferredRefName
-    , localRefName
     , lookupTypeBinderIdentityAlias
     , renameDeferredRef
     , symbolGeneratedIdentities
@@ -609,8 +609,7 @@ attachBinderRefsToScheme refs (Scheme binds body) =
         typeBinderRefsSameIdentity target ref
 
 data ResolvedVar = ResolvedVar
-    { resolvedVarRuntimeName :: String,
-      resolvedVarType :: ElabType,
+    { resolvedVarType :: ElabType,
       resolvedVarDetails :: IdDetails
     }
     deriving (Show)
@@ -619,6 +618,10 @@ resolvedVarIdentityKey :: ResolvedVar -> ResolvedTermIdentityKey
 resolvedVarIdentityKey =
     idDetailsIdentityKey . resolvedVarDetails
 
+resolvedVarRuntimeName :: ResolvedVar -> String
+resolvedVarRuntimeName =
+    idDetailsRuntimeName . resolvedVarDetails
+
 instance Eq ResolvedVar where
     left == right =
         resolvedVarType left == resolvedVarType right
@@ -626,15 +629,15 @@ instance Eq ResolvedVar where
 
 resolvedVarReferenceName :: ResolvedVar -> String
 resolvedVarReferenceName resolved =
-    idDetailsReferenceName (resolvedVarRuntimeName resolved) (resolvedVarDetails resolved)
+    idDetailsReferenceName (resolvedVarDetails resolved)
 
 resolvedVarAliasNames :: ResolvedVar -> Set.Set String
 resolvedVarAliasNames resolved =
-    Set.fromList (idDetailsAliasNames (resolvedVarRuntimeName resolved) (resolvedVarDetails resolved))
+    Set.fromList (idDetailsAliasNames (resolvedVarDetails resolved))
 
 resolvedVarName :: ResolvedVar -> String
 resolvedVarName resolved =
-    idDetailsDisplayName (resolvedVarRuntimeName resolved) (resolvedVarDetails resolved)
+    idDetailsDisplayName (resolvedVarDetails resolved)
 
 resolvedVarConstructorRef :: ResolvedVar -> Maybe ConstructorRef
 resolvedVarConstructorRef = idDetailsConstructorRef . resolvedVarDetails
@@ -675,8 +678,7 @@ renameResolvedLocalVar name resolved =
     if resolvedVarIsLocal resolved
         then
             resolved
-                { resolvedVarRuntimeName = name
-                , resolvedVarDetails = idDetailsRenameLocal name (resolvedVarDetails resolved)
+                { resolvedVarDetails = idDetailsRenameLocal name (resolvedVarDetails resolved)
                 }
         else resolved
 
@@ -693,8 +695,7 @@ freshenResolvedLocalVar name generator resolved =
     freshen wrap ref =
         let (ref', generator') = freshenLocalRef name generator ref
          in ( resolved
-                { resolvedVarRuntimeName = name
-                , resolvedVarDetails = wrap ref'
+                { resolvedVarDetails = wrap ref'
                 }
             , generator'
             )
@@ -704,8 +705,7 @@ renameResolvedDeferredVar name resolved =
     case resolvedVarDetails resolved of
         DeferredId ref ->
             resolved
-                { resolvedVarRuntimeName = name
-                , resolvedVarDetails = DeferredId (renameDeferredRef name ref)
+                { resolvedVarDetails = DeferredId (renameDeferredRef name ref)
                 }
         _ -> resolved
 
@@ -777,19 +777,16 @@ instance Corecursive Instantiation where
 deferredResolvedVarFromRef :: DeferredRef -> ResolvedVar
 deferredResolvedVarFromRef ref =
     ResolvedVar
-        { resolvedVarRuntimeName = deferredRefName ref
-        , resolvedVarType = TBottom
+        { resolvedVarType = TBottom
         , resolvedVarDetails = DeferredId ref
         }
 
 localResolvedVarFromRef :: LocalRef -> ElabType -> ResolvedVar
 localResolvedVarFromRef localRef ty =
-    let name = localRefName localRef
-     in ResolvedVar
-            { resolvedVarRuntimeName = name
-            , resolvedVarType = ty
-            , resolvedVarDetails = LocalId localRef
-            }
+    ResolvedVar
+        { resolvedVarType = ty
+        , resolvedVarDetails = LocalId localRef
+        }
 
 deferredResolvedVarRef :: ResolvedVar -> Maybe DeferredRef
 deferredResolvedVarRef resolved =

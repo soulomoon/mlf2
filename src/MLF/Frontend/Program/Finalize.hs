@@ -72,8 +72,8 @@ import MLF.Frontend.ConstraintGen
   ( ExternalBinding (..),
     ExternalBindingIdentity,
     ExternalBindingMode (..),
+    externalBindingIdentityFromDetails,
     externalBindingIdentityFromDeferredRef,
-    externalBindingIdentityFromResolvedVar,
   )
 import MLF.Frontend.Normalize (normalizeExpr, normalizeType)
 import qualified MLF.Frontend.Program.Builtins as Builtins
@@ -217,14 +217,13 @@ import MLF.Types.Identity
     LocalRef,
     localRefGeneratedIdentities,
     localRefIdentity,
-    localRefName,
     TypeBinderIdentity,
     UniqueIdentity,
     freshDeferredRef,
     freshEnvRef,
     freshLocalRef,
-    idDetailsAliasMap,
-    idDetailsAliasNames,
+    idDetailsAliasMapWith,
+    idDetailsAliasNamesWith,
     idDetailsGeneratedIdentities,
     identityGeneratorAfter,
     renameDeferredRef,
@@ -1727,8 +1726,7 @@ stampLoweredResolvedLocals lowered term0 =
 
     stampResolvedVar runtimeRef resolved =
       resolved
-        { X.resolvedVarRuntimeName = localRefName runtimeRef
-        , X.resolvedVarDetails = LocalId runtimeRef
+        { X.resolvedVarDetails = LocalId runtimeRef
         }
 
 annotateResolvedTermVars :: FinalizeContext -> LoweredBinding -> XmlfTerm -> XmlfTerm
@@ -2074,13 +2072,12 @@ runtimeExternalBindingIndexFromScope scope runtimeTypes =
       | valueInfo <- Map.elems (elaborateScopeValues scope),
         Just (runtimeName, details) <- [valueResolvedDetails valueInfo],
         Just ty <- [Map.lookup runtimeName runtimeTypes],
-        Just key <- [idDetailsReadKeyMaybe details],
-        let resolved =
-              X.ResolvedVar
-                { X.resolvedVarRuntimeName = runtimeName,
-                  X.resolvedVarType = ty,
-                  X.resolvedVarDetails = details
-                }
+            Just key <- [idDetailsReadKeyMaybe details],
+            let resolved =
+                  X.ResolvedVar
+                    { X.resolvedVarType = ty,
+                      X.resolvedVarDetails = details
+                    }
       ]
 
     valueResolvedDetails valueInfo =
@@ -2106,7 +2103,7 @@ runtimeExternalBindingIndexFromScope scope runtimeTypes =
         Set.union
         [ (alias, Set.singleton key)
         | (runtimeName, key, resolved) <- entries,
-          alias <- idDetailsAliasNames runtimeName (X.resolvedVarDetails resolved)
+          alias <- idDetailsAliasNamesWith runtimeName (X.resolvedVarDetails resolved)
         ]
 
     resolvedByKey =
@@ -2123,7 +2120,7 @@ runtimeExternalBindingIndexFromScope scope runtimeTypes =
 runtimeExternalBindingIdentity :: RuntimeExternalBindingIndex -> String -> Maybe ExternalBindingIdentity
 runtimeExternalBindingIdentity index name = do
   resolved <- lookupRuntimeExternalBindingByName name index
-  pure (externalBindingIdentityFromResolvedVar resolved)
+  pure (externalBindingIdentityFromDetails name (X.resolvedVarDetails resolved))
 
 runtimeSourceTypesWithIdentityAliases :: Map String SrcType -> RuntimeExternalBindingIndex -> Map String SrcType
 runtimeSourceTypesWithIdentityAliases runtimeSourceTypes index =
@@ -2133,10 +2130,10 @@ runtimeSourceTypesWithIdentityAliases runtimeSourceTypes index =
       Map.fromListWith
         (++)
         [ (alias, [(X.resolvedVarIdentityKey resolved, ty)])
-        | resolved <- Map.elems (runtimeExternalBindingByKey index),
-          let runtimeName = X.resolvedVarRuntimeName resolved,
+        | (runtimeName, key) <- Map.toList (runtimeExternalBindingKeyByName index),
+          Just resolved <- [Map.lookup key (runtimeExternalBindingByKey index)],
           Just ty <- [Map.lookup runtimeName runtimeSourceTypes],
-          alias <- idDetailsAliasNames runtimeName (X.resolvedVarDetails resolved)
+          alias <- idDetailsAliasNamesWith runtimeName (X.resolvedVarDetails resolved)
         ]
 
     uniqueAlias entries =
@@ -2161,7 +2158,7 @@ deferredExternalBindingIndex obligations =
     }
   where
     refAliases =
-      idDetailsAliasMap
+      idDetailsAliasMapWith
         [ (deferredRefName ref, DeferredId ref)
         | obligation <- Map.elems obligations,
           let ref = deferredProgramObligationRef obligation
@@ -2734,8 +2731,9 @@ runtimeTypeCheckEnv context =
 
     resolvedRuntimeNames =
       Set.fromList
-        [ X.resolvedVarRuntimeName resolved
-        | resolved <- Map.elems (runtimeExternalBindingByKey runtimeIndex)
+        [ name
+        | name <- Map.keys (runtimeExternalBindingKeyByName runtimeIndex),
+          Map.member name runtimeTypes
         ]
 
     unresolvedEntries =
@@ -2751,8 +2749,7 @@ runtimeTypeCheckEnv context =
       let (envRef, generator') = freshEnvRef name generator
           resolved =
             X.ResolvedVar
-              { X.resolvedVarRuntimeName = name,
-                X.resolvedVarType = ty,
+              { X.resolvedVarType = ty,
                 X.resolvedVarDetails = EnvId envRef
               }
        in (generator', (resolved, ty))
@@ -4512,8 +4509,7 @@ deferredPlaceholderHeadRefWithInsts = go []
 resolvedVarFromConstructorInfo :: ConstructorInfo -> X.ResolvedVar
 resolvedVarFromConstructorInfo ctorInfo =
   X.ResolvedVar
-    { X.resolvedVarRuntimeName = ctorRuntimeName ctorInfo,
-      X.resolvedVarType = X.TBottom,
+    { X.resolvedVarType = X.TBottom,
       X.resolvedVarDetails = ConstructorId (constructorRefFromInfo ctorInfo)
     }
 

@@ -73,7 +73,7 @@ import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Elab.Elaborate.Algebra qualified as Algebra
 import MLF.Elab.Elaborate.Annotation qualified as Annotation
 import MLF.Elab.Pipeline qualified as Elab
-import MLF.Elab.Types (ResolvedVar (..))
+import MLF.Elab.Types (ResolvedVar (..), resolvedVarRuntimeName)
 import MLF.Elab.Types qualified as ElabTypes
 import MLF.Elab.Phi.TestSupport qualified as PhiTestSupport
 import ElabTermTestSupport
@@ -2067,9 +2067,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
     it "pretty prints resolved locals by identity instead of runtime spelling" $ do
       let intTy = Elab.tBase (BaseTy "Int")
-          resolved ref runtime =
+          resolved ref _runtime =
             ResolvedVar
-              { resolvedVarRuntimeName = runtime,
+              {
                 resolvedVarType = intTy,
                 resolvedVarDetails = LocalId (generatedLocalRefForName ref)
               }
@@ -2090,15 +2090,15 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               "a"
           captured =
             ResolvedVar
-              { resolvedVarRuntimeName = "captured",
+              {
                 resolvedVarType = ElabTypes.tVarWithRef envRef,
                 resolvedVarDetails =
                   EnvId (envRefFromIdentity (UniqueIdentity 1866) "captured")
               }
           env = Elab.mkTypeCheckEnvWithResolvedTerms [(captured, ElabTypes.tVarWithRef envRef)] Map.empty
-          resolved ref runtime ty =
+          resolved ref _runtime ty =
             ResolvedVar
-              { resolvedVarRuntimeName = runtime,
+              {
                 resolvedVarType = ty,
                 resolvedVarDetails = LocalId (generatedLocalRefForName ref)
               }
@@ -2114,7 +2114,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
           resolvedVarType binder `shouldBe` ElabTypes.tVarWithRef freshRef
           resolvedVarType occurrence `shouldBe` ElabTypes.tVarWithRef freshRef
           resolvedVarDetails binder `shouldBe` LocalId (generatedLocalRefForName "$x#0")
-          resolvedVarRuntimeName occurrence `shouldBe` "different-runtime"
+          resolvedVarRuntimeName occurrence `shouldBe` "$x#0"
         other -> expectationFailure ("Expected resolved freshened term, got: " ++ show other)
 
     it "freshens annotation type abstractions away from visible stable aliases" $ do
@@ -2129,15 +2129,15 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               stableAlias
           captured =
             ResolvedVar
-              { resolvedVarRuntimeName = "captured",
+              {
                 resolvedVarType = ElabTypes.tVarWithRef envRef,
                 resolvedVarDetails =
                   EnvId (envRefFromIdentity (UniqueIdentity 1869) "captured")
               }
           env = Elab.mkTypeCheckEnvWithResolvedTerms [(captured, ElabTypes.tVarWithRef envRef)] Map.empty
-          resolved ref runtime ty =
+          resolved ref _runtime ty =
             ResolvedVar
-              { resolvedVarRuntimeName = runtime,
+              {
                 resolvedVarType = ty,
                 resolvedVarDetails = LocalId (generatedLocalRefForName ref)
               }
@@ -2156,9 +2156,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
     it "uses resolved local identity when selecting authoritative app annotations" $ do
       let intTy = Elab.tBase (BaseTy "Int")
-          resolved ref runtime =
+          resolved ref _runtime =
             ResolvedVar
-              { resolvedVarRuntimeName = runtime,
+              {
                 resolvedVarType = intTy,
                 resolvedVarDetails = LocalId (generatedLocalRefForName ref)
               }
@@ -2181,9 +2181,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
     it "uses annotation node identity instead of local names for authoritative var annotations" $ do
       let intTy = Elab.tBase (BaseTy "Int")
-          resolvedAt (NodeId node) ref runtime =
+          resolvedAt (NodeId node) ref _runtime =
             ResolvedVar
-              { resolvedVarRuntimeName = runtime,
+              {
                 resolvedVarType = intTy,
                 resolvedVarDetails = LocalId (localRefFromNodeId ref (NodeId node))
               }
@@ -2213,7 +2213,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             symbolIdentityFromParts (UniqueIdentity 991901) SymbolValue "Main" "x" Nothing
           resolved =
             ResolvedVar
-              { resolvedVarRuntimeName = "runtime-x",
+              {
                 resolvedVarType = intTy,
                 resolvedVarDetails = TopLevelId topIdentity
               }
@@ -2230,9 +2230,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
     it "uses let scheme-root identity instead of local names for authoritative let annotations" $ do
       let intTy = Elab.tBase (BaseTy "Int")
-          resolvedAt (NodeId node) ref runtime =
+          resolvedAt (NodeId node) ref _runtime =
             ResolvedVar
-              { resolvedVarRuntimeName = runtime,
+              {
                 resolvedVarType = intTy,
                 resolvedVarDetails = LocalId (localRefFromNodeId ref (NodeId node))
               }
@@ -4845,13 +4845,13 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             decoyDetails = EnvId (envRefFromIdentity (UniqueIdentity 991901) "actual")
             targetResolved =
               ResolvedVar
-                { resolvedVarRuntimeName = "actual",
+                {
                   resolvedVarType = Elab.tBase (BaseTy "Int"),
                   resolvedVarDetails = targetDetails
                 }
             decoyResolved =
               ResolvedVar
-                { resolvedVarRuntimeName = "actual",
+                {
                   resolvedVarType = Elab.tBase (BaseTy "Bool"),
                   resolvedVarDetails = decoyDetails
                 }
@@ -4864,7 +4864,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 )
             resolved =
               ResolvedVar
-                { resolvedVarRuntimeName = "actual",
+                {
                   resolvedVarType = Elab.tBase (BaseTy "Int"),
                   resolvedVarDetails = targetDetails
                 }
@@ -4878,7 +4878,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             localRef = localRefFromNodeId "x" (NodeId 991902)
             targetResolved =
               ResolvedVar
-                { resolvedVarRuntimeName = "x",
+                {
                   resolvedVarType = Elab.tBase (BaseTy "Int"),
                   resolvedVarDetails = LocalId localRef
                 }
@@ -4887,7 +4887,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                 (Map.singleton "x" (targetSchemeInfo, targetResolved))
             resolved =
               ResolvedVar
-                { resolvedVarRuntimeName = "$stale_x",
+                {
                   resolvedVarType = Elab.tBase (BaseTy "Int"),
                   resolvedVarDetails = EvidenceId localRef
                 }

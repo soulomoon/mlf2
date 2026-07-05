@@ -16,6 +16,7 @@ module MLF.Frontend.ConstraintGen.Types
     ExternalBindingMode (..),
     ExternalBinding (..),
     ExternalBindingIdentity,
+    externalBindingIdentityFromDetails,
     externalBindingIdentityFromResolvedVar,
     externalBindingIdentityFromDeferredRef,
     externalBindingRuntimeName,
@@ -32,7 +33,7 @@ import MLF.Constraint.RootOwnership (ModuleRootId (..), RootOwnershipIndex (..))
 import MLF.Constraint.Types.Graph
 import MLF.Frontend.Symbol (SymbolIdentity)
 import MLF.Frontend.Syntax (Lit, NormSrcType, VarName)
-import MLF.Types.Elab (ResolvedVar (..))
+import MLF.Types.Elab (ResolvedVar (..), resolvedVarRuntimeName)
 import MLF.Types.Identity (DeferredRef, IdDetails (..), TypeBinderIdentity, deferredRefName)
 
 -- | Errors that can surface during constraint generation.

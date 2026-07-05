@@ -176,7 +176,7 @@ import MLF.Constraint.Types.Graph (BaseTy (..))
 import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), SymbolOwnerIdentity (..), sameSymbolIdentity, symbolDefiningModule, symbolDefiningName, symbolIdentityFromParts, symbolIdentityStableName, symbolRefMatches, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit (..))
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
-import MLF.Types.Identity (constructorRefSymbol, deferredRefIdentity, envRefIdentity, IdDetails (..), IdentityGenerator, LocalRef, localRefIdentity, primitiveRefSymbol, idDetailsAliasMap, idDetailsSymbolIdentity, StructuralTypeBinderRole (..), TypeBinderIdentity, UniqueIdentity (..), freshIdentity, freshLocalRef, identityGeneratorAfter, initialIdentityGenerator, localIdentityStableUnique, typeBinderIdentityAliasMap, typeBinderIdentityAliasNames, typeBinderIdentityFromUnique, typeBinderIdentityStableName, typeBinderIdentityStructural)
+import MLF.Types.Identity (constructorRefSymbol, deferredRefIdentity, envRefIdentity, IdDetails (..), IdentityGenerator, LocalRef, localRefIdentity, primitiveRefSymbol, idDetailsAliasMapWith, idDetailsSymbolIdentity, StructuralTypeBinderRole (..), TypeBinderIdentity, UniqueIdentity (..), freshIdentity, freshLocalRef, identityGeneratorAfter, initialIdentityGenerator, localIdentityStableUnique, typeBinderIdentityAliasMap, typeBinderIdentityAliasNames, typeBinderIdentityFromUnique, typeBinderIdentityStableName, typeBinderIdentityStructural)
 import MLF.Util.Names (freshNameLike)
 
 lowerBackendProgram :: BackendProgram -> Either BackendLLVMError LLVMModule
@@ -462,7 +462,7 @@ shadowBackendTypeBinderIdentity name identity env =
 
 insertUniqueBackendTermIdentity :: String -> IdDetails -> BackendTermEnv -> BackendTermEnv
 insertUniqueBackendTermIdentity name identity env =
-  Map.foldrWithKey (\alias details env0 -> Map.alter (insert details) alias env0) env (idDetailsAliasMap [(name, identity)])
+  Map.foldrWithKey (\alias details env0 -> Map.alter (insert details) alias env0) env (idDetailsAliasMapWith [(name, identity)])
   where
     insert details Nothing =
       Just (Just details)
@@ -474,7 +474,7 @@ insertUniqueBackendTermIdentity name identity env =
 
 shadowBackendTermIdentity :: String -> IdDetails -> BackendTermEnv -> BackendTermEnv
 shadowBackendTermIdentity name identity env =
-  Map.foldrWithKey (\alias details env0 -> Map.insert alias (Just details) env0) env (idDetailsAliasMap [(name, identity)])
+  Map.foldrWithKey (\alias details env0 -> Map.insert alias (Just details) env0) env (idDetailsAliasMapWith [(name, identity)])
 
 unionUniqueBackendTermEnv :: BackendTermEnv -> BackendTermEnv -> BackendTermEnv
 unionUniqueBackendTermEnv =
@@ -6306,7 +6306,7 @@ rewriteBackendVarsByName identities0 =
         . patternLocalBinders
 
     withoutTermBinder (Just identity, name) identities =
-      Map.foldrWithKey (\alias _ -> Map.delete alias) identities (idDetailsAliasMap [(name, identity)])
+      Map.foldrWithKey (\alias _ -> Map.delete alias) identities (idDetailsAliasMapWith [(name, identity)])
     withoutTermBinder (Nothing, name) identities =
       Map.delete name identities
 

@@ -135,11 +135,11 @@ resolvedTypeBinderRef identity name =
     resolvedTypeBinderRefFromIdentity (typeBinderIdentityFromUnique identity) name
 
 loweredBindingIdentityFromDetails :: String -> IdDetails -> ProgramTypes.LoweredBindingIdentity
-loweredBindingIdentityFromDetails runtimeName details =
+loweredBindingIdentityFromDetails _runtimeName details =
     ProgramTypes.loweredBindingIdentityFromResolvedVar
         ResolvedVar
-            { resolvedVarRuntimeName = runtimeName
-            , resolvedVarType = Elab.TBottom
+            {
+            resolvedVarType = Elab.TBottom
             , resolvedVarDetails = details
             }
 
@@ -785,8 +785,8 @@ spec = do
                 binderRef = Elab.typeBinderRefFromIdentity (typeBinderIdentityFromUnique binderUnique) "a"
                 resolved =
                     ResolvedVar
-                        { resolvedVarRuntimeName = "Main__method"
-                        , resolvedVarType = Elab.TVarRef binderRef
+                        {
+                        resolvedVarType = Elab.TVarRef binderRef
                         , resolvedVarDetails = TopLevelId valueIdentity
                         }
                 method =
@@ -1998,7 +1998,7 @@ spec = do
             finalizeContext <- requireFinalizeContext scope
             finalizeBindingWithContext finalizeContext lowered `shouldBe` Left (ProgramUnknownValue runtimeName)
 
-        it "preserves runtime external binding identity across stale runtime spellings" $ do
+        it "derives runtime external binding names from identity across stale runtime spellings" $ do
             let sharedIdentity = generatedSymbolIdentity 991653 SymbolValue "Main" "shared" Nothing
                 bindingIdentity = generatedSymbolIdentity 991654 SymbolValue "Main" "main" Nothing
                 valueInfo runtimeName =
@@ -2039,7 +2039,7 @@ spec = do
                 Right binding ->
                     case checkedBindingTerm binding of
                         Elab.EVarNode resolved -> do
-                            Elab.resolvedVarRuntimeName resolved `shouldBe` "Main__right"
+                            Elab.resolvedVarRuntimeName resolved `shouldBe` "Main__shared"
                             Elab.resolvedVarDetails resolved `shouldBe` TopLevelId sharedIdentity
                         other ->
                             expectationFailure ("expected external variable term, got " ++ show other)
@@ -2727,8 +2727,8 @@ spec = do
             let ty = testTForall "a" Nothing (testTVar "result")
                 resolved =
                     ResolvedVar
-                        { resolvedVarRuntimeName = "value"
-                        , resolvedVarType = testTVar "a"
+                        {
+                        resolvedVarType = testTVar "a"
                         , resolvedVarDetails = LocalId (generatedLocalRefForName "$value#0")
                         }
                 retainedTerm = mkTestTyAbs "a" Nothing (Elab.EVarNode resolved)
@@ -3110,8 +3110,8 @@ spec = do
             binding <- requireCheckedBinding "Main__None" checked
             case checkedBindingResolvedVar binding of
                 ResolvedVar
-                    { resolvedVarRuntimeName = "Main__None"
-                    , resolvedVarDetails = ConstructorId ctorRef
+                    {
+                    resolvedVarDetails = ConstructorId ctorRef
                     } -> do
                         symbolDefiningName (constructorRefSymbol ctorRef) `shouldBe` "None"
                 resolvedVar ->
@@ -3835,14 +3835,14 @@ spec = do
                 handlerRef = generatedLocalRefForName "$None-handler"
                 binder =
                     ResolvedVar
-                        { resolvedVarRuntimeName = "runtime-handler"
-                        , resolvedVarType = handlerType
+                        {
+                        resolvedVarType = handlerType
                         , resolvedVarDetails = LocalId handlerRef
                         }
                 occurrence =
                     binder
-                        { resolvedVarRuntimeName = "stale-runtime-handler"
-                        , resolvedVarDetails =
+                        {
+                        resolvedVarDetails =
                             LocalId
                                 (renameLocalRef "$stale-handler-reference" handlerRef)
                         }
@@ -3870,21 +3870,21 @@ spec = do
                 handlerRef = generatedLocalRefForName "$Option-handler"
                 noneHandler =
                     ResolvedVar
-                        { resolvedVarRuntimeName = "none-handler"
-                        , resolvedVarType = handlerType
+                        {
+                        resolvedVarType = handlerType
                         , resolvedVarDetails = LocalId handlerRef
                         }
                 someHandler =
                     noneHandler
-                        { resolvedVarRuntimeName = "some-handler"
-                        , resolvedVarType = Elab.TArrow handlerArgType handlerType
+                        {
+                        resolvedVarType = Elab.TArrow handlerArgType handlerType
                         , resolvedVarDetails =
                             LocalId (renameLocalRef "$same-option-handler" handlerRef)
                         }
                 occurrence =
                     noneHandler
-                        { resolvedVarRuntimeName = "selected-handler"
-                        , resolvedVarDetails =
+                        {
+                        resolvedVarDetails =
                             LocalId (renameLocalRef "$selected-option-handler" handlerRef)
                         }
                 churchAmbiguous =
@@ -3918,21 +3918,21 @@ spec = do
                 handlerRef = generatedLocalRefForName "$Option-fallback-handler"
                 noneHandler =
                     ResolvedVar
-                        { resolvedVarRuntimeName = "none-handler"
-                        , resolvedVarType = handlerType
+                        {
+                        resolvedVarType = handlerType
                         , resolvedVarDetails = LocalId handlerRef
                         }
                 someHandler =
                     noneHandler
-                        { resolvedVarRuntimeName = "some-handler"
-                        , resolvedVarType = Elab.TArrow handlerArgType handlerType
+                        {
+                        resolvedVarType = Elab.TArrow handlerArgType handlerType
                         , resolvedVarDetails =
                             LocalId (renameLocalRef "$same-option-fallback-handler" handlerRef)
                         }
                 occurrence =
                     noneHandler
-                        { resolvedVarRuntimeName = "selected-handler"
-                        , resolvedVarDetails =
+                        {
+                        resolvedVarDetails =
                             LocalId (renameLocalRef "$selected-option-fallback-handler" handlerRef)
                         }
                 churchAmbiguous =
@@ -4122,8 +4122,8 @@ spec = do
                         ctorTy = ProgramTypes.ctorTypeView poisonedCtor
                         stringFromInt =
                             ResolvedVar
-                                { resolvedVarRuntimeName = PrimitiveInventory.stringFromIntPrimitiveName
-                                , resolvedVarType = Elab.TArrow (Elab.tBase (BaseTy "Int")) (Elab.tBase (BaseTy "String"))
+                                {
+                                resolvedVarType = Elab.TArrow (Elab.tBase (BaseTy "Int")) (Elab.tBase (BaseTy "String"))
                                 , resolvedVarDetails =
                                     PrimitiveId (primitiveRefFromSymbol (Builtins.builtinValueIdentity PrimitiveInventory.stringFromIntPrimitiveName))
                                 }
@@ -4185,8 +4185,8 @@ spec = do
                         ctorTy = ProgramTypes.ctorTypeView poisonedCtor
                         stringFromInt =
                             ResolvedVar
-                                { resolvedVarRuntimeName = PrimitiveInventory.stringFromIntPrimitiveName
-                                , resolvedVarType = Elab.TArrow (Elab.tBase (BaseTy "Int")) (Elab.tBase (BaseTy "String"))
+                                {
+                                resolvedVarType = Elab.TArrow (Elab.tBase (BaseTy "Int")) (Elab.tBase (BaseTy "String"))
                                 , resolvedVarDetails =
                                     PrimitiveId (primitiveRefFromSymbol (Builtins.builtinValueIdentity PrimitiveInventory.stringFromIntPrimitiveName))
                                 }
@@ -4301,8 +4301,8 @@ spec = do
                 primitiveTy = Elab.TArrow intTy stringTy
                 staleStringFromInt =
                     ResolvedVar
-                        { resolvedVarRuntimeName = "$stale_string_from_int"
-                        , resolvedVarType = primitiveTy
+                        {
+                        resolvedVarType = primitiveTy
                         , resolvedVarDetails =
                             PrimitiveId (primitiveRefFromSymbol (Builtins.builtinValueIdentity PrimitiveInventory.stringFromIntPrimitiveName))
                         }
@@ -4324,8 +4324,8 @@ spec = do
                 primitiveTy = Elab.TArrow intTy stringTy
                 fakePrimitiveSpelling =
                     ResolvedVar
-                        { resolvedVarRuntimeName = PrimitiveInventory.stringFromIntPrimitiveName
-                        , resolvedVarType = primitiveTy
+                        {
+                        resolvedVarType = primitiveTy
                         , resolvedVarDetails =
                             TopLevelId (generatedSymbolIdentity 1031 SymbolValue "Main" "notStringFromInt" Nothing)
                         }
@@ -4549,7 +4549,7 @@ spec = do
                         checked
             case runCheckedProgramOutput checked' of
                 Left (ProgramUnknownValue name) ->
-                    name `shouldBe` "$stale_none"
+                    name `shouldBe` "Main__$stale_none"
                 other ->
                     expectationFailure ("expected stale constructor identity rejection, got " ++ show other)
 
@@ -4591,7 +4591,7 @@ spec = do
             case runCheckedProgramOutput checked' of
                 Left (ProgramPipelineError message) -> do
                     message `shouldSatisfy` isInfixOf "missing symbol identity"
-                    message `shouldSatisfy` isInfixOf "Main__helper"
+                    message `shouldSatisfy` isInfixOf "`helper`"
                 other ->
                     expectationFailure ("expected missing binding identity rejection, got " ++ show other)
 
@@ -4638,7 +4638,7 @@ spec = do
                         checked
             case runCheckedProgramOutput checked' of
                 Left (ProgramUnknownValue name) ->
-                    name `shouldBe` "$stale_helper"
+                    name `shouldBe` "Main__$stale_helper"
                 other ->
                     expectationFailure ("expected stale binding identity rejection, got " ++ show other)
 
@@ -4657,14 +4657,14 @@ spec = do
                 staleIdentity = renameSymbolDefiningName "$stale_message" correctIdentity
                 correctResolved =
                     ResolvedVar
-                        { resolvedVarRuntimeName = "synthetic_message"
-                        , resolvedVarType = stringTy
+                        {
+                        resolvedVarType = stringTy
                         , resolvedVarDetails = TopLevelId correctIdentity
                         }
                 staleResolved =
                     ResolvedVar
-                        { resolvedVarRuntimeName = "$stale_message"
-                        , resolvedVarType = stringTy
+                        {
+                        resolvedVarType = stringTy
                         , resolvedVarDetails = TopLevelId staleIdentity
                         }
                 stringScheme = Elab.mkElabSchemeWithRefs [] stringTy
@@ -8220,9 +8220,9 @@ spec = do
                 Right checked -> do
                     mainBinding <- requireCheckedBinding "Main__main" checked
                     checkedBindingResolvedVar mainBinding
-                        `shouldSatisfy` \resolvedVar@ResolvedVar {resolvedVarRuntimeName, resolvedVarDetails} ->
+                        `shouldSatisfy` \resolvedVar@ResolvedVar {resolvedVarDetails} ->
                             Elab.resolvedVarName resolvedVar == "main"
-                                && resolvedVarRuntimeName == "Main__main"
+                                && Elab.resolvedVarRuntimeName resolvedVar == "Main__main"
                                 && resolvedVarDetails == TopLevelId (resolvedSymbolIdentity mainValue)
 
         it "does not let resolved local spellings shadow global identities" $ do
@@ -9112,37 +9112,18 @@ replaceCheckedBindingSourceTypeView name sourceTypeView checked =
         | otherwise = binding
 
 poisonPrimitiveRuntimeNames :: String -> Elab.XmlfTerm -> Elab.XmlfTerm
-poisonPrimitiveRuntimeNames replacement term =
-    case term of
-        Elab.EVarNode resolved@ResolvedVar {resolvedVarDetails = PrimitiveId ref} ->
-            Elab.EVarNode
-                resolved
-                    { resolvedVarRuntimeName = replacement
-                    , resolvedVarDetails = PrimitiveId ref
-                    }
-        Elab.EVarNode resolved@ResolvedVar {resolvedVarDetails = TopLevelId _} ->
-            Elab.EVarNode resolved {resolvedVarRuntimeName = replacement}
-        Elab.EVarNode {} -> term
-        Elab.ELit {} -> term
-        Elab.ELam resolved body -> Elab.ELam resolved (go body)
-        Elab.EApp fun arg -> Elab.EApp (go fun) (go arg)
-        Elab.ELet resolved scheme rhs body -> Elab.ELet resolved scheme (go rhs) (go body)
-        Elab.ETyAbsRef ref mbBound body -> Elab.ETyAbsRef ref mbBound (go body)
-        Elab.ETyInst body inst -> Elab.ETyInst (go body) inst
-        Elab.ERoll ty body -> Elab.ERoll ty (go body)
-        Elab.EUnroll body -> Elab.EUnroll (go body)
-  where
-    go = poisonPrimitiveRuntimeNames replacement
+poisonPrimitiveRuntimeNames _replacement =
+    id
 
 poisonTopLevelTermIdentity :: SymbolIdentity -> SymbolIdentity -> String -> Elab.XmlfTerm -> Elab.XmlfTerm
-poisonTopLevelTermIdentity target replacement replacementName term =
+poisonTopLevelTermIdentity target replacement _replacementName term =
     case term of
         Elab.EVarNode resolved@ResolvedVar {resolvedVarDetails = TopLevelId identity}
             | Symbol.sameSymbolIdentity identity target ->
                 Elab.EVarNode
                     resolved
-                        { resolvedVarRuntimeName = replacementName
-                        , resolvedVarDetails = TopLevelId replacement
+                        {
+                        resolvedVarDetails = TopLevelId replacement
                         }
         Elab.EVarNode {} -> term
         Elab.ELit {} -> term
@@ -9154,17 +9135,17 @@ poisonTopLevelTermIdentity target replacement replacementName term =
         Elab.ERoll ty body -> Elab.ERoll ty (go body)
         Elab.EUnroll body -> Elab.EUnroll (go body)
   where
-    go = poisonTopLevelTermIdentity target replacement replacementName
+    go = poisonTopLevelTermIdentity target replacement _replacementName
 
 poisonConstructorTermIdentity :: SymbolIdentity -> SymbolIdentity -> String -> Elab.XmlfTerm -> Elab.XmlfTerm
-poisonConstructorTermIdentity target replacement replacementName term =
+poisonConstructorTermIdentity target replacement _replacementName term =
     case term of
         Elab.EVarNode resolved@ResolvedVar {resolvedVarDetails = ConstructorId ref}
             | Symbol.sameSymbolIdentity (constructorRefSymbol ref) target ->
                 Elab.EVarNode
                     resolved
-                        { resolvedVarRuntimeName = replacementName
-                        , resolvedVarDetails = ConstructorId (ProgramTypes.constructorRefFromSymbol replacement)
+                        {
+                        resolvedVarDetails = ConstructorId (ProgramTypes.constructorRefFromSymbol replacement)
                         }
         Elab.EVarNode {} -> term
         Elab.ELit {} -> term
@@ -9176,14 +9157,14 @@ poisonConstructorTermIdentity target replacement replacementName term =
         Elab.ERoll ty body -> Elab.ERoll ty (go body)
         Elab.EUnroll body -> Elab.EUnroll (go body)
   where
-    go = poisonConstructorTermIdentity target replacement replacementName
+    go = poisonConstructorTermIdentity target replacement _replacementName
 
 primitiveTerm :: String -> Elab.XmlfTerm
 primitiveTerm name =
     Elab.EVarNode
         ResolvedVar
-            { resolvedVarRuntimeName = name
-            , resolvedVarType = Elab.TBottom
+            {
+            resolvedVarType = Elab.TBottom
             , resolvedVarDetails =
                 PrimitiveId (primitiveRefFromSymbol (Builtins.builtinValueIdentity name))
             }
@@ -9207,27 +9188,8 @@ replaceCheckedBindingSurfaceExpr name expr checked =
         | otherwise = binding
 
 renameCheckedBindingName :: String -> String -> CheckedProgram -> CheckedProgram
-renameCheckedBindingName oldName newName checked =
+renameCheckedBindingName _oldName _newName checked =
     checked
-        { checkedProgramModules =
-            map renameModule (checkedProgramModules checked)
-        }
-  where
-    renameModule checkedModule =
-        checkedModule
-            { checkedModuleBindings =
-                map renameBinding (checkedModuleBindings checkedModule)
-            }
-
-    renameBinding binding
-        | checkedBindingName binding == oldName =
-            binding
-                { checkedBindingResolvedVar =
-                    (checkedBindingResolvedVar binding)
-                        { resolvedVarRuntimeName = newName
-                        }
-                }
-        | otherwise = binding
 
 requireTopLevelIdentity :: CheckedBinding -> IO SymbolIdentity
 requireTopLevelIdentity binding =

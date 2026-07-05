@@ -126,10 +126,10 @@ spec = do
         it "does not treat equal local spellings as the same generated identity" $ do
             let (outerRef, gen1) = freshLocalRef "x" initialIdentityGenerator
                 (innerRef, _) = freshLocalRef "x" gen1
-                resolved ref runtime =
+                resolved ref _runtime =
                     ResolvedVar
-                        { resolvedVarRuntimeName = runtime
-                        , resolvedVarType = intTy
+                        {
+                        resolvedVarType = intTy
                         , resolvedVarDetails = LocalId ref
                         }
                 outer = resolved outerRef "outer-runtime"
@@ -141,10 +141,10 @@ spec = do
         it "freshens binder identity when capture avoidance collides by identity" $ do
             let (xRef, gen1) = freshLocalRef "x" initialIdentityGenerator
                 (yRef, _) = freshLocalRef "y" gen1
-                resolved ref runtime =
+                resolved ref _runtime =
                     ResolvedVar
-                        { resolvedVarRuntimeName = runtime
-                        , resolvedVarType = intTy
+                        {
+                        resolvedVarType = intTy
                         , resolvedVarDetails = LocalId ref
                         }
                 x = resolved xRef "x-runtime"
@@ -161,15 +161,15 @@ spec = do
             let x = resolvedLocal "x" "x-runtime" intTy
                 yReplacement =
                     ResolvedVar
-                        { resolvedVarRuntimeName = "free-y-runtime"
-                        , resolvedVarType = intTy
+                        {
+                        resolvedVarType = intTy
                         , resolvedVarDetails = LocalId (generatedLocalRef 1 "free-y")
                         }
                 stableAlias = idDetailsStableName (resolvedVarDetails yReplacement)
                 yBinder =
                     ResolvedVar
-                        { resolvedVarRuntimeName = "inner-y-runtime"
-                        , resolvedVarType = intTy
+                        {
+                        resolvedVarType = intTy
                         , resolvedVarDetails = LocalId (generatedLocalRef 1 stableAlias)
                         }
                 term = EApp (ELam x (ELam yBinder (EVarNode x))) (EVarNode yReplacement)
@@ -184,8 +184,8 @@ spec = do
             let boolTy = tBase (BaseTy "Bool")
                 andResolved =
                     ResolvedVar
-                        { resolvedVarRuntimeName = "stale-and"
-                        , resolvedVarType = TArrow boolTy (TArrow boolTy boolTy)
+                        {
+                        resolvedVarType = TArrow boolTy (TArrow boolTy boolTy)
                         , resolvedVarDetails =
                             PrimitiveId (primitiveRefFromSymbol (builtinValueIdentity PrimitiveInventory.nativeAndPrimitiveName))
                         }
@@ -281,10 +281,10 @@ spec = do
         it "does not treat equal local spellings as identity-boundary lambdas" $ do
             let (boundaryParamRef, gen1) = freshLocalRef "$p#0" initialIdentityGenerator
                 (boundaryUseRef, _) = freshLocalRef "$p#0" gen1
-                resolved ref runtime ty =
+                resolved ref _runtime ty =
                     ResolvedVar
-                        { resolvedVarRuntimeName = runtime
-                        , resolvedVarType = ty
+                        {
+                        resolvedVarType = ty
                         , resolvedVarDetails = LocalId ref
                         }
                 source = resolvedLocal "$source#0" "source-runtime" recursiveIntTy

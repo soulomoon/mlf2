@@ -301,7 +301,7 @@ import qualified Data.Map.Strict as Map
 import Data.Maybe (mapMaybe)
 import Data.Set (Set)
 import qualified Data.Set as Set
-import MLF.Elab.Types (XmlfTerm, ElabType, ResolvedVar (..), generatedIdentitiesInType, resolvedVarConstructorRef)
+import MLF.Elab.Types (XmlfTerm, ElabType, ResolvedVar (..), generatedIdentitiesInType, resolvedVarConstructorRef, resolvedVarRuntimeName)
 import MLF.Frontend.Symbol
   ( ResolvedReference,
     ResolvedReferenceKind (..),
@@ -2414,8 +2414,7 @@ loweredBindingIdentityFromValueInfo valueInfo =
 resolvedVarFromLoweredBinding :: LoweredBinding -> ElabType -> ResolvedVar
 resolvedVarFromLoweredBinding lowered ty =
   ResolvedVar
-    { resolvedVarRuntimeName = loweredIdentityRuntimeName identity,
-      resolvedVarType = ty,
+    { resolvedVarType = ty,
       resolvedVarDetails = loweredIdentityDetails identity
     }
   where
@@ -2424,8 +2423,7 @@ resolvedVarFromLoweredBinding lowered ty =
 resolvedVarFromValueInfo :: ValueInfo -> ElabType -> ResolvedVar
 resolvedVarFromValueInfo valueInfo ty =
   ResolvedVar
-    { resolvedVarRuntimeName = loweredIdentityRuntimeName identity,
-      resolvedVarType = ty,
+    { resolvedVarType = ty,
       resolvedVarDetails = loweredIdentityDetails identity
     }
   where

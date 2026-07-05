@@ -1180,7 +1180,7 @@ backendVariableTypeMatches :: BackendValidationContext -> Maybe IdDetails -> Str
 backendVariableTypeMatches context0 mbIdentity name expectedTy actualTy =
   rawMatches || canonicalMatches
   where
-    referenceName = maybe name (idDetailsReferenceName name) mbIdentity
+    referenceName = maybe name idDetailsReferenceName mbIdentity
     dataScope = backendDataScopeForContext context0
     typeBounds = bvcTypeBounds context0
     rawMatches =
