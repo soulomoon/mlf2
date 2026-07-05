@@ -69,7 +69,7 @@ import MLF.Frontend.Syntax (Lit (..), SrcBound (..), SrcTy (..), SrcType, TypePa
 import MLF.Frontend.Syntax.Program (Program)
 import MLF.Pipeline (checkProgram)
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
-import MLF.Types.Identity (deferredRefFromIdentity, deferredRefName, idDetailsStableName, UniqueIdentity (..), TypeBinderIdentity, typeBinderIdentityFromUnique, typeBinderIdentityGeneratedUnique, typeBinderIdentityStableName)
+import MLF.Types.Identity (deferredRefFromIdentity, deferredRefName, idDetailsStableName, LocalIdentity (..), localRefFromIdentity, UniqueIdentity (..), TypeBinderIdentity, typeBinderIdentityFromUnique, typeBinderIdentityGeneratedUnique, typeBinderIdentityStableName)
 import System.Directory (createDirectoryIfMissing)
 import System.Environment (lookupEnv)
 import System.FilePath (takeDirectory)
@@ -1775,6 +1775,16 @@ spec = describe "MLF.Backend.Convert" $ do
             checked0
     convertCheckedProgram checked
       `shouldBe` Left (BackendValidationFailed (BackendConflictingIdentityPayload "binding" (symbolIdentityStableName duplicateIdentity)))
+
+  it "rejects checked bindings with no symbol identity before building backend context maps" $ do
+    checked0 <- requireChecked duplicateBindingIdentityProgram
+    let checked =
+          replaceBindingDetails
+            "Main__helper"
+            (LocalId (localRefFromIdentity (GeneratedLocalId (UniqueIdentity 991753)) "helper"))
+            checked0
+    convertCheckedProgram checked
+      `shouldBe` Left (BackendValidationFailed (BackendModuleBindingIdentityMissing "Main" "Main__helper"))
 
   it "rejects checked binding identities that collide with primitive identities" $ do
     checked0 <- requireChecked duplicateBindingIdentityProgram
@@ -5365,6 +5375,16 @@ replaceBindingTopLevelIdentity bindingName replacement =
       { checkedBindingResolvedVar =
           (checkedBindingResolvedVar binding)
             { Elab.resolvedVarDetails = TopLevelId replacement
+            }
+      }
+
+replaceBindingDetails :: String -> IdDetails -> CheckedProgram -> CheckedProgram
+replaceBindingDetails bindingName replacement =
+  mapBinding bindingName $ \binding ->
+    binding
+      { checkedBindingResolvedVar =
+          (checkedBindingResolvedVar binding)
+            { Elab.resolvedVarDetails = replacement
             }
       }
 

@@ -1884,14 +1884,23 @@ uniqueResolvedModulesByIdentity checked =
   uniqueCheckedInfoByIdentity "resolved module" BackendDuplicateModule resolvedModuleIdentity (resolvedProgramModules (checkedProgramResolved checked))
 
 uniqueBindingsByIdentity :: CheckedProgram -> Either BackendConversionError (Map SymbolIdentity CheckedBinding)
-uniqueBindingsByIdentity checked =
-  Map.map snd
-    <$> uniqueCheckedInfoByIdentity "binding" BackendDuplicateBinding fst
-      [ (symbol, binding)
+uniqueBindingsByIdentity checked = do
+  entries <-
+    forM
+      [ (checkedModule, binding)
       | checkedModule <- checkedProgramModules checked,
-        binding <- checkedModuleBindings checkedModule,
-        Just symbol <- [checkedBindingSymbolIdentity binding]
+        binding <- checkedModuleBindings checkedModule
       ]
+      ( \(checkedModule, binding) ->
+          case checkedBindingSymbolIdentity binding of
+            Just symbol -> Right (symbol, binding)
+            Nothing ->
+              Left $
+                BackendValidationFailed $
+                  BackendModuleBindingIdentityMissing (checkedModuleName checkedModule) (checkedBindingRuntimeName binding)
+      )
+  Map.map snd
+    <$> uniqueCheckedInfoByIdentity "binding" BackendDuplicateBinding fst entries
 
 uniqueDataInfosByIdentity :: [DataInfo] -> Either BackendConversionError (Map SymbolIdentity DataInfo)
 uniqueDataInfosByIdentity =
