@@ -78,7 +78,6 @@ module MLF.Backend.IR.Types
     backendTypeSubstitutionKeyFromIdentity,
     backendTypeSubstitutionKeyFromMetadataLightName,
     backendTypeSubstitutionKeyFromMaybeMetadataLight,
-    backendTypeSubstitutionKeyFor,
     backendTypeSubstitutionKeyIdentity,
     backendTypeSubstitutionKeyName,
     pattern BTVar,
@@ -116,9 +115,18 @@ module MLF.Backend.IR.Types
     generatedIdentitiesInBackendProgram,
     generatedIdentitiesInBackendTypes,
     generatedIdentitiesInBackendExpr,
+    BackendTypeReferenceMode (..),
+    typeBinderRefMatchesWith,
     typeBinderRefMatches,
+    backendTypeHeadMatchesWith,
+    BackendTermReferenceMode (..),
+    backendTermRefMatchesWith,
     backendTypeHeadMatches,
+    backendTypeRefinesScrutineeWith,
+    backendTypeRefinesScrutinee,
     backendTermRefMatches,
+    ClosureEntryReferenceMode (..),
+    closureEntryRefMatchesWith,
     closureEntryRefMatches,
     literalBackendType,
     symbolRefMatches,
@@ -136,16 +144,17 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import MLF.Constraint.Types.Graph (BaseTy (..))
 import MLF.Frontend.Program.Builtins (builtinTypeHeadIdentity, builtinTypeIdentity)
-import MLF.Frontend.Symbol (SymbolIdentity, symbolRefMatches)
+import MLF.Frontend.Symbol (SymbolIdentity, SymbolReferenceMode (..), symbolRefMatches, symbolRefMatchesWith)
 import MLF.Frontend.Syntax (Lit (..))
 import MLF.Types.Identity
   ( IdDetails,
+    IdDetailsReferenceMode (..),
     IdentityGenerator,
     TypeBinderIdentity,
     UniqueIdentity (..),
     freshIdentity,
     idDetailsGeneratedIdentities,
-    idDetailsRefMatches,
+    idDetailsRefMatchesWith,
     identityGeneratorAfter,
     symbolGeneratedIdentities,
     typeBinderGeneratedIdentities,
@@ -156,6 +165,11 @@ import MLF.Types.Identity
     typeBinderIdentityStructural,
   )
 import MLF.Util.Names (freshNameLike)
+
+data BackendTypeReferenceMode
+  = BackendTypeIdentityOnly
+  | BackendTypeMetadataLight
+  deriving (Eq, Show)
 
 {- Note [Backend IR identity-complete production references]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -184,7 +198,7 @@ data BackendProgram = BackendProgramWithIdentity
 instance Eq BackendProgram where
   left == right =
     backendProgramModules left == backendProgramModules right
-      && symbolRefMatches (backendProgramMainIdentity left) (backendProgramMain left) (backendProgramMainIdentity right) (backendProgramMain right)
+      && symbolRefMatchesWith SymbolMetadataLight (backendProgramMainIdentity left) (backendProgramMain left) (backendProgramMainIdentity right) (backendProgramMain right)
 
 -- Metadata-light/test boundary constructor; production programs should carry
 -- 'backendProgramMainIdentity'.
@@ -216,7 +230,7 @@ data BackendModule = BackendModuleWithIdentity
 
 instance Eq BackendModule where
   left == right =
-    symbolRefMatches (backendModuleIdentity left) (backendModuleName left) (backendModuleIdentity right) (backendModuleName right)
+    symbolRefMatchesWith SymbolMetadataLight (backendModuleIdentity left) (backendModuleName left) (backendModuleIdentity right) (backendModuleName right)
       && backendModuleData left == backendModuleData right
       && backendModuleBindings left == backendModuleBindings right
 
@@ -298,7 +312,7 @@ data BackendData = BackendDataWithIdentity
 
 instance Eq BackendData where
   left == right =
-    symbolRefMatches (backendDataIdentity left) (backendDataName left) (backendDataIdentity right) (backendDataName right)
+    symbolRefMatchesWith SymbolMetadataLight (backendDataIdentity left) (backendDataName left) (backendDataIdentity right) (backendDataName right)
       && backendDataParameterRefs left == backendDataParameterRefs right
       && backendDataConstructors left == backendDataConstructors right
 
@@ -350,7 +364,7 @@ data BackendConstructor = BackendConstructorWithIdentity
 
 instance Eq BackendConstructor where
   left == right =
-    symbolRefMatches (backendConstructorIdentity left) (backendConstructorName left) (backendConstructorIdentity right) (backendConstructorName right)
+    symbolRefMatchesWith SymbolMetadataLight (backendConstructorIdentity left) (backendConstructorName left) (backendConstructorIdentity right) (backendConstructorName right)
       && backendConstructorForalls left == backendConstructorForalls right
       && backendConstructorFields left == backendConstructorFields right
       && backendConstructorResult left == backendConstructorResult right
@@ -386,7 +400,7 @@ data BackendClosureCapture = BackendClosureCapture
 
 instance Eq BackendClosureCapture where
   left == right =
-    backendTermRefMatches (backendClosureCaptureIdentity left) (backendClosureCaptureName left) (backendClosureCaptureIdentity right) (backendClosureCaptureName right)
+    backendTermRefMatchesWith BackendTermMetadataLight (backendClosureCaptureIdentity left) (backendClosureCaptureName left) (backendClosureCaptureIdentity right) (backendClosureCaptureName right)
       && backendClosureCaptureType left == backendClosureCaptureType right
       && backendClosureCaptureExpr left == backendClosureCaptureExpr right
 
@@ -399,7 +413,7 @@ data BackendClosureParam = BackendClosureParam
 
 instance Eq BackendClosureParam where
   left == right =
-    backendTermRefMatches (backendClosureParamIdentity left) (backendClosureParamName left) (backendClosureParamIdentity right) (backendClosureParamName right)
+    backendTermRefMatchesWith BackendTermMetadataLight (backendClosureParamIdentity left) (backendClosureParamName left) (backendClosureParamIdentity right) (backendClosureParamName right)
       && backendClosureParamType left == backendClosureParamType right
 
 data BackendTypeBinder = BackendTypeBinderWithIdentity
@@ -411,7 +425,7 @@ data BackendTypeBinder = BackendTypeBinderWithIdentity
 
 instance Eq BackendTypeBinder where
   left == right =
-    typeBinderRefMatches (backendTypeBinderIdentity left) (backendTypeBinderName left) (backendTypeBinderIdentity right) (backendTypeBinderName right)
+    typeBinderRefMatchesWith BackendTypeMetadataLight (backendTypeBinderIdentity left) (backendTypeBinderName left) (backendTypeBinderIdentity right) (backendTypeBinderName right)
       && backendTypeBinderBound left == backendTypeBinderBound right
 
 -- Metadata-light/test boundary constructor; production type binders should
@@ -437,7 +451,7 @@ data BackendBinding = BackendBindingWithMetadata
 
 instance Eq BackendBinding where
   left == right =
-    symbolRefMatches (backendBindingIdentity left) (backendBindingName left) (backendBindingIdentity right) (backendBindingName right)
+    symbolRefMatchesWith SymbolMetadataLight (backendBindingIdentity left) (backendBindingName left) (backendBindingIdentity right) (backendBindingName right)
       && backendBindingType left == backendBindingType right
       && backendBindingExpr left == backendBindingExpr right
       && backendBindingExportedAsMain left == backendBindingExportedAsMain right
@@ -477,49 +491,82 @@ instance Eq BackendType where
   left == right =
     case (left, right) of
       (BTVarWithIdentity leftIdentity leftName, BTVarWithIdentity rightIdentity rightName) ->
-        typeBinderRefMatches leftIdentity leftName rightIdentity rightName
+        typeBinderRefMatchesWith BackendTypeMetadataLight leftIdentity leftName rightIdentity rightName
       (BTArrow leftDom leftCod, BTArrow rightDom rightCod) ->
         leftDom == rightDom && leftCod == rightCod
       (BTBaseWithIdentity leftIdentity leftBase, BTBaseWithIdentity rightIdentity rightBase) ->
-        typeHeadRefMatches leftIdentity leftBase rightIdentity rightBase
+        typeHeadRefMatchesWith SymbolMetadataLight leftIdentity leftBase rightIdentity rightBase
       (BTConWithIdentity leftIdentity leftBase leftArgs, BTConWithIdentity rightIdentity rightBase rightArgs) ->
-        typeHeadRefMatches leftIdentity leftBase rightIdentity rightBase && leftArgs == rightArgs
+        typeHeadRefMatchesWith SymbolMetadataLight leftIdentity leftBase rightIdentity rightBase && leftArgs == rightArgs
       (BTVarAppWithIdentity leftIdentity leftName leftArgs, BTVarAppWithIdentity rightIdentity rightName rightArgs) ->
-        typeBinderRefMatches leftIdentity leftName rightIdentity rightName && leftArgs == rightArgs
+        typeBinderRefMatchesWith BackendTypeMetadataLight leftIdentity leftName rightIdentity rightName && leftArgs == rightArgs
       (BTForallWithIdentity leftIdentity leftName leftBound leftBody, BTForallWithIdentity rightIdentity rightName rightBound rightBody) ->
-        typeBinderRefMatches leftIdentity leftName rightIdentity rightName && leftBound == rightBound && leftBody == rightBody
+        typeBinderRefMatchesWith BackendTypeMetadataLight leftIdentity leftName rightIdentity rightName && leftBound == rightBound && leftBody == rightBody
       (BTMuWithIdentity leftIdentity leftName leftBody, BTMuWithIdentity rightIdentity rightName rightBody) ->
-        typeBinderRefMatches leftIdentity leftName rightIdentity rightName && leftBody == rightBody
+        typeBinderRefMatchesWith BackendTypeMetadataLight leftIdentity leftName rightIdentity rightName && leftBody == rightBody
       (BTBottom, BTBottom) ->
         True
       _ ->
         False
 
 -- Fallback name matching supports metadata-light/test boundary values only.
--- Production references are checked for identities by validateBackendProgram.
-typeBinderRefMatches :: Maybe TypeBinderIdentity -> String -> Maybe TypeBinderIdentity -> String -> Bool
-typeBinderRefMatches (Just left) _ (Just right) _ =
+-- The default matcher is identity-only so production call sites cannot
+-- accidentally accept name-only references.
+typeBinderRefMatchesWith :: BackendTypeReferenceMode -> Maybe TypeBinderIdentity -> String -> Maybe TypeBinderIdentity -> String -> Bool
+typeBinderRefMatchesWith _ (Just left) _ (Just right) _ =
   left == right
-typeBinderRefMatches Nothing leftName Nothing rightName =
-  leftName == rightName
-typeBinderRefMatches _ _ _ _ =
+typeBinderRefMatchesWith mode Nothing leftName Nothing rightName =
+  case mode of
+    BackendTypeIdentityOnly -> False
+    BackendTypeMetadataLight -> leftName == rightName
+typeBinderRefMatchesWith _ _ _ _ _ =
   False
 
-typeHeadRefMatches :: Maybe SymbolIdentity -> BaseTy -> Maybe SymbolIdentity -> BaseTy -> Bool
-typeHeadRefMatches leftIdentity (BaseTy leftName) rightIdentity (BaseTy rightName) =
-  symbolRefMatches leftIdentity leftName rightIdentity rightName
+typeBinderRefMatches :: Maybe TypeBinderIdentity -> String -> Maybe TypeBinderIdentity -> String -> Bool
+typeBinderRefMatches =
+  typeBinderRefMatchesWith BackendTypeIdentityOnly
+
+typeHeadRefMatchesWith :: SymbolReferenceMode -> Maybe SymbolIdentity -> BaseTy -> Maybe SymbolIdentity -> BaseTy -> Bool
+typeHeadRefMatchesWith mode leftIdentity (BaseTy leftName) rightIdentity (BaseTy rightName) =
+  symbolRefMatchesWith mode leftIdentity leftName rightIdentity rightName
+
+data BackendTermReferenceMode
+  = BackendTermIdentityOnly
+  | BackendTermMetadataLight
+  deriving (Eq, Show)
+
+backendTermReferenceMode :: BackendTermReferenceMode -> IdDetailsReferenceMode
+backendTermReferenceMode mode =
+  case mode of
+    BackendTermIdentityOnly -> IdDetailsIdentityOnly
+    BackendTermMetadataLight -> IdDetailsMetadataLight
+
+backendTermRefMatchesWith :: BackendTermReferenceMode -> Maybe IdDetails -> String -> Maybe IdDetails -> String -> Bool
+backendTermRefMatchesWith mode =
+  idDetailsRefMatchesWith (backendTermReferenceMode mode)
 
 backendTermRefMatches :: Maybe IdDetails -> String -> Maybe IdDetails -> String -> Bool
 backendTermRefMatches =
-  idDetailsRefMatches
+  backendTermRefMatchesWith BackendTermIdentityOnly
+
+data ClosureEntryReferenceMode
+  = ClosureEntryIdentityOnly
+  | ClosureEntryMetadataLight
+  deriving (Eq, Show)
+
+closureEntryRefMatchesWith :: ClosureEntryReferenceMode -> Maybe UniqueIdentity -> String -> Maybe UniqueIdentity -> String -> Bool
+closureEntryRefMatchesWith _ (Just left) _ (Just right) _ =
+  left == right
+closureEntryRefMatchesWith mode Nothing leftName Nothing rightName =
+  case mode of
+    ClosureEntryIdentityOnly -> False
+    ClosureEntryMetadataLight -> leftName == rightName
+closureEntryRefMatchesWith _ _ _ _ _ =
+  False
 
 closureEntryRefMatches :: Maybe UniqueIdentity -> String -> Maybe UniqueIdentity -> String -> Bool
-closureEntryRefMatches (Just left) _ (Just right) _ =
-  left == right
-closureEntryRefMatches Nothing leftName Nothing rightName =
-  leftName == rightName
-closureEntryRefMatches _ _ _ _ =
-  False
+closureEntryRefMatches =
+  closureEntryRefMatchesWith ClosureEntryIdentityOnly
 
 -- Name-only type patterns are metadata-light/test boundary constructors.
 -- Production type references should carry binder/head identities.
@@ -585,13 +632,6 @@ backendTypeSubstitutionKeyFromMaybeMetadataLight mbIdentity name =
   case mbIdentity of
     Just identity -> BackendTypeSubstitutionByIdentity identity
     Nothing -> BackendTypeSubstitutionByName name
-
--- Compatibility alias for older callers. New code that may accept a missing
--- identity should use 'backendTypeSubstitutionKeyFromMaybeMetadataLight' so
--- the metadata-light boundary is explicit.
-backendTypeSubstitutionKeyFor :: Maybe TypeBinderIdentity -> String -> BackendTypeSubstitutionKey
-backendTypeSubstitutionKeyFor =
-  backendTypeSubstitutionKeyFromMaybeMetadataLight
 
 backendTypeSubstitutionKeyIdentity :: BackendTypeSubstitutionKey -> Maybe TypeBinderIdentity
 backendTypeSubstitutionKeyIdentity =
@@ -721,25 +761,25 @@ instance Eq BackendExpr where
   left == right =
     case (left, right) of
       (BackendVarWithIdentity leftTy leftIdentity leftName, BackendVarWithIdentity rightTy rightIdentity rightName) ->
-        leftTy == rightTy && backendTermRefMatches leftIdentity leftName rightIdentity rightName
+        leftTy == rightTy && backendTermRefMatchesWith BackendTermMetadataLight leftIdentity leftName rightIdentity rightName
       (BackendLit leftTy leftLit, BackendLit rightTy rightLit) ->
         leftTy == rightTy && leftLit == rightLit
       (BackendLamWithIdentity leftTy leftIdentity leftName leftParamTy leftBody, BackendLamWithIdentity rightTy rightIdentity rightName rightParamTy rightBody) ->
         leftTy == rightTy
-          && backendTermRefMatches leftIdentity leftName rightIdentity rightName
+          && backendTermRefMatchesWith BackendTermMetadataLight leftIdentity leftName rightIdentity rightName
           && leftParamTy == rightParamTy
           && leftBody == rightBody
       (BackendApp leftTy leftFun leftArg, BackendApp rightTy rightFun rightArg) ->
         leftTy == rightTy && leftFun == rightFun && leftArg == rightArg
       (BackendLetWithIdentity leftTy leftIdentity leftName leftBindingTy leftRhs leftBody, BackendLetWithIdentity rightTy rightIdentity rightName rightBindingTy rightRhs rightBody) ->
         leftTy == rightTy
-          && backendTermRefMatches leftIdentity leftName rightIdentity rightName
+          && backendTermRefMatchesWith BackendTermMetadataLight leftIdentity leftName rightIdentity rightName
           && leftBindingTy == rightBindingTy
           && leftRhs == rightRhs
           && leftBody == rightBody
       (BackendTyAbsWithIdentity leftTy leftIdentity leftName leftBound leftBody, BackendTyAbsWithIdentity rightTy rightIdentity rightName rightBound rightBody) ->
         leftTy == rightTy
-          && typeBinderRefMatches leftIdentity leftName rightIdentity rightName
+          && typeBinderRefMatchesWith BackendTypeMetadataLight leftIdentity leftName rightIdentity rightName
           && leftBound == rightBound
           && leftBody == rightBody
       (BackendTyApp leftTy leftFun leftArg, BackendTyApp rightTy rightFun rightArg) ->
@@ -750,7 +790,7 @@ instance Eq BackendExpr where
         leftTy == rightTy && leftPayload == rightPayload
       (BackendClosureWithParamIdentities leftTy leftEntryIdentity leftEntry leftCaptures leftParams leftBody, BackendClosureWithParamIdentities rightTy rightEntryIdentity rightEntry rightCaptures rightParams rightBody) ->
         leftTy == rightTy
-          && closureEntryRefMatches leftEntryIdentity leftEntry rightEntryIdentity rightEntry
+          && closureEntryRefMatchesWith ClosureEntryMetadataLight leftEntryIdentity leftEntry rightEntryIdentity rightEntry
           && leftCaptures == rightCaptures
           && leftParams == rightParams
           && leftBody == rightBody
@@ -758,7 +798,7 @@ instance Eq BackendExpr where
         leftTy == rightTy && leftFun == rightFun && leftArgs == rightArgs
       (BackendConstructWithIdentity leftTy leftIdentity leftName leftArgs, BackendConstructWithIdentity rightTy rightIdentity rightName rightArgs) ->
         leftTy == rightTy
-          && symbolRefMatches leftIdentity leftName rightIdentity rightName
+          && symbolRefMatchesWith SymbolMetadataLight leftIdentity leftName rightIdentity rightName
           && leftArgs == rightArgs
       (BackendCase leftTy leftScrutinee leftAlternatives, BackendCase rightTy rightScrutinee rightAlternatives) ->
         leftTy == rightTy && leftScrutinee == rightScrutinee && leftAlternatives == rightAlternatives
@@ -869,7 +909,7 @@ backendPatternBinderWithResolvedIdentity identity name =
 
 instance Eq BackendPatternBinder where
   left == right =
-    backendTermRefMatches (backendPatternBinderIdentity left) (backendPatternBinderName left) (backendPatternBinderIdentity right) (backendPatternBinderName right)
+    backendTermRefMatchesWith BackendTermMetadataLight (backendPatternBinderIdentity left) (backendPatternBinderName left) (backendPatternBinderIdentity right) (backendPatternBinderName right)
 
 data BackendPattern
   = BackendDefaultPattern
@@ -886,7 +926,7 @@ instance Eq BackendPattern where
       (BackendDefaultPattern, BackendDefaultPattern) ->
         True
       (BackendConstructorPatternWithBinderIdentities leftIdentity leftName leftBinders, BackendConstructorPatternWithBinderIdentities rightIdentity rightName rightBinders) ->
-        symbolRefMatches leftIdentity leftName rightIdentity rightName && leftBinders == rightBinders
+        symbolRefMatchesWith SymbolMetadataLight leftIdentity leftName rightIdentity rightName && leftBinders == rightBinders
       _ ->
         False
 
@@ -1160,9 +1200,100 @@ generatedIdentitiesInBackendTypeSubstitutionKey =
     BackendTypeSubstitutionByIdentity identity -> generatedIdentitiesInTypeBinderIdentity (Just identity)
     BackendTypeSubstitutionByName {} -> []
 
+backendTypeHeadMatchesWith :: SymbolReferenceMode -> Maybe SymbolIdentity -> BaseTy -> Maybe SymbolIdentity -> BaseTy -> Bool
+backendTypeHeadMatchesWith =
+  typeHeadRefMatchesWith
+
 backendTypeHeadMatches :: Maybe SymbolIdentity -> BaseTy -> Maybe SymbolIdentity -> BaseTy -> Bool
 backendTypeHeadMatches =
-  typeHeadRefMatches
+  backendTypeHeadMatchesWith SymbolIdentityOnly
+
+backendTypeRefinesScrutineeWith :: BackendTypeReferenceMode -> BackendType -> BackendType -> Bool
+backendTypeRefinesScrutineeWith referenceMode =
+  go False
+  where
+    symbolMode =
+      case referenceMode of
+        BackendTypeIdentityOnly -> SymbolIdentityOnly
+        BackendTypeMetadataLight -> SymbolMetadataLight
+
+    go allowVariableRefinement constructorResult scrutineeTy
+      | sameType constructorResult scrutineeTy = True
+      | otherwise =
+          case (constructorResult, scrutineeTy) of
+            (_, BTVarWithIdentity {})
+              | allowVariableRefinement ->
+                  True
+            (BTArrow resultDom resultCod, BTArrow scrutineeDom scrutineeCod) ->
+              go False resultDom scrutineeDom
+                && go False resultCod scrutineeCod
+            (BTBaseWithIdentity resultIdentity resultBase, BTBaseWithIdentity scrutineeIdentity scrutineeBase) ->
+              backendTypeHeadMatchesWith symbolMode resultIdentity resultBase scrutineeIdentity scrutineeBase
+            (BTConWithIdentity resultIdentity resultBase resultArgs, BTConWithIdentity scrutineeIdentity scrutineeBase scrutineeArgs) ->
+              backendTypeHeadMatchesWith symbolMode resultIdentity resultBase scrutineeIdentity scrutineeBase
+                && length resultArgs == length scrutineeArgs
+                && and (zipWith (go True) (NE.toList resultArgs) (NE.toList scrutineeArgs))
+            (BTVarAppWithIdentity resultIdentity resultName resultArgs, BTVarAppWithIdentity scrutineeIdentity scrutineeName scrutineeArgs) ->
+              typeBinderRefMatchesWith referenceMode resultIdentity resultName scrutineeIdentity scrutineeName
+                && length resultArgs == length scrutineeArgs
+                && and (zipWith (go True) (NE.toList resultArgs) (NE.toList scrutineeArgs))
+            (BTForallWithIdentity resultIdentity resultName resultBound resultBody, BTForallWithIdentity scrutineeIdentity scrutineeName scrutineeBound scrutineeBody) ->
+              typeBinderRefMatchesWith referenceMode resultIdentity resultName scrutineeIdentity scrutineeName
+                && backendTypeBoundRefines resultBound scrutineeBound
+                && go False resultBody scrutineeBody
+            (BTMuWithIdentity resultIdentity resultName resultBody, BTMuWithIdentity scrutineeIdentity scrutineeName scrutineeBody) ->
+              typeBinderRefMatchesWith referenceMode resultIdentity resultName scrutineeIdentity scrutineeName
+                && go False resultBody scrutineeBody
+            (BTBottom, BTBottom) ->
+              True
+            _ ->
+              False
+
+    backendTypeBoundRefines Nothing Nothing =
+      True
+    backendTypeBoundRefines (Just resultBound) (Just scrutineeBound) =
+      go False resultBound scrutineeBound
+    backendTypeBoundRefines _ _ =
+      False
+
+    sameType left right =
+      case (left, right) of
+        (BTVarWithIdentity leftIdentity leftName, BTVarWithIdentity rightIdentity rightName) ->
+          typeBinderRefMatchesWith referenceMode leftIdentity leftName rightIdentity rightName
+        (BTArrow leftDom leftCod, BTArrow rightDom rightCod) ->
+          sameType leftDom rightDom && sameType leftCod rightCod
+        (BTBaseWithIdentity leftIdentity leftBase, BTBaseWithIdentity rightIdentity rightBase) ->
+          backendTypeHeadMatchesWith symbolMode leftIdentity leftBase rightIdentity rightBase
+        (BTConWithIdentity leftIdentity leftBase leftArgs, BTConWithIdentity rightIdentity rightBase rightArgs) ->
+          backendTypeHeadMatchesWith symbolMode leftIdentity leftBase rightIdentity rightBase
+            && length leftArgs == length rightArgs
+            && and (zipWith sameType (NE.toList leftArgs) (NE.toList rightArgs))
+        (BTVarAppWithIdentity leftIdentity leftName leftArgs, BTVarAppWithIdentity rightIdentity rightName rightArgs) ->
+          typeBinderRefMatchesWith referenceMode leftIdentity leftName rightIdentity rightName
+            && length leftArgs == length rightArgs
+            && and (zipWith sameType (NE.toList leftArgs) (NE.toList rightArgs))
+        (BTForallWithIdentity leftIdentity leftName leftBound leftBody, BTForallWithIdentity rightIdentity rightName rightBound rightBody) ->
+          typeBinderRefMatchesWith referenceMode leftIdentity leftName rightIdentity rightName
+            && sameMaybeType leftBound rightBound
+            && sameType leftBody rightBody
+        (BTMuWithIdentity leftIdentity leftName leftBody, BTMuWithIdentity rightIdentity rightName rightBody) ->
+          typeBinderRefMatchesWith referenceMode leftIdentity leftName rightIdentity rightName
+            && sameType leftBody rightBody
+        (BTBottom, BTBottom) ->
+          True
+        _ ->
+          False
+
+    sameMaybeType Nothing Nothing =
+      True
+    sameMaybeType (Just left) (Just right) =
+      sameType left right
+    sameMaybeType _ _ =
+      False
+
+backendTypeRefinesScrutinee :: BackendType -> BackendType -> Bool
+backendTypeRefinesScrutinee =
+  backendTypeRefinesScrutineeWith BackendTypeIdentityOnly
 
 substituteBackendTypeByIdentity :: TypeBinderIdentity -> BackendType -> BackendType -> BackendType
 substituteBackendTypeByIdentity needle replacement =
@@ -1303,7 +1434,7 @@ renameBackendTypeBinder oldIdentity oldName newIdentity newName =
     replacement = BTVarWithIdentity newIdentity newName
 
     matches identity name =
-      typeBinderRefMatches identity name oldIdentity oldName
+      typeBinderRefMatchesWith BackendTypeMetadataLight identity name oldIdentity oldName
 
     go ty =
       case ty of

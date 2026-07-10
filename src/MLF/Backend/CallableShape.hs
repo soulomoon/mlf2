@@ -12,15 +12,18 @@ backend-expression destructuring stays in the IR-owned adapter instance.
 -}
 module MLF.Backend.CallableShape
   ( BackendCallableBindingKind (..),
+    BackendCallableReferenceMode (..),
     BackendCallableRef,
     backendCallableRef,
     backendCallableRefIdentity,
     backendCallableRefName,
+    backendCallableRefMatchesWith,
     backendCallableRefMatches,
     BackendCallableHead (..),
     BackendCallableAlternative (..),
     BackendCallableExpr (..),
     BackendCallableExprView (..),
+    backendCallableHeadWith,
     backendCallableHead,
   )
 where
@@ -31,6 +34,11 @@ data BackendCallableBindingKind
   = BackendCallableBindingDirect
   | BackendCallableBindingClosure
   | BackendCallableBindingUnknown
+  deriving (Eq, Show)
+
+data BackendCallableReferenceMode
+  = BackendCallableIdentityOnly
+  | BackendCallableMetadataLight
   deriving (Eq, Show)
 
 data BackendCallableIdentity
@@ -44,7 +52,7 @@ data BackendCallableRef
 
 instance Eq BackendCallableRef where
   left == right =
-    backendCallableRefMatches left right
+    backendCallableRefMatchesWith BackendCallableMetadataLight left right
 
 backendCallableRef :: Maybe IdDetails -> String -> BackendCallableRef
 backendCallableRef mbIdentity name =
@@ -65,8 +73,8 @@ backendCallableRefIdentity =
     BackendCallableRef (Just (BackendCallableTermIdentity identity)) _ -> Just identity
     BackendCallableRef {} -> Nothing
 
-backendCallableRefMatches :: BackendCallableRef -> BackendCallableRef -> Bool
-backendCallableRefMatches (BackendCallableRef leftIdentity leftName) (BackendCallableRef rightIdentity rightName) =
+backendCallableRefMatchesWith :: BackendCallableReferenceMode -> BackendCallableRef -> BackendCallableRef -> Bool
+backendCallableRefMatchesWith mode (BackendCallableRef leftIdentity leftName) (BackendCallableRef rightIdentity rightName) =
   case (leftIdentity, rightIdentity) of
     (Just (BackendCallableTermIdentity left), Just (BackendCallableTermIdentity right)) ->
       idDetailsSameIdentity left right
@@ -81,9 +89,15 @@ backendCallableRefMatches (BackendCallableRef leftIdentity leftName) (BackendCal
     (Nothing, Just (BackendCallableClosureIdentity {})) ->
       False
     (Nothing, Nothing) ->
-      leftName == rightName
+      case mode of
+        BackendCallableIdentityOnly -> False
+        BackendCallableMetadataLight -> leftName == rightName
     _ ->
       False
+
+backendCallableRefMatches :: BackendCallableRef -> BackendCallableRef -> Bool
+backendCallableRefMatches =
+  backendCallableRefMatchesWith BackendCallableIdentityOnly
 
 data BackendCallableHead
   = BackendDirectCallableHead (Maybe BackendCallableRef)
@@ -108,14 +122,18 @@ data BackendCallableExprView expr
   | BackendCallableOpaque
 
 class BackendCallableExpr expr where
-  backendCallableExprView :: expr -> BackendCallableExprView expr
+  backendCallableExprViewWith :: BackendCallableReferenceMode -> expr -> BackendCallableExprView expr
 
 backendCallableHead :: BackendCallableExpr expr => (Maybe IdDetails -> String -> BackendCallableBindingKind) -> expr -> BackendCallableHead
-backendCallableHead resolve0 =
+backendCallableHead =
+  backendCallableHeadWith BackendCallableIdentityOnly
+
+backendCallableHeadWith :: BackendCallableExpr expr => BackendCallableReferenceMode -> (Maybe IdDetails -> String -> BackendCallableBindingKind) -> expr -> BackendCallableHead
+backendCallableHeadWith mode resolve0 =
   go resolve0
   where
     go resolve expr =
-      case backendCallableExprView expr of
+      case backendCallableExprViewWith mode expr of
         BackendCallableVar mbIdentity name ->
           case resolve mbIdentity name of
             BackendCallableBindingDirect ->
@@ -135,7 +153,7 @@ backendCallableHead resolve0 =
         BackendCallableLet mbIdentity name rhs body ->
           go (extendBindingKind resolve mbIdentity name (go resolve rhs)) body
         BackendCallableCase alternatives ->
-          collapseCallableHeads
+          collapseCallableHeadsWith mode
             [ go (extendPatternBindingKinds binders closureBinders resolve) body
             | BackendCallableAlternative binders closureBinders body <- alternatives
             ]
@@ -143,22 +161,22 @@ backendCallableHead resolve0 =
           BackendUnknownCallableHead
 
     extendBindingKind resolve mbIdentity name headShape localIdentity localName
-      | backendCallableRefMatches (backendCallableRef mbIdentity name) (backendCallableRef localIdentity localName) =
+      | backendCallableRefMatchesWith mode (backendCallableRef mbIdentity name) (backendCallableRef localIdentity localName) =
           callableBindingKindForHead headShape
       | otherwise =
           resolve localIdentity localName
 
     extendPatternBindingKinds binders closureBinders resolve localIdentity name
-      | any (callableBinderMatches localIdentity name) closureBinders =
+      | any (callableBinderMatches mode localIdentity name) closureBinders =
           BackendCallableBindingClosure
-      | any (callableBinderMatches localIdentity name) binders =
+      | any (callableBinderMatches mode localIdentity name) binders =
           BackendCallableBindingDirect
       | otherwise =
           resolve localIdentity name
 
-callableBinderMatches :: Maybe IdDetails -> String -> BackendCallableRef -> Bool
-callableBinderMatches localIdentity localName binder =
-  backendCallableRefMatches binder (backendCallableRef localIdentity localName)
+callableBinderMatches :: BackendCallableReferenceMode -> Maybe IdDetails -> String -> BackendCallableRef -> Bool
+callableBinderMatches mode localIdentity localName binder =
+  backendCallableRefMatchesWith mode binder (backendCallableRef localIdentity localName)
 
 callableBindingKindForHead :: BackendCallableHead -> BackendCallableBindingKind
 callableBindingKindForHead =
@@ -170,14 +188,14 @@ callableBindingKindForHead =
     BackendUnknownCallableHead ->
       BackendCallableBindingUnknown
 
-collapseCallableHeads :: [BackendCallableHead] -> BackendCallableHead
-collapseCallableHeads [] =
+collapseCallableHeadsWith :: BackendCallableReferenceMode -> [BackendCallableHead] -> BackendCallableHead
+collapseCallableHeadsWith _ [] =
   BackendClosureCallableHead unknownClosureHeadRef
-collapseCallableHeads heads
+collapseCallableHeadsWith mode heads
   | all isClosureHead heads =
-      BackendClosureCallableHead (sameClosureHeadRef heads)
+      BackendClosureCallableHead (sameClosureHeadRef mode heads)
   | all isDirectHead heads =
-      BackendDirectCallableHead (sameDirectHeadRef heads)
+      BackendDirectCallableHead (sameDirectHeadRef mode heads)
   | otherwise =
       BackendUnknownCallableHead
   where
@@ -191,26 +209,26 @@ collapseCallableHeads heads
         BackendDirectCallableHead _ -> True
         _ -> False
 
-sameClosureHeadRef :: [BackendCallableHead] -> BackendCallableRef
-sameClosureHeadRef heads =
+sameClosureHeadRef :: BackendCallableReferenceMode -> [BackendCallableHead] -> BackendCallableRef
+sameClosureHeadRef mode heads =
   case [ref | BackendClosureCallableHead ref <- heads] of
     ref : rest
-      | all (backendCallableRefMatches ref) rest -> ref
+      | all (backendCallableRefMatchesWith mode ref) rest -> ref
     _ -> unknownClosureHeadRef
 
-sameDirectHeadRef :: [BackendCallableHead] -> Maybe BackendCallableRef
-sameDirectHeadRef heads =
+sameDirectHeadRef :: BackendCallableReferenceMode -> [BackendCallableHead] -> Maybe BackendCallableRef
+sameDirectHeadRef mode heads =
   case [ref | BackendDirectCallableHead ref <- heads] of
     ref : rest
-      | all (directHeadRefMatches ref) rest -> ref
+      | all (directHeadRefMatches mode ref) rest -> ref
     _ -> Nothing
 
-directHeadRefMatches :: Maybe BackendCallableRef -> Maybe BackendCallableRef -> Bool
-directHeadRefMatches (Just left) (Just right) =
-  backendCallableRefMatches left right
-directHeadRefMatches Nothing Nothing =
+directHeadRefMatches :: BackendCallableReferenceMode -> Maybe BackendCallableRef -> Maybe BackendCallableRef -> Bool
+directHeadRefMatches mode (Just left) (Just right) =
+  backendCallableRefMatchesWith mode left right
+directHeadRefMatches _ Nothing Nothing =
   True
-directHeadRefMatches _ _ =
+directHeadRefMatches _ _ _ =
   False
 
 unknownClosureHeadRef :: BackendCallableRef

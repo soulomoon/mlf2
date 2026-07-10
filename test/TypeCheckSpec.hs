@@ -73,7 +73,7 @@ import MLF.Types.Elab
     )
 import qualified MLF.Types.Elab as ElabTypes
 import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace(..), SymbolOwnerIdentity(..), symbolIdentityFromParts, symbolIdentityStableName, symbolUniqueIdentity)
-import MLF.Frontend.ConstraintGen (ExternalBinding(..), ExternalBindingIdentity, ExternalBindingMode(..), externalBindingIdentityFromResolvedVar)
+import MLF.Frontend.ConstraintGen (ExternalBinding(..), ExternalBindingIdentity, ExternalBindingMode(..), externalBindingIdentityFromResolvedVar, externalBindingRuntimeName)
 import MLF.Frontend.Program.Builtins (builtinTypeIdentity, builtinValueIdentity)
 import MLF.Frontend.Program.Types (LoweredBindingIdentity, loweredBindingIdentityFromResolvedVar)
 import MLF.Frontend.Syntax (Lit(..), SrcBound(..))
@@ -86,6 +86,7 @@ import MLF.Types.Identity
     , envRefFromIdentity
     , envRefIdentity
     , IdDetails(..)
+    , IdDetailsReferenceMode(..)
     , LocalIdentity(..)
     , localRefFromIdentity
     , localRefFromNodeId
@@ -97,9 +98,11 @@ import MLF.Types.Identity
     , idDetailsAliasMapWith
     , idDetailsConstructorRef
     , idDetailsDisplayName
+    , IdDetailsReferenceMode(..)
     , idDetailsIsLocal
     , idDetailsRenameLocal
     , idDetailsReferenceName
+    , idDetailsRefMatchesWith
     , idDetailsRefMatches
     , idDetailsSameIdentity
     , initialIdentityGenerator
@@ -438,6 +441,7 @@ spec = describe "Phase 7 typecheck" $ do
                 case localRefIdentity (generatedLocalRefForName "x") of
                     GeneratedLocalId identity -> identity
                     GraphLocalId {} -> UniqueIdentity 0
+                    ScopedGraphLocalId {} -> UniqueIdentity 0
             nextIdentity (UniqueIdentity value) = UniqueIdentity (value + 1)
             generatedRef = typeBinderRefFromIdentity (typeBinderIdentityFromUnique fixtureIdentity) "a"
             body =
@@ -474,6 +478,7 @@ spec = describe "Phase 7 typecheck" $ do
                 generatedSymbolIdentity unique SymbolValue "Main" "x" Nothing
             identity runtimeName unique =
                 externalBindingIdentityFromDetails runtimeName (TopLevelId (symbol unique))
+        externalBindingRuntimeName (identity "$stale_x" 20) `shouldBe` "Main__x"
         identity "x" 20 `shouldBe` identity "$stale_x" 20
         identity "x" 20 `shouldNotBe` identity "x" 21
 
@@ -502,6 +507,40 @@ spec = describe "Phase 7 typecheck" $ do
                 let env = preparedExternalTypeCheckEnv prepared
                 typeCheckWithEnv env (EVarNode (topLevelResolved 20 "Actual")) `shouldBe` Right builtinIntTy
                 typeCheckWithEnv env (EVarNode (topLevelResolved 21 "Stale")) `shouldBe` Left (TCUnboundVar "Stale__x")
+
+    it "shares scheme identities across identity-bearing external aliases" $ do
+        let symbol =
+                generatedSymbolIdentity 23 SymbolValue "Actual" "poly" Nothing
+            stableName =
+                symbolIdentityStableName symbol
+            externalBinding =
+                ExternalBinding
+                    { externalBindingType =
+                        Surf.STForall
+                            "a"
+                            Nothing
+                            (Surf.STArrow (Surf.STVar "a") (Surf.STVar "a"))
+                    , externalBindingMode = ExternalBindingScheme
+                    , externalBindingIdentity =
+                        Just (externalBindingIdentityFromDetails "poly" (TopLevelId symbol))
+                    , externalBindingTypeHeadIdentities = Map.empty
+                    , externalBindingTypeBinderIdentities = Map.empty
+                    }
+            externalBindings =
+                Map.fromList
+                    [ ("poly", externalBinding)
+                    , (stableName, externalBinding)
+                    ]
+        case runPipelineElabDetailedWithExternalBindings
+            Set.empty
+            externalBindings
+            (unsafeNormalizeExpr (Surf.EVar "poly")) of
+            Right PipelineElabDetailedResult {pedTerm = EVarNode resolved} ->
+                resolvedVarDetails resolved `shouldBe` TopLevelId symbol
+            Right result ->
+                expectationFailure ("Expected external variable term, got: " ++ show (pedTerm result))
+            Left err ->
+                expectationFailure ("Expected shared external alias scheme, got: " ++ renderPipelineError err)
 
     it "uses external binding identity aliases during constraint generation" $ do
         let symbol =
@@ -1092,7 +1131,9 @@ spec = describe "Phase 7 typecheck" $ do
         idDetailsRefMatches (Just topLevelDetails) "value" (Just conflictingTopLevelDetails) "stale-value" `shouldBe` False
         idDetailsRefMatches (Just localDetails) "$x#0" Nothing "$x#0" `shouldBe` False
         idDetailsRefMatches (Just localDetails) "$x#0" Nothing (uniqueIdentityStableName (UniqueIdentity 0)) `shouldBe` False
-        idDetailsRefMatches Nothing "$x#0" Nothing "$x#0" `shouldBe` True
+        idDetailsRefMatches Nothing "$x#0" Nothing "$x#0" `shouldBe` False
+        idDetailsRefMatchesWith IdDetailsIdentityOnly Nothing "$x#0" Nothing "$x#0" `shouldBe` False
+        idDetailsRefMatchesWith IdDetailsMetadataLight Nothing "$x#0" Nothing "$x#0" `shouldBe` True
         let otherLocalDetails = LocalId (generatedLocalRef 1 "$x#0")
             renamedSameIdentityDetails = idDetailsRenameLocal "$x#renamed" localDetails
             detailsByAlias = idDetailsAliasMapWith [("runtime-x", localDetails), ("runtime-y", otherLocalDetails)]

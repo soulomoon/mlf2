@@ -213,10 +213,11 @@ letScopeOverrides base solvedForGen presolutionView redirects ann =
           Left _ -> acc
       alg expr = case expr of
         AVarF _ _ -> IntMap.empty
+        AResolvedVarF _ _ _ -> IntMap.empty
         ALitF _ _ -> IntMap.empty
-        ALamF _ _ _ body _ -> body
+        ALamF _ _ _ _ body _ -> body
         AAppF fun arg _ _ _ -> IntMap.union arg fun
-        ALetF _ _ schemeRootId _ _ rhs body _ ->
+        ALetF _ _ _ schemeRootId _ _ rhs body _ ->
           let baseMap = addOverride IntMap.empty schemeRootId
            in IntMap.union body (IntMap.union rhs baseMap)
         AAnnF inner _ _ -> inner

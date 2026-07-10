@@ -3,6 +3,27 @@
 ## Unreleased
 
 ### Changed
+- Completed the post-resolution identity audit across the frontend, checked
+  artifact, backend, and LLVM paths: semantic evidence keys, constructor
+  rewriting, deferred obligations, type-binder substitution, structural
+  recovery, specialization, provenance, and semantic caches now use carried
+  identities instead of string projections.
+- Added mention-sensitive checked-`TypeView` completeness validation and applied
+  it at checked artifact publication and backend conversion, including binding,
+  data, constructor, class, instance, export, evidence, and deferred-obligation
+  payloads.
+- Added the internal `EBinderIdentity` surface wrapper so exact local/evidence/
+  pattern binder identity survives normalization, desugaring, constraint
+  generation, and elaboration without a `Map String IdDetails` reconstruction
+  pass.
+- Made backend conversion publish `ProductionBackendProgram` and restricted LLVM
+  entrypoints to that identity-complete capability; raw metadata-light Backend
+  IR remains available only through explicit fixture/boundary adapters.
+- Assigned structural constructor-result binders owner-derived identities and
+  made structural source-type recovery require one unambiguous data owner.
+- Centralized resolved `TypeView` identity hydration and evidence-method identity
+  checks, and removed the owner-unavailable structural recovery entrypoint; the
+  remaining string-only recovery path is explicitly metadata-light.
 - Accepted Resolved xMLF Identity IR as the checked-term target: final checked
   executable references should carry resolved variable identity and
   constructor references instead of bare strings, while checked module metadata

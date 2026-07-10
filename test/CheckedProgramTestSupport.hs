@@ -23,7 +23,7 @@ import Control.Concurrent.MVar (MVar, modifyMVar_, newMVar, readMVar)
 import Data.Bifunctor (first)
 import Data.List (intercalate)
 import qualified Data.Map.Strict as Map
-import MLF.Backend.Emission.Prepare (prepareCheckedProgramForBackendEmission)
+import MLF.Backend.Emission.Prepare (prepareCheckedProgramForBackendEmission, renderBackendEmissionPreparationError)
 import MLF.Backend.LLVM
   ( renderBackendLLVMError,
     renderCheckedProgramLLVM,
@@ -155,10 +155,14 @@ emitNativeSourceCached path source =
 
 mkCheckedProgramArtifact :: CheckedProgram -> CheckedProgramArtifact
 mkCheckedProgramArtifact checked =
-  CheckedProgramArtifact
-    { checkedArtifactChecked = checked,
-      checkedArtifactPrepared = prepareCheckedProgramForBackendEmission checked
-    }
+  case prepareCheckedProgramForBackendEmission checked of
+    Right prepared ->
+      CheckedProgramArtifact
+        { checkedArtifactChecked = checked,
+          checkedArtifactPrepared = prepared
+        }
+    Left err ->
+      error ("checked artifact failed backend-emission identity validation: " ++ renderBackendEmissionPreparationError err)
 
 renderProgramError :: ProgramError -> String
 renderProgramError err =

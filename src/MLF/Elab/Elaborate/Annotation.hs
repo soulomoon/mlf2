@@ -1,14 +1,17 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
-{-# LANGUAGE PatternSynonyms #-}
 
 module MLF.Elab.Elaborate.Annotation
   ( AnnotationContext (..),
     closeTermForAnnotation,
     stripUnusedTopTyAbs,
     sourceAnnIsPolymorphic,
+    sourceAnnIsPolymorphicResolved,
     sourceAnnSchemeInfo,
+    sourceAnnSchemeInfoResolved,
+    annBinderKey,
+    annExprReferenceKey,
     desugaredAnnLambdaInfo,
     elaborateAnnotationTerm,
     freshenTermTypeAbsAgainstEnv,
@@ -89,7 +92,7 @@ import MLF.Elab.Types
     typeBinderRefsSameIdentityAndName,
     tyToElab,
   )
-import MLF.Frontend.ConstraintGen.Types (AnnExpr (..))
+import MLF.Frontend.ConstraintGen.Types (AnnExpr (..), BindingKey (..))
 import qualified MLF.Frontend.Program.Builtins as Builtins
 import MLF.Frontend.Symbol (SymbolIdentity, lookupSymbolIdentityAlias)
 import MLF.Frontend.Syntax (NormSrcType, SrcBound (..), SrcNorm (NormN), SrcTy (..), StructBound, VarName)
@@ -103,7 +106,15 @@ import MLF.Reify.TypeOps
     resolveBaseBoundForInstConstraint,
     substTypeCaptureRef,
   )
-import MLF.Types.Identity (IdentityGenerator, TypeBinderIdentity, identityGeneratorAfter, symbolGeneratedIdentities, typeBinderGeneratedIdentities)
+import MLF.Types.Identity
+  ( IdDetails,
+    IdentityGenerator,
+    TypeBinderIdentity,
+    idDetailsIdentityKey,
+    identityGeneratorAfter,
+    symbolGeneratedIdentities,
+    typeBinderGeneratedIdentities,
+  )
 import MLF.Util.Trace (TraceConfig, traceGeneralize)
 
 data AnnotationContext (p :: Phase) = AnnotationContext
@@ -168,55 +179,80 @@ instAppsFromTypes scopeContext tys =
         else Right $ foldr1 InstSeq (map InstApp tys')
 
 sourceAnnIsPolymorphic :: Map.Map VarName SchemeInfo -> AnnExpr -> Bool
-sourceAnnIsPolymorphic env sourceAnn =
+sourceAnnIsPolymorphic = sourceAnnIsPolymorphicResolved (const Nothing)
+
+sourceAnnIsPolymorphicResolved :: (IdDetails -> Maybe SchemeInfo) -> Map.Map VarName SchemeInfo -> AnnExpr -> Bool
+sourceAnnIsPolymorphicResolved resolvedLookup env sourceAnn =
   case sourceAnn of
     AVar v _ ->
       case Map.lookup v env of
         Just schemeInfo -> not (null (schemeBinderRefs (siScheme schemeInfo)))
         _ -> False
-    AAnn inner _ _ -> sourceAnnIsPolymorphic env inner
-    AUnfold inner _ _ -> sourceAnnIsPolymorphic env inner
+    AResolvedVar details _ _ ->
+      case resolvedLookup details of
+        Just schemeInfo -> not (null (schemeBinderRefs (siScheme schemeInfo)))
+        _ -> False
+    AAnn inner _ _ -> sourceAnnIsPolymorphicResolved resolvedLookup env inner
+    AUnfold inner _ _ -> sourceAnnIsPolymorphicResolved resolvedLookup env inner
     _ -> False
 
 sourceAnnSchemeInfo :: Map.Map VarName SchemeInfo -> AnnExpr -> Maybe SchemeInfo
-sourceAnnSchemeInfo env sourceAnn =
+sourceAnnSchemeInfo = sourceAnnSchemeInfoResolved (const Nothing)
+
+sourceAnnSchemeInfoResolved :: (IdDetails -> Maybe SchemeInfo) -> Map.Map VarName SchemeInfo -> AnnExpr -> Maybe SchemeInfo
+sourceAnnSchemeInfoResolved resolvedLookup env sourceAnn =
   case sourceAnn of
     AVar v _ -> Map.lookup v env
-    AAnn inner _ _ -> sourceAnnSchemeInfo env inner
-    AUnfold inner _ _ -> sourceAnnSchemeInfo env inner
+    AResolvedVar details _ _ -> resolvedLookup details
+    AAnn inner _ _ -> sourceAnnSchemeInfoResolved resolvedLookup env inner
+    AUnfold inner _ _ -> sourceAnnSchemeInfoResolved resolvedLookup env inner
     _ -> Nothing
 
-sourceVarName :: AnnExpr -> Maybe VarName
-sourceVarName annExpr =
+-- | Semantic key for a binder represented in the annotated source tree.
+-- Resolved binders use their carried identity; only explicitly metadata-light
+-- binders use the source spelling.
+annBinderKey :: VarName -> Maybe IdDetails -> BindingKey
+annBinderKey name mbDetails =
+  case mbDetails of
+    Just details -> ResolvedBindingKey (idDetailsIdentityKey details)
+    Nothing -> MetadataLightBindingKey name
+
+-- | Semantic key for a direct annotated variable occurrence.
+annExprReferenceKey :: AnnExpr -> Maybe BindingKey
+annExprReferenceKey annExpr =
   case annExpr of
-    AVar v _ -> Just v
-    AAnn inner _ _ -> sourceVarName inner
-    AUnfold inner _ _ -> sourceVarName inner
+    AVar name _ -> Just (MetadataLightBindingKey name)
+    AResolvedVar details _ _ -> Just (ResolvedBindingKey (idDetailsIdentityKey details))
+    AAnn inner _ _ -> annExprReferenceKey inner
+    AUnfold inner _ _ -> annExprReferenceKey inner
     _ -> Nothing
 
-desugaredAnnLambdaInfo :: VarName -> AnnExpr -> Maybe (NodeId, EdgeId, AnnExpr)
-desugaredAnnLambdaInfo param bodyAnn =
+desugaredAnnLambdaInfo :: VarName -> Maybe IdDetails -> AnnExpr -> Maybe (NodeId, EdgeId, AnnExpr)
+desugaredAnnLambdaInfo param mbParamDetails bodyAnn =
   case bodyAnn of
-    ALet letName _ _ _ _ rhsAnn innerBodyAnn _
+    ALet letName _ _ _ _ _ rhsAnn innerBodyAnn _
       | letName == param ->
           case rhsAnn of
             AAnn rhsInner annNodeId eid
-              | annRefersToVar param rhsInner ->
+              | annRefersToVar paramKey rhsInner ->
                   Just (annNodeId, eid, innerBodyAnn)
             _ -> Nothing
     _ -> Nothing
+  where
+    paramKey = annBinderKey param mbParamDetails
 
 elaborateAnnotationTerm ::
   AnnotationContext p ->
   IntSet.IntSet ->
   Map.Map VarName SchemeInfo ->
+  (IdDetails -> Maybe SchemeInfo) ->
   TypeCheck.Env ->
   AnnExpr ->
   NodeId ->
   EdgeId ->
   XmlfTerm ->
   Either ElabError XmlfTerm
-elaborateAnnotationTerm annotationContext namedSetReify env tcEnv exprAnn annNodeId eid expr' = do
+elaborateAnnotationTerm annotationContext namedSetReify env resolvedLookup tcEnv exprAnn annNodeId eid expr' = do
   expectedSchemeInfo <-
     case generalizeAtNode scopeContext annNodeId of
       Right pair -> pure (Just pair)
@@ -242,7 +278,7 @@ elaborateAnnotationTerm annotationContext namedSetReify env tcEnv exprAnn annNod
                in go (aliases' `Set.union` used) rest bodyAcc' acc'
             (binds', body') = go reserved (schemeBinderRefs scheme0) (schemeBody scheme0) []
          in mkElabSchemeWithRefs binds' body'
-      sourceSchemeInfo = sourceAnnSchemeInfo env exprAnn
+      sourceSchemeInfo = sourceAnnSchemeInfoResolved resolvedLookup env exprAnn
       canReuseSourceScheme =
         case (sourceSchemeInfo, expectedSchemeInfo) of
           (Just schemeInfo, Just (schemeExpected, _substExpected)) ->
@@ -257,12 +293,12 @@ elaborateAnnotationTerm annotationContext namedSetReify env tcEnv exprAnn annNod
                   && not (alphaEqType (schemeToType srcScheme) (schemeToType schemeExpected))
           _ -> False
   inst <-
-    case (sourceVarName exprAnn, TypeCheck.typeCheckWithEnv tcEnv exprFresh) of
+    case (annExprReferenceKey exprAnn, TypeCheck.typeCheckWithEnv tcEnv exprFresh) of
       (Nothing, Right ty)
         | not (case ty of TForallRef {} -> True; _ -> False) ->
             pure InstId
       _ ->
-        case reifyInst annotationContext namedSetReify env exprAnn eid of
+        case reifyInst annotationContext namedSetReify env resolvedLookup exprAnn eid of
           Right inst0 -> pure inst0
           Left (PhiTranslatabilityError _)
             | canReuseSourceScheme -> pure InstId
@@ -328,7 +364,7 @@ elaborateAnnotationTerm annotationContext namedSetReify env tcEnv exprAnn annNod
       else
         if instAdjusted == InstId
           then
-            if canReuseSourceScheme && sourceAnnIsPolymorphic env exprAnn
+            if canReuseSourceScheme && sourceAnnIsPolymorphicResolved resolvedLookup env exprAnn
               then pure exprFresh
               else case sourceLambdaParamClosed of
                 Just closed -> pure closed
@@ -368,11 +404,11 @@ elaborateAnnotationTerm annotationContext namedSetReify env tcEnv exprAnn annNod
                   InstSeq (InstInside (InstBot _)) InstElim -> True
                   InstSeq (InstInside (InstApp _)) InstElim -> True
                   _ -> False
-             in if sourceAnnIsPolymorphic env exprAnn
+             in if sourceAnnIsPolymorphicResolved resolvedLookup env exprAnn
                   then pure exprFresh
                   else
                     if instLooksLikeApp instAdjusted
-                      then case (sourceVarName exprAnn, TypeCheck.typeCheckWithEnv tcEnv exprFresh) of
+                      then case (annExprReferenceKey exprAnn, TypeCheck.typeCheckWithEnv tcEnv exprFresh) of
                         (Nothing, Right TForallRef {}) ->
                           if instHasUnder instAdjusted
                             then case expectedSchemeInfoForClose of
@@ -416,7 +452,7 @@ elaborateAnnotationTerm annotationContext namedSetReify env tcEnv exprAnn annNod
                   InstSeq (InstInside (InstBot ty)) InstElim -> InstApp ty
                   InstSeq (InstInside (InstApp ty)) InstElim -> InstApp ty
                   _ -> inst0
-             in if instLooksLikeApp instAdjusted && sourceVarName exprAnn == Nothing
+             in if instLooksLikeApp instAdjusted && annExprReferenceKey exprAnn == Nothing
                   then InstId
                   else case TypeCheck.typeCheckWithEnv tcEnv exprClosed of
                     Right tyExpr
@@ -512,10 +548,11 @@ reifyInst ::
   AnnotationContext p ->
   IntSet.IntSet ->
   Map.Map VarName SchemeInfo ->
+  (IdDetails -> Maybe SchemeInfo) ->
   AnnExpr ->
   EdgeId ->
   Either ElabError Instantiation
-reifyInst annotationContext namedSetReify env funAnn (EdgeId eid) =
+reifyInst annotationContext namedSetReify env resolvedLookup funAnn (EdgeId eid) =
   debugGeneralize
     ( "reifyInst: edge="
         ++ show eid
@@ -699,14 +736,15 @@ reifyInst annotationContext namedSetReify env funAnn (EdgeId eid) =
           Nothing ->
             case annExpr of
               AVar v _ -> pure (Map.lookup v env)
+              AResolvedVar details _ _ -> pure (resolvedLookup details)
               AAnn inner _ _ -> schemeInfoForInst inner
               AUnfold inner _ _ -> schemeInfoForInst inner
               _ -> pure Nothing
 
     syntheticLetSchemeInfo annExpr =
       case annExpr of
-        ALet letName _ schemeRootId _ _ rhsAnn bodyAnn _
-          | annRefersToVar letName bodyAnn ->
+        ALet letName mbDetails _ schemeRootId _ _ rhsAnn bodyAnn _
+          | annRefersToVar (annBinderKey letName mbDetails) bodyAnn ->
               firstJustE
                 (explicitSourceAnnotatedScheme rhsAnn)
                 ( firstJustE
@@ -728,10 +766,10 @@ reifyInst annotationContext namedSetReify env funAnn (EdgeId eid) =
           case IntMap.lookup (getNodeId annNodeId) (acAnnSourceTypes annotationContext) of
             Just srcTy -> Just <$> sourceSchemeInfoFromType srcTy
             Nothing -> explicitSourceAnnotatedScheme inner
-        ALam _ _ _ body _ -> explicitSourceAnnotatedScheme body
+        ALam _ _ _ _ body _ -> explicitSourceAnnotatedScheme body
         AApp fun arg _ _ _ ->
           firstJustE (explicitSourceAnnotatedScheme fun) (explicitSourceAnnotatedScheme arg)
-        ALet _ _ _ _ _ rhs body _ ->
+        ALet _ _ _ _ _ _ rhs body _ ->
           firstJustE (explicitSourceAnnotatedScheme rhs) (explicitSourceAnnotatedScheme body)
         AUnfold inner _ _ -> explicitSourceAnnotatedScheme inner
         _ -> pure Nothing
@@ -849,13 +887,9 @@ instSeqApps tys =
     [inst] -> inst
     insts -> foldr1 InstSeq insts
 
-annRefersToVar :: VarName -> AnnExpr -> Bool
-annRefersToVar name exprAnn =
-  case exprAnn of
-    AVar v _ -> v == name
-    AAnn inner _ _ -> annRefersToVar name inner
-    AUnfold inner _ _ -> annRefersToVar name inner
-    _ -> False
+annRefersToVar :: BindingKey -> AnnExpr -> Bool
+annRefersToVar key exprAnn =
+  annExprReferenceKey exprAnn == Just key
 
 freshenTermTypeAbsAgainstEnv :: TypeCheck.Env -> XmlfTerm -> XmlfTerm
 freshenTermTypeAbsAgainstEnv env = go reserved

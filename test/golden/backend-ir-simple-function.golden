@@ -8,9 +8,9 @@ backend-program
         binding Main__id : (Int -> Int)
           exported-main: false
           expr:
-            lam x : Int -> (Int -> Int)
+            lam $x#4 : Int -> (Int -> Int)
               body:
-                var x : Int
+                var $x#4 : Int
         binding Main__main : Int
           exported-main: true
           expr:

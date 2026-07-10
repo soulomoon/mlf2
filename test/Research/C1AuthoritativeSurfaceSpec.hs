@@ -123,12 +123,13 @@ c1FallbackTypeFor expr expectedBase = do
 
 extractVarBody :: AnnExpr -> AnnExpr
 extractVarBody ann0 = case ann0 of
-    ALet _ _ _ _ _ _ (AAnn body _ _) _ -> body
+    ALet _ _ _ _ _ _ _ (AAnn body _ _) _ -> body
     _ -> error ("unexpected scheme-alias/base-like wrapper shape: " ++ show ann0)
 
 bodyRoot :: AnnExpr -> NodeId
 bodyRoot ann0 = case extractVarBody ann0 of
     AVar _ nid -> nid
+    AResolvedVar _ _ nid -> nid
     other -> error ("expected scheme alias variable body, got " ++ show other)
 
 rebindRootTo :: ResultTypeInputs 'Raw -> NodeId -> NodeId -> ResultTypeInputs 'Raw

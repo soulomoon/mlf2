@@ -16,9 +16,12 @@ module MLF.Reify.TypeOps
     composeTypeHeadRef,
     freshNameLike,
     alphaEqType,
+    alphaEqTypeWith,
+    alphaEqTypeMetadataLight,
     churchMuEquivalent,
     churchAwareEqType,
     typeHeadMatches,
+    typeHeadMatchesMetadataLight,
     firstNonContractiveRecursiveType,
     matchTypeRefs,
     resolveBaseBoundForInstConstraint,
@@ -41,7 +44,7 @@ import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types.Graph
 import qualified MLF.Constraint.VarStore as VarStore
-import MLF.Frontend.Symbol (SymbolIdentity)
+import MLF.Frontend.Symbol (SymbolIdentity, SymbolReferenceMode (..))
 import qualified MLF.Primitive.Identity as PrimitiveIdentity
 import MLF.Types.Elab
 import MLF.Util.ElabError (ElabError (..))
@@ -414,22 +417,36 @@ alphaEqRef envL envR left right =
 
 typeHeadMatches :: Maybe SymbolIdentity -> BaseTy -> Maybe SymbolIdentity -> BaseTy -> Bool
 typeHeadMatches =
-  typeHeadRefMatches
+  typeHeadRefMatchesWith SymbolIdentityOnly
+
+typeHeadMatchesMetadataLight :: Maybe SymbolIdentity -> BaseTy -> Maybe SymbolIdentity -> BaseTy -> Bool
+typeHeadMatchesMetadataLight =
+  typeHeadRefMatchesWith SymbolMetadataLight
 
 alphaEqType :: ElabType -> ElabType -> Bool
-alphaEqType = go [] []
+alphaEqType =
+  alphaEqTypeWith SymbolIdentityOnly
+
+alphaEqTypeMetadataLight :: ElabType -> ElabType -> Bool
+alphaEqTypeMetadataLight =
+  alphaEqTypeWith SymbolMetadataLight
+
+alphaEqTypeWith :: SymbolReferenceMode -> ElabType -> ElabType -> Bool
+alphaEqTypeWith mode = go [] []
   where
+    headMatches = typeHeadRefMatchesWith mode
+
     go envL envR t1 t2 = case (t1, t2) of
       (TVarRef a, TVarRef b) ->
         alphaEqRef envL envR a b
       (TArrow a1 b1, TArrow a2 b2) ->
         go envL envR a1 a2 && go envL envR b1 b2
       (TConWithIdentity identity1 c1 args1, TConWithIdentity identity2 c2 args2) ->
-        typeHeadMatches identity1 c1 identity2 c2 && alphaEqArgs envL envR (toList args1) (toList args2)
+        headMatches identity1 c1 identity2 c2 && alphaEqArgs envL envR (toList args1) (toList args2)
       (TVarAppRef a args1, TVarAppRef b args2) ->
         alphaEqVar envL envR a b && alphaEqArgs envL envR (toList args1) (toList args2)
       (TBaseWithIdentity identity1 b1, TBaseWithIdentity identity2 b2) ->
-        typeHeadMatches identity1 b1 identity2 b2
+        headMatches identity1 b1 identity2 b2
       (TBottom, TBottom) -> True
       (TForallRef ref1 mb1 body1, TForallRef ref2 mb2 body2) ->
         let envL' = (ref1, ref2) : envL
@@ -457,11 +474,11 @@ alphaEqType = go [] []
       (TArrow a1 b1', TArrow a2 b2') ->
         go envL envR a1 a2 && go envL envR b1' b2'
       (TConWithIdentity identity1 c1 args1, TConWithIdentity identity2 c2 args2) ->
-        typeHeadMatches identity1 c1 identity2 c2 && alphaEqArgs envL envR (toList args1) (toList args2)
+        headMatches identity1 c1 identity2 c2 && alphaEqArgs envL envR (toList args1) (toList args2)
       (TVarAppRef a args1, TVarAppRef b args2) ->
         alphaEqVar envL envR a b && alphaEqArgs envL envR (toList args1) (toList args2)
       (TBaseWithIdentity identity1 b1', TBaseWithIdentity identity2 b2') ->
-        typeHeadMatches identity1 b1' identity2 b2'
+        headMatches identity1 b1' identity2 b2'
       (TBottom, TBottom) -> True
       (TForallRef ref1 mb1 body1, TForallRef ref2 mb2 body2) ->
         let envL' = (ref1, ref2) : envL

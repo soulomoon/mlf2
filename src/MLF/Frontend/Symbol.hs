@@ -27,6 +27,8 @@ module MLF.Frontend.Symbol
     mkResolvedReference,
     sameSymbolIdentity,
     sameResolvedSymbol,
+    SymbolReferenceMode (..),
+    symbolRefMatchesWith,
     symbolRefMatches,
     symbolIdentityPayloadMatches,
     lookupSymbolIdentityExact,
@@ -234,13 +236,24 @@ sameResolvedSymbol :: ResolvedSymbol -> ResolvedSymbol -> Bool
 sameResolvedSymbol left right =
   sameSymbolIdentity (resolvedSymbolIdentity left) (resolvedSymbolIdentity right)
 
-symbolRefMatches :: Maybe SymbolIdentity -> String -> Maybe SymbolIdentity -> String -> Bool
-symbolRefMatches (Just leftIdentity) _ (Just rightIdentity) _ =
+data SymbolReferenceMode
+  = SymbolIdentityOnly
+  | SymbolMetadataLight
+  deriving (Eq, Show)
+
+symbolRefMatchesWith :: SymbolReferenceMode -> Maybe SymbolIdentity -> String -> Maybe SymbolIdentity -> String -> Bool
+symbolRefMatchesWith _ (Just leftIdentity) _ (Just rightIdentity) _ =
   symbolIdentityPayloadKey leftIdentity == symbolIdentityPayloadKey rightIdentity
-symbolRefMatches Nothing leftName Nothing rightName =
-  leftName == rightName
-symbolRefMatches _ _ _ _ =
+symbolRefMatchesWith mode Nothing leftName Nothing rightName =
+  case mode of
+    SymbolIdentityOnly -> False
+    SymbolMetadataLight -> leftName == rightName
+symbolRefMatchesWith _ _ _ _ _ =
   False
+
+symbolRefMatches :: Maybe SymbolIdentity -> String -> Maybe SymbolIdentity -> String -> Bool
+symbolRefMatches =
+  symbolRefMatchesWith SymbolIdentityOnly
 
 symbolIdentityPayloadMatches :: SymbolIdentity -> SymbolIdentity -> Bool
 symbolIdentityPayloadMatches =

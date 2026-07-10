@@ -441,7 +441,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           validateStrict res
           let ann = applyRedirectsToAnn (prRedirects pres) ann0
           case ann of
-            ALet _ schemeGen schemeRoot _ _ _ _ _ -> do
+            ALet _ _ schemeGen schemeRoot _ _ _ _ _ -> do
               let generalizeAt = generalizeAtWithBuilder (defaultPlanBuilder defaultTraceConfig) Nothing
               case generalizeAt (viewFromSolved res) (genRef schemeGen) schemeRoot of
                 Right scheme -> show scheme `shouldSatisfy` ("Forall" `isInfixOf`)
@@ -3173,10 +3173,10 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 expr =
                   ELet "k" (ELamAnn "x" recursiveAnn (EVar "x")) (EVar "k")
                 extractVarBody ann0 = case ann0 of
-                  ALet _ _ _ _ _ _ (AAnn body _ _) _ -> body
+                  ALet _ _ _ _ _ _ _ (AAnn body _ _) _ -> body
                   _ -> error ("unexpected scheme-alias/base-like wrapper shape: " ++ show ann0)
                 bodyRoot ann0 = case extractVarBody ann0 of
-                  AVar _ nid -> nid
+                  AResolvedVar _ _ nid -> nid
                   other ->
                     error ("expected local scheme alias variable body, got " ++ show other)
             artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
@@ -3202,7 +3202,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     (ELamAnn "x" recursiveAnn (EVar "x"))
                     (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "k")) (EVar "u"))
                 extractInnerLetRhs ann0 = case ann0 of
-                  ALet _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ rhs _ _) _ _) _ -> rhs
+                  ALet _ _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ _ rhs _ _) _ _) _ -> rhs
                   _ ->
                     error
                       ( "unexpected local empty-candidate scheme-alias/base-like wrapper shape: "
@@ -3213,7 +3213,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 innerCanon = extractInnerLetRhs annCanon0
                 innerPre = extractInnerLetRhs annPre0
                 (rootNid, childNid) = case innerCanon of
-                  AApp _ (AVar _ nid) _ _ appNid -> (appNid, nid)
+                  AApp _ (AResolvedVar _ _ nid) _ _ appNid -> (appNid, nid)
                   other ->
                     error
                       ( "expected local empty-candidate scheme-alias/base-like app shape, got "
@@ -3238,14 +3238,14 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     (ELamAnn "x" recursiveAnn (EVar "x"))
                     (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "k")) (EVar "u"))
                 extractInnerLetRhs ann0 = case ann0 of
-                  ALet _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ rhs _ _) _ _) _ -> rhs
+                  ALet _ _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ _ rhs _ _) _ _) _ -> rhs
                   _ -> error ("unexpected local multi-inst wrapper shape: " ++ show ann0)
             artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
             let (inputs0, annCanon0, annPre0) = resultTypeInputsForArtifacts artifacts
                 innerCanon = extractInnerLetRhs annCanon0
                 innerPre = extractInnerLetRhs annPre0
                 (rootNid, childNid, edgeIds) = case innerCanon of
-                  AApp _ (AVar _ nid) funEid argEid appNid -> (appNid, nid, [funEid, argEid])
+                  AApp _ (AResolvedVar _ _ nid) funEid argEid appNid -> (appNid, nid, [funEid, argEid])
                   other ->
                     error ("expected local multi-inst app shape, got " ++ show other)
                 inputs1 =
@@ -3263,7 +3263,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     (ELamAnn "x" recursiveAnn (EVar "x"))
                     (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "k")) (EVar "u"))
                 extractInnerLetRhs ann0 = case ann0 of
-                  ALet _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ rhs _ _) _ _) _ -> rhs
+                  ALet _ _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ _ rhs _ _) _ _) _ -> rhs
                   _ -> error ("unexpected local inst-arg multi-base wrapper shape: " ++ show ann0)
                 injectMultiBaseArgs inputs eids =
                   let view0 = rtcPresolutionView inputs
@@ -3302,7 +3302,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 innerCanon = extractInnerLetRhs annCanon0
                 innerPre = extractInnerLetRhs annPre0
                 (rootNid, childNid, edgeIds) = case innerCanon of
-                  AApp _ (AVar _ nid) funEid argEid appNid -> (appNid, nid, [funEid, argEid])
+                  AApp _ (AResolvedVar _ _ nid) funEid argEid appNid -> (appNid, nid, [funEid, argEid])
                   other ->
                     error ("expected local inst-arg multi-base app shape, got " ++ show other)
                 inputs1 =
@@ -3320,7 +3320,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     (ELamAnn "x" recursiveAnn (EVar "x"))
                     (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "k")) (EVar "u"))
                 extractInnerLetRhs ann0 = case ann0 of
-                  ALet _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ rhs _ _) _ _) _ -> rhs
+                  ALet _ _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ _ rhs _ _) _ _) _ -> rhs
                   _ -> error ("unexpected local inst-arg singleton-base wrapper shape: " ++ show ann0)
                 injectSingleBaseWitness inputs eid =
                   let view0 = rtcPresolutionView inputs
@@ -3351,7 +3351,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 innerCanon = extractInnerLetRhs annCanon0
                 innerPre = extractInnerLetRhs annPre0
                 (rootNid, childNid, argEid) = case innerCanon of
-                  AApp _ (AVar _ nid) _funEid argEdgeId appNid -> (appNid, nid, argEdgeId)
+                  AApp _ (AResolvedVar _ _ nid) _funEid argEdgeId appNid -> (appNid, nid, argEdgeId)
                   other ->
                     error ("expected local inst-arg singleton-base app shape, got " ++ show other)
                 inputs1 =
@@ -3373,14 +3373,14 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     (ELamAnn "x" recursiveAnn (EVar "x"))
                     (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "k")) (EVar "u"))
                 extractInnerLetRhs ann0 = case ann0 of
-                  ALet _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ rhs _ _) _ _) _ -> rhs
+                  ALet _ _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ _ rhs _ _) _ _) _ -> rhs
                   _ -> error ("unexpected local single-base wrapper shape: " ++ show ann0)
             artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
             let (inputs0, annCanon0, annPre0) = resultTypeInputsForArtifacts artifacts
                 innerCanon = extractInnerLetRhs annCanon0
                 innerPre = extractInnerLetRhs annPre0
                 (rootNid, childNid) = case innerCanon of
-                  AApp _ (AVar _ nid) _ _ appNid -> (appNid, nid)
+                  AApp _ (AResolvedVar _ _ nid) _ _ appNid -> (appNid, nid)
                   other ->
                     error ("expected local single-base app shape, got " ++ show other)
                 inputs1 =
@@ -3436,7 +3436,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 (ELamAnn "x" recursiveAnn (EVar "x"))
                 (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "k")) (EVar "u"))
             extractInnerLetRhs ann0 = case ann0 of
-              ALet _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ rhs _ _) _ _) _ -> rhs
+              ALet _ _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ _ rhs _ _) _ _) _ -> rhs
               _ -> error ("unexpected retained-child wrapper shape: " ++ show ann0)
             setVarBound nid newBound constraint =
               let tweak node = case node of
@@ -3502,7 +3502,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             innerCanon = extractInnerLetRhs annCanon0
             innerPre = extractInnerLetRhs annPre0
             (retainedRoot, retainedChild) = case innerCanon of
-              AApp _ (AVar _ nid) _ _ rootNid -> (rootNid, nid)
+              AApp _ (AResolvedVar _ _ nid) _ _ rootNid -> (rootNid, nid)
               _ -> error ("expected retained-child app shape, got " ++ show innerCanon)
             inputs = wireSameLaneLocalRoot inputs0 retainedRoot retainedChild
         fallbackTy <- requireRight (computeResultTypeFallback inputs innerCanon innerPre)
@@ -3516,7 +3516,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 (ELamAnn "x" recursiveAnn (EVar "x"))
                 (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "k")) (EVar "u"))
             extractInnerLetRhs ann0 = case ann0 of
-              ALet _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ rhs _ _) _ _) _ -> rhs
+              ALet _ _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ _ rhs _ _) _ _) _ -> rhs
               _ -> error ("unexpected retained-child wrapper shape: " ++ show ann0)
             wireSameLaneLocalRoot inputs rootNid childNid =
               let view0 = rtcPresolutionView inputs
@@ -3561,7 +3561,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             innerCanon = extractInnerLetRhs annCanon0
             innerPre = extractInnerLetRhs annPre0
             (retainedRoot, retainedChild) = case innerCanon of
-              AApp _ (AVar _ nid) _ _ rootNid -> (rootNid, nid)
+              AApp _ (AResolvedVar _ _ nid) _ _ rootNid -> (rootNid, nid)
               _ -> error ("expected retained-child app shape, got " ++ show innerCanon)
             inputs1 = wireSameLaneLocalRoot inputs0 retainedRoot retainedChild
             inputs2 = duplicateRetainedChildCandidate inputs1 retainedRoot retainedChild
@@ -3576,7 +3576,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 (ELamAnn "x" recursiveAnn (EVar "x"))
                 (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "k")) (EVar "u"))
             extractInnerLetRhs ann0 = case ann0 of
-              ALet _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ rhs _ _) _ _) _ -> rhs
+              ALet _ _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ _ rhs _ _) _ _) _ -> rhs
               _ -> error ("unexpected retained-child wrapper shape: " ++ show ann0)
             wireSameLaneLocalRoot inputs rootNid childNid =
               let view0 = rtcPresolutionView inputs
@@ -3625,7 +3625,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             innerCanon = extractInnerLetRhs annCanon0
             innerPre = extractInnerLetRhs annPre0
             (retainedRoot, retainedChild) = case innerCanon of
-              AApp _ (AVar _ nid) _ _ rootNid -> (rootNid, nid)
+              AApp _ (AResolvedVar _ _ nid) _ _ rootNid -> (rootNid, nid)
               _ -> error ("expected retained-child app shape, got " ++ show innerCanon)
             inputs1 = wireSameLaneLocalRoot inputs0 retainedRoot retainedChild
             inputs2 = injectAmbiguousRetainedChildTarget inputs1 retainedRoot retainedChild
@@ -3640,7 +3640,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 (ELamAnn "x" recursiveAnn (EVar "x"))
                 (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "k")) (EVar "u"))
             extractInnerLetRhs ann0 = case ann0 of
-              ALet _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ rhs _ _) _ _) _ -> rhs
+              ALet _ _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ _ rhs _ _) _ _) _ -> rhs
               _ -> error ("unexpected retained-child wrapper shape: " ++ show ann0)
             wireSameLaneLocalRoot inputs rootNid childNid =
               let view0 = rtcPresolutionView inputs
@@ -3687,7 +3687,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             innerCanon = extractInnerLetRhs annCanon0
             innerPre = extractInnerLetRhs annPre0
             (retainedRoot, retainedChild, argEid) = case innerCanon of
-              AApp _ (AVar _ nid) _funEid argEdgeId appNid -> (appNid, nid, argEdgeId)
+              AApp _ (AResolvedVar _ _ nid) _funEid argEdgeId appNid -> (appNid, nid, argEdgeId)
               other ->
                 error
                   ( "expected retained-child app shape for mixed retained-child/base-target case, got "
@@ -4159,7 +4159,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     (EApp (ELam "y" (EVar "y")) (EVar "k"))
                 )
             extractSelectedBodyApp ann0 = case ann0 of
-              ALet _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ _ body _) _ _) _ ->
+              ALet _ _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ _ _ body _) _ _) _ ->
                 case body of
                   AAnn inner _ _ -> inner
                   other -> other
@@ -4190,7 +4190,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             bodyCanon = extractSelectedBodyApp annCanon0
             bodyPre = extractSelectedBodyApp annPre0
             (retainedRoot, retainedChild) = case bodyCanon of
-              AApp _ (AVar _ nid) _ _ rootNid -> (rootNid, nid)
+              AApp _ (AResolvedVar _ _ nid) _ _ rootNid -> (rootNid, nid)
               other ->
                 error
                   ( "expected same-wrapper nested-forall retained-child app shape, got "
@@ -5381,7 +5381,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       Nothing -> expectationFailure "Expected edge 0 trace" >> fail "missing edge 0 trace"
     let (c1Gen, c1SchemeRoot0) =
           case ann of
-            ALet "make" _ _ _ _ _ (AAnn (ALet "c1" schemeGen schemeRoot _ _ _ _ _) _ _) _ ->
+            ALet "make" _ _ _ _ _ _ (AAnn (ALet "c1" _ schemeGen schemeRoot _ _ _ _ _) _ _) _ ->
               (schemeGen, schemeRoot)
             other ->
               error ("Unexpected annotation shape for let-c1-apply-bool: " ++ show other)
@@ -6073,10 +6073,11 @@ nodeIdToKey (NodeId k) = k
 annNodeOccurrences :: AnnExpr -> [NodeId]
 annNodeOccurrences expr = case expr of
   AVar _ nid -> [nid]
+  AResolvedVar _ _ nid -> [nid]
   ALit _ nid -> [nid]
-  ALam _ pNode _ body nid -> pNode : nid : annNodeOccurrences body
+  ALam _ _ pNode _ body nid -> pNode : nid : annNodeOccurrences body
   AApp fn arg _ _ nid -> nid : annNodeOccurrences fn ++ annNodeOccurrences arg
-  ALet _ _ schemeRoot _ _ rhs body nid ->
+  ALet _ _ _ schemeRoot _ _ rhs body nid ->
     schemeRoot : nid : annNodeOccurrences rhs ++ annNodeOccurrences body
   AAnn inner nid _ -> nid : annNodeOccurrences inner
   AUnfold inner nid _ -> nid : annNodeOccurrences inner
@@ -6084,10 +6085,11 @@ annNodeOccurrences expr = case expr of
 annLetSchemeRoots :: AnnExpr -> [NodeId]
 annLetSchemeRoots expr = case expr of
   AVar _ _ -> []
+  AResolvedVar _ _ _ -> []
   ALit _ _ -> []
-  ALam _ _ _ body _ -> annLetSchemeRoots body
+  ALam _ _ _ _ body _ -> annLetSchemeRoots body
   AApp fn arg _ _ _ -> annLetSchemeRoots fn ++ annLetSchemeRoots arg
-  ALet _ _ schemeRoot _ _ rhs body _ ->
+  ALet _ _ _ schemeRoot _ _ rhs body _ ->
     schemeRoot : annLetSchemeRoots rhs ++ annLetSchemeRoots body
   AAnn inner _ _ -> annLetSchemeRoots inner
   AUnfold inner _ _ -> annLetSchemeRoots inner
@@ -6095,10 +6097,11 @@ annLetSchemeRoots expr = case expr of
 annRootNode :: AnnExpr -> NodeId
 annRootNode expr = case expr of
   AVar _ nid -> nid
+  AResolvedVar _ _ nid -> nid
   ALit _ nid -> nid
-  ALam _ _ _ _ nid -> nid
+  ALam _ _ _ _ _ nid -> nid
   AApp _ _ _ _ nid -> nid
-  ALet _ _ _ _ _ _ _ nid -> nid
+  ALet _ _ _ _ _ _ _ _ nid -> nid
   AAnn _ nid _ -> nid
   AUnfold _ nid _ -> nid
 

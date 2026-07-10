@@ -62,6 +62,10 @@ spec = describe "MLF.Backend.StructuralRecursiveData" $ do
     structuralMuAsDataType (Just listIdentity) (backendDataParameterRefs listData) (Just listSelfIdentity) "$List_self"
       `shouldBe` Just (BTConWithIdentity (Just listIdentity) (BaseTy "List") (BTVar "a" :| []))
 
+  it "rebuilds identity-bearing structural mu heads without parsing the binder spelling" $
+    structuralMuAsDataType (Just listIdentity) (backendDataParameterRefs listData) (Just listSelfIdentity) "$not_a_data_name"
+      `shouldBe` Just (BTConWithIdentity (Just listIdentity) (BaseTy "List") (BTVar "a" :| []))
+
   it "does not rebuild identity-bearing structural mu heads from names alone" $
     structuralMuAsDataType (Just listIdentity) (backendDataParameterRefs listData) Nothing "$List_self"
       `shouldBe` Nothing
@@ -78,6 +82,17 @@ spec = describe "MLF.Backend.StructuralRecursiveData" $ do
     structuralMuAsActualDataType (Just listIdentity) (Just wrongSelfIdentity) "$List_self" actualTy
       `shouldBe` Nothing
 
+  it "does not match nominal and structural data by spelling when owners differ" $ do
+    let wrongIdentity =
+          symbolIdentityWithUnique (UniqueIdentity 990103) listIdentity
+        wrongNominalTy =
+          BTConWithIdentity (Just wrongIdentity) (BaseTy "List") (intTy :| [])
+        structuralTy =
+          identityStructuralListTy listSelfIdentity intTy
+
+    matchBackendTypeParametersWithTypeBounds Map.empty [] Map.empty Map.empty wrongNominalTy structuralTy
+      `shouldBe` Nothing
+
   it "does not match identity-bearing actual data through name-only structural mu recovery" $
     structuralMuAsActualDataType Nothing Nothing "$List_self" (BTConWithIdentity (Just listIdentity) (BaseTy "List") (BTVar "a" :| []))
       `shouldBe` Nothing
@@ -86,7 +101,7 @@ spec = describe "MLF.Backend.StructuralRecursiveData" $ do
     structuralMuAsActualDataType (Just listIdentity) (Just listSelfIdentity) "$List_self" (BTConWithIdentity (Just listIdentity) (BaseTy "$stale") (BTVar "a" :| []))
       `shouldBe` Just (BTConWithIdentity (Just listIdentity) (BaseTy "$stale") (BTVar "a" :| []))
 
-  it "matches structural boundaries by data identity instead of display name fallback" $ do
+  it "matches structural boundaries by structural self identity instead of display name fallback" $ do
     let dataScope =
           backendDataScope
             (Map.singleton (backendDataName identityListData) identityListData)
@@ -99,16 +114,25 @@ spec = describe "MLF.Backend.StructuralRecursiveData" $ do
           symbolIdentityWithUnique (UniqueIdentity 990102) listIdentity
         wrongNominalTy =
           BTConWithIdentity (Just wrongIdentity) (BaseTy "List") (intTy :| [])
-        structuralTy =
+        identityStructuralTy =
+          identityStructuralListTy listSelfIdentity intTy
+        identitylessStructuralTy =
           structuralListTy intTy
 
-    backendStructuralDataBoundaryMatches Map.empty (Just dataScope) staleNominalTy structuralTy
+    backendStructuralDataBoundaryMatches Map.empty (Just dataScope) staleNominalTy identityStructuralTy
+      `shouldBe` True
+    alphaEqBackendType staleNominalTy identityStructuralTy
       `shouldBe` True
 
-    backendStructuralDataBoundaryMatches Map.empty (Just dataScope) stalePayloadNominalTy structuralTy
+    backendStructuralDataBoundaryMatches Map.empty (Just dataScope) staleNominalTy identitylessStructuralTy
       `shouldBe` False
 
-    backendStructuralDataBoundaryMatches Map.empty (Just dataScope) wrongNominalTy structuralTy
+    backendStructuralDataBoundaryMatches Map.empty (Just dataScope) stalePayloadNominalTy identityStructuralTy
+      `shouldBe` False
+
+    backendStructuralDataBoundaryMatches Map.empty (Just dataScope) wrongNominalTy identityStructuralTy
+      `shouldBe` False
+    alphaEqBackendType wrongNominalTy identityStructuralTy
       `shouldBe` False
 
   it "does not match identity-bearing scoped data through name-only structural boundaries" $ do
@@ -416,13 +440,40 @@ spec = describe "MLF.Backend.StructuralRecursiveData" $ do
       actualBody
       `shouldBe` False
 
+  it "compares structural payload owners by identity when binder spellings differ" $
+    structuralPayloadsMayInstantiate
+      Map.empty
+      (Just listSelfIdentity)
+      "$stale_left"
+      (listStructuralBody intTy)
+      (Just listSelfIdentity)
+      "$stale_right"
+      (listStructuralBody intTy)
+      `shouldBe` True
+
+  it "reuses repeated structural substitutions by owner identity instead of mu spelling" $ do
+    let parameterIdentity = typeBinderIdentityFromNode (NodeId 991359)
+        parameterKey = backendTypeSubstitutionKeyFromIdentity parameterIdentity
+        parameterBounds = Map.singleton parameterKey Nothing
+        previous = BTMuWithIdentity (Just listSelfIdentity) "$stale_left" (listStructuralBody intTy)
+        actual = BTMuWithIdentity (Just listSelfIdentity) "$stale_right" (listStructuralBody intTy)
+
+    matchBackendTypeParametersWithTypeBounds
+      Map.empty
+      []
+      parameterBounds
+      (Map.singleton parameterKey previous)
+      (BTVarWithIdentity (Just parameterIdentity) "a")
+      actual
+      `shouldBe` Just (Map.singleton parameterKey previous)
+
   it "checks actual type variable bounds by identity when names are stale" $ do
     let expectedIdentity = typeBinderIdentityFromNode (NodeId 991303)
         actualIdentity = typeBinderIdentityFromNode (NodeId 991304)
         expectedKey = backendTypeSubstitutionKeyFromIdentity expectedIdentity
         actualKey = backendTypeSubstitutionKeyFromIdentity actualIdentity
         parameterBounds = Map.singleton expectedKey (Just intTy)
-        typeBounds = Map.fromList [(actualKey, Just intTy), (backendTypeSubstitutionKeyFor Nothing "a", Just boolTy)]
+        typeBounds = Map.fromList [(actualKey, Just intTy), (backendTypeSubstitutionKeyFromMaybeMetadataLight Nothing "a", Just boolTy)]
         expected = BTVarWithIdentity (Just expectedIdentity) "a"
         actual = BTVarWithIdentity (Just actualIdentity) "a"
 
@@ -431,7 +482,7 @@ spec = describe "MLF.Backend.StructuralRecursiveData" $ do
 
   it "does not match identity-bearing parameters through name-only bounds" $ do
     let identity = typeBinderIdentityFromNode (NodeId 991305)
-        parameterBounds = Map.singleton (backendTypeSubstitutionKeyFor Nothing "a") Nothing
+        parameterBounds = Map.singleton (backendTypeSubstitutionKeyFromMaybeMetadataLight Nothing "a") Nothing
         expected = BTVarWithIdentity (Just identity) "a"
 
     matchBackendTypeParametersWithTypeBounds Map.empty [] parameterBounds Map.empty expected intTy
@@ -458,7 +509,7 @@ spec = describe "MLF.Backend.StructuralRecursiveData" $ do
 
   it "does not instantiate structural payload variables through name-only bounds" $ do
     let identity = typeBinderIdentityFromNode (NodeId 991335)
-        typeBounds = Map.singleton (backendTypeSubstitutionKeyFor Nothing "a") Nothing
+        typeBounds = Map.singleton (backendTypeSubstitutionKeyFromMaybeMetadataLight Nothing "a") Nothing
 
     structuralPayloadsMayInstantiate
       typeBounds
@@ -532,7 +583,7 @@ spec = describe "MLF.Backend.StructuralRecursiveData" $ do
 
   it "keeps unique name-only data parameter substitutions name-keyed" $ do
     let identity = typeBinderIdentityFromNode (NodeId 991341)
-        nameKey = backendTypeSubstitutionKeyFor Nothing "a"
+        nameKey = backendTypeSubstitutionKeyFromMaybeMetadataLight Nothing "a"
         substitution = Map.singleton nameKey intTy
         dataDecl = BackendDataWithIdentity Nothing "Box" [backendDataParameterRefFromIdentity identity "a"] []
 
@@ -542,7 +593,7 @@ spec = describe "MLF.Backend.StructuralRecursiveData" $ do
   it "does not promote duplicate data parameter names to arbitrary identities" $ do
     let leftIdentity = typeBinderIdentityFromNode (NodeId 991342)
         rightIdentity = typeBinderIdentityFromNode (NodeId 991343)
-        nameKey = backendTypeSubstitutionKeyFor Nothing "a"
+        nameKey = backendTypeSubstitutionKeyFromMaybeMetadataLight Nothing "a"
         substitution = Map.singleton nameKey intTy
         dataDecl =
           BackendDataWithIdentity
@@ -557,7 +608,7 @@ spec = describe "MLF.Backend.StructuralRecursiveData" $ do
   it "does not promote across distinct same-named result placeholders" $ do
     let dataIdentity = typeBinderIdentityFromNode (NodeId 991344)
         resultIdentity = typeBinderIdentityFromNode (NodeId 991345)
-        nameKey = backendTypeSubstitutionKeyFor Nothing "a"
+        nameKey = backendTypeSubstitutionKeyFromMaybeMetadataLight Nothing "a"
         substitution = Map.singleton nameKey intTy
         dataDecl =
           BackendDataWithIdentity
@@ -702,7 +753,7 @@ isLeft =
 
 subst :: [(String, BackendType)] -> Map.Map BackendTypeSubstitutionKey BackendType
 subst =
-  Map.fromList . map (\(name, ty) -> (backendTypeSubstitutionKeyFor Nothing name, ty))
+  Map.fromList . map (\(name, ty) -> (backendTypeSubstitutionKeyFromMaybeMetadataLight Nothing name, ty))
 
 legacyDataParameterRef :: String -> BackendDataParameterRef
 legacyDataParameterRef name =

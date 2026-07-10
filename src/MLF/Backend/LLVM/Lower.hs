@@ -133,6 +133,7 @@ module MLF.Backend.LLVM.Lower
     inferTypeArguments,
     lowerBackendProgram,
     lowerBackendProgramNative,
+    refineExplicitTypeArgumentsForTest,
     renderBackendLLVMError,
   )
 where
@@ -155,30 +156,29 @@ import Numeric (showHex)
 import MLF.Backend.CallableShape
   ( BackendCallableBindingKind (..),
     BackendCallableHead (..),
+    BackendCallableReferenceMode (..),
     BackendCallableRef,
     backendCallableRef,
-    backendCallableRefMatches,
+    backendCallableRefMatchesWith,
     backendCallableRefName,
-    backendCallableHead,
+    backendCallableHeadWith,
   )
 import MLF.Backend.IR hiding
   ( BackendCallableBindingKind (..),
     BackendCallableHead (..),
-    backendCallableHead,
   )
-import MLF.Backend.IR.Types (closureEntryRefMatches)
 import MLF.Backend.LLVM.Lower.Emit
 import MLF.Backend.LLVM.Lower.Types
 import MLF.Backend.LLVM.Syntax
 import qualified MLF.Backend.StructuralRecursiveData as Structural
 import MLF.Constraint.Types.Graph (BaseTy (..))
-import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), SymbolOwnerIdentity (..), sameSymbolIdentity, symbolDefiningModule, symbolDefiningName, symbolIdentityFromParts, symbolIdentityStableName, symbolRefMatches, symbolUniqueIdentity)
+import MLF.Frontend.Symbol (SymbolIdentity, SymbolReferenceMode (..), symbolIdentityStableName, symbolRefMatchesWith, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit (..))
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
-import MLF.Types.Identity (constructorRefSymbol, deferredRefIdentity, envRefIdentity, IdDetails (..), IdentityGenerator, LocalRef, localRefIdentity, primitiveRefSymbol, idDetailsAliasMapWith, idDetailsSymbolIdentity, StructuralTypeBinderRole (..), TypeBinderIdentity, UniqueIdentity (..), freshIdentity, freshLocalRef, identityGeneratorAfter, initialIdentityGenerator, localIdentityStableUnique, typeBinderIdentityAliasMap, typeBinderIdentityAliasNames, typeBinderIdentityFromUnique, typeBinderIdentityStableName, typeBinderIdentityStructural)
+import MLF.Types.Identity (constructorRefSymbol, deferredRefIdentity, envRefIdentity, IdDetails (..), IdentityGenerator, LocalRef, localRefIdentity, primitiveRefSymbol, idDetailsSymbolIdentity, StructuralTypeBinderRole (..), TypeBinderIdentity, UniqueIdentity (..), freshIdentity, freshLocalRef, identityGeneratorAfter, initialIdentityGenerator, localIdentityStableUnique, typeBinderIdentityFromUnique, typeBinderIdentityStableName, typeBinderIdentityStructural)
 import MLF.Util.Names (freshNameLike)
 
-lowerBackendProgram :: BackendProgram -> Either BackendLLVMError LLVMModule
+lowerBackendProgram :: ProductionBackendProgram -> Either BackendLLVMError LLVMModule
 lowerBackendProgram program = do
   lowered <- lowerBackendProgramCore program
   let base = lpBase lowered
@@ -285,36 +285,34 @@ lowerBackendProgram program = do
         llvmModuleFunctions = lpFunctions lowered ++ if needsIO then nativeIOFunctions base else []
       }
 
-lowerBackendProgramNative :: BackendProgram -> Either BackendLLVMError LLVMModule
+lowerBackendProgramNative :: ProductionBackendProgram -> Either BackendLLVMError LLVMModule
 lowerBackendProgramNative program = do
   lowered <- lowerBackendProgramCore program
   lowerNativeProgram lowered
 
-lowerBackendProgramCore :: BackendProgram -> Either BackendLLVMError LoweredProgram
-lowerBackendProgramCore program0 = do
-  first BackendLLVMValidationFailed (validateRawBackendBinderUniqueness program0)
-  first BackendLLVMValidationFailed (validateBackendIdentityPayloadsBeforeAssignment program0)
-  let program = assignBackendIdentitiesInProgram program0
-  first BackendLLVMValidationFailed (validateBackendProgramProduction program)
+lowerBackendProgramCore :: ProductionBackendProgram -> Either BackendLLVMError LoweredProgram
+lowerBackendProgramCore productionProgram = do
+  let program = productionBackendProgramIR productionProgram
+  first BackendLLVMValidationFailed (validateRawBackendBinderUniqueness program)
   base <- buildProgramBase program
   mainBinding <- requireProgramMainBinding base program
   reachable <- reachableBindings base mainBinding
   (generatorAfterSpecializations, specializations) <- collectRequiredSpecializations (pbIdentityGenerator base) base reachable
   let (generatorAfterEvidenceWrappers, evidenceWrappers) = collectEvidenceWrappers generatorAfterSpecializations base reachable specializations
       (generatorAfterFunctionWrappers, functionWrappers) = collectFunctionWrappers generatorAfterEvidenceWrappers base reachable specializations
-      closureEntries0 = collectClosureEntries base reachable specializations evidenceWrappers functionWrappers
       referencedFunctions = collectReferencedFunctions base reachable specializations evidenceWrappers functionWrappers
       stringGlobals = assignStringGlobals (collectProgramStrings reachable specializations evidenceWrappers functionWrappers)
       env =
         ProgramEnv
           { peBase = base,
-            peSpecializations = Map.fromList [(specializationKey (spRequest spec), spec) | spec <- specializations],
-            peEvidenceWrappers = Map.fromList [(wrapperKey wrapper, wrapper) | wrapper <- evidenceWrappers],
-            peFunctionWrappers = Map.fromList [(wrapperKey wrapper, wrapper) | wrapper <- functionWrappers],
+            peSpecializations = Map.fromList [(specializationIdentityKey (spRequest spec), spec) | spec <- specializations],
+            peEvidenceWrappers = Map.fromList [(wrapperIdentityKey (wrapperExpectedType wrapper) (wrapperExpr wrapper), wrapper) | wrapper <- evidenceWrappers],
+            peFunctionWrappers = Map.fromList [(wrapperIdentityKey (wrapperExpectedType wrapper) (wrapperExpr wrapper), wrapper) | wrapper <- functionWrappers],
             peStringGlobals = stringGlobals
           }
-  uniqueClosureEntries <- requireUniqueClosureEntries closureEntries0
-  let (generatorAfterClosureEntries, closureEntries) = assignGeneratedClosureEntryIdentities generatorAfterFunctionWrappers uniqueClosureEntries
+      closureEntries0 = collectClosureEntries base reachable specializations evidenceWrappers functionWrappers
+      (generatorAfterClosureEntries, closureEntriesWithIdentities) = assignGeneratedClosureEntryIdentities generatorAfterFunctionWrappers closureEntries0
+  closureEntries <- requireUniqueClosureEntries closureEntriesWithIdentities
   (functions, _) <-
     lowerFunctionJobs
       generatorAfterClosureEntries
@@ -407,595 +405,6 @@ validateRawBackendBinderUniqueness program =
           | Set.member key seen = Left (mkError name)
           | otherwise = go (Set.insert key seen) rest
 
-type BackendTypeBinderEnv = Map String (Maybe TypeBinderIdentity)
-type BackendDataEnv = Map String (Maybe SymbolIdentity)
-type BackendConstructorEnv = Map String (Maybe SymbolIdentity)
-type BackendGlobalEnv = Map String (Maybe SymbolIdentity)
-type BackendTermEnv = Map String (Maybe IdDetails)
-
-insertBackendSymbolIdentity :: String -> SymbolIdentity -> Map String (Maybe SymbolIdentity) -> Map String (Maybe SymbolIdentity)
-insertBackendSymbolIdentity name identity env =
-  foldr insertOne env (backendSymbolIdentityEntries name identity)
-  where
-    insertOne (alias, next) =
-      Map.alter (merge next) alias
-
-    merge next Nothing =
-      Just (Just next)
-    merge next (Just (Just existing))
-      | sameSymbolIdentity existing next = Just (Just existing)
-      | otherwise = Just Nothing
-    merge _ (Just Nothing) =
-      Just Nothing
-
-backendSymbolIdentityEntries :: String -> SymbolIdentity -> [(String, SymbolIdentity)]
-backendSymbolIdentityEntries name identity =
-  [(alias, identity) | alias <- backendSymbolIdentityAliases name identity]
-
-backendSymbolIdentityAliases :: String -> SymbolIdentity -> [String]
-backendSymbolIdentityAliases name identity =
-  filter
-    (not . null)
-    ( nub
-        [ name,
-          symbolDefiningName identity,
-          symbolDefiningModule identity ++ "." ++ symbolDefiningName identity
-        ]
-    )
-
-insertUniqueBackendTypeBinderIdentity :: String -> TypeBinderIdentity -> BackendTypeBinderEnv -> BackendTypeBinderEnv
-insertUniqueBackendTypeBinderIdentity name identity env =
-  foldl (\env0 alias -> Map.alter insert alias env0) env (typeBinderIdentityAliasNames name identity)
-  where
-    insert Nothing =
-      Just (Just identity)
-    insert (Just (Just existing))
-      | existing == identity = Just (Just existing)
-      | otherwise = Just Nothing
-    insert (Just Nothing) =
-      Just Nothing
-
-shadowBackendTypeBinderIdentity :: String -> TypeBinderIdentity -> BackendTypeBinderEnv -> BackendTypeBinderEnv
-shadowBackendTypeBinderIdentity name identity env =
-  fmap Just (typeBinderIdentityAliasMap [(name, identity)]) `Map.union` env
-
-insertUniqueBackendTermIdentity :: String -> IdDetails -> BackendTermEnv -> BackendTermEnv
-insertUniqueBackendTermIdentity name identity env =
-  Map.foldrWithKey (\alias details env0 -> Map.alter (insert details) alias env0) env (idDetailsAliasMapWith [(name, identity)])
-  where
-    insert details Nothing =
-      Just (Just details)
-    insert details (Just (Just existing))
-      | existing == details = Just (Just existing)
-      | otherwise = Just Nothing
-    insert _ (Just Nothing) =
-      Just Nothing
-
-shadowBackendTermIdentity :: String -> IdDetails -> BackendTermEnv -> BackendTermEnv
-shadowBackendTermIdentity name identity env =
-  Map.foldrWithKey (\alias details env0 -> Map.insert alias (Just details) env0) env (idDetailsAliasMapWith [(name, identity)])
-
-unionUniqueBackendTermEnv :: BackendTermEnv -> BackendTermEnv -> BackendTermEnv
-unionUniqueBackendTermEnv =
-  Map.unionWith merge
-  where
-    merge (Just left) (Just right)
-      | left == right = Just left
-      | otherwise = Nothing
-    merge _ _ =
-      Nothing
-
-validateBackendIdentityPayloadsBeforeAssignment :: BackendProgram -> Either BackendValidationError ()
-validateBackendIdentityPayloadsBeforeAssignment program =
-  mapM_ validateModule (backendProgramModules program)
-  where
-    validateModule backendModule =
-      case backendModuleIdentity backendModule of
-        Just {} -> do
-          mapM_ requireDataIdentity (backendModuleData backendModule)
-          mapM_ requireBindingIdentity (backendModuleBindings backendModule)
-        Nothing ->
-          mapM_ validateData (backendModuleData backendModule)
-      where
-        moduleName0 =
-          backendModuleName backendModule
-
-        requireDataIdentity dataDecl =
-          case backendDataIdentity dataDecl of
-            Just {} -> validateData dataDecl
-            Nothing -> Left (BackendModuleDataIdentityMissing moduleName0 (backendDataName dataDecl))
-
-        requireBindingIdentity binding =
-          case backendBindingIdentity binding of
-            Just {} -> pure ()
-            Nothing -> Left (BackendModuleBindingIdentityMissing moduleName0 (backendBindingName binding))
-
-    validateData dataDecl =
-      case backendDataIdentity dataDecl of
-        Just {} -> do
-          mapM_ requireParameterIdentity (backendDataParameterRefs dataDecl)
-          mapM_ validateConstructor (backendDataConstructors dataDecl)
-        Nothing -> pure ()
-      where
-        dataName =
-          backendDataName dataDecl
-
-        requireParameterIdentity ref =
-          case backendDataParameterRefIdentity ref of
-            Just {} -> pure ()
-            Nothing -> Left (BackendDataParameterIdentityMissing dataName (backendDataParameterRefName ref))
-
-        validateConstructor constructor = do
-          case backendConstructorIdentity constructor of
-            Just {} -> pure ()
-            Nothing -> Left (BackendDataConstructorIdentityMissing dataName (backendConstructorName constructor))
-          mapM_ requireConstructorBinderIdentity (backendConstructorForalls constructor)
-          where
-            requireConstructorBinderIdentity binder =
-              case backendTypeBinderIdentity binder of
-                Just {} -> pure ()
-                Nothing -> Left (BackendConstructorTypeBinderIdentityMissing (backendConstructorName constructor) (backendTypeBinderName binder))
-
-assignBackendIdentitiesInProgram :: BackendProgram -> BackendProgram
-assignBackendIdentitiesInProgram program =
-  program
-    { backendProgramModulesWithIdentity = modules',
-      backendProgramMainIdentity = backendProgramMainIdentity program <|> (Map.lookup (backendProgramMain program) globalEnv >>= id)
-    }
-  where
-    generator0 =
-      identityGeneratorAfter (generatedIdentitiesInBackendProgram program)
-    (generator1, modulesWithModuleIdentities) =
-      assignModuleIdentities generator0 (backendProgramModulesWithIdentity program)
-    (generator2, modulesWithDataIdentities, dataEnv) =
-      assignGlobalDataIdentities generator1 modulesWithModuleIdentities
-    (generator3, modulesWithData) =
-      mapAccumL (assignModuleData dataEnv) generator2 modulesWithDataIdentities
-    (generator4, modulesWithBindingIdentities, globalEnv) =
-      assignGlobalBindingIdentities generator3 modulesWithData
-    (_, modules') =
-      mapAccumL (assignModuleBindingBodies dataEnv constructorEnv globalEnv) generator4 modulesWithBindingIdentities
-    constructorEnv =
-      backendConstructorEnv modulesWithData
-
-assignModuleIdentities :: IdentityGenerator -> [BackendModule] -> (IdentityGenerator, [BackendModule])
-assignModuleIdentities =
-  mapAccumL assignModuleIdentity
-  where
-    assignModuleIdentity generator backendModule =
-      let name = backendModuleName backendModule
-          (identity, generator') =
-            case backendModuleIdentity backendModule of
-              Just existing -> (existing, generator)
-              Nothing ->
-                let (unique, generatorNext) = freshIdentity generator
-                 in (generatedBackendModuleIdentity name unique, generatorNext)
-       in (generator', backendModule {backendModuleIdentity = Just identity})
-
-generatedBackendModuleIdentity :: String -> UniqueIdentity -> SymbolIdentity
-generatedBackendModuleIdentity name identity =
-  symbolIdentityFromParts identity SymbolModule name name Nothing
-
-assignGlobalDataIdentities :: IdentityGenerator -> [BackendModule] -> (IdentityGenerator, [BackendModule], BackendDataEnv)
-assignGlobalDataIdentities generator modules0 =
-  (generator', reverse modules', dataEnv)
-  where
-    (generator', modules', dataEnv) =
-      foldl assignModuleDataIdentities (generator, [], Map.empty) modules0
-
-    assignModuleDataIdentities (generator0, modulesAcc, env0) backendModule =
-      let moduleName = backendModuleName backendModule
-          (generator1, dataDecls', env1) =
-            foldl (assignDataIdentity moduleName) (generator0, [], env0) (backendModuleData backendModule)
-       in ( generator1,
-            backendModule {backendModuleDataWithIdentity = dataDecls'} : modulesAcc,
-            env1
-          )
-
-    assignDataIdentity moduleName (generator0, dataAcc, env0) dataDecl =
-      let name = backendDataName dataDecl
-          (identity, generator1) =
-            case backendDataIdentity dataDecl of
-              Just existing -> (existing, generator0)
-              Nothing ->
-                let (unique, generatorNext) = freshIdentity generator0
-                 in (generatedBackendDataIdentity moduleName name unique, generatorNext)
-          dataDecl' = dataDecl {backendDataIdentity = Just identity}
-       in (generator1, dataAcc ++ [dataDecl'], insertBackendSymbolIdentity name identity env0)
-
-backendConstructorEnv :: [BackendModule] -> BackendConstructorEnv
-backendConstructorEnv modules0 =
-  foldl insertConstructor Map.empty constructors
-  where
-    constructors =
-      [ constructor
-      | backendModule <- modules0,
-        dataDecl <- backendModuleData backendModule,
-        constructor <- backendDataConstructors dataDecl
-      ]
-
-    insertConstructor env constructor =
-      case backendConstructorIdentity constructor of
-        Just identity -> insertBackendSymbolIdentity (backendConstructorName constructor) identity env
-        Nothing -> env
-
-assignModuleData :: BackendDataEnv -> IdentityGenerator -> BackendModule -> (IdentityGenerator, BackendModule)
-assignModuleData dataEnv generator backendModule =
-  ( generator1,
-    backendModule
-      { backendModuleDataWithIdentity = dataDecls',
-        backendModuleBindingsWithIdentity = backendModuleBindings backendModule
-      }
-  )
-  where
-    (generator1, dataDecls') =
-      mapAccumL (assignDataDeclaration dataEnv (backendModuleName backendModule)) generator (backendModuleData backendModule)
-
-assignGlobalBindingIdentities :: IdentityGenerator -> [BackendModule] -> (IdentityGenerator, [BackendModule], BackendGlobalEnv)
-assignGlobalBindingIdentities generator modules0 =
-  (generator', reverse modules', globalEnv)
-  where
-    (generator', modules', globalEnv) =
-      foldl assignModuleBindings (generator, [], Map.empty) modules0
-
-    assignModuleBindings (generator0, modulesAcc, env0) backendModule =
-      let moduleName = backendModuleName backendModule
-          (generator1, bindings', env1) =
-            foldl (assignBindingIdentity moduleName) (generator0, [], env0) (backendModuleBindings backendModule)
-       in ( generator1,
-            backendModule {backendModuleBindingsWithIdentity = bindings'} : modulesAcc,
-            env1
-          )
-
-    assignBindingIdentity moduleName (generator0, bindingsAcc, env0) binding =
-      let name = backendBindingName binding
-          (identity, generator1) =
-            case backendBindingIdentity binding of
-              Just existing -> (existing, generator0)
-              Nothing ->
-                let (unique, generatorNext) = freshIdentity generator0
-                 in (generatedBackendBindingIdentity moduleName name unique, generatorNext)
-          binding' = binding {backendBindingIdentity = Just identity}
-       in (generator1, bindingsAcc ++ [binding'], insertBackendSymbolIdentity name identity env0)
-
-generatedBackendBindingIdentity :: String -> String -> UniqueIdentity -> SymbolIdentity
-generatedBackendBindingIdentity moduleName name identity =
-  symbolIdentityFromParts identity SymbolValue moduleName name Nothing
-
-generatedBackendDataIdentity :: String -> String -> UniqueIdentity -> SymbolIdentity
-generatedBackendDataIdentity moduleName name identity =
-  symbolIdentityFromParts identity SymbolType moduleName name Nothing
-
-assignModuleBindingBodies :: BackendDataEnv -> BackendConstructorEnv -> BackendGlobalEnv -> IdentityGenerator -> BackendModule -> (IdentityGenerator, BackendModule)
-assignModuleBindingBodies dataEnv constructorEnv globalEnv generator backendModule =
-  ( generator',
-    backendModule {backendModuleBindingsWithIdentity = bindings'}
-  )
-  where
-    (generator', bindings') =
-      mapAccumL (assignBindingIdentities dataEnv constructorEnv globalEnv) generator (backendModuleBindings backendModule)
-
-assignDataDeclaration :: BackendDataEnv -> String -> IdentityGenerator -> BackendData -> (IdentityGenerator, BackendData)
-assignDataDeclaration dataEnv moduleName generator dataDecl =
-  ( generator2,
-    dataDecl
-      { backendDataParameterRefsWithIdentity = parameterRefs',
-        backendDataConstructorsWithIdentity = constructors'
-      }
-  )
-  where
-    (generator1, parameterRefs', env) =
-      foldl assignParameter (generator, [], Map.empty) (backendDataParameterRefs dataDecl)
-    (generator2, constructors') =
-      mapAccumL (assignConstructorTypeBinderIdentities dataEnv moduleName (backendDataIdentity dataDecl) env) generator1 (backendDataConstructors dataDecl)
-
-    assignParameter (generator0, refs, env0) ref =
-      let name = backendDataParameterRefName ref
-          oldIdentity = backendDataParameterRefIdentity ref
-          (identity, generatorNext) = freshTypeBinderIdentity oldIdentity generator0
-          ref' = backendDataParameterRefFromIdentity identity name
-       in (generatorNext, refs ++ [ref'], insertUniqueBackendTypeBinderIdentity name identity env0)
-
-assignConstructorTypeBinderIdentities :: BackendDataEnv -> String -> Maybe SymbolIdentity -> BackendTypeBinderEnv -> IdentityGenerator -> BackendConstructor -> (IdentityGenerator, BackendConstructor)
-assignConstructorTypeBinderIdentities dataEnv moduleName mbDataIdentity env generator constructor =
-  ( generator3,
-    constructor
-      { backendConstructorIdentity = Just constructorIdentity,
-        backendConstructorForallsWithIdentity = foralls',
-        backendConstructorFieldsWithIdentity = fields',
-        backendConstructorResultWithIdentity = result'
-      }
-  )
-  where
-    (constructorIdentity, generator0) =
-      freshConstructorIdentity (backendConstructorIdentity constructor) moduleName mbDataIdentity (backendConstructorName constructor) generator
-    (generator1, foralls', env') =
-      assignTypeBinders dataEnv env generator0 (backendConstructorForalls constructor)
-    (generator2, fields') =
-      mapAccumL (assignTypeBinderIdentitiesInType dataEnv env') generator1 (backendConstructorFields constructor)
-    (generator3, result') =
-      assignTypeBinderIdentitiesInType dataEnv env' generator2 (backendConstructorResult constructor)
-
-assignBindingIdentities :: BackendDataEnv -> BackendConstructorEnv -> BackendGlobalEnv -> IdentityGenerator -> BackendBinding -> (IdentityGenerator, BackendBinding)
-assignBindingIdentities dataEnv constructorEnv globalEnv generator binding =
-  ( generator2,
-    binding
-      { backendBindingTypeWithMetadata = bindingTy',
-        backendBindingExprWithMetadata = expr'
-      }
-  )
-  where
-    (generator1, bindingTy') =
-      assignTypeBinderIdentitiesInType dataEnv Map.empty generator (backendBindingType binding)
-    (generator2, expr') =
-      assignIdentitiesInExpr dataEnv constructorEnv globalEnv Map.empty Map.empty generator1 (backendBindingExpr binding)
-
-assignTypeBinders :: BackendDataEnv -> BackendTypeBinderEnv -> IdentityGenerator -> [BackendTypeBinder] -> (IdentityGenerator, [BackendTypeBinder], BackendTypeBinderEnv)
-assignTypeBinders dataEnv env generator =
-  foldl assignOne (generator, [], env)
-  where
-    assignOne (generator0, binders, env0) binder =
-      let name = backendTypeBinderName binder
-          (generator1, bound') =
-            assignMaybeTypeBinderIdentitiesInType dataEnv env0 generator0 (backendTypeBinderBound binder)
-          (identity, generator2) =
-            freshTypeBinderIdentity (backendTypeBinderIdentity binder) generator1
-          binder' =
-            BackendTypeBinderWithIdentity
-              (Just identity)
-              name
-              bound'
-       in (generator2, binders ++ [binder'], insertUniqueBackendTypeBinderIdentity name identity env0)
-
-assignMaybeTypeBinderIdentitiesInType :: BackendDataEnv -> BackendTypeBinderEnv -> IdentityGenerator -> Maybe BackendType -> (IdentityGenerator, Maybe BackendType)
-assignMaybeTypeBinderIdentitiesInType dataEnv env generator =
-  \case
-    Nothing -> (generator, Nothing)
-    Just ty ->
-      let (generator', ty') = assignTypeBinderIdentitiesInType dataEnv env generator ty
-       in (generator', Just ty')
-
-assignTypeBinderIdentitiesInType :: BackendDataEnv -> BackendTypeBinderEnv -> IdentityGenerator -> BackendType -> (IdentityGenerator, BackendType)
-assignTypeBinderIdentitiesInType dataEnv env generator ty =
-  case ty of
-    BTVarWithIdentity identity name ->
-      (generator, BTVarWithIdentity (typeRefIdentity env identity name) name)
-    BTArrow dom cod ->
-      let (generator1, dom') = assignTypeBinderIdentitiesInType dataEnv env generator dom
-          (generator2, cod') = assignTypeBinderIdentitiesInType dataEnv env generator1 cod
-       in (generator2, BTArrow dom' cod')
-    BTBaseWithIdentity identity base@(BaseTy name) ->
-      (generator, BTBaseWithIdentity (dataHeadIdentity dataEnv identity name) base)
-    BTConWithIdentity identity base@(BaseTy name) args ->
-      let (generator', args') = assignNonEmptyTypes dataEnv env generator args
-       in (generator', BTConWithIdentity (dataHeadIdentity dataEnv identity name) base args')
-    BTVarAppWithIdentity identity name args ->
-      let (generator', args') = assignNonEmptyTypes dataEnv env generator args
-       in (generator', BTVarAppWithIdentity (typeRefIdentity env identity name) name args')
-    BTForallWithIdentity identity name mbBound body ->
-      let (generator1, mbBound') = assignMaybeTypeBinderIdentitiesInType dataEnv env generator mbBound
-          (binderIdentity, generator2) = freshTypeBinderIdentity identity generator1
-          env' = shadowBackendTypeBinderIdentity name binderIdentity env
-          (generator3, body') = assignTypeBinderIdentitiesInType dataEnv env' generator2 body
-       in (generator3, BTForallWithIdentity (Just binderIdentity) name mbBound' body')
-    BTMuWithIdentity identity name body ->
-      let (binderIdentity, generator1) = freshTypeBinderIdentity identity generator
-          env' = shadowBackendTypeBinderIdentity name binderIdentity env
-          (generator2, body') = assignTypeBinderIdentitiesInType dataEnv env' generator1 body
-       in (generator2, BTMuWithIdentity (Just binderIdentity) name body')
-    BTBottom ->
-      (generator, BTBottom)
-
-assignNonEmptyTypes :: BackendDataEnv -> BackendTypeBinderEnv -> IdentityGenerator -> NonEmpty BackendType -> (IdentityGenerator, NonEmpty BackendType)
-assignNonEmptyTypes dataEnv env generator (ty :| tys) =
-  let (generator1, ty') = assignTypeBinderIdentitiesInType dataEnv env generator ty
-      (generator2, tys') = mapAccumL (assignTypeBinderIdentitiesInType dataEnv env) generator1 tys
-   in (generator2, ty' :| tys')
-
-assignIdentitiesInExpr :: BackendDataEnv -> BackendConstructorEnv -> BackendGlobalEnv -> BackendTypeBinderEnv -> BackendTermEnv -> IdentityGenerator -> BackendExpr -> (IdentityGenerator, BackendExpr)
-assignIdentitiesInExpr dataEnv constructorEnv globalEnv typeEnv termEnv generator expr =
-  case expr of
-    BackendVarWithIdentity resultTy mbIdentity name ->
-      let (generator', resultTy') = assignTypeBinderIdentitiesInType dataEnv typeEnv generator resultTy
-       in (generator', BackendVarWithIdentity resultTy' (termRefIdentity globalEnv termEnv mbIdentity name) name)
-    BackendLit resultTy lit ->
-      let (generator', resultTy') = assignTypeBinderIdentitiesInType dataEnv typeEnv generator resultTy
-       in (generator', BackendLit resultTy' lit)
-    BackendLamWithIdentity resultTy mbIdentity name paramTy body ->
-      let (generator1, resultTy') = assignTypeBinderIdentitiesInType dataEnv typeEnv generator resultTy
-          (generator2, paramTy') = assignTypeBinderIdentitiesInType dataEnv typeEnv generator1 paramTy
-          (identity, generator3) = freshTermIdentity mbIdentity name generator2
-          (generator4, body') = assignIdentitiesInExpr dataEnv constructorEnv globalEnv typeEnv (shadowBackendTermIdentity name identity termEnv) generator3 body
-       in (generator4, BackendLamWithIdentity resultTy' (Just identity) name paramTy' body')
-    BackendApp resultTy fun arg ->
-      let (generator1, resultTy') = assignTypeBinderIdentitiesInType dataEnv typeEnv generator resultTy
-          (generator2, fun') = assignIdentitiesInExpr dataEnv constructorEnv globalEnv typeEnv termEnv generator1 fun
-          (generator3, arg') = assignIdentitiesInExpr dataEnv constructorEnv globalEnv typeEnv termEnv generator2 arg
-       in (generator3, BackendApp resultTy' fun' arg')
-    BackendLetWithIdentity resultTy mbIdentity name bindingTy rhs body ->
-      let (generator1, resultTy') = assignTypeBinderIdentitiesInType dataEnv typeEnv generator resultTy
-          (generator2, bindingTy') = assignTypeBinderIdentitiesInType dataEnv typeEnv generator1 bindingTy
-          (generator3, rhs') = assignIdentitiesInExpr dataEnv constructorEnv globalEnv typeEnv termEnv generator2 rhs
-          (identity, generator4) = freshTermIdentity mbIdentity name generator3
-          (generator5, body') = assignIdentitiesInExpr dataEnv constructorEnv globalEnv typeEnv (shadowBackendTermIdentity name identity termEnv) generator4 body
-       in (generator5, BackendLetWithIdentity resultTy' (Just identity) name bindingTy' rhs' body')
-    BackendTyAbsWithIdentity resultTy identity name mbBound body ->
-      let (generator1, resultTy') = assignTypeBinderIdentitiesInType dataEnv typeEnv generator resultTy
-          (generator2, mbBound') = assignMaybeTypeBinderIdentitiesInType dataEnv typeEnv generator1 mbBound
-          (binderIdentity, generator3) =
-            case resultTy' of
-              BTForallWithIdentity (Just resultIdentity) _ _ _ ->
-                (resultIdentity, generator2)
-              _ -> freshTypeBinderIdentity identity generator2
-          typeEnv' = shadowBackendTypeBinderIdentity name binderIdentity typeEnv
-          (generator4, body') = assignIdentitiesInExpr dataEnv constructorEnv globalEnv typeEnv' termEnv generator3 body
-       in (generator4, BackendTyAbsWithIdentity resultTy' (Just binderIdentity) name mbBound' body')
-    BackendTyApp resultTy fun argTy ->
-      let (generator1, resultTy') = assignTypeBinderIdentitiesInType dataEnv typeEnv generator resultTy
-          (generator2, fun') = assignIdentitiesInExpr dataEnv constructorEnv globalEnv typeEnv termEnv generator1 fun
-          (generator3, argTy') = assignTypeBinderIdentitiesInType dataEnv typeEnv generator2 argTy
-       in (generator3, BackendTyApp resultTy' fun' argTy')
-    BackendRoll resultTy payload ->
-      let (generator1, resultTy') = assignTypeBinderIdentitiesInType dataEnv typeEnv generator resultTy
-          (generator2, payload') = assignIdentitiesInExpr dataEnv constructorEnv globalEnv typeEnv termEnv generator1 payload
-       in (generator2, BackendRoll resultTy' payload')
-    BackendUnroll resultTy payload ->
-      let (generator1, resultTy') = assignTypeBinderIdentitiesInType dataEnv typeEnv generator resultTy
-          (generator2, payload') = assignIdentitiesInExpr dataEnv constructorEnv globalEnv typeEnv termEnv generator1 payload
-       in (generator2, BackendUnroll resultTy' payload')
-    BackendClosureWithParamIdentities resultTy entryIdentity entryName captures params body ->
-      let (generator1, resultTy') = assignTypeBinderIdentitiesInType dataEnv typeEnv generator resultTy
-          (entryIdentity', generator2) = freshClosureEntryIdentity entryIdentity generator1
-          (generator3, captures', captureEnv) = assignClosureCaptureIdentities dataEnv constructorEnv globalEnv typeEnv termEnv generator2 captures
-          (generator4, params', paramEnv) = assignClosureParamIdentities dataEnv typeEnv generator3 params
-          bodyEnv = unionUniqueBackendTermEnv paramEnv captureEnv
-          (generator5, body') = assignIdentitiesInExpr dataEnv constructorEnv globalEnv typeEnv bodyEnv generator4 body
-       in (generator5, BackendClosureWithParamIdentities resultTy' (Just entryIdentity') entryName captures' params' body')
-    BackendClosureCall resultTy fun args ->
-      let (generator1, resultTy') = assignTypeBinderIdentitiesInType dataEnv typeEnv generator resultTy
-          (generator2, fun') = assignIdentitiesInExpr dataEnv constructorEnv globalEnv typeEnv termEnv generator1 fun
-          (generator3, args') = mapAccumL (assignIdentitiesInExpr dataEnv constructorEnv globalEnv typeEnv termEnv) generator2 args
-       in (generator3, BackendClosureCall resultTy' fun' args')
-    BackendConstructWithIdentity resultTy mbIdentity name args ->
-      let (generator1, resultTy') = assignTypeBinderIdentitiesInType dataEnv typeEnv generator resultTy
-          (generator2, args') = mapAccumL (assignIdentitiesInExpr dataEnv constructorEnv globalEnv typeEnv termEnv) generator1 args
-       in (generator2, BackendConstructWithIdentity resultTy' (constructorRefIdentity constructorEnv mbIdentity name) name args')
-    BackendCase resultTy scrutinee alternatives ->
-      let (generator1, resultTy') = assignTypeBinderIdentitiesInType dataEnv typeEnv generator resultTy
-          (generator2, scrutinee') = assignIdentitiesInExpr dataEnv constructorEnv globalEnv typeEnv termEnv generator1 scrutinee
-          (generator3, alternatives') = assignNonEmptyAlternatives dataEnv constructorEnv globalEnv typeEnv termEnv generator2 alternatives
-       in (generator3, BackendCase resultTy' scrutinee' alternatives')
-
-assignClosureCaptureIdentities :: BackendDataEnv -> BackendConstructorEnv -> BackendGlobalEnv -> BackendTypeBinderEnv -> BackendTermEnv -> IdentityGenerator -> [BackendClosureCapture] -> (IdentityGenerator, [BackendClosureCapture], BackendTermEnv)
-assignClosureCaptureIdentities dataEnv constructorEnv globalEnv typeEnv termEnv generator captures =
-  foldl assignOne (generator, [], Map.empty) captures
-  where
-    assignOne (generator0, captures0, captureEnv) capture =
-      let (generator1, captureTy') =
-            assignTypeBinderIdentitiesInType dataEnv typeEnv generator0 (backendClosureCaptureType capture)
-          (generator2, captureExpr') =
-            assignIdentitiesInExpr dataEnv constructorEnv globalEnv typeEnv termEnv generator1 (backendClosureCaptureExpr capture)
-          name = backendClosureCaptureName capture
-          (identity, generator3) =
-            freshTermIdentity (backendClosureCaptureIdentity capture) name generator2
-          capture' =
-            capture
-              { backendClosureCaptureIdentity = Just identity,
-                backendClosureCaptureType = captureTy',
-                backendClosureCaptureExpr = captureExpr'
-              }
-       in (generator3, captures0 ++ [capture'], insertUniqueBackendTermIdentity name identity captureEnv)
-
-assignClosureParamIdentities :: BackendDataEnv -> BackendTypeBinderEnv -> IdentityGenerator -> [BackendClosureParam] -> (IdentityGenerator, [BackendClosureParam], BackendTermEnv)
-assignClosureParamIdentities dataEnv typeEnv generator params =
-  foldl assignOne (generator, [], Map.empty) params
-  where
-    assignOne (generator0, params0, paramEnv) param =
-      let (generator1, paramTy') =
-            assignTypeBinderIdentitiesInType dataEnv typeEnv generator0 (backendClosureParamType param)
-          name = backendClosureParamName param
-          (identity, generator2) =
-            freshTermIdentity (backendClosureParamIdentity param) name generator1
-          param' =
-            param
-              { backendClosureParamIdentity = Just identity,
-                backendClosureParamType = paramTy'
-              }
-       in (generator2, params0 ++ [param'], insertUniqueBackendTermIdentity name identity paramEnv)
-
-assignNonEmptyAlternatives :: BackendDataEnv -> BackendConstructorEnv -> BackendGlobalEnv -> BackendTypeBinderEnv -> BackendTermEnv -> IdentityGenerator -> NonEmpty BackendAlternative -> (IdentityGenerator, NonEmpty BackendAlternative)
-assignNonEmptyAlternatives dataEnv constructorEnv globalEnv typeEnv termEnv generator (alternative :| alternatives) =
-  let (generator1, alternative') = assignAlternativeIdentities dataEnv constructorEnv globalEnv typeEnv termEnv generator alternative
-      (generator2, alternatives') = mapAccumL (assignAlternativeIdentities dataEnv constructorEnv globalEnv typeEnv termEnv) generator1 alternatives
-   in (generator2, alternative' :| alternatives')
-
-assignAlternativeIdentities :: BackendDataEnv -> BackendConstructorEnv -> BackendGlobalEnv -> BackendTypeBinderEnv -> BackendTermEnv -> IdentityGenerator -> BackendAlternative -> (IdentityGenerator, BackendAlternative)
-assignAlternativeIdentities dataEnv constructorEnv globalEnv typeEnv termEnv generator alternative =
-  ( generator',
-    alternative {backendAltPattern = pattern', backendAltBody = body'}
-  )
-  where
-    (generator1, pattern', patternEnv) =
-      assignPatternIdentities constructorEnv generator (backendAltPattern alternative)
-    (generator', body') =
-      assignIdentitiesInExpr dataEnv constructorEnv globalEnv typeEnv (Map.union patternEnv termEnv) generator1 (backendAltBody alternative)
-
-assignPatternIdentities :: BackendConstructorEnv -> IdentityGenerator -> BackendPattern -> (IdentityGenerator, BackendPattern, BackendTermEnv)
-assignPatternIdentities constructorEnv generator =
-  \case
-    BackendDefaultPattern ->
-      (generator, BackendDefaultPattern, Map.empty)
-    BackendConstructorPatternWithBinderIdentities identity name binders ->
-      let (generator', binders', env) =
-            foldl assignBinder (generator, [], Map.empty) binders
-       in (generator', BackendConstructorPatternWithBinderIdentities (constructorRefIdentity constructorEnv identity name) name binders', env)
-  where
-    assignBinder (generator0, binders, env) binder =
-      let name = backendPatternBinderName binder
-          (identity, generator1) =
-            freshTermIdentity (backendPatternBinderIdentity binder) name generator0
-          binder' = binder {backendPatternBinderIdentity = Just identity}
-       in (generator1, binders ++ [binder'], insertUniqueBackendTermIdentity name identity env)
-
-freshTypeBinderIdentity :: Maybe TypeBinderIdentity -> IdentityGenerator -> (TypeBinderIdentity, IdentityGenerator)
-freshTypeBinderIdentity identity generator =
-  case identity of
-    Just resolvedIdentity -> (resolvedIdentity, generator)
-    Nothing ->
-      let (unique, generator') = freshIdentity generator
-       in (typeBinderIdentityFromUnique unique, generator')
-
-freshTermIdentity :: Maybe IdDetails -> String -> IdentityGenerator -> (IdDetails, IdentityGenerator)
-freshTermIdentity (Just identity) _ generator =
-  (identity, generator)
-freshTermIdentity Nothing name generator =
-  let (localRef, generator') = freshLocalRef name generator
-   in (LocalId localRef, generator')
-
-freshClosureEntryIdentity :: Maybe UniqueIdentity -> IdentityGenerator -> (UniqueIdentity, IdentityGenerator)
-freshClosureEntryIdentity (Just identity) generator =
-  (identity, generator)
-freshClosureEntryIdentity Nothing generator =
-  freshIdentity generator
-
-freshConstructorIdentity :: Maybe SymbolIdentity -> String -> Maybe SymbolIdentity -> String -> IdentityGenerator -> (SymbolIdentity, IdentityGenerator)
-freshConstructorIdentity (Just identity) _ _ _ generator =
-  (identity, generator)
-freshConstructorIdentity Nothing moduleName mbDataIdentity name generator =
-  let (unique, generator') = freshIdentity generator
-   in (generatedBackendConstructorIdentity moduleName mbDataIdentity name unique, generator')
-
-generatedBackendConstructorIdentity :: String -> Maybe SymbolIdentity -> String -> UniqueIdentity -> SymbolIdentity
-generatedBackendConstructorIdentity moduleName mbDataIdentity name identity =
-  symbolIdentityFromParts identity SymbolConstructor moduleName name (SymbolOwnerType <$> mbDataIdentity)
-
-typeRefIdentity :: BackendTypeBinderEnv -> Maybe TypeBinderIdentity -> String -> Maybe TypeBinderIdentity
-typeRefIdentity env identity name =
-  case identity of
-    Just {} -> identity
-    Nothing -> Map.lookup name env >>= id
-
-dataHeadIdentity :: BackendDataEnv -> Maybe SymbolIdentity -> String -> Maybe SymbolIdentity
-dataHeadIdentity env identity name =
-  case identity of
-    Just {} -> identity
-    Nothing -> Map.lookup name env >>= id
-
-termRefIdentity :: BackendGlobalEnv -> BackendTermEnv -> Maybe IdDetails -> String -> Maybe IdDetails
-termRefIdentity globalEnv env identity name =
-  case identity of
-    Just {} -> identity
-    Nothing ->
-      case Map.lookup name env of
-        Just (Just localIdentity) -> Just localIdentity
-        _ -> TopLevelId <$> (Map.lookup name globalEnv >>= id)
-
-constructorRefIdentity :: BackendConstructorEnv -> Maybe SymbolIdentity -> String -> Maybe SymbolIdentity
-constructorRefIdentity env identity name =
-  case identity of
-    Just {} -> identity
-    Nothing -> Map.lookup name env >>= id
-
 lowerNativeProgram :: LoweredProgram -> Either BackendLLVMError LLVMModule
 lowerNativeProgram lowered = do
   let base = lpBase lowered
@@ -1013,7 +422,7 @@ lowerNativeProgram lowered = do
     _ -> pure ()
   renderSpecs <- collectNativeRenderSpecs base (ffReturnType mainForm)
   rejectNativeSymbolConflicts base renderSpecs
-  let renderMap = Map.fromList [(backendTypeKey (nrsType spec), nrsFunctionName spec) | spec <- renderSpecs]
+  let renderMap = Map.fromList [(backendTypeIdentityKey (nrsType spec), nrsFunctionName spec) | spec <- renderSpecs]
   renderers <- traverse (lowerNativeRenderer env renderMap) renderSpecs
   entrypoint <- lowerNativeEntrypoint env mainBinding renderMap
   validateLLVMModuleSymbols
@@ -1254,19 +663,9 @@ lookupDataRuntimeByHead base mbIdentity =
     Nothing -> Nothing
 
 lookupDataRuntimeForStructuralMu :: ProgramBase -> Maybe TypeBinderIdentity -> String -> Maybe DataRuntime
-lookupDataRuntimeForStructuralMu base mbIdentity name =
-  case structuralIdentityRuntime of
-    Just runtime -> Just runtime
-    Nothing
-      | Just {} <- structuralSelfIdentityUnique mbIdentity -> Nothing
-      | otherwise -> structuralNameRuntime
+lookupDataRuntimeForStructuralMu base mbIdentity _name =
+  structuralSelfIdentityUnique mbIdentity >>= findDataRuntimeByUnique
   where
-    structuralIdentityRuntime =
-      structuralSelfIdentityUnique mbIdentity >>= findDataRuntimeByUnique
-
-    structuralNameRuntime =
-      Structural.structuralRecursiveDataName name >>= lookupDataRuntimeByName base
-
     structuralSelfIdentityUnique identity = do
       selfIdentity <- identity
       (unique, StructuralSelfBinder) <- typeBinderIdentityStructural selfIdentity
@@ -1282,10 +681,6 @@ lookupDataRuntimeForStructuralMu base mbIdentity name =
       of
         runtime : _ -> Just runtime
         [] -> Nothing
-
-lookupDataRuntimeByName :: ProgramBase -> String -> Maybe DataRuntime
-lookupDataRuntimeByName _ _ =
-  Nothing
 
 nativeConstructorGlobalName :: NativeRenderSpec -> ConstructorRuntime -> String
 nativeConstructorGlobalName spec constructorRuntime =
@@ -1347,7 +742,7 @@ collectNativeRenderSpecs base rootTy =
             NativeUnsupported detail ->
               Left (BackendLLVMUnsupportedExpression "native result rendering" detail)
       where
-        key = backendTypeKey ty
+        key = backendTypeIdentityKey ty
 
     collectConstructorFields resultTy (specs, seen) constructorRuntime = do
       fieldTys <-
@@ -1433,7 +828,7 @@ backendCharTy :: BackendType
 backendCharTy =
   literalBackendType (LChar '\0')
 
-lowerNativeRenderer :: ProgramEnv -> Map String String -> NativeRenderSpec -> Either BackendLLVMError LLVMFunction
+lowerNativeRenderer :: ProgramEnv -> Map BackendTypeIdentityKey String -> NativeRenderSpec -> Either BackendLLVMError LLVMFunction
 lowerNativeRenderer env renderMap spec =
   case nativeRenderableKind (peBase env) (nrsType spec) of
     NativeScalar ->
@@ -1676,7 +1071,7 @@ lowerNativeFunctionRenderer spec =
       _ <- emitPrintStringGlobal nativeStrFunctionName
       finishNativeSuccess
 
-lowerNativeDataRenderer :: ProgramEnv -> Map String String -> NativeRenderSpec -> DataRuntime -> Either BackendLLVMError LLVMFunction
+lowerNativeDataRenderer :: ProgramEnv -> Map BackendTypeIdentityKey String -> NativeRenderSpec -> DataRuntime -> Either BackendLLVMError LLVMFunction
 lowerNativeDataRenderer env renderMap spec dataRuntime0 =
   lowerNativeFunction
     (nrsFunctionName spec)
@@ -1697,7 +1092,7 @@ lowerNativeDataRenderer env renderMap spec dataRuntime0 =
 
 lowerNativeConstructorRenderer ::
   ProgramEnv ->
-  Map String String ->
+  Map BackendTypeIdentityKey String ->
   NativeRenderSpec ->
   LLVMOperand ->
   LLVMOperand ->
@@ -1751,7 +1146,7 @@ nativeFieldParenthesize base ty =
     NativeData {} -> True
     _ -> False
 
-lowerNativeEntrypoint :: ProgramEnv -> BindingInfo -> Map String String -> Either BackendLLVMError LLVMFunction
+lowerNativeEntrypoint :: ProgramEnv -> BindingInfo -> Map BackendTypeIdentityKey String -> Either BackendLLVMError LLVMFunction
 lowerNativeEntrypoint env mainBinding renderMap =
   case nativeRenderableKind (peBase env) (ffReturnType mainForm) of
     NativeIO ->
@@ -5398,9 +4793,9 @@ emitPutchar :: LLVMOperand -> LowerM LLVMOperand
 emitPutchar charOperand =
   emitAssign "putchar" (LLVMInt 32) (LLVMCall nativePutcharName [(LLVMInt 32, charOperand)])
 
-callNativeRenderer :: Map String String -> BackendType -> LLVMType -> LLVMOperand -> Bool -> LowerM ()
+callNativeRenderer :: Map BackendTypeIdentityKey String -> BackendType -> LLVMType -> LLVMOperand -> Bool -> LowerM ()
 callNativeRenderer renderMap ty llvmTy value parenthesize =
-  case Map.lookup (backendTypeKey ty) renderMap of
+  case Map.lookup (backendTypeIdentityKey ty) renderMap of
     Just renderName -> do
       _ <-
         emitAssign
@@ -5542,7 +4937,7 @@ functionFormCallsGlobal binding =
 
 globalReferenceMatchesBinding :: BindingInfo -> Maybe IdDetails -> String -> Bool
 globalReferenceMatchesBinding binding mbIdentity calleeName =
-  symbolRefMatches (biIdentity binding) (biName binding) (backendVarSymbolIdentity mbIdentity) calleeName
+  symbolRefMatchesWith SymbolIdentityOnly (biIdentity binding) (biName binding) (backendVarSymbolIdentity mbIdentity) calleeName
 
 patternBinderRefs :: BackendPattern -> [(Maybe IdDetails, String)]
 patternBinderRefs = \case
@@ -5968,15 +5363,11 @@ buildProgramBase program = do
         | backendModule <- modules0,
           dataDecl <- backendModuleData backendModule
         ]
-      (generatorAfterBindings, bindingInfos) =
-        mapAccumL
-          bindingInfo
-          (identityGeneratorAfter (generatedIdentitiesInBackendProgram program))
-          bindings
-      (generatorAfterData, dataRuntimes) =
-        mapAccumL dataRuntime generatorAfterBindings dataDecls
-      constructors =
-        concatMap drConstructors dataRuntimes
+  (generatorAfterBindings, bindingInfosRev) <-
+    foldM collectBinding (identityGeneratorAfter (generatedIdentitiesInBackendProgram program), []) bindings
+  dataRuntimes <- mapM dataRuntime dataDecls
+  let bindingInfos = reverse bindingInfosRev
+      constructors = concatMap drConstructors dataRuntimes
   pure
         ProgramBase
           { pbBindingsByIdentity =
@@ -6000,32 +5391,35 @@ buildProgramBase program = do
                 | dataRuntime0 <- dataRuntimes,
                   Just identity <- [backendDataIdentity (drData dataRuntime0)]
                 ],
-            pbIdentityGenerator = generatorAfterData
+            pbIdentityGenerator = generatorAfterBindings
           }
+  where
+    collectBinding (generator, infos) binding = do
+      (generator', info) <- bindingInfo generator binding
+      pure (generator', info : infos)
 
-bindingInfo :: IdentityGenerator -> BackendBinding -> (IdentityGenerator, BindingInfo)
+bindingInfo :: IdentityGenerator -> BackendBinding -> Either BackendLLVMError (IdentityGenerator, BindingInfo)
 bindingInfo generator binding =
-  ( generator'',
-    BindingInfo
-      { biRef = bindingRef,
-        biIdentity = backendBindingIdentity binding,
-        biName = backendBindingName binding,
-        biForm =
-          markFunctionFormEvidenceParams
-            (backendBindingEvidenceParamIndices binding)
-            form,
-        biExportedAsMain = backendBindingExportedAsMain binding
-      }
-  )
+  case backendBindingIdentity binding of
+    Nothing ->
+      Left (BackendLLVMValidationFailed (BackendBindingIdentityMissing (backendBindingName binding)))
+    Just identity ->
+      Right
+        ( generator',
+          BindingInfo
+            { biRef = backendBindingRefFromIdentity identity,
+              biIdentity = Just identity,
+              biName = backendBindingName binding,
+              biForm =
+                markFunctionFormEvidenceParams
+                  (backendBindingEvidenceParamIndices binding)
+                  form,
+              biExportedAsMain = backendBindingExportedAsMain binding
+            }
+        )
   where
     (form, generator') =
       functionFormFromExpectedWithGenerator generator (backendBindingType binding) (backendBindingExpr binding)
-    (bindingRef, generator'') =
-      case backendBindingIdentity binding of
-        Just identity -> (backendBindingRefFromIdentity identity, generator')
-        Nothing ->
-          let (identity, generatorNext) = freshIdentity generator'
-           in (backendBindingRefFromGenerated identity (backendBindingName binding), generatorNext)
 
 programBindingRuntimeNames :: ProgramBase -> Set String
 programBindingRuntimeNames base =
@@ -6037,7 +5431,7 @@ runtimeBindingNameAvailable base name =
 
 bindingSelfReference :: BindingInfo -> Maybe IdDetails -> String -> Bool
 bindingSelfReference binding mbIdentity name =
-  symbolRefMatches (biIdentity binding) (biName binding) (backendVarSymbolIdentity mbIdentity) name
+  symbolRefMatchesWith SymbolIdentityOnly (biIdentity binding) (biName binding) (backendVarSymbolIdentity mbIdentity) name
 
 lookupNonLocalBindingInfo :: ProgramBase -> Maybe IdDetails -> Maybe BindingInfo
 lookupNonLocalBindingInfo base mbIdentity =
@@ -6083,27 +5477,24 @@ resolvedNonLocalReference mbIdentity =
     Just _ -> True
     Nothing -> False
 
-constructorRuntimes :: IdentityGenerator -> BackendData -> (IdentityGenerator, [ConstructorRuntime])
-constructorRuntimes generator dataDecl =
-  mapAccumL constructorRuntime generator (zip [0 ..] (backendDataConstructors dataDecl))
+constructorRuntimes :: BackendData -> Either BackendLLVMError [ConstructorRuntime]
+constructorRuntimes dataDecl =
+  mapM constructorRuntime (zip [0 ..] (backendDataConstructors dataDecl))
   where
-    constructorRuntime generator0 (tag, constructor) =
-      let (key, generator1) = constructorValueKey generator0 constructor
-       in ( generator1,
-            ConstructorRuntime
-              { crConstructor = constructor,
-                crData = dataDecl,
-                crTag = tag,
-                crValueKey = key
-              }
-          )
+    constructorRuntime (tag, constructor) = do
+      key <- constructorValueKey constructor
+      pure
+        ConstructorRuntime
+          { crConstructor = constructor,
+            crData = dataDecl,
+            crTag = tag,
+            crValueKey = key
+          }
 
-    constructorValueKey generator0 constructor =
+    constructorValueKey constructor =
       case backendConstructorIdentity constructor of
-        Just identity -> (constructorValueKeyFromIdentity identity, generator0)
-        Nothing ->
-          let (identity, generator1) = freshIdentity generator0
-           in (constructorValueKeyFromGenerated identity (backendConstructorName constructor), generator1)
+        Just identity -> Right (constructorValueKeyFromIdentity identity)
+        Nothing -> Left (BackendLLVMValidationFailed (BackendConstructorIdentityMissing (backendConstructorName constructor)))
 
 lookupConstructorRuntime :: ProgramBase -> Maybe SymbolIdentity -> String -> Maybe ConstructorRuntime
 lookupConstructorRuntime base mbIdentity _name =
@@ -6111,16 +5502,14 @@ lookupConstructorRuntime base mbIdentity _name =
     Just identity -> lookupProgramConstructorByIdentityExact base (Just identity)
     Nothing -> Nothing
 
-dataRuntime :: IdentityGenerator -> BackendData -> (IdentityGenerator, DataRuntime)
-dataRuntime generator dataDecl =
-  ( generator',
+dataRuntime :: BackendData -> Either BackendLLVMError DataRuntime
+dataRuntime dataDecl = do
+  constructors <- constructorRuntimes dataDecl
+  pure
     DataRuntime
       { drData = dataDecl,
         drConstructors = constructors
       }
-  )
-  where
-    (generator', constructors) = constructorRuntimes generator dataDecl
 
 functionFormFromExpr :: BackendExpr -> FunctionForm
 functionFormFromExpr expr =
@@ -6207,7 +5596,7 @@ freshenFunctionFormMissingTypeBinderIdentities generator form =
     assignBinder (generator0, bindersAcc, substitutionAcc) binder =
       let name = backendTypeBinderName binder
           oldIdentity = backendTypeBinderIdentity binder
-          oldKey = backendTypeSubstitutionKeyFor oldIdentity name
+          oldKey = backendTypeSubstitutionKeyFromMaybeMetadataLight oldIdentity name
           bound' = fmap (substituteBackendTypesByKey substitutionAcc) (backendTypeBinderBound binder)
           (newIdentity, generator1) =
             case oldIdentity of
@@ -6301,7 +5690,7 @@ closureEntryParamTriples entry =
 
 functionTypeBinderKey :: BackendTypeBinder -> BackendTypeSubstitutionKey
 functionTypeBinderKey binder =
-  backendTypeSubstitutionKeyFor (backendTypeBinderIdentity binder) (backendTypeBinderName binder)
+  backendTypeSubstitutionKeyFromMaybeMetadataLight (backendTypeBinderIdentity binder) (backendTypeBinderName binder)
 
 functionTypeBinderVar :: BackendTypeBinder -> BackendType
 functionTypeBinderVar binder =
@@ -6323,7 +5712,7 @@ backendTyAbsIdentity =
 
 deleteTypeBinderSubstitution :: Maybe TypeBinderIdentity -> String -> Map BackendTypeSubstitutionKey BackendType -> Map BackendTypeSubstitutionKey BackendType
 deleteTypeBinderSubstitution identity name =
-  Map.delete (backendTypeSubstitutionKeyFor identity name)
+  Map.delete (backendTypeSubstitutionKeyFromMaybeMetadataLight identity name)
 
 substituteFunctionFormTypes :: Map BackendTypeSubstitutionKey BackendType -> FunctionForm -> FunctionForm
 substituteFunctionFormTypes substitution0 form =
@@ -6657,70 +6046,6 @@ renameBackendVars renaming0 =
         BackendConstructorPatternWithBinderIdentities _ _ binders ->
           withoutBinders [(backendPatternBinderIdentity binder, backendPatternBinderName binder) | binder <- binders] renaming
 
-annotateBackendVarsByName :: Map String IdDetails -> BackendExpr -> BackendExpr
-annotateBackendVarsByName identities0 =
-  go identities0
-  where
-    go identities =
-      \case
-        BackendVarWithIdentity resultTy Nothing name ->
-          BackendVarWithIdentity resultTy (Map.lookup name identities) name
-        BackendVarWithIdentity resultTy mbIdentity name ->
-          BackendVarWithIdentity resultTy mbIdentity name
-        BackendLit resultTy lit ->
-          BackendLit resultTy lit
-        BackendLamWithIdentity resultTy mbIdentity name paramTy body ->
-          BackendLamWithIdentity resultTy mbIdentity name paramTy (go (withoutBinder (mbIdentity, name) identities) body)
-        BackendApp resultTy fun arg ->
-          BackendApp resultTy (go identities fun) (go identities arg)
-        BackendLetWithIdentity resultTy mbIdentity name bindingTy rhs body ->
-          BackendLetWithIdentity resultTy mbIdentity name bindingTy (go identities rhs) (go (withoutBinder (mbIdentity, name) identities) body)
-        BackendTyAbsWithIdentity resultTy identity name mbBound body ->
-          BackendTyAbsWithIdentity resultTy identity name mbBound (go identities body)
-        BackendTyApp resultTy fun ty ->
-          BackendTyApp resultTy (go identities fun) ty
-        BackendConstructWithIdentity resultTy mbIdentity name args ->
-          BackendConstructWithIdentity resultTy mbIdentity name (map (go identities) args)
-        BackendCase resultTy scrutinee alternatives ->
-          BackendCase resultTy (go identities scrutinee) (fmap (annotateAlternative identities) alternatives)
-        BackendRoll resultTy payload ->
-          BackendRoll resultTy (go identities payload)
-        BackendUnroll resultTy payload ->
-          BackendUnroll resultTy (go identities payload)
-        BackendClosureWithParamIdentities resultTy entryIdentity entryName captures params body ->
-          BackendClosureWithParamIdentities
-            resultTy
-            entryIdentity
-            entryName
-            (map (annotateCapture identities) captures)
-            params
-            (go (withoutBinders (closureBinderRefs captures params) identities) body)
-        BackendClosureCall resultTy fun args ->
-          BackendClosureCall resultTy (go identities fun) (map (go identities) args)
-
-    annotateAlternative identities (BackendAlternative pattern0 body) =
-      BackendAlternative pattern0 (go (withoutPatternBinders pattern0 identities) body)
-
-    annotateCapture identities capture =
-      capture {backendClosureCaptureExpr = go identities (backendClosureCaptureExpr capture)}
-
-    withoutBinder (_mbIdentity, name) identities =
-      Map.delete name identities
-
-    withoutBinders refs identities =
-      foldr withoutBinder identities refs
-
-    closureBinderRefs captures params =
-      [(backendClosureCaptureIdentity capture, backendClosureCaptureName capture) | capture <- captures]
-        ++ [(backendClosureParamIdentity param, backendClosureParamName param) | param <- params]
-
-    withoutPatternBinders pattern0 identities =
-      case pattern0 of
-        BackendDefaultPattern ->
-          identities
-        BackendConstructorPatternWithBinderIdentities _ _ binders ->
-          withoutBinders [(backendPatternBinderIdentity binder, backendPatternBinderName binder) | binder <- binders] identities
-
 freeBackendExprVars :: BackendExpr -> Set String
 freeBackendExprVars =
   go Set.empty
@@ -6863,18 +6188,14 @@ requireProgramMainBinding base program =
 
 requireSpecRequestBinding :: ProgramBase -> SpecRequest -> Either BackendLLVMError BindingInfo
 requireSpecRequestBinding base request =
-  case srBindingIdentity request of
-    Just identity ->
-      case lookupProgramBindingByIdentityExact base (Just identity) of
-        Just binding -> Right binding
-        Nothing -> Left (BackendLLVMUnknownFunction (srBindingName request))
-    Nothing ->
-      Left (BackendLLVMUnknownFunction (srBindingName request))
+  case lookupBindingRef base (srBindingRef request) of
+    Just binding -> Right binding
+    Nothing -> Left (BackendLLVMUnknownFunction (srBindingName request))
 
 specRequestForBinding :: BindingInfo -> [BackendType] -> SpecRequest
 specRequestForBinding binding typeArgs =
   SpecRequest
-    { srBindingIdentity = biIdentity binding,
+    { srBindingRef = bindingInfoRef binding,
       srBindingName = biName binding,
       srTypeArgs = typeArgs
     }
@@ -6889,7 +6210,15 @@ collectRequiredSpecializations generator0 base reachable =
         (filter (null . ffTypeBinders . biForm) reachable)
 
     go generator seen [] =
-      Right (generator, map snd (sortOn fst (Map.toList seen)))
+      Right
+        ( generator,
+          map snd
+            ( sortOn fst
+                [ (specializationEmissionOrderKey (spRequest spec), spec)
+                | spec <- Map.elems seen
+                ]
+            )
+        )
     go generator seen (request : rest)
       | Map.member key seen = go generator seen rest
       | otherwise = do
@@ -6907,7 +6236,7 @@ collectRequiredSpecializations generator0 base reachable =
               nestedRequests = collectSpecializationRequestsInForm base Map.empty form
           go generator' (Map.insert key spec seen) (rest ++ nestedRequests)
       where
-        key = specializationKey request
+        key = specializationIdentityKey request
 
 collectEvidenceWrappers :: IdentityGenerator -> ProgramBase -> [BindingInfo] -> [Specialization] -> (IdentityGenerator, [Wrapper])
 collectEvidenceWrappers generator base reachable specializations =
@@ -6919,7 +6248,14 @@ collectEvidenceWrappers generator base reachable specializations =
     monomorphicReachable =
       filter (null . ffTypeBinders . biForm) reachable
     uniqueRequests =
-      map snd (Map.toAscList (Map.fromList [(wrapperKey' expected expr, (expected, expr)) | (expected, expr) <- requests]))
+      map snd
+        ( sortOn fst
+            [ (wrapperEmissionOrderKey expected expr, request)
+            | request@(expected, expr) <- Map.elems uniqueRequestsByIdentity
+            ]
+        )
+    uniqueRequestsByIdentity =
+      Map.fromList [(wrapperIdentityKey expected expr, (expected, expr)) | (expected, expr) <- requests]
     assignName generator0 (index0, (expected, expr)) =
       let functionName = "__mlfp_evidence_wrapper$" ++ show index0
           (bindingIdentity, generator1) = freshIdentity generator0
@@ -6928,7 +6264,6 @@ collectEvidenceWrappers generator base reachable specializations =
             Wrapper
               { wrapperKind = EvidenceWrapperKind,
                 wrapperBindingRef = backendBindingRefFromGenerated bindingIdentity functionName,
-                wrapperKey = wrapperKey' expected expr,
                 wrapperFunctionName = functionName,
                 wrapperExpectedType = expected,
                 wrapperExpr = expr,
@@ -6946,7 +6281,14 @@ collectFunctionWrappers generator base reachable specializations =
     monomorphicReachable =
       filter (null . ffTypeBinders . biForm) reachable
     uniqueRequests =
-      map snd (Map.toAscList (Map.fromList [(wrapperKey' expected expr, (expected, expr)) | (expected, expr) <- requests]))
+      map snd
+        ( sortOn fst
+            [ (wrapperEmissionOrderKey expected expr, request)
+            | request@(expected, expr) <- Map.elems uniqueRequestsByIdentity
+            ]
+        )
+    uniqueRequestsByIdentity =
+      Map.fromList [(wrapperIdentityKey expected expr, (expected, expr)) | (expected, expr) <- requests]
     assignName generator0 (index0, (expected, expr)) =
       let functionName = "__mlfp_function_wrapper$" ++ show index0
           (bindingIdentity, generator1) = freshIdentity generator0
@@ -6955,7 +6297,6 @@ collectFunctionWrappers generator base reachable specializations =
             Wrapper
               { wrapperKind = FunctionWrapperKind,
                 wrapperBindingRef = backendBindingRefFromGenerated bindingIdentity functionName,
-                wrapperKey = wrapperKey' expected expr,
                 wrapperFunctionName = functionName,
                 wrapperExpectedType = expected,
                 wrapperExpr = expr,
@@ -6989,7 +6330,7 @@ collectReferencedFunctions base reachable specializations evidenceWrappers funct
     }
   where
     specializationsByKey =
-      Map.fromList [(specializationKey (spRequest spec), spec) | spec <- specializations]
+      Map.fromList [(specializationIdentityKey (spRequest spec), spec) | spec <- specializations]
     refs =
       concatMap Set.toList $
         map (collectReferencedFunctionsInForm base specializationsByKey Map.empty Set.empty . biForm) reachable
@@ -7204,11 +6545,11 @@ exprEnvLocalValueKinds exprEnv =
     { lvkByIdentity = Map.map lvValueKind (eeValuesByIdentity exprEnv)
     }
 
-collectReferencedFunctionsInForm :: ProgramBase -> Map String Specialization -> Map BackendTypeSubstitutionKey BackendType -> Set TermBoundKey -> FunctionForm -> Set ReferencedFunction
+collectReferencedFunctionsInForm :: ProgramBase -> Map SpecializationKey Specialization -> Map BackendTypeSubstitutionKey BackendType -> Set TermBoundKey -> FunctionForm -> Set ReferencedFunction
 collectReferencedFunctionsInForm base specializationsByKey substitution bound form =
   collectReferencedFunctionsInFormWithLocals base specializationsByKey substitution emptyLocalFunctionForms bound form
 
-collectReferencedFunctionsInFormWithLocals :: ProgramBase -> Map String Specialization -> Map BackendTypeSubstitutionKey BackendType -> LocalFunctionForms -> Set TermBoundKey -> FunctionForm -> Set ReferencedFunction
+collectReferencedFunctionsInFormWithLocals :: ProgramBase -> Map SpecializationKey Specialization -> Map BackendTypeSubstitutionKey BackendType -> LocalFunctionForms -> Set TermBoundKey -> FunctionForm -> Set ReferencedFunction
 collectReferencedFunctionsInFormWithLocals base specializationsByKey substitution localForms bound form =
   let paramRefs = [(mbIdentity, name) | (mbIdentity, name, _) <- functionFormParamTriples form]
    in collectReferencedFunctionsInExpr
@@ -7219,7 +6560,7 @@ collectReferencedFunctionsInFormWithLocals base specializationsByKey substitutio
         (Set.union (termBoundKeyRefs (map fst paramRefs)) bound)
         (ffBody form)
 
-collectReferencedFunctionsInExpr :: ProgramBase -> Map String Specialization -> Map BackendTypeSubstitutionKey BackendType -> LocalFunctionForms -> Set TermBoundKey -> BackendExpr -> Set ReferencedFunction
+collectReferencedFunctionsInExpr :: ProgramBase -> Map SpecializationKey Specialization -> Map BackendTypeSubstitutionKey BackendType -> LocalFunctionForms -> Set TermBoundKey -> BackendExpr -> Set ReferencedFunction
 collectReferencedFunctionsInExpr base specializationsByKey substitution localForms bound expr =
   referencedHere `Set.union` childReferences
   where
@@ -7274,7 +6615,7 @@ collectReferencedFunctionsInExpr base specializationsByKey substitution localFor
               | null (ffTypeBinders (biForm binding)) -> Just (ReferencedBinding (bindingInfoRef binding))
               | otherwise ->
                   ReferencedGeneratedBinding . spBindingRef
-                    <$> Map.lookup (specializationKey (specRequestForBinding binding resolvedTypeArgs)) specializationsByKey
+                    <$> Map.lookup (specializationIdentityKey (specRequestForBinding binding resolvedTypeArgs)) specializationsByKey
             Left _ -> Nothing
       | otherwise = Nothing
       where
@@ -7528,8 +6869,8 @@ collectEvidenceWrappersInExpr base substitution localForms bound expr =
 
 
 
-wrapperKey' :: BackendType -> BackendExpr -> String
-wrapperKey' expected expr =
+wrapperEmissionOrderKey :: BackendType -> BackendExpr -> String
+wrapperEmissionOrderKey expected expr =
   backendTypeKey expected ++ "\0" ++ canonicalBackendExprKey expr
 
 canonicalBackendExprKey :: BackendExpr -> String
@@ -8119,13 +7460,13 @@ firstDuplicate =
       | Set.member value seen = Just value
       | otherwise = go (Set.insert value seen) rest
 
-specializationKey :: SpecRequest -> String
-specializationKey request =
+specializationEmissionOrderKey :: SpecRequest -> String
+specializationEmissionOrderKey request =
   specRequestBindingKey request ++ "\0" ++ intercalate "\0" (map backendTypeKey (srTypeArgs request))
 
 specRequestBindingKey :: SpecRequest -> String
 specRequestBindingKey request =
-  maybe (srBindingName request) symbolIdentityStableName (srBindingIdentity request)
+  maybe (srBindingName request) symbolIdentityStableName (backendBindingRefIdentity (srBindingRef request))
 
 specializedFunctionName :: SpecRequest -> String
 specializedFunctionName request =
@@ -8254,54 +7595,77 @@ requireUniqueClosureEntries entries =
           Left (BackendLLVMInternalError ("duplicate closure entry after specialization: " ++ ceEntryName entry))
 
     sameClosureEntryRef left right =
-      closureEntryRefMatches (ceEntryIdentity left) (ceEntryName left) (ceEntryIdentity right) (ceEntryName right)
+      closureEntryRefMatchesWith ClosureEntryIdentityOnly (ceEntryIdentity left) (ceEntryName left) (ceEntryIdentity right) (ceEntryName right)
+
+type ClosureEntryGeneratedIdentities = (UniqueIdentity, [Maybe IdDetails], [Maybe IdDetails])
 
 assignGeneratedClosureEntryIdentities :: IdentityGenerator -> [ClosureEntry] -> (IdentityGenerator, [ClosureEntry])
-assignGeneratedClosureEntryIdentities =
-  mapAccumL assignEntry
+assignGeneratedClosureEntryIdentities generator0 entries =
+  let ((generator', _generatedByKey), entries') = mapAccumL assignEntry (generator0, Map.empty) entries
+   in (generator', entries')
   where
-    assignEntry generator entry
-      | returnedPartialClosureEntry entry || ceEntryIdentity entry == Nothing =
-          let captureInputs = [(ccsName capture, ccsIdentity capture) | capture <- ceCaptures entry]
-              paramInputs = zip (map fst (ceParams entry)) (ceParamIdentities entry ++ repeat Nothing)
-              (generator', captureIdentities) = completeLocalIdentities generator captureInputs
-              (generator'', paramIdentities) = completeLocalIdentities generator' paramInputs
-              (entryIdentity, generator''') =
-                case ceEntryIdentity entry of
-                  Just identity -> (identity, generator'')
-                  Nothing -> freshIdentity generator''
-              captures' = zipWith setCaptureIdentity captureIdentities (ceCaptures entry)
-           in ( generator''',
-                entry
-                  { ceEntryIdentity = Just entryIdentity,
-                    ceCaptures = captures',
-                    ceParamIdentities = paramIdentities,
-                    ceBody = annotateSyntheticClosureEntryRefs captures' (ceParams entry) paramIdentities (ceBody entry)
-                  }
-              )
+    assignEntry ::
+      (IdentityGenerator, Map ClosureEntryIdentityKey ClosureEntryGeneratedIdentities) ->
+      ClosureEntry ->
+      ((IdentityGenerator, Map ClosureEntryIdentityKey ClosureEntryGeneratedIdentities), ClosureEntry)
+    assignEntry (generator, generatedByKey) entry
+      | needsGeneratedClosureEntryIdentities entry =
+          case closureEntryIdentityKey entry of
+            Just key ->
+              case Map.lookup key generatedByKey of
+                Just generated ->
+                  ((generator, generatedByKey), applyGeneratedClosureEntryIdentities generated entry)
+                Nothing ->
+                  let (generator', generated) = freshGeneratedClosureEntryIdentities generator entry
+                   in ( (generator', Map.insert key generated generatedByKey),
+                        applyGeneratedClosureEntryIdentities generated entry
+                      )
+            Nothing ->
+              let (generator', generated) = freshGeneratedClosureEntryIdentities generator entry
+               in ( (generator', generatedByKey),
+                    applyGeneratedClosureEntryIdentities generated entry
+                  )
       | otherwise =
-          (generator, entry)
+          ((generator, generatedByKey), entry)
 
-    returnedPartialClosureEntry entry =
-      "__mlfp_returned_partial$" `isPrefixOf` ceEntryName entry
+    needsGeneratedClosureEntryIdentities :: ClosureEntry -> Bool
+    needsGeneratedClosureEntryIdentities entry =
+      ceOrigin entry == GeneratedReturnedPartialOrigin
+        || ceEntryIdentity entry == Nothing
+        || any ((== Nothing) . ccsIdentity) (ceCaptures entry)
+        || any (== Nothing) (take (length (ceParams entry)) (ceParamIdentities entry ++ repeat Nothing))
 
+    freshGeneratedClosureEntryIdentities :: IdentityGenerator -> ClosureEntry -> (IdentityGenerator, ClosureEntryGeneratedIdentities)
+    freshGeneratedClosureEntryIdentities generator entry =
+      let captureInputs = [(ccsName capture, ccsIdentity capture) | capture <- ceCaptures entry]
+          paramInputs = zip (map fst (ceParams entry)) (ceParamIdentities entry ++ repeat Nothing)
+          (generator', captureIdentities) = completeLocalIdentities generator captureInputs
+          (generator'', paramIdentities) = completeLocalIdentities generator' paramInputs
+          (entryIdentity, generator''') =
+            case ceEntryIdentity entry of
+              Just identity -> (identity, generator'')
+              Nothing -> freshIdentity generator''
+       in (generator''', (entryIdentity, captureIdentities, paramIdentities))
+
+    applyGeneratedClosureEntryIdentities :: ClosureEntryGeneratedIdentities -> ClosureEntry -> ClosureEntry
+    applyGeneratedClosureEntryIdentities (entryIdentity, captureIdentities, paramIdentities) entry =
+      let entry' =
+            entry
+              { ceEntryIdentity = Just entryIdentity,
+                ceCaptures = zipWith setCaptureIdentity captureIdentities (ceCaptures entry),
+                ceParamIdentities = paramIdentities
+              }
+       in case ceOrigin entry of
+            GeneratedReturnedPartialOrigin ->
+              entry' {ceBody = returnedPartialClosureEntryBody entry'}
+            BackendClosureOrigin ->
+              entry'
+
+    setCaptureIdentity :: Maybe IdDetails -> ClosureCaptureSlot -> ClosureCaptureSlot
     setCaptureIdentity identity capture =
       capture {ccsIdentity = identity}
 
-    annotateSyntheticClosureEntryRefs captures params paramIdentities body =
-      annotateBackendVarsByName identitiesByName body
-      where
-        identitiesByName =
-          Map.fromList
-            ( [ (ccsName capture, identity)
-              | capture <- captures,
-                Just identity <- [ccsIdentity capture]
-              ]
-                ++ [ (name, identity)
-                   | ((name, _), Just identity) <- zip params paramIdentities
-                   ]
-            )
-
+    completeLocalIdentities :: IdentityGenerator -> [(String, Maybe IdDetails)] -> (IdentityGenerator, [Maybe IdDetails])
     completeLocalIdentities generator [] =
       (generator, [])
     completeLocalIdentities generator ((name, mbIdentity) : rest) =
@@ -8313,6 +7677,44 @@ assignGeneratedClosureEntryIdentities =
                  in (LocalId localRef, nextGenerator)
           (generator'', identities) = completeLocalIdentities generator' rest
        in (generator'', Just identity : identities)
+
+returnedPartialClosureEntryBody :: ClosureEntry -> BackendExpr
+returnedPartialClosureEntryBody entry =
+  case ceCaptures entry of
+    calleeCapture : suppliedCaptures ->
+      case ccsValueKind calleeCapture of
+        LowerClosureRecord ->
+          BackendClosureCall finalReturnTy calleeExpr callArgs
+        LowerFunctionPointer ->
+          applyReturnedPartialArgs calleeExpr (ccsType calleeCapture) callArgs
+        LowerRuntimeValue ->
+          ceBody entry
+      where
+        calleeExpr =
+          BackendVarWithIdentity (ccsType calleeCapture) (ccsIdentity calleeCapture) (ccsName calleeCapture)
+        suppliedArgs =
+          [ BackendVarWithIdentity (ccsType capture) (ccsIdentity capture) (ccsName capture)
+          | capture <- suppliedCaptures
+          ]
+        remainingArgs =
+          [ BackendVarWithIdentity paramTy mbIdentity name
+          | ((name, paramTy), mbIdentity) <- zip (ceParams entry) (ceParamIdentities entry ++ repeat Nothing)
+          ]
+        callArgs =
+          suppliedArgs ++ remainingArgs
+        (_, finalReturnTy) =
+          collectArrowsType (ceFunctionType entry)
+    [] ->
+      ceBody entry
+  where
+    applyReturnedPartialArgs fun _ [] =
+      fun
+    applyReturnedPartialArgs fun funTy (arg : rest) =
+      case funTy of
+        BTArrow _ resultTy ->
+          applyReturnedPartialArgs (BackendApp resultTy fun arg) resultTy rest
+        _ ->
+          fun
 
 qualifiedSpecializationForm :: Specialization -> FunctionForm
 qualifiedSpecializationForm specialization =
@@ -8484,7 +7886,8 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
   where
     closureEntriesFor resultTy entryIdentity entryName captures params body =
       ClosureEntry
-        { ceFunctionType = resultTy,
+        { ceOrigin = BackendClosureOrigin,
+          ceFunctionType = resultTy,
           ceEntryIdentity = entryIdentity,
           ceEntryName = entryName,
           ceCaptures = captureSlots,
@@ -8577,7 +7980,8 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
 
     returnedPartialEntry calleeKind calleeTy suppliedParamTys remainingParamTys finalReturnTy suppliedKinds resultTy =
       ClosureEntry
-        { ceFunctionType = resultTy,
+        { ceOrigin = GeneratedReturnedPartialOrigin,
+          ceFunctionType = resultTy,
           ceEntryIdentity = Nothing,
           ceEntryName = returnedPartialClosureEntryName calleeKind calleeTy (length suppliedParamTys) suppliedKinds resultTy,
           ceCaptures =
@@ -8956,7 +8360,7 @@ applyWrapperArgs expr ty (arg : rest) =
 
 backendExprUsesClosureCallPath :: BackendExpr -> Bool
 backendExprUsesClosureCallPath expr =
-  case backendCallableHead (\_ _ -> BackendCallableBindingUnknown) expr of
+  case backendCallableHeadWith BackendCallableIdentityOnly (\_ _ -> BackendCallableBindingUnknown) expr of
     BackendClosureCallableHead _ -> True
     _ -> False
 
@@ -9375,7 +8779,7 @@ pushCallIntoExpression context resultTy fun typeArgs args =
 applyCallToExpr :: String -> BackendType -> BackendExpr -> [BackendType] -> [BackendExpr] -> Either BackendLLVMError BackendExpr
 applyCallToExpr context expectedTy expr typeArgs args = do
   (typedExpr, typedExprTy) <- applyTypeApplicationsToExprWithType context expr typeArgs
-  case backendCallableHead (\_ _ -> BackendCallableBindingUnknown) typedExpr of
+  case backendCallableHeadWith BackendCallableIdentityOnly (\_ _ -> BackendCallableBindingUnknown) typedExpr of
     BackendClosureCallableHead ref ->
       Left (BackendLLVMValidationFailed (BackendClosureCalledWithBackendApp (backendCallableRefName ref)))
     _ -> do
@@ -9815,7 +9219,7 @@ lowerCall env exprEnv context expr =
         BackendTyAbs _ _ _ _ ->
           lowerDirectFunctionCall env exprEnv context (backendExprType expr) (functionFormFromExpr headExpr) typeArgs args
         _ ->
-          case backendCallableHead (\_ _ -> BackendCallableBindingUnknown) headExpr of
+          case backendCallableHeadWith BackendCallableIdentityOnly (\_ _ -> BackendCallableBindingUnknown) headExpr of
             BackendClosureCallableHead ref ->
               liftEither (BackendLLVMValidationFailed (BackendClosureCalledWithBackendApp (backendCallableRefName ref)))
             _ ->
@@ -9901,7 +9305,7 @@ lowerExprForIndirectArgument env exprEnv context evidenceParams (index0, (_, par
   | isEvidenceArgument evidenceParams index0 paramTy =
       lowerEvidenceArgument env exprEnv context paramTy arg
   | isFunctionLikeBackendType paramTy =
-      case Map.lookup (wrapperKey' paramTy arg) (peEvidenceWrappers env) of
+      case Map.lookup (wrapperIdentityKey paramTy arg) (peEvidenceWrappers env) of
         Just wrapper ->
           pure (functionPointerValueForBindingRef paramTy (wrapperBindingRef wrapper) (LLVMGlobalRef LLVMPtr (wrapperFunctionName wrapper)))
         Nothing ->
@@ -9923,7 +9327,7 @@ lowerStoredFunctionArgument env exprEnv context expectedTy arg =
     (BackendVarWithIdentity _ mbIdentity name, typeArgs) ->
       lowerStoredFunctionReference env exprEnv context expectedTy mbIdentity name typeArgs
     _ ->
-      case Map.lookup (wrapperKey' expectedTy arg) (peFunctionWrappers env) of
+      case Map.lookup (wrapperIdentityKey expectedTy arg) (peFunctionWrappers env) of
         Just wrapper ->
           pure (functionPointerValueForBindingRef expectedTy (wrapperBindingRef wrapper) (LLVMGlobalRef LLVMPtr (wrapperFunctionName wrapper)))
         Nothing ->
@@ -9935,7 +9339,7 @@ lowerEvidenceArgument env exprEnv context expectedTy arg =
     (BackendVarWithIdentity _ mbIdentity name, typeArgs) ->
       lowerFunctionReference env exprEnv context expectedTy mbIdentity name typeArgs
     _ ->
-      case Map.lookup (wrapperKey' expectedTy arg) (peEvidenceWrappers env) of
+      case Map.lookup (wrapperIdentityKey expectedTy arg) (peEvidenceWrappers env) of
         Just wrapper ->
           pure (functionPointerValueForBindingRef expectedTy (wrapperBindingRef wrapper) (LLVMGlobalRef LLVMPtr (wrapperFunctionName wrapper)))
         Nothing ->
@@ -9993,7 +9397,7 @@ lowerLocalFunctionStoredReference env context expectedTy localFunction typeArgs 
   case lfStoredReference localFunction of
     Just (_, sourceExpr0) -> do
       sourceExpr <- storedReferenceSourceExpr context sourceExpr0 typeArgs
-      case Map.lookup (wrapperKey' expectedTy sourceExpr) (peFunctionWrappers env) of
+      case Map.lookup (wrapperIdentityKey expectedTy sourceExpr) (peFunctionWrappers env) of
         Just wrapper ->
           pure (Just (functionPointerValueForBindingRef expectedTy (wrapperBindingRef wrapper) (LLVMGlobalRef LLVMPtr (wrapperFunctionName wrapper))))
         Nothing ->
@@ -10036,7 +9440,7 @@ etaAliasArgsMatch params args =
 etaAliasArgMatches :: (Maybe IdDetails, String, BackendType) -> BackendExpr -> Bool
 etaAliasArgMatches (paramIdentity, paramName, _) arg =
   case backendVarExprRef arg of
-    Just argRef -> backendCallableRefMatches (backendCallableRef paramIdentity paramName) argRef
+    Just argRef -> backendCallableRefMatchesWith BackendCallableIdentityOnly (backendCallableRef paramIdentity paramName) argRef
     Nothing -> False
 
 collectValueApps :: BackendExpr -> (BackendExpr, [BackendExpr])
@@ -10154,9 +9558,9 @@ runtimeCompatibleValueType left right =
                   ]
               )
       (BTBaseWithIdentity leftIdentity leftBase, BTBaseWithIdentity rightIdentity rightBase) ->
-        backendTypeHeadMatches leftIdentity leftBase rightIdentity rightBase
+        backendTypeHeadMatchesWith SymbolIdentityOnly leftIdentity leftBase rightIdentity rightBase
       (BTConWithIdentity leftIdentity leftCon leftArgs, BTConWithIdentity rightIdentity rightCon rightArgs) ->
-        backendTypeHeadMatches leftIdentity leftCon rightIdentity rightCon
+        backendTypeHeadMatchesWith SymbolIdentityOnly leftIdentity leftCon rightIdentity rightCon
           && length leftArgs == length rightArgs
           && and (zipWith runtimeCompatibleValueType (NE.toList leftArgs) (NE.toList rightArgs))
       (BTBottom, BTBottom) -> True
@@ -11236,7 +10640,7 @@ shouldInlineGlobalCall env exprEnv binding resolvedTypeArgs form args =
 missingPolymorphicSpecialization :: ProgramEnv -> BindingInfo -> [BackendType] -> Bool
 missingPolymorphicSpecialization env binding resolvedTypeArgs =
   not (null (ffTypeBinders (biForm binding)))
-    && Map.notMember (specializationKey (specRequestForBinding binding resolvedTypeArgs)) (peSpecializations env)
+    && Map.notMember (specializationIdentityKey (specRequestForBinding binding resolvedTypeArgs)) (peSpecializations env)
 
 evidenceArgumentRequiresInline :: Set Int -> ProgramEnv -> ExprEnv -> ((Int, (String, BackendType)), BackendExpr) -> Bool
 evidenceArgumentRequiresInline evidenceParams env exprEnv ((index0, (_, paramTy)), arg) =
@@ -11263,7 +10667,7 @@ globalFunctionTarget env context binding typeArgs
   | null (ffTypeBinders (biForm binding)) =
       pure (bindingInfoRef binding, biName binding)
   | otherwise =
-      case Map.lookup (specializationKey request) (peSpecializations env) of
+      case Map.lookup (specializationIdentityKey request) (peSpecializations env) of
         Just specialization -> pure (spBindingRef specialization, spFunctionName specialization)
         Nothing ->
           liftEither (BackendLLVMInternalError ("missing specialization for " ++ biName binding ++ " at " ++ context))
@@ -11546,13 +10950,18 @@ refineExplicitTypeArguments ::
   [BackendType] ->
   [BackendExpr] ->
   Either BackendLLVMError (Map BackendTypeSubstitutionKey BackendType)
-refineExplicitTypeArguments binders form explicitArgs [] =
-  Right (explicitSubstitutionWithNameAliases binders form explicitArgs)
+refineExplicitTypeArguments binders _form explicitArgs [] =
+  Right (explicitTypeArgumentSubstitution binders explicitArgs)
 refineExplicitTypeArguments binders form explicitArgs args = do
   residualSubstitution <-
     foldM
       ( \acc ((_, expectedTy), actualExpr) ->
-          matchTypeParams residualBinderSet acc expectedTy (backendExprType actualExpr)
+          let applyAccumulated = substituteBackendTypesByKey acc
+           in matchTypeParams
+                residualBinderSet
+                acc
+                (applyAccumulated expectedTy)
+                (applyAccumulated (backendExprType actualExpr))
       )
       Map.empty
       (zip instantiatedParams args)
@@ -11561,150 +10970,28 @@ refineExplicitTypeArguments binders form explicitArgs args = do
   pure (Map.union refinedExplicitSubstitution residualSubstitution)
   where
     explicitSubstitution =
-      explicitSubstitutionWithNameAliases binders form explicitArgs
+      explicitTypeArgumentSubstitution binders explicitArgs
     instantiatedParams =
       [(name, substituteBackendTypesByKey explicitSubstitution ty) | (name, ty) <- ffParams form]
     residualBinderSet =
-      Set.union
-        (Set.unions (map freeBackendTypeVarKeys explicitArgs))
-        residualParamBinderSet
+      Set.unions (map freeBackendTypeVarKeys explicitArgs)
         `Set.difference` Set.fromList (map functionTypeBinderKey binders)
-    residualParamBinderSet =
-      Set.fromList
-        [ key
-        | (_, ty) <- instantiatedParams,
-          (key, occurrenceName) <- Set.toList (freeBackendTypeVarOccurrences ty),
-          Set.member occurrenceName binderNames
-        ]
-    binderNames =
-      Set.fromList (map backendTypeBinderName binders)
 
-explicitSubstitutionWithNameAliases ::
+refineExplicitTypeArgumentsForTest ::
   [BackendTypeBinder] ->
   FunctionForm ->
   [BackendType] ->
+  [BackendExpr] ->
+  Either BackendLLVMError (Map BackendTypeSubstitutionKey BackendType)
+refineExplicitTypeArgumentsForTest =
+  refineExplicitTypeArguments
+
+explicitTypeArgumentSubstitution ::
+  [BackendTypeBinder] ->
+  [BackendType] ->
   Map BackendTypeSubstitutionKey BackendType
-explicitSubstitutionWithNameAliases binders form explicitArgs =
-  Map.union binderSubstitution aliasSubstitution
-  where
-    binderSubstitution =
-      Map.fromList (zip (map functionTypeBinderKey binders) explicitArgs)
-    aliasSubstitution =
-      Map.fromList
-        [ (key, explicitArg)
-        | (binder, explicitArg) <- zip binders explicitArgs,
-          (key, occurrenceName) <- Set.toList freeParamOccurrences,
-          key /= functionTypeBinderKey binder,
-          occurrenceName == backendTypeBinderName binder
-        ]
-    freeParamOccurrences =
-      freeFunctionFormTypeVarOccurrences form
-
-freeFunctionFormTypeVarOccurrences :: FunctionForm -> Set (BackendTypeSubstitutionKey, String)
-freeFunctionFormTypeVarOccurrences form =
-  Set.unions
-    [ Set.unions (map (freeBackendTypeVarOccurrences . snd) (ffParams form)),
-      freeBackendTypeVarOccurrences (ffReturnType form),
-      freeBackendTypeVarOccurrencesInExpr (ffBody form)
-    ]
-
-freeBackendTypeVarOccurrences :: BackendType -> Set (BackendTypeSubstitutionKey, String)
-freeBackendTypeVarOccurrences =
-  \case
-    BTVarWithIdentity identity name ->
-      Set.singleton (backendTypeSubstitutionKeyFor identity name, name)
-    BTArrow dom cod ->
-      Set.union (freeBackendTypeVarOccurrences dom) (freeBackendTypeVarOccurrences cod)
-    BTBaseWithIdentity {} ->
-      Set.empty
-    BTConWithIdentity _ _ args ->
-      Set.unions (map freeBackendTypeVarOccurrences (NE.toList args))
-    BTVarAppWithIdentity identity name args ->
-      Set.insert
-        (backendTypeSubstitutionKeyFor identity name, name)
-        (Set.unions (map freeBackendTypeVarOccurrences (NE.toList args)))
-    BTForallWithIdentity identity name mbBound body ->
-      Set.union
-        (maybe Set.empty freeBackendTypeVarOccurrences mbBound)
-        (Set.filter ((/= backendTypeSubstitutionKeyFor identity name) . fst) (freeBackendTypeVarOccurrences body))
-    BTMuWithIdentity identity name body ->
-      Set.filter ((/= backendTypeSubstitutionKeyFor identity name) . fst) (freeBackendTypeVarOccurrences body)
-    BTBottom ->
-      Set.empty
-
-freeBackendTypeVarOccurrencesInExpr :: BackendExpr -> Set (BackendTypeSubstitutionKey, String)
-freeBackendTypeVarOccurrencesInExpr =
-  \case
-    BackendVarWithIdentity ty _ _ ->
-      freeBackendTypeVarOccurrences ty
-    BackendLit ty _ ->
-      freeBackendTypeVarOccurrences ty
-    BackendLamWithIdentity resultTy _ _ paramTy body ->
-      Set.unions
-        [ freeBackendTypeVarOccurrences resultTy,
-          freeBackendTypeVarOccurrences paramTy,
-          freeBackendTypeVarOccurrencesInExpr body
-        ]
-    BackendApp resultTy fun arg ->
-      Set.unions
-        [ freeBackendTypeVarOccurrences resultTy,
-          freeBackendTypeVarOccurrencesInExpr fun,
-          freeBackendTypeVarOccurrencesInExpr arg
-        ]
-    BackendLetWithIdentity resultTy _ _ bindingTy rhs body ->
-      Set.unions
-        [ freeBackendTypeVarOccurrences resultTy,
-          freeBackendTypeVarOccurrences bindingTy,
-          freeBackendTypeVarOccurrencesInExpr rhs,
-          freeBackendTypeVarOccurrencesInExpr body
-        ]
-    BackendTyAbsWithIdentity resultTy identity name mbBound body ->
-      Set.unions
-        [ freeBackendTypeVarOccurrences resultTy,
-          maybe Set.empty freeBackendTypeVarOccurrences mbBound,
-          Set.filter ((/= backendTypeSubstitutionKeyFor identity name) . fst) (freeBackendTypeVarOccurrencesInExpr body)
-        ]
-    BackendTyApp resultTy fun tyArg ->
-      Set.unions
-        [ freeBackendTypeVarOccurrences resultTy,
-          freeBackendTypeVarOccurrencesInExpr fun,
-          freeBackendTypeVarOccurrences tyArg
-        ]
-    BackendRoll resultTy payload ->
-      Set.union (freeBackendTypeVarOccurrences resultTy) (freeBackendTypeVarOccurrencesInExpr payload)
-    BackendUnroll resultTy payload ->
-      Set.union (freeBackendTypeVarOccurrences resultTy) (freeBackendTypeVarOccurrencesInExpr payload)
-    BackendClosureWithParamIdentities resultTy _ _ captures params body ->
-      Set.unions
-        [ freeBackendTypeVarOccurrences resultTy,
-          Set.unions (map freeBackendTypeVarOccurrencesInClosureCapture captures),
-          Set.unions (map (freeBackendTypeVarOccurrences . backendClosureParamType) params),
-          freeBackendTypeVarOccurrencesInExpr body
-        ]
-    BackendClosureCall resultTy fun args ->
-      Set.unions
-        [ freeBackendTypeVarOccurrences resultTy,
-          freeBackendTypeVarOccurrencesInExpr fun,
-          Set.unions (map freeBackendTypeVarOccurrencesInExpr args)
-        ]
-    BackendConstructWithIdentity resultTy _ _ args ->
-      Set.union (freeBackendTypeVarOccurrences resultTy) (Set.unions (map freeBackendTypeVarOccurrencesInExpr args))
-    BackendCase resultTy scrutinee alternatives ->
-      Set.unions
-        [ freeBackendTypeVarOccurrences resultTy,
-          freeBackendTypeVarOccurrencesInExpr scrutinee,
-          Set.unions (map freeBackendTypeVarOccurrencesInAlternative (NE.toList alternatives))
-        ]
-
-freeBackendTypeVarOccurrencesInClosureCapture :: BackendClosureCapture -> Set (BackendTypeSubstitutionKey, String)
-freeBackendTypeVarOccurrencesInClosureCapture capture =
-  Set.union
-    (freeBackendTypeVarOccurrences (backendClosureCaptureType capture))
-    (freeBackendTypeVarOccurrencesInExpr (backendClosureCaptureExpr capture))
-
-freeBackendTypeVarOccurrencesInAlternative :: BackendAlternative -> Set (BackendTypeSubstitutionKey, String)
-freeBackendTypeVarOccurrencesInAlternative (BackendAlternative _ body) =
-  freeBackendTypeVarOccurrencesInExpr body
+explicitTypeArgumentSubstitution binders explicitArgs =
+  Map.fromList (zip (map functionTypeBinderKey binders) explicitArgs)
 
 inferTypeArguments :: String -> [BackendTypeBinder] -> [(String, BackendType)] -> [BackendExpr] -> Either BackendLLVMError (Map BackendTypeSubstitutionKey BackendType)
 inferTypeArguments context binders params args = do
@@ -11738,7 +11025,7 @@ matchTypeParamsWith ::
 matchTypeParamsWith strictness binderSet substitution expected actual =
   case expected of
     BTVarWithIdentity identity name
-      | let key = backendTypeSubstitutionKeyFor identity name,
+      | let key = backendTypeSubstitutionKeyFromMaybeMetadataLight identity name,
         Set.member key binderSet ->
           case Map.lookup key substitution of
             Nothing -> Right (Map.insert key actual substitution)
@@ -11751,15 +11038,15 @@ matchTypeParamsWith strictness binderSet substitution expected actual =
           matchTypeParamsWith strictness binderSet substitution leftA leftB >>= \subst ->
             matchTypeParamsWith strictness binderSet subst rightA rightB
         (BTConWithIdentity identityA conA argsA, BTConWithIdentity identityB conB argsB)
-          | backendTypeHeadMatches identityA conA identityB conB && length argsA == length argsB ->
+          | backendTypeHeadMatchesWith SymbolIdentityOnly identityA conA identityB conB && length argsA == length argsB ->
               foldM
                 (\subst (tyA, tyB) -> matchTypeParamsWith strictness binderSet subst tyA tyB)
                 substitution
                 (zip (NE.toList argsA) (NE.toList argsB))
         (BTVarAppWithIdentity identity name args, _) ->
-          matchTypeParamApplication binderSet substitution (backendTypeSubstitutionKeyFor identity name) name (BTVarWithIdentity identity name) (NE.toList args) actual
+          matchTypeParamApplication binderSet substitution (backendTypeSubstitutionKeyFromMaybeMetadataLight identity name) name (BTVarWithIdentity identity name) (NE.toList args) actual
         (BTBaseWithIdentity identityA baseA, BTBaseWithIdentity identityB baseB)
-          | backendTypeHeadMatches identityA baseA identityB baseB -> Right substitution
+          | backendTypeHeadMatchesWith SymbolIdentityOnly identityA baseA identityB baseB -> Right substitution
         (BTForallWithIdentity identityA nameA boundA bodyA, BTForallWithIdentity identityB nameB boundB bodyB) -> do
           substA <-
             case (boundA, boundB) of
@@ -11834,7 +11121,7 @@ matchTypeParamApplication binderSet substitution nameKey name expectedHead expec
 
 typeApplicationHeadMatches :: BackendType -> BackendType -> Bool
 typeApplicationHeadMatches (BTVarWithIdentity leftIdentity leftName) (BTVarWithIdentity rightIdentity rightName) =
-  typeBinderRefMatches leftIdentity leftName rightIdentity rightName
+  typeBinderRefMatchesWith BackendTypeIdentityOnly leftIdentity leftName rightIdentity rightName
 typeApplicationHeadMatches left right =
   alphaEqBackendType left right
 
@@ -12518,10 +11805,8 @@ lowerImmediateConstructCase env exprEnv context resultTy mbConstructorIdentity c
 
     constructorPatternMatches (Just constructorIdentity) _ (Just patternIdentity) _ =
       constructorIdentity == patternIdentity
-    constructorPatternMatches (Just {}) _ Nothing _ =
+    constructorPatternMatches _ _ _ _ =
       False
-    constructorPatternMatches _ expectedName _ patternName =
-      patternName == expectedName
 
     rejectNonTailDefaultAlternative =
       case break isDefaultAlternative alternativesList of
@@ -12535,17 +11820,23 @@ lowerImmediateConstructCase env exprEnv context resultTy mbConstructorIdentity c
     isDefaultAlternative _ =
       False
 
-    rejectDuplicateConstructorAlternatives =
-      case firstDuplicate [constructorPatternDuplicateKey mbIdentity name | BackendAlternative (BackendConstructorPatternWithBinderIdentities mbIdentity name _) _ <- alternativesList] of
+    rejectDuplicateConstructorAlternatives = do
+      keys <-
+        mapM
+          constructorPatternDuplicateKey
+          [ (mbIdentity, name)
+          | BackendAlternative (BackendConstructorPatternWithBinderIdentities mbIdentity name _) _ <- alternativesList
+          ]
+      case firstDuplicate keys of
         Just key ->
           liftEither (BackendLLVMUnsupportedExpression context ("duplicate constructor case alternative " ++ show key))
         Nothing ->
           pure ()
 
-    constructorPatternDuplicateKey (Just identity) _ =
-      Left identity
-    constructorPatternDuplicateKey Nothing name =
-      Right name
+    constructorPatternDuplicateKey (Just identity, _) =
+      pure identity
+    constructorPatternDuplicateKey (Nothing, name) =
+      liftEither (BackendLLVMValidationFailed (BackendPatternConstructorIdentityMissing name))
 
     lowerUnmatchedImmediateCase = do
       zipWithM_ evaluateUnusedField fieldTys args
@@ -12635,13 +11926,15 @@ constructorRuntimeFieldTypes constructorRuntime scrutineeTy =
         Just substitution ->
           Just (map (substituteBackendTypesByKey substitution) (backendConstructorFields constructor))
         Nothing ->
-          Nothing
+          if backendTypeRefinesScrutinee (backendConstructorResult constructor) scrutineeTy
+            then Just (backendConstructorFields constructor)
+            else Nothing
   where
     constructor = crConstructor constructorRuntime
     parameters =
       Set.fromList
         ( backendDataParameterKeys (crData constructorRuntime)
-            ++ [ backendTypeSubstitutionKeyFor (backendTypeBinderIdentity binder) (backendTypeBinderName binder)
+            ++ [ backendTypeSubstitutionKeyFromMaybeMetadataLight (backendTypeBinderIdentity binder) (backendTypeBinderName binder)
                  | binder <- backendConstructorForalls constructor
                ]
         )

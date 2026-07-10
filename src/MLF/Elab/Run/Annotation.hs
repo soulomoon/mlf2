@@ -22,12 +22,13 @@ mapAnnNodes :: (NodeId -> NodeId) -> AnnExpr -> AnnExpr
 mapAnnNodes f = cata $ \case
   ALitF l nid -> ALit l (f nid)
   AVarF v nid -> AVar v (f nid)
-  ALamF v pNode x bodyAnn nid ->
-    ALam v (f pNode) x bodyAnn (f nid)
+  AResolvedVarF details v nid -> AResolvedVar details v (f nid)
+  ALamF v details pNode x bodyAnn nid ->
+    ALam v details (f pNode) x bodyAnn (f nid)
   AAppF fAnn argAnn funEid argEid nid ->
     AApp fAnn argAnn funEid argEid (f nid)
-  ALetF v schemeGenId schemeRootId ev rhsGen rhsAnn bodyAnn nid ->
-    ALet v schemeGenId (f schemeRootId) ev rhsGen rhsAnn bodyAnn (f nid)
+  ALetF v details schemeGenId schemeRootId ev rhsGen rhsAnn bodyAnn nid ->
+    ALet v details schemeGenId (f schemeRootId) ev rhsGen rhsAnn bodyAnn (f nid)
   AAnnF exprAnn nid eid -> AAnn exprAnn (f nid) eid
   AUnfoldF exprAnn nid eid -> AUnfold exprAnn (f nid) eid
 
@@ -47,9 +48,10 @@ annNode = cata alg
     alg ann = case ann of
       ALitF _ nid -> nid
       AVarF _ nid -> nid
-      ALamF _ _ _ _ nid -> nid
+      AResolvedVarF _ _ nid -> nid
+      ALamF _ _ _ _ _ nid -> nid
       AAppF _ _ _ _ nid -> nid
-      ALetF _ _ _ _ _ _ _ nid -> nid
+      ALetF _ _ _ _ _ _ _ _ nid -> nid
       AAnnF _ nid _ -> nid
       AUnfoldF _ nid _ -> nid
 

@@ -26,6 +26,13 @@ import qualified MLF.Frontend.ConstraintGen.Scope as Scope
 import MLF.Frontend.ConstraintGen.State (BuildState (..), ConstraintM, ScopeFrame, withModuleRootOwner)
 import MLF.Frontend.ConstraintGen.Types
 import MLF.Frontend.Syntax
+import MLF.Types.Identity (IdDetails (..), idDetailsIdentityKey, localRefFromScopedNodeId)
+
+data FreeBindingReference = FreeBindingReference
+  { freeBindingKey :: BindingKey,
+    freeBindingDisplayName :: VarName
+  }
+  deriving (Eq, Ord, Show)
 
 buildRootExpr :: NormCoreExpr -> ConstraintM (GenNodeId, Env, NodeId, AnnExpr)
 buildRootExpr = buildRootExprWithEnv Map.empty
@@ -69,14 +76,14 @@ buildModuleRootExprsKeyedWithExternalBindings extBindings keyedExprs = do
   moduleGen <- allocGenNode []
   builtRoots <-
     forM (zip [0 ..] keyedExprs) $ \(rootIndex, (key, _name, expr)) -> do
-      let referencedNames = Set.toAscList (freeCoreVars expr)
+      let referencedRefs = freeCoreBindingReferences expr
       let rootId = ModuleRootId rootIndex
       (referencedBindings, rootNode, annRoot) <-
         withModuleRootOwner rootId $ do
           rootGen <- allocChildGenUnder moduleGen
-          initialBindings <- buildInitialEnvForNames rootGen referencedNames extBindings
+          initialBindings <- buildInitialEnvForReferences rootGen referencedRefs extBindings
           withRootLocalExternalBindingCache $ do
-            referencedBindings <- materializeExternalBindingNames referencedNames initialBindings
+            referencedBindings <- materializeExternalBindingReferences referencedRefs initialBindings
             (rootNode, annRoot) <- buildModuleRootExprFromInitialEnv rootGen referencedBindings expr
             pure (referencedBindings, rootNode, annRoot)
       pure (key, rootId, referencedBindings, rootNode, annRoot)
@@ -135,26 +142,50 @@ buildRootExprFromInitialEnv rootGen initialBindings expr = do
 -- translating the expression, preserving the eager binding shape for used
 -- entries while avoiding the unused external graph.
 buildInitialEnv :: GenNodeId -> ExternalBindings -> ConstraintM Env
-buildInitialEnv rootGen =
-  pure
-    . Map.map
-      ( \externalBinding ->
+buildInitialEnv rootGen extBindings =
+  pure $
+    Map.fromList
+      [ ( bindingKey,
           LazyExternalBinding
             { bindingExternalRoot = rootGen,
               bindingExternal = externalBinding
             }
-      )
+        )
+      | (name, externalBinding) <- Map.toList extBindings
+      , bindingKey <- externalBindingKeys name externalBinding
+      ]
 
-buildInitialEnvForNames :: GenNodeId -> [VarName] -> ExternalBindings -> ConstraintM Env
-buildInitialEnvForNames rootGen names extBindings =
-  buildInitialEnv rootGen (Map.restrictKeys extBindings (Set.fromList names))
+buildInitialEnvForReferences :: GenNodeId -> [FreeBindingReference] -> ExternalBindings -> ConstraintM Env
+buildInitialEnvForReferences rootGen references extBindings = do
+  initialEnv <- buildInitialEnv rootGen extBindings
+  pure (Map.restrictKeys initialEnv (Set.fromList (map freeBindingKey references)))
+
+externalBindingKey :: VarName -> ExternalBinding -> BindingKey
+externalBindingKey name externalBinding =
+  case externalBindingIdentity externalBinding of
+    Just identity ->
+      ResolvedBindingKey (idDetailsIdentityKey (externalBindingDetails identity))
+    Nothing ->
+      MetadataLightBindingKey name
+
+-- Identity-bearing prepared bindings retain a deliberately separate name-keyed
+-- entry for raw surface callers. Resolved occurrences never consult it.
+externalBindingKeys :: VarName -> ExternalBinding -> [BindingKey]
+externalBindingKeys name externalBinding =
+  case externalBindingIdentity externalBinding of
+    Just {} ->
+      [ externalBindingKey name externalBinding,
+        MetadataLightBindingKey name
+      ]
+    Nothing ->
+      [MetadataLightBindingKey name]
 
 -- | Create a let-bound polymorphic 'Binding' for an external variable.
 -- Allocates a child gen node under the root, internalizes the source
 -- type as a flexible copy, and returns a binding with the scheme root
 -- and gen node so that variable references get expansion nodes.
 buildExternalBinding :: GenNodeId -> VarName -> ExternalBinding -> ConstraintM Binding
-buildExternalBinding rootGen _name ExternalBinding {externalBindingType = srcTy, externalBindingMode = mode} =
+buildExternalBinding rootGen _name externalBinding@ExternalBinding {externalBindingType = srcTy, externalBindingMode = mode} =
   case mode of
     ExternalBindingScheme -> do
       extSchemeGen <- allocChildGenUnder rootGen
@@ -164,11 +195,13 @@ buildExternalBinding rootGen _name ExternalBinding {externalBindingType = srcTy,
       rebindScopeRoot (genRef extSchemeGen) extSchemeRoot scopeFrame
       setBindParentIfMissing (typeRef extSchemeRoot) (genRef extSchemeGen) BindFlex
       setGenNodeSchemes extSchemeGen [extSchemeRoot]
-      pure Binding {bindingNode = extSchemeRoot, bindingGen = Just extSchemeGen}
+      pure Binding {bindingNode = extSchemeRoot, bindingGen = Just extSchemeGen, bindingIdentity = externalDetails}
     ExternalBindingMonomorphic -> do
       monoRoot <- allocVar
       setBindParentIfMissing (typeRef monoRoot) (genRef rootGen) BindFlex
-      pure Binding {bindingNode = monoRoot, bindingGen = Nothing}
+      pure Binding {bindingNode = monoRoot, bindingGen = Nothing, bindingIdentity = externalDetails}
+  where
+    externalDetails = externalBindingDetails <$> externalBindingIdentity externalBinding
 
 buildExpr :: Env -> GenNodeId -> NormCoreExpr -> ConstraintM (NodeId, AnnExpr)
 buildExpr env scopeRoot expr = do
@@ -280,92 +313,110 @@ unwrapSchemeRoot start = do
               _ -> nid
   pure (go IntSet.empty start)
 
-rhsMentionsBinder :: VarName -> NormCoreExpr -> Bool
+rhsMentionsBinder :: BindingKey -> NormCoreExpr -> Bool
 rhsMentionsBinder needle expr =
   case expr of
-    EVar name -> name == needle
+    EVar name -> MetadataLightBindingKey name == needle
     ELit _ -> False
     ELam param body
-      | param == needle -> False
+      | MetadataLightBindingKey param == needle -> False
       | otherwise -> rhsMentionsBinder needle body
     EApp fun arg ->
       rhsMentionsBinder needle fun || rhsMentionsBinder needle arg
     ELet name rhs body
-      | name == needle -> False
+      | MetadataLightBindingKey name == needle -> False
       | otherwise ->
           rhsMentionsBinder needle rhs || rhsMentionsBinder needle body
+    EBinderIdentity details inner ->
+      let resolvedKey = ResolvedBindingKey (idDetailsIdentityKey details)
+       in case inner of
+            EVar _ -> resolvedKey == needle
+            ELam _ body
+              | resolvedKey == needle -> False
+              | otherwise -> rhsMentionsBinder needle body
+            ELet _ rhs body
+              | resolvedKey == needle -> False
+              | otherwise ->
+                  rhsMentionsBinder needle rhs || rhsMentionsBinder needle body
+            _ -> rhsMentionsBinder needle inner
     ECoerceConst {} -> False
 
-freeCoreVars :: NormCoreExpr -> Set.Set VarName
-freeCoreVars = go Set.empty
+freeCoreBindingReferences :: NormCoreExpr -> [FreeBindingReference]
+freeCoreBindingReferences = Set.toAscList . go Set.empty
   where
-    go :: Set.Set VarName -> NormCoreExpr -> Set.Set VarName
+    go :: Set.Set BindingKey -> NormCoreExpr -> Set.Set FreeBindingReference
     go bound expr =
       case expr of
-        EVar name
-          | Set.member name bound -> Set.empty
-          | otherwise -> Set.singleton name
+        EVar name ->
+          freeReference bound (MetadataLightBindingKey name) name
         ELit _ -> Set.empty
         ELam param body ->
-          go (Set.insert param bound) body
+          go (Set.insert (MetadataLightBindingKey param) bound) body
         EApp fun arg ->
           go bound fun <> go bound arg
         ELet name rhs body ->
-          go bound rhs <> go (Set.insert name bound) body
+          go bound rhs <> go (Set.insert (MetadataLightBindingKey name) bound) body
+        EBinderIdentity details inner ->
+          let resolvedKey = ResolvedBindingKey (idDetailsIdentityKey details)
+           in case inner of
+                EVar name ->
+                  freeReference bound resolvedKey name
+                ELam _ body ->
+                  go (Set.insert resolvedKey bound) body
+                ELet _ rhs body ->
+                  let bound' = Set.insert resolvedKey bound
+                   in go bound' rhs <> go bound' body
+                _ -> go bound inner
         ECoerceConst {} -> Set.empty
+
+    freeReference bound key displayName
+      | Set.member key bound = Set.empty
+      | otherwise = Set.singleton (FreeBindingReference key displayName)
 
 materializeReferencedExternalBindings :: NormCoreExpr -> Env -> ConstraintM Env
 materializeReferencedExternalBindings expr env0 =
-  materializeExternalBindingNames (Set.toAscList (freeCoreVars expr)) env0
+  materializeExternalBindingReferences (freeCoreBindingReferences expr) env0
 
-materializeExternalBindingNames :: [VarName] -> Env -> ConstraintM Env
-materializeExternalBindingNames names env0 =
-  foldM materializeOne env0 names
+materializeExternalBindingReferences :: [FreeBindingReference] -> Env -> ConstraintM Env
+materializeExternalBindingReferences references env0 =
+  foldM materializeOne env0 references
   where
-    materializeOne acc name =
-      case Map.lookup name acc of
+    materializeOne acc reference =
+      case Map.lookup (freeBindingKey reference) acc of
         Just lazy@LazyExternalBinding{} -> do
-          binding <- materializeBinding name lazy
-          pure (Map.insert name binding acc)
+          binding <-
+            materializeBinding
+              (freeBindingKey reference)
+              (freeBindingDisplayName reference)
+              lazy
+          pure (Map.insert (freeBindingKey reference) binding acc)
         _ -> pure acc
 
 buildExprRaw :: Env -> GenNodeId -> NormCoreExpr -> ConstraintM (NodeId, AnnExpr)
 buildExprRaw env scopeRoot expr =
   case expr of
-    EVar name -> do
-      binding <- lookupVar env name >>= materializeBinding name
-      case binding of
-        Binding nid mGen ->
-          case mGen of
-            -- Polymorphic bindings (let-bound schemes) get a fresh expansion node.
-            Just _ -> do
-              (expNode, _) <- allocExpNode nid
-              pure (expNode, AVar name expNode)
-            -- Monomorphic bindings (e.g. lambda parameters) do not need expansion.
-            Nothing ->
-              pure (nid, AVar name nid)
-        LazyExternalBinding {} ->
-          throwError (InternalConstraintError ("unmaterialized external binding for " ++ name))
+    EVar name ->
+      buildVar env (MetadataLightBindingKey name) Nothing name
     ELit lit -> do
       baseNode <- allocBase (baseFor lit)
       varNode <- allocVar
       setVarBound varNode (Just baseNode)
       pure (varNode, ALit lit varNode)
+    EBinderIdentity details inner ->
+      let bindingKey = ResolvedBindingKey (idDetailsIdentityKey details)
+       in case inner of
+            EVar name ->
+              buildVar env bindingKey (Just details) name
+            ELam param body ->
+              buildLambda env scopeRoot bindingKey (Just details) param body
+            ELet name rhs body ->
+              buildLet env scopeRoot bindingKey (Just details) name rhs body
+            _ ->
+              throwError
+                (InternalConstraintError "resolved identity wrapper does not enclose a variable, lambda, or let")
     -- See Note [Lambda Translation]
-    ELam param body -> do
-      -- Allocate children first, then create the arrow.
-      argNode <- allocVar
-      let env' = Map.insert param (Binding argNode Nothing) env
-      (bodyNode, bodyAnn) <- buildExpr env' scopeRoot body
-      let codNode = bodyNode
-          bodyAnn' = bodyAnn
-      -- allocArrow sets binding parents for dom/cod automatically
-      arrowNode <- allocArrow argNode codNode
-      -- Lambda parameters are bound at the current binding node (not under the arrow).
-      setBindParentOverride (typeRef argNode) (genRef scopeRoot) BindFlex
-      rootVar <- allocVar
-      setVarBound rootVar (Just arrowNode)
-      pure (rootVar, ALam param argNode scopeRoot bodyAnn' rootVar)
+    ELam param body ->
+      buildLambda env scopeRoot (MetadataLightBindingKey param) Nothing param body
 
     -- Term annotation sugar: (a : τ) ≜ cτ a. See Note [Coercion domain/codomain semantics].
     EApp (ECoerceConst annTy) annotatedExpr ->
@@ -381,7 +432,7 @@ buildExprRaw env scopeRoot expr =
       funEid <- addInstEdge funNode arrowNode
       argEid <- addInstEdge argNode domNode
       case funAnn of
-        ALam _ paramNode _ _ _ -> do
+        ALam _ _ paramNode _ _ _ -> do
           nodes <- gets bsNodes
           case IntMap.lookup (getNodeId paramNode) nodes of
             Just TyVar {tnBound = Nothing} -> pure ()
@@ -392,70 +443,156 @@ buildExprRaw env scopeRoot expr =
 
     -- See Note [Let Bindings and Expansion Variables]
     ELet name rhs body ->
-      let buildUnder env0 gen subExpr = do
-            ((node, ann), scope) <- withScopedBuild (buildExpr env0 gen subExpr)
-            pure (node, ann, scope)
-          shouldBuildRecursive = Map.notMember name env && rhsMentionsBinder name rhs
-          buildLet schemeGenId schemeRootNode rhsGen rhsAnn = do
-            let schemeGenUsed = schemeGenId
-                env' = Map.insert name (Binding schemeRootNode (Just schemeGenUsed)) env
-
-            -- Alternative let scoping (Fig. 15.2.6, rightmost constraint):
-            -- introduce a gen node for the let expression and a trivial scheme root.
-            letGen <- allocChildGenUnder scopeRoot
-            attachUnder (genRef schemeGenId) (genRef letGen) BindFlex
-            if rhsGen /= schemeGenId
-              then attachUnder (genRef rhsGen) (genRef letGen) BindFlex
-              else pure ()
-            bodyGen <- allocChildGenUnder letGen
-
-            trivialRoot <- allocVar
-            setBindParentIfMissing (typeRef trivialRoot) (genRef letGen) BindFlex
-            setGenNodeSchemes letGen [trivialRoot]
-
-            (bodyNode, bodyAnn0) <-
-              withScopedRebind (genRef bodyGen) fst (buildExpr env' bodyGen body)
-
-            letEdge <- addInstEdge bodyNode trivialRoot
-            recordLetEdge letEdge
-            let bodyAnn = AAnn bodyAnn0 trivialRoot letEdge
-
-            -- Pass schemeNode as scheme, 0 as dummy expVar
-            pure (trivialRoot, ALet name schemeGenUsed schemeRootNode (ExpVarId 0) rhsGen rhsAnn bodyAnn trivialRoot)
-          buildInferred rhsExpr = do
-            schemeGenId <- allocGenNode []
-            (rhsNode, rhsAnn, rhsScope) <- buildUnder env schemeGenId rhsExpr
-            schemeGenUsed <- fmap (maybe schemeGenId id) (lookupSchemeGenForRoot rhsNode)
-            setGenNodeSchemes schemeGenUsed [rhsNode]
-            rebindScopeRoot (genRef schemeGenUsed) rhsNode rhsScope
-            attachUnder (typeRef rhsNode) (genRef schemeGenUsed) BindFlex
-            pure (schemeGenId, rhsNode, schemeGenId, rhsAnn)
-          buildRecursive rhsExpr = do
-            schemeGenId <- allocGenNode []
-            recursiveBody <- allocVar
-            (recursiveAssumption, _) <- allocExpNode recursiveBody
-            setBindParentIfMissing (typeRef recursiveAssumption) (genRef schemeGenId) BindFlex
-            setBindParentIfMissing (typeRef recursiveBody) (typeRef recursiveAssumption) BindFlex
-            let env' = Map.insert name (Binding recursiveAssumption (Just schemeGenId)) env
-            (rhsNode, rhsAnn, rhsScope) <- buildUnder env' schemeGenId rhsExpr
-            schemeRootNode <- unwrapSchemeRoot rhsNode
-            setExpBody recursiveAssumption schemeRootNode
-            setGenNodeSchemes schemeGenId [schemeRootNode]
-            rebindScopeRoot (genRef schemeGenId) schemeRootNode rhsScope
-            attachUnder (typeRef schemeRootNode) (genRef schemeGenId) BindFlex
-            _ <- addInstEdge schemeRootNode recursiveAssumption
-            pure (schemeGenId, schemeRootNode, schemeGenId, rhsAnn)
-       in do
-            (schemeGenId, schemeRootNode, rhsGen, rhsAnn) <-
-              if shouldBuildRecursive
-                then buildRecursive rhs
-                else buildInferred rhs
-            buildLet schemeGenId schemeRootNode rhsGen rhsAnn
+      buildLet env scopeRoot (MetadataLightBindingKey name) Nothing name rhs body
 
     -- We only expect coercion constants to appear in an application position,
     -- i.e. as the result of desugaring @(a : τ)@ to @cτ a@.
     ECoerceConst {} ->
       throwError UnexpectedBareCoercionConst
+
+buildVar :: Env -> BindingKey -> Maybe IdDetails -> VarName -> ConstraintM (NodeId, AnnExpr)
+buildVar env bindingKey mbDetails name = do
+  binding <- lookupVar env bindingKey name >>= materializeBinding bindingKey name
+  case binding of
+    Binding nid mGen bindingDetails ->
+      case mGen of
+        -- Polymorphic bindings (let-bound schemes) get a fresh expansion node.
+        Just _ -> do
+          (expNode, _) <- allocExpNode nid
+          pure (expNode, annotateVar bindingDetails expNode)
+        -- Monomorphic bindings (e.g. lambda parameters) do not need expansion.
+        Nothing ->
+          pure (nid, annotateVar bindingDetails nid)
+    LazyExternalBinding {} ->
+      throwError (InternalConstraintError ("unmaterialized external binding for " ++ name))
+  where
+    annotateVar bindingDetails nid =
+      case mbDetails `orElse` bindingDetails of
+        Just details -> AResolvedVar details name nid
+        Nothing -> AVar name nid
+
+    orElse preferred fallback =
+      case preferred of
+        Just {} -> preferred
+        Nothing -> fallback
+
+buildLambda :: Env -> GenNodeId -> BindingKey -> Maybe IdDetails -> VarName -> NormCoreExpr -> ConstraintM (NodeId, AnnExpr)
+buildLambda env scopeRoot bindingKey mbDetails param body = do
+  -- Allocate children first, then create the arrow.
+  argNode <- allocVar
+  binderDetails <- graphBinderDetails param argNode mbDetails
+  let env' = Map.insert bindingKey (Binding argNode Nothing (Just binderDetails)) env
+  (bodyNode, bodyAnn) <-
+    case annotatedLambdaMediator param body of
+      Just (mediator, rhs, innerBody) ->
+        buildLet
+          env'
+          scopeRoot
+          (MetadataLightBindingKey mediator)
+          (Just binderDetails)
+          mediator
+          rhs
+          innerBody
+      Nothing -> buildExpr env' scopeRoot body
+  -- allocArrow sets binding parents for dom/cod automatically.
+  arrowNode <- allocArrow argNode bodyNode
+  -- Lambda parameters are bound at the current binding node (not under the arrow).
+  setBindParentOverride (typeRef argNode) (genRef scopeRoot) BindFlex
+  rootVar <- allocVar
+  setVarBound rootVar (Just arrowNode)
+  pure (rootVar, ALam param (Just binderDetails) argNode scopeRoot bodyAnn rootVar)
+
+-- | The annotated-lambda desugaring introduces @let x = κτ x in body@,
+-- but that mediator denotes the same source binder as the enclosing lambda.
+-- Give both graph nodes the same term identity so Phase 6 can discard the
+-- coercion mediator without reverting resolved body occurrences to name lookup.
+annotatedLambdaMediator :: VarName -> NormCoreExpr -> Maybe (VarName, NormCoreExpr, NormCoreExpr)
+annotatedLambdaMediator param body =
+  case body of
+    ELet mediator rhs@(EApp (ECoerceConst _) (EVar occurrence)) innerBody
+      | mediator == param,
+        occurrence == param ->
+          Just (mediator, rhs, innerBody)
+    _ -> Nothing
+
+buildLet :: Env -> GenNodeId -> BindingKey -> Maybe IdDetails -> VarName -> NormCoreExpr -> NormCoreExpr -> ConstraintM (NodeId, AnnExpr)
+buildLet env scopeRoot bindingKey mbDetails name rhs body = do
+  (schemeGenId, schemeRootNode, rhsGen, rhsAnn, binderDetails) <-
+    if shouldBuildRecursive
+      then buildRecursive rhs
+      else buildInferred rhs
+  buildBody schemeGenId schemeRootNode rhsGen rhsAnn binderDetails
+  where
+    buildUnder env0 gen subExpr = do
+      ((node, ann), scope) <- withScopedBuild (buildExpr env0 gen subExpr)
+      pure (node, ann, scope)
+
+    shouldBuildRecursive =
+      Map.notMember bindingKey env && rhsMentionsBinder bindingKey rhs
+
+    buildBody schemeGenId schemeRootNode rhsGen rhsAnn binderDetails = do
+      let schemeGenUsed = schemeGenId
+          env' = Map.insert bindingKey (Binding schemeRootNode (Just schemeGenUsed) (Just binderDetails)) env
+
+      -- Alternative let scoping (Fig. 15.2.6, rightmost constraint):
+      -- introduce a gen node for the let expression and a trivial scheme root.
+      letGen <- allocChildGenUnder scopeRoot
+      attachUnder (genRef schemeGenId) (genRef letGen) BindFlex
+      if rhsGen /= schemeGenId
+        then attachUnder (genRef rhsGen) (genRef letGen) BindFlex
+        else pure ()
+      bodyGen <- allocChildGenUnder letGen
+
+      trivialRoot <- allocVar
+      setBindParentIfMissing (typeRef trivialRoot) (genRef letGen) BindFlex
+      setGenNodeSchemes letGen [trivialRoot]
+
+      (bodyNode, bodyAnn0) <-
+        withScopedRebind (genRef bodyGen) fst (buildExpr env' bodyGen body)
+
+      letEdge <- addInstEdge bodyNode trivialRoot
+      recordLetEdge letEdge
+      let bodyAnn = AAnn bodyAnn0 trivialRoot letEdge
+
+      -- Pass schemeNode as scheme, 0 as dummy expVar.
+      pure (trivialRoot, ALet name (Just binderDetails) schemeGenUsed schemeRootNode (ExpVarId 0) rhsGen rhsAnn bodyAnn trivialRoot)
+
+    buildInferred rhsExpr = do
+      schemeGenId <- allocGenNode []
+      (rhsNode, rhsAnn, rhsScope) <- buildUnder env schemeGenId rhsExpr
+      schemeGenUsed <- fmap (maybe schemeGenId id) (lookupSchemeGenForRoot rhsNode)
+      setGenNodeSchemes schemeGenUsed [rhsNode]
+      rebindScopeRoot (genRef schemeGenUsed) rhsNode rhsScope
+      attachUnder (typeRef rhsNode) (genRef schemeGenUsed) BindFlex
+      binderDetails <- graphBinderDetails name rhsNode mbDetails
+      pure (schemeGenId, rhsNode, schemeGenId, rhsAnn, binderDetails)
+
+    buildRecursive rhsExpr = do
+      schemeGenId <- allocGenNode []
+      recursiveBody <- allocVar
+      (recursiveAssumption, _) <- allocExpNode recursiveBody
+      setBindParentIfMissing (typeRef recursiveAssumption) (genRef schemeGenId) BindFlex
+      setBindParentIfMissing (typeRef recursiveBody) (typeRef recursiveAssumption) BindFlex
+      binderDetails <- graphBinderDetails name recursiveAssumption mbDetails
+      let env' = Map.insert bindingKey (Binding recursiveAssumption (Just schemeGenId) (Just binderDetails)) env
+      (rhsNode, rhsAnn, rhsScope) <- buildUnder env' schemeGenId rhsExpr
+      schemeRootNode <- unwrapSchemeRoot rhsNode
+      setExpBody recursiveAssumption schemeRootNode
+      setGenNodeSchemes schemeGenId [schemeRootNode]
+      rebindScopeRoot (genRef schemeGenId) schemeRootNode rhsScope
+      attachUnder (typeRef schemeRootNode) (genRef schemeGenId) BindFlex
+      _ <- addInstEdge schemeRootNode recursiveAssumption
+      pure (schemeGenId, schemeRootNode, schemeGenId, rhsAnn, binderDetails)
+
+
+graphBinderDetails :: VarName -> NodeId -> Maybe IdDetails -> ConstraintM IdDetails
+graphBinderDetails name node mbDetails =
+  case mbDetails of
+    Just details -> pure details
+    Nothing -> do
+      binderOrdinal <- gets bsNextLocalBinder
+      modify' $ \st -> st {bsNextLocalBinder = binderOrdinal + 1}
+      pure (LocalId (localRefFromScopedNodeId name node binderOrdinal))
 
 -- | Translate a coercion application @cτ a@ (surface form @(a : τ)@).
 --
@@ -471,13 +608,13 @@ buildCoerce env scopeRoot annTy annotatedExpr = do
 
   -- If we're annotating a variable occurrence, prefer instantiating from the
   -- underlying scheme root rather than stacking expansions (see tests).
-  edgeBody <- case annotatedExpr of
-    EVar {} -> do
+  edgeBody <- case variableReference annotatedExpr of
+    Just {} -> do
       nodes <- gets bsNodes
       case IntMap.lookup (getNodeId exprNode) nodes of
         Just TyExp {tnBody = body} -> pure body
         _ -> pure exprNode
-    _ -> pure exprNode
+    Nothing -> pure exprNode
   (edgeLeft, _) <- allocExpNode edgeBody
   attachUnder (typeRef edgeLeft) (genRef annGen) BindFlex
   eid <- addInstEdge edgeLeft domainNode
@@ -486,6 +623,14 @@ buildCoerce env scopeRoot annTy annotatedExpr = do
   modify' $ \st ->
     st {bsAnnSourceTypes = IntMap.insert (getNodeId codomainNode) annTy (bsAnnSourceTypes st)}
   pure (codomainNode, AAnn exprAnn codomainNode eid)
+
+variableReference :: NormCoreExpr -> Maybe (BindingKey, VarName)
+variableReference expr =
+  case expr of
+    EVar name -> Just (MetadataLightBindingKey name, name)
+    EBinderIdentity details (EVar name) ->
+      Just (ResolvedBindingKey (idDetailsIdentityKey details), name)
+    _ -> Nothing
 
 {- Note [Coercion domain/codomain semantics]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -554,8 +699,9 @@ We apply Var-Abs on-the-fly during constraint generation (§12.4.3: "they can
 be performed on-the-fly during the generation of typing constraints. From an
 algorithmic standpoint, the second approach is actually simpler.") by never
 creating the gen node in the first place: the parameter is bound directly at
-the current scope with `Binding argNode Nothing`, and variable references skip
-expansion (the `Nothing` branch of `bindingGen` in `buildExprRaw`).
+the current scope with a monomorphic `Binding` carrying its generated local
+identity, and variable references skip expansion (the `Nothing` branch of
+`bindingGen` in `buildExprRaw`).
 
 See also Note [Minimal Expansion Decision] in Presolution/Expansion.hs for the
 degenerate-forall case (case 2: "If there are no bound vars (degenerate ∀),
@@ -681,17 +827,18 @@ so presolution/elaboration can drop its witness/expansion (`dropTrivialSchemeEdg
 and avoid generating spurious instantiation computations for this internal edge.
 -}
 
-lookupVar :: Env -> VarName -> ConstraintM Binding
-lookupVar env name = case Map.lookup name env of
+lookupVar :: Env -> BindingKey -> VarName -> ConstraintM Binding
+lookupVar env key name = case Map.lookup key env of
   Just binding -> pure binding
   Nothing -> throwError (UnknownVariable name)
 
-materializeBinding :: VarName -> Binding -> ConstraintM Binding
-materializeBinding _ binding@Binding{} =
+materializeBinding :: BindingKey -> VarName -> Binding -> ConstraintM Binding
+materializeBinding _ _ binding@Binding{} =
   pure binding
-materializeBinding name LazyExternalBinding {bindingExternalRoot = rootGen, bindingExternal = externalBinding} = do
+materializeBinding _key name LazyExternalBinding {bindingExternalRoot = rootGen, bindingExternal = externalBinding} = do
   cache <- gets bsExternalBindingCache
-  case Map.lookup name cache of
+  let cacheKey = externalBindingKey name externalBinding
+  case Map.lookup cacheKey cache of
     Just binding -> pure binding
     Nothing -> do
       binding <- buildExternalBinding rootGen name externalBinding
@@ -699,7 +846,7 @@ materializeBinding name LazyExternalBinding {bindingExternalRoot = rootGen, bind
       modify' $ \st ->
         st
           { bsExternalBindingCache =
-              Map.insert name binding (bsExternalBindingCache st)
+              Map.insert cacheKey binding (bsExternalBindingCache st)
           }
       pure binding
 

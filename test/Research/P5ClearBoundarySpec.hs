@@ -439,7 +439,7 @@ sameLaneClearBoundaryFallbackType = do
         innerCanon = extractInnerLetRhs annCanon0
         innerPre = extractInnerLetRhs annPre0
         (retainedRoot, retainedChild) = case innerCanon of
-            AApp _ (AVar _ nid) _ _ rootNid -> (rootNid, nid)
+            AApp _ (AResolvedVar _ _ nid) _ _ rootNid -> (rootNid, nid)
             _ -> error ("expected retained-child app shape, got " ++ show innerCanon)
         inputs = wireSameLaneLocalRoot inputs0 retainedRoot retainedChild
     requireRight (computeResultTypeFallback inputs innerCanon innerPre)
@@ -451,7 +451,7 @@ sameLaneAliasFrameClearBoundaryFallbackType = do
         innerCanon = extractFirstApp annCanon0
         innerPre = extractFirstApp annPre0
         (retainedRoot, retainedChild) = case innerCanon of
-            AApp _ (AVar _ nid) _ _ rootNid -> (rootNid, nid)
+            AApp _ (AResolvedVar _ _ nid) _ _ rootNid -> (rootNid, nid)
             _ -> error ("expected retained-child app shape, got " ++ show innerCanon)
         inputs = wireSameLaneLocalRoot inputs0 retainedRoot retainedChild
     requireRight (computeResultTypeFallback inputs innerCanon innerPre)
@@ -463,7 +463,7 @@ sameLaneDoubleAliasFrameClearBoundaryFallbackType = do
         innerCanon = extractFirstApp annCanon0
         innerPre = extractFirstApp annPre0
         (retainedRoot, retainedChild) = case innerCanon of
-            AApp _ (AVar _ nid) _ _ rootNid -> (rootNid, nid)
+            AApp _ (AResolvedVar _ _ nid) _ _ rootNid -> (rootNid, nid)
             _ -> error ("expected retained-child app shape, got " ++ show innerCanon)
         inputs = wireSameLaneLocalRoot inputs0 retainedRoot retainedChild
     requireRight (computeResultTypeFallback inputs innerCanon innerPre)
@@ -475,7 +475,7 @@ sameLaneTripleAliasFrameClearBoundaryFallbackType = do
         innerCanon = extractFirstApp annCanon0
         innerPre = extractFirstApp annPre0
         (retainedRoot, retainedChild) = case innerCanon of
-            AApp _ (AVar _ nid) _ _ rootNid -> (rootNid, nid)
+            AApp _ (AResolvedVar _ _ nid) _ _ rootNid -> (rootNid, nid)
             _ -> error ("expected retained-child app shape, got " ++ show innerCanon)
         inputs = wireSameLaneLocalRoot inputs0 retainedRoot retainedChild
     requireRight (computeResultTypeFallback inputs innerCanon innerPre)
@@ -487,7 +487,7 @@ sameLaneQuadrupleAliasFrameClearBoundaryFallbackType = do
         innerCanon = extractFirstApp annCanon0
         innerPre = extractFirstApp annPre0
         (retainedRoot, retainedChild) = case innerCanon of
-            AApp _ (AVar _ nid) _ _ rootNid -> (rootNid, nid)
+            AApp _ (AResolvedVar _ _ nid) _ _ rootNid -> (rootNid, nid)
             _ -> error ("expected retained-child app shape, got " ++ show innerCanon)
         inputs = wireSameLaneLocalRoot inputs0 retainedRoot retainedChild
     requireRight (computeResultTypeFallback inputs innerCanon innerPre)
@@ -499,7 +499,7 @@ sameLaneQuintupleAliasFrameClearBoundaryFallbackType = do
         innerCanon = extractFirstApp annCanon0
         innerPre = extractFirstApp annPre0
         (retainedRoot, retainedChild) = case innerCanon of
-            AApp _ (AVar _ nid) _ _ rootNid -> (rootNid, nid)
+            AApp _ (AResolvedVar _ _ nid) _ _ rootNid -> (rootNid, nid)
             _ -> error ("expected retained-child app shape, got " ++ show innerCanon)
         inputs = wireSameLaneLocalRoot inputs0 retainedRoot retainedChild
     requireRight (computeResultTypeFallback inputs innerCanon innerPre)
@@ -511,7 +511,7 @@ sameLaneSextupleAliasFrameClearBoundaryFallbackType = do
         innerCanon = extractFirstApp annCanon0
         innerPre = extractFirstApp annPre0
         (retainedRoot, retainedChild) = case innerCanon of
-            AApp _ (AVar _ nid) _ _ rootNid -> (rootNid, nid)
+            AApp _ (AResolvedVar _ _ nid) _ _ rootNid -> (rootNid, nid)
             _ -> error ("expected retained-child app shape, got " ++ show innerCanon)
         inputs = wireSameLaneLocalRoot inputs0 retainedRoot retainedChild
     requireRight (computeResultTypeFallback inputs innerCanon innerPre)
@@ -523,7 +523,7 @@ sameLaneSeptupleAliasFrameClearBoundaryFallbackType = do
         innerCanon = extractFirstApp annCanon0
         innerPre = extractFirstApp annPre0
         (retainedRoot, retainedChild) = case innerCanon of
-            AApp _ (AVar _ nid) _ _ rootNid -> (rootNid, nid)
+            AApp _ (AResolvedVar _ _ nid) _ _ rootNid -> (rootNid, nid)
             _ -> error ("expected retained-child app shape, got " ++ show innerCanon)
         inputs = wireSameLaneLocalRoot inputs0 retainedRoot retainedChild
     requireRight (computeResultTypeFallback inputs innerCanon innerPre)
@@ -535,7 +535,7 @@ sameLaneOctupleAliasFrameClearBoundaryFallbackType = do
         innerCanon = extractFirstApp annCanon0
         innerPre = extractFirstApp annPre0
         (retainedRoot, retainedChild) = case innerCanon of
-            AApp _ (AVar _ nid) _ _ rootNid -> (rootNid, nid)
+            AApp _ (AResolvedVar _ _ nid) _ _ rootNid -> (rootNid, nid)
             _ -> error ("expected retained-child app shape, got " ++ show innerCanon)
         inputs = wireSameLaneLocalRoot inputs0 retainedRoot retainedChild
     requireRight (computeResultTypeFallback inputs innerCanon innerPre)
@@ -547,7 +547,7 @@ sameLaneNonupleAliasFrameClearBoundaryFallbackType = do
         innerCanon = extractFirstApp annCanon0
         innerPre = extractFirstApp annPre0
         (retainedRoot, retainedChild) = case innerCanon of
-            AApp _ (AVar _ nid) _ _ rootNid -> (rootNid, nid)
+            AApp _ (AResolvedVar _ _ nid) _ _ rootNid -> (rootNid, nid)
             _ -> error ("expected retained-child app shape, got " ++ show innerCanon)
         inputs = wireSameLaneLocalRoot inputs0 retainedRoot retainedChild
     requireRight (computeResultTypeFallback inputs innerCanon innerPre)
@@ -559,7 +559,7 @@ sameLaneDecupleAliasFrameClearBoundaryFallbackType = do
         innerCanon = extractFirstApp annCanon0
         innerPre = extractFirstApp annPre0
         (retainedRoot, retainedChild) = case innerCanon of
-            AApp _ (AVar _ nid) _ _ rootNid -> (rootNid, nid)
+            AApp _ (AResolvedVar _ _ nid) _ _ rootNid -> (rootNid, nid)
             _ -> error ("expected retained-child app shape, got " ++ show innerCanon)
         inputs = wireSameLaneLocalRoot inputs0 retainedRoot retainedChild
     requireRight (computeResultTypeFallback inputs innerCanon innerPre)
@@ -571,7 +571,7 @@ sameWrapperNestedForallAliasFrameClearBoundaryFallbackType = do
         innerCanon = extractFirstApp (extractSelectedBody annCanon0)
         innerPre = extractFirstApp (extractSelectedBody annPre0)
         (retainedRoot, retainedChild) = case innerCanon of
-            AApp _ (AVar _ nid) _ _ rootNid -> (rootNid, nid)
+            AApp _ (AResolvedVar _ _ nid) _ _ rootNid -> (rootNid, nid)
             other ->
                 error
                     ("expected same-wrapper nested-forall alias-frame retained-child app shape, got " ++ show other)
@@ -585,7 +585,7 @@ sameWrapperNestedForallDecupleAliasFrameClearBoundaryFallbackType = do
         innerCanon = extractFirstApp (extractSelectedBody annCanon0)
         innerPre = extractFirstApp (extractSelectedBody annPre0)
         (retainedRoot, retainedChild) = case innerCanon of
-            AApp _ (AVar _ nid) _ _ rootNid -> (rootNid, nid)
+            AApp _ (AResolvedVar _ _ nid) _ _ rootNid -> (rootNid, nid)
             other ->
                 error
                     ("expected same-wrapper nested-forall decuple alias retained-child app shape, got " ++ show other)
@@ -599,7 +599,7 @@ fallbackType expr = do
         bodyCanon = extractSelectedBodyApp annCanon0
         bodyPre = extractSelectedBodyApp annPre0
         (retainedRoot, retainedChild) = case bodyCanon of
-            AApp _ (AVar _ nid) _ _ rootNid -> (rootNid, nid)
+            AApp _ (AResolvedVar _ _ nid) _ _ rootNid -> (rootNid, nid)
             other ->
                 error
                     ("expected same-wrapper nested-forall retained-child app shape, got " ++ show other)
@@ -608,15 +608,15 @@ fallbackType expr = do
 
 extractInnerLetRhs :: AnnExpr -> AnnExpr
 extractInnerLetRhs ann0 = case ann0 of
-    ALet _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ rhs _ _) _ _) _ -> rhs
+    ALet _ _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ _ rhs _ _) _ _) _ -> rhs
     _ -> error ("unexpected retained-child wrapper shape: " ++ show ann0)
 
 extractFirstApp :: AnnExpr -> AnnExpr
 extractFirstApp ann0 = case ann0 of
     AApp {} -> ann0
     AAnn inner _ _ -> extractFirstApp inner
-    ALam _ _ _ body _ -> extractFirstApp body
-    ALet _ _ _ _ _ rhs body _ ->
+    ALam _ _ _ _ body _ -> extractFirstApp body
+    ALet _ _ _ _ _ _ rhs body _ ->
         case extractFirstAppMaybe rhs of
             Just hit -> hit
             Nothing ->
@@ -629,8 +629,8 @@ extractFirstAppMaybe :: AnnExpr -> Maybe AnnExpr
 extractFirstAppMaybe ann0 = case ann0 of
     AApp {} -> Just ann0
     AAnn inner _ _ -> extractFirstAppMaybe inner
-    ALam _ _ _ body _ -> extractFirstAppMaybe body
-    ALet _ _ _ _ _ rhs body _ ->
+    ALam _ _ _ _ body _ -> extractFirstAppMaybe body
+    ALet _ _ _ _ _ _ rhs body _ ->
         case extractFirstAppMaybe rhs of
             Just hit -> Just hit
             Nothing -> extractFirstAppMaybe body
@@ -638,7 +638,7 @@ extractFirstAppMaybe ann0 = case ann0 of
 
 extractSelectedBody :: AnnExpr -> AnnExpr
 extractSelectedBody ann0 = case ann0 of
-    ALet _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ _ body _) _ _) _ -> body
+    ALet _ _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ _ _ body _) _ _) _ -> body
     _ -> error ("unexpected same-wrapper nested-forall wrapper shape: " ++ show ann0)
 
 extractSelectedBodyApp :: AnnExpr -> AnnExpr

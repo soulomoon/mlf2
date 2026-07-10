@@ -9,6 +9,7 @@ module MLF.Frontend.ConstraintGen
     ModuleConstraintRoot (..),
     ModuleConstraintResult (..),
     AnnExpr (..),
+    BindingKey (..),
     ExternalEnv,
     ExternalBindingMode (..),
     ExternalBinding (..),
@@ -234,12 +235,13 @@ collectAnnEdges ann = aeAll (cata alg ann)
 
     alg expr = case expr of
       AVarF _ _ -> emptyEdges
+      AResolvedVarF _ _ _ -> emptyEdges
       ALitF _ _ -> emptyEdges
-      ALamF _ _ _ body _ -> body
+      ALamF _ _ _ _ body _ -> body
       AAppF fun arg _ _ _ ->
         let allEdges = IntSet.union (aeAll fun) (aeAll arg)
          in AnnEdges allEdges allEdges Nothing
-      ALetF _ _ _ _ _ rhs body trivialRoot ->
+      ALetF _ _ _ _ _ _ rhs body trivialRoot ->
         let bodyEdges =
               if aeAnnTarget body == Just trivialRoot
                 then aeNoAnn body

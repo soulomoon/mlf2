@@ -39,6 +39,7 @@ module MLF.Frontend.Program.Check
     checkProgram,
     checkProgramPackage,
     checkResolvedProgram,
+    validateCheckedProgramTypeViews,
     checkLocatedProgram,
     checkLocatedProgramPackage,
     checkLocatedProgramPackageWithTiming,
@@ -113,19 +114,28 @@ import MLF.Frontend.Program.Package
     trivialProgramPackage,
   )
 import MLF.Frontend.Program.Resolve (resolveProgram)
-import MLF.Frontend.Symbol (lookupSymbolIdentityAlias, lookupSymbolIdentityExact, sameSymbolIdentity, symbolIdentityAliasMap, symbolIdentityAliasMapWith, symbolIdentityPayloadKey, symbolIdentityStableName, symbolUniqueIdentity)
+import MLF.Frontend.Symbol (SymbolIdentityPayloadKey, lookupSymbolIdentityExact, sameSymbolIdentity, symbolIdentityAliasMap, symbolIdentityPayloadKey, symbolIdentityStableName, symbolUniqueIdentity)
 import MLF.Frontend.Program.TypeFamilies (normalizeTypeFamiliesInProgram)
+import MLF.Types.Elab (ElabTypeIdentityGap, elabTypeIdentityGaps, xmlfTermTypeIdentityGaps)
 import MLF.Frontend.Program.Types
   ( CheckedBinding (..),
     CheckedModule (..),
     CheckedProgram (..),
+    ClassApplicationKey,
     ClassInfo (..),
     ConstructorForallBinder (..),
     ConstructorShape (..),
     ConstructorInfo (..),
     ConstructorRef,
     DataInfo (..),
+    DeferredCaseCall (..),
+    DeferredConstructorCall (..),
+    DeferredMethodCall (..),
+    DeferredMethodEvidence (..),
+    DeferredProgramObligation (..),
     DeferredRef,
+    EvidenceInfo (..),
+    EvidenceMethod (..),
     ExportedTypeInfo (..),
     FunctionalDependencyInfo (..),
     IdDetails (..),
@@ -150,14 +160,15 @@ import MLF.Frontend.Program.Types
     SymbolOwnerIdentity (..),
     ConstraintInfo (..),
     TypeView (..),
+    typeViewIdentityGaps,
     ValueInfo (..),
-    applyTypeHead,
     applyConstraintInfoSubst,
     checkedBindingName,
     constructorRefFromSymbol,
     constructorRefSymbol,
     constraintTypeView,
     classInfoIdentityModule,
+    classApplicationKey,
     className,
     classParamBinderIdentities,
     classParamNames,
@@ -178,7 +189,6 @@ import MLF.Frontend.Program.Types
     instanceClassName,
     instanceInfoClassSymbolIdentity,
     instanceHeadTypes,
-    instanceHeadIdentityTypes,
     freeTypeBinderIdentitiesTypeView,
     loweredBindingIdentityFromValueInfo,
     loweredIdentityDetails,
@@ -226,9 +236,9 @@ import MLF.Frontend.Program.Types
     displayConstraint,
     specializeMethodTypeView,
     substituteTypeVar,
-    splitArrows,
     splitForalls,
     typeBinderAliasIdentityMap,
+    typeBinderSubstViews,
     typeParamBinderIdentity,
     typeViewBinderIdentityAliasEntries,
     typeViewBinderIdentityForAlias,
@@ -238,9 +248,11 @@ import MLF.Frontend.Program.Types
     typeViewsDisplay,
     typeViewsIdentity,
     typeViewSubstFromParamIdentities,
+    constructorInfoRuntimeName,
     ordinaryValueTypeView,
     primitiveRefFromSymbol,
     primitiveRefSymbol,
+    valueInfoRuntimeName,
     valueInfoSymbolIdentity,
   )
 import MLF.Util.Timing
@@ -279,6 +291,228 @@ type TcM a = Either ProgramError a
 
 runTcM :: TcM a -> Either ProgramError a
 runTcM = id
+
+data OverlapSide
+  = OverlapLeft
+  | OverlapRight
+  deriving (Eq, Ord, Show)
+
+data OverlapMeta = OverlapMeta OverlapSide TypeBinderIdentity
+  deriving (Eq, Ord, Show)
+
+data OverlapType
+  = OverlapMetaVar OverlapMeta
+  | OverlapRigidVar Int
+  | OverlapArrow OverlapType OverlapType
+  | OverlapHead SymbolIdentityPayloadKey
+  | OverlapCon SymbolIdentityPayloadKey (NonEmpty OverlapType)
+  | OverlapMetaApp OverlapMeta (NonEmpty OverlapType)
+  | OverlapRigidApp Int (NonEmpty OverlapType)
+  | OverlapTyLam OverlapType
+  | OverlapTyApp OverlapType OverlapType
+  | OverlapForall (Maybe OverlapType) OverlapType
+  | OverlapMu OverlapType
+  | OverlapBottom
+  deriving (Eq, Ord, Show)
+
+type OverlapSubstitution = Map OverlapMeta OverlapType
+
+overlapTypeView :: OverlapSide -> TypeView -> Maybe OverlapType
+overlapTypeView side view =
+  go Map.empty (typeViewIdentity view)
+  where
+    go bound ty =
+      case ty of
+        STVar name ->
+          either OverlapMetaVar OverlapRigidVar <$> overlapBinderKey bound name
+        STArrow dom cod ->
+          OverlapArrow <$> go bound dom <*> go bound cod
+        STBase name ->
+          OverlapHead . symbolIdentityPayloadKey <$> typeViewHeadIdentityForAlias view name
+        STCon name args ->
+          OverlapCon
+            <$> (symbolIdentityPayloadKey <$> typeViewHeadIdentityForAlias view name)
+            <*> traverse (go bound) args
+        STVarApp name args ->
+          do
+            key <- overlapBinderKey bound name
+            args' <- traverse (go bound) args
+            pure $
+              case key of
+                Left meta -> OverlapMetaApp meta args'
+                Right index0 -> OverlapRigidApp index0 args'
+        STTyLam name body -> do
+          identity <- typeViewBinderIdentityForAlias view name
+          OverlapTyLam <$> go (pushBound identity bound) body
+        STTyApp fun arg ->
+          OverlapTyApp <$> go bound fun <*> go bound arg
+        STForall name mbBound body -> do
+          identity <- typeViewBinderIdentityForAlias view name
+          bound' <- traverse (go bound . unSrcBound) mbBound
+          OverlapForall bound' <$> go (pushBound identity bound) body
+        STMu name body -> do
+          identity <- typeViewBinderIdentityForAlias view name
+          OverlapMu <$> go (pushBound identity bound) body
+        STBottom ->
+          Just OverlapBottom
+
+    overlapBinderKey bound name = do
+      identity <- typeViewBinderIdentityForAlias view name
+      pure $
+        case Map.lookup identity bound of
+          Just index0 -> Right index0
+          Nothing -> Left (OverlapMeta side identity)
+
+    pushBound identity =
+      Map.insert identity 0 . fmap (+ 1)
+
+unifyOverlapTypes :: OverlapSubstitution -> OverlapType -> OverlapType -> Maybe OverlapSubstitution
+unifyOverlapTypes subst left right =
+  case (applyOverlapSubstitution subst left, applyOverlapSubstitution subst right) of
+    (OverlapMetaVar meta, ty) -> bindOverlapMeta meta ty subst
+    (ty, OverlapMetaVar meta) -> bindOverlapMeta meta ty subst
+    (OverlapRigidVar leftIndex, OverlapRigidVar rightIndex)
+      | leftIndex == rightIndex -> Just subst
+    (OverlapHead leftIdentity, OverlapHead rightIdentity)
+      | leftIdentity == rightIdentity -> Just subst
+    (OverlapCon leftIdentity leftArgs, OverlapCon rightIdentity rightArgs)
+      | leftIdentity == rightIdentity,
+        NE.length leftArgs == NE.length rightArgs ->
+          unifyOverlapLists subst (NE.toList leftArgs) (NE.toList rightArgs)
+    (OverlapMetaApp meta args, actual) ->
+      unifyOverlapAppliedMeta subst meta (NE.toList args) actual
+    (actual, OverlapMetaApp meta args) ->
+      unifyOverlapAppliedMeta subst meta (NE.toList args) actual
+    (OverlapRigidApp leftIndex leftArgs, OverlapRigidApp rightIndex rightArgs)
+      | leftIndex == rightIndex,
+        NE.length leftArgs == NE.length rightArgs ->
+          unifyOverlapLists subst (NE.toList leftArgs) (NE.toList rightArgs)
+    (OverlapArrow leftDom leftCod, OverlapArrow rightDom rightCod) -> do
+      subst' <- unifyOverlapTypes subst leftDom rightDom
+      unifyOverlapTypes subst' leftCod rightCod
+    (OverlapTyLam leftBody, OverlapTyLam rightBody) ->
+      unifyOverlapTypes subst leftBody rightBody
+    (OverlapTyApp leftFun leftArg, OverlapTyApp rightFun rightArg) -> do
+      subst' <- unifyOverlapTypes subst leftFun rightFun
+      unifyOverlapTypes subst' leftArg rightArg
+    (OverlapForall leftBound leftBody, OverlapForall rightBound rightBody) -> do
+      subst' <- unifyOverlapMaybe subst leftBound rightBound
+      unifyOverlapTypes subst' leftBody rightBody
+    (OverlapMu leftBody, OverlapMu rightBody) ->
+      unifyOverlapTypes subst leftBody rightBody
+    (OverlapBottom, OverlapBottom) ->
+      Just subst
+    _ ->
+      Nothing
+
+unifyOverlapLists :: OverlapSubstitution -> [OverlapType] -> [OverlapType] -> Maybe OverlapSubstitution
+unifyOverlapLists subst left right
+  | length left /= length right = Nothing
+  | otherwise =
+      foldM
+        (\acc (leftTy, rightTy) -> unifyOverlapTypes acc leftTy rightTy)
+        subst
+        (zip left right)
+
+unifyOverlapMaybe :: OverlapSubstitution -> Maybe OverlapType -> Maybe OverlapType -> Maybe OverlapSubstitution
+unifyOverlapMaybe subst Nothing Nothing = Just subst
+unifyOverlapMaybe subst (Just left) (Just right) = unifyOverlapTypes subst left right
+unifyOverlapMaybe _ _ _ = Nothing
+
+unifyOverlapAppliedMeta :: OverlapSubstitution -> OverlapMeta -> [OverlapType] -> OverlapType -> Maybe OverlapSubstitution
+unifyOverlapAppliedMeta subst meta templateArgs actual =
+  case actual of
+    OverlapCon identity actualArgs ->
+      matchAppliedHead (OverlapHead identity) (NE.toList actualArgs)
+    OverlapMetaApp actualMeta actualArgs ->
+      matchAppliedHead (OverlapMetaVar actualMeta) (NE.toList actualArgs)
+    OverlapRigidApp index0 actualArgs ->
+      matchAppliedHead (OverlapRigidVar index0) (NE.toList actualArgs)
+    _ -> Nothing
+  where
+    templateArgCount = length templateArgs
+
+    matchAppliedHead headTy actualArgs
+      | length actualArgs < templateArgCount = Nothing
+      | otherwise = do
+          let (headArgs, matchedArgs) = splitAt (length actualArgs - templateArgCount) actualArgs
+          appliedHead <- applyOverlapTypeHead headTy headArgs
+          subst' <- bindOverlapMeta meta appliedHead subst
+          unifyOverlapLists subst' templateArgs matchedArgs
+
+bindOverlapMeta :: OverlapMeta -> OverlapType -> OverlapSubstitution -> Maybe OverlapSubstitution
+bindOverlapMeta meta ty subst =
+  case Map.lookup meta subst of
+    Just existing -> unifyOverlapTypes subst existing ty
+    Nothing
+      | ty == OverlapMetaVar meta -> Just subst
+      | overlapMetaOccurs meta ty -> Nothing
+      | otherwise -> Just (Map.insert meta ty subst)
+
+applyOverlapSubstitution :: OverlapSubstitution -> OverlapType -> OverlapType
+applyOverlapSubstitution subst ty =
+  case ty of
+    OverlapMetaVar meta ->
+      maybe ty (applyOverlapSubstitution subst) (Map.lookup meta subst)
+    OverlapRigidVar {} -> ty
+    OverlapArrow dom cod ->
+      OverlapArrow (applyOverlapSubstitution subst dom) (applyOverlapSubstitution subst cod)
+    OverlapHead {} -> ty
+    OverlapCon identity args ->
+      OverlapCon identity (fmap (applyOverlapSubstitution subst) args)
+    OverlapMetaApp meta args ->
+      let args' = fmap (applyOverlapSubstitution subst) args
+       in case Map.lookup meta subst >>= (\replacement -> applyOverlapTypeHead (applyOverlapSubstitution subst replacement) (NE.toList args')) of
+            Just replacement -> replacement
+            Nothing -> OverlapMetaApp meta args'
+    OverlapRigidApp index0 args ->
+      OverlapRigidApp index0 (fmap (applyOverlapSubstitution subst) args)
+    OverlapTyLam body ->
+      OverlapTyLam (applyOverlapSubstitution subst body)
+    OverlapTyApp fun arg ->
+      OverlapTyApp (applyOverlapSubstitution subst fun) (applyOverlapSubstitution subst arg)
+    OverlapForall mbBound body ->
+      OverlapForall
+        (applyOverlapSubstitution subst <$> mbBound)
+        (applyOverlapSubstitution subst body)
+    OverlapMu body ->
+      OverlapMu (applyOverlapSubstitution subst body)
+    OverlapBottom ->
+      OverlapBottom
+
+applyOverlapTypeHead :: OverlapType -> [OverlapType] -> Maybe OverlapType
+applyOverlapTypeHead headTy args =
+  case headTy of
+    OverlapMetaVar meta -> Just (mkMetaHead meta args)
+    OverlapRigidVar index0 -> Just (mkRigidHead index0 args)
+    OverlapHead identity -> Just (mkGlobalHead identity args)
+    OverlapCon identity existing -> Just (mkGlobalHead identity (NE.toList existing ++ args))
+    OverlapMetaApp meta existing -> Just (mkMetaHead meta (NE.toList existing ++ args))
+    OverlapRigidApp index0 existing -> Just (mkRigidHead index0 (NE.toList existing ++ args))
+    _ -> Nothing
+  where
+    mkMetaHead meta0 [] = OverlapMetaVar meta0
+    mkMetaHead meta0 (arg : rest) = OverlapMetaApp meta0 (arg :| rest)
+    mkRigidHead index0 [] = OverlapRigidVar index0
+    mkRigidHead index0 (arg : rest) = OverlapRigidApp index0 (arg :| rest)
+    mkGlobalHead identity [] = OverlapHead identity
+    mkGlobalHead identity (arg : rest) = OverlapCon identity (arg :| rest)
+
+overlapMetaOccurs :: OverlapMeta -> OverlapType -> Bool
+overlapMetaOccurs needle ty =
+  case ty of
+    OverlapMetaVar meta -> meta == needle
+    OverlapRigidVar {} -> False
+    OverlapArrow dom cod -> overlapMetaOccurs needle dom || overlapMetaOccurs needle cod
+    OverlapHead {} -> False
+    OverlapCon _ args -> any (overlapMetaOccurs needle) args
+    OverlapMetaApp meta args -> meta == needle || any (overlapMetaOccurs needle) args
+    OverlapRigidApp _ args -> any (overlapMetaOccurs needle) args
+    OverlapTyLam body -> overlapMetaOccurs needle body
+    OverlapTyApp fun arg -> overlapMetaOccurs needle fun || overlapMetaOccurs needle arg
+    OverlapForall mbBound body -> maybe False (overlapMetaOccurs needle) mbBound || overlapMetaOccurs needle body
+    OverlapMu body -> overlapMetaOccurs needle body
+    OverlapBottom -> False
 
 -- Scope ----------------------------------------------------------------------
 
@@ -573,7 +807,9 @@ checkedProgramFromCheckedModules resolved modulesChecked = do
       [] -> throwError ProgramMainNotFound
       [binding] -> pure binding
       bindings -> throwError (ProgramMultipleMainDefinitions (map checkedBindingName bindings))
-  pure (checkedProgramFromModules resolved modulesChecked (checkedBindingResolvedVar mainBinding))
+  let checked = checkedProgramFromModules resolved modulesChecked (checkedBindingResolvedVar mainBinding)
+  liftEither (validateCheckedProgramTypeViews checked)
+  pure checked
 
 checkLocatedProgram :: P.LocatedProgram -> Either ProgramDiagnostic CheckedProgram
 checkLocatedProgram located =
@@ -682,6 +918,182 @@ checkedProgramFromModules resolved modulesChecked mainResolved =
       checkedProgramMainResolvedVar = mainResolved,
       checkedProgramResolved = resolved
     }
+
+validateCheckedProgramTypeViews :: CheckedProgram -> Either ProgramError ()
+validateCheckedProgramTypeViews checked = do
+  mapM_ validateOne (concatMap checkedModuleTypeViews (checkedProgramModules checked))
+  mapM_ validateElabOne (checkedProgramElabTypeGaps checked)
+  where
+    validateOne :: (String, TypeView) -> Either ProgramError ()
+    validateOne (owner, view) =
+      case typeViewIdentityGaps view of
+        [] -> pure ()
+        gaps ->
+          Left
+            ( ProgramPipelineError
+                ("checked TypeView for " ++ owner ++ " is identity-incomplete: " ++ show gaps)
+            )
+
+    validateElabOne :: (String, [ElabTypeIdentityGap]) -> Either ProgramError ()
+    validateElabOne (_, []) = pure ()
+    validateElabOne (owner, gaps) =
+      Left
+        ( ProgramPipelineError
+            ("checked ElabType for " ++ owner ++ " is identity-incomplete: " ++ show gaps)
+        )
+
+checkedProgramElabTypeGaps :: CheckedProgram -> [(String, [ElabTypeIdentityGap])]
+checkedProgramElabTypeGaps checked =
+  ( "program main reference",
+    elabTypeIdentityGaps (resolvedVarType (checkedProgramMainResolvedVar checked))
+  )
+    : concatMap checkedModuleElabTypeGaps (checkedProgramModules checked)
+
+checkedModuleElabTypeGaps :: CheckedModule -> [(String, [ElabTypeIdentityGap])]
+checkedModuleElabTypeGaps =
+  concatMap checkedBindingElabTypeGaps . checkedModuleBindings
+
+checkedBindingElabTypeGaps :: CheckedBinding -> [(String, [ElabTypeIdentityGap])]
+checkedBindingElabTypeGaps binding =
+  [ (owner ++ " reference", elabTypeIdentityGaps (resolvedVarType (checkedBindingResolvedVar binding))),
+    (owner ++ " result", elabTypeIdentityGaps (checkedBindingType binding)),
+    (owner ++ " term", xmlfTermTypeIdentityGaps (checkedBindingTerm binding))
+  ]
+    ++ concatMap deferredObligationElabTypeGaps (Map.elems (checkedBindingDeferredObligations binding))
+  where
+    owner = "binding `" ++ checkedBindingName binding ++ "`"
+
+deferredObligationElabTypeGaps :: DeferredProgramObligation -> [(String, [ElabTypeIdentityGap])]
+deferredObligationElabTypeGaps obligation =
+  case obligation of
+    DeferredMethod deferred ->
+      maybe [] (evidenceMethodElabTypeGaps "deferred method evidence") (deferredMethodEvidence deferred)
+        ++ concatMap evidenceInfoElabTypeGaps (deferredMethodLocalEvidence deferred)
+    DeferredConstructor {} -> []
+    DeferredCase {} -> []
+
+evidenceMethodElabTypeGaps :: String -> DeferredMethodEvidence -> [(String, [ElabTypeIdentityGap])]
+evidenceMethodElabTypeGaps owner =
+  resolvedEvidenceMethodElabTypeGaps owner . deferredMethodEvidenceMethod
+
+evidenceInfoElabTypeGaps :: EvidenceInfo -> [(String, [ElabTypeIdentityGap])]
+evidenceInfoElabTypeGaps evidence =
+  concatMap
+    (resolvedEvidenceMethodElabTypeGaps "local evidence method")
+    (Map.elems (evidenceMethodsByIdentity evidence))
+
+resolvedEvidenceMethodElabTypeGaps :: String -> EvidenceMethod -> [(String, [ElabTypeIdentityGap])]
+resolvedEvidenceMethodElabTypeGaps owner method =
+  case evidenceMethodResolvedVar method of
+    Nothing -> []
+    Just resolved -> [(owner, elabTypeIdentityGaps (resolvedVarType resolved))]
+
+checkedModuleTypeViews :: CheckedModule -> [(String, TypeView)]
+checkedModuleTypeViews checked =
+  concat
+    [ concatMap checkedBindingTypeViews (checkedModuleBindings checked),
+      concatMap dataInfoTypeViews (Map.elems (checkedModuleData checked)),
+      concatMap classInfoTypeViews (Map.elems (checkedModuleClasses checked)),
+      concatMap instanceInfoTypeViews (checkedModuleInstances checked),
+      moduleExportTypeViews (checkedModuleExports checked)
+    ]
+
+checkedBindingTypeViews :: CheckedBinding -> [(String, TypeView)]
+checkedBindingTypeViews binding =
+  ("binding `" ++ checkedBindingName binding ++ "`", checkedBindingSourceTypeView binding)
+    : concatMap deferredObligationTypeViews (Map.elems (checkedBindingDeferredObligations binding))
+
+constraintInfoTypeViews :: ConstraintInfo -> [(String, TypeView)]
+constraintInfoTypeViews constraint =
+  [ ("constraint `" ++ constraintDisplayClass constraint ++ "`", view)
+  | view <- NE.toList (constraintTypeViews constraint)
+  ]
+
+constructorInfoTypeViews :: ConstructorInfo -> [(String, TypeView)]
+constructorInfoTypeViews ctor =
+  ("constructor `" ++ ctorName ctor ++ "`", ctorTypeView ctor)
+    : [ ("constructor owner shape `" ++ ctorName ctor ++ "`", constructorShapeTypeView shape)
+      | shape <- constructorOwnerShapes ctor
+      ]
+
+dataInfoTypeViews :: DataInfo -> [(String, TypeView)]
+dataInfoTypeViews =
+  concatMap constructorInfoTypeViews . dataConstructors
+
+methodInfoTypeViews :: MethodInfo -> [(String, TypeView)]
+methodInfoTypeViews method =
+  ("method `" ++ methodName method ++ "`", methodTypeViewRaw method)
+    : concatMap constraintInfoTypeViews (methodConstraintInfos method)
+
+classInfoTypeViews :: ClassInfo -> [(String, TypeView)]
+classInfoTypeViews classInfo =
+  concatMap constraintInfoTypeViews (classSuperclassInfos classInfo)
+    ++ concatMap methodInfoTypeViews (Map.elems (classMethodsByIdentity classInfo))
+
+valueInfoTypeViews :: ValueInfo -> [(String, TypeView)]
+valueInfoTypeViews valueInfo =
+  case valueInfo of
+    OrdinaryValue {valueConstraintInfos = constraints} ->
+      ("value `" ++ valueInfoRuntimeName valueInfo ++ "`", ordinaryValueTypeView valueInfo)
+        : concatMap constraintInfoTypeViews constraints
+    ConstructorValue {valueCtorInfo = ctor} ->
+      constructorInfoTypeViews ctor
+    OverloadedMethod {valueMethodInfo = method} ->
+      methodInfoTypeViews method
+
+instanceInfoTypeViews :: InstanceInfo -> [(String, TypeView)]
+instanceInfoTypeViews instanceInfo =
+  [ ("instance head `" ++ instanceClassName instanceInfo ++ "`", view)
+  | view <- NE.toList (instanceHeadTypeViews instanceInfo)
+  ]
+    ++ concatMap constraintInfoTypeViews (instanceConstraintInfos instanceInfo)
+    ++ concatMap valueInfoTypeViews (Map.elems (instanceMethodsByIdentity instanceInfo))
+
+evidenceInfoTypeViews :: EvidenceInfo -> [(String, TypeView)]
+evidenceInfoTypeViews evidence =
+  [("evidence class argument", view) | view <- NE.toList (evidenceTypeViews evidence)]
+    ++ [ ("evidence method", evidenceMethodTypeView method)
+       | method <- Map.elems (evidenceMethodsByIdentity evidence)
+       ]
+
+deferredMethodEvidenceTypeViews :: DeferredMethodEvidence -> [(String, TypeView)]
+deferredMethodEvidenceTypeViews evidence =
+  [("deferred method class argument", view) | view <- NE.toList (deferredMethodEvidenceClassArgs evidence)]
+    ++ [("deferred evidence method", evidenceMethodTypeView (deferredMethodEvidenceMethod evidence))]
+
+deferredObligationTypeViews :: DeferredProgramObligation -> [(String, TypeView)]
+deferredObligationTypeViews obligation =
+  case obligation of
+    DeferredMethod deferred ->
+      methodInfoTypeViews (deferredMethodInfo deferred)
+        ++ maybe [] (\view -> [("deferred method result", view)]) (deferredMethodExpectedResult deferred)
+        ++ maybe [] deferredMethodEvidenceTypeViews (deferredMethodEvidence deferred)
+        ++ concatMap evidenceInfoTypeViews (deferredMethodLocalEvidence deferred)
+    DeferredConstructor deferred ->
+      constructorInfoTypeViews (deferredConstructorInfo deferred)
+        ++ [ ("deferred constructor source", deferredConstructorSourceTypeView deferred),
+             ("deferred constructor occurrence", deferredConstructorOccurrenceTypeView deferred)
+           ]
+        ++ [ ("deferred constructor substitution", view)
+           | view <- typeBinderSubstViews (deferredConstructorInitialSubst deferred)
+           ]
+    DeferredCase deferred ->
+      dataInfoTypeViews (deferredCaseDataInfo deferred)
+        ++ [ ("deferred case scrutinee", deferredCaseScrutineeTypeView deferred),
+             ("deferred case result", deferredCaseResultTypeView deferred)
+           ]
+
+moduleExportTypeViews :: ModuleExports -> [(String, TypeView)]
+moduleExportTypeViews exports =
+  concat
+    [ concatMap valueInfoTypeViews (Map.elems (exportedValuesByIdentity exports)),
+      concatMap exportedTypeInfoViews (Map.elems (exportedTypesByIdentity exports)),
+      concatMap classInfoTypeViews (Map.elems (exportedClassesByIdentity exports))
+    ]
+  where
+    exportedTypeInfoViews info =
+      dataInfoTypeViews (exportedTypeData info)
+        ++ concatMap constructorInfoTypeViews (Map.elems (exportedTypeConstructorsByIdentity info))
 
 validateCheckedPackageInterface :: PackageModuleGraph -> CheckedProgram -> TcM ()
 validateCheckedPackageInterface graph checked =
@@ -1796,7 +2208,7 @@ qualifyModuleExports alias exports =
         [ ( sourceName,
             ConstructorValue
               { valueInfoSymbol = constructorInfoSymbolIdentity dataInfo ctor,
-                valueRuntimeName = ctorRuntimeName ctor,
+                valueRuntimeName = constructorInfoRuntimeName ctor,
                 valueCtorInfo = ctor
               }
           )
@@ -1881,7 +2293,7 @@ qualifyModuleExports alias exports =
           let qualifiedCtorInfo = qualifyConstructorInfo ctorInfo
            in ConstructorValue
                 { valueInfoSymbol = valueInfoSymbolIdentity valueInfo,
-                  valueRuntimeName = valueRuntimeName valueInfo,
+                  valueRuntimeName = valueInfoRuntimeName valueInfo,
                   valueCtorInfo = qualifiedCtorInfo
                 }
 
@@ -2139,7 +2551,7 @@ distinctInstanceHeads = reverse . foldl' add []
 sameInstanceHead :: InstanceInfo -> InstanceInfo -> Bool
 sameInstanceHead left right =
   instanceClassIdentity left == instanceClassIdentity right
-    && instanceHeadIdentityTypes left == instanceHeadIdentityTypes right
+    && instanceHeadTypeViews left == instanceHeadTypeViews right
 
 instanceExportedTypeMentions :: Map SymbolIdentity DataInfo -> InstanceInfo -> Set.Set SymbolIdentity
 instanceExportedTypeMentions dataByIdentity instanceInfo =
@@ -2215,7 +2627,7 @@ applyResolvedImportItem moduleName0 exports scope item =
                   [ ( ctorName ctor,
                       ConstructorValue
                         { valueInfoSymbol = constructorInfoSymbolIdentity dataInfo ctor,
-                          valueRuntimeName = ctorRuntimeName ctor,
+                          valueRuntimeName = constructorInfoRuntimeName ctor,
                           valueCtorInfo = ctor
                         }
                     )
@@ -2358,7 +2770,7 @@ importedHiddenConstructorInfo ctorInfo hiddenDataInfo =
   case find (sameSymbolIdentity (ctorInfoSymbol ctorInfo) . ctorInfoSymbol) (dataConstructors hiddenDataInfo) of
     Just hiddenCtorInfo ->
       hiddenCtorInfo
-        { ctorRuntimeName = ctorRuntimeName ctorInfo
+        { ctorRuntimeName = constructorInfoRuntimeName ctorInfo
         }
     Nothing -> ctorInfo
 
@@ -3165,7 +3577,7 @@ addConstructorValues dataInfos =
       [ ( ctorName ctor,
           ConstructorValue
             { valueInfoSymbol = constructorInfoSymbolIdentity dataInfo ctor,
-              valueRuntimeName = ctorRuntimeName ctor,
+              valueRuntimeName = constructorInfoRuntimeName ctor,
               valueCtorInfo = ctor
             }
         )
@@ -3262,17 +3674,18 @@ synthesizeDerivedInstances moduleIdentity displayEnv scope mod0 = do
             P.dataDeclDeriving = map resolvedSymbolDisplayName (P.dataDeclDeriving dataDecl)
           }
 
-    constructorFieldTypes ctor =
-      fst (splitArrows (snd (splitForalls (P.constructorDeclType ctor))))
-
     validateEqDerivingFields :: ClassInfo -> P.ClassName -> Scope -> P.ResolvedDataDecl -> P.DataDecl -> TcM ()
-    validateEqDerivingFields eqClassInfo eqClassDisplayName validationScope resolvedDataDecl displayDataDecl =
+    validateEqDerivingFields eqClassInfo eqClassDisplayName validationScope resolvedDataDecl displayDataDecl = do
+      paramRefs <- traverse requiredResolvedDataParamRef (P.dataDeclParams resolvedDataDecl)
+      let ownerHeadView =
+            typeViewFromResolved
+              (dataDeclHeadResolvedType (P.dataDeclName resolvedDataDecl) paramRefs)
       mapM_
-        (validateEqDerivingField eqClassInfo eqClassDisplayName validationScope displayDataDecl)
+        (validateEqDerivingField eqClassInfo eqClassDisplayName validationScope displayDataDecl ownerHeadView)
         (concatMap (resolvedConstructorFieldTypes . P.constructorDeclType) (P.dataDeclConstructors resolvedDataDecl))
 
-    validateEqDerivingField :: ClassInfo -> P.ClassName -> Scope -> P.DataDecl -> ResolvedSrcType -> TcM ()
-    validateEqDerivingField eqClassInfo eqClassDisplayName validationScope dataDecl fieldTy = do
+    validateEqDerivingField :: ClassInfo -> P.ClassName -> Scope -> P.DataDecl -> TypeView -> ResolvedSrcType -> TcM ()
+    validateEqDerivingField eqClassInfo eqClassDisplayName validationScope dataDecl ownerHeadView fieldTy = do
       fieldView <- typeViewForDisplayEnv displayEnv fieldTy
       satisfiable <-
         constraintTypeSatisfiable
@@ -3280,7 +3693,8 @@ synthesizeDerivedInstances moduleIdentity displayEnv scope mod0 = do
           eqClassDisplayName
           validationScope
           dataDecl
-          Set.empty
+          ownerHeadView
+          []
           (classInfoSymbolIdentity eqClassInfo)
           eqClassDisplayName
           fieldView
@@ -3288,36 +3702,37 @@ synthesizeDerivedInstances moduleIdentity displayEnv scope mod0 = do
         then pure ()
         else throwError (ProgramDerivingMissingFieldInstance eqClassDisplayName (typeViewDisplay fieldView))
 
-    constraintTypeSatisfiable :: ClassIdentity -> P.ClassName -> Scope -> P.DataDecl -> Set.Set (ClassIdentity, String) -> ClassIdentity -> P.ClassName -> TypeView -> TcM Bool
-    constraintTypeSatisfiable derivedClassIdentity derivedClassName validationScope dataDecl seen classIdentity0 className0 fieldView = do
+    constraintTypeSatisfiable :: ClassIdentity -> P.ClassName -> Scope -> P.DataDecl -> TypeView -> [ClassApplicationKey] -> ClassIdentity -> P.ClassName -> TypeView -> TcM Bool
+    constraintTypeSatisfiable derivedClassIdentity derivedClassName validationScope dataDecl ownerHeadView seen classIdentity0 className0 fieldView = do
       coveredByDerived <-
         if classIdentity0 == derivedClassIdentity
-          then fieldCoveredByDerivedConstraints dataDecl fieldView
+          then fieldCoveredByDerivedConstraints dataDecl ownerHeadView fieldView
           else pure False
       if coveredByDerived
         then pure True
         else
-          if key `Set.member` seen
+          if key `elem` seen
             then pure False
             else
               case resolveInstanceInfoWithIdentityType elaborateScope classIdentity0 className0 fieldView of
                 Right (instanceInfo, subst) -> do
-                  let seen' = Set.insert key seen
+                  let seen' = key : seen
                   allM
-                    (constraintSatisfiable derivedClassIdentity derivedClassName validationScope dataDecl seen' . applyConstraintInfoSubst subst)
+                    (constraintSatisfiable derivedClassIdentity derivedClassName validationScope dataDecl ownerHeadView seen' . applyConstraintInfoSubst subst)
                     (instanceConstraintInfos instanceInfo)
                 Left _ -> pure False
       where
         elaborateScope = scopeToElaborateScope validationScope
-        key = (classIdentity0, show (typeViewIdentity fieldView))
+        key = classApplicationKey classIdentity0 (fieldView :| [])
 
-    constraintSatisfiable :: ClassIdentity -> P.ClassName -> Scope -> P.DataDecl -> Set.Set (ClassIdentity, String) -> ConstraintInfo -> TcM Bool
-    constraintSatisfiable derivedClassIdentity derivedClassName validationScope dataDecl seen constraint =
+    constraintSatisfiable :: ClassIdentity -> P.ClassName -> Scope -> P.DataDecl -> TypeView -> [ClassApplicationKey] -> ConstraintInfo -> TcM Bool
+    constraintSatisfiable derivedClassIdentity derivedClassName validationScope dataDecl ownerHeadView seen constraint =
       constraintTypeSatisfiable
         derivedClassIdentity
         derivedClassName
         validationScope
         dataDecl
+        ownerHeadView
         seen
         (constraintClassSymbol constraint)
         (constraintDisplayClass constraint)
@@ -3330,8 +3745,8 @@ synthesizeDerivedInstances moduleIdentity displayEnv scope mod0 = do
         step False _ = pure False
         step True value = predicate value
 
-    fieldCoveredByDerivedConstraints :: P.DataDecl -> TypeView -> TcM Bool
-    fieldCoveredByDerivedConstraints dataDecl fieldView =
+    fieldCoveredByDerivedConstraints :: P.DataDecl -> TypeView -> TypeView -> TcM Bool
+    fieldCoveredByDerivedConstraints dataDecl ownerHeadView fieldView =
       case (typeViewDisplay fieldView, typeViewIdentity fieldView) of
         (STVar _, STVar identityName) -> do
           case typeViewBinderIdentityForAlias fieldView identityName of
@@ -3340,14 +3755,21 @@ synthesizeDerivedInstances moduleIdentity displayEnv scope mod0 = do
               pure (identity `Set.member` Set.fromList dataParamIdentities)
             Nothing -> pure False
         _ ->
-          pure $
-            isRecursiveOwnerField dataDecl (typeViewDisplay fieldView)
-              || isRecursiveOwnerField dataDecl (typeViewIdentity fieldView)
+          pure (fieldView == ownerHeadView)
 
     dataParamIdentity :: P.TypeParam -> TcM TypeBinderIdentity
     dataParamIdentity param =
       case typeParamBinderIdentity param of
         Just identity -> pure identity
+        Nothing ->
+          throwError $
+            ProgramPipelineError
+              ("resolved data parameter `" ++ P.typeParamName param ++ "` is missing identity")
+
+    requiredResolvedDataParamRef :: P.TypeParam -> TcM ResolvedTypeBinderRef
+    requiredResolvedDataParamRef param =
+      case P.typeParamRef param of
+        Just ref -> pure ref
         Nothing ->
           throwError $
             ProgramPipelineError
@@ -3380,7 +3802,7 @@ synthesizeDerivedInstances moduleIdentity displayEnv scope mod0 = do
     scopeToElaborateScope scope0 =
       mkElaborateScope (scopeValues scope0) (scopeElaborateTypes scope0) (scopeClasses scope0) (scopeInstances scope0)
 
-    mkEqInstance classSymbol _classInfo eqMethodSymbol resolvedDataDecl displayDataDecl = do
+    mkEqInstance classSymbol _classInfo eqMethodSymbol resolvedDataDecl _displayDataDecl = do
       let dataSymbol = P.dataDeclName resolvedDataDecl
           dataName0 = symbolDefiningName (resolvedSymbolIdentity dataSymbol)
           andSymbol = Builtins.builtinValueSymbol "__mlfp_and"
@@ -3409,7 +3831,7 @@ synthesizeDerivedInstances moduleIdentity displayEnv scope mod0 = do
           (nonRecursiveBody, _) =
             deriveEqBody eqMethodSymbol andSymbol headTy ctorEntries leftRef rightRef Nothing deriveGen3
           methodBody =
-            if hasRecursiveOwnerFields displayDataDecl
+            if any (isRecursiveOwnerResolvedField headTy) (concatMap (resolvedConstructorFieldTypes . P.constructorDeclType) (P.dataDeclConstructors resolvedDataDecl))
               then
                 P.ELet
                   selfRef
@@ -3441,9 +3863,6 @@ synthesizeDerivedInstances moduleIdentity displayEnv scope mod0 = do
               throwError $
                 ProgramPipelineError
                   ("resolved data parameter `" ++ P.typeParamName param ++ "` is missing identity")
-
-    hasRecursiveOwnerFields dataDecl =
-      any (isRecursiveOwnerField dataDecl) (concatMap constructorFieldTypes (P.dataDeclConstructors dataDecl))
 
     deriveEqBody eqMethodSymbol andSymbol ownerHeadTy ctorEntries leftRef rightRef mbSelfRef generator0 =
       let (alts, generator1) = deriveCtorAlts generator0 ctorEntries
@@ -3498,21 +3917,13 @@ synthesizeDerivedInstances moduleIdentity displayEnv scope mod0 = do
                   (refs, generator2) = freshLocalRefs rest generator1
                in (ref : refs, generator2)
 
-    isRecursiveOwnerField dataDecl argTy =
-      argTy == dataDeclHeadType dataDecl
-
-    dataDeclHeadType dataDecl =
-      case P.typeParamNames (P.dataDeclParams dataDecl) of
-        [] -> STBase (P.dataDeclName dataDecl)
-        param0 : paramsRest -> STCon (P.dataDeclName dataDecl) (STVar param0 :| map STVar paramsRest)
-
     dataDeclHeadResolvedType dataSymbol paramRefs =
       case paramRefs of
         [] -> RSTBase dataSymbol
         param0 : paramsRest -> RSTCon dataSymbol (RSTVar param0 :| map RSTVar paramsRest)
 
     isRecursiveOwnerResolvedField ownerHeadTy argTy =
-      typeViewIdentity (typeViewFromResolved argTy) == typeViewIdentity (typeViewFromResolved ownerHeadTy)
+      typeViewFromResolved argTy == typeViewFromResolved ownerHeadTy
 
     resolvedConstructorFieldTypes ty =
       fst (splitResolvedArrows (stripResolvedForalls ty))
@@ -3753,29 +4164,17 @@ buildInstanceSkeletons moduleIdentity generator0 displayEnv scope mod0 derived =
         Nothing -> False
 
     unifyTaggedProjectionViews leftDeterminers rightDeterminers leftDetermined rightDetermined = do
-      let headIdentities =
-            mergeTypeViewHeadIdentities
-              ( NE.toList leftDeterminers
-                  ++ NE.toList rightDeterminers
-                  ++ NE.toList leftDetermined
-                  ++ NE.toList rightDetermined
-              )
-          (leftEnv, taggedLeftDeterminers) =
-            tagTypeList "__fundep_left__" Map.empty (map typeViewIdentity (NE.toList leftDeterminers))
-          (rightEnv, taggedRightDeterminers) =
-            tagTypeList "__fundep_right__" Map.empty (map typeViewIdentity (NE.toList rightDeterminers))
-          (_, taggedLeftDetermined) =
-            tagTypeList "__fundep_left__" leftEnv (map typeViewIdentity (NE.toList leftDetermined))
-          (_, taggedRightDetermined) =
-            tagTypeList "__fundep_right__" rightEnv (map typeViewIdentity (NE.toList rightDetermined))
-      determinerSubst <- unifyProjectionTypes headIdentities Map.empty taggedLeftDeterminers taggedRightDeterminers
-      case unifyProjectionTypes headIdentities determinerSubst taggedLeftDetermined taggedRightDetermined of
+      leftDeterminerTypes <- traverse (overlapTypeView OverlapLeft) (NE.toList leftDeterminers)
+      rightDeterminerTypes <- traverse (overlapTypeView OverlapRight) (NE.toList rightDeterminers)
+      leftDeterminedTypes <- traverse (overlapTypeView OverlapLeft) (NE.toList leftDetermined)
+      rightDeterminedTypes <- traverse (overlapTypeView OverlapRight) (NE.toList rightDetermined)
+      determinerSubst <- unifyProjectionTypes Map.empty leftDeterminerTypes rightDeterminerTypes
+      case unifyProjectionTypes determinerSubst leftDeterminedTypes rightDeterminedTypes of
         Just _ -> Just True
         Nothing -> Just False
 
-    unifyProjectionTypes headIdentities subst left right
-      | length left /= length right = Nothing
-      | otherwise = foldM (\acc (leftTy, rightTy) -> unifyOverlap headIdentities acc leftTy rightTy) subst (zip left right)
+    unifyProjectionTypes =
+      unifyOverlapLists
 
     freeProjectedTypeBinderIdentities :: NonEmpty Int -> NonEmpty TypeView -> TcM (Set.Set TypeBinderIdentity)
     freeProjectedTypeBinderIdentities indices views =
@@ -3820,7 +4219,7 @@ buildInstanceSkeletons moduleIdentity generator0 displayEnv scope mod0 derived =
         | (ix, left) <- zip [(0 :: Int) ..] infos,
           right <- drop (ix + 1) infos,
           sameInstanceClass left right,
-          instanceHeadIdentityTypes left /= instanceHeadIdentityTypes right,
+          instanceHeadTypeViews left /= instanceHeadTypeViews right,
           instanceHeadViewsOverlap (instanceHeadTypeViews left) (instanceHeadTypeViews right)
       ]
 
@@ -3843,7 +4242,7 @@ buildInstanceSkeletons moduleIdentity generator0 displayEnv scope mod0 derived =
         | local <- infos,
           existing <- scopeInstances scope,
           sameInstanceClass local existing,
-          instanceHeadIdentityTypes local /= instanceHeadIdentityTypes existing,
+          instanceHeadTypeViews local /= instanceHeadTypeViews existing,
           instanceHeadViewsOverlap (instanceHeadTypeViews local) (instanceHeadTypeViews existing)
       ]
 
@@ -3852,229 +4251,17 @@ buildInstanceSkeletons moduleIdentity generator0 displayEnv scope mod0 derived =
 
     sameCanonicalInstanceHead left right =
       sameInstanceClass left right
-        && instanceHeadIdentityTypes left == instanceHeadIdentityTypes right
+        && instanceHeadTypeViews left == instanceHeadTypeViews right
 
     instanceHeadViewsOverlap left right =
       NE.length left == NE.length right
-        && case
-          foldM
-            ( \(subst, ix) (leftView, rightView) -> do
-                subst' <-
-                  unifyOverlap
-                    overlapHeadIdentities
-                    subst
-                    (tagTypeVars ("__overlap_left" ++ show ix ++ "__") (typeViewIdentity leftView))
-                    (tagTypeVars ("__overlap_right" ++ show ix ++ "__") (typeViewIdentity rightView))
-                pure (subst', ix + 1)
-            )
-            (Map.empty, 0 :: Int)
-            (zip (NE.toList left) (NE.toList right))
+        && case do
+          leftTypes <- traverse (overlapTypeView OverlapLeft) (NE.toList left)
+          rightTypes <- traverse (overlapTypeView OverlapRight) (NE.toList right)
+          unifyOverlapLists Map.empty leftTypes rightTypes
         of
           Just _ -> True
           Nothing -> False
-      where
-        overlapHeadIdentities =
-          mergeTypeViewHeadIdentities (NE.toList left ++ NE.toList right)
-
-    mergeTypeViewHeadIdentities views =
-      mergeSymbolIdentityMaps
-        [ Map.singleton name identity
-        | view <- views,
-          (name, identity) <- typeViewHeadIdentityAliases view
-        ]
-
-    typeViewHeadIdentityAliases view =
-      Map.toList $
-        symbolIdentityAliasMapWith
-          [(identity, [name]) | (name, identity) <- Map.toList (typeViewHeadIdentities view)]
-
-    unifyOverlap headIdentities subst left right =
-      case (applyOverlapSubst subst left, applyOverlapSubst subst right) of
-        (STVar name, ty) -> bindOverlap headIdentities name ty subst
-        (ty, STVar name) -> bindOverlap headIdentities name ty subst
-        (STBase leftName, STBase rightName)
-          | sameOverlapHead headIdentities leftName rightName -> Just subst
-        (STCon leftName leftArgs, STCon rightName rightArgs)
-          | sameOverlapHead headIdentities leftName rightName && NE.length leftArgs == NE.length rightArgs ->
-              foldM
-                (\acc (leftTy, rightTy) -> unifyOverlap headIdentities acc leftTy rightTy)
-                subst
-                (zip (NE.toList leftArgs) (NE.toList rightArgs))
-        (STTyLam leftName leftBody, STTyLam rightName rightBody)
-          | leftName == rightName -> unifyOverlap headIdentities subst leftBody rightBody
-        (STTyApp leftFun leftArg, STTyApp rightFun rightArg) -> do
-          subst' <- unifyOverlap headIdentities subst leftFun rightFun
-          unifyOverlap headIdentities subst' leftArg rightArg
-        (STVarApp leftName leftArgs, rightTy) ->
-          unifyOverlapTypeHead headIdentities subst leftName (NE.toList leftArgs) rightTy
-        (leftTy, STVarApp rightName rightArgs) ->
-          unifyOverlapTypeHead headIdentities subst rightName (NE.toList rightArgs) leftTy
-        (STArrow leftDom leftCod, STArrow rightDom rightCod) -> do
-          subst' <- unifyOverlap headIdentities subst leftDom rightDom
-          unifyOverlap headIdentities subst' leftCod rightCod
-        _ -> Nothing
-
-    sameOverlapHead headIdentities leftName rightName =
-      let leftIdentities = overlapHeadSymbolIdentities headIdentities leftName
-          rightIdentities = overlapHeadSymbolIdentities headIdentities rightName
-       in not (Set.null (Set.intersection leftIdentities rightIdentities))
-
-    overlapHeadSymbolIdentities headIdentities name =
-      case lookupSymbolIdentityAlias headIdentities name of
-        Just identity -> Set.singleton identity
-        Nothing -> Set.empty
-
-    unifyOverlapTypeHead headIdentities subst name templateArgs actual =
-      case actual of
-        STCon actualName actualArgs ->
-          matchAppliedHead (STBase actualName) (NE.toList actualArgs)
-        STVarApp actualName actualArgs ->
-          matchAppliedHead (STVar actualName) (NE.toList actualArgs)
-        _ -> Nothing
-      where
-        templateArgCount = length templateArgs
-
-        matchAppliedHead headTy actualArgs
-          | length actualArgs < templateArgCount = Nothing
-          | otherwise = do
-              let (headArgs, matchedArgs) = splitAt (length actualArgs - templateArgCount) actualArgs
-              appliedHead <- applyTypeHead headTy headArgs
-              subst' <- bindOverlap headIdentities name appliedHead subst
-              foldM
-                (\acc (templateTy, actualTy) -> unifyOverlap headIdentities acc templateTy actualTy)
-                subst'
-                (zip templateArgs matchedArgs)
-
-    bindOverlap headIdentities name ty subst =
-      case Map.lookup name subst of
-        Just existing -> unifyOverlap headIdentities subst existing ty
-        Nothing
-          | ty == STVar name -> Just subst
-          | name `Set.member` freeTypeVarsInType ty -> Nothing
-          | otherwise -> Just (Map.insert name ty subst)
-
-    applyOverlapSubst subst ty =
-      case ty of
-        STVar name ->
-          case Map.lookup name subst of
-            Just replacement -> applyOverlapSubst subst replacement
-            Nothing -> ty
-        STArrow dom cod -> STArrow (applyOverlapSubst subst dom) (applyOverlapSubst subst cod)
-        STCon name args -> STCon name (fmap (applyOverlapSubst subst) args)
-        STVarApp name args ->
-          let args' = fmap (applyOverlapSubst subst) args
-           in case Map.lookup name subst >>= \replacement -> applyTypeHead replacement (NE.toList args') of
-                Just replacementTy -> replacementTy
-                Nothing -> STVarApp name args'
-        STTyLam name body ->
-          STTyLam name (applyOverlapSubst (Map.delete name subst) body)
-        STTyApp fun arg -> STTyApp (applyOverlapSubst subst fun) (applyOverlapSubst subst arg)
-        STForall name mb body ->
-          let subst' = Map.delete name subst
-           in STForall name (fmap (SrcBound . applyOverlapSubst subst' . unSrcBound) mb) (applyOverlapSubst subst' body)
-        STMu name body -> STMu name (applyOverlapSubst subst body)
-        STBase {} -> ty
-        STBottom -> STBottom
-
-    tagTypeVars prefix = go Map.empty
-      where
-        go env ty =
-          case ty of
-            STVar name -> STVar (Map.findWithDefault (prefix ++ name) name env)
-            STArrow dom cod -> STArrow (go env dom) (go env cod)
-            STCon name args -> STCon name (fmap (go env) args)
-            STVarApp name args -> STVarApp (Map.findWithDefault (prefix ++ name) name env) (fmap (go env) args)
-            STTyLam name body ->
-              let tagged = prefix ++ name
-               in STTyLam tagged (go (Map.insert name tagged env) body)
-            STTyApp fun arg -> STTyApp (go env fun) (go env arg)
-            STForall name mb body ->
-              let tagged = prefix ++ name
-                  env' = Map.insert name tagged env
-               in STForall tagged (fmap (SrcBound . go env . unSrcBound) mb) (go env' body)
-            STMu name body ->
-              let tagged = prefix ++ name
-               in STMu tagged (go (Map.insert name tagged env) body)
-            STBase {} -> ty
-            STBottom -> STBottom
-
-    tagTypeList prefix env0 tys =
-      foldl step (env0, []) tys
-      where
-        step (env, acc) ty =
-          let (env', ty') = tagTypeWithEnv prefix env ty
-           in (env', acc ++ [ty'])
-
-    tagTypeWithEnv prefix env ty =
-      case ty of
-        STVar name ->
-          let (env', tagged) = lookupOrTag prefix env name
-           in (env', STVar tagged)
-        STArrow dom cod ->
-          let (env1, dom') = tagTypeWithEnv prefix env dom
-              (env2, cod') = tagTypeWithEnv prefix env1 cod
-           in (env2, STArrow dom' cod')
-        STCon name args ->
-          let (env', args') = tagTypeList prefix env (NE.toList args)
-           in (env', STCon name (NE.fromList args'))
-        STVarApp name args ->
-          let (env1, tagged) = lookupOrTag prefix env name
-              (env2, args') = tagTypeList prefix env1 (NE.toList args)
-           in (env2, STVarApp tagged (NE.fromList args'))
-        STTyLam name body ->
-          let tagged = prefix ++ name
-              previous = Map.lookup name env
-              (env', body') = tagTypeWithEnv prefix (Map.insert name tagged env) body
-           in (restoreTagBinding name previous env', STTyLam tagged body')
-        STTyApp fun arg ->
-          let (env1, fun') = tagTypeWithEnv prefix env fun
-              (env2, arg') = tagTypeWithEnv prefix env1 arg
-           in (env2, STTyApp fun' arg')
-        STForall name mb body ->
-          let tagged = prefix ++ name
-              previous = Map.lookup name env
-              (env1, mb') = tagMaybeBound env mb
-              (env2, body') = tagTypeWithEnv prefix (Map.insert name tagged env1) body
-           in (restoreTagBinding name previous env2, STForall tagged mb' body')
-          where
-            tagMaybeBound envBound Nothing = (envBound, Nothing)
-            tagMaybeBound envBound (Just bound) =
-              let (env', bound') = tagTypeWithEnv prefix envBound (unSrcBound bound)
-               in (env', Just (SrcBound bound'))
-        STMu name body ->
-          let tagged = prefix ++ name
-              previous = Map.lookup name env
-              (env', body') = tagTypeWithEnv prefix (Map.insert name tagged env) body
-           in (restoreTagBinding name previous env', STMu tagged body')
-        STBase {} -> (env, ty)
-        STBottom -> (env, STBottom)
-
-    lookupOrTag prefix env name =
-      case Map.lookup name env of
-        Just tagged -> (env, tagged)
-        Nothing ->
-          let tagged = prefix ++ name
-           in (Map.insert name tagged env, tagged)
-
-    restoreTagBinding name previous env =
-      case previous of
-        Just tagged -> Map.insert name tagged env
-        Nothing -> Map.delete name env
-
-    freeTypeVarsInType ty =
-      case ty of
-        STVar name -> Set.singleton name
-        STArrow dom cod -> freeTypeVarsInType dom `Set.union` freeTypeVarsInType cod
-        STCon _ args -> foldMap freeTypeVarsInType args
-        STVarApp name args -> Set.insert name (foldMap freeTypeVarsInType args)
-        STTyLam name body -> Set.delete name (freeTypeVarsInType body)
-        STTyApp fun arg -> freeTypeVarsInType fun `Set.union` freeTypeVarsInType arg
-        STForall name mb body ->
-          maybe Set.empty (freeTypeVarsInType . unSrcBound) mb
-            `Set.union` Set.delete name (freeTypeVarsInType body)
-        STMu name body -> Set.delete name (freeTypeVarsInType body)
-        STBase {} -> Set.empty
-        STBottom -> Set.empty
 
     substituteConstraintTypes paramNames headTys constraint =
       constraint
@@ -4203,7 +4390,7 @@ collectResolvedExportValue localValues localClasses localData acc = \case
               [ ( ctorName ctor,
                   ConstructorValue
                     { valueInfoSymbol = constructorInfoSymbolIdentity dataInfo ctor,
-                      valueRuntimeName = ctorRuntimeName ctor,
+                      valueRuntimeName = constructorInfoRuntimeName ctor,
                       valueCtorInfo = ctor
                     }
                 )

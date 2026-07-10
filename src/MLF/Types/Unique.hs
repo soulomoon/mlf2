@@ -5,6 +5,7 @@ module MLF.Types.Unique
     initialIdentityGenerator,
     identityGeneratorAfter,
     advanceIdentityGeneratorPast,
+    advanceIdentityGeneratorPastMany,
     freshIdentity,
   )
 where
@@ -33,6 +34,10 @@ identityGeneratorAfter identities =
 advanceIdentityGeneratorPast :: UniqueIdentity -> IdentityGenerator -> IdentityGenerator
 advanceIdentityGeneratorPast (UniqueIdentity used) (IdentityGenerator next) =
   IdentityGenerator (max next (used + 1))
+
+advanceIdentityGeneratorPastMany :: [UniqueIdentity] -> IdentityGenerator -> IdentityGenerator
+advanceIdentityGeneratorPastMany identities generator =
+  foldr advanceIdentityGeneratorPast generator identities
 
 freshIdentity :: IdentityGenerator -> (UniqueIdentity, IdentityGenerator)
 freshIdentity (IdentityGenerator next) =

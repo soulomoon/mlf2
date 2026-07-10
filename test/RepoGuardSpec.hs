@@ -21,14 +21,14 @@ spec = describe "Repository guardrails" $ do
 
   it "legacy MyLib surface is removed" $ do
     doesFileExist "src-public/MyLib.hs" >>= (`shouldBe` False)
-    cabalSrc <- readFile "mlf2.cabal"
+    cabalSrc <- readFileStrict "mlf2.cabal"
     countModuleEntries "MyLib" cabalSrc `shouldBe` 0
     offenders <- findImportOffenders ["MyLib"] ["src", "src-public", "test", "app"]
     offenders `shouldBe` []
 
   it "legacy MLF.Program compatibility shim is removed" $ do
     doesFileExist "src-public/MLF/Program.hs" >>= (`shouldBe` False)
-    cabalSrc <- readFile "mlf2.cabal"
+    cabalSrc <- readFileStrict "mlf2.cabal"
     countModuleEntries "MLF.Program" cabalSrc `shouldBe` 0
     offenders <- findImportOffenders ["MLF.Program"] ["src", "src-public", "test", "app"]
     offenders `shouldBe` []
@@ -42,7 +42,7 @@ spec = describe "Repository guardrails" $ do
     offenders `shouldBe` []
 
   it "split child modules stay implementation-only in Cabal" $ do
-    cabalSrc <- readFile "mlf2.cabal"
+    cabalSrc <- readFileStrict "mlf2.cabal"
     let publicLibrarySrc = extractPublicLibraryStanza cabalSrc
         publicLibraryModules = listedModules publicLibrarySrc
     forM_ splitChildModules $ \moduleName -> do
@@ -50,7 +50,7 @@ spec = describe "Repository guardrails" $ do
       publicLibraryModules `shouldSatisfy` notElem moduleName
 
   it "backend implementation modules stay out of the public library" $ do
-    cabalSrc <- readFile "mlf2.cabal"
+    cabalSrc <- readFileStrict "mlf2.cabal"
     let publicLibraryModules = listedModules (extractPublicLibraryStanza cabalSrc)
     publicLibraryModules `shouldSatisfy` all (not . hasModulePrefix "MLF.Backend.")
     publicLibraryModules `shouldSatisfy` all (not . hasModulePrefix "LowerableBackend.")
@@ -76,7 +76,7 @@ discoverMainEntrySpecModules root = do
 
 discoverCabalSpecModules :: IO [String]
 discoverCabalSpecModules = do
-  src <- lines <$> readFile "mlf2.cabal"
+  src <- lines <$> readFileStrict "mlf2.cabal"
   pure
     [ moduleName
     | line <- src,
@@ -86,7 +86,7 @@ discoverCabalSpecModules = do
 
 discoverMainImports :: IO [String]
 discoverMainImports = do
-  src <- lines <$> readFile "test/Main.hs"
+  src <- lines <$> readFileStrict "test/Main.hs"
   pure
     [ moduleName
     | line <- src,
@@ -108,7 +108,7 @@ discoverMainImports = do
 
 discoverMainCalls :: IO [String]
 discoverMainCalls = do
-  src <- lines <$> readFile "test/Main.hs"
+  src <- lines <$> readFileStrict "test/Main.hs"
   pure
     [ moduleName
     | line <- src,
@@ -130,7 +130,7 @@ findImportOffenders moduleNames roots = do
   pure [path | (path, True) <- offenders]
   where
     hasTargetImport path = do
-      src <- readFile path
+      src <- readFileStrict path
       pure (path, any (`elem` moduleNames) (importedModules src))
 
 findConstraintBoundaryImportOffenders :: IO [String]
@@ -138,7 +138,7 @@ findConstraintBoundaryImportOffenders = do
   hsFiles <- concat <$> mapM collectHsFiles ["src", "src-public", "app"]
   fmap sort . fmap concat $
     forM hsFiles $ \path -> do
-      src <- readFile path
+      src <- readFileStrict path
       pure
         [ path ++ " imports " ++ moduleName
         | moduleName <- importedModules src,
@@ -179,7 +179,7 @@ findFinalizeInternalImportOffenders = do
   hsFiles <- concat <$> mapM collectHsFiles ["src", "src-public", "app", "test"]
   fmap sort . fmap concat $
     forM hsFiles $ \path -> do
-      src <- readFile path
+      src <- readFileStrict path
       pure
         [ path ++ " imports MLF.Constraint.Finalize.Internal"
         | moduleName <- importedModules src,
@@ -213,6 +213,11 @@ stripLineComment :: String -> String
 stripLineComment [] = []
 stripLineComment ('-' : '-' : _) = []
 stripLineComment (c : cs) = c : stripLineComment cs
+
+readFileStrict :: FilePath -> IO String
+readFileStrict path = do
+  src <- readFile path
+  length src `seq` pure src
 
 isPrefixOfToken :: String -> String -> Bool
 isPrefixOfToken prefix token =

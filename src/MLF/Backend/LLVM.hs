@@ -19,7 +19,7 @@ import MLF.Backend.Convert
     convertCheckedProgram,
     renderBackendConversionError,
   )
-import MLF.Backend.IR (BackendProgram)
+import MLF.Backend.IR (ProductionBackendProgram)
 import qualified MLF.Backend.LLVM.Lower as Lower
 import MLF.Backend.LLVM.Ppr (renderLLVMModule)
 import MLF.Frontend.Program.Types (CheckedProgram)
@@ -34,11 +34,11 @@ renderCheckedProgramNativeLLVM checked =
   first BackendLLVMConversionFailed (convertCheckedProgram checked)
     >>= renderBackendProgramNativeLLVM
 
-renderBackendProgramLLVM :: BackendProgram -> Either BackendLLVMError String
+renderBackendProgramLLVM :: ProductionBackendProgram -> Either BackendLLVMError String
 renderBackendProgramLLVM program =
   first BackendLLVMLoweringFailed (renderLLVMModule <$> Lower.lowerBackendProgram program)
 
-renderBackendProgramNativeLLVM :: BackendProgram -> Either BackendLLVMError String
+renderBackendProgramNativeLLVM :: ProductionBackendProgram -> Either BackendLLVMError String
 renderBackendProgramNativeLLVM program =
   first BackendLLVMLoweringFailed (renderLLVMModule <$> Lower.lowerBackendProgramNative program)
 

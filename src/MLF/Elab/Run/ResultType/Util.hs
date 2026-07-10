@@ -117,7 +117,7 @@ resultTypeRoots canonical sourceConstraint baseConstraint annCanon ann =
     isLetEdge (EdgeId edgeId) = IntSet.member edgeId letEdges
 
     peelCanonical ann0 = case ann0 of
-      ALet _ _ _ _ _ _ bodyAnn nid ->
+      ALet _ _ _ _ _ _ _ bodyAnn nid ->
         case bodyAnn of
           AAnn inner target eid
             | canonical target == canonical nid
@@ -137,7 +137,7 @@ resultTypeRoots canonical sourceConstraint baseConstraint annCanon ann =
       _ -> ann0
 
     peelPreCanonical ann0 = case ann0 of
-      ALet _ _ _ _ _ _ bodyAnn nid ->
+      ALet _ _ _ _ _ _ _ bodyAnn nid ->
         case bodyAnn of
           AAnn inner target eid
             | target == nid
@@ -228,11 +228,12 @@ stripAnn ann0 = case ann0 of
 collectEdges :: AnnExpr -> [EdgeId]
 collectEdges ann0 = case ann0 of
   AVar _ _ -> []
+  AResolvedVar _ _ _ -> []
   ALit _ _ -> []
-  ALam _ _ _ body _ -> collectEdges body
+  ALam _ _ _ _ body _ -> collectEdges body
   AApp f a funEid argEid _ ->
     funEid : argEid : collectEdges f ++ collectEdges a
-  ALet _ _ _ _ _ rhs body _ ->
+  ALet _ _ _ _ _ _ rhs body _ ->
     collectEdges rhs ++ collectEdges body
   AAnn inner _ eid -> eid : collectEdges inner
   AUnfold inner _ eid -> eid : collectEdges inner

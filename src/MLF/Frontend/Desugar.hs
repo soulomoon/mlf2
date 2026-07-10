@@ -50,6 +50,21 @@ desugarSurface = cata alg
       ELamSurfaceF v body -> ELam v body
       EAppSurfaceF fun arg -> EApp fun arg
       ELetSurfaceF v rhs body -> ELet v rhs body
+      EBinderIdentitySurfaceF details inner ->
+        EBinderIdentity details (resolveAnnotatedBinderMediator details inner)
       ELamAnnSurfaceF v ty body ->
         ELam v (ELet v (EApp (ECoerceConst ty) (EVar v)) body)
       EAnnSurfaceF expr0 ty -> EApp (ECoerceConst ty) expr0
+
+    -- The variable introduced on the RHS of annotated-lambda sugar refers to
+    -- the resolved lambda binder. It is generated after resolution, so attach
+    -- the same identity explicitly instead of reintroducing a name lookup.
+    resolveAnnotatedBinderMediator details inner =
+      case inner of
+        ELam param (ELet mediator (EApp (coerce@ECoerceConst {}) (EVar occurrence)) body)
+          | param == mediator,
+            mediator == occurrence ->
+              ELam
+                param
+                (ELet mediator (EApp coerce (EBinderIdentity details (EVar occurrence))) body)
+        _ -> inner

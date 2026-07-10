@@ -19,6 +19,7 @@ import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), symbolIdentity
 import qualified MLF.Primitive.Identity as PrimitiveIdentity
 import MLF.Reify.TypeOps
   ( alphaEqType,
+    alphaEqTypeMetadataLight,
     firstNonContractiveRecursiveType,
     freeTypeVarRefsList,
     freeTypeVarRefsFrom,
@@ -47,6 +48,7 @@ import MLF.Types.Elab
     typeBinderRefFromIdentity,
     typeBinderRefIdentity,
     typeBinderRefName,
+    typeHeadRefMatches,
   )
 import MLF.Types.Identity (UniqueIdentity (..), typeBinderIdentityStableName)
 import Test.Hspec
@@ -419,6 +421,14 @@ spec = describe "MLF.Reify.TypeOps" $ do
       let identityHead = TBaseWithIdentity (Just (typeIdentity 991806)) (BaseTy "Token")
           nameOnlyHead = TBaseWithIdentity Nothing (BaseTy "Token")
        in alphaEqType identityHead nameOnlyHead `shouldBe` False
+
+    it "keeps production type equality identity-only" $ do
+      typeHeadRefMatches Nothing (BaseTy "Token") Nothing (BaseTy "Token")
+        `shouldBe` False
+      alphaEqType (TBaseWithIdentity Nothing (BaseTy "Token")) (TBaseWithIdentity Nothing (BaseTy "Token"))
+        `shouldBe` False
+      alphaEqTypeMetadataLight (TBaseWithIdentity Nothing (BaseTy "Token")) (TBaseWithIdentity Nothing (BaseTy "Token"))
+        `shouldBe` True
 
     it "recognises alpha-equivalent bound variables by binder position" $
       let refA = typeRef 43 "a"

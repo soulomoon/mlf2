@@ -294,11 +294,13 @@ collectVarNodes name = go
   where
     go ann = case ann of
       AVar v nid | v == name -> [nid]
+      AResolvedVar _ v nid | v == name -> [nid]
       AVar _ _ -> []
+      AResolvedVar _ _ _ -> []
       ALit _ _ -> []
-      ALam _ _ _ body _ -> go body
+      ALam _ _ _ _ body _ -> go body
       AApp fun arg _ _ _ -> go fun ++ go arg
-      ALet _ _ _ _ _ rhs body _ -> go rhs ++ go body
+      ALet _ _ _ _ _ _ rhs body _ -> go rhs ++ go body
       AAnn expr _ _ -> go expr
       AUnfold expr _ _ -> go expr
 

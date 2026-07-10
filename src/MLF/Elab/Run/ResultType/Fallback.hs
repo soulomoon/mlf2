@@ -83,9 +83,10 @@ computeResultTypeFallbackWithRoots recurse ctx view mbRoots annCanon ann = do
   case annCanon of
     ALam
       paramName
+      _paramDetails
       _paramNode
       _scopeRoot
-      (ALet letName _schemeGen _schemeRoot _expVar _rhsGen rhsAnn bodyAnn _letNode)
+      (ALet letName _letDetails _schemeGen _schemeRoot _expVar _rhsGen rhsAnn bodyAnn _letNode)
       _lamNode
         | paramName == letName,
           AAnn _innerAnn annNodeId _eid <- rhsAnn -> do

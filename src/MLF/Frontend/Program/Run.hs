@@ -29,14 +29,13 @@ import qualified Data.Set as Set
 import MLF.Elab.Pipeline (XmlfTerm (..), Pretty (..), Ty (TForallRef), normalize, schemeFromType, typeCheck)
 import MLF.Elab.Types (ElabType, ResolvedTermIdentityKey, ResolvedVar (..), deferredResolvedVarRef, resolvedVarBindingSymbolIdentity, resolvedVarBoundBy, resolvedVarConstructorRef, resolvedVarIdentityKey, resolvedVarReferenceName, resolvedVarRuntimeName, resolvedVarSameIdentity)
 import qualified MLF.Elab.Types as X
-import MLF.Frontend.Program.Check (checkLocatedProgram, checkLocatedProgramPackage, checkLocatedProgramPackageWithTiming, checkProgram, checkProgramPackage)
+import MLF.Frontend.Program.Check (checkLocatedProgram, checkLocatedProgramPackage, checkLocatedProgramPackageWithTiming, checkProgram, checkProgramPackage, validateCheckedProgramTypeViews)
 import MLF.Frontend.Program.Elaborate
   ( ElaborateScope,
     classInfoForConstraint,
     diagnosticTypeViewDisplay,
     elaborateScopeDataTypesByIdentity,
-    lookupEvidenceMethodByClass,
-    lookupEvidenceMethodByClassTypes,
+    lookupEvidenceMethodByClassViews,
     matchMethodTypeViews,
     matchTypeViewsAgainstIdentity,
     mkElaborateScope,
@@ -45,7 +44,7 @@ import MLF.Frontend.Program.Elaborate
     sourceTypeViewInScope,
     zeroMethodConstraintCoveredByEvidenceInfo,
   )
-import MLF.Frontend.Program.Finalize (recoverSourceType, typeViewToElabType)
+import MLF.Frontend.Program.Finalize (typeViewToElabType)
 import qualified MLF.Frontend.Program.Builtins as Builtins
 import MLF.Frontend.Program.Package
   ( LocatedProgramPackage,
@@ -58,6 +57,7 @@ import MLF.Frontend.Program.Types
     CheckedModule (..),
     CheckedProgram (..),
     ConstraintInfo (..),
+    ClassApplicationKey,
     ConstructorForallBinder (..),
     ConstructorInfo (..),
     DataInfo (..),
@@ -83,6 +83,7 @@ import MLF.Frontend.Program.Types
     applyConstraintInfoSubst,
     applyTypeViewSubst,
     checkedBindingSourceType,
+    constraintClassApplicationKey,
     ctorName,
     ctorArgs,
     constructorInfoArgViews,
@@ -94,8 +95,6 @@ import MLF.Frontend.Program.Types
     deferredMethodName,
     diagnosticForProgramError,
     emptyTypeBinderSubst,
-    filterBinderIdentitiesByNames,
-    filterHeadIdentitiesByNames,
     freeTypeBinderIdentitiesTypeViews,
     freeTypeVarsTypeView,
     lookupInstanceMethod,
@@ -114,17 +113,16 @@ import MLF.Frontend.Program.Types
     splitArrows,
     splitForalls,
     typeBinderAliasIdentityMap,
-    typeHeadNamesSrcType,
-    typeViewHeadPairs,
     typeViewHeadIdentityForAlias,
+    typeViewHeadArgViews,
+    typeViewArrowResultViewForArity,
     typeViewSubstFromParamIdentities,
-    typeViewsIdentity,
     typeViewBinderIdentityAliasEntries,
     uniqueEvidenceMethod,
     uniqueEvidenceMethodMatch,
     typeBinderSubstFromTypeViewSubst,
-    typeBinderSubstToTypeViewSubstWith,
-    insertTypeBinderSubstWithIdentity,
+    typeBinderSubstToTypeViewSubst,
+    insertTypeBinderSubstViewWithIdentity,
     ordinaryValueTypeView,
     resolvedVarFromValueInfo,
   )
@@ -133,7 +131,7 @@ import MLF.Frontend.Syntax (Lit (..), SrcBound (..), SrcTy (..), SrcType)
 import qualified MLF.Frontend.Syntax.Program as ProgramSyntax
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
 import MLF.Reify.TypeOps (alphaEqType, churchAwareEqType, freeTypeVarRefsType)
-import MLF.Types.Identity (constructorRefSymbol, DeferredRef, EnvRef, IdDetails (..), LocalRef, PrimitiveRef, primitiveRefSymbol, TypeBinderIdentity)
+import MLF.Types.Identity (constructorRefSymbol, DeferredRef, EnvRef, IdDetails (..), LocalRef, PrimitiveRef, primitiveRefSymbol, TypeBinderIdentity, typeBinderIdentityStableName)
 import MLF.Util.Timing (TimingConfig, timeProgramIO)
 
 data Value
@@ -220,6 +218,7 @@ programRunOutput result =
 
 runCheckedPureProgram :: CheckedProgram -> Either ProgramError Value
 runCheckedPureProgram checked = do
+  validateCheckedProgramTypeViews checked
   context <- mkRuntimeContext checked
   case classifyMainMode context checked of
     MainPure -> do
@@ -241,6 +240,7 @@ runCheckedPureMain context checked = do
 
 runCheckedProgramOutput :: CheckedProgram -> Either ProgramError ProgramRunResult
 runCheckedProgramOutput checked = do
+  validateCheckedProgramTypeViews checked
   context <- mkRuntimeContext checked
   case classifyMainMode context checked of
     MainPure -> do
@@ -284,8 +284,8 @@ classifyMainMode context checked =
   case mainBinding checked of
     Just binding
       | isIOUnitElabType context (checkedBindingType binding) -> MainIOUnit
-      | isIOElabType (checkedBindingType binding) -> MainIOOther (recoverMainSourceType checked displaySourceTy)
-      | checkedBindingMentionsOpaqueBuiltin binding -> MainUnsupportedIO (recoverMainSourceType checked displaySourceTy)
+      | isIOElabType (checkedBindingType binding) -> MainIOOther displaySourceTy
+      | checkedBindingMentionsOpaqueBuiltin binding -> MainUnsupportedIO displaySourceTy
       where
         displaySourceTy = checkedBindingSourceType binding
     _ -> MainPure
@@ -1032,17 +1032,17 @@ runtimeConstructorValue context spec args
 runtimeConstructorResultView :: RuntimeContext -> RuntimeConstructorSpec -> [RuntimeValue] -> Either ProgramError TypeView
 runtimeConstructorResultView context spec args = do
   (substBinders, startSubst) <- runtimeConstructorSubstSeed context spec
-  Right (applyRuntimeConstructorSubstView scope (subst substBinders startSubst) resultView)
+  Right (applyRuntimeConstructorSubstView (subst substBinders startSubst) resultView)
   where
     scope = runtimeElaborateScope context
     ctor = runtimeConstructorInfo spec
     argViews = constructorInfoArgViews ctor
-    resultView = runtimeConstructorOccurrenceResultView context spec
+    resultView = runtimeConstructorOccurrenceResultView spec
     subst substBinders startSubst
       | Set.null (freeTypeVarsTypeView resultViewFromDeferred) = startSubst
       | otherwise = foldl (refineFromRuntimeArg substBinders) startSubst (zip argViews args)
       where
-        resultViewFromDeferred = applyRuntimeConstructorSubstView scope startSubst resultView
+        resultViewFromDeferred = applyRuntimeConstructorSubstView startSubst resultView
 
     refineFromRuntimeArg substBinders acc (templateView, arg) =
       case runtimeValueTypeView context arg of
@@ -1064,9 +1064,11 @@ runtimeConstructorSubstSeed context spec =
 
 runtimeConstructorBinders :: RuntimeContext -> ConstructorInfo -> Either ProgramError [(String, TypeBinderIdentity)]
 runtimeConstructorBinders context ctor
-  | null missingFreeBinders = Right binders
-  | missing : _ <- missingFreeBinders =
+  | Left missing <- freeBinderIdentities =
       Left (ProgramPipelineError ("run-program constructor binder `" ++ missing ++ "` is missing identity"))
+  | Right identities <- freeBinderIdentities,
+    missing : _ <- Set.toList (identities `Set.difference` binderIdentities) =
+      Left (ProgramPipelineError ("run-program constructor binder `" ++ typeBinderIdentityStableName missing ++ "` is missing identity"))
   | otherwise = Right binders
   where
     binders = explicitBinders ++ viewBinders ++ ownerBinders
@@ -1083,12 +1085,9 @@ runtimeConstructorBinders context ctor
         Just dataInfo ->
           Map.toList (typeBinderAliasIdentityMap (dataParamBinders dataInfo))
         Nothing -> []
-    binderNames = Set.fromList (map fst binders)
-    missingFreeBinders =
-      [ name
-      | name <- Set.toList (freeTypeVarsTypeViewDisplayAndIdentity (ctorTypeView ctor)),
-        name `Set.notMember` binderNames
-      ]
+    binderIdentities = Set.fromList (map snd binders)
+    freeBinderIdentities =
+      freeTypeBinderIdentitiesTypeViews (NE.singleton (ctorTypeView ctor))
 
 matchRuntimeTypeBinderSubstInScope ::
   ElaborateScope ->
@@ -1101,7 +1100,7 @@ matchRuntimeTypeBinderSubstInScope scope binders subst templateView actualView =
   typeBinderSubstFromTypeViewSubst binders
     <$> matchTypeViewsAgainstIdentity
       scope
-      (typeBinderSubstToTypeViewSubstWith (sourceTypeViewInScope scope) subst)
+      (typeBinderSubstToTypeViewSubst subst)
       (NE.singleton (typeBinderTemplateView binders templateView))
       (NE.singleton actualView)
 
@@ -1115,12 +1114,12 @@ typeBinderTemplateView binders view =
           ]
     }
 
-applyRuntimeConstructorSubstView :: ElaborateScope -> TypeBinderSubst -> TypeView -> TypeView
-applyRuntimeConstructorSubstView scope subst =
-  applyTypeViewSubst (typeBinderSubstToTypeViewSubstWith (sourceTypeViewInScope scope) subst)
+applyRuntimeConstructorSubstView :: TypeBinderSubst -> TypeView -> TypeView
+applyRuntimeConstructorSubstView subst =
+  applyTypeViewSubst (typeBinderSubstToTypeViewSubst subst)
 
-runtimeConstructorOccurrenceResultView :: RuntimeContext -> RuntimeConstructorSpec -> TypeView
-runtimeConstructorOccurrenceResultView context spec =
+runtimeConstructorOccurrenceResultView :: RuntimeConstructorSpec -> TypeView
+runtimeConstructorOccurrenceResultView spec =
   case runtimeConstructorDeferred spec of
     Just deferred ->
       occurrenceView
@@ -1132,57 +1131,12 @@ runtimeConstructorOccurrenceResultView context spec =
         }
       where
         occurrenceView =
-          sourceTypeViewInScope (runtimeElaborateScope context) occurrenceType
-        occurrenceType =
-          dropSourceArrows
+          typeViewArrowResultViewForArity
+            (deferredConstructorOccurrenceTypeView deferred)
             (length (constructorInfoArgViews ctor) - deferredConstructorArgCount deferred)
-            (deferredConstructorOccurrenceType deferred)
     Nothing -> constructorInfoResultView ctor
   where
     ctor = runtimeConstructorInfo spec
-
-freeTypeVarsTypeViewDisplayAndIdentity :: TypeView -> Set.Set String
-freeTypeVarsTypeViewDisplayAndIdentity view =
-  freeTypeVarsRuntimeSrcType (typeViewDisplay view)
-    <> freeTypeVarsRuntimeSrcType (typeViewIdentity view)
-
-dropSourceArrows :: Int -> SrcType -> SrcType
-dropSourceArrows count ty
-  | count <= 0 = ty
-dropSourceArrows count ty =
-  case ty of
-    STArrow _ resultTy -> dropSourceArrows (count - 1) resultTy
-    _ -> ty
-
-freeTypeVarsRuntimeSrcType :: SrcType -> Set.Set String
-freeTypeVarsRuntimeSrcType =
-  freeTypeVarsRuntimeSrcTy
-
-freeTypeVarsRuntimeSrcTy :: SrcTy n v -> Set.Set String
-freeTypeVarsRuntimeSrcTy = go Set.empty
-  where
-    go :: Set.Set String -> SrcTy n0 v0 -> Set.Set String
-    go bound ty =
-      case ty of
-        STVar name
-          | name `Set.member` bound -> Set.empty
-          | otherwise -> Set.singleton name
-        STArrow dom cod -> go bound dom `Set.union` go bound cod
-        STBase {} -> Set.empty
-        STCon _ args -> foldMap (go bound) args
-        STVarApp name args ->
-          let headVars =
-                if name `Set.member` bound
-                  then Set.empty
-                  else Set.singleton name
-           in headVars `Set.union` foldMap (go bound) args
-        STTyLam name body -> go (Set.insert name bound) body
-        STTyApp fun arg -> go bound fun `Set.union` go bound arg
-        STForall name mb body ->
-          maybe Set.empty (go bound . unSrcBound) mb
-            `Set.union` go (Set.insert name bound) body
-        STMu name body -> go (Set.insert name bound) body
-        STBottom -> Set.empty
 
 isPreludeUnitConstructor :: RuntimeContext -> ConstructorInfo -> Bool
 isPreludeUnitConstructor context ctor =
@@ -1351,7 +1305,7 @@ resolveRuntimeEvidenceMethod context stack deferredValues env deferred classArgV
       deferredValues
       env
       (deferredMethodLocalEvidence deferred)
-      Set.empty
+      []
       methodLocalConstraints
   methodHead <- lookupRuntimeEvidenceMethodValue context stack deferredValues env (deferredMethodEvidenceMethod evidence)
   foldM (applyRuntimeValue context) methodHead (evidenceArgs ++ args)
@@ -1386,7 +1340,7 @@ resolveRuntimeInstanceMethod context stack deferredValues env deferred classArgV
       deferredValues
       env
       (deferredMethodLocalEvidence deferred)
-      Set.empty
+      []
       eagerConstraints
   methodResolved <- runtimeMethodValueResolved context (deferredMethodName deferred) methodValueInfo
   methodHead <- lookupRuntimeResolvedValue context stack deferredValues env methodResolved
@@ -1439,7 +1393,7 @@ resolveRuntimeNullaryEvidenceMethod context stack deferredValues env deferred cl
       deferredValues
       env
       (deferredMethodLocalEvidence deferred)
-      Set.empty
+      []
       methodLocalConstraints
   methodHead <- lookupRuntimeEvidenceMethodValue context stack deferredValues env (deferredMethodEvidenceMethod evidence)
   foldM (applyRuntimeValue context) methodHead evidenceArgs
@@ -1473,7 +1427,7 @@ resolveRuntimeNullaryInstanceMethod context stack deferredValues env deferred cl
       deferredValues
       env
       (deferredMethodLocalEvidence deferred)
-      Set.empty
+      []
       eagerConstraints
   methodResolved <- runtimeMethodValueResolved context (deferredMethodName deferred) methodValueInfo
   methodHead <- lookupRuntimeResolvedValue context stack deferredValues env methodResolved
@@ -1499,10 +1453,10 @@ lookupRuntimeMethodEvidence context deferred classArgView =
           deferredMethodEvidenceMethod = methodEvidence
         }
     globalEvidence =
-      lookupEvidenceMethodByClass
+      lookupEvidenceMethodByClassViews
         scope
         (methodInfoOwnerClassSymbolIdentity methodInfo)
-        (typeViewIdentity classArgView)
+        targetViews
         (methodInfoSymbolIdentity methodInfo)
     localMatches =
       [ (methodEvidence, subst)
@@ -1561,7 +1515,7 @@ resolveRuntimeConstraintEvidenceValues ::
   RuntimeDeferredValues ->
   RuntimeEnv ->
   [EvidenceInfo] ->
-  Set.Set (SymbolIdentity, [SrcType]) ->
+  [ClassApplicationKey] ->
   [ConstraintInfo] ->
   Either ProgramError [RuntimeValue]
 resolveRuntimeConstraintEvidenceValues context stack deferredValues env localEvidence seen constraints =
@@ -1573,12 +1527,12 @@ resolveRuntimeConstraintEvidenceValue ::
   RuntimeDeferredValues ->
   RuntimeEnv ->
   [EvidenceInfo] ->
-  Set.Set (SymbolIdentity, [SrcType]) ->
+  [ClassApplicationKey] ->
   ConstraintInfo ->
   Either ProgramError [RuntimeValue]
 resolveRuntimeConstraintEvidenceValue context stack deferredValues env localEvidence seen constraint = do
   let key = constraintEvidenceKey constraint
-  if key `Set.member` seen
+  if key `elem` seen
     then Left (noMatchingInstanceError (runtimeElaborateScope context) constraint)
     else do
       mbLocalEvidence <- resolveRuntimeLocalConstraintEvidenceValues context stack deferredValues env localEvidence constraint
@@ -1586,7 +1540,7 @@ resolveRuntimeConstraintEvidenceValue context stack deferredValues env localEvid
         Just evidenceValues -> Right evidenceValues
         Nothing -> do
           (instanceInfo, subst) <- resolveInstanceInfoByConstraint (runtimeElaborateScope context) constraint
-          let seen' = Set.insert key seen
+          let seen' = key : seen
               methodValues = [valueInfo | valueInfo@OrdinaryValue {} <- Map.elems (instanceMethodsByIdentity instanceInfo)]
           if null methodValues
             then do
@@ -1608,7 +1562,7 @@ materializeRuntimeMethodEvidence ::
   RuntimeDeferredValues ->
   RuntimeEnv ->
   [EvidenceInfo] ->
-  Set.Set (SymbolIdentity, [SrcType]) ->
+  [ClassApplicationKey] ->
   TypeViewSubst ->
   ConstraintInfo ->
   ValueInfo ->
@@ -1653,10 +1607,10 @@ resolveRuntimeLocalConstraintEvidenceValues context stack deferredValues env loc
                 mapM
                   ( \methodInfo -> do
                       methodEvidence <-
-                        lookupEvidenceMethodByClassTypes
+                        lookupEvidenceMethodByClassViews
                           (runtimeElaborateScope context)
                           (constraintClassSymbol constraint)
-                          (typeViewsIdentity (constraintTypeViews constraint))
+                          (constraintTypeViews constraint)
                           (methodInfoSymbolIdentity methodInfo)
                           `orElseRuntimeEvidenceMethod`
                           lookupRuntimeEvidenceMethod
@@ -1704,9 +1658,9 @@ orElseRuntimeEvidenceMethod :: Maybe EvidenceMethod -> Maybe EvidenceMethod -> M
 orElseRuntimeEvidenceMethod (Just evidence) _ = Just evidence
 orElseRuntimeEvidenceMethod Nothing fallback = fallback
 
-constraintEvidenceKey :: ConstraintInfo -> (SymbolIdentity, [SrcType])
-constraintEvidenceKey constraint =
-  (constraintClassSymbol constraint, NE.toList (typeViewsIdentity (constraintTypeViews constraint)))
+constraintEvidenceKey :: ConstraintInfo -> ClassApplicationKey
+constraintEvidenceKey =
+  constraintClassApplicationKey
 
 noMatchingInstanceError :: ElaborateScope -> ConstraintInfo -> ProgramError
 noMatchingInstanceError scope constraint =
@@ -2752,12 +2706,6 @@ mainBinding checked =
     binding : _ -> Just binding
     [] -> Nothing
 
-recoverMainSourceType :: CheckedProgram -> SrcType -> SrcType
-recoverMainSourceType checked ty =
-  case ty of
-    STArrow {} -> ty
-    _ -> recoverSourceType (programElaborateScope checked) ty
-
 programElaborateScope :: CheckedProgram -> ElaborateScope
 programElaborateScope checked =
   mkElaborateScope
@@ -2885,81 +2833,20 @@ dataTypeSubst :: DataInfo -> TypeView -> TypeBinderSubst
 dataTypeSubst dataInfo view =
   if maybe False (sameSymbolIdentity (dataInfoSymbol dataInfo)) (sourceTypeDataHeadIdentity view)
     then
-      case (dataParamBinders dataInfo, typeViewIdentity view) of
-        ([], STBase {}) -> emptyTypeBinderSubst
-        (binders, STCon _ args)
-          | length binders == length args ->
-              foldr (uncurry insertDataParam) emptyTypeBinderSubst (zip binders (toList args))
+      case (dataParamBinders dataInfo, typeViewHeadArgViews view) of
+        ([], Just []) -> emptyTypeBinderSubst
+        (binders, Just argViews)
+          | length binders == length argViews ->
+              foldr (uncurry insertDataParam) emptyTypeBinderSubst (zip binders argViews)
         _ -> emptyTypeBinderSubst
     else emptyTypeBinderSubst
   where
-    insertDataParam (displayName, identity) ty =
-      insertTypeBinderSubstWithIdentity identity displayName ty
+    insertDataParam (displayName, identity) argView =
+      insertTypeBinderSubstViewWithIdentity identity displayName argView
 
 substDataParamView :: TypeView -> TypeBinderSubst -> TypeView -> TypeView
-substDataParamView sourceView subst view =
-  substitutedView
-    { typeViewIdentity = identityTy,
-      typeViewHeadIdentities =
-        mergeSymbolIdentityMaps
-          [ typeViewHeadIdentities substitutedView,
-            sourceHeadIdentitiesFor identityHeadNames
-          ]
-    }
-  where
-    substitutedView =
-      applyTypeViewSubst (typeBinderSubstToTypeViewSubstWith substView subst) view
-
-    substView ty =
-      TypeView
-        { typeViewDisplay = displayTypeFromRuntimeHeadPairs sourceHeadPairs ty,
-          typeViewIdentity = ty,
-          typeViewHeadIdentities =
-            sourceHeadIdentitiesFor (typeHeadNamesSrcType ty),
-          typeViewBinderIdentities =
-            sourceBinderIdentitiesFor (freeTypeVarsRuntimeSrcType ty)
-        }
-
-    identityTy = typeViewIdentity substitutedView
-    identityHeadNames = typeHeadNamesSrcType identityTy
-    sourceHeadIdentitiesFor names =
-      filterHeadIdentitiesByNames
-        (names <> pairedSourceHeadNames names)
-        sourceHeadIdentities
-    pairedSourceHeadNames names =
-      Set.fromList
-        [ displayName
-        | identityName <- Set.toList names,
-          Just displayName <- [Map.lookup identityName sourceHeadPairs]
-        ]
-    sourceHeadPairs =
-      typeViewHeadPairs sourceView
-    sourceHeadIdentities = typeViewHeadIdentities sourceView
-    sourceBinderIdentitiesFor names =
-      filterBinderIdentitiesByNames
-        names
-        (typeViewBinderIdentityAliasEntries sourceView)
-        (typeViewBinderIdentities sourceView)
-
-displayTypeFromRuntimeHeadPairs :: Map.Map String String -> SrcType -> SrcType
-displayTypeFromRuntimeHeadPairs pairs =
-  go
-  where
-    displayHead name =
-      Map.findWithDefault name name pairs
-
-    go ty =
-      case ty of
-        STVar {} -> ty
-        STBase name -> STBase (displayHead name)
-        STCon name args -> STCon (displayHead name) (fmap go args)
-        STVarApp name args -> STVarApp name (fmap go args)
-        STTyLam name body -> STTyLam name (go body)
-        STTyApp fun arg -> STTyApp (go fun) (go arg)
-        STArrow dom cod -> STArrow (go dom) (go cod)
-        STForall name mb body -> STForall name (fmap (SrcBound . go . unSrcBound) mb) (go body)
-        STMu name body -> STMu name (go body)
-        STBottom -> STBottom
+substDataParamView _sourceView subst view =
+  applyTypeViewSubst (typeBinderSubstToTypeViewSubst subst) view
 
 canonicalFieldTypeView :: RuntimeContext -> DataInfo -> TypeView -> TypeView
 canonicalFieldTypeView context _ownerInfo view =

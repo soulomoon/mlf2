@@ -508,9 +508,10 @@ annExprNode :: AnnExpr -> NodeId
 annExprNode ann = case ann of
   ALit _ nid -> nid
   AVar _ nid -> nid
-  ALam _ _ _ _ nid -> nid
+  AResolvedVar _ _ nid -> nid
+  ALam _ _ _ _ _ nid -> nid
   AApp _ _ _ _ nid -> nid
-  ALet _ _ _ _ _ _ _ nid -> nid
+  ALet _ _ _ _ _ _ _ _ nid -> nid
   AAnn _ nid _ -> nid
   AUnfold _ nid _ -> nid
 
@@ -840,7 +841,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
         requireRight (runPipelineArtifactsDefault Set.empty expr)
       bodyNode <-
         case ann of
-          ALet _ _ _ _ _ _ body _ -> pure (annExprNode body)
+          ALet _ _ _ _ _ _ _ body _ -> pure (annExprNode body)
           other -> expectationFailure ("Expected ALet, got " ++ show other) >> fail "no body node"
       scheme <- recoverLiveSchemeAt artifacts bodyNode
       expectWellFormedScheme scheme
@@ -2240,6 +2241,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
           matchingAnn =
             ALet
               "$x#0"
+              Nothing
               (GenNodeId 0)
               (NodeId 7)
               (ExpVarId 0)
@@ -2250,6 +2252,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
           staleAnn =
             ALet
               "$x#0"
+              Nothing
               (GenNodeId 2)
               (NodeId 8)
               (ExpVarId 0)
@@ -2267,6 +2270,62 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
       Elab.authoritativeRootAnn term staleAnn `shouldBe` staleAnn
 
   describe "eMLF source annotations" $ do
+    describe "resolved AnnExpr identity analysis" $ do
+      let binderDetails = LocalId (localRefFromNodeId "runtime-x" (NodeId 992001))
+          siblingDetails = LocalId (localRefFromNodeId "runtime-x" (NodeId 992002))
+          innerBody = ALit (LInt 1) (NodeId 992003)
+          annotatedMediator occurrenceDetails occurrenceDisplay =
+            ALet
+              "runtime-x"
+              Nothing
+              (GenNodeId 992004)
+              (NodeId 992005)
+              (ExpVarId 992006)
+              (GenNodeId 992007)
+              ( AAnn
+                  (AResolvedVar occurrenceDetails occurrenceDisplay (NodeId 992008))
+                  (NodeId 992009)
+                  (EdgeId 992010)
+              )
+              innerBody
+              (NodeId 992011)
+          metadataLightMediator occurrenceDisplay =
+            ALet
+              "runtime-x"
+              Nothing
+              (GenNodeId 992004)
+              (NodeId 992005)
+              (ExpVarId 992006)
+              (GenNodeId 992007)
+              ( AAnn
+                  (AVar occurrenceDisplay (NodeId 992008))
+                  (NodeId 992009)
+                  (EdgeId 992010)
+              )
+              innerBody
+              (NodeId 992011)
+
+      it "matches an annotated lambda mediator by identity despite a stale occurrence spelling" $ do
+        Annotation.desugaredAnnLambdaInfo
+          "runtime-x"
+          (Just binderDetails)
+          (annotatedMediator binderDetails "stale-x")
+          `shouldBe` Just (NodeId 992009, EdgeId 992010, innerBody)
+
+      it "rejects an annotated lambda mediator with the same spelling but a different identity" $ do
+        Annotation.desugaredAnnLambdaInfo
+          "runtime-x"
+          (Just binderDetails)
+          (annotatedMediator siblingDetails "runtime-x")
+          `shouldBe` Nothing
+
+      it "keeps explicit metadata-light annotated lambda matching name-based" $ do
+        Annotation.desugaredAnnLambdaInfo
+          "runtime-x"
+          Nothing
+          (metadataLightMediator "runtime-x")
+          `shouldBe` Just (NodeId 992009, EdgeId 992010, innerBody)
+
     it "parses and represents STVar" $ do
       let st = STVar "alpha"
       st `shouldBe` STVar "alpha"
@@ -2326,7 +2385,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               (ELamAnn "x" recursiveAnn (EVar "x"))
               (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "k")) (EVar "u"))
           extractSameLaneClearBoundaryEdge ann0 = case ann0 of
-            ALet "k" _ schemeRootId _ _ _ (AAnn (ALet "u" _ _ _ _ (AApp _ _ _ argEdgeId _) _ _) _ _) _ ->
+            ALet "k" _ _ schemeRootId _ _ _ (AAnn (ALet "u" _ _ _ _ _ (AApp _ _ _ argEdgeId _) _ _) _ _) _ ->
               pure (schemeRootId, argEdgeId)
             other -> do
               expectationFailure ("Expected sameLaneClearBoundaryExpr packet shape, got: " ++ show other)
@@ -2388,13 +2447,13 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   )
               )
           extractSameLaneDoubleAliasEdge ann0 = case ann0 of
-            ALet "k" _ schemeRootId _ _ _ (AAnn holdBody _ _) _ ->
+            ALet "k" _ _ schemeRootId _ _ _ (AAnn holdBody _ _) _ ->
               case holdBody of
-                ALet "hold" _ _ _ _ _ (AAnn keepBody _ _) _ ->
+                ALet "hold" _ _ _ _ _ _ (AAnn keepBody _ _) _ ->
                   case keepBody of
-                    ALet "keep" _ _ _ _ _ (AAnn uBody _ _) _ ->
+                    ALet "keep" _ _ _ _ _ _ (AAnn uBody _ _) _ ->
                       case uBody of
-                        ALet "u" _ _ _ _ (AApp _ _ _ argEdgeId _) _ _ ->
+                        ALet "u" _ _ _ _ _ (AApp _ _ _ argEdgeId _) _ _ ->
                           pure (schemeRootId, argEdgeId)
                         other -> do
                           expectationFailure ("Expected sameLaneDoubleAliasFrameClearBoundaryExpr inner packet shape, got: " ++ show other)
@@ -2469,15 +2528,15 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   )
               )
           extractSameLaneTripleAliasEdge ann0 = case ann0 of
-            ALet "k" _ schemeRootId _ _ _ (AAnn holdBody _ _) _ ->
+            ALet "k" _ _ schemeRootId _ _ _ (AAnn holdBody _ _) _ ->
               case holdBody of
-                ALet "hold" _ _ _ _ _ (AAnn keepBody _ _) _ ->
+                ALet "hold" _ _ _ _ _ _ (AAnn keepBody _ _) _ ->
                   case keepBody of
-                    ALet "keep" _ _ _ _ _ (AAnn moreBody _ _) _ ->
+                    ALet "keep" _ _ _ _ _ _ (AAnn moreBody _ _) _ ->
                       case moreBody of
-                        ALet "more" _ _ _ _ _ (AAnn uBody _ _) _ ->
+                        ALet "more" _ _ _ _ _ _ (AAnn uBody _ _) _ ->
                           case uBody of
-                            ALet "u" _ _ _ _ (AApp _ _ _ argEdgeId _) _ _ ->
+                            ALet "u" _ _ _ _ _ (AApp _ _ _ argEdgeId _) _ _ ->
                               pure (schemeRootId, argEdgeId)
                             other -> do
                               expectationFailure ("Expected sameLaneTripleAliasFrameClearBoundaryExpr inner packet shape, got: " ++ show other)
@@ -2559,17 +2618,17 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   )
               )
           extractSameLaneQuadrupleAliasEdge ann0 = case ann0 of
-            ALet "k" _ schemeRootId _ _ _ (AAnn holdBody _ _) _ ->
+            ALet "k" _ _ schemeRootId _ _ _ (AAnn holdBody _ _) _ ->
               case holdBody of
-                ALet "hold" _ _ _ _ _ (AAnn keepBody _ _) _ ->
+                ALet "hold" _ _ _ _ _ _ (AAnn keepBody _ _) _ ->
                   case keepBody of
-                    ALet "keep" _ _ _ _ _ (AAnn moreBody _ _) _ ->
+                    ALet "keep" _ _ _ _ _ _ (AAnn moreBody _ _) _ ->
                       case moreBody of
-                        ALet "more" _ _ _ _ _ (AAnn deepBody _ _) _ ->
+                        ALet "more" _ _ _ _ _ _ (AAnn deepBody _ _) _ ->
                           case deepBody of
-                            ALet "deep" _ _ _ _ _ (AAnn uBody _ _) _ ->
+                            ALet "deep" _ _ _ _ _ _ (AAnn uBody _ _) _ ->
                               case uBody of
-                                ALet "u" _ _ _ _ (AApp _ _ _ argEdgeId _) _ _ ->
+                                ALet "u" _ _ _ _ _ (AApp _ _ _ argEdgeId _) _ _ ->
                                   pure (schemeRootId, argEdgeId)
                                 other -> do
                                   expectationFailure ("Expected sameLaneQuadrupleAliasFrameClearBoundaryExpr inner packet shape, got: " ++ show other)
@@ -2658,19 +2717,19 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   )
               )
           extractSameLaneQuintupleAliasEdge ann0 = case ann0 of
-            ALet "k" _ schemeRootId _ _ _ (AAnn holdBody _ _) _ ->
+            ALet "k" _ _ schemeRootId _ _ _ (AAnn holdBody _ _) _ ->
               case holdBody of
-                ALet "hold" _ _ _ _ _ (AAnn keepBody _ _) _ ->
+                ALet "hold" _ _ _ _ _ _ (AAnn keepBody _ _) _ ->
                   case keepBody of
-                    ALet "keep" _ _ _ _ _ (AAnn moreBody _ _) _ ->
+                    ALet "keep" _ _ _ _ _ _ (AAnn moreBody _ _) _ ->
                       case moreBody of
-                        ALet "more" _ _ _ _ _ (AAnn deepBody _ _) _ ->
+                        ALet "more" _ _ _ _ _ _ (AAnn deepBody _ _) _ ->
                           case deepBody of
-                            ALet "deep" _ _ _ _ _ (AAnn tailBody _ _) _ ->
+                            ALet "deep" _ _ _ _ _ _ (AAnn tailBody _ _) _ ->
                               case tailBody of
-                                ALet "tail" _ _ _ _ _ (AAnn uBody _ _) _ ->
+                                ALet "tail" _ _ _ _ _ _ (AAnn uBody _ _) _ ->
                                   case uBody of
-                                    ALet "u" _ _ _ _ (AApp _ _ _ argEdgeId _) _ _ ->
+                                    ALet "u" _ _ _ _ _ (AApp _ _ _ argEdgeId _) _ _ ->
                                       pure (schemeRootId, argEdgeId)
                                     other -> do
                                       expectationFailure ("Expected sameLaneQuintupleAliasFrameClearBoundaryExpr inner packet shape, got: " ++ show other)
@@ -2766,21 +2825,21 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   )
               )
           extractSameLaneSextupleAliasEdge ann0 = case ann0 of
-            ALet "k" _ schemeRootId _ _ _ (AAnn holdBody _ _) _ ->
+            ALet "k" _ _ schemeRootId _ _ _ (AAnn holdBody _ _) _ ->
               case holdBody of
-                ALet "hold" _ _ _ _ _ (AAnn keepBody _ _) _ ->
+                ALet "hold" _ _ _ _ _ _ (AAnn keepBody _ _) _ ->
                   case keepBody of
-                    ALet "keep" _ _ _ _ _ (AAnn moreBody _ _) _ ->
+                    ALet "keep" _ _ _ _ _ _ (AAnn moreBody _ _) _ ->
                       case moreBody of
-                        ALet "more" _ _ _ _ _ (AAnn deepBody _ _) _ ->
+                        ALet "more" _ _ _ _ _ _ (AAnn deepBody _ _) _ ->
                           case deepBody of
-                            ALet "deep" _ _ _ _ _ (AAnn tailBody _ _) _ ->
+                            ALet "deep" _ _ _ _ _ _ (AAnn tailBody _ _) _ ->
                               case tailBody of
-                                ALet "tail" _ _ _ _ _ (AAnn leafBody _ _) _ ->
+                                ALet "tail" _ _ _ _ _ _ (AAnn leafBody _ _) _ ->
                                   case leafBody of
-                                    ALet "leaf" _ _ _ _ _ (AAnn uBody _ _) _ ->
+                                    ALet "leaf" _ _ _ _ _ _ (AAnn uBody _ _) _ ->
                                       case uBody of
-                                        ALet "u" _ _ _ _ (AApp _ _ _ argEdgeId _) _ _ ->
+                                        ALet "u" _ _ _ _ _ (AApp _ _ _ argEdgeId _) _ _ ->
                                           pure (schemeRootId, argEdgeId)
                                         other -> do
                                           expectationFailure ("Expected sameLaneSextupleAliasFrameClearBoundaryExpr inner packet shape, got: " ++ show other)
@@ -2883,23 +2942,23 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   )
               )
           extractSameLaneSeptupleAliasEdge ann0 = case ann0 of
-            ALet "k" _ schemeRootId _ _ _ (AAnn holdBody _ _) _ ->
+            ALet "k" _ _ schemeRootId _ _ _ (AAnn holdBody _ _) _ ->
               case holdBody of
-                ALet "hold" _ _ _ _ _ (AAnn keepBody _ _) _ ->
+                ALet "hold" _ _ _ _ _ _ (AAnn keepBody _ _) _ ->
                   case keepBody of
-                    ALet "keep" _ _ _ _ _ (AAnn moreBody _ _) _ ->
+                    ALet "keep" _ _ _ _ _ _ (AAnn moreBody _ _) _ ->
                       case moreBody of
-                        ALet "more" _ _ _ _ _ (AAnn deepBody _ _) _ ->
+                        ALet "more" _ _ _ _ _ _ (AAnn deepBody _ _) _ ->
                           case deepBody of
-                            ALet "deep" _ _ _ _ _ (AAnn tailBody _ _) _ ->
+                            ALet "deep" _ _ _ _ _ _ (AAnn tailBody _ _) _ ->
                               case tailBody of
-                                ALet "tail" _ _ _ _ _ (AAnn leafBody _ _) _ ->
+                                ALet "tail" _ _ _ _ _ _ (AAnn leafBody _ _) _ ->
                                   case leafBody of
-                                    ALet "leaf" _ _ _ _ _ (AAnn tipBody _ _) _ ->
+                                    ALet "leaf" _ _ _ _ _ _ (AAnn tipBody _ _) _ ->
                                       case tipBody of
-                                        ALet "tip" _ _ _ _ _ (AAnn uBody _ _) _ ->
+                                        ALet "tip" _ _ _ _ _ _ (AAnn uBody _ _) _ ->
                                           case uBody of
-                                            ALet "u" _ _ _ _ (AApp _ _ _ argEdgeId _) _ _ ->
+                                            ALet "u" _ _ _ _ _ (AApp _ _ _ argEdgeId _) _ _ ->
                                               pure (schemeRootId, argEdgeId)
                                             other -> do
                                               expectationFailure ("Expected sameLaneSeptupleAliasFrameClearBoundaryExpr inner packet shape, got: " ++ show other)
@@ -3009,25 +3068,25 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   )
               )
           extractSameLaneOctupleAliasEdge ann0 = case ann0 of
-            ALet "k" _ schemeRootId _ _ _ (AAnn holdBody _ _) _ ->
+            ALet "k" _ _ schemeRootId _ _ _ (AAnn holdBody _ _) _ ->
               case holdBody of
-                ALet "hold" _ _ _ _ _ (AAnn keepBody _ _) _ ->
+                ALet "hold" _ _ _ _ _ _ (AAnn keepBody _ _) _ ->
                   case keepBody of
-                    ALet "keep" _ _ _ _ _ (AAnn moreBody _ _) _ ->
+                    ALet "keep" _ _ _ _ _ _ (AAnn moreBody _ _) _ ->
                       case moreBody of
-                        ALet "more" _ _ _ _ _ (AAnn deepBody _ _) _ ->
+                        ALet "more" _ _ _ _ _ _ (AAnn deepBody _ _) _ ->
                           case deepBody of
-                            ALet "deep" _ _ _ _ _ (AAnn tailBody _ _) _ ->
+                            ALet "deep" _ _ _ _ _ _ (AAnn tailBody _ _) _ ->
                               case tailBody of
-                                ALet "tail" _ _ _ _ _ (AAnn leafBody _ _) _ ->
+                                ALet "tail" _ _ _ _ _ _ (AAnn leafBody _ _) _ ->
                                   case leafBody of
-                                    ALet "leaf" _ _ _ _ _ (AAnn tipBody _ _) _ ->
+                                    ALet "leaf" _ _ _ _ _ _ (AAnn tipBody _ _) _ ->
                                       case tipBody of
-                                        ALet "tip" _ _ _ _ _ (AAnn budBody _ _) _ ->
+                                        ALet "tip" _ _ _ _ _ _ (AAnn budBody _ _) _ ->
                                           case budBody of
-                                            ALet "bud" _ _ _ _ _ (AAnn uBody _ _) _ ->
+                                            ALet "bud" _ _ _ _ _ _ (AAnn uBody _ _) _ ->
                                               case uBody of
-                                                ALet "u" _ _ _ _ (AApp _ _ _ argEdgeId _) _ _ ->
+                                                ALet "u" _ _ _ _ _ (AApp _ _ _ argEdgeId _) _ _ ->
                                                   pure (schemeRootId, argEdgeId)
                                                 other -> do
                                                   expectationFailure ("Expected sameLaneOctupleAliasFrameClearBoundaryExpr inner packet shape, got: " ++ show other)
@@ -3144,27 +3203,27 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   )
               )
           extractSameLaneNonupleAliasEdge ann0 = case ann0 of
-            ALet "k" _ schemeRootId _ _ _ (AAnn holdBody _ _) _ ->
+            ALet "k" _ _ schemeRootId _ _ _ (AAnn holdBody _ _) _ ->
               case holdBody of
-                ALet "hold" _ _ _ _ _ (AAnn keepBody _ _) _ ->
+                ALet "hold" _ _ _ _ _ _ (AAnn keepBody _ _) _ ->
                   case keepBody of
-                    ALet "keep" _ _ _ _ _ (AAnn moreBody _ _) _ ->
+                    ALet "keep" _ _ _ _ _ _ (AAnn moreBody _ _) _ ->
                       case moreBody of
-                        ALet "more" _ _ _ _ _ (AAnn deepBody _ _) _ ->
+                        ALet "more" _ _ _ _ _ _ (AAnn deepBody _ _) _ ->
                           case deepBody of
-                            ALet "deep" _ _ _ _ _ (AAnn tailBody _ _) _ ->
+                            ALet "deep" _ _ _ _ _ _ (AAnn tailBody _ _) _ ->
                               case tailBody of
-                                ALet "tail" _ _ _ _ _ (AAnn leafBody _ _) _ ->
+                                ALet "tail" _ _ _ _ _ _ (AAnn leafBody _ _) _ ->
                                   case leafBody of
-                                    ALet "leaf" _ _ _ _ _ (AAnn tipBody _ _) _ ->
+                                    ALet "leaf" _ _ _ _ _ _ (AAnn tipBody _ _) _ ->
                                       case tipBody of
-                                        ALet "tip" _ _ _ _ _ (AAnn budBody _ _) _ ->
+                                        ALet "tip" _ _ _ _ _ _ (AAnn budBody _ _) _ ->
                                           case budBody of
-                                            ALet "bud" _ _ _ _ _ (AAnn seedBody _ _) _ ->
+                                            ALet "bud" _ _ _ _ _ _ (AAnn seedBody _ _) _ ->
                                               case seedBody of
-                                                ALet "seed" _ _ _ _ _ (AAnn uBody _ _) _ ->
+                                                ALet "seed" _ _ _ _ _ _ (AAnn uBody _ _) _ ->
                                                   case uBody of
-                                                    ALet "u" _ _ _ _ (AApp _ _ _ argEdgeId _) _ _ ->
+                                                    ALet "u" _ _ _ _ _ (AApp _ _ _ argEdgeId _) _ _ ->
                                                       pure (schemeRootId, argEdgeId)
                                                     other -> do
                                                       expectationFailure ("Expected sameLaneNonupleAliasFrameClearBoundaryExpr inner packet shape, got: " ++ show other)
@@ -3252,7 +3311,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   (EApp (ELam "y" (EVar "y")) (EVar "k"))
               )
           extractPacket ann0 = case ann0 of
-            ALet "id" _ idSchemeRoot _ _ _ (AAnn (ALet "k" _ _ _ _ rhs _ _) _ _) _ ->
+            ALet "id" _ _ idSchemeRoot _ _ _ (AAnn (ALet "k" _ _ _ _ _ rhs _ _) _ _) _ ->
               case rhs of
                 AApp funAnn _ argEdgeId _ _ -> pure (idSchemeRoot, funAnn, argEdgeId)
                 other -> do
@@ -4869,6 +4928,29 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   resolvedVarDetails = targetDetails
                 }
         Algebra.lookupSchemeInfoForResolved resolved env `shouldBe` Just targetSchemeInfo
+
+      it "does not fall back to source names when resolved term head identity is absent" $ do
+        let decoySchemeInfo =
+              Elab.schemeInfoFromRefSubst
+                (Elab.schemeFromType (Elab.tBase (BaseTy "Bool")))
+                IntMap.empty
+            decoyResolved =
+              ResolvedVar
+                {
+                  resolvedVarType = Elab.tBase (BaseTy "Bool"),
+                  resolvedVarDetails = EnvId (envRefFromIdentity (UniqueIdentity 991901) "actual")
+                }
+            missingResolved =
+              ResolvedVar
+                {
+                  resolvedVarType = Elab.tBase (BaseTy "Int"),
+                  resolvedVarDetails = EnvId (envRefFromIdentity (UniqueIdentity 991903) "actual")
+                }
+            env =
+              Algebra.mkEnvWithResolvedBindings
+                (Map.singleton "actual" (decoySchemeInfo, decoyResolved))
+        Algebra.lookupSchemeInfoForTermOrName env (ElabTypes.EVarNode missingResolved) (Just "actual")
+          `shouldBe` Nothing
 
       it "looks up SchemeInfo across local evidence identity aliases" $ do
         let targetSchemeInfo =
@@ -6803,6 +6885,41 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
           Right () ->
             expectationFailure "Expected GenSchemeFreeVars, got success"
 
+      it "accepts higher-rank binders reached only through a rigid alias bound" $ do
+        let rootGen = GenNodeId 0
+            higherRankGen = GenNodeId 1
+            root = NodeId 100
+            alias = NodeId 1
+            binder = NodeId 2
+            result = NodeId 3
+            nodes =
+              nodeMapFromList
+                [ (getNodeId root, TyArrow root alias result),
+                  (getNodeId alias, TyVar {tnId = alias, tnBound = Just binder}),
+                  (getNodeId binder, TyVar {tnId = binder, tnBound = Nothing}),
+                  (getNodeId result, TyBase {tnId = result, tnBase = BaseTy "Int"})
+                ]
+            bindParents =
+              IntMap.fromList
+                [ (nodeRefKey (typeRef root), (genRef rootGen, BindFlex)),
+                  (nodeRefKey (typeRef alias), (genRef higherRankGen, BindRigid)),
+                  (nodeRefKey (typeRef binder), (genRef higherRankGen, BindFlex)),
+                  (nodeRefKey (typeRef result), (typeRef root, BindFlex)),
+                  (nodeRefKey (genRef higherRankGen), (genRef rootGen, BindFlex))
+                ]
+            constraint =
+              emptyConstraint
+                { cNodes = nodes,
+                  cBindParents = bindParents,
+                  cGenNodes =
+                    fromListGen
+                      [ (rootGen, GenNode rootGen [root]),
+                        (higherRankGen, GenNode higherRankGen [])
+                      ]
+                }
+
+        Binding.checkSchemeClosure constraint `shouldBe` Right ()
+
       it "selectMinPrecInsertionIndex implements m = min≺ selection (min≺)" $ do
         -- Keys are ordered by <P (lexicographic with empty path greatest).
         -- We craft: key(1) ≺ key(n) ≺ key(2) ≺ key(3).
@@ -7815,6 +7932,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
           ann =
             ALet
               "x"
+              Nothing
               g0
               e1
               (ExpVarId 0)
@@ -7852,6 +7970,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
           ann =
             ALet
               "x"
+              Nothing
               g0
               n1
               (ExpVarId 0)

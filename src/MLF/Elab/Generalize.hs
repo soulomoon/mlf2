@@ -65,7 +65,12 @@ import MLF.Reify.Core
     reifyTypeWithRefsNoFallback,
     reifyTypeWithRefsNoFallbackOnConstraint,
   )
-import MLF.Reify.TypeOps (alphaEqType, inlineAliasBoundsWithBy, typeHeadMatches)
+import
+  MLF.Reify.TypeOps
+    ( alphaEqTypeMetadataLight,
+      inlineAliasBoundsWithBy,
+      typeHeadMatchesMetadataLight,
+    )
 import MLF.Util.Graph (reachableFromStop)
 import qualified MLF.Util.IntMapUtils as IntMapUtils
 import MLF.Util.Names (alphaName)
@@ -93,7 +98,7 @@ shadowCompareTypes context solvedTy baseTy =
 
 shadowCompareTypesWithDetails :: String -> [String] -> ElabType -> ElabType -> Either ElabError ()
 shadowCompareTypesWithDetails context detailLines solvedTy baseTy
-  | alphaEqType solvedTy baseTy || alphaEqTypeModuloVarRenaming solvedTy baseTy = Right ()
+  | alphaEqTypeMetadataLight solvedTy baseTy || alphaEqTypeModuloVarRenaming solvedTy baseTy = Right ()
   | otherwise =
       Left $
         ValidationFailed
@@ -125,10 +130,10 @@ alphaEqTypeModuloVarRenaming tyL tyR =
         env' <- goType env a1 a2
         goType env' b1 b2
       (TConWithIdentity identity1 c1 args1, TConWithIdentity identity2 c2 args2)
-        | typeHeadMatches identity1 c1 identity2 c2 ->
+        | typeHeadMatchesMetadataLight identity1 c1 identity2 c2 ->
             goTypes env (NonEmpty.toList args1) (NonEmpty.toList args2)
       (TBaseWithIdentity identity1 b1, TBaseWithIdentity identity2 b2)
-        | typeHeadMatches identity1 b1 identity2 b2 ->
+        | typeHeadMatchesMetadataLight identity1 b1 identity2 b2 ->
             Just env
       (TBottom, TBottom) ->
         Just env
@@ -149,10 +154,10 @@ alphaEqTypeModuloVarRenaming tyL tyR =
         env' <- goType env a1 a2
         goType env' b1' b2'
       (TConWithIdentity identity1 c1 args1, TConWithIdentity identity2 c2 args2)
-        | typeHeadMatches identity1 c1 identity2 c2 ->
+        | typeHeadMatchesMetadataLight identity1 c1 identity2 c2 ->
             goTypes env (NonEmpty.toList args1) (NonEmpty.toList args2)
       (TBaseWithIdentity identity1 base1, TBaseWithIdentity identity2 base2)
-        | typeHeadMatches identity1 base1 identity2 base2 ->
+        | typeHeadMatchesMetadataLight identity1 base1 identity2 base2 ->
             Just env
       (TBottom, TBottom) ->
         Just env

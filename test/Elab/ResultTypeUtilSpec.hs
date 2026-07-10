@@ -119,6 +119,7 @@ spec = describe "MLF.Elab.Run.ResultType.Util" $ do
           body =
             ALam
               "x"
+              Nothing
               (NodeId 5)
               (GenNodeId 0)
               (AAnn (AVar "x" (NodeId 6)) (NodeId 7) (EdgeId 40))
@@ -126,6 +127,7 @@ spec = describe "MLF.Elab.Run.ResultType.Util" $ do
           expr =
             ALet
               "x"
+              Nothing
               (GenNodeId 1)
               (NodeId 9)
               (ExpVarId 0)
@@ -143,6 +145,7 @@ spec = describe "MLF.Elab.Run.ResultType.Util" $ do
           expr =
             ALet
               "x"
+              Nothing
               (GenNodeId 0)
               (NodeId 10)
               (ExpVarId 0)
@@ -165,6 +168,7 @@ spec = describe "MLF.Elab.Run.ResultType.Util" $ do
           expr =
             ALet
               "x"
+              Nothing
               (GenNodeId 0)
               (NodeId 10)
               (ExpVarId 0)

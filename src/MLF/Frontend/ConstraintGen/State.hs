@@ -22,7 +22,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import MLF.Constraint.RootOwnership
 import MLF.Constraint.Types.Graph
-import MLF.Frontend.ConstraintGen.Types (Binding, ConstraintError)
+import MLF.Frontend.ConstraintGen.Types (Binding, BindingKey, ConstraintError)
 import MLF.Frontend.Syntax (NormSrcType)
 
 data ScopeFrame = ScopeFrame
@@ -38,6 +38,9 @@ data BuildState = BuildState
     bsNextExpVar :: !Int,
     -- | Next available EdgeId
     bsNextEdge :: !Int,
+    -- | Next graph-local lexical binder identity. Distinct binders may share
+    -- one inferred type node, so this cannot be derived from 'NodeId'.
+    bsNextLocalBinder :: !Int,
     -- | Map of all allocated type nodes
     bsNodes :: !(IntMap.IntMap TyNode),
     -- | Instantiation edges (accumulated in reverse)
@@ -65,7 +68,7 @@ data BuildState = BuildState
     -- variables.  The initial environment keeps compact lazy entries; once a
     -- variable is needed, its graph binding is cached here so later
     -- occurrences share the same scheme graph within this definition.
-    bsExternalBindingCache :: !(Map.Map String Binding),
+    bsExternalBindingCache :: !(Map.Map BindingKey Binding),
     -- | Current module root being generated.  This is only populated by the
     -- diagnostic multi-root .mlfp checker path.
     bsCurrentRootOwner :: !(Maybe ModuleRootId),
@@ -90,6 +93,7 @@ mkInitialStateWithPolySyms polySyms =
       bsNextGen = 0,
       bsNextExpVar = 0,
       bsNextEdge = 0,
+      bsNextLocalBinder = 0,
       bsNodes = IntMap.empty,
       bsInstEdges = [],
       bsUnifyEdges = [],

@@ -223,7 +223,21 @@ slices are implemented:
   boundary, and only when backend structural recovery proves the source ADT head
   and lowered Church/recursive runtime type are equivalent.
 - Opaque unchecked checked-binding finalization annotates the fallback term with
-  resolved occurrence and binder identities before storing it.
+  resolved occurrence and binder identities and rejects any remaining
+  `DeferredId` before storing it.
+- The internal `EBinderIdentity` surface wrapper transports exact `IdDetails`
+  through normalization, desugaring, constraint generation, and elaboration to
+  the owning lambda/let node; finalization no longer reconstructs local binder
+  meaning from runtime strings.
+- `ClassApplicationKey` and `EvidenceMethodKey` retain identity-bearing
+  `TypeView`s across elaboration, finalization, and runtime evidence lookup.
+- Checked-program publication validates mention-sensitive `TypeView` head and
+  binder identity completeness, including deferred obligation payloads.
+- Deferred constructor/case substitution stores `TypeView` values by
+  `TypeBinderIdentity`, and structural constructor result binders derive their
+  identity from the data owner plus `StructuralResultBinder` role.
+- Backend conversion returns `ProductionBackendProgram`; LLVM entrypoints accept
+  only that validated identity-complete capability.
 - Constructor bindings without constructor foralls now have a metadata-derived
   checked finalization path that constructs monomorphic nullary,
   monomorphic field/multi-constructor, and non-nullary data-parameterized
@@ -234,10 +248,18 @@ slices are implemented:
   builtin `SymbolIdentity` values, and `DeferredId` is treated as an unresolved
   marker rather than a semantic identity.
 
-This does not complete the ADR. Non-program eMLF producers can still construct
-bare string-compatible terms, and many consumers still use the compatibility
-runtime-name view while they migrate to inspecting `ResolvedVar` / `IdDetails`
-directly.
+Status update, 2026-07-10: `XmlfTerm` no longer has a bare-string variable or
+binder form; occurrences and binders store `ResolvedVar` directly. Normal
+checked-program finalization, including the opaque unchecked path, rejects
+remaining `DeferredId` references. Exact binder identity crosses the
+String-shaped `SurfaceExpr` carrier through `EBinderIdentity`; evidence keys,
+constructor/case obligations, substitutions, and checked `TypeView` validation
+retain identity-bearing metadata. Production backend conversion publishes a
+`ProductionBackendProgram`, and LLVM accepts only that capability. Remaining
+work is representational: replacing the surface carrier itself and separating
+metadata-light fixture constructors from identity-complete Backend IR types.
+The current focused snapshot is
+`docs/audit/identity-string-reference-audit.md`.
 
 ## Performance Expectation
 

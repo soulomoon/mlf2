@@ -24,6 +24,7 @@ import MLF.Frontend.Parse.Program
 import MLF.Frontend.Program.Check
     ( checkLocatedProgramPackage
     , checkProgramPackage
+    , validateCheckedProgramTypeViews
     )
 import MLF.Frontend.Program.Package
     ( LocatedProgramPackage
@@ -86,18 +87,19 @@ prepareBackendEmissionFromSource path source = do
 prepareBackendEmissionFromProgramPackage ::
     ProgramPackage -> Either BackendEmissionPreparationError CheckedProgram
 prepareBackendEmissionFromProgramPackage package =
-    prepareCheckedProgramForBackendEmission
-        <$> first BackendEmissionProgramError (checkProgramPackage package)
+    first BackendEmissionProgramError (checkProgramPackage package)
+        >>= prepareCheckedProgramForBackendEmission
 
 prepareBackendEmissionFromLocatedPackage ::
     LocatedProgramPackage -> Either BackendEmissionPreparationError CheckedProgram
 prepareBackendEmissionFromLocatedPackage package =
-    prepareCheckedProgramForBackendEmission
-        <$> first BackendEmissionProgramDiagnostic (checkLocatedProgramPackage package)
+    first BackendEmissionProgramDiagnostic (checkLocatedProgramPackage package)
+        >>= prepareCheckedProgramForBackendEmission
 
-prepareCheckedProgramForBackendEmission :: CheckedProgram -> CheckedProgram
-prepareCheckedProgramForBackendEmission checked =
-    checked {checkedProgramModules = map (prepareModule preludeIdentity retainedPreludeBindings retainedPreludeData) modules0}
+prepareCheckedProgramForBackendEmission :: CheckedProgram -> Either BackendEmissionPreparationError CheckedProgram
+prepareCheckedProgramForBackendEmission checked = do
+    first BackendEmissionProgramError (validateCheckedProgramTypeViews checked)
+    pure checked {checkedProgramModules = map (prepareModule preludeIdentity retainedPreludeBindings retainedPreludeData) modules0}
   where
     modules0 = checkedProgramModules checked
     preludeIdentity = preludeModuleIdentity modules0
@@ -283,11 +285,19 @@ retainedPreludeBindingData ::
     [CheckedBinding] -> Set SymbolIdentity -> Set SymbolIdentity
 retainedPreludeBindingData preludeDataIdentities preludeBindings retainedPreludeBindings =
     Set.unions
-        [ elabTypePreludeData preludeDataIdentities (checkedBindingType binding)
+        [ Set.union
+            (elabTypePreludeData preludeDataIdentities (checkedBindingType binding))
+            (typeViewPreludeData preludeDataIdentities (checkedBindingSourceTypeView binding))
         | binding <- preludeBindings
         , Just bindingSymbol <- [checkedBindingSymbolIdentity binding]
         , bindingSymbol `memberSymbolIdentityExact` retainedPreludeBindings
         ]
+
+typeViewPreludeData :: Set SymbolIdentity -> TypeView -> Set SymbolIdentity
+typeViewPreludeData preludeDataIdentities view =
+    Set.filter
+        (`memberSymbolIdentityExact` preludeDataIdentities)
+        (Set.fromList (Map.elems (typeViewHeadIdentities view)))
 
 elabTypePreludeData :: Set SymbolIdentity -> ElabType -> Set SymbolIdentity
 elabTypePreludeData preludeDataIdentities ty =

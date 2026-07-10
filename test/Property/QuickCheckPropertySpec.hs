@@ -27,13 +27,14 @@ import MLF.Constraint.Types.Graph
   )
 import MLF.Constraint.Unify.Decompose (decomposeUnifyChildren)
 -- Reification type operations
-import MLF.Reify.TypeOps (alphaEqType, freeTypeVarsType, substTypeCaptureRef)
+import MLF.Reify.TypeOps (alphaEqType, alphaEqTypeMetadataLight, freeTypeVarsType, substTypeCaptureRef)
 -- Elaboration types
 import MLF.Types.Elab
   ( BoundType,
     ElabType,
     Ty (..),
     TypeBinderRef,
+    elabTypeIdentityComplete,
     tBase,
     tForallWithRef,
     tMuWithRef,
@@ -300,16 +301,21 @@ reificationProperties = describe "Reification round-trip well-formedness" $ do
                 expected = Set.union (Set.delete v (freeTypeVarsType ty)) (freeTypeVarsType s)
              in fvResult `Set.isSubsetOf` expected
 
-  it "alphaEqType is reflexive" $
+  it "metadata-light alphaEqType is reflexive" $
     property $
       forAllShrink (sized genElabType) shrinkElabType $ \ty ->
-        alphaEqType ty ty === True
+        alphaEqTypeMetadataLight ty ty === True
 
-  it "alphaEqType is symmetric" $
+  it "metadata-light alphaEqType is symmetric" $
     property $
       forAllShrink (sized genElabType) shrinkElabType $ \ty1 ->
         forAllShrink (sized genElabType) shrinkElabType $ \ty2 ->
-          alphaEqType ty1 ty2 === alphaEqType ty2 ty1
+          alphaEqTypeMetadataLight ty1 ty2 === alphaEqTypeMetadataLight ty2 ty1
+
+  it "production alphaEqType is reflexive for identity-complete types" $
+    property $
+      forAllShrink (sized genElabType) shrinkElabType $ \ty ->
+        elabTypeIdentityComplete ty ==> alphaEqType ty ty === True
 
   it "substituting a variable not free in a type is identity" $
     property $

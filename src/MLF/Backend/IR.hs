@@ -106,6 +106,9 @@ module MLF.Backend.IR
     pattern BackendProgram,
     backendProgramModules,
     backendProgramMain,
+    ProductionBackendProgram,
+    mkProductionBackendProgram,
+    productionBackendProgramIR,
     BackendModule
       ( BackendModuleWithIdentity,
         backendModuleIdentity,
@@ -172,7 +175,6 @@ module MLF.Backend.IR
     backendTypeSubstitutionKeyFromIdentity,
     backendTypeSubstitutionKeyFromMetadataLightName,
     backendTypeSubstitutionKeyFromMaybeMetadataLight,
-    backendTypeSubstitutionKeyFor,
     backendTypeSubstitutionKeyName,
     pattern BTVar,
     pattern BTBase,
@@ -205,8 +207,19 @@ module MLF.Backend.IR
     BackendCallableHead (..),
     BackendValidationError (..),
     alphaEqBackendType,
+    backendTypeHeadMatchesWith,
     backendTypeHeadMatches,
+    backendTypeRefinesScrutineeWith,
+    backendTypeRefinesScrutinee,
+    BackendTypeReferenceMode (..),
+    typeBinderRefMatchesWith,
     typeBinderRefMatches,
+    BackendTermReferenceMode (..),
+    backendTermRefMatchesWith,
+    backendTermRefMatches,
+    ClosureEntryReferenceMode (..),
+    closureEntryRefMatchesWith,
+    closureEntryRefMatches,
     freeBackendTypeVarKeys,
     generatedIdentitiesInBackendProgram,
     generatedIdentitiesInBackendTypes,
@@ -240,7 +253,7 @@ import MLF.Backend.StructuralRecursiveData
     BackendParameterBounds,
     alphaEqBackendType,
     backendDataScope,
-    backendStructuralDataBoundaryMatches,
+    backendStructuralDataBoundaryMatchesWith,
     completeBackendParameterSubstitution,
     completeDataParameterSubstitution,
     isVacuousRecursiveBinderWithIdentity,
@@ -259,7 +272,7 @@ import MLF.Backend.StructuralRecursiveData
   )
 import MLF.Constraint.Types.Graph (BaseTy (..))
 import MLF.Frontend.Program.Builtins (builtinTypeHeadIdentity, builtinValueIdentity)
-import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), lookupSymbolIdentityAlias, lookupSymbolIdentityExact, memberSymbolIdentityExact, symbolDefiningModule, symbolDefiningName, symbolIdentityPayloadKey, symbolIdentityPayloadMatches, symbolIdentityStableName, symbolNamespace, symbolUniqueIdentity)
+import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), SymbolReferenceMode (..), lookupSymbolIdentityAlias, lookupSymbolIdentityExact, memberSymbolIdentityExact, symbolDefiningModule, symbolDefiningName, symbolIdentityPayloadKey, symbolIdentityPayloadMatches, symbolIdentityStableName, symbolNamespace, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit (..))
 import MLF.Types.Identity
   ( DeferredRef,
@@ -270,19 +283,33 @@ import MLF.Types.Identity
     StructuralTypeBinderRole (..),
     TypeBinderIdentity,
     UniqueIdentity,
-    advanceIdentityGeneratorPast,
+    advanceIdentityGeneratorPastMany,
     freshIdentity,
     idDetailsAliasNames,
-    idDetailsReferenceName,
     idDetailsSymbolIdentity,
     initialIdentityGenerator,
     symbolGeneratedIdentities,
-    typeBinderIdentityGeneratedUnique,
-    typeBinderIdentityStructural,
+    typeBinderIdentityFromStructural,
     typeBinderIdentityFromUnique,
+    typeBinderIdentityStructural,
   )
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
 import MLF.Util.Names (freshNameLike)
+
+-- | Capability proving that every production backend reference passed
+-- identity-only validation. The constructor stays private so production
+-- lowering cannot accidentally accept metadata-light fixtures.
+newtype ProductionBackendProgram = ProductionBackendProgram BackendProgram
+  deriving (Show)
+
+mkProductionBackendProgram :: BackendProgram -> Either BackendValidationError ProductionBackendProgram
+mkProductionBackendProgram program = do
+  validateBackendProgramProduction program
+  pure (ProductionBackendProgram program)
+
+productionBackendProgramIR :: ProductionBackendProgram -> BackendProgram
+productionBackendProgramIR (ProductionBackendProgram program) =
+  program
 
 data BackendValidationError
   = BackendDuplicateModule String
@@ -361,7 +388,8 @@ data BackendValidationError
   deriving (Eq, Show)
 
 data BackendValidationContext = BackendValidationContext
-  { bvcMetadataLightGlobalsByName :: Map.Map String BackendType,
+  { bvcReferenceMode :: BackendValidationReferenceMode,
+    bvcMetadataLightGlobalsByName :: Map.Map String BackendType,
     bvcGlobalsByIdentity :: Map.Map SymbolIdentity BackendType,
     bvcMetadataLightDataByName :: Map.Map String BackendData,
     bvcDataByIdentity :: Map.Map SymbolIdentity BackendData,
@@ -369,6 +397,7 @@ data BackendValidationContext = BackendValidationContext
     bvcConstructorsByIdentity :: Map.Map SymbolIdentity BackendConstructorInfo,
     bvcMetadataLightLocalsByName :: Map.Map String BackendType,
     bvcLocalsByIdentity :: Map.Map BackendLocalKey BackendType,
+    bvcCasePatternLocalsByIdentity :: Set.Set BackendLocalKey,
     bvcMetadataLightClosureGlobalsByName :: Set.Set String,
     bvcClosureGlobalsByIdentity :: Set.Set SymbolIdentity,
     bvcMetadataLightClosureLocalsByName :: Set.Set String,
@@ -377,6 +406,16 @@ data BackendValidationContext = BackendValidationContext
     bvcPossibleClosureLocalsByIdentity :: Set.Set BackendLocalKey,
     bvcTypeBounds :: BackendParameterBounds
   }
+
+data BackendValidationReferenceMode
+  = AllowMetadataLightReferences
+  | RequireIdentityReferences
+  deriving (Eq, Show)
+
+data TypeBoundReferenceMode
+  = TypeBoundIdentityOnly
+  | TypeBoundMetadataLight
+  deriving (Eq, Show)
 
 data BackendConstructorInfo = BackendConstructorInfo
   { bciDataIdentity :: Maybe SymbolIdentity,
@@ -390,6 +429,41 @@ typeBoundKeyNames :: BackendParameterBounds -> Set.Set String
 typeBoundKeyNames =
   Set.map backendTypeSubstitutionKeyName . Map.keysSet
 
+typeBoundReferenceModeForContext :: Maybe BackendValidationContext -> TypeBoundReferenceMode
+typeBoundReferenceModeForContext Nothing =
+  TypeBoundMetadataLight
+typeBoundReferenceModeForContext (Just context0)
+  | metadataLightReferencesAllowed context0 = TypeBoundMetadataLight
+  | otherwise = TypeBoundIdentityOnly
+
+backendTypeReferenceModeForTypeBoundMode :: TypeBoundReferenceMode -> BackendTypeReferenceMode
+backendTypeReferenceModeForTypeBoundMode mode =
+  case mode of
+    TypeBoundIdentityOnly -> BackendTypeIdentityOnly
+    TypeBoundMetadataLight -> BackendTypeMetadataLight
+
+symbolReferenceModeForTypeBoundMode :: TypeBoundReferenceMode -> SymbolReferenceMode
+symbolReferenceModeForTypeBoundMode mode =
+  case mode of
+    TypeBoundIdentityOnly -> SymbolIdentityOnly
+    TypeBoundMetadataLight -> SymbolMetadataLight
+
+backendCallableReferenceModeForContext :: Maybe BackendValidationContext -> BackendCallableReferenceMode
+backendCallableReferenceModeForContext Nothing =
+  BackendCallableMetadataLight
+backendCallableReferenceModeForContext (Just context0)
+  | metadataLightReferencesAllowed context0 = BackendCallableMetadataLight
+  | otherwise = BackendCallableIdentityOnly
+
+typeBoundReferenceKey :: TypeBoundReferenceMode -> Maybe TypeBinderIdentity -> String -> Maybe BackendTypeSubstitutionKey
+typeBoundReferenceKey mode mbIdentity name =
+  case mbIdentity of
+    Just identity -> Just (backendTypeSubstitutionKeyFromIdentity identity)
+    Nothing ->
+      case mode of
+        TypeBoundIdentityOnly -> Nothing
+        TypeBoundMetadataLight -> Just (backendTypeSubstitutionKeyFromMetadataLightName name)
+
 data BackendLocalKey
   = BackendLocalRef LocalRef
   | BackendEnvRef EnvRef
@@ -397,13 +471,8 @@ data BackendLocalKey
   deriving (Eq, Ord, Show)
 
 data TypeVariableInstantiation
-  = RejectFreeTypeVariableInstantiation FreshenedTypeVariableAliases
+  = RejectFreeTypeVariableInstantiation
   | AllowStructuralPayloadInstantiation
-  deriving (Eq, Show)
-
-data FreshenedTypeVariableAliases
-  = RejectFreshenedTypeVariableAliases
-  | AllowFreshenedTypeVariableAliases
   deriving (Eq, Show)
 
 backendClosureEntryNames :: BackendExpr -> [String]
@@ -429,7 +498,11 @@ backendClosureEntryNames =
       backendClosureEntryNames fun ++ concatMap backendClosureEntryNames args
 
 validateBackendProgram :: BackendProgram -> Either BackendValidationError ()
-validateBackendProgram program = do
+validateBackendProgram =
+  validateBackendProgramWith AllowMetadataLightReferences
+
+validateBackendProgramWith :: BackendValidationReferenceMode -> BackendProgram -> Either BackendValidationError ()
+validateBackendProgramWith referenceMode program = do
   requireUnique BackendDuplicateModule (map backendModuleName modules0)
   requireUniqueSymbolIdentities "module" BackendDuplicateModule [identity | module0 <- modules0, Just identity <- [backendModuleIdentity module0]]
   mapM_ validateBackendModuleIdentities modules0
@@ -445,6 +518,7 @@ validateBackendProgram program = do
   requireUniqueSymbolIdentities "constructor" BackendDuplicateConstructor [identity | constructor <- constructors, Just identity <- [backendConstructorIdentity constructor]]
   requireUnique BackendDuplicateClosureEntry closureEntryNames
   rejectClosureEntryNameCollisions closureEntryNames (map backendBindingName bindings ++ Map.keys runtimePrimitiveTypes)
+  validateBackendProgramMainIdentity program bindings
   unless (backendProgramMainExists program bindings) $
     Left (BackendMainNotFound (backendProgramMain program))
   mapM_ (validateBackendBindingInContext context0) bindings
@@ -455,7 +529,7 @@ validateBackendProgram program = do
     constructors = concatMap backendDataConstructors dataDecls
     closureEntryNames = concatMap (backendClosureEntryNames . backendBindingExpr) bindings
     dataDeclsByName =
-      Map.fromList
+      metadataLightMap
         [ (backendDataName dataDecl, dataDecl)
         | dataDecl <- dataDecls,
           backendDataIdentity dataDecl == Nothing
@@ -484,8 +558,9 @@ validateBackendProgram program = do
       ]
     baseContext =
       BackendValidationContext
-        { bvcMetadataLightGlobalsByName =
-            Map.fromList
+        { bvcReferenceMode = referenceMode,
+          bvcMetadataLightGlobalsByName =
+            metadataLightMap
               [ (backendBindingName binding, backendBindingType binding)
               | binding <- bindings,
                 backendBindingIdentity binding == Nothing
@@ -500,7 +575,7 @@ validateBackendProgram program = do
           bvcMetadataLightDataByName = dataDeclsByName,
           bvcDataByIdentity = dataDeclsByIdentity,
           bvcMetadataLightConstructorsByName =
-            Map.fromList
+            metadataLightMap
               [ (name, info)
               | (name, info@(BackendConstructorInfo {bciConstructor = constructor})) <- constructorInfos,
                 backendConstructorIdentity constructor == Nothing
@@ -513,6 +588,7 @@ validateBackendProgram program = do
               ],
           bvcMetadataLightLocalsByName = Map.empty,
           bvcLocalsByIdentity = Map.empty,
+          bvcCasePatternLocalsByIdentity = Set.empty,
           bvcMetadataLightClosureGlobalsByName = Set.empty,
           bvcClosureGlobalsByIdentity = Set.empty,
           bvcMetadataLightClosureLocalsByName = Set.empty,
@@ -527,11 +603,15 @@ validateBackendProgram program = do
         { bvcMetadataLightClosureGlobalsByName = closureGlobals,
           bvcClosureGlobalsByIdentity = closureGlobalIdentities
         }
+    metadataLightMap entries =
+      case referenceMode of
+        AllowMetadataLightReferences -> Map.fromList entries
+        RequireIdentityReferences -> Map.empty
 
 validateBackendProgramProduction :: BackendProgram -> Either BackendValidationError ()
 validateBackendProgramProduction program = do
   validateBackendProgramSemanticReferences program
-  validateBackendProgram program
+  validateBackendProgramWith RequireIdentityReferences program
 
 validateBackendProgramSemanticReferences :: BackendProgram -> Either BackendValidationError ()
 validateBackendProgramSemanticReferences program = do
@@ -583,14 +663,14 @@ validateBackendExprSemanticReferences expr = do
     BackendLit {} ->
       pure ()
     BackendLamWithIdentity _ mbIdentity name paramTy body -> do
-      requireIdentity BackendLambdaParameterIdentityMissing name mbIdentity
+      requireLocalIdentity BackendLambdaParameterIdentityMissing name mbIdentity
       validateBackendTypeSemanticReferences paramTy
       validateBackendExprSemanticReferences body
     BackendApp _ fun arg -> do
       validateBackendExprSemanticReferences fun
       validateBackendExprSemanticReferences arg
     BackendLetWithIdentity _ mbIdentity name bindingTy rhs body -> do
-      requireIdentity BackendLetIdentityMissing name mbIdentity
+      requireLocalIdentity BackendLetIdentityMissing name mbIdentity
       validateBackendTypeSemanticReferences bindingTy
       validateBackendExprSemanticReferences rhs
       validateBackendExprSemanticReferences body
@@ -622,13 +702,13 @@ validateBackendExprSemanticReferences expr = do
 
 validateBackendClosureCaptureSemanticReferences :: BackendClosureCapture -> Either BackendValidationError ()
 validateBackendClosureCaptureSemanticReferences capture = do
-  requireIdentity BackendClosureCaptureIdentityMissing (backendClosureCaptureName capture) (backendClosureCaptureIdentity capture)
+  requireLocalIdentity BackendClosureCaptureIdentityMissing (backendClosureCaptureName capture) (backendClosureCaptureIdentity capture)
   validateBackendTypeSemanticReferences (backendClosureCaptureType capture)
   validateBackendExprSemanticReferences (backendClosureCaptureExpr capture)
 
 validateBackendClosureParamSemanticReferences :: BackendClosureParam -> Either BackendValidationError ()
 validateBackendClosureParamSemanticReferences param = do
-  requireIdentity BackendClosureParameterIdentityMissing (backendClosureParamName param) (backendClosureParamIdentity param)
+  requireLocalIdentity BackendClosureParameterIdentityMissing (backendClosureParamName param) (backendClosureParamIdentity param)
   validateBackendTypeSemanticReferences (backendClosureParamType param)
 
 validateBackendAlternativeSemanticReferences :: BackendAlternative -> Either BackendValidationError ()
@@ -647,7 +727,7 @@ validateBackendPatternSemanticReferences =
 
 validateBackendPatternBinderSemanticReferences :: BackendPatternBinder -> Either BackendValidationError ()
 validateBackendPatternBinderSemanticReferences binder =
-  requireIdentity BackendPatternBinderIdentityMissing (backendPatternBinderName binder) (backendPatternBinderIdentity binder)
+  requireLocalIdentity BackendPatternBinderIdentityMissing (backendPatternBinderName binder) (backendPatternBinderIdentity binder)
 
 validateBackendTypeSemanticReferences :: BackendType -> Either BackendValidationError ()
 validateBackendTypeSemanticReferences =
@@ -678,6 +758,12 @@ validateBackendTypeSemanticReferences =
 requireIdentity :: (String -> BackendValidationError) -> String -> Maybe identity -> Either BackendValidationError ()
 requireIdentity mkError name =
   maybe (Left (mkError name)) (const (Right ()))
+
+requireLocalIdentity :: (String -> BackendValidationError) -> String -> Maybe IdDetails -> Either BackendValidationError ()
+requireLocalIdentity mkError name mbIdentity =
+  case mbIdentity >>= idDetailsLocalKey of
+    Just {} -> Right ()
+    Nothing -> Left (mkError name)
 
 validateBackendModuleIdentities :: BackendModule -> Either BackendValidationError ()
 validateBackendModuleIdentities backendModule =
@@ -770,8 +856,7 @@ validateBackendDataConstructorTypeVariables dataDecl =
 
     validateType allowedKeys constructor ty =
       case [ key
-           | key <- Set.toList (Set.difference (freeBackendTypeVarKeys ty) allowedKeys),
-             backendTypeSubstitutionKeyIdentity key == Nothing
+           | key <- Set.toList (Set.difference (freeBackendTypeVarKeys ty) allowedKeys)
            ] of
         [] -> pure ()
         key : _ -> Left (BackendConstructorUnknownTypeVariable (backendConstructorName constructor) (backendTypeSubstitutionKeyName key))
@@ -779,6 +864,23 @@ validateBackendDataConstructorTypeVariables dataDecl =
 backendDataScopeForContext :: BackendValidationContext -> BackendDataScope
 backendDataScopeForContext context0 =
   backendDataScope (bvcMetadataLightDataByName context0) (bvcDataByIdentity context0)
+
+validateBackendProgramMainIdentity :: BackendProgram -> [BackendBinding] -> Either BackendValidationError ()
+validateBackendProgramMainIdentity program bindings =
+  case backendProgramMainIdentity program of
+    Just {} ->
+      Right ()
+    Nothing ->
+      case identityBearingMainBindings of
+        _ : _ -> Left (BackendProgramMainIdentityMissing (backendProgramMain program))
+        [] -> Right ()
+  where
+    identityBearingMainBindings =
+      [ ()
+      | binding <- bindings,
+        backendBindingName binding == backendProgramMain program,
+        Just {} <- [backendBindingIdentity binding]
+      ]
 
 backendProgramMainExists :: BackendProgram -> [BackendBinding] -> Bool
 backendProgramMainExists program bindings =
@@ -810,11 +912,15 @@ backendClosureGlobals baseContext bindings =
               BackendClosureCallableHead _ <- [backendCallableHeadInContext (Just context0) (backendBindingExpr binding)]
             ]
           detectedGlobals =
-            Set.fromList
-              [ backendBindingName binding
-              | binding <- closureBindings,
-                backendBindingIdentity binding == Nothing
-              ]
+            case bvcReferenceMode baseContext of
+              AllowMetadataLightReferences ->
+                Set.fromList
+                  [ backendBindingName binding
+                  | binding <- closureBindings,
+                    backendBindingIdentity binding == Nothing
+                  ]
+              RequireIdentityReferences ->
+                Set.empty
           detectedIdentities =
             Set.fromList
               [identity | binding <- closureBindings, Just identity <- [backendBindingIdentity binding]]
@@ -1007,7 +1113,7 @@ validateBackendClosureFunctionType entryName resultTy params bodyTy =
         Left (BackendClosureTypeMismatch entryName resultTy expected)
 
 instance BackendCallableExpr BackendExpr where
-  backendCallableExprView =
+  backendCallableExprViewWith mode =
     \case
       BackendVarWithIdentity _ mbIdentity name ->
         BackendCallableVar mbIdentity name
@@ -1028,7 +1134,7 @@ instance BackendCallableExpr BackendExpr where
              in BackendCallableAlternative
                   { backendCallableAltBinders = binders,
                     backendCallableAltClosureBinders =
-                      filter (`backendExprMentionsBindingWithCallableType` body) binders,
+                      filter (\binder -> backendExprMentionsBindingWithCallableType mode binder body) binders,
                     backendCallableAltBody = body
                   }
           | alternative <- NE.toList alternatives
@@ -1038,7 +1144,9 @@ instance BackendCallableExpr BackendExpr where
 
 backendCallableHeadInContext :: Maybe BackendValidationContext -> BackendExpr -> BackendCallableHead
 backendCallableHeadInContext mbContext =
-  backendCallableHead (backendCallableBindingKindInContext mbContext)
+  backendCallableHeadWith
+    (backendCallableReferenceModeForContext mbContext)
+    (backendCallableBindingKindInContext mbContext)
 
 backendCallableBindingKindInContext :: Maybe BackendValidationContext -> Maybe IdDetails -> String -> BackendCallableBindingKind
 backendCallableBindingKindInContext Nothing _ _ =
@@ -1055,12 +1163,14 @@ lookupCallableBindingKindByIdentity context0 mbIdentity =
       | Just key <- idDetailsLocalKey details ->
           lookupLocalCallableBindingKindByIdentity context0 key
       | Just identity <- idDetailsSymbolIdentity details ->
-      lookupGlobalCallableBindingKindByIdentity context0 identity
+          lookupGlobalCallableBindingKindByIdentity context0 identity
     _ ->
       Nothing
 
 lookupMetadataLightCallableBindingKind :: BackendValidationContext -> String -> BackendCallableBindingKind
 lookupMetadataLightCallableBindingKind context0 name
+  | not (metadataLightReferencesAllowed context0) =
+      BackendCallableBindingUnknown
   | Set.member name (bvcMetadataLightClosureLocalsByName context0) =
       BackendCallableBindingClosure
   | Set.member name (bvcMetadataLightPossibleClosureLocalsByName context0) =
@@ -1094,28 +1204,28 @@ lookupGlobalCallableBindingKindByIdentity context0 identity
   | otherwise =
       Nothing
 
-backendExprMentionsBindingWithCallableType :: BackendBinderRef -> BackendExpr -> Bool
-backendExprMentionsBindingWithCallableType needle =
+backendExprMentionsBindingWithCallableType :: BackendCallableReferenceMode -> BackendBinderRef -> BackendExpr -> Bool
+backendExprMentionsBindingWithCallableType mode needle =
   go
   where
     go =
       \case
         BackendVarWithIdentity ty mbIdentity name ->
-          backendBinderMatches needle (backendCallableRef mbIdentity name) && backendTypeIsClosureValue ty
+          backendBinderMatchesWith mode needle (backendCallableRef mbIdentity name) && backendTypeIsClosureValue ty
         BackendLit {} ->
           False
         BackendLamWithIdentity _ mbIdentity name _ body
-          | backendBinderMatches needle (backendCallableRef mbIdentity name) -> False
+          | backendBinderMatchesWith mode needle (backendCallableRef mbIdentity name) -> False
           | otherwise -> go body
         BackendApp _ fun arg ->
           go fun || go arg
         BackendLetWithIdentity _ mbIdentity name _ rhs body
-          | backendBinderMatches needle (backendCallableRef mbIdentity name) -> go rhs
+          | backendBinderMatchesWith mode needle (backendCallableRef mbIdentity name) -> go rhs
           | otherwise -> go rhs || go body
         BackendTyAbs _ _ _ body ->
           go body
         BackendTyApp ty (BackendVarWithIdentity _ mbIdentity name) _
-          | backendBinderMatches needle (backendCallableRef mbIdentity name),
+          | backendBinderMatchesWith mode needle (backendCallableRef mbIdentity name),
             backendTypeIsClosureValue ty ->
               True
         BackendTyApp _ fun _ ->
@@ -1130,7 +1240,7 @@ backendExprMentionsBindingWithCallableType needle =
           go payload
         BackendClosureWithParamIdentities _ _ _ captures params body ->
           any (go . backendClosureCaptureExpr) captures
-            || (not (any (backendBinderMatches needle) closureBinders) && go body)
+            || (not (any (backendBinderMatchesWith mode needle) closureBinders) && go body)
           where
             closureBinders =
               [backendCallableRef (backendClosureCaptureIdentity capture) (backendClosureCaptureName capture) | capture <- captures]
@@ -1139,17 +1249,17 @@ backendExprMentionsBindingWithCallableType needle =
           go fun || any go args
 
     goAlternative (BackendAlternative pattern0 body)
-      | any (backendBinderMatches needle) (patternBinderDetails pattern0) = False
+      | any (backendBinderMatchesWith mode needle) (patternBinderDetails pattern0) = False
       | otherwise = go body
 
-backendBinderMatches :: BackendBinderRef -> BackendBinderRef -> Bool
-backendBinderMatches =
-  backendCallableRefMatches
+backendBinderMatchesWith :: BackendCallableReferenceMode -> BackendBinderRef -> BackendBinderRef -> Bool
+backendBinderMatchesWith =
+  backendCallableRefMatchesWith
 
 type BackendBinderRef = BackendCallableRef
 
-backendExprCallsBinderAsClosureHead :: BackendBinderRef -> BackendExpr -> Bool
-backendExprCallsBinderAsClosureHead needle =
+backendExprCallsBinderAsClosureHead :: BackendCallableReferenceMode -> BackendBinderRef -> BackendExpr -> Bool
+backendExprCallsBinderAsClosureHead mode needle =
   go [needle]
   where
     go aliases =
@@ -1159,16 +1269,16 @@ backendExprCallsBinderAsClosureHead needle =
         BackendLit {} ->
           False
         BackendLamWithIdentity _ mbIdentity name _ body
-          | any (backendBinderMatches (backendCallableRef mbIdentity name)) aliases -> False
+          | any (backendBinderMatchesWith mode (backendCallableRef mbIdentity name)) aliases -> False
           | otherwise -> go aliases body
         BackendApp _ fun arg ->
           go aliases fun || go aliases arg
         BackendLetWithIdentity _ mbIdentity name _ rhs body
-          | any (backendBinderMatches (backendCallableRef mbIdentity name)) aliases -> go aliases rhs
+          | any (backendBinderMatchesWith mode (backendCallableRef mbIdentity name)) aliases -> go aliases rhs
           | otherwise ->
               let aliasesForBody =
-                    if closureCallHeadReferencesAny aliases rhs
-                      then insertBackendBinderAlias (backendCallableRef mbIdentity name) aliases
+                    if closureCallHeadReferencesAny mode aliases rhs
+                      then insertBackendBinderAlias mode (backendCallableRef mbIdentity name) aliases
                       else aliases
                in go aliases rhs || go aliasesForBody body
         BackendTyAbs _ _ _ body ->
@@ -1185,73 +1295,73 @@ backendExprCallsBinderAsClosureHead needle =
           go aliases payload
         BackendClosureWithParamIdentities _ _ _ captures params body ->
           any (go aliases . backendClosureCaptureExpr) captures
-            || (backendBindersDisjoint aliases closureParamBinders && go aliasesForBody body)
+            || (backendBindersDisjoint mode aliases closureParamBinders && go aliasesForBody body)
           where
             closureParamBinders =
               [backendCallableRef (backendClosureParamIdentity param) (backendClosureParamName param) | param <- params]
             aliasesForBody =
-              foldr insertBackendBinderAlias aliases capturedAliases
+              foldr (insertBackendBinderAlias mode) aliases capturedAliases
             capturedAliases =
               [ captureBinder
               | capture <- captures,
                 let captureBinder = backendCallableRef (backendClosureCaptureIdentity capture) (backendClosureCaptureName capture),
-                any (\alias -> backendExprReferencesBinding alias (backendClosureCaptureExpr capture)) aliases
+                any (\alias -> backendExprReferencesBinding mode alias (backendClosureCaptureExpr capture)) aliases
               ]
         BackendClosureCall _ fun args ->
-          closureCallHeadReferencesAny aliases fun || go aliases fun || any (go aliases) args
+          closureCallHeadReferencesAny mode aliases fun || go aliases fun || any (go aliases) args
 
     goAlternative aliases (BackendAlternative pattern0 body)
-      | not (backendBindersDisjoint aliases (patternBinderDetails pattern0)) = False
+      | not (backendBindersDisjoint mode aliases (patternBinderDetails pattern0)) = False
       | otherwise = go aliases body
 
-insertBackendBinderAlias :: BackendBinderRef -> [BackendBinderRef] -> [BackendBinderRef]
-insertBackendBinderAlias alias aliases =
-  alias : filter (not . backendBinderMatches alias) aliases
+insertBackendBinderAlias :: BackendCallableReferenceMode -> BackendBinderRef -> [BackendBinderRef] -> [BackendBinderRef]
+insertBackendBinderAlias mode alias aliases =
+  alias : filter (not . backendBinderMatchesWith mode alias) aliases
 
-backendBindersDisjoint :: [BackendBinderRef] -> [BackendBinderRef] -> Bool
-backendBindersDisjoint left right =
-  not (any (\leftBinder -> any (backendBinderMatches leftBinder) right) left)
+backendBindersDisjoint :: BackendCallableReferenceMode -> [BackendBinderRef] -> [BackendBinderRef] -> Bool
+backendBindersDisjoint mode left right =
+  not (any (\leftBinder -> any (backendBinderMatchesWith mode leftBinder) right) left)
 
-closureCallHeadReferencesAny :: [BackendBinderRef] -> BackendExpr -> Bool
-closureCallHeadReferencesAny needles expr =
-  closureCallHeadReferencesAnyFrom needles expr
+closureCallHeadReferencesAny :: BackendCallableReferenceMode -> [BackendBinderRef] -> BackendExpr -> Bool
+closureCallHeadReferencesAny mode needles expr =
+  closureCallHeadReferencesAnyFrom mode needles expr
 
-closureCallHeadReferencesAnyFrom :: [BackendBinderRef] -> BackendExpr -> Bool
-closureCallHeadReferencesAnyFrom aliases0 =
+closureCallHeadReferencesAnyFrom :: BackendCallableReferenceMode -> [BackendBinderRef] -> BackendExpr -> Bool
+closureCallHeadReferencesAnyFrom mode aliases0 =
   \case
     BackendVarWithIdentity _ mbIdentity name ->
-      any (backendBinderMatches (backendCallableRef mbIdentity name)) aliases0
+      any (backendBinderMatchesWith mode (backendCallableRef mbIdentity name)) aliases0
     BackendTyApp _ fun _ ->
-      closureCallHeadReferencesAnyFrom aliases0 fun
+      closureCallHeadReferencesAnyFrom mode aliases0 fun
     BackendLetWithIdentity _ mbIdentity name _ rhs body ->
       let binder = backendCallableRef mbIdentity name
           aliasesWithoutShadow =
-            filter (not . backendBinderMatches binder) aliases0
+            filter (not . backendBinderMatchesWith mode binder) aliases0
           aliasesForBody =
-            if closureCallHeadReferencesAnyFrom aliases0 rhs
-              then insertBackendBinderAlias binder aliasesWithoutShadow
+            if closureCallHeadReferencesAnyFrom mode aliases0 rhs
+              then insertBackendBinderAlias mode binder aliasesWithoutShadow
               else aliasesWithoutShadow
-       in closureCallHeadReferencesAnyFrom aliasesForBody body
+       in closureCallHeadReferencesAnyFrom mode aliasesForBody body
     _ ->
       False
 
-backendExprReferencesBinding :: BackendBinderRef -> BackendExpr -> Bool
-backendExprReferencesBinding needle =
+backendExprReferencesBinding :: BackendCallableReferenceMode -> BackendBinderRef -> BackendExpr -> Bool
+backendExprReferencesBinding mode needle =
   go
   where
     go =
       \case
         BackendVarWithIdentity _ mbIdentity name ->
-          backendBinderMatches needle (backendCallableRef mbIdentity name)
+          backendBinderMatchesWith mode needle (backendCallableRef mbIdentity name)
         BackendLit {} ->
           False
         BackendLamWithIdentity _ mbIdentity name _ body
-          | backendBinderMatches needle (backendCallableRef mbIdentity name) -> False
+          | backendBinderMatchesWith mode needle (backendCallableRef mbIdentity name) -> False
           | otherwise -> go body
         BackendApp _ fun arg ->
           go fun || go arg
         BackendLetWithIdentity _ mbIdentity name _ rhs body
-          | backendBinderMatches needle (backendCallableRef mbIdentity name) -> go rhs
+          | backendBinderMatchesWith mode needle (backendCallableRef mbIdentity name) -> go rhs
           | otherwise -> go rhs || go body
         BackendTyAbs _ _ _ body ->
           go body
@@ -1267,7 +1377,7 @@ backendExprReferencesBinding needle =
           go payload
         BackendClosureWithParamIdentities _ _ _ captures params body ->
           any (go . backendClosureCaptureExpr) captures
-            || (not (any (backendBinderMatches needle) closureBinders) && go body)
+            || (not (any (backendBinderMatchesWith mode needle) closureBinders) && go body)
           where
             closureBinders =
               [backendCallableRef (backendClosureCaptureIdentity capture) (backendClosureCaptureName capture) | capture <- captures]
@@ -1276,7 +1386,7 @@ backendExprReferencesBinding needle =
           go fun || any go args
 
     goAlternative (BackendAlternative pattern0 body)
-      | any (backendBinderMatches needle) (patternBinderDetails pattern0) = False
+      | any (backendBinderMatchesWith mode needle) (patternBinderDetails pattern0) = False
       | otherwise = go body
 
 patternBinderDetails :: BackendPattern -> [BackendBinderRef]
@@ -1365,6 +1475,7 @@ backendApplicationTypeMatches mbContext expectedTy actualTy =
   matches expectedTy actualTy
     || (not (backendTypeContainsMu expectedTy || backendTypeContainsMu actualTy) && matches expectedTy' actualTy')
   where
+    typeBoundMode = typeBoundReferenceModeForContext mbContext
     typeBounds = maybe Map.empty bvcTypeBounds mbContext
     dataScope = backendDataScopeForContext <$> mbContext
     expectedTy' = maybe expectedTy (`canonicalizeBackendTypeDataHeads` expectedTy) mbContext
@@ -1372,10 +1483,17 @@ backendApplicationTypeMatches mbContext expectedTy actualTy =
     matches expected actual =
       typeMatches expected actual
         || typeMatches actual expected
-        || backendStructuralDataBoundaryMatches typeBounds dataScope expected actual
+        || ( not (identityBearingNominalStructuralBoundary expected actual)
+               && backendStructuralDataBoundaryMatchesWith
+                 (backendTypeReferenceModeForTypeBoundMode typeBoundMode)
+                 typeBounds
+                 dataScope
+                 expected
+                 actual
+           )
 
     typeMatches =
-      backendTypeMatchesWith AllowStructuralPayloadInstantiation typeBounds dataScope
+      backendTypeMatchesWith typeBoundMode AllowStructuralPayloadInstantiation typeBounds dataScope
 
 backendTypeContainsMu :: BackendType -> Bool
 backendTypeContainsMu =
@@ -1389,72 +1507,116 @@ backendTypeContainsMu =
     BTMuWithIdentity {} -> True
     BTBottom -> False
 
+identityBearingNominalStructuralBoundary :: BackendType -> BackendType -> Bool
+identityBearingNominalStructuralBoundary expected actual =
+  case (expected, actual) of
+    (BTArrow expectedDom expectedCod, BTArrow actualDom actualCod) ->
+      identityBearingNominalStructuralBoundary expectedDom actualDom
+        || identityBearingNominalStructuralBoundary expectedCod actualCod
+    (BTConWithIdentity _ _ expectedArgs, BTConWithIdentity _ _ actualArgs) ->
+      or (zipWith identityBearingNominalStructuralBoundary (NE.toList expectedArgs) (NE.toList actualArgs))
+    (BTVarAppWithIdentity _ _ expectedArgs, BTVarAppWithIdentity _ _ actualArgs) ->
+      or (zipWith identityBearingNominalStructuralBoundary (NE.toList expectedArgs) (NE.toList actualArgs))
+    (BTForallWithIdentity _ _ expectedBound expectedBody, BTForallWithIdentity _ _ actualBound actualBody) ->
+      maybe False (uncurry identityBearingNominalStructuralBoundary) ((,) <$> expectedBound <*> actualBound)
+        || identityBearingNominalStructuralBoundary expectedBody actualBody
+    (BTMuWithIdentity _ _ expectedBody, BTMuWithIdentity _ _ actualBody) ->
+      identityBearingNominalStructuralBoundary expectedBody actualBody
+    (BTBaseWithIdentity (Just {}) _, BTMuWithIdentity {}) -> True
+    (BTMuWithIdentity {}, BTBaseWithIdentity (Just {}) _) -> True
+    (BTConWithIdentity (Just {}) _ _, BTMuWithIdentity {}) -> True
+    (BTMuWithIdentity {}, BTConWithIdentity (Just {}) _ _) -> True
+    _ -> False
+
 backendVariableTypeMatches :: BackendValidationContext -> Maybe IdDetails -> String -> BackendType -> BackendType -> Bool
 backendVariableTypeMatches context0 mbIdentity name expectedTy actualTy =
   rawMatches || canonicalMatches
   where
-    referenceName = maybe name idDetailsReferenceName mbIdentity
     dataScope = backendDataScopeForContext context0
     typeBounds = bvcTypeBounds context0
+    typeBoundMode = typeBoundReferenceModeForContext (Just context0)
     rawMatches =
       backendTypeMatchesWith
-        (RejectFreeTypeVariableInstantiation (freshenedAliasesForVariable referenceName))
+        typeBoundMode
+        RejectFreeTypeVariableInstantiation
         typeBounds
         (Just dataScope)
         expectedTy
         actualTy
         || backendTypeMatchesWith
+          typeBoundMode
           AllowStructuralPayloadInstantiation
           typeBounds
           (Just dataScope)
           expectedTy
           actualTy
-        || backendStructuralDataBoundaryMatches
-          typeBounds
-          (Just dataScope)
+        || ( not (identityBearingNominalStructuralBoundary expectedTy actualTy)
+               && backendStructuralDataBoundaryMatchesWith
+                 (backendTypeReferenceModeForTypeBoundMode typeBoundMode)
+                 typeBounds
+                 (Just dataScope)
+                 expectedTy
+                 actualTy
+           )
+        || backendApplicationTypeMatches (Just context0) expectedTy actualTy
+        || generatedCasePatternVariableTypeMatches context0 mbIdentity expectedTy
+        || primitiveRuntimeVariableTypeMatches
+          (backendTypeReferenceModeForTypeBoundMode typeBoundMode)
+          mbIdentity
+          name
           expectedTy
           actualTy
-        || backendApplicationTypeMatches (Just context0) expectedTy actualTy
-        || generatedCasePatternVariableTypeMatches referenceName typeBounds expectedTy
-        || primitiveRuntimeVariableTypeMatches mbIdentity name expectedTy actualTy
     canonicalMatches =
       let expectedTy' = canonicalizeBackendTypeDataHeads context0 expectedTy
           actualTy' = canonicalizeBackendTypeDataHeads context0 actualTy
        in backendTypeMatchesWith
-            (RejectFreeTypeVariableInstantiation (freshenedAliasesForVariable referenceName))
+           typeBoundMode
+            RejectFreeTypeVariableInstantiation
             typeBounds
             (Just dataScope)
             expectedTy'
             actualTy'
             || backendTypeMatchesWith
+              typeBoundMode
               AllowStructuralPayloadInstantiation
               typeBounds
               (Just dataScope)
               expectedTy'
               actualTy'
-            || backendStructuralDataBoundaryMatches
-              typeBounds
-              (Just dataScope)
+            || ( not (identityBearingNominalStructuralBoundary expectedTy' actualTy')
+                   && backendStructuralDataBoundaryMatchesWith
+                     (backendTypeReferenceModeForTypeBoundMode typeBoundMode)
+                     typeBounds
+                     (Just dataScope)
+                     expectedTy'
+                     actualTy'
+               )
+            || generatedCasePatternVariableTypeMatches context0 mbIdentity expectedTy'
+            || primitiveRuntimeVariableTypeMatches
+              (backendTypeReferenceModeForTypeBoundMode typeBoundMode)
+              mbIdentity
+              name
               expectedTy'
               actualTy'
-            || generatedCasePatternVariableTypeMatches referenceName typeBounds expectedTy'
-            || primitiveRuntimeVariableTypeMatches mbIdentity name expectedTy' actualTy'
 
-generatedCasePatternVariableTypeMatches :: String -> BackendParameterBounds -> BackendType -> Bool
-generatedCasePatternVariableTypeMatches name typeBounds expectedTy =
-  case (stripPrefix "$case" name, expectedTy) of
-    (Just _, BTVarWithIdentity identity typeName) ->
-      not (hasConcreteTypeBound (backendTypeSubstitutionKeyFromMaybeMetadataLight identity typeName))
+generatedCasePatternVariableTypeMatches :: BackendValidationContext -> Maybe IdDetails -> BackendType -> Bool
+generatedCasePatternVariableTypeMatches context0 mbIdentity expectedTy =
+  case (mbIdentity >>= idDetailsLocalKey, expectedTy) of
+    (Just localKey, BTVarWithIdentity identity typeName)
+      | Set.member localKey (bvcCasePatternLocalsByIdentity context0) ->
+          maybe False (not . hasConcreteTypeBound) (typeBoundReferenceKey typeBoundMode identity typeName)
     _ ->
       False
   where
+    typeBoundMode = typeBoundReferenceModeForContext (Just context0)
+    typeBounds = bvcTypeBounds context0
     hasConcreteTypeBound key =
       case Map.lookup key typeBounds of
         Just (Just boundTy) -> not (alphaEqBackendType boundTy BTBottom)
         _ -> False
 
-primitiveRuntimeVariableTypeMatches :: Maybe IdDetails -> String -> BackendType -> BackendType -> Bool
-primitiveRuntimeVariableTypeMatches mbIdentity _name expectedTy actualTy
+primitiveRuntimeVariableTypeMatches :: BackendTypeReferenceMode -> Maybe IdDetails -> String -> BackendType -> BackendType -> Bool
+primitiveRuntimeVariableTypeMatches referenceMode mbIdentity _name expectedTy actualTy
   | primitiveRuntimeVariableReference mbIdentity =
       go expectedTy actualTy
   | otherwise =
@@ -1486,24 +1648,20 @@ primitiveRuntimeVariableTypeMatches mbIdentity _name expectedTy actualTy
                   && zipAllWith go (NE.toList expectedArgs) (NE.toList actualArgs)
               (BTMuWithIdentity expectedIdentity expectedName expectedBody, BTMuWithIdentity actualIdentity actualName actualBody) ->
                 structuralPrimitiveMuMatches expectedIdentity expectedName expectedBody actualIdentity actualName actualBody
-              (BTMuWithIdentity expectedIdentity expectedName expectedBody, BTConWithIdentity _ actualCon actualArgs) ->
-                structuralPrimitiveTypeMatches expectedIdentity expectedName expectedBody actualCon (NE.toList actualArgs)
-              (BTConWithIdentity _ expectedCon expectedArgs, BTMuWithIdentity actualIdentity actualName actualBody) ->
-                structuralPrimitiveTypeMatches actualIdentity actualName actualBody expectedCon (NE.toList expectedArgs)
+              (BTMuWithIdentity expectedIdentity expectedName expectedBody, BTConWithIdentity actualIdentity actualCon actualArgs) ->
+                structuralPrimitiveTypeMatches expectedIdentity expectedName expectedBody actualIdentity actualCon (NE.toList actualArgs)
+              (BTConWithIdentity expectedIdentity expectedCon expectedArgs, BTMuWithIdentity actualIdentity actualName actualBody) ->
+                structuralPrimitiveTypeMatches actualIdentity actualName actualBody expectedIdentity expectedCon (NE.toList expectedArgs)
               _ ->
                 False
 
     structuralPrimitiveMuMatches expectedIdentity expectedName expectedBody actualIdentity actualName actualBody =
-      case (structuralRecursiveDataName expectedName, structuralRecursiveDataName actualName) of
-        (Just expectedDataName, Just actualDataName)
-          | backendPrimitiveDataNameMatches expectedDataName actualDataName ->
-              case (structuralPrimitivePayloadTypes expectedIdentity expectedName expectedBody, structuralPrimitivePayloadTypes actualIdentity actualName actualBody) of
-                (Just expectedPayloadTypes, Just actualPayloadTypes) ->
-                  zipAllWith go expectedPayloadTypes actualPayloadTypes
-                _ ->
-                  False
-        _ ->
-          False
+      structuralPrimitiveMuOwnersMatch expectedIdentity expectedName actualIdentity actualName
+        && case (structuralPrimitivePayloadTypes expectedIdentity expectedName expectedBody, structuralPrimitivePayloadTypes actualIdentity actualName actualBody) of
+          (Just expectedPayloadTypes, Just actualPayloadTypes) ->
+            zipAllWith go expectedPayloadTypes actualPayloadTypes
+          _ ->
+            False
 
     backendPrimitiveTypeHeadMatches expectedIdentity expectedBase actualIdentity actualBase =
       backendTypeHeadMatches expectedIdentity expectedBase actualIdentity actualBase
@@ -1514,15 +1672,31 @@ primitiveRuntimeVariableTypeMatches mbIdentity _name expectedTy actualTy
     normalizedBaseName (BaseTy baseName) =
       normalizeBackendBuiltinTypeReference baseName
 
-    structuralPrimitiveTypeMatches muIdentity muName muBody con args =
-      case structuralRecursiveDataName muName of
-        Just dataName
-          | backendPrimitiveDataNameMatches dataName (getBaseName con) ->
-              case structuralPrimitivePayloadTypes muIdentity muName muBody of
-                Just payloadTypes -> zipAllWith go payloadTypes args
+    structuralPrimitiveTypeMatches muIdentity muName muBody dataIdentity con args =
+      structuralPrimitiveDataOwnerMatches muIdentity muName dataIdentity con
+        && case structuralPrimitivePayloadTypes muIdentity muName muBody of
+          Just payloadTypes -> zipAllWith go payloadTypes args
+          Nothing -> False
+
+    structuralPrimitiveMuOwnersMatch leftIdentity leftName rightIdentity rightName =
+      case (structuralSelfIdentityUnique leftIdentity, structuralSelfIdentityUnique rightIdentity) of
+        (Just leftOwner, Just rightOwner) -> leftOwner == rightOwner
+        (Nothing, Nothing)
+          | referenceMode == BackendTypeMetadataLight ->
+              case (structuralRecursiveDataName leftName, structuralRecursiveDataName rightName) of
+                (Just leftDataName, Just rightDataName) -> backendPrimitiveDataNameMatches leftDataName rightDataName
+                _ -> False
+        _ -> False
+
+    structuralPrimitiveDataOwnerMatches muIdentity muName dataIdentity con =
+      case (structuralSelfIdentityUnique muIdentity, symbolUniqueIdentity <$> dataIdentity) of
+        (Just structuralOwner, Just nominalOwner) -> structuralOwner == nominalOwner
+        (Nothing, Nothing)
+          | referenceMode == BackendTypeMetadataLight ->
+              case structuralRecursiveDataName muName of
+                Just dataName -> backendPrimitiveDataNameMatches dataName (getBaseName con)
                 Nothing -> False
-        _ ->
-          False
+        _ -> False
 
     structuralPrimitivePayloadTypes muIdentity muName body =
       filter (not . structuralSelfField muIdentity muName) <$> structuralMuPayloadTypes body
@@ -1530,11 +1704,12 @@ primitiveRuntimeVariableTypeMatches mbIdentity _name expectedTy actualTy
     structuralSelfField muIdentity muName =
       \case
         BTVarWithIdentity fieldIdentity fieldName ->
-          case (muIdentity, fieldIdentity) of
-            (Just {}, Just {}) ->
-              fieldIdentity == muIdentity
-            _ ->
-              structuralRecursiveDataName fieldName == structuralRecursiveDataName muName
+          typeBinderRefMatchesWith BackendTypeIdentityOnly muIdentity muName fieldIdentity fieldName
+            || ( referenceMode == BackendTypeMetadataLight
+                   && case structuralRecursiveDataName muName of
+                     Just dataName -> structuralDataSelfFieldMatches dataName muIdentity fieldIdentity fieldName
+                     Nothing -> False
+               )
         _ ->
           False
 
@@ -1544,46 +1719,45 @@ primitiveRuntimeVariableTypeMatches mbIdentity _name expectedTy actualTy
         || unqualifiedBackendDataName leftName == rightName
         || unqualifiedBackendDataName leftName == unqualifiedBackendDataName rightName
 
-backendVariableTypeMatchesWithBounds :: BackendParameterBounds -> BackendType -> BackendType -> Bool
-backendVariableTypeMatchesWithBounds typeBounds expectedTy actualTy =
+backendVariableTypeMatchesWithBounds :: TypeBoundReferenceMode -> BackendParameterBounds -> BackendType -> BackendType -> Bool
+backendVariableTypeMatchesWithBounds typeBoundMode typeBounds expectedTy actualTy =
   backendTypeMatchesWith
-    (RejectFreeTypeVariableInstantiation RejectFreshenedTypeVariableAliases)
+    typeBoundMode
+    RejectFreeTypeVariableInstantiation
     typeBounds
     Nothing
     expectedTy
     actualTy
 
-freshenedAliasesForVariable :: String -> FreshenedTypeVariableAliases
-freshenedAliasesForVariable ('$' : _) =
-  AllowFreshenedTypeVariableAliases
-freshenedAliasesForVariable _ =
-  RejectFreshenedTypeVariableAliases
-
 backendTypeMatchesWith ::
+  TypeBoundReferenceMode ->
   TypeVariableInstantiation ->
   BackendParameterBounds ->
   Maybe BackendDataScope ->
   BackendType ->
   BackendType ->
   Bool
-backendTypeMatchesWith typeVariableInstantiation typeBounds mbDataDecls expectedTy actualTy =
+backendTypeMatchesWith typeBoundMode typeVariableInstantiation typeBounds mbDataDecls expectedTy actualTy =
   go Set.empty expectedTy actualTy
   where
+    typeHeadMatches =
+      backendTypeHeadMatchesWith (symbolReferenceModeForTypeBoundMode typeBoundMode)
+
+    typeBinderMatches =
+      typeBinderRefMatchesWith (backendTypeReferenceModeForTypeBoundMode typeBoundMode)
+
     go bound expected actual =
       alphaEqWithinDataScope actual expected
         || typeVariableBoundMatches bound expected actual
         || typeVariableBoundMatches bound actual expected
         || case (expected, actual) of
-              (BTVarWithIdentity expectedIdentity expectedName, BTVarWithIdentity actualIdentity actualName)
-                | generatedTypeVariableAliasMatches expectedIdentity expectedName actualIdentity actualName ->
-                    True
               (BTArrow expectedDom expectedCod, BTArrow actualDom actualCod)
                 | opaqueIOFunctionCompatible bound expectedDom expectedCod actualDom actualCod ->
                     True
               (BTArrow expectedDom expectedCod, BTArrow actualDom actualCod) ->
                 go bound expectedDom actualDom && go bound expectedCod actualCod
               (BTBaseWithIdentity expectedIdentity expectedBase, BTBaseWithIdentity actualIdentity actualBase) ->
-                backendTypeHeadMatches expectedIdentity expectedBase actualIdentity actualBase
+                typeHeadMatches expectedIdentity expectedBase actualIdentity actualBase
               (BTBaseWithIdentity expectedDataIdentity expectedBase, BTMuWithIdentity actualIdentity actualName actualBody) ->
                 structuralMuMatchesKnownData expectedDataIdentity expectedBase [] actualIdentity actualName actualBody
               (BTMuWithIdentity expectedIdentity expectedName expectedBody, BTBaseWithIdentity actualDataIdentity actualBase) ->
@@ -1592,19 +1766,19 @@ backendTypeMatchesWith typeVariableInstantiation typeBounds mbDataDecls expected
                 | opaqueIOBackendHeadMatches expectedIdentity expectedCon && opaqueIOBackendHeadMatches actualIdentity actualCon ->
                     True
               (BTConWithIdentity expectedIdentity expectedCon expectedArgs, BTConWithIdentity actualIdentity actualCon actualArgs) ->
-                backendTypeHeadMatches expectedIdentity expectedCon actualIdentity actualCon
+                typeHeadMatches expectedIdentity expectedCon actualIdentity actualCon
                   && zipAllWith
                     (metadataBackedTypeArgumentMatchesEither (metadataBackedTypeHead expectedIdentity expectedCon) bound)
                     (NE.toList expectedArgs)
                     (NE.toList actualArgs)
               (BTConWithIdentity expectedDataIdentity expectedCon expectedArgs, BTMuWithIdentity actualIdentity actualName actualBody) ->
-                nominalStructuralTypeVarArgsMatch expectedCon (NE.toList expectedArgs) actualName
+                nominalStructuralTypeVarArgsMatch expectedDataIdentity expectedCon (NE.toList expectedArgs) actualIdentity actualName
                   || structuralMuMatchesKnownData expectedDataIdentity expectedCon (NE.toList expectedArgs) actualIdentity actualName actualBody
               (BTMuWithIdentity expectedIdentity expectedName expectedBody, BTConWithIdentity actualDataIdentity actualCon actualArgs) ->
-                nominalStructuralTypeVarArgsMatch actualCon (NE.toList actualArgs) expectedName
+                nominalStructuralTypeVarArgsMatch actualDataIdentity actualCon (NE.toList actualArgs) expectedIdentity expectedName
                   || structuralMuMatchesKnownData actualDataIdentity actualCon (NE.toList actualArgs) expectedIdentity expectedName expectedBody
               (BTVarAppWithIdentity expectedIdentity expectedName expectedArgs, BTVarAppWithIdentity actualIdentity actualName actualArgs) ->
-                typeBinderRefMatches expectedIdentity expectedName actualIdentity actualName
+                typeBinderMatches expectedIdentity expectedName actualIdentity actualName
                   && zipAllWith (go bound) (NE.toList expectedArgs) (NE.toList actualArgs)
               (BTForallWithIdentity expectedIdentity expectedName expectedBound expectedBody, BTForallWithIdentity actualIdentity actualName actualBound actualBody) ->
                 maybeBoundMatches bound expectedBound actualBound
@@ -1621,9 +1795,9 @@ backendTypeMatchesWith typeVariableInstantiation typeBounds mbDataDecls expected
                     expectedBody' = substituteBackendTypeForBinder expectedIdentity expectedName freshTy expectedBody
                     actualBody' = substituteBackendTypeForBinder actualIdentity actualName freshTy actualBody
                     bodiesMatch = go (Set.insert freshKey bound) expectedBody' actualBody'
-                 in if sameStructuralDataName expectedName actualName
+                 in if sameStructuralDataOwner expectedIdentity expectedName actualIdentity actualName
                   then
-                    (typeBinderRefMatches expectedIdentity expectedName actualIdentity actualName && bodiesMatch)
+                    (typeBinderMatches expectedIdentity expectedName actualIdentity actualName && bodiesMatch)
                       || structuralMuPayloadMayInstantiate expectedIdentity expectedName expectedBody actualIdentity actualName actualBody
                   else case (isVacuousRecursiveBinderWithIdentity expectedIdentity expectedName expectedBody, isVacuousRecursiveBinderWithIdentity actualIdentity actualName actualBody) of
                     (True, True) ->
@@ -1655,32 +1829,29 @@ backendTypeMatchesWith typeVariableInstantiation typeBounds mbDataDecls expected
         && not (identityHeadNeedsScopedData expected actual)
 
     identityHeadNeedsScopedData expected actual =
-      case (expected, actual, mbDataDecls) of
-        (BTArrow expectedDom expectedCod, BTArrow actualDom actualCod, _) ->
-          identityHeadNeedsScopedData expectedDom actualDom
-            || identityHeadNeedsScopedData expectedCod actualCod
-        (BTConWithIdentity _ _ expectedArgs, BTConWithIdentity _ _ actualArgs, _) ->
-          or (zipWith identityHeadNeedsScopedData (NE.toList expectedArgs) (NE.toList actualArgs))
-        (BTVarAppWithIdentity _ _ expectedArgs, BTVarAppWithIdentity _ _ actualArgs, _) ->
-          or (zipWith identityHeadNeedsScopedData (NE.toList expectedArgs) (NE.toList actualArgs))
-        (BTForallWithIdentity _ _ expectedBound expectedBody, BTForallWithIdentity _ _ actualBound actualBody, _) ->
-          maybe False (uncurry identityHeadNeedsScopedData) ((,) <$> expectedBound <*> actualBound)
-            || identityHeadNeedsScopedData expectedBody actualBody
-        (BTMuWithIdentity _ _ expectedBody, BTMuWithIdentity _ _ actualBody, _) ->
-          identityHeadNeedsScopedData expectedBody actualBody
-        (BTBaseWithIdentity (Just {}) _, BTMuWithIdentity {}, Just {}) -> True
-        (BTMuWithIdentity {}, BTBaseWithIdentity (Just {}) _, Just {}) -> True
-        (BTConWithIdentity (Just {}) _ _, BTMuWithIdentity {}, Just {}) -> True
-        (BTMuWithIdentity {}, BTConWithIdentity (Just {}) _ _, Just {}) -> True
-        (BTBaseWithIdentity Nothing base, BTMuWithIdentity _ muName _, Just dataScope) ->
-          identitylessHeadNeedsScopedData dataScope base muName
-        (BTMuWithIdentity _ muName _, BTBaseWithIdentity Nothing base, Just dataScope) ->
-          identitylessHeadNeedsScopedData dataScope base muName
-        (BTConWithIdentity Nothing base _, BTMuWithIdentity _ muName _, Just dataScope) ->
-          identitylessHeadNeedsScopedData dataScope base muName
-        (BTMuWithIdentity _ muName _, BTConWithIdentity Nothing base _, Just dataScope) ->
-          identitylessHeadNeedsScopedData dataScope base muName
-        _ -> False
+      identityBearingNominalStructuralBoundary expected actual
+        || case (expected, actual, mbDataDecls) of
+          (BTArrow expectedDom expectedCod, BTArrow actualDom actualCod, _) ->
+            identityHeadNeedsScopedData expectedDom actualDom
+              || identityHeadNeedsScopedData expectedCod actualCod
+          (BTConWithIdentity _ _ expectedArgs, BTConWithIdentity _ _ actualArgs, _) ->
+            or (zipWith identityHeadNeedsScopedData (NE.toList expectedArgs) (NE.toList actualArgs))
+          (BTVarAppWithIdentity _ _ expectedArgs, BTVarAppWithIdentity _ _ actualArgs, _) ->
+            or (zipWith identityHeadNeedsScopedData (NE.toList expectedArgs) (NE.toList actualArgs))
+          (BTForallWithIdentity _ _ expectedBound expectedBody, BTForallWithIdentity _ _ actualBound actualBody, _) ->
+            maybe False (uncurry identityHeadNeedsScopedData) ((,) <$> expectedBound <*> actualBound)
+              || identityHeadNeedsScopedData expectedBody actualBody
+          (BTMuWithIdentity _ _ expectedBody, BTMuWithIdentity _ _ actualBody, _) ->
+            identityHeadNeedsScopedData expectedBody actualBody
+          (BTBaseWithIdentity Nothing base, BTMuWithIdentity _ muName _, Just dataScope) ->
+            identitylessHeadNeedsScopedData dataScope base muName
+          (BTMuWithIdentity _ muName _, BTBaseWithIdentity Nothing base, Just dataScope) ->
+            identitylessHeadNeedsScopedData dataScope base muName
+          (BTConWithIdentity Nothing base _, BTMuWithIdentity _ muName _, Just dataScope) ->
+            identitylessHeadNeedsScopedData dataScope base muName
+          (BTMuWithIdentity _ muName _, BTConWithIdentity Nothing base _, Just dataScope) ->
+            identitylessHeadNeedsScopedData dataScope base muName
+          _ -> False
 
     identitylessHeadNeedsScopedData dataScope (BaseTy name) muName =
       identityBearingScopedDataName dataScope name
@@ -1711,51 +1882,55 @@ backendTypeMatchesWith typeVariableInstantiation typeBounds mbDataDecls expected
         || typeVariableBoundMatches bound actual expected
         || case (expected, actual) of
           (BTVarWithIdentity expectedIdentity expectedName, _)
-            | Set.notMember (backendTypeSubstitutionKeyFromMaybeMetadataLight expectedIdentity expectedName) bound -> True
+            | freeTypeVariableMayInstantiate bound expectedIdentity expectedName -> True
           (_, BTVarWithIdentity actualIdentity actualName)
-            | Set.notMember (backendTypeSubstitutionKeyFromMaybeMetadataLight actualIdentity actualName) bound -> True
+            | freeTypeVariableMayInstantiate bound actualIdentity actualName -> True
           (BTVarWithIdentity expectedIdentity expectedName, BTVarWithIdentity actualIdentity actualName) ->
-            typeBinderRefMatches expectedIdentity expectedName actualIdentity actualName
+            typeBinderMatches expectedIdentity expectedName actualIdentity actualName
           _ -> False
 
     typeVariableBoundMatches bound ty otherTy =
       case ty of
         BTVarWithIdentity identity name
-          | Set.notMember key bound ->
+          | Just key <- typeBoundReferenceKey typeBoundMode identity name,
+            Set.notMember key bound ->
               case Map.lookup key typeBounds of
                 Just (Just boundTy)
                   | not (alphaEqBackendType boundTy BTBottom) ->
                       go bound boundTy otherTy
                 _ ->
                   False
-          where
-            key = backendTypeSubstitutionKeyFromMaybeMetadataLight identity name
         _ ->
           False
 
-    sameStructuralDataName expectedName actualName =
-      case (structuralRecursiveDataName expectedName, structuralRecursiveDataName actualName) of
-        (Just expectedDataName, Just actualDataName) -> expectedDataName == actualDataName
+    sameStructuralDataOwner expectedIdentity expectedName actualIdentity actualName =
+      case (structuralSelfIdentityUnique expectedIdentity, structuralSelfIdentityUnique actualIdentity, expectedIdentity, actualIdentity) of
+        (Just expectedUnique, Just actualUnique, _, _) -> expectedUnique == actualUnique
+        (Nothing, Nothing, Nothing, Nothing)
+          | typeBoundMode == TypeBoundMetadataLight ->
+              structuralRecursiveDataName expectedName == structuralRecursiveDataName actualName
         _ -> False
 
-    nominalStructuralTypeVarArgsMatch (BaseTy dataName) args muName =
-      structuralRecursiveDataName muName == Just dataName
+    nominalStructuralTypeVarArgsMatch dataIdentity (BaseTy dataName) args muIdentity muName =
+      nominalStructuralOwnerMatches dataIdentity dataName muIdentity muName
         && all freeTypeVarArg args
       where
+        nominalStructuralOwnerMatches (Just identity) _ identity0 _ =
+          structuralSelfIdentityUnique identity0 == Just (symbolUniqueIdentity identity)
+        nominalStructuralOwnerMatches Nothing dataName0 Nothing muName0 =
+          typeBoundMode == TypeBoundMetadataLight
+            && structuralRecursiveDataName muName0 == Just dataName0
+        nominalStructuralOwnerMatches _ _ _ _ =
+          False
+
         freeTypeVarArg =
           \case
             BTVarWithIdentity identity name ->
-              not (hasConcreteTypeBound (backendTypeSubstitutionKeyFromMaybeMetadataLight identity name))
+              case typeBoundReferenceKey typeBoundMode identity name of
+                Just key -> not (hasConcreteTypeBound key)
+                Nothing -> False
             _ ->
               False
-
-    generatedTypeVariableAliasMatches expectedIdentity expectedName actualIdentity actualName =
-      expectedName == actualName
-        && maybe False isGeneratedTypeBinder expectedIdentity
-        && maybe False isGeneratedTypeBinder actualIdentity
-
-    isGeneratedTypeBinder =
-      maybe False (const True) . typeBinderIdentityGeneratedUnique
 
     metadataBackedTypeArgumentMatches metadataBacked bound expected actual =
       go bound expected actual || (metadataBacked && freeExpectedTypeVariableMayInstantiate bound expected)
@@ -1767,12 +1942,19 @@ backendTypeMatchesWith typeVariableInstantiation typeBounds mbDataDecls expected
     freeExpectedTypeVariableMayInstantiate bound =
       \case
         BTVarWithIdentity identity name ->
-          Set.notMember key bound
-            && not (hasConcreteTypeBound key)
-          where
-            key = backendTypeSubstitutionKeyFromMaybeMetadataLight identity name
+          case typeBoundReferenceKey typeBoundMode identity name of
+            Just key ->
+              Set.notMember key bound
+                && not (hasConcreteTypeBound key)
+            Nothing ->
+              False
         _ ->
           False
+
+    freeTypeVariableMayInstantiate bound identity name =
+      case typeBoundReferenceKey typeBoundMode identity name of
+        Just key -> Set.notMember key bound
+        Nothing -> False
 
     hasConcreteTypeBound key =
       case Map.lookup key typeBounds of
@@ -1787,23 +1969,32 @@ backendTypeMatchesWith typeVariableInstantiation typeBounds mbDataDecls expected
             Just {} <- mbDataDecls ->
               False
         Nothing ->
-          maybe False (Map.member name . backendDataScopeByName) mbDataDecls
+          case typeBoundMode of
+            TypeBoundIdentityOnly -> False
+            TypeBoundMetadataLight -> maybe False (Map.member name . backendDataScopeByName) mbDataDecls
 
     structuralMuMatchesKnownData dataIdentity base@(BaseTy dataName) args muIdentity muName body =
       structuralSelfIdentityCompatibleWithDataIdentity dataIdentity muIdentity
-        && ( (metadataLightTrusted dataIdentity dataName muIdentity muName && metadataLightStructuralDataMatchesWithIdentity base args muIdentity muName body)
-               || ( maybe
-                      False
-                      ( \structuralName ->
-                          PrimitiveInventory.matchesBuiltinTypeName dataName structuralName
-                            && metadataLightTrusted dataIdentity structuralName muIdentity muName
-                            && metadataLightStructuralDataMatchesWithIdentity (BaseTy structuralName) args muIdentity muName body
-                      )
-                      (structuralRecursiveDataName muName)
-                  )
-               || maybe False structuralDataDeclMatches (matchingDataDecl dataIdentity dataName muIdentity muName)
-           )
+        && case structuralSelfIdentityUnique muIdentity of
+          Just {} -> structuralDataDeclMatchesKnownIdentity
+          Nothing -> metadataLightStructuralMatches || structuralDataDeclMatchesKnownIdentity
       where
+        structuralDataDeclMatchesKnownIdentity =
+          maybe False structuralDataDeclMatches (matchingDataDecl dataIdentity dataName muIdentity muName)
+
+        metadataLightStructuralMatches =
+          ( metadataLightAllowed dataIdentity dataName
+              && metadataLightStructuralDataMatchesWithIdentity base args muIdentity muName body
+          )
+            || maybe
+              False
+              ( \structuralName ->
+                  PrimitiveInventory.matchesBuiltinTypeName dataName structuralName
+                    && metadataLightAllowed dataIdentity structuralName
+                    && metadataLightStructuralDataMatchesWithIdentity (BaseTy structuralName) args muIdentity muName body
+              )
+              (structuralRecursiveDataName muName)
+
         structuralDataDeclMatches dataDecl
           | Just substitution <- structuralDataArgumentSubstitution dataDecl args =
               structuralDataDeclarationMatches typeBounds dataDecl substitution (BTMuWithIdentity muIdentity muName body)
@@ -1813,26 +2004,12 @@ backendTypeMatchesWith typeVariableInstantiation typeBounds mbDataDecls expected
     structuralSelfIdentityCompatibleWithDataIdentity dataIdentity muIdentity =
       case (dataIdentity, structuralSelfIdentityUnique muIdentity) of
         (Just identity, Just unique) -> symbolUniqueIdentity identity == unique
+        (Just {}, Nothing) -> False
         _ -> True
-
-    structuralSelfIdentityPinsData dataIdentity muIdentity =
-      case (dataIdentity, structuralSelfIdentityUnique muIdentity) of
-        (Just identity, Just unique) -> symbolUniqueIdentity identity == unique
-        _ -> False
-
-    metadataLightTrusted dataIdentity dataName muIdentity muName =
-      metadataLightAllowed dataIdentity dataName
-        || structuralSelfIdentityPinsData dataIdentity muIdentity
-        || generatedStructuralMuNamePinsData dataIdentity dataName muIdentity muName
-
-    generatedStructuralMuNamePinsData dataIdentity dataName muIdentity muName =
-      case (dataIdentity, muIdentity >>= typeBinderIdentityGeneratedUnique) of
-        (Just {}, Just {}) -> structuralRecursiveDataName muName == Just dataName
-        _ -> False
 
     metadataLightAllowed dataIdentity dataName =
       case (dataIdentity, mbDataDecls) of
-        (Just {}, Just {}) -> False
+        (Just {}, _) -> False
         (Nothing, Just dataScope) ->
           not (identityBearingScopedDataName dataScope dataName)
         _ -> True
@@ -1850,12 +2027,24 @@ backendTypeMatchesWith typeVariableInstantiation typeBounds mbDataDecls expected
         . Map.elems
 
     matchingDataDecl dataIdentity dataName muIdentity muName =
+      case typeBoundMode of
+        TypeBoundIdentityOnly ->
+          matchingDataDeclByIdentity dataIdentity muIdentity
+        TypeBoundMetadataLight ->
+          matchingDataDeclMetadataLight dataIdentity dataName muIdentity muName
+
+    matchingDataDeclByIdentity dataIdentity muIdentity =
       case dataIdentity >>= lookupDataByIdentity of
         Just dataDecl
-          | structuralSelfIdentityMatchesData muIdentity dataDecl -> Just dataDecl
-          | Nothing <- structuralSelfIdentityUnique muIdentity,
-            structuralMuNameMatchesData muName dataDecl ->
-              Just dataDecl
+          | structuralSelfIdentityMatchesDataByIdentity muIdentity dataDecl -> Just dataDecl
+          | otherwise -> Nothing
+        Nothing ->
+          lookupDataByStructuralSelfIdentity muIdentity
+
+    matchingDataDeclMetadataLight dataIdentity dataName muIdentity muName =
+      case dataIdentity >>= lookupDataByIdentity of
+        Just dataDecl
+          | structuralSelfIdentityMatchesDataByIdentity muIdentity dataDecl -> Just dataDecl
           | otherwise -> Nothing
         Nothing
           | Just {} <- dataIdentity,
@@ -1885,16 +2074,13 @@ backendTypeMatchesWith typeVariableInstantiation typeBounds mbDataDecls expected
         [dataDecl] -> Just dataDecl
         _ -> Nothing
 
-    structuralSelfIdentityMatchesData muIdentity dataDecl =
+    structuralSelfIdentityMatchesDataByIdentity muIdentity dataDecl =
       case structuralSelfIdentityUnique muIdentity of
-        Nothing -> True
         Just unique ->
           case backendDataIdentity dataDecl of
             Just dataDeclIdentity -> symbolUniqueIdentity dataDeclIdentity == unique
             Nothing -> False
-
-    structuralMuNameMatchesData muName dataDecl =
-      structuralRecursiveDataName muName == Just (backendDataName dataDecl)
+        Nothing -> False
 
     structuralLookupNames dataName muName =
       dataName
@@ -1909,7 +2095,7 @@ backendTypeMatchesWith typeVariableInstantiation typeBounds mbDataDecls expected
     -- strictly.
     structuralMuPayloadMayInstantiate expectedIdentity expectedName expectedBody actualIdentity actualName actualBody =
       case typeVariableInstantiation of
-        RejectFreeTypeVariableInstantiation {} ->
+        RejectFreeTypeVariableInstantiation ->
           False
         AllowStructuralPayloadInstantiation ->
           structuralPayloadsMayInstantiate typeBounds expectedIdentity expectedName expectedBody actualIdentity actualName actualBody
@@ -1955,8 +2141,11 @@ lookupBackendVariable context0 mbIdentity name =
           lookupSymbolIdentityExact identity (bvcGlobalsByIdentity context0)
             <|> lookupPrimitiveRuntimeVariable context0 identity
     _ ->
-      Map.lookup name (bvcMetadataLightLocalsByName context0)
-        <|> Map.lookup name (bvcMetadataLightGlobalsByName context0)
+      if metadataLightReferencesAllowed context0
+        then
+          Map.lookup name (bvcMetadataLightLocalsByName context0)
+            <|> Map.lookup name (bvcMetadataLightGlobalsByName context0)
+        else Nothing
 
 lookupPrimitiveRuntimeVariable :: BackendValidationContext -> SymbolIdentity -> Maybe BackendType
 lookupPrimitiveRuntimeVariable context0 identity = do
@@ -1978,7 +2167,7 @@ extendLocalMaybe mbContext mbIdentity name ty =
 
 extendFunctionParamLocalMaybe :: Maybe BackendValidationContext -> Maybe IdDetails -> String -> BackendType -> BackendExpr -> Maybe BackendValidationContext
 extendFunctionParamLocalMaybe mbContext mbIdentity name ty body
-  | backendExprCallsBinderAsClosureHead (backendCallableRef mbIdentity name) body =
+  | backendExprCallsBinderAsClosureHead (backendCallableReferenceModeForContext mbContext) (backendCallableRef mbIdentity name) body =
       extendClosureLocalMaybe mbContext mbIdentity name ty
   | otherwise =
       extendLocalMaybe mbContext mbIdentity name ty
@@ -1987,10 +2176,11 @@ extendLocal :: BackendValidationContext -> Maybe IdDetails -> String -> BackendT
 extendLocal context0 mbIdentity name ty =
   insertLocalIdentity mbIdentity ty
     context0
-      { bvcMetadataLightLocalsByName = bindLocalName mbIdentity name ty (bvcMetadataLightLocalsByName context0),
-        bvcMetadataLightClosureLocalsByName = Set.delete name (bvcMetadataLightClosureLocalsByName context0),
+      { bvcMetadataLightLocalsByName = bindMetadataLightLocalName context0 mbIdentity name ty,
+        bvcCasePatternLocalsByIdentity = deleteLocalIdentity mbIdentity (bvcCasePatternLocalsByIdentity context0),
+        bvcMetadataLightClosureLocalsByName = deleteMetadataLightLocalName context0 name (bvcMetadataLightClosureLocalsByName context0),
         bvcClosureLocalsByIdentity = deleteLocalIdentity mbIdentity (bvcClosureLocalsByIdentity context0),
-        bvcMetadataLightPossibleClosureLocalsByName = Set.delete name (bvcMetadataLightPossibleClosureLocalsByName context0),
+        bvcMetadataLightPossibleClosureLocalsByName = deleteMetadataLightLocalName context0 name (bvcMetadataLightPossibleClosureLocalsByName context0),
         bvcPossibleClosureLocalsByIdentity = deleteLocalIdentity mbIdentity (bvcPossibleClosureLocalsByIdentity context0)
       }
 
@@ -2002,10 +2192,11 @@ extendClosureLocal :: BackendValidationContext -> Maybe IdDetails -> String -> B
 extendClosureLocal context0 mbIdentity name ty =
   insertLocalIdentity mbIdentity ty
     context0
-      { bvcMetadataLightLocalsByName = bindLocalName mbIdentity name ty (bvcMetadataLightLocalsByName context0),
-        bvcMetadataLightClosureLocalsByName = bindLocalNameSet mbIdentity name (bvcMetadataLightClosureLocalsByName context0),
+      { bvcMetadataLightLocalsByName = bindMetadataLightLocalName context0 mbIdentity name ty,
+        bvcCasePatternLocalsByIdentity = deleteLocalIdentity mbIdentity (bvcCasePatternLocalsByIdentity context0),
+        bvcMetadataLightClosureLocalsByName = bindMetadataLightLocalNameSet context0 mbIdentity name (bvcMetadataLightClosureLocalsByName context0),
         bvcClosureLocalsByIdentity = insertLocalIdentityKey mbIdentity (bvcClosureLocalsByIdentity context0),
-        bvcMetadataLightPossibleClosureLocalsByName = Set.delete name (bvcMetadataLightPossibleClosureLocalsByName context0),
+        bvcMetadataLightPossibleClosureLocalsByName = deleteMetadataLightLocalName context0 name (bvcMetadataLightPossibleClosureLocalsByName context0),
         bvcPossibleClosureLocalsByIdentity = deleteLocalIdentity mbIdentity (bvcPossibleClosureLocalsByIdentity context0)
       }
 
@@ -2017,12 +2208,34 @@ extendPossibleClosureLocal :: BackendValidationContext -> Maybe IdDetails -> Str
 extendPossibleClosureLocal context0 mbIdentity name ty =
   insertLocalIdentity mbIdentity ty
     context0
-      { bvcMetadataLightLocalsByName = bindLocalName mbIdentity name ty (bvcMetadataLightLocalsByName context0),
-        bvcMetadataLightClosureLocalsByName = Set.delete name (bvcMetadataLightClosureLocalsByName context0),
+      { bvcMetadataLightLocalsByName = bindMetadataLightLocalName context0 mbIdentity name ty,
+        bvcCasePatternLocalsByIdentity = deleteLocalIdentity mbIdentity (bvcCasePatternLocalsByIdentity context0),
+        bvcMetadataLightClosureLocalsByName = deleteMetadataLightLocalName context0 name (bvcMetadataLightClosureLocalsByName context0),
         bvcClosureLocalsByIdentity = deleteLocalIdentity mbIdentity (bvcClosureLocalsByIdentity context0),
-        bvcMetadataLightPossibleClosureLocalsByName = bindLocalNameSet mbIdentity name (bvcMetadataLightPossibleClosureLocalsByName context0),
+        bvcMetadataLightPossibleClosureLocalsByName = bindMetadataLightLocalNameSet context0 mbIdentity name (bvcMetadataLightPossibleClosureLocalsByName context0),
         bvcPossibleClosureLocalsByIdentity = insertLocalIdentityKey mbIdentity (bvcPossibleClosureLocalsByIdentity context0)
       }
+
+metadataLightReferencesAllowed :: BackendValidationContext -> Bool
+metadataLightReferencesAllowed context0 =
+  bvcReferenceMode context0 == AllowMetadataLightReferences
+
+bindMetadataLightLocalName :: BackendValidationContext -> Maybe IdDetails -> String -> BackendType -> Map.Map String BackendType
+bindMetadataLightLocalName context0 mbIdentity name ty =
+  let locals = bvcMetadataLightLocalsByName context0
+   in if metadataLightReferencesAllowed context0
+        then bindLocalName mbIdentity name ty locals
+        else Map.delete name locals
+
+deleteMetadataLightLocalName :: BackendValidationContext -> String -> Set.Set String -> Set.Set String
+deleteMetadataLightLocalName _context0 name =
+  Set.delete name
+
+bindMetadataLightLocalNameSet :: BackendValidationContext -> Maybe IdDetails -> String -> Set.Set String -> Set.Set String
+bindMetadataLightLocalNameSet context0 mbIdentity name names =
+  if metadataLightReferencesAllowed context0
+    then bindLocalNameSet mbIdentity name names
+    else Set.delete name names
 
 bindLocalName :: Maybe IdDetails -> String -> BackendType -> Map.Map String BackendType -> Map.Map String BackendType
 bindLocalName mbIdentity name ty locals =
@@ -2096,11 +2309,16 @@ extendPatternLocals =
   foldr extendOne
   where
     extendOne (ref, ty) context0
-      | backendTypeIsClosureValue ty = extendClosureLocal context0 mbIdentity name ty
-      | otherwise = extendLocal context0 mbIdentity name ty
+      | backendTypeIsClosureValue ty = markCasePatternLocal mbIdentity (extendClosureLocal context0 mbIdentity name ty)
+      | otherwise = markCasePatternLocal mbIdentity (extendLocal context0 mbIdentity name ty)
       where
         mbIdentity = backendCallableRefIdentity ref
         name = backendCallableRefName ref
+
+    markCasePatternLocal mbIdentity context0 =
+      context0
+        { bvcCasePatternLocalsByIdentity = insertLocalIdentityKey mbIdentity (bvcCasePatternLocalsByIdentity context0)
+        }
 
 backendTypeIsClosureValue :: BackendType -> Bool
 backendTypeIsClosureValue =
@@ -2136,10 +2354,9 @@ primitiveTypeToBackendTypeFromWithHeadIdentities headIdentities0 generator0 ty =
    in (ty', generator')
   where
     generatorAfterHeads =
-      foldr
-        advanceIdentityGeneratorPast
-        generator0
+      advanceIdentityGeneratorPastMany
         (concatMap symbolGeneratedIdentities (Map.elems headIdentities0))
+        generator0
 
     go env generator =
       \case
@@ -2163,7 +2380,10 @@ primitiveTypeToBackendTypeFromWithHeadIdentities headIdentities0 generator0 ty =
               (body', generator2) = go (Map.insert name identity env) generator1 body
            in (BTForallWithIdentity (Just identity) name Nothing body', generator2)
         PrimitiveInventory.PrimitiveTypeMu name body ->
-          let (identity, generator1) = freshBackendTypeIdentity generator
+          let (identity, generator1) =
+                case primitiveStructuralOwnerIdentity name of
+                  Just ownerIdentity -> (ownerIdentity, generator)
+                  Nothing -> freshBackendTypeIdentity generator
               (body', generator2) = go (Map.insert name identity env) generator1 body
            in (BTMuWithIdentity (Just identity) name body', generator2)
 
@@ -2182,6 +2402,13 @@ primitiveTypeToBackendTypeFromWithHeadIdentities headIdentities0 generator0 ty =
     primitiveTypeHeadIdentity name =
       lookupPrimitiveTypeHeadIdentity headIdentities0 name <|> builtinTypeHeadIdentity name
 
+    -- Primitive specs are string-shaped, but a visible data identity pins the
+    -- structural self binder before the type reaches production validation.
+    primitiveStructuralOwnerIdentity name = do
+      dataName <- structuralRecursiveDataName name
+      dataIdentity <- lookupPrimitiveTypeHeadIdentity headIdentities0 dataName
+      pure (typeBinderIdentityFromStructural (symbolUniqueIdentity dataIdentity) StructuralSelfBinder)
+
     lookupPrimitiveTypeHeadIdentity headIdentities name =
       lookupSymbolIdentityAlias headIdentities name
 
@@ -2196,6 +2423,7 @@ dropTermLocalsMaybe =
         context0
           { bvcMetadataLightLocalsByName = Map.empty,
             bvcLocalsByIdentity = Map.empty,
+            bvcCasePatternLocalsByIdentity = Set.empty,
             bvcMetadataLightClosureLocalsByName = Set.empty,
             bvcClosureLocalsByIdentity = Set.empty,
             bvcMetadataLightPossibleClosureLocalsByName = Set.empty,
@@ -2205,7 +2433,18 @@ dropTermLocalsMaybe =
 
 extendTypeBoundMaybe :: Maybe BackendValidationContext -> Maybe TypeBinderIdentity -> String -> Maybe BackendType -> Maybe BackendValidationContext
 extendTypeBoundMaybe mbContext identity name mbBound =
-  fmap (\context0 -> context0 {bvcTypeBounds = Map.insert (backendTypeSubstitutionKeyFromMaybeMetadataLight identity name) mbBound (bvcTypeBounds context0)}) mbContext
+  fmap
+    ( \context0 ->
+        case identity of
+          Just {} ->
+            context0 {bvcTypeBounds = Map.insert (backendTypeSubstitutionKeyFromMaybeMetadataLight identity name) mbBound (bvcTypeBounds context0)}
+          Nothing
+            | metadataLightReferencesAllowed context0 ->
+                context0 {bvcTypeBounds = Map.insert (backendTypeSubstitutionKeyFromMaybeMetadataLight identity name) mbBound (bvcTypeBounds context0)}
+          Nothing ->
+            context0
+    )
+    mbContext
 
 extendTypeBounds :: BackendValidationContext -> [(BackendTypeSubstitutionKey, Maybe BackendType)] -> BackendValidationContext
 extendTypeBounds context0 bounds =
@@ -2215,7 +2454,9 @@ lookupBackendConstructorInfo :: BackendValidationContext -> Maybe SymbolIdentity
 lookupBackendConstructorInfo context0 mbIdentity name =
   case mbIdentity of
     Just identity -> lookupSymbolIdentityExact identity (bvcConstructorsByIdentity context0)
-    Nothing -> Map.lookup name (bvcMetadataLightConstructorsByName context0)
+    Nothing
+      | metadataLightReferencesAllowed context0 -> Map.lookup name (bvcMetadataLightConstructorsByName context0)
+      | otherwise -> Nothing
 
 canonicalizeBackendTypeDataHeads :: BackendValidationContext -> BackendType -> BackendType
 canonicalizeBackendTypeDataHeads context0 =
@@ -2413,6 +2654,7 @@ validateBackendConstructorUse (Just context0) mbIdentity name resultTy0 args =
       Left (BackendUnknownConstructor name)
     Just constructorInfo -> do
       let constructor = bciConstructor constructorInfo
+          typeBoundMode = typeBoundReferenceModeForContext (Just context0)
           dataParameters =
             constructorResultParameterRefs constructorInfo
           parameters =
@@ -2426,7 +2668,7 @@ validateBackendConstructorUse (Just context0) mbIdentity name resultTy0 args =
         case matchBackendTypeParametersWithTypeBounds (bvcTypeBounds context0) dataParameters parameters Map.empty constructorResultTy resultTy of
           Just substitution -> pure substitution
           Nothing
-            | backendConstructorResultPlaceholderMatchesEither (bvcTypeBounds context0) constructorResultTy resultTy ->
+            | backendConstructorResultPlaceholderMatchesEither typeBoundMode (bvcTypeBounds context0) constructorResultTy resultTy ->
                 pure Map.empty
           Nothing -> Left (BackendConstructorResultMismatch name constructorResultTy resultTy)
       validateBackendConstructorStructuralPayload
@@ -2444,11 +2686,12 @@ validateBackendConstructorUse (Just context0) mbIdentity name resultTy0 args =
       let dataScope = backendDataScopeForContext context0
       finalSubstitution <-
         foldM
-          (validateBackendConstructorArgument (bvcTypeBounds context0) (Just dataScope) dataParameters parameters name)
+          (validateBackendConstructorArgument typeBoundMode (bvcTypeBounds context0) (Just dataScope) dataParameters parameters name)
           substitution
           (zip [0 ..] (zip fields args))
       validateBackendConstructorResultSubstitution
         (bvcTypeBounds context0)
+        typeBoundMode
         (Just dataScope)
         constructorInfo
         finalSubstitution
@@ -2457,6 +2700,7 @@ validateBackendConstructorUse (Just context0) mbIdentity name resultTy0 args =
       pure ()
 
 validateBackendConstructorArgument ::
+  TypeBoundReferenceMode ->
   BackendParameterBounds ->
   Maybe BackendDataScope ->
   [BackendDataParameterRef] ->
@@ -2465,7 +2709,7 @@ validateBackendConstructorArgument ::
   Map.Map BackendTypeSubstitutionKey BackendType ->
   (Int, (BackendType, BackendExpr)) ->
   Either BackendValidationError (Map.Map BackendTypeSubstitutionKey BackendType)
-validateBackendConstructorArgument typeBounds mbDataDecls dataParameters parameters name substitution (index0, (expectedTy, arg)) =
+validateBackendConstructorArgument typeBoundMode typeBounds mbDataDecls dataParameters parameters name substitution (index0, (expectedTy, arg)) =
   case matchBackendTypeParametersWithTypeBounds typeBounds dataParameters parameters substitution expectedTy argTy of
     Just substitution' ->
       pure substitution'
@@ -2489,10 +2733,15 @@ validateBackendConstructorArgument typeBounds mbDataDecls dataParameters paramet
     backendConstructorFieldTypeMatches substitutedExpectedTy =
       backendFieldPlaceholderMatches substitutedExpectedTy argTy
         || ( backendTypeContainsVarApp expectedTy
-          && backendVariableTypeMatchesWithBounds typeBounds substitutedExpectedTy argTy
+          && backendVariableTypeMatchesWithBounds typeBoundMode typeBounds substitutedExpectedTy argTy
            )
-        || backendVariableTypeMatchesWithBounds typeBounds substitutedExpectedTy argTy
-        || backendStructuralDataBoundaryMatches typeBounds mbDataDecls substitutedExpectedTy argTy
+        || backendVariableTypeMatchesWithBounds typeBoundMode typeBounds substitutedExpectedTy argTy
+        || backendStructuralDataBoundaryMatchesWith
+          (backendTypeReferenceModeForTypeBoundMode typeBoundMode)
+          typeBounds
+          mbDataDecls
+          substitutedExpectedTy
+          argTy
 
     backendFieldPlaceholderMatches expected actual =
       case (expected, actual) of
@@ -2506,10 +2755,12 @@ validateBackendConstructorArgument typeBounds mbDataDecls dataParameters paramet
           False
 
     placeholderTypeVariable identity tyName =
-      Map.notMember key parameters
-        && Map.notMember key typeBounds
-      where
-        key = backendTypeSubstitutionKeyFromMaybeMetadataLight identity tyName
+      case typeBoundReferenceKey typeBoundMode identity tyName of
+        Just key ->
+          Map.notMember key parameters
+            && Map.notMember key typeBounds
+        Nothing ->
+          False
 
 backendTypeContainsVarApp :: BackendType -> Bool
 backendTypeContainsVarApp =
@@ -2546,12 +2797,19 @@ validateBackendPattern (Just context0) scrutineeTy0 (BackendConstructorPatternWi
           binderNames = map backendPatternBinderName binders
           scrutineeTy = scrutineeTy0
           constructorResultTy = backendConstructorResult constructor
+          typeBoundMode = typeBoundReferenceModeForContext (Just context0)
       requireUniqueBy BackendDuplicatePatternBinding (map patternBinderRef binders)
       unless (length fields == length binderNames) $
         Left (BackendPatternArityMismatch name (length fields) (length binderNames))
       substitution <-
         case matchBackendTypeParametersWithTypeBounds (bvcTypeBounds context0) dataParameters parameters Map.empty constructorResultTy scrutineeTy of
           Just substitution -> pure substitution
+          Nothing
+            | backendTypeRefinesScrutineeWith
+                (backendTypeReferenceModeForTypeBoundMode typeBoundMode)
+                constructorResultTy
+                scrutineeTy ->
+                pure Map.empty
           Nothing -> Left (BackendCaseConstructorScrutineeMismatch name scrutineeTy constructorResultTy)
       validateBackendConstructorStructuralPayload
         (bvcTypeBounds context0)
@@ -2708,16 +2966,22 @@ constructorInfoDataDecl constructorInfo =
 
 validateBackendConstructorResultSubstitution ::
   BackendParameterBounds ->
+  TypeBoundReferenceMode ->
   Maybe BackendDataScope ->
   BackendConstructorInfo ->
   Map.Map BackendTypeSubstitutionKey BackendType ->
   BackendType ->
   BackendValidationError ->
   Either BackendValidationError ()
-validateBackendConstructorResultSubstitution typeBounds mbDataDecls constructorInfo substitution resultTy mismatchError =
+validateBackendConstructorResultSubstitution typeBounds typeBoundMode mbDataDecls constructorInfo substitution resultTy mismatchError =
   unless
-    ( backendStructuralDataBoundaryMatches typeBounds mbDataDecls substitutedResultTy resultTy
-        || backendConstructorResultPlaceholderMatchesEither typeBounds substitutedResultTy resultTy
+    ( backendStructuralDataBoundaryMatchesWith
+        (backendTypeReferenceModeForTypeBoundMode typeBoundMode)
+        typeBounds
+        mbDataDecls
+        substitutedResultTy
+        resultTy
+        || backendConstructorResultPlaceholderMatchesEither typeBoundMode typeBounds substitutedResultTy resultTy
     )
     $
     Left mismatchError
@@ -2749,47 +3013,53 @@ validateCaseAlternative mbContext resultTy alternative =
   unless (backendApplicationTypeMatches mbContext (backendExprType (backendAltBody alternative)) resultTy) $
     Left (BackendCaseResultMismatch resultTy (backendExprType (backendAltBody alternative)))
 
-backendConstructorResultPlaceholderMatchesEither :: BackendParameterBounds -> BackendType -> BackendType -> Bool
-backendConstructorResultPlaceholderMatchesEither typeBounds left right =
-  backendConstructorResultPlaceholderMatches typeBounds left right
-    || backendConstructorResultPlaceholderMatches typeBounds right left
+backendConstructorResultPlaceholderMatchesEither :: TypeBoundReferenceMode -> BackendParameterBounds -> BackendType -> BackendType -> Bool
+backendConstructorResultPlaceholderMatchesEither typeBoundMode typeBounds left right =
+  backendConstructorResultPlaceholderMatches typeBoundMode typeBounds left right
+    || backendConstructorResultPlaceholderMatches typeBoundMode typeBounds right left
 
-backendConstructorResultPlaceholderMatches :: BackendParameterBounds -> BackendType -> BackendType -> Bool
-backendConstructorResultPlaceholderMatches typeBounds actual expected =
+backendConstructorResultPlaceholderMatches :: TypeBoundReferenceMode -> BackendParameterBounds -> BackendType -> BackendType -> Bool
+backendConstructorResultPlaceholderMatches typeBoundMode typeBounds actual expected =
   case (actual, expected) of
     (_, BTVarWithIdentity identity name)
-      | not (typeBoundsContain identity name) -> True
+      | placeholderOpen identity name -> True
     (_, BTVarAppWithIdentity identity name _)
-      | not (typeBoundsContain identity name) -> True
+      | placeholderOpen identity name -> True
     (BTArrow actualDom actualCod, BTArrow expectedDom expectedCod) ->
-      backendConstructorResultPlaceholderMatches typeBounds actualDom expectedDom
-        && backendConstructorResultPlaceholderMatches typeBounds actualCod expectedCod
+      backendConstructorResultPlaceholderMatches typeBoundMode typeBounds actualDom expectedDom
+        && backendConstructorResultPlaceholderMatches typeBoundMode typeBounds actualCod expectedCod
     (BTConWithIdentity actualIdentity actualCon actualArgs, BTConWithIdentity expectedIdentity expectedCon expectedArgs)
-      | backendTypeHeadMatches actualIdentity actualCon expectedIdentity expectedCon,
+      | backendTypeHeadMatchesWith (symbolReferenceModeForTypeBoundMode typeBoundMode) actualIdentity actualCon expectedIdentity expectedCon,
         length actualArgs == length expectedArgs ->
-          and (zipWith (backendConstructorResultPlaceholderMatches typeBounds) (NE.toList actualArgs) (NE.toList expectedArgs))
+          and (zipWith (backendConstructorResultPlaceholderMatches typeBoundMode typeBounds) (NE.toList actualArgs) (NE.toList expectedArgs))
     (BTVarAppWithIdentity actualIdentity actualName actualArgs, BTVarAppWithIdentity expectedIdentity expectedName expectedArgs)
-      | typeBinderRefMatches actualIdentity actualName expectedIdentity expectedName,
+      | typeBinderRefMatchesWith (backendTypeReferenceModeForTypeBoundMode typeBoundMode) actualIdentity actualName expectedIdentity expectedName,
         length actualArgs == length expectedArgs ->
-          and (zipWith (backendConstructorResultPlaceholderMatches typeBounds) (NE.toList actualArgs) (NE.toList expectedArgs))
+          and (zipWith (backendConstructorResultPlaceholderMatches typeBoundMode typeBounds) (NE.toList actualArgs) (NE.toList expectedArgs))
     (BTForallWithIdentity actualIdentity actualName actualBound actualBody, BTForallWithIdentity expectedIdentity expectedName expectedBound expectedBody) ->
-      backendConstructorResultPlaceholderBoundMatches typeBounds actualBound expectedBound
+      backendConstructorResultPlaceholderBoundMatches typeBoundMode typeBounds actualBound expectedBound
         && backendConstructorResultPlaceholderMatches
-          ( Map.insert (backendTypeSubstitutionKeyFromMaybeMetadataLight expectedIdentity expectedName) Nothing $
-              Map.insert (backendTypeSubstitutionKeyFromMaybeMetadataLight actualIdentity actualName) Nothing typeBounds
-          )
+          typeBoundMode
+          (extendPlaceholderBound expectedIdentity expectedName (extendPlaceholderBound actualIdentity actualName typeBounds))
           actualBody
           expectedBody
     _ -> alphaEqBackendType actual expected
   where
-    typeBoundsContain identity name =
-      Map.member (backendTypeSubstitutionKeyFromMaybeMetadataLight identity name) typeBounds
+    placeholderOpen identity name =
+      case typeBoundReferenceKey typeBoundMode identity name of
+        Just key -> Map.notMember key typeBounds
+        Nothing -> False
 
-backendConstructorResultPlaceholderBoundMatches :: BackendParameterBounds -> Maybe BackendType -> Maybe BackendType -> Bool
-backendConstructorResultPlaceholderBoundMatches _ Nothing Nothing = True
-backendConstructorResultPlaceholderBoundMatches typeBounds (Just actual) (Just expected) =
-  backendConstructorResultPlaceholderMatches typeBounds actual expected
-backendConstructorResultPlaceholderBoundMatches _ _ _ = False
+    extendPlaceholderBound identity name bounds =
+      case typeBoundReferenceKey typeBoundMode identity name of
+        Just key -> Map.insert key Nothing bounds
+        Nothing -> bounds
+
+backendConstructorResultPlaceholderBoundMatches :: TypeBoundReferenceMode -> BackendParameterBounds -> Maybe BackendType -> Maybe BackendType -> Bool
+backendConstructorResultPlaceholderBoundMatches _ _ Nothing Nothing = True
+backendConstructorResultPlaceholderBoundMatches typeBoundMode typeBounds (Just actual) (Just expected) =
+  backendConstructorResultPlaceholderMatches typeBoundMode typeBounds actual expected
+backendConstructorResultPlaceholderBoundMatches _ _ _ _ = False
 
 requireUnique :: (String -> BackendValidationError) -> [String] -> Either BackendValidationError ()
 requireUnique mkError names =

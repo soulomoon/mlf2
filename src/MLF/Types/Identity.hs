@@ -21,6 +21,7 @@ module MLF.Types.Identity
     initialIdentityGenerator,
     identityGeneratorAfter,
     advanceIdentityGeneratorPast,
+    advanceIdentityGeneratorPastMany,
     freshIdentity,
     LocalRef,
     localRefFromIdentity,
@@ -30,6 +31,7 @@ module MLF.Types.Identity
     freshLocalRef,
     freshenLocalRef,
     localRefFromNodeId,
+    localRefFromScopedNodeId,
     localRefMatchesNodeId,
     localRefGeneratedIdentities,
     renameLocalRef,
@@ -70,6 +72,8 @@ module MLF.Types.Identity
     idDetailsIsDiscard,
     idDetailsRenameLocal,
     idDetailsSameIdentity,
+    IdDetailsReferenceMode (..),
+    idDetailsRefMatchesWith,
     idDetailsRefMatches,
     idDetailsGeneratedIdentities,
     symbolGeneratedIdentities,
@@ -196,6 +200,7 @@ data LocalRef = LocalRef
 
 data LocalIdentity
   = GraphLocalId NodeId
+  | ScopedGraphLocalId NodeId Int
   | GeneratedLocalId UniqueIdentity
   deriving (Eq, Ord, Show)
 
@@ -203,10 +208,14 @@ localIdentityStableUnique :: LocalIdentity -> UniqueIdentity
 localIdentityStableUnique identity =
   case identity of
     GraphLocalId nodeId -> UniqueIdentity (graphLocalIdentityBase - getNodeId nodeId)
+    ScopedGraphLocalId _ binderOrdinal -> UniqueIdentity (scopedGraphLocalIdentityBase - binderOrdinal)
     GeneratedLocalId unique -> unique
 
 graphLocalIdentityBase :: Int
 graphLocalIdentityBase = -400000
+
+scopedGraphLocalIdentityBase :: Int
+scopedGraphLocalIdentityBase = -800000
 
 instance Eq LocalRef where
   left == right =
@@ -234,16 +243,25 @@ localRefFromNodeId :: String -> NodeId -> LocalRef
 localRefFromNodeId name nodeId =
   localRefFromIdentity (GraphLocalId nodeId) name
 
+-- | A lexical binder backed by a graph type node.  The ordinal distinguishes
+-- binders whose inferred types legitimately share that node (for example,
+-- @let k = h@) while retaining the graph-node association.
+localRefFromScopedNodeId :: String -> NodeId -> Int -> LocalRef
+localRefFromScopedNodeId name nodeId binderOrdinal =
+  localRefFromIdentity (ScopedGraphLocalId nodeId binderOrdinal) name
+
 localRefMatchesNodeId :: LocalRef -> NodeId -> Bool
 localRefMatchesNodeId ref nodeId =
   case localRefIdentity ref of
     GraphLocalId refNodeId -> refNodeId == nodeId
+    ScopedGraphLocalId refNodeId _ -> refNodeId == nodeId
     GeneratedLocalId {} -> False
 
 localRefGeneratedIdentities :: LocalRef -> [UniqueIdentity]
 localRefGeneratedIdentities ref =
   case localRefIdentity ref of
     GraphLocalId {} -> []
+    ScopedGraphLocalId {} -> []
     GeneratedLocalId identity -> [identity]
 
 renameLocalRef :: String -> LocalRef -> LocalRef
@@ -410,6 +428,7 @@ symbolRuntimeName symbol =
   case symbolDefiningModule symbol of
     "" -> name
     "<builtin>" -> name
+    "<local>" -> name
     moduleName
       | (moduleName ++ "__") `isPrefixOf` name -> name
       | otherwise -> moduleName ++ "__" ++ name
@@ -561,13 +580,24 @@ idDetailsSameIdentity left right =
     (DeferredId leftRef, DeferredId rightRef) -> leftRef == rightRef
     _ -> False
 
-idDetailsRefMatches :: Maybe IdDetails -> String -> Maybe IdDetails -> String -> Bool
-idDetailsRefMatches (Just left) _ (Just right) _ =
+data IdDetailsReferenceMode
+  = IdDetailsIdentityOnly
+  | IdDetailsMetadataLight
+  deriving (Eq, Show)
+
+idDetailsRefMatchesWith :: IdDetailsReferenceMode -> Maybe IdDetails -> String -> Maybe IdDetails -> String -> Bool
+idDetailsRefMatchesWith _ (Just left) _ (Just right) _ =
   idDetailsSameIdentity left right
-idDetailsRefMatches Nothing leftName Nothing rightName =
-  leftName == rightName
-idDetailsRefMatches _ _ _ _ =
+idDetailsRefMatchesWith mode Nothing leftName Nothing rightName =
+  case mode of
+    IdDetailsIdentityOnly -> False
+    IdDetailsMetadataLight -> leftName == rightName
+idDetailsRefMatchesWith _ _ _ _ _ =
   False
+
+idDetailsRefMatches :: Maybe IdDetails -> String -> Maybe IdDetails -> String -> Bool
+idDetailsRefMatches =
+  idDetailsRefMatchesWith IdDetailsIdentityOnly
 
 idDetailsGeneratedIdentities :: IdDetails -> [UniqueIdentity]
 idDetailsGeneratedIdentities details =

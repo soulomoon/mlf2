@@ -1336,7 +1336,7 @@ elaboratesTo expr expected =
 typeShouldMatch :: Elab.ElabType -> Elab.ElabType -> Property
 typeShouldMatch actual expected =
   counterexample (show actual ++ " /= " ++ show expected) $
-    actual == expected || TypeOps.alphaEqType actual expected
+    TypeOps.alphaEqType actual expected
 
 typeCheckShouldMatch :: Either Elab.TypeCheckError Elab.ElabType -> Elab.ElabType -> Property
 typeCheckShouldMatch actual expected =

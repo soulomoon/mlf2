@@ -8,6 +8,7 @@ import Data.List.NonEmpty (NonEmpty(..))
 import Data.Maybe (catMaybes, isJust)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Test.Hspec
 
@@ -17,9 +18,17 @@ import MLF.Constraint.Solve (solveUnifyWithSnapshot)
 import MLF.Constraint.Solved (fromSolveOutput, originalConstraint)
 import MLF.Constraint.Types.Graph hiding (lookupNode)
 import MLF.Constraint.Types.Phase (Phase(Raw))
-import MLF.Frontend.ConstraintGen (AnnExpr (..), generateConstraintsCore)
+import MLF.Frontend.ConstraintGen
+    ( AnnExpr (..)
+    , ExternalBinding (..)
+    , ExternalBindingMode (..)
+    , externalBindingIdentityFromDetails
+    , generateConstraintsCore
+    , generateConstraintsCoreWithExternalBindings
+    )
 import MLF.API hiding (lookupNode)
 import MLF.Pipeline (ConstraintError(..), ConstraintResult(..), defaultTraceConfig, inferConstraintGraph)
+import MLF.Types.Identity (IdDetails (..), LocalIdentity (..), UniqueIdentity (..), idDetailsSameIdentity, localRefFromIdentity)
 import SpecUtil
     ( expectRight
     , lookupNode
@@ -35,6 +44,20 @@ import SpecUtil
 inferConstraintGraphDefault :: SurfaceExpr -> Either ConstraintError (ConstraintResult 'Raw)
 inferConstraintGraphDefault expr =
     inferConstraintGraph Set.empty (unsafeNormalizeExpr expr)
+
+localDetails :: Int -> String -> IdDetails
+localDetails unique name =
+    LocalId (localRefFromIdentity (GeneratedLocalId (UniqueIdentity unique)) name)
+
+monomorphicExternalBinding :: IdDetails -> ExternalBinding
+monomorphicExternalBinding details =
+    ExternalBinding
+        { externalBindingType = STBase "Int"
+        , externalBindingMode = ExternalBindingMonomorphic
+        , externalBindingIdentity = Just (externalBindingIdentityFromDetails details)
+        , externalBindingTypeHeadIdentities = Map.empty
+        , externalBindingTypeBinderIdentities = Map.empty
+        }
 
 spec :: Spec
 spec = describe "Phase 1 — Constraint generation" $ do
@@ -101,7 +124,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
                 (schemeRoot, bodyAnn, resNode) <- case crAnnotated result of
-                    ALet _ _ schemeRoot' _ _ _ bodyAnn' resNode' ->
+                    ALet _ _ _ schemeRoot' _ _ _ bodyAnn' resNode' ->
                         pure (schemeRoot', bodyAnn', resNode')
                     other -> expectationFailure ("Expected ALet annotation, saw " ++ show other) >> fail "no schemeRoot"
                 resNode `shouldBe` crRoot result
@@ -109,7 +132,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                     Just TyVar{} -> pure ()
                     other -> expectationFailure $ "Root is not the trivial scheme var: " ++ show other
                 case bodyAnn of
-                    AAnn (AVar "x" useNode) annNode edgeId -> do
+                    AAnn (AResolvedVar _ "x" useNode) annNode edgeId -> do
                         annNode `shouldBe` resNode
                         case lookupNodeMaybe nodes useNode of
                             Just TyExp { tnBody = bodyId } -> bodyId `shouldBe` schemeRoot
@@ -138,15 +161,15 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
                 (innerSchemeRoot, innerBodyAnn) <- case crAnnotated result of
-                    ALet _ _ _ _ _ _ (AAnn innerAnn _ _) _ ->
+                    ALet _ _ _ _ _ _ _ (AAnn innerAnn _ _) _ ->
                         case innerAnn of
-                            ALet _ _ schemeRoot' _ _ _ bodyAnn' _ ->
+                            ALet _ _ _ schemeRoot' _ _ _ bodyAnn' _ ->
                                 pure (schemeRoot', bodyAnn')
                             other ->
                                 expectationFailure ("Expected nested ALet annotation, saw " ++ show other) >> fail "no schemeRoot"
                     other -> expectationFailure ("Expected nested ALet annotation, saw " ++ show other) >> fail "no schemeRoot"
                 case innerBodyAnn of
-                    AAnn (AVar "x" useNode) _ _ -> do
+                    AAnn (AResolvedVar _ "x" useNode) _ _ -> do
                         case lookupNodeMaybe nodes useNode of
                             Just TyExp { tnBody = bodyId } -> bodyId `shouldBe` innerSchemeRoot
                             other -> expectationFailure $ "Expected TyExp for inner x, saw " ++ show other
@@ -159,6 +182,79 @@ spec = describe "Phase 1 — Constraint generation" $ do
         it "reports unknown variables that appear inside let RHS" $ do
             let expr = ELet "x" (EVar "ghost") (ELit (LInt 0))
             inferConstraintGraphDefault expr `shouldBe` Left (UnknownVariable "ghost")
+
+        it "resolves identity-bearing occurrences independently of display spelling and shadowing" $ do
+            let outerDetails = localDetails 91001 "$runtime_outer"
+                innerDetails = localDetails 91002 "$runtime_inner"
+                expr =
+                    EBinderIdentity outerDetails $
+                        ELam "same" $
+                            EBinderIdentity innerDetails $
+                                ELam "same" $
+                                    EBinderIdentity outerDetails (EVar "$stale_outer_display")
+            expectRight (generateConstraintsCore Set.empty expr) $ \result ->
+                case crAnnotated result of
+                    ALam _ (Just outerBinder) outerNode _ (ALam _ (Just innerBinder) _ _ (AResolvedVar occurrenceDetails displayName occurrenceNode) _) _ -> do
+                        outerBinder `shouldBe` outerDetails
+                        innerBinder `shouldBe` innerDetails
+                        occurrenceDetails `shouldBe` outerDetails
+                        displayName `shouldBe` "$stale_outer_display"
+                        occurrenceNode `shouldBe` outerNode
+                    other ->
+                        expectationFailure ("expected nested identity-bearing lambdas, saw " ++ show other)
+
+        it "does not fall back from a resolved occurrence identity to a matching name" $ do
+            let binderDetails = localDetails 91003 "same"
+                missingDetails = localDetails 91004 "same"
+                expr =
+                    EBinderIdentity binderDetails $
+                        ELam "same" (EBinderIdentity missingDetails (EVar "same"))
+            generateConstraintsCore Set.empty expr `shouldBe` Left (UnknownVariable "same")
+
+        it "keeps an identity-bearing let local instead of rematerializing a same-named external" $ do
+            let binderDetails = localDetails 91007 "$runtime_local"
+                externalDetails = localDetails 91008 "same"
+                externalBinding = monomorphicExternalBinding externalDetails
+                expr =
+                    EBinderIdentity binderDetails $
+                        ELet
+                            "same"
+                            (ELit (LInt 1))
+                            (EBinderIdentity binderDetails (EVar "$stale_local_display"))
+            expectRight
+                (generateConstraintsCoreWithExternalBindings Set.empty (Map.singleton "same" externalBinding) expr)
+                $ \result ->
+                    case crAnnotated result of
+                        ALet _ (Just actualBinder) _ schemeRoot _ _ _ (AAnn (AResolvedVar occurrenceDetails "$stale_local_display" occurrenceNode) _ _) _ -> do
+                            actualBinder `shouldBe` binderDetails
+                            occurrenceDetails `shouldBe` binderDetails
+                            case lookupNodeMaybe (cNodes (crConstraint result)) occurrenceNode of
+                                Just TyExp {tnBody = bodyNode} -> bodyNode `shouldBe` schemeRoot
+                                other -> expectationFailure ("expected local let expansion, saw " ++ show other)
+                        other -> expectationFailure ("expected identity-bearing let, saw " ++ show other)
+
+        it "keeps a name-keyed external entry as an explicit raw adapter, then upgrades to identity" $ do
+            let details = localDetails 91005 "external"
+                externalBinding = monomorphicExternalBinding details
+            expectRight
+                (generateConstraintsCoreWithExternalBindings Set.empty (Map.singleton "external" externalBinding) (EVar "external"))
+                $ \result ->
+                    case crAnnotated result of
+                        AResolvedVar occurrenceDetails "external" _ ->
+                            occurrenceDetails `shouldBe` details
+                        other -> expectationFailure ("expected raw adapter to produce an identity-bearing occurrence, saw " ++ show other)
+
+        it "selects an external binding by resolved identity when its display spelling is stale" $ do
+            let details = localDetails 91006 "$runtime_external"
+                externalBinding = monomorphicExternalBinding details
+                expr = EBinderIdentity details (EVar "$stale_external_display")
+            expectRight
+                (generateConstraintsCoreWithExternalBindings Set.empty (Map.singleton "$runtime_external" externalBinding) expr)
+                $ \result ->
+                    case crAnnotated result of
+                        AResolvedVar occurrenceDetails "$stale_external_display" _ ->
+                            occurrenceDetails `shouldBe` details
+                        other -> expectationFailure ("expected identity-bearing external occurrence, saw " ++ show other)
 
     describe "Applications" $ do
         it "emits instantiation edges for both function and argument" $ do
@@ -190,9 +286,10 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
                 case crAnnotated result of
-                    ALam _ lamParam _ bodyAnn _ ->
+                    ALam _ (Just lamDetails) lamParam _ bodyAnn _ ->
                         case bodyAnn of
-                            ALet "x" _ schemeRoot _ _ rhsAnn bodyAnn' _ -> do
+                            ALet "x" (Just mediatorDetails) _ schemeRoot _ _ rhsAnn bodyAnn' _ -> do
+                                mediatorDetails `shouldSatisfy` idDetailsSameIdentity lamDetails
                                 schemeNode <- lookupNode nodes schemeRoot
                                 -- With coercion-based desugaring, the scheme root is a type
                                 -- variable (the coercion's codomain), not the base type directly
@@ -204,10 +301,11 @@ spec = describe "Phase 1 — Constraint generation" $ do
                                             other -> expectationFailure $ "Expected Int bound, saw " ++ show other
                                     other -> expectationFailure $ "Expected TyVar with bound, saw " ++ show other
                                 case rhsAnn of
-                                    AAnn (AVar "x" rhsUse) _ _ -> rhsUse `shouldBe` lamParam
+                                    AAnn (AResolvedVar _ "x" rhsUse) _ _ -> rhsUse `shouldBe` lamParam
                                     other -> expectationFailure $ "Expected annotated RHS, saw " ++ show other
                                 case bodyAnn' of
-                                    AAnn (AVar "x" useNode) _ _ -> do
+                                    AAnn (AResolvedVar bodyDetails "x" useNode) _ _ -> do
+                                        bodyDetails `shouldSatisfy` idDetailsSameIdentity lamDetails
                                         useTy <- lookupNode nodes useNode
                                         case useTy of
                                             TyExp { tnBody = bodyId } -> bodyId `shouldBe` schemeRoot
@@ -224,7 +322,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
             expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let nodes = cNodes (crConstraint result)
                 schemeRoot <- case crAnnotated result of
-                    ALet _ _ schemeRoot' _ _ _ _ _ -> pure schemeRoot'
+                    ALet _ _ _ schemeRoot' _ _ _ _ _ -> pure schemeRoot'
                     other -> expectationFailure ("Expected ALet annotation, saw " ++ show other) >> fail "no schemeRoot"
                 body <- lookupNode nodes schemeRoot
                 -- Expect a scheme root Arrow with shared dom/cod.
@@ -256,7 +354,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
                 schemeRoot <- case crAnnotated result of
-                    ALet _ _ schemeRoot' _ _ _ _ _ -> pure schemeRoot'
+                    ALet _ _ _ schemeRoot' _ _ _ _ _ -> pure schemeRoot'
                     other -> expectationFailure ("Expected ALet annotation, saw " ++ show other) >> fail "no schemeRoot"
                 body <- lookupNode nodes schemeRoot
                 -- Expect a scheme root Arrow with bounded dom.
@@ -287,14 +385,14 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
                 case crAnnotated result of
-                    ALam _ lamParam _ bodyAnn _ ->
+                    ALam _ _ lamParam _ bodyAnn _ ->
                         case bodyAnn of
-                            ALet "x" _ schemeRoot _ _ rhsAnn bodyAnn' _ -> do
+                            ALet "x" _ _ schemeRoot _ _ rhsAnn bodyAnn' _ -> do
                                 case rhsAnn of
-                                    AAnn (AVar "x" rhsUse) _ _ -> rhsUse `shouldBe` lamParam
+                                    AAnn (AResolvedVar _ "x" rhsUse) _ _ -> rhsUse `shouldBe` lamParam
                                     other -> expectationFailure $ "Expected annotated RHS, saw " ++ show other
                                 case bodyAnn' of
-                                    AAnn (AVar "x" useNode) _ _ -> do
+                                    AAnn (AResolvedVar _ "x" useNode) _ _ -> do
                                         case lookupNodeMaybe nodes useNode of
                                             Just TyExp { tnBody = bodyId } -> bodyId `shouldBe` schemeRoot
                                             other -> expectationFailure $ "Expected TyExp for polymorphic x, saw " ++ show other
@@ -334,14 +432,14 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
                 case crAnnotated result of
-                    ALam _ lamParam _ bodyAnn _ ->
+                    ALam _ _ lamParam _ bodyAnn _ ->
                         case bodyAnn of
-                            ALet "x" _ schemeRoot _ _ rhsAnn bodyAnn' _ -> do
+                            ALet "x" _ _ schemeRoot _ _ rhsAnn bodyAnn' _ -> do
                                 case rhsAnn of
-                                    AAnn (AVar "x" rhsUse) _ _ -> rhsUse `shouldBe` lamParam
+                                    AAnn (AResolvedVar _ "x" rhsUse) _ _ -> rhsUse `shouldBe` lamParam
                                     other -> expectationFailure $ "Expected annotated RHS, saw " ++ show other
                                 case bodyAnn' of
-                                    AAnn (AVar "x" useNode) _ _ -> do
+                                    AAnn (AResolvedVar _ "x" useNode) _ _ -> do
                                         useTy <- lookupNode nodes useNode
                                         case useTy of
                                             TyExp { tnBody = bodyId } -> bodyId `shouldBe` schemeRoot
@@ -365,7 +463,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 let constraint = crConstraint result
                     nodes = cNodes constraint
                 case crAnnotated result of
-                    ALet _ _ _ _ _ _ bodyAnn _ ->
+                    ALet _ _ _ _ _ _ _ bodyAnn _ ->
                         case bodyAnn of
                             AAnn innerAnn _ _ ->
                                 case innerAnn of
@@ -408,7 +506,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
              expectRight (inferConstraintGraphDefault expr) $ \result -> do
                  let ann = crAnnotated result
                  case ann of
-                     ALet name schemeGen _ _ rhsGen rhsAnn bodyAnn _resNode -> do
+                     ALet name _ schemeGen _ _ rhsGen rhsAnn bodyAnn _resNode -> do
                          name `shouldBe` "x"
                          schemeGen `shouldBe` rhsGen
                          -- Basic structural check
@@ -416,7 +514,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                              ALit (LInt 1) _ -> pure ()
                              _ -> expectationFailure "RHS annotation mismatch"
                          case bodyAnn of
-                             AAnn (AVar "x" _) _ _ -> pure ()
+                             AAnn (AResolvedVar _ "x" _) _ _ -> pure ()
                              _ -> expectationFailure "Body annotation mismatch"
                      _ -> expectationFailure "Expected ALet annotation"
 
@@ -469,7 +567,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                     nodes = cNodes constraint
                     insts = cInstEdges constraint
                 (funEid, argEid, appResult) <- case crAnnotated result of
-                    ALet _ _ _ _ _ _ bodyAnn _ ->
+                    ALet _ _ _ _ _ _ _ bodyAnn _ ->
                         case bodyAnn of
                             AAnn (AApp _ _ funEid' argEid' resNode) _ _ ->
                                 pure (funEid', argEid', resNode)
@@ -604,7 +702,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
             expectRight (inferConstraintGraphDefault expr) $ \result -> do
                 let constraint = crConstraint result
                 case crAnnotated result of
-                    ALet _ _ _ _ _ _ bodyAnn resNode ->
+                    ALet _ _ _ _ _ _ _ bodyAnn resNode ->
                         case bodyAnn of
                             AAnn (ALit (LInt 0) litNode) annNode edgeId -> do
                                 annNode `shouldBe` resNode
@@ -625,9 +723,9 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 let constraint = crConstraint result
                     bindParents = cBindParents constraint
                 (schemeGen, paramId) <- case crAnnotated result of
-                    ALet _ schemeGen _ _ _ rhsAnn _ _ ->
+                    ALet _ _ schemeGen _ _ _ rhsAnn _ _ ->
                         case rhsAnn of
-                            ALam _ param _ _ _ -> pure (schemeGen, param)
+                            ALam _ _ param _ _ _ -> pure (schemeGen, param)
                             other -> expectationFailure ("Expected lambda RHS, saw " ++ show other) >> fail "no param"
                     other -> expectationFailure ("Expected ALet annotation, saw " ++ show other) >> fail "no schemeGen"
                 case IntMap.lookup (nodeRefKey (typeRef paramId)) bindParents of
@@ -646,9 +744,9 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 let constraint = crConstraint result
                     bindParents = cBindParents constraint
                 (innerGen, innerRoot) <- case crAnnotated result of
-                    ALet _ _ _ _ _ rhsAnn _ _ ->
+                    ALet _ _ _ _ _ _ rhsAnn _ _ ->
                         case rhsAnn of
-                            ALet _ schemeGen schemeRoot _ _ _ _ _ ->
+                            ALet _ _ schemeGen schemeRoot _ _ _ _ _ ->
                                 pure (schemeGen, schemeRoot)
                             other ->
                                 expectationFailure ("Expected inner ALet annotation, saw " ++ show other) >> fail "no inner let"
@@ -1119,7 +1217,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 -- Get the scheme root from the let annotation
                 -- ALet: name, schemeGenId, schemeRootId, expVar, scopeRoot, rhs, body, nid
                 schemeRoot <- case crAnnotated result of
-                    ALet _ _ schemeRoot' _ _ _ _ _ -> pure schemeRoot'
+                    ALet _ _ _ schemeRoot' _ _ _ _ _ -> pure schemeRoot'
                     other -> expectationFailure ("Expected ALet annotation, saw " ++ show other) >> fail "no schemeRoot"
 
                 -- The scheme root should be a TyArrow (the lambda's type), not a
@@ -1141,9 +1239,9 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 -- The use of 'id' in the body should have a TyExp node (normal let-polymorphism)
                 -- not a direct link to a TyForall scheme
                 case crAnnotated result of
-                    ALet _ _ _ _ _ _ bodyAnn _ ->
+                    ALet _ _ _ _ _ _ _ bodyAnn _ ->
                         case bodyAnn of
-                            AAnn (AVar "id" useNode) _ _ -> do
+                            AAnn (AResolvedVar _ "id" useNode) _ _ -> do
                                 useTy <- lookupNode nodes useNode
                                 case useTy of
                                     TyExp {} -> pure () -- Normal let-polymorphic use

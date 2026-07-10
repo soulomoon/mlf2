@@ -90,6 +90,7 @@ prettyEmlfExpr = goExpr 0
         paren (p > 1) (goExpr 1 f ++ " " ++ goArg a)
       ELet v rhs body ->
         paren (p > 0) ("let " ++ v ++ " = " ++ goExpr 0 rhs ++ " in " ++ goExpr 0 body)
+      EBinderIdentity _ inner -> goExpr p inner
       EAnn e ty ->
         "(" ++ goExpr 0 e ++ " : " ++ prettyEmlfType ty ++ ")"
 
@@ -98,6 +99,7 @@ prettyEmlfExpr = goExpr 0
       EVar {} -> goExpr 2 expr
       ELit {} -> goExpr 2 expr
       EAnn {} -> goExpr 2 expr
+      EBinderIdentity _ inner -> goArg inner
       _ -> "(" ++ goExpr 0 expr ++ ")"
 
     prettyLit :: Lit -> String

@@ -71,7 +71,7 @@ import MLF.Frontend.Symbol
     symbolIdentityStableName,
     symbolNamespace,
   )
-import MLF.Types.Identity (TypeBinderIdentity, typeBinderIdentityStableName)
+import MLF.Types.Identity (IdDetails, TypeBinderIdentity, typeBinderIdentityStableName)
 
 {- Note [Surface syntax and paper alignment]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -427,6 +427,11 @@ data Expr (s :: ExprStage) ty where
     Expr s ty ->
     -- | let x = e₁ in e₂ (inferred scheme)
     Expr s ty
+  -- Internal-only. Keep a resolved term identity attached to a concrete
+  -- variable occurrence or binder while it crosses the source-shaped surface
+  -- pipeline. The constraint generator consumes this wrapper into an
+  -- identity-bearing annotated node; it is never a source-language construct.
+  EBinderIdentity :: IdDetails -> Expr s ty -> Expr s ty
   -- Surface-only.
   ELamAnn :: VarName -> ty -> Expr 'Surface ty -> Expr 'Surface ty
   EAnn :: Expr 'Surface ty -> ty -> Expr 'Surface ty
@@ -446,6 +451,7 @@ data SurfaceExprF ty a
   | ELamSurfaceF VarName a
   | EAppSurfaceF a a
   | ELetSurfaceF VarName a a
+  | EBinderIdentitySurfaceF IdDetails a
   | ELamAnnSurfaceF VarName ty a
   | EAnnSurfaceF a ty
   deriving (Functor, Foldable, Traversable)
@@ -459,6 +465,7 @@ instance Recursive (Expr 'Surface ty) where
     ELam v body -> ELamSurfaceF v body
     EApp fun arg -> EAppSurfaceF fun arg
     ELet v rhs body -> ELetSurfaceF v rhs body
+    EBinderIdentity details inner -> EBinderIdentitySurfaceF details inner
     ELamAnn v ty body -> ELamAnnSurfaceF v ty body
     EAnn expr0 ty -> EAnnSurfaceF expr0 ty
 
@@ -469,6 +476,7 @@ instance Corecursive (Expr 'Surface ty) where
     ELamSurfaceF v body -> ELam v body
     EAppSurfaceF fun arg -> EApp fun arg
     ELetSurfaceF v rhs body -> ELet v rhs body
+    EBinderIdentitySurfaceF details inner -> EBinderIdentity details inner
     ELamAnnSurfaceF v ty body -> ELamAnn v ty body
     EAnnSurfaceF expr0 ty -> EAnn expr0 ty
 

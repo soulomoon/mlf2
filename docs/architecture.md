@@ -66,7 +66,10 @@ The code is organized by domain (not by phase) under `src/MLF/`:
 - `MLF.Backend.Convert` — checked `.mlfp` program to typed backend IR conversion, including backend type conversion, explicit ADT construct/case recovery, and closure conversion where the checked xMLF shape is unambiguous
 - `MLF.Backend.Emission.Prepare` — private adapter for backend-emission semantic preparation from a caller-provided source string or located package before LLVM rendering
 - `MLF.Backend.LLVM` — repo-local LLVM backend facade over a small typed LLVM AST, lowerer, and pretty-printer for the supported typed backend IR subset, with explicit diagnostics for unsupported backend nodes
-- Structural recursive ADT matching currently remains adapter-local in `MLF.Backend.IR`, `MLF.Backend.Convert`, and `MLF.Backend.LLVM.Lower`. The accepted target is one private backend matcher module named `MLF.Backend.StructuralRecursiveData`, but that module is not yet present in the current codebase.
+- `MLF.Backend.StructuralRecursiveData` — private owner for structural recursive
+  ADT identity and payload-shape matching shared by backend IR validation,
+  checked-program conversion, and LLVM lowering; it separates identity-only
+  production matching from explicit metadata-light compatibility matching
 - `MLF.Constraint.*` — constraint graph types + normalize + acyclicity + presolution + solve
 - `MLF.Binding.*` — binding tree queries + executable χe ops + harmonization
 - `MLF.Witness.*` — ω execution helpers (base χe operations)
@@ -154,11 +157,12 @@ that identity. `MLF.Frontend.Program.Check` consumes the semantic artifact, and
 `MLF.Frontend.Program.Elaborate` compiles resolved expressions and patterns
 through identity indexes beside its visible string maps. Surface-spelling maps
 and reference-list adapters are for lookup, diagnostics, source rendering,
-audits, and runtime-name construction;
-semantic decisions compare stored identities or identity-aware source-type
-shapes, not qualified strings. Deferred method finalization carries paired
-display/identity type views so instance and evidence lookup stay semantic even
-after eMLF type recovery.
+audits, and runtime-name construction. The intended semantic rule is to compare
+stored identities or identity-aware source-type shapes, not qualified strings.
+Instance and evidence matching uses the shared identity-bearing
+`ClassApplicationKey` and `EvidenceMethodKey` abstractions. These keys retain
+`TypeView` head and binder identities; display projections are not evidence
+lookup keys.
 
 ### Resolved xMLF identity target
 
@@ -171,67 +175,42 @@ node; deferred terms are built from explicit `DeferredRef` values, with generate
 refs required for accepted checked-program terms. `ELam`/`ELet` are the only
 lambda/let term forms. Local-binder construction helpers are for tests and
 fixture-like call sites. `CheckedBinding` carries a
-`ResolvedVar`, constructor bindings carry a
-`ConstructorId` reference consumed by backend conversion, and checked-program
-finalization rejects accepted terms that still carry deferred variable identity
-after annotating occurrences from runtime metadata. `MLF.Types.Identity` owns
-common `IdDetails` reference-name, local, constructor, and local-rename
-projections for these consumers. Core elaboration now emits resolved variable
-occurrences from `EnvBinding`: external environment values carry `EnvId`, while
-lambda and let binders carry `LocalId`, and lambda/let rewrite helpers refresh
-local occurrence sidecar types when they rewrite binder types. The opaque
-unchecked fallback also annotates
-its stored checked term before returning. Backend-emission preparation, runtime
-reachability, and backend-conversion free-variable scans now consume resolved
-term identity before falling back to string-compatible legacy terms. Backend
-conversion recursive-let lifting and capture-avoiding rewrite helpers preserve
-the resolved occurrence and lambda/let binder identities. Backend conversion's
-builtin-type normalization and ordinary lambda/let emission also preserve those
-identities while running temporary backend type inference and emitting backend
-binders. Backend conversion partial-application, closure-demand, handler-call,
-and structural lambda-shape probes read resolved local identity before falling
-back to runtime names. Backend conversion let-alias application-head unfolding
-also compares resolved let binder identity before runtime names.
-Checked-program main-term aggregation and Church-data decoding also
-preserve/use resolved binding identity before falling back to runtime names.
-Constructor bindings without constructor foralls can be finalized directly from
-`ConstructorInfo` metadata instead of routing through the surface pipeline,
-including monomorphic field/multi-constructor ADTs and non-nullary
-data-parameterized constructors; parameterized nullary constructors and other
-constructor shapes still use the surface pipeline until their metadata path
-preserves the existing result-shape invariants.
-Constructor application heads are recognized from resolved
-`ConstructorId` identities when present, with string-name recognition retained
-only for unresolved compatibility terms. xMLF pretty/XMLF projection reads
-resolved local identity before the string-runtime compatibility view, so
-rendered checked terms do not expose stale local runtime spellings. Pipeline
-type-abstraction freshening preserves resolved occurrence and binder identities
-while renaming internal type variables, and authoritative-annotation selection
-uses resolved local identity for identity-lambda terms before falling back to
-runtime-name equality.
-Checked-program deferred constructor/case/method rewrite helpers also preserve
-resolved occurrence and binder identities during finalization.
-Deferred placeholder matching reads resolved occurrence identity before falling
-back to string-compatible names.
-Deferred local evidence finalization matches evidence methods by class identity,
-type identity, and method identity rather than evidence runtime names.
-Instance method resolution also keeps an identity-indexed method map beside the
-source-name map, so deferred method dispatch selects the instance method by
-`MethodInfo` identity.
-Module definition finalization collects checked layer results by definition
-`SymbolIdentity`, not checked-binding runtime name.
-Module finalization read contexts are keyed by lowered binding identity rather
-than lowered binding runtime name.
-Module pipeline results are re-keyed by lowered binding identity immediately
-after the string-keyed pipeline boundary returns.
-Parameterized constructor-binding result-shape repair preserves resolved lambda
-binder identities while reordering the generated spine.
-Retained-child preservation analysis reads resolved let-binder and variable
-identity before falling back to runtime names.
-Non-program eMLF producers are still string-compatible during the migration.
-Final checked terms should carry resolved variable identity throughout, with
-constructor occurrences represented by an `IdDetails`-style constructor
-reference rather than by a string that must be classified later.
+`ResolvedVar`, and constructor bindings carry a
+`ConstructorId` reference consumed by backend conversion. Normal checked-program
+finalization rejects terms that still carry deferred
+variable identity after annotating occurrences from runtime metadata. The opaque
+unchecked finalization path runs the same `unresolvedXmlfTermVarRefs` rejection
+before it can publish a `CheckedBinding`. `MLF.Types.Identity` owns common
+`IdDetails` reference-name, local, constructor, and local-rename projections for
+these consumers. Core elaboration emits resolved variable occurrences from
+`EnvBinding`: external environment values carry `EnvId`, while lambda and let
+binders carry `LocalId`, and lambda/let rewrite helpers refresh local occurrence
+sidecar types when they rewrite binder types. Every `XmlfTerm` variable and binder
+form carries `ResolvedVar` at the type level.
+
+Resolved Program expressions still pass through `compileResolvedExpr` into the
+String-shaped `SurfaceExpr` boundary. Global references use stable identity
+aliases. Local, evidence, generated handler, and branch-local pattern binders
+carry `IdDetails` on the internal `EBinderIdentity` surface wrapper; that wrapper
+survives normalization, desugaring, constraint generation, and elaboration into
+the exact `ALam`/`ALet` node. Finalization therefore does not reconstruct binder
+meaning from a `Map String IdDetails` or a runtime-name sidecar. Runtime-name
+projections remain boundary views, not an alternate checked-term representation.
+
+Backend-emission preparation, runtime reachability, typechecking, reduction, and
+backend conversion consume `ResolvedVar` / `IdDetails`. Constructor applications
+carry `ConstructorId`; constructor bindings without constructor foralls can also
+be finalized directly from `ConstructorInfo` metadata. Other constructor shapes
+still use the surface pipeline until their metadata path preserves the same
+result-shape invariants.
+
+Checked `TypeView` completeness is mention-sensitive and validated at checked
+artifact publication and before backend conversion. Constructor-visible
+rewriting, deferred constructor/case obligations, evidence keys, and type-binder
+substitution retain those identities. The remaining frontend representation
+debt is the string-shaped surface carrier itself; it is fenced by direct binder
+identity transport and identity-indexed global aliases. The focused snapshot is
+`docs/audit/identity-string-reference-audit.md`.
 
 The target does not duplicate every checked module declaration inside every
 term occurrence. `CheckedModule` remains the declaration owner for data,
@@ -245,8 +224,7 @@ the semantic equality key.
 
 - `Expr` (`MLF.Frontend.Syntax`) — surface eMLF terms
 - `XmlfTerm` (`MLF.Types.Elab`) — checked xMLF term representation; executable
-  occurrences and checked lambda/let binders can carry `ResolvedVar`, while
-  legacy producer paths remain string-compatible during migration
+  occurrences and lambda/let binders store `ResolvedVar` directly
 - `Constraint` (`MLF.Constraint.Types.Graph`) — constraint graph plus binding tree
 - `TyNode` — graph nodes (`TyVar`, `TyArrow`, `TyForall`, `TyBase`, `TyCon`, `TyExp`, `TyMu`, `TyBottom`)
 - `InstEdge` — instantiation edges (`<=`)
@@ -368,6 +346,14 @@ abstraction/application, and recursive roll/unroll. The validation-visible
 invariants for those executable shapes live at this boundary so conversion and
 lowering share one executable contract.
 
+Production lowering accepts `ProductionBackendProgram`, constructed only by
+`mkProductionBackendProgram` after identity-complete validation.
+`MLF.Backend.Convert` returns this capability wrapper, and LLVM entrypoints do
+not accept a raw `BackendProgram`. Validation checks references under
+`RequireIdentityReferences`. Backend IR data types still admit name-only or
+optional-identity forms for explicit metadata-light fixtures and adapters; that
+is representation debt, not a production fallback.
+
 That callable contract is explicit. `BackendApp` is the direct first-order
 call node, so local direct aliases that remain first-order stay on this path.
 `BackendClosureCall` is the indirect closure-call node, so closure-valued
@@ -388,17 +374,16 @@ and nullary tag-only representation stay private to LLVM/native lowering.
 Checked-program conversion must not assign runtime tag values, field offsets,
 boxing/storage policy, or layout-only witnesses.
 
-Structural recursive ADT identity and payload-shape matching is also a private
-backend-owned concern, but the current implementation has not yet centralized it.
-Today the matching logic is still split across backend IR validation,
-checked-program conversion, and LLVM lowering, with adapter-local helpers for
-structural `BTMu`/nominal data comparisons. The accepted target is to move that
-logic behind `MLF.Backend.StructuralRecursiveData`, where source-local recovery
-and representation normalization remain conversion concerns and the matcher
-returns derived match/mismatch evidence for the current adapter operation. Until
-that module exists, do not treat it as live architecture; treat the ADR as the
-implementation handoff and keep any cleanup aligned with
-`docs/adr/2026-05-14-backend-structural-recursive-data-matching.md`.
+Structural recursive ADT identity and payload-shape matching is centralized in
+`MLF.Backend.StructuralRecursiveData`. `MLF.Backend.IR`,
+`MLF.Backend.Convert`, and `MLF.Backend.LLVM.Lower` reuse that owner. Its
+mode-aware boundary entrypoints separate identity-only production checks from
+metadata-light checks; lower-level compatibility helpers compare identity when
+present and may use structural names only when identity is absent. Checked
+`TypeView` completeness plus `ProductionBackendProgram` validation makes that
+identityless recovery unreachable for production lowering. Conversion retains a
+narrow, explicitly metadata-light structural recovery adapter for fixtures and
+source-boundary normalization only.
 
 The row-5 primitive/eager contract is explicit as well. The current primitive
 surface is the inventory-owned reserved runtime-binding set in
@@ -454,9 +439,14 @@ A later lower IR may be introduced only when all of the following hold:
 The boundary invariants are:
 
 - every backend expression node carries its result `BackendType`;
-- module-level binding names are runtime names and must be globally unique in a
-  `BackendProgram`;
-- `backendProgramMain` must name one of those bindings;
+- production modules, data declarations, constructors, data parameters,
+  bindings, term references, lexical binders, closure references, patterns, and
+  type references must carry semantic identity;
+- module-level binding names remain runtime names and must be globally unique in
+  a `BackendProgram`;
+- `backendProgramMainIdentity` must designate one of those bindings; the
+  companion `backendProgramMain` string is runtime/diagnostic metadata and is
+  not the production lookup key;
 - binding declarations must match the type carried by their expression body;
 - variable references must resolve either to lexical binders introduced by
   lambda/let/case patterns or to globally unique program bindings, and the
@@ -466,7 +456,8 @@ The boundary invariants are:
   diagnostics;
 - lambda, application, let, type abstraction/application, recursive roll, and
   recursive unroll nodes satisfy local type equalities checked by
-  `validateBackendProgram`;
+  `validateBackendProgramProduction`; the more permissive
+  `validateBackendProgram` is the explicit metadata-light/test validator;
 - ADT construction and case analysis are explicit backend nodes checked against
   program constructor metadata for known constructors, constructor arity,
   constructor-local `forall` bounds, argument/result types, case scrutinee
@@ -482,10 +473,11 @@ The boundary invariants are:
 This module intentionally lives in the private `mlf2-internal` library for now.
 Conversion and lowering modules should depend on this IR rather than reaching
 back into `MLF.Frontend.Program.*` internals for backend decisions.
-`MLF.Backend.LLVM` preserves that boundary by validating the IR before
-lowering, rendering the supported first-order subset plus explicit closure IR,
-and producing explicit unsupported-node diagnostics for backend constructs that
-do not yet have LLVM lowering. The LLVM backend is intentionally repo-local:
+`MLF.Backend.LLVM` preserves that boundary by running production identity
+validation before lowering, rendering the supported first-order subset plus
+explicit closure IR, and producing explicit unsupported-node diagnostics for
+backend constructs that do not yet have LLVM lowering. The LLVM backend is
+intentionally repo-local:
 `Syntax` models the small LLVM surface used by mlf2, `Lower` maps backend IR
 into that AST, and `Ppr` emits opaque-pointer LLVM IR text accepted by LLVM 15+
 tools or LLVM 14-era tools run with `-opaque-pointers`.

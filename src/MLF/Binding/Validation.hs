@@ -381,12 +381,28 @@ checkSchemeClosureUnder canonical c0 = do
                         Just TyVar { tnBound = Just bnd } ->
                             IntSet.member (getNodeId (canonical bnd)) reachable0
                         _ -> False
+                rigidAliasClosesBinder reachable0 binder =
+                    any closesBinder (toListNode nodes)
+                  where
+                    binderC = canonical binder
+                    -- A higher-rank instantiation can expose its quantified
+                    -- binder only as the bound of a reachable rigid coercion
+                    -- alias.  The original rigid edge is the scope witness;
+                    -- the canonical tree may legitimately soften it later.
+                    closesBinder (alias, TyVar { tnBound = Just bnd }) =
+                        canonical bnd == binderC
+                            && IntSet.member (getNodeId (canonical alias)) reachable0
+                            && case IntMap.lookup (nodeRefKey (typeRef alias)) (cBindParents c0) of
+                                Just (_, BindRigid) -> True
+                                _ -> False
+                    closesBinder _ = False
                 freeNodes0 =
                     [ n
                     | n <- namedNodes
                     , IntSet.member (getNodeId (canonical n)) reachable
                     , not (IntSet.member (getNodeId (canonical n)) nestedReachable)
                     , not (boundedAliasClosedByReachability reachable n)
+                    , not (rigidAliasClosesBinder reachable n)
                     , not (boundUnderGen allowedGens' n)
                     ]
             unless (null freeNodes0) $

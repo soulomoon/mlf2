@@ -12,6 +12,7 @@ module MLF.Elab.Run.Pipeline
     preparedExternalTypeCheckEnv,
     extendPreparedExternalBindingTypeIdentities,
     restrictPreparedExternalBindings,
+    restrictPreparedExternalBindingsByKeys,
     unionPreparedExternalBindings,
     runPipelineElabDetailedWithEnv,
     runPipelineElabDetailedWithConfigAndEnv,
@@ -118,6 +119,7 @@ import qualified MLF.Elab.TypeCheck as TypeCheck
 import MLF.Elab.Types
 import MLF.Frontend.ConstraintGen
   ( AnnExpr (..),
+    BindingKey (..),
     ConstraintError (..),
     ConstraintResult (..),
     ExternalBinding (..),
@@ -153,6 +155,7 @@ import MLF.Types.Identity
     freshEnvRef,
     idDetailsAliasNamesWith,
     idDetailsGeneratedIdentities,
+    idDetailsSameIdentity,
     identityGeneratorAfter,
     localRefMatchesNodeId,
     typeBinderIdentityFromStructural,
@@ -323,6 +326,7 @@ validateDirectRecursiveAnnotations = goExpr
         Surface.ELam _ body -> goExpr body
         Surface.EApp fun arg -> goExpr fun >> goExpr arg
         Surface.ELet _ rhs body -> goExpr rhs >> goExpr body
+        Surface.EBinderIdentity _ inner -> goExpr inner
         Surface.ELamAnn _ annTy body -> validateAnn annTy >> goExpr body
         Surface.EAnn inner annTy -> goExpr inner >> validateAnn annTy
         Surface.ECoerceConst _ -> Right ()
@@ -545,6 +549,24 @@ restrictPreparedExternalBindings names prepared =
           pebSourceTypeHeadIdentities = pebSourceTypeHeadIdentities prepared,
           pebSourceTypeBinderIdentities = pebSourceTypeBinderIdentities prepared
         }
+
+-- | Restrict resolved callers by semantic identity while retaining the
+-- explicit name-keyed path used by metadata-light surface syntax.
+restrictPreparedExternalBindingsByKeys :: Set.Set BindingKey -> PreparedExternalBindings -> PreparedExternalBindings
+restrictPreparedExternalBindingsByKeys bindingKeys prepared =
+  restrictPreparedExternalBindings selectedNames prepared
+  where
+    selectedNames =
+      Map.keysSet $
+        Map.filterWithKey bindingSelected (pebBindings prepared)
+
+    bindingSelected name binding =
+      MetadataLightBindingKey name `Set.member` bindingKeys
+        || case externalBindingIdentity binding of
+          Just identity ->
+            ResolvedBindingKey (idDetailsIdentityKey (externalBindingDetails identity))
+              `Set.member` bindingKeys
+          Nothing -> False
 
 unionPreparedExternalBindings :: PreparedExternalBindings -> PreparedExternalBindings -> PreparedExternalBindings
 unionPreparedExternalBindings preferred fallback =
@@ -1478,6 +1500,7 @@ finishPreparedPipelineRootStage timing label finalCheckMode diagnosticsMode trac
             pedRootAnn = authoritativeAnnCanonFinal,
             pedTypeCheckEnv = initialTcEnv
           }
+
   authoritativeResult <-
     case finalCheckMode of
       FinalCheckInPipeline ->
@@ -1835,7 +1858,7 @@ authoritativeRootAnn term annExpr =
     (term0, AUnfold inner _ _)
       | shouldStripAuthoritativeAnn term0 ->
           authoritativeRootAnn term0 inner
-    (ELet resolved _ _ bodyTerm, ALet _ _ schemeRootId _ _ _ bodyAnn _)
+    (ELet resolved _ _ bodyTerm, ALet _ _ _ schemeRootId _ _ _ bodyAnn _)
       | resolvedVarMatchesAnnNode resolved schemeRootId ->
           authoritativeRootAnn bodyTerm bodyAnn
     (EApp (ELam param (EVarNode bodyVar)) argTerm, AApp _ argAnn _ _ _)
@@ -1861,6 +1884,8 @@ annProducesResolvedVar resolved = go
     go annExpr =
       case annExpr of
         AVar _ nodeId -> resolvedVarMatchesAnnNode resolved nodeId
+        AResolvedVar details _ _ ->
+          idDetailsSameIdentity details (resolvedVarDetails resolved)
         AAnn inner _ _ -> go inner
         AUnfold inner _ _ -> go inner
         _ -> False
@@ -1893,12 +1918,21 @@ stripLeadingTyAbs term =
    We keep this local to avoid widening production facades. -}
 
 externalBindingSchemeInfos :: IdentityGenerator -> ExternalBindings -> Either ConstraintError (IdentityGenerator, Map.Map VarName SchemeInfo)
-externalBindingSchemeInfos generator0 extBindings =
-  foldM addBinding (generator0, Map.empty) (Map.toList extBindings)
+externalBindingSchemeInfos generator0 extBindings = do
+  (generator, schemeInfos, _) <- foldM addBinding (generator0, Map.empty, []) (Map.toList extBindings)
+  pure (generator, schemeInfos)
   where
-    addBinding (generator, acc) (name, binding) = do
-      (schemeInfo, generator') <- externalBindingSchemeInfoWithGenerator generator binding
-      pure (generator', Map.insert name schemeInfo acc)
+    addBinding (generator, acc, identitySchemes) (name, binding) =
+      case externalBindingIdentity binding >>= \_ -> lookup binding identitySchemes of
+        Just schemeInfo ->
+          pure (generator, Map.insert name schemeInfo acc, identitySchemes)
+        Nothing -> do
+          (schemeInfo, generator') <- externalBindingSchemeInfoWithGenerator generator binding
+          let identitySchemes' =
+                case externalBindingIdentity binding of
+                  Just {} -> (binding, schemeInfo) : identitySchemes
+                  Nothing -> identitySchemes
+          pure (generator', Map.insert name schemeInfo acc, identitySchemes')
 
 externalBindingSchemeInfoWithGenerator :: IdentityGenerator -> ExternalBinding -> Either ConstraintError (SchemeInfo, IdentityGenerator)
 externalBindingSchemeInfoWithGenerator generator0 ExternalBinding {externalBindingType = srcTy, externalBindingTypeHeadIdentities = headIdentities, externalBindingTypeBinderIdentities = binderIdentities} = do

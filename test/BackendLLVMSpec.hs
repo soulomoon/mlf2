@@ -2,9 +2,10 @@
 
 module BackendLLVMSpec (spec) where
 
+import Control.Applicative ((<|>))
 import Control.Exception (bracket, evaluate)
 import Control.Monad (forM_, replicateM, when)
-import Data.List (isInfixOf)
+import Data.List (isInfixOf, mapAccumL)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -43,12 +44,14 @@ import LLVMToolSupport
     withTempProgram,
   )
 import MLF.Backend.IR
-import MLF.Backend.LLVM
+import MLF.Backend.LLVM hiding (renderBackendProgramLLVM, renderBackendProgramNativeLLVM)
+import qualified MLF.Backend.LLVM as BackendLLVM
 import qualified MLF.Backend.LLVM.Lower as Lower
 import MLF.Backend.LLVM.Lower.Types
   ( BindingInfo (..),
     ClosureCaptureSlot (..),
     ClosureEntry (..),
+    ClosureEntryOrigin (..),
     ConstructorRuntime (..),
     DataRuntime (..),
     ExprEnv (..),
@@ -63,6 +66,8 @@ import MLF.Backend.LLVM.Lower.Types
     WrapperKind (..),
     backendBindingRefFromGenerated,
     backendBindingRefFromIdentity,
+    backendTypeIdentityKey,
+    closureEntryIdentityKey,
     constructedFieldValueKind,
     constructedValueForConstructor,
     constructorValueKeyFromIdentity,
@@ -70,17 +75,21 @@ import MLF.Backend.LLVM.Lower.Types
     lookupProgramConstructorByIdentityExact,
     lookupProgramDataByIdentityExact,
     mergeConstructedValues,
+    specializationIdentityKey,
+    wrapperIdentityKey,
   )
 import MLF.Backend.LLVM.Ppr (renderLLVMModule)
+import MLF.Backend.LLVM.Syntax (LLVMModule)
+import qualified MLF.Backend.StructuralRecursiveData as Structural
 import MLF.Constraint.Types.Graph (BaseTy (..))
 import MLF.API (parseRawProgram, renderProgramParseError)
 import MLF.Frontend.Program.Types (CheckedProgram)
-import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), SymbolOwnerIdentity (..), renameSymbolDefiningName, symbolIdentityFromParts, symbolIdentityStableName)
+import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), SymbolOwnerIdentity (..), renameSymbolDefiningName, symbolIdentityFromParts, symbolIdentityStableName, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit (..))
 import MLF.Pipeline (checkProgram)
 import qualified MLF.Program.CLI as CLI
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
-import MLF.Types.Identity (IdDetails (..), LocalIdentity (..), TypeBinderIdentity, idDetailsStableName, initialIdentityGenerator, localRefFromIdentity, primitiveRefFromSymbol, typeBinderIdentityFromUnique, typeBinderIdentityStableName)
+import MLF.Types.Identity (IdDetails (..), IdentityGenerator, LocalIdentity (..), StructuralTypeBinderRole (..), TypeBinderIdentity, freshIdentity, freshLocalRef, idDetailsStableName, identityGeneratorAfter, initialIdentityGenerator, localRefFromIdentity, primitiveRefFromSymbol, typeBinderIdentityFromStructural, typeBinderIdentityFromUnique, typeBinderIdentityStableName)
 import MLF.Types.Unique (UniqueIdentity (..))
 import Parity.ProgramMatrix
   ( ProgramMatrixCase (..),
@@ -99,6 +108,24 @@ import Parity.ProgramMatrix.NativePolicy
     programLLVMNativeParityPolicies,
     programLLVMNativeParityPolicyDiagnostics,
   )
+
+renderBackendProgramLLVM :: BackendProgram -> Either BackendLLVMError String
+renderBackendProgramLLVM program =
+  case mkProductionBackendProgram program of
+    Left err -> Left (BackendLLVMLoweringFailed (Lower.BackendLLVMValidationFailed err))
+    Right productionProgram -> BackendLLVM.renderBackendProgramLLVM productionProgram
+
+renderBackendProgramNativeLLVM :: BackendProgram -> Either BackendLLVMError String
+renderBackendProgramNativeLLVM program =
+  case mkProductionBackendProgram program of
+    Left err -> Left (BackendLLVMLoweringFailed (Lower.BackendLLVMValidationFailed err))
+    Right productionProgram -> BackendLLVM.renderBackendProgramNativeLLVM productionProgram
+
+lowerTestBackendProgram :: BackendProgram -> Either Lower.BackendLLVMError LLVMModule
+lowerTestBackendProgram program =
+  case mkProductionBackendProgram program of
+    Left err -> Left (Lower.BackendLLVMValidationFailed err)
+    Right productionProgram -> Lower.lowerBackendProgram productionProgram
 
 spec :: Spec
 spec = describe "MLF.Backend.LLVM" $ do
@@ -1460,16 +1487,16 @@ spec = describe "MLF.Backend.LLVM" $ do
           `shouldReturn` NativeRunResult ExitSuccess "'\\955'\n" ""
 
     it "rejects source/native entrypoint symbol collisions" $
-      renderBackendProgramNativeLLVM nativeMainNameCollisionProgram
+      renderMainIdentifiedBackendProgramNativeLLVM nativeMainNameCollisionProgram
         `shouldSatisfyLeft` isInfixOf "reserved native LLVM symbol \"main\""
 
     it "rejects identity-bearing source/native entrypoint symbol collisions" $
       renderBackendProgramNativeLLVM nativeMainIdentityNameCollisionProgram
         `shouldSatisfyLeft` isInfixOf "reserved native LLVM symbol \"main\""
 
-    it "rejects identity-bearing modules before late LLVM identity assignment" $
+    it "rejects identity-incomplete backend bindings before LLVM lowering" $
       renderBackendProgramLLVM identityBearingModuleNameOnlyBindingProgram
-        `shouldSatisfyLeft` isInfixOf "BackendModuleBindingIdentityMissing \"Main\" \"main\""
+        `shouldSatisfyLeft` isInfixOf "BackendBindingIdentityMissing \"main\""
 
   it "runs a linked native executable and captures process output" $ do
     result <- runLLVMNativeExecutable nativeOutputCaptureLLVM
@@ -1508,7 +1535,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "lowers string literals to private LLVM globals" $ do
-    output <- requireRight (renderBackendProgramLLVM stringProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM stringProgram)
 
     goldenText "test/golden/backend-string.ll.golden" output
     validateLLVMAssembly output
@@ -1524,9 +1551,9 @@ spec = describe "MLF.Backend.LLVM" $ do
     renderBackendProgramNativeLLVM staleMainSelfReferenceProgram
       `shouldSatisfyLeft` isInfixOf "opaque main binding `actual-main`"
 
-  it "resolves name-only main self-reference before native main validation" $
+  it "rejects name-only main self-reference before native main validation" $
     renderBackendProgramNativeLLVM staleMainNameOnlySelfReferenceProgram
-      `shouldSatisfyLeft` isInfixOf "opaque main binding `actual-main`"
+      `shouldSatisfyLeft` isInfixOf "BackendVariableIdentityMissing \"actual-main\""
 
   it "keeps identity-referenced helpers reachable when runtime names are stale" $ do
     output <- requireRight (renderBackendProgramLLVM staleMainWithHelperIdentityProgram)
@@ -1537,26 +1564,26 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "uses collision-free names for distinct type specializations" $ do
-    output <- requireRight (renderBackendProgramLLVM specializationNameCollisionProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM specializationNameCollisionProgram)
 
     length (filter (isInfixOf "define private ptr @\"poly$t") (lines output)) `shouldBe` 2
     validateLLVMAssembly output
 
   it "deduplicates type specialization keys by carried type identity" $ do
-    output <- requireRight (renderBackendProgramLLVM staleTypeKeySpecializationProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM staleTypeKeySpecializationProgram)
 
     length (filter (isInfixOf "define private ptr @\"poly$t") (lines output)) `shouldBe` 1
     validateLLVMAssembly output
 
   it "reuses result forall identity when a type abstraction binder name is stale" $ do
-    output <- requireRight (renderBackendProgramLLVM staleTypeAbsResultBinderIdentityProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM staleTypeAbsResultBinderIdentityProgram)
 
     output `shouldSatisfy` isInfixOf "define i64 @\"main\"()"
     output `shouldNotSatisfy` isInfixOf "BackendTypeAbsTypeMismatch"
     validateLLVMAssembly output
 
   it "resolves stable-spelled type vars through binder identity aliases" $ do
-    output <- requireRight (renderBackendProgramLLVM typeBinderStableAliasProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM typeBinderStableAliasProgram)
 
     output `shouldSatisfy` isInfixOf "define i64 @\"main\"()"
     output `shouldSatisfy` isInfixOf "ret i64 42"
@@ -1564,14 +1591,14 @@ spec = describe "MLF.Backend.LLVM" $ do
 
   describe "polymorphism lowerability contract" $ do
     it "supports top-level complete type application through static specialization" $ do
-      output <- requireRight (renderBackendProgramLLVM polymorphicZeroArityProgram)
+      output <- requireRight (renderFixtureBackendProgramLLVM polymorphicZeroArityProgram)
 
       output `shouldSatisfy` isInfixOf "define private ptr @\"none$t"
       output `shouldSatisfy` isInfixOf "call ptr @\"none$t"
       validateLLVMAssembly output
 
     it "supports local closure-sensitive specialization when type applications cross let heads" $ do
-      output <- requireRight (renderBackendProgramLLVM letHeadPolymorphicClosureCallProgram)
+      output <- requireRight (renderFixtureBackendProgramLLVM letHeadPolymorphicClosureCallProgram)
 
       output `shouldSatisfy` isInfixOf "define private i64 @\"polyLocal$"
       output `shouldSatisfy` isInfixOf "store ptr @\"polyLocal$"
@@ -1588,7 +1615,7 @@ spec = describe "MLF.Backend.LLVM" $ do
       validateLLVMAssembly output
 
     it "qualifies closure entries emitted from type specializations" $ do
-      output <- requireRight (renderBackendProgramLLVM polymorphicClosureSpecializationProgram)
+      output <- requireRight (renderFixtureBackendProgramLLVM polymorphicClosureSpecializationProgram)
 
       let closureDefinitions =
             filter
@@ -1608,21 +1635,21 @@ spec = describe "MLF.Backend.LLVM" $ do
           (const False)
 
     it "rejects unspecialized polymorphic bindings that escape specialization" $ do
-      renderBackendProgramLLVM unspecializedPolymorphicBindingProgram
+      renderFixtureBackendProgramLLVM unspecializedPolymorphicBindingProgram
         `shouldSatisfyLeft` isInfixOf "unspecialized polymorphic binding"
 
     it "rejects escaping type abstractions and escaping polymorphic bindings as runtime values" $ do
-      renderBackendProgramLLVM escapingTypeAbstractionProgram
+      renderFixtureBackendProgramLLVM escapingTypeAbstractionProgram
         `shouldSatisfyLeft` isInfixOf "escaping type abstraction"
-      renderBackendProgramLLVM escapingPolymorphicBindingProgram
+      renderFixtureBackendProgramLLVM escapingPolymorphicBindingProgram
         `shouldSatisfyLeft` isInfixOf "escaping polymorphic binding"
 
     it "rejects partial type application instead of inventing runtime polymorphism" $ do
-      renderBackendProgramLLVM partialTypeApplicationProgram
+      renderFixtureBackendProgramLLVM partialTypeApplicationProgram
         `shouldSatisfyLeft` isInfixOf "partial type application"
 
   it "specializes polymorphic zero-arity globals used through type application" $ do
-    output <- requireRight (renderBackendProgramLLVM polymorphicZeroArityProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM polymorphicZeroArityProgram)
 
     output `shouldSatisfy` isInfixOf "define private ptr @\"none$t"
     output `shouldSatisfy` isInfixOf "define ptr @\"main\"()"
@@ -1630,7 +1657,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "instantiates local polymorphic zero-arity values used through type application" $ do
-    output <- requireRight (renderBackendProgramLLVM localPolymorphicZeroArityProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM localPolymorphicZeroArityProgram)
 
     output `shouldSatisfy` isInfixOf "define ptr @\"main\"()"
     output `shouldSatisfy` isInfixOf "call ptr @\"malloc\""
@@ -1638,14 +1665,14 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "collects local polymorphic closure entries after type application" $ do
-    output <- requireRight (renderBackendProgramLLVM localPolymorphicClosureEntryProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM localPolymorphicClosureEntryProgram)
 
     output `shouldSatisfy` isInfixOf "$__mlfp_closure$local_poly"
     output `shouldNotSatisfy` isInfixOf "Unsupported backend LLVM type"
     validateLLVMAssembly output
 
   it "collects local function forms by identity when type-app head names are stale" $ do
-    output <- requireRight (renderBackendProgramLLVM localFunctionFormIdentityTypeAppProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM localFunctionFormIdentityTypeAppProgram)
 
     output `shouldSatisfy` isInfixOf "$__mlfp_closure$local_poly_identity"
     output `shouldNotSatisfy` isInfixOf "$stale_polyLocal"
@@ -1653,7 +1680,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "uses qualified closure entries for directly called type applications" $ do
-    output <- requireRight (renderBackendProgramLLVM directPolymorphicClosureCallProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM directPolymorphicClosureCallProgram)
 
     output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_direct_typeapp$"
     output `shouldSatisfy` isInfixOf "$__mlfp_closure$direct_call_poly\""
@@ -1661,7 +1688,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "collects closure entries when direct type applications cross let heads" $ do
-    output <- requireRight (renderBackendProgramLLVM letHeadPolymorphicClosureCallProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM letHeadPolymorphicClosureCallProgram)
 
     output `shouldSatisfy` isInfixOf "define private i64 @\"polyLocal$"
     output `shouldSatisfy` isInfixOf "store ptr @\"polyLocal$"
@@ -1669,13 +1696,13 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "lowers structurally matched closure call results" $ do
-    output <- requireRight (renderBackendProgramLLVM structuralClosureResultProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM structuralClosureResultProgram)
 
     output `shouldSatisfy` isInfixOf "__mlfp_closure$result_structural"
     validateLLVMAssembly output
 
   it "instantiates direct polymorphic zero-arity expressions used through type application" $ do
-    output <- requireRight (renderBackendProgramLLVM directPolymorphicZeroArityProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM directPolymorphicZeroArityProgram)
 
     output `shouldSatisfy` isInfixOf "define ptr @\"main\"()"
     output `shouldSatisfy` isInfixOf "call ptr @\"malloc\""
@@ -1683,7 +1710,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "instantiates polymorphic zero-arity values when type application crosses let heads" $ do
-    output <- requireRight (renderBackendProgramLLVM letHeadPolymorphicZeroArityProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM letHeadPolymorphicZeroArityProgram)
 
     output `shouldSatisfy` isInfixOf "define ptr @\"main\"()"
     output `shouldSatisfy` isInfixOf "call ptr @\"malloc\""
@@ -1691,7 +1718,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "collects global specializations when type application crosses let heads" $ do
-    output <- requireRight (renderBackendProgramLLVM letHeadGlobalPolymorphicZeroArityProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM letHeadGlobalPolymorphicZeroArityProgram)
 
     output `shouldSatisfy` isInfixOf "define private ptr @\"none$t"
     output `shouldSatisfy` isInfixOf "call ptr @\"none$t"
@@ -1699,7 +1726,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "collects global specializations by resolved identity when type-app head names are stale" $ do
-    output <- requireRight (renderBackendProgramLLVM staleGlobalPolymorphicZeroArityProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM staleGlobalPolymorphicZeroArityProgram)
 
     output `shouldSatisfy` isInfixOf "define private ptr @\"none$t"
     output `shouldNotSatisfy` isInfixOf "$stale_none"
@@ -1707,14 +1734,14 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "collects global specializations by identity through same-named local shadowing" $ do
-    output <- requireRight (renderBackendProgramLLVM shadowedNameGlobalPolymorphicZeroArityProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM shadowedNameGlobalPolymorphicZeroArityProgram)
 
     output `shouldSatisfy` isInfixOf "define private ptr @\"none$t"
     output `shouldNotSatisfy` isInfixOf "missing specialization"
     validateLLVMAssembly output
 
   it "collects global specializations after direct head type instantiation" $ do
-    output <- requireRight (renderBackendProgramLLVM directHeadGlobalPolymorphicZeroArityProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM directHeadGlobalPolymorphicZeroArityProgram)
 
     output `shouldSatisfy` isInfixOf "define private ptr @\"none$t"
     output `shouldSatisfy` isInfixOf "call ptr @\"none$t"
@@ -1722,14 +1749,14 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "treats top-level function parameters as bound during reachability scanning" $ do
-    output <- requireRight (renderBackendProgramLLVM parameterNameShadowsDeadGlobalProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM parameterNameShadowsDeadGlobalProgram)
 
     output `shouldSatisfy` isInfixOf "define i64 @\"main\"(i64 %\"x\")"
     output `shouldNotSatisfy` isInfixOf "define ptr @\"x\""
     validateLLVMAssembly output
 
   it "does not collect global specializations for let-bound shadowing names" $ do
-    output <- requireRight (renderBackendProgramLLVM letShadowedGlobalSpecializationProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM letShadowedGlobalSpecializationProgram)
 
     output `shouldSatisfy` isInfixOf "define ptr @\"main\"()"
     output `shouldSatisfy` isInfixOf "call ptr @\"malloc\""
@@ -1737,7 +1764,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "collects specializations from let-promoted local function aliases" $ do
-    output <- requireRight (renderBackendProgramLLVM letPromotedAliasSpecializationProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM letPromotedAliasSpecializationProgram)
 
     output `shouldSatisfy` isInfixOf "define private i64 @\"poly$t"
     output `shouldSatisfy` isInfixOf "call i64 @\"poly$t"
@@ -1797,6 +1824,72 @@ spec = describe "MLF.Backend.LLVM" $ do
         Right substitution ->
           expectationFailure ("expected stable string head mismatch, got substitution: " ++ show substitution)
 
+  it "does not refine explicit type arguments through same-named distinct identities" $ do
+    let explicitIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991213)
+        residualIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991214)
+        paramIdentity = localIdentity 991215 "x"
+        residualTy = BTVarWithIdentity (Just residualIdentity) "a"
+        explicitBinder =
+          BackendTypeBinderWithIdentity (Just explicitIdentity) "a" Nothing
+        form =
+          FunctionForm
+            { ffTypeBinders = [explicitBinder],
+              ffParams = [("x", residualTy)],
+              ffParamIdentities = [Just paramIdentity],
+              ffEvidenceParams = Set.empty,
+              ffBody = BackendVarWithIdentity residualTy (Just paramIdentity) "x",
+              ffReturnType = residualTy
+            }
+
+    case Lower.refineExplicitTypeArgumentsForTest [explicitBinder] form [intTy] [] of
+      Left err ->
+        expectationFailure ("expected explicit substitution, got error: " ++ Lower.renderBackendLLVMError err)
+      Right substitution -> do
+        Map.lookup (backendTypeSubstitutionKeyFromIdentity explicitIdentity) substitution `shouldBe` Just intTy
+        Map.lookup (backendTypeSubstitutionKeyFromIdentity residualIdentity) substitution `shouldBe` Nothing
+
+  it "applies accumulated residual identity substitutions to later explicit-call arguments" $ do
+    let explicitIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991216)
+        residualIdentity = typeBinderIdentityFromUnique (UniqueIdentity 991217)
+        explicitBinder =
+          BackendTypeBinderWithIdentity (Just explicitIdentity) "f" Nothing
+        explicitVar = BTVarWithIdentity (Just explicitIdentity) "f"
+        residualVar = BTVarWithIdentity (Just residualIdentity) "a"
+        residualOptionIdentity =
+          symbolIdentityFromParts (UniqueIdentity 991220) SymbolType "Main" "Option" Nothing
+        option ty =
+          BTConWithIdentity (Just residualOptionIdentity) (BaseTy "Main.Option") (ty :| [])
+        optionResidual = option residualVar
+        optionInt = option intTy
+        form =
+          FunctionForm
+            { ffTypeBinders = [explicitBinder],
+              ffParams =
+                [ ("evidence", BTArrow explicitVar explicitVar),
+                  ("value", explicitVar)
+                ],
+              ffParamIdentities =
+                [ Just (localIdentity 991218 "evidence"),
+                  Just (localIdentity 991219 "value")
+                ],
+              ffEvidenceParams = Set.empty,
+              ffBody = BackendVar explicitVar "value",
+              ffReturnType = explicitVar
+            }
+        args =
+          [ BackendVar (BTArrow optionInt optionInt) "evidence",
+            BackendVar optionResidual "value"
+          ]
+
+    case Lower.refineExplicitTypeArgumentsForTest [explicitBinder] form [optionResidual] args of
+      Left err ->
+        expectationFailure ("expected accumulated refinement, got error: " ++ Lower.renderBackendLLVMError err)
+      Right substitution -> do
+        Map.lookup (backendTypeSubstitutionKeyFromIdentity explicitIdentity) substitution
+          `shouldBe` Just optionInt
+        Map.lookup (backendTypeSubstitutionKeyFromIdentity residualIdentity) substitution
+          `shouldBe` Just intTy
+
   it "rejects mismatched applied type arguments during type-argument inference" $ do
     case
       Lower.inferTypeArguments
@@ -1846,80 +1939,78 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "statically lowers stale-named top-level function arguments by resolved identity" $ do
-    output <- requireRight (renderBackendProgramLLVM staleStaticFunctionArgumentProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM staleStaticFunctionArgumentProgram)
 
     output `shouldNotSatisfy` isInfixOf "$stale_id"
     validateLLVMAssembly output
 
   it "follows stale-named eta alias targets by resolved identity" $ do
-    output <- requireRight (renderBackendProgramLLVM staleEtaAliasStaticFunctionArgumentProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM staleEtaAliasStaticFunctionArgumentProgram)
 
     output `shouldNotSatisfy` isInfixOf "$stale_id"
     validateLLVMAssembly output
 
   it "follows eta alias arguments by local identity when parameter names are stale" $ do
-    output <- requireRight (renderBackendProgramLLVM staleEtaAliasParamIdentityProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM staleEtaAliasParamIdentityProgram)
 
     output `shouldNotSatisfy` isInfixOf "$stale_id"
     output `shouldNotSatisfy` isInfixOf "$stale_y"
     validateLLVMAssembly output
 
   it "does not lower global binding uses by stale name when identities differ" $ do
-    renderBackendProgramLLVM mismatchedGlobalBindingIdentityProgram
+    renderMainIdentifiedBackendProgramLLVM mismatchedGlobalBindingIdentityProgram
       `shouldSatisfyLeft` isInfixOf "BackendUnknownVariable \"id\""
 
   it "keeps same-named top-level identity references reachable through local shadowing" $ do
-    output <- requireRight (renderBackendProgramLLVM shadowedNameGlobalReachabilityProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM shadowedNameGlobalReachabilityProgram)
 
     output `shouldSatisfy` isInfixOf "define i64 @\"helper\""
     output `shouldSatisfy` isInfixOf "call i64 @\"helper\""
     validateLLVMAssembly output
 
-  it "resolves name-only local references before same-named globals" $ do
-    renderBackendProgramLLVM shadowedNameGlobalNameOnlyReachabilityProgram
-      `shouldSatisfyLeft` isInfixOf "BackendVariableTypeMismatch \"helper\""
+  it "rejects name-only local references before same-named globals" $ do
+    renderMainIdentifiedBackendProgramLLVM shadowedNameGlobalNameOnlyReachabilityProgram
+      `shouldSatisfyLeft` isInfixOf "BackendVariableIdentityMissing \"helper\""
 
   it "does not resolve data type heads named only by encoded data identity" $ do
-    renderBackendProgramLLVM dataIdentityTypeHeadProgram
+    renderMainIdentifiedBackendProgramLLVM dataIdentityTypeHeadProgram
       `shouldSatisfyLeft` isInfixOf "BackendTypeHeadIdentityMissing \"$identity#990004\""
 
-  it "resolves data type heads named only by identity-bearing display name" $ do
-    output <- requireRight (renderBackendProgramLLVM dataIdentityDisplayTypeHeadProgram)
-
-    output `shouldSatisfy` isInfixOf "define ptr @\"main\"(ptr %\"x\")"
-    validateLLVMAssembly output
+  it "rejects data type heads named only by identity-bearing display name" $ do
+    renderMainIdentifiedBackendProgramLLVM dataIdentityDisplayTypeHeadProgram
+      `shouldSatisfyLeft` isInfixOf "BackendTypeHeadIdentityMissing \"IdentityBox\""
 
   it "lowers stale data type heads by carried data identity" $ do
-    output <- requireRight (renderBackendProgramLLVM dataIdentityStaleTypeHeadProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM dataIdentityStaleTypeHeadProgram)
 
     output `shouldSatisfy` isInfixOf "define ptr @\"main\"(ptr %\"x\")"
     output `shouldNotSatisfy` isInfixOf "stale.IdentityBox"
     validateLLVMAssembly output
 
   it "does not lower data type heads by stale name when identities differ" $ do
-    renderBackendProgramLLVM dataIdentityMismatchedTypeHeadProgram
+    renderFixtureBackendProgramLLVM dataIdentityMismatchedTypeHeadProgram
       `shouldSatisfyLeft` isInfixOf "Unsupported backend LLVM type"
 
   it "does not assign arbitrary identities to duplicate name-only data parameters" $
-    renderBackendProgramLLVM ambiguousNameOnlyDataParameterProgram
+    renderMainIdentifiedBackendProgramLLVM ambiguousNameOnlyDataParameterProgram
       `shouldSatisfyLeft` isInfixOf "BackendTypeVariableIdentityMissing \"a\""
 
   it "case-analyzes let-bound native primitive results by checked data identity" $ do
-    output <- requireRight (renderBackendProgramLLVM letBoundNativeOptionCaseProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM letBoundNativeOptionCaseProgram)
 
     output `shouldSatisfy` isInfixOf ("call ptr @\"" ++ PrimitiveInventory.stringCharAtOptionPrimitiveName ++ "\"")
     validateLLVMAssembly output
 
   it "does not lower same-named fake builtin type heads as builtin scalars" $ do
-    renderBackendProgramLLVM fakeBuiltinIntProgram
+    renderFixtureBackendProgramLLVM fakeBuiltinIntProgram
       `shouldSatisfyLeft` isInfixOf "Unsupported backend LLVM type"
 
   it "does not lower name-only builtin type heads as builtin scalars" $ do
-    renderBackendProgramLLVM nameOnlyBuiltinIntProgram
+    renderMainIdentifiedBackendProgramLLVM nameOnlyBuiltinIntProgram
       `shouldSatisfyLeft` isInfixOf "BackendTypeHeadIdentityMissing \"Int\""
 
   it "rejects unsupported static function arguments instead of erasing them" $ do
-    renderBackendProgramLLVM staticPartialApplicationArgumentProgram
+    renderFixtureBackendProgramLLVM staticPartialApplicationArgumentProgram
       `shouldSatisfyLeft` isInfixOf "unsupported static function argument \"f\""
 
   it "collects specializations for type-applied global static aliases" $ do
@@ -1933,11 +2024,11 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "rejects static-argument entrypoints instead of eliding main" $ do
-    renderBackendProgramLLVM staticArgumentMainProgram
+    renderFixtureBackendProgramLLVM staticArgumentMainProgram
       `shouldSatisfyLeft` isInfixOf "parameter \"poly\" of main"
 
   it "rejects recursive static global inlining instead of diverging" $ do
-    renderBackendProgramLLVM recursiveStaticGlobalProgram
+    renderFixtureBackendProgramLLVM recursiveStaticGlobalProgram
       `shouldSatisfyLeft` isInfixOf "recursive static global \"loop\""
 
   it "statically lowers immediate constructor fields carrying forall values" $ do
@@ -1950,7 +2041,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "lowers local function aliases without requiring closure conversion" $ do
-    output <- requireRight (renderBackendProgramLLVM localFunctionAliasProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM localFunctionAliasProgram)
 
     output `shouldSatisfy` isInfixOf "define i64 @\"main\"()"
     output `shouldSatisfy` isInfixOf "ret i64 7"
@@ -1958,19 +2049,23 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "resolves same-named local lets by identity before name fallback" $ do
-    output <- requireRight (renderBackendProgramLLVM localIdentityShadowedLetProgram)
+    output <- requireRight (renderMainIdentifiedBackendProgramLLVM localIdentityShadowedLetProgram)
 
     output `shouldSatisfy` isInfixOf "define i64 @\"main\"()"
     output `shouldSatisfy` isInfixOf "ret i64 41"
     output `shouldNotSatisfy` isInfixOf "ret i64 99"
     validateLLVMAssembly output
 
-  it "resolves stable-spelled local vars through binder identity aliases" $ do
-    output <- requireRight (renderBackendProgramLLVM localIdentityStableAliasProgram)
+  it "preserves stable-spelled local vars when the reference carries binder identity" $ do
+    output <- requireRight (renderMainIdentifiedBackendProgramLLVM localIdentityStableAliasProgram)
 
     output `shouldSatisfy` isInfixOf "define i64 @\"main\"()"
     output `shouldSatisfy` isInfixOf "ret i64 42"
     validateLLVMAssembly output
+
+  it "rejects name-only stable-spelled local vars instead of recovering binder identity by spelling" $
+    renderMainIdentifiedBackendProgramLLVM localIdentityNameOnlyStableAliasProgram
+      `shouldSatisfyLeft` isInfixOf "BackendVariableIdentityMissing \"$identity#2069105\""
 
   it "rejects name-only vars instead of rewriting through stale identity binder aliases" $ do
     let outer = localIdentity 2069137 "x"
@@ -1987,7 +2082,7 @@ spec = describe "MLF.Backend.LLVM" $ do
       `shouldBe` Left (BackendVariableIdentityMissing "x")
 
   it "resolves same-named lambda parameters by identity before name fallback" $ do
-    output <- requireRight (renderBackendProgramLLVM lambdaIdentityShadowedParamProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM lambdaIdentityShadowedParamProgram)
 
     output `shouldSatisfy` isInfixOf "define i64 @\"shadow\"(i64 %\"x\", i64 %\"x1\")"
     output `shouldSatisfy` isInfixOf "ret i64 %\"x\""
@@ -1995,7 +2090,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "resolves same-named top-level values by identity before local fallback" $ do
-    output <- requireRight (renderBackendProgramLLVM shadowedNameGlobalValueIdentityProgram)
+    output <- requireRight (renderMainIdentifiedBackendProgramLLVM shadowedNameGlobalValueIdentityProgram)
 
     output `shouldSatisfy` isInfixOf "define i64 @\"x\"()"
     output `shouldSatisfy` isInfixOf "call i64 @\"x\"()"
@@ -2003,7 +2098,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "resolves stale-named case binders by identity before name fallback" $ do
-    output <- requireRight (renderBackendProgramNativeLLVM casePatternIdentityStaleBinderProgram)
+    output <- requireRight (renderFixtureBackendProgramNativeLLVM casePatternIdentityStaleBinderProgram)
 
     validateLLVMAssembly output
     validateLLVMObjectCode output
@@ -2011,7 +2106,7 @@ spec = describe "MLF.Backend.LLVM" $ do
       `shouldReturn` NativeRunResult ExitSuccess "99\n" ""
 
   it "resolves same-named case binders by identity before name fallback" $ do
-    output <- requireRight (renderBackendProgramNativeLLVM casePatternIdentityDuplicateDisplayProgram)
+    output <- requireRight (renderFixtureBackendProgramNativeLLVM casePatternIdentityDuplicateDisplayProgram)
 
     validateLLVMAssembly output
     validateLLVMObjectCode output
@@ -2019,7 +2114,7 @@ spec = describe "MLF.Backend.LLVM" $ do
       `shouldReturn` NativeRunResult ExitSuccess "99\n" ""
 
   it "does not infer name-only pattern field types from identity-bearing same-named variables" $ do
-    output <- requireRight (renderBackendProgramNativeLLVM casePatternNameOnlyFieldTypeProgram)
+    output <- requireRight (renderMainIdentifiedBackendProgramNativeLLVM casePatternNameOnlyFieldTypeProgram)
 
     validateLLVMAssembly output
     validateLLVMObjectCode output
@@ -2027,7 +2122,7 @@ spec = describe "MLF.Backend.LLVM" $ do
       `shouldReturn` NativeRunResult ExitSuccess "41\n" ""
 
   it "resolves stale-named closure parameters by identity before name fallback" $ do
-    output <- requireRight (renderBackendProgramNativeLLVM closureParamIdentityStaleNameProgram)
+    output <- requireRight (renderMainIdentifiedBackendProgramNativeLLVM closureParamIdentityStaleNameProgram)
 
     validateLLVMAssembly output
     validateLLVMObjectCode output
@@ -2035,7 +2130,15 @@ spec = describe "MLF.Backend.LLVM" $ do
       `shouldReturn` NativeRunResult ExitSuccess "99\n" ""
 
   it "preserves identity-bearing returned-partial closure slots while assigning entry identity" $ do
-    output <- requireRight (renderBackendProgramNativeLLVM returnedPartialClosureSlotIdentityProgram)
+    output <- requireRight (renderMainIdentifiedBackendProgramNativeLLVM returnedPartialClosureSlotIdentityProgram)
+
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    runLLVMNativeExecutable output
+      `shouldReturn` NativeRunResult ExitSuccess "99\n" ""
+
+  it "does not infer returned-partial provenance from a source closure name" $ do
+    output <- requireRight (renderMainIdentifiedBackendProgramNativeLLVM returnedPartialPrefixSourceClosureProgram)
 
     validateLLVMAssembly output
     validateLLVMObjectCode output
@@ -2043,7 +2146,7 @@ spec = describe "MLF.Backend.LLVM" $ do
       `shouldReturn` NativeRunResult ExitSuccess "99\n" ""
 
   it "freshens same-named closure parameters while resolving by identity" $ do
-    output <- requireRight (renderBackendProgramNativeLLVM closureParamIdentityDuplicateDisplayProgram)
+    output <- requireRight (renderMainIdentifiedBackendProgramNativeLLVM closureParamIdentityDuplicateDisplayProgram)
 
     output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$duplicate_param_display\"(ptr %\"__mlfp_env\", i64 %\"x\", i64 %\"x1\")"
     output `shouldSatisfy` isInfixOf "ret i64 %\"x1\""
@@ -2054,14 +2157,14 @@ spec = describe "MLF.Backend.LLVM" $ do
 
   it "does not hide duplicate name-only closure parameters behind generated identities" $
     renderBackendProgramLLVM duplicateNameOnlyClosureParamProgram
-      `shouldSatisfyLeft` isInfixOf "BackendDuplicateClosureParameter \"x\""
+      `shouldSatisfyLeft` isInfixOf "BackendClosureParameterIdentityMissing \"x\""
 
   it "does not resolve name-only closure parameter uses when identity-bearing parameter names collide" $
-    renderBackendProgramLLVM ambiguousIdentityClosureParamUseProgram
+    renderMainIdentifiedBackendProgramLLVM ambiguousIdentityClosureParamUseProgram
       `shouldSatisfyLeft` isInfixOf "BackendVariableIdentityMissing \"x\""
 
   it "classifies stale-named closure captures by identity before name fallback" $ do
-    output <- requireRight (renderBackendProgramLLVM closureCaptureValueKindIdentityProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM closureCaptureValueKindIdentityProgram)
 
     output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.env.field"
     output `shouldNotSatisfy` isInfixOf "closure.code.ptr\" %\"__llvm.closure.env.field"
@@ -2069,7 +2172,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMObjectCode output
 
   it "preserves top-level function aliases as function forms" $ do
-    output <- requireRight (renderBackendProgramLLVM topLevelFunctionAliasProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM topLevelFunctionAliasProgram)
 
     output `shouldSatisfy` isInfixOf "define i64 @\"g\"(i64"
     output `shouldSatisfy` isInfixOf "call i64 @\"id\""
@@ -2077,14 +2180,14 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "freshens shadowed lambda parameters before emitting LLVM" $ do
-    output <- requireRight (renderBackendProgramLLVM shadowedLambdaParamsProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM shadowedLambdaParamsProgram)
 
     output `shouldSatisfy` isInfixOf "define i64 @\"shadow\"(i64 %\"x\", i64 %\"x1\")"
     output `shouldSatisfy` isInfixOf "ret i64 %\"x1\""
     validateLLVMAssembly output
 
   it "lowers let-headed calls before call dispatch" $ do
-    output <- requireRight (renderBackendProgramLLVM letHeadedCallProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM letHeadedCallProgram)
 
     output `shouldSatisfy` isInfixOf "define i64 @\"main\"()"
     output `shouldSatisfy` isInfixOf "ret i64 7"
@@ -2092,7 +2195,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "lowers case-headed calls before call dispatch" $ do
-    output <- requireRight (renderBackendProgramLLVM caseHeadedCallProgram)
+    output <- requireRight (renderMainIdentifiedBackendProgramLLVM caseHeadedCallProgram)
 
     output `shouldSatisfy` isInfixOf "define i64 @\"main\"()"
     output `shouldSatisfy` isInfixOf "call i64 @\"id\""
@@ -2100,7 +2203,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "resolves a global named like the runtime and primitive before intrinsic dispatch" $ do
-    output <- requireRight (renderBackendProgramLLVM userNamedRuntimeAndProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM userNamedRuntimeAndProgram)
 
     output `shouldSatisfy` isInfixOf "define i64 @\"__mlfp_and\"(i64"
     output `shouldSatisfy` isInfixOf "call i64 @\"__mlfp_and\""
@@ -2108,15 +2211,15 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "does not dispatch name-only primitive spelling without primitive identity" $
-    renderBackendProgramLLVM nameOnlyRuntimePrimitiveProgram
+    renderMainIdentifiedBackendProgramLLVM nameOnlyRuntimePrimitiveProgram
       `shouldSatisfyLeft` isInfixOf "BackendVariableIdentityMissing \"__mlfp_and\""
 
   it "does not dispatch primitive calls through stale identity payloads" $
-    renderBackendProgramLLVM staleNamedRuntimePrimitiveProgram
+    renderMainIdentifiedBackendProgramLLVM staleNamedRuntimePrimitiveProgram
       `shouldSatisfyLeft` isInfixOf "BackendUnknownVariable \"$stale_and\""
 
   it "suppresses the runtime malloc declaration when a global owns that name" $ do
-    output <- requireRight (renderBackendProgramLLVM userNamedMallocProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM userNamedMallocProgram)
 
     output `shouldSatisfy` isInfixOf "define i64 @\"malloc\"(i64"
     output `shouldSatisfy` isInfixOf "call i64 @\"malloc\""
@@ -2124,7 +2227,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "suppresses the runtime malloc declaration when an identity-bearing global owns that name" $ do
-    output <- requireRight (renderBackendProgramLLVM userNamedMallocIdentityProgram)
+    output <- requireRight (renderMainIdentifiedBackendProgramLLVM userNamedMallocIdentityProgram)
 
     output `shouldSatisfy` isInfixOf "define i64 @\"malloc\"(i64"
     output `shouldSatisfy` isInfixOf "call i64 @\"malloc\""
@@ -2132,11 +2235,11 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "rejects constructor allocation when a global owns the runtime malloc name" $ do
-    renderBackendProgramLLVM mallocCollisionConstructorProgram
+    renderMainIdentifiedBackendProgramLLVM mallocCollisionConstructorProgram
       `shouldSatisfyLeft` isInfixOf "reserved runtime binding \"malloc\""
 
   it "rejects constructor allocation when an identity-bearing global owns the runtime malloc name" $ do
-    renderBackendProgramLLVM mallocIdentityCollisionConstructorProgram
+    renderMainIdentifiedBackendProgramLLVM mallocIdentityCollisionConstructorProgram
       `shouldSatisfyLeft` isInfixOf "reserved runtime binding \"malloc\""
 
   it "lowers Nat construction and case analysis to heap tags and switch" $ do
@@ -2173,8 +2276,8 @@ spec = describe "MLF.Backend.LLVM" $ do
       withTempProgram sourceTopLevelRecursiveHigherOrderProgram $ \path ->
         requireRight =<< emitBackendFile path
 
-    output `shouldSatisfy` isInfixOf "define i64 @\"Main__loop\"(ptr %\"f\""
-    output `shouldSatisfy` isInfixOf "ptr %\"n\""
+    output `shouldSatisfy` isInfixOf "define i64 @\"Main__loop\"(ptr %\"$f#"
+    output `shouldSatisfy` isInfixOf "ptr %\"$n#"
     output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
     validateLLVMAssembly output
     validateLLVMObjectCode output
@@ -2208,7 +2311,7 @@ spec = describe "MLF.Backend.LLVM" $ do
       ]
 
   it "loads only constructor fields used by a case branch" $ do
-    output <- requireRight (renderBackendProgramLLVM unusedPolymorphicPatternFieldProgram)
+    output <- requireRight (renderMainIdentifiedBackendProgramLLVM unusedPolymorphicPatternFieldProgram)
 
     output `shouldSatisfy` isInfixOf "define i64 @\"main\"(ptr %\"box\")"
     output `shouldSatisfy` isInfixOf "getelementptr i8, ptr %\"box\", i64 0"
@@ -2219,46 +2322,46 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "evaluates unused immediate constructor fields before static erasure" $ do
-    renderBackendProgramLLVM strictImmediateConstructFieldProgram
+    renderMainIdentifiedBackendProgramLLVM strictImmediateConstructFieldProgram
       `shouldSatisfyLeft` isInfixOf "representation-changing roll"
 
   it "evaluates immediate constructor fields before default alternatives" $ do
-    renderBackendProgramLLVM strictImmediateDefaultProgram
+    renderMainIdentifiedBackendProgramLLVM strictImmediateDefaultProgram
       `shouldSatisfyLeft` isInfixOf "representation-changing roll"
 
   it "lowers unmatched immediate constructor cases to unreachable" $ do
-    output <- requireRight (renderBackendProgramLLVM unmatchedImmediateConstructorProgram)
+    output <- requireRight (renderMainIdentifiedBackendProgramLLVM unmatchedImmediateConstructorProgram)
 
     output `shouldSatisfy` isInfixOf "unreachable"
     output `shouldNotSatisfy` isInfixOf "no matching immediate constructor alternative"
     validateLLVMAssembly output
 
   it "does not match immediate constructor alternatives by stale name when identities differ" $ do
-    renderBackendProgramLLVM mismatchedImmediateConstructorIdentityCaseProgram
+    renderMainIdentifiedBackendProgramLLVM mismatchedImmediateConstructorIdentityCaseProgram
       `shouldSatisfyLeft` isInfixOf "BackendUnknownConstructor \"WithStatic\""
 
   it "does not lower constructor uses by stale name when identities differ" $ do
-    renderBackendProgramLLVM mismatchedConstructorUseIdentityProgram
+    renderMainIdentifiedBackendProgramLLVM mismatchedConstructorUseIdentityProgram
       `shouldSatisfyLeft` isInfixOf "BackendUnknownConstructor \"WithStatic\""
 
   it "resolves name-only constructor uses before field lowerability checks" $ do
-    renderBackendProgramLLVM nameOnlyConstructorUseIdentityProgram
+    renderMainIdentifiedBackendProgramLLVM nameOnlyConstructorUseIdentityProgram
       `shouldSatisfyLeft` isInfixOf "escaping type abstraction"
 
   it "resolves constructor display aliases before field lowerability checks" $ do
-    renderBackendProgramLLVM displayAliasConstructorUseIdentityProgram
+    renderMainIdentifiedBackendProgramLLVM displayAliasConstructorUseIdentityProgram
       `shouldSatisfyLeft` isInfixOf "escaping type abstraction"
 
   it "evaluates immediate constructor fields before unmatched alternatives" $ do
-    renderBackendProgramLLVM strictImmediateUnmatchedProgram
+    renderMainIdentifiedBackendProgramLLVM strictImmediateUnmatchedProgram
       `shouldSatisfyLeft` isInfixOf "representation-changing roll"
 
   it "rejects duplicate constructor case alternatives before emitting switch" $ do
-    renderBackendProgramLLVM duplicateConstructorCaseProgram
+    renderMainIdentifiedBackendProgramLLVM duplicateConstructorCaseProgram
       `shouldSatisfyLeft` isInfixOf "duplicate constructor case tag"
 
   it "rejects duplicate immediate constructor alternatives by identity" $ do
-    renderBackendProgramLLVM duplicateImmediateConstructorIdentityCaseProgram
+    renderMainIdentifiedBackendProgramLLVM duplicateImmediateConstructorIdentityCaseProgram
       `shouldSatisfyLeft` isInfixOf "duplicate constructor case alternative"
 
   it "keys constructed field value kinds by constructor identity" $ do
@@ -2342,14 +2445,56 @@ spec = describe "MLF.Backend.LLVM" $ do
     stableSpec `shouldBe` staleSpec
     stableSpec `shouldNotBe` nameOnlySpec
 
+  it "keys LLVM semantic caches by carried identities instead of display strings" $ do
+    let stringIdentity = PrimitiveInventory.builtinTypeIdentity "String"
+        conflictingIdentity = renameSymbolDefiningName "$conflicting_String" stringIdentity
+        stableTy = BTBaseWithIdentity (Just stringIdentity) (BaseTy "String")
+        staleTy = BTBaseWithIdentity (Just stringIdentity) (BaseTy "$stale_String")
+        conflictingTy = BTBaseWithIdentity (Just conflictingIdentity) (BaseTy "String")
+        bindingRef = backendBindingRefFromIdentity helperIdentity
+        stableRequest = SpecRequest bindingRef "poly" [stableTy]
+        staleRequest = SpecRequest bindingRef "$stale_poly" [staleTy]
+        conflictingRequest = SpecRequest bindingRef "poly" [conflictingTy]
+        stableExpr = BackendLit stableTy (LString "value")
+        staleExpr = BackendLit staleTy (LString "value")
+        conflictingExpr = BackendLit conflictingTy (LString "value")
+        calleeTy ty = BTArrow ty (BTArrow ty ty)
+        resultTy ty = BTArrow ty ty
+        returnedPartialEntry name ty =
+          ClosureEntry
+            { ceOrigin = GeneratedReturnedPartialOrigin,
+              ceFunctionType = resultTy ty,
+              ceEntryIdentity = Nothing,
+              ceEntryName = name,
+              ceCaptures =
+                [ ClosureCaptureSlot Nothing "callee" (calleeTy ty) LowerFunctionPointer,
+                  ClosureCaptureSlot Nothing "supplied" ty LowerRuntimeValue
+                ],
+              ceParams = [("remaining", ty)],
+              ceParamIdentities = [Nothing],
+              ceEvidenceParams = Set.empty,
+              ceBody = BackendLit ty (LString "unused")
+            }
+        stableEntry = returnedPartialEntry "__mlfp_returned_partial$stable" stableTy
+        staleEntry = returnedPartialEntry "__mlfp_returned_partial$stale" staleTy
+        conflictingEntry = returnedPartialEntry "__mlfp_returned_partial$stable" conflictingTy
+    backendTypeIdentityKey stableTy `shouldBe` backendTypeIdentityKey staleTy
+    backendTypeIdentityKey stableTy `shouldNotBe` backendTypeIdentityKey conflictingTy
+    specializationIdentityKey stableRequest `shouldBe` specializationIdentityKey staleRequest
+    specializationIdentityKey stableRequest `shouldNotBe` specializationIdentityKey conflictingRequest
+    wrapperIdentityKey stableTy stableExpr `shouldBe` wrapperIdentityKey staleTy staleExpr
+    wrapperIdentityKey stableTy stableExpr `shouldNotBe` wrapperIdentityKey conflictingTy conflictingExpr
+    closureEntryIdentityKey stableEntry `shouldBe` closureEntryIdentityKey staleEntry
+    closureEntryIdentityKey stableEntry `shouldNotBe` closureEntryIdentityKey conflictingEntry
+
   it "compares specializations by request and identity-bearing form when generated names are stale" $ do
     let paramIdentity = Just (LocalId (localRefFromIdentity (GeneratedLocalId (UniqueIdentity 991713)) "x"))
         stableBody = BackendVarWithIdentity intTy paramIdentity "x"
         staleBody = BackendVarWithIdentity intTy paramIdentity "$stale_x"
         stableForm = FunctionForm [] [("x", intTy)] [paramIdentity] Set.empty stableBody intTy
         staleForm = FunctionForm [] [("$stale_x", intTy)] [paramIdentity] Set.empty staleBody intTy
-        request = SpecRequest (Just helperIdentity) "poly" [intTy]
-        staleRequest = SpecRequest (Just helperIdentity) "$stale_poly" [intTy]
+        request = SpecRequest (backendBindingRefFromIdentity helperIdentity) "poly" [intTy]
+        staleRequest = SpecRequest (backendBindingRefFromIdentity helperIdentity) "$stale_poly" [intTy]
         stableSpec =
           Specialization
             request
@@ -2364,7 +2509,7 @@ spec = describe "MLF.Backend.LLVM" $ do
             staleForm
         otherSpec =
           Specialization
-            (SpecRequest Nothing "other" [intTy])
+            (SpecRequest (backendBindingRefFromGenerated (UniqueIdentity 991716) "other") "other" [intTy])
             (backendBindingRefFromGenerated (UniqueIdentity 991716) "__mlfp_specialization$stable")
             "__mlfp_specialization$stable"
             stableForm
@@ -2401,7 +2546,6 @@ spec = describe "MLF.Backend.LLVM" $ do
           Wrapper
             { wrapperKind = FunctionWrapperKind,
               wrapperBindingRef = backendBindingRefFromGenerated (UniqueIdentity 991713) "__mlfp_function_wrapper$stable",
-              wrapperKey = "stable-key",
               wrapperFunctionName = "__mlfp_function_wrapper$stable",
               wrapperExpectedType = wrapperTy,
               wrapperExpr = BackendVarWithIdentity wrapperTy paramIdentity "x",
@@ -2409,8 +2553,7 @@ spec = describe "MLF.Backend.LLVM" $ do
             }
         staleWrapper =
           stableWrapper
-            { wrapperKey = "$stale-key",
-              wrapperBindingRef = backendBindingRefFromGenerated (UniqueIdentity 991713) "__mlfp_function_wrapper$stale",
+            { wrapperBindingRef = backendBindingRefFromGenerated (UniqueIdentity 991713) "__mlfp_function_wrapper$stale",
               wrapperFunctionName = "__mlfp_function_wrapper$stale",
               wrapperExpr = BackendVarWithIdentity wrapperTy paramIdentity "$stale_x"
             }
@@ -2428,7 +2571,8 @@ spec = describe "MLF.Backend.LLVM" $ do
         staleBody = BackendVarWithIdentity intTy paramIdentity "$stale_x"
         stableEntry =
           ClosureEntry
-            { ceFunctionType = BTArrow intTy intTy,
+            { ceOrigin = BackendClosureOrigin,
+              ceFunctionType = BTArrow intTy intTy,
               ceEntryIdentity = Nothing,
               ceEntryName = "__mlfp_closure$stable",
               ceCaptures = [],
@@ -2467,7 +2611,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     stableEntry `shouldNotBe` nameOnlyEntry
 
   it "rejects non-tail default case alternatives before emitting switch" $ do
-    renderBackendProgramLLVM nonTailDefaultCaseProgram
+    renderMainIdentifiedBackendProgramLLVM nonTailDefaultCaseProgram
       `shouldSatisfyLeft` isInfixOf "default case alternative must be last"
 
   it "lowers nullary and recursive-list constructors through case" $ do
@@ -2524,41 +2668,41 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMObjectCode output
 
   it "emits inline-only callees passed through opaque evidence pointers" $ do
-    output <- requireRight (renderBackendProgramLLVM inlineOnlyEvidenceCalleeProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM inlineOnlyEvidenceCalleeProgram)
 
     output `shouldSatisfy` isInfixOf "define i64 @\"callee\"(ptr %\"f\")"
     output `shouldSatisfy` isInfixOf "ptr @\"callee\""
     validateLLVMAssembly output
 
   it "emits referenced callees that call opaque evidence parameters inline-only" $ do
-    output <- requireRight (renderBackendProgramLLVM inlineOnlyEvidenceParameterCallCalleeProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM inlineOnlyEvidenceParameterCallCalleeProgram)
 
     output `shouldSatisfy` isInfixOf "define i64 @\"calleeWithEvidenceCall\"(ptr %\"$evidence_apply\")"
     output `shouldSatisfy` isInfixOf "ptr @\"calleeWithEvidenceCall\""
     validateLLVMAssembly output
 
   it "emits referenced inline-only callees passed through local aliases" $ do
-    output <- requireRight (renderBackendProgramLLVM aliasedInlineOnlyEvidenceCalleeProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM aliasedInlineOnlyEvidenceCalleeProgram)
 
     output `shouldSatisfy` isInfixOf "define i64 @\"calleeWithEvidenceCall\"(ptr %\"$evidence_apply\")"
     output `shouldSatisfy` isInfixOf "ptr @\"calleeWithEvidenceCall\""
     validateLLVMAssembly output
 
   it "does not collect shadowed local aliases as referenced callees" $ do
-    output <- requireRight (renderBackendProgramLLVM shadowedLocalAliasReferenceCollectorProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM shadowedLocalAliasReferenceCollectorProgram)
 
     output `shouldNotSatisfy` isInfixOf "define i64 @\"shadowedCalleeWithEvidenceCall\""
     validateLLVMAssembly output
 
   it "collects referenced callees by identity through same-named local shadowing" $ do
-    output <- requireRight (renderBackendProgramLLVM shadowedNameReferencedCalleeIdentityProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM shadowedNameReferencedCalleeIdentityProgram)
 
     output `shouldSatisfy` isInfixOf "define i64 @\"calleeWithEvidenceCall\"(ptr %\"$evidence_apply\")"
     output `shouldSatisfy` isInfixOf "ptr @\"calleeWithEvidenceCall\""
     validateLLVMAssembly output
 
   it "lowers nested evidence wrapper parameters as pointers" $ do
-    output <- requireRight (renderBackendProgramLLVM nestedEvidenceWrapperParameterProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM nestedEvidenceWrapperParameterProgram)
 
     output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_evidence_wrapper$"
     output `shouldSatisfy` isInfixOf "ptr %\"__mlfp_evidence_arg0\""
@@ -2597,57 +2741,57 @@ spec = describe "MLF.Backend.LLVM" $ do
       `shouldBe` True
 
   it "emits self-recursive higher-order calls instead of expanding them inline" $ do
-    output <- requireRight (renderBackendProgramLLVM selfRecursiveHigherOrderProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM selfRecursiveHigherOrderProgram)
 
     output `shouldSatisfy` isInfixOf "define i64 @\"loop\"(ptr %\"f\", i64 %\"x\")"
     output `shouldSatisfy` isInfixOf "call i64 @\"loop\"(ptr %\"f\", i64 %\"x\")"
     validateLLVMAssembly output
 
   it "resolves inlined local function calls before captured values" $ do
-    output <- requireRight (renderBackendProgramLLVM localFunctionCallShadowsValueProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM localFunctionCallShadowsValueProgram)
 
     output `shouldSatisfy` isInfixOf "define i64 @\"main\"()"
     output `shouldNotSatisfy` isInfixOf "unexpected type arguments"
     validateLLVMAssembly output
 
   it "resolves local function references before captured values for indirect arguments" $ do
-    output <- requireRight (renderBackendProgramLLVM localFunctionReferenceShadowsValueProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM localFunctionReferenceShadowsValueProgram)
 
     output `shouldSatisfy` isInfixOf "define i64 @\"main\"()"
     output `shouldNotSatisfy` isInfixOf "evidence function type mismatch"
     validateLLVMAssembly output
 
   it "preserves inline function argument shadowing beside closure-valued fields" $ do
-    output <- requireRight (renderBackendProgramLLVM inlineFunctionArgumentShadowsValueProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM inlineFunctionArgumentShadowsValueProgram)
 
     output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_closure$field_shadow\""
     output `shouldNotSatisfy` isInfixOf "escaping function \"f\""
     validateLLVMAssembly output
 
   it "rejects evidence wrappers that capture local term bindings" $ do
-    renderBackendProgramLLVM capturingEvidenceWrapperProgram
+    renderFixtureBackendProgramLLVM capturingEvidenceWrapperProgram
       `shouldSatisfyLeft` isInfixOf "unsupported evidence function argument"
 
   it "rejects evidence wrappers that capture stale-named locals by identity" $ do
-    renderBackendProgramLLVM staleLocalIdentityEvidenceWrapperProgram
+    renderFixtureBackendProgramLLVM staleLocalIdentityEvidenceWrapperProgram
       `shouldSatisfyLeft` isInfixOf "unsupported evidence function argument"
 
   it "allows evidence wrappers that reference same-named globals by identity" $ do
-    output <- requireRight (renderBackendProgramLLVM globalIdentityEvidenceWrapperProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM globalIdentityEvidenceWrapperProgram)
 
     output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_evidence_wrapper$"
     output `shouldNotSatisfy` isInfixOf "unsupported evidence function argument"
     validateLLVMAssembly output
 
   it "collects evidence wrappers only after polymorphic forms are specialized" $ do
-    output <- requireRight (renderBackendProgramLLVM polymorphicEvidenceWrapperProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM polymorphicEvidenceWrapperProgram)
 
     output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_evidence_wrapper$"
     output `shouldNotSatisfy` isInfixOf "Unsupported backend LLVM type"
     validateLLVMAssembly output
 
   it "collects local polymorphic evidence wrappers after type application" $ do
-    output <- requireRight (renderBackendProgramLLVM localPolymorphicEvidenceWrapperProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM localPolymorphicEvidenceWrapperProgram)
 
     output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_evidence_wrapper$"
     output `shouldNotSatisfy` isInfixOf "unsupported evidence function argument"
@@ -2667,7 +2811,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     mapM_ runLLVMParityPolicy programLLVMNativeParityPolicies
 
   it "lowers packaged partial applications through the explicit closure ABI" $ do
-    output <- requireRight (renderBackendProgramLLVM partialApplicationProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM partialApplicationProgram)
 
     output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$addOne\""
     output `shouldSatisfy` isInfixOf "store i64 1"
@@ -2676,7 +2820,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMObjectCode output
 
   it "rejects raw escaping lambdas until closure construction is explicit in backend IR" $ do
-    renderBackendProgramLLVM escapingLambdaProgram
+    renderFixtureBackendProgramLLVM escapingLambdaProgram
       `shouldSatisfyLeft` isInfixOf "escaping function"
 
   it "packages source-level top-level partial applications as closure values" $ do
@@ -3060,7 +3204,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMObjectCode output
 
   it "lowers zero-capture closures through the explicit closure ABI" $ do
-    output <- requireRight (renderBackendProgramLLVM zeroCaptureClosureProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM zeroCaptureClosureProgram)
 
     output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$identity\"(ptr %\"__mlfp_env\", i64 %\"x\")"
     output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_closure$identity\""
@@ -3069,7 +3213,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "lowers captured local values through closure environments" $ do
-    output <- requireRight (renderBackendProgramLLVM capturedClosureProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM capturedClosureProgram)
 
     output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$constCaptured\"(ptr %\"__mlfp_env\", i64 %\"x\")"
     output `shouldSatisfy` isInfixOf "store i64 41"
@@ -3078,7 +3222,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "lowers case-selected closure callees through the explicit closure ABI" $ do
-    output <- requireRight (renderBackendProgramLLVM caseSelectedClosureCalleeProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM caseSelectedClosureCalleeProgram)
 
     output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$case_some\"(ptr %\"__mlfp_env\", i64 %\"x\")"
     output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$case_none\"(ptr %\"__mlfp_env\", i64 %\"x\")"
@@ -3087,7 +3231,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "lowers let-selected closure callees through the explicit closure ABI" $ do
-    output <- requireRight (renderBackendProgramLLVM letSelectedClosureCalleeProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM letSelectedClosureCalleeProgram)
 
     output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$let_callee\"(ptr %\"__mlfp_env\", i64 %\"x\")"
     output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_closure$let_callee\""
@@ -3095,7 +3239,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "qualifies closure entry names emitted from type specializations" $ do
-    output <- requireRight (renderBackendProgramLLVM polymorphicClosureSpecializationProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM polymorphicClosureSpecializationProgram)
 
     let closureDefinitions =
           filter
@@ -3107,14 +3251,14 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "keeps closure-valued constructor fields on the closure ABI across specializations" $ do
-    output <- requireRight (renderBackendProgramLLVM polymorphicClosureFunctionWrapperProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM polymorphicClosureFunctionWrapperProgram)
 
     output `shouldSatisfy` isInfixOf "$__mlfp_closure$wrapper_key"
     output `shouldNotSatisfy` isInfixOf "__mlfp_function_wrapper$"
     validateLLVMAssembly output
 
   it "qualifies closure entries in inlined polymorphic global calls" $ do
-    output <- requireRight (renderBackendProgramLLVM inlinePolymorphicClosureProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM inlinePolymorphicClosureProgram)
 
     let qualifiedStores =
           filter
@@ -3125,14 +3269,14 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "does not reserve retired stored-function wrapper names without generated wrappers" $ do
-    output <- requireRight (renderBackendProgramLLVM closureEntryFunctionWrapperCollisionProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM closureEntryFunctionWrapperCollisionProgram)
 
     output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_function_wrapper$0\""
     output `shouldNotSatisfy` isInfixOf "Duplicate backend LLVM symbol"
     validateLLVMAssembly output
 
   it "deduplicates evidence wrapper keys by carried term identity" $ do
-    output <- requireRight (renderBackendProgramLLVM staleEvidenceWrapperKeyProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM staleEvidenceWrapperKeyProgram)
 
     let wrapperDefinitions =
           filter (isInfixOf "define private i64 @\"__mlfp_evidence_wrapper$") (lines output)
@@ -3140,11 +3284,11 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "rejects closure entry names that collide with runtime declarations" $
-    renderBackendProgramLLVM closureEntryRuntimeDeclarationCollisionProgram
+    renderFixtureBackendProgramLLVM closureEntryRuntimeDeclarationCollisionProgram
       `shouldSatisfyLeft` isInfixOf "Duplicate backend LLVM symbol: \"malloc\""
 
   it "lowers stored explicit closure constructor fields" $ do
-    output <- requireRight (renderBackendProgramLLVM functionFieldProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM functionFieldProgram)
 
     output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$field_top\""
     output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_closure$field_top\""
@@ -3152,7 +3296,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "lowers stored direct closure constructor fields through closure records" $ do
-    output <- requireRight (renderBackendProgramLLVM directFunctionFieldProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM directFunctionFieldProgram)
 
     output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$field_direct\""
     output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_closure$field_direct\""
@@ -3160,7 +3304,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "lowers stored local closure constructor fields through pointer aliases" $ do
-    output <- requireRight (renderBackendProgramLLVM localFunctionFieldProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM localFunctionFieldProgram)
 
     output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$field_local\""
     output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_closure$field_local\""
@@ -3168,7 +3312,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "lowers stored transitive local closure aliases through pointer aliases" $ do
-    output <- requireRight (renderBackendProgramLLVM transitiveLocalFunctionFieldProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM transitiveLocalFunctionFieldProgram)
 
     output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$field_transitive\""
     output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_closure$field_transitive\""
@@ -3176,7 +3320,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "re-stores case-projected constructor fields carrying closures" $ do
-    output <- requireRight (renderBackendProgramLLVM immediateRestoredFunctionFieldProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM immediateRestoredFunctionFieldProgram)
 
     output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$field_restored\""
     output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_closure$field_restored\""
@@ -3185,7 +3329,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "lowers captured function constructor fields through closure environments" $ do
-    output <- requireRight (renderBackendProgramLLVM capturedFunctionFieldProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM capturedFunctionFieldProgram)
 
     output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$field_captured\""
     output `shouldSatisfy` isInfixOf "store i64 1"
@@ -3194,7 +3338,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "preserves stored function-pointer captures on the indirect call path" $ do
-    output <- requireRight (renderBackendProgramLLVM capturedFunctionPointerCallProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM capturedFunctionPointerCallProgram)
 
     output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.env.field"
     output `shouldNotSatisfy` isInfixOf "closure.code.ptr\" %\"__llvm.closure.env.field"
@@ -3202,7 +3346,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMObjectCode output
 
   it "infers captured nullary global callable aliases from their bodies" $ do
-    output <- requireRight (renderBackendProgramLLVM capturedNullaryGlobalFunctionAliasProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM capturedNullaryGlobalFunctionAliasProgram)
 
     output `shouldSatisfy` isInfixOf "call ptr @\"get\"()"
     output `shouldNotSatisfy` isInfixOf "$stale_get"
@@ -3211,24 +3355,24 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
     validateLLVMObjectCode output
 
-    nativeOutput <- requireRight (renderBackendProgramNativeLLVM capturedNullaryGlobalFunctionAliasProgram)
+    nativeOutput <- requireRight (renderFixtureBackendProgramNativeLLVM capturedNullaryGlobalFunctionAliasProgram)
     runLLVMNativeExecutable nativeOutput
       `shouldReturn` NativeRunResult ExitSuccess "41\n" ""
 
   it "infers captured nullary global case closures from their bodies" $ do
-    output <- requireRight (renderBackendProgramLLVM capturedNullaryGlobalCaseClosureProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM capturedNullaryGlobalCaseClosureProgram)
 
     output `shouldSatisfy` isInfixOf "call ptr @\"getCaseClosure\"()"
     output `shouldSatisfy` isInfixOf "getelementptr i8, ptr %\"__llvm.closure.env.field"
     validateLLVMAssembly output
     validateLLVMObjectCode output
 
-    nativeOutput <- requireRight (renderBackendProgramNativeLLVM capturedNullaryGlobalCaseClosureProgram)
+    nativeOutput <- requireRight (renderFixtureBackendProgramNativeLLVM capturedNullaryGlobalCaseClosureProgram)
     runLLVMNativeExecutable nativeOutput
       `shouldReturn` NativeRunResult ExitSuccess "41\n" ""
 
   it "routes over-applied raw function-pointer results through indirect calls" $ do
-    output <- requireRight (renderBackendProgramLLVM rawReturnedFunctionPointerCallProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM rawReturnedFunctionPointerCallProgram)
 
     output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.call."
     output `shouldNotSatisfy` isInfixOf "closure.code.ptr\" %\"__llvm.call."
@@ -3236,7 +3380,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMObjectCode output
 
   it "preserves let-bound raw function-pointer aliases as values" $ do
-    output <- requireRight (renderBackendProgramLLVM rawFunctionPointerAliasReturnProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM rawFunctionPointerAliasReturnProgram)
 
     output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.call."
     output `shouldNotSatisfy` isInfixOf "escaping function"
@@ -3245,7 +3389,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMObjectCode output
 
   it "classifies first-order function parameters as raw function pointers" $ do
-    output <- requireRight (renderBackendProgramLLVM firstOrderFunctionParameterCallProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM firstOrderFunctionParameterCallProgram)
 
     output `shouldSatisfy` isInfixOf "define i64 @\"applyFirst\"(ptr %\"f\", i64 %\"x\")"
     output `shouldSatisfy` isInfixOf "call i64 %\"f\"(i64 %\"x\")"
@@ -3254,7 +3398,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMObjectCode output
 
   it "classifies first-order closure parameters as raw function pointers" $ do
-    output <- requireRight (renderBackendProgramLLVM closureFirstOrderFunctionParameterCallProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM closureFirstOrderFunctionParameterCallProgram)
 
     output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$call_first_order_param\""
     output `shouldSatisfy` isInfixOf "call i64 %\"f\"(i64 %\"x\")"
@@ -3263,7 +3407,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMObjectCode output
 
   it "normalizes first-order function fields through closure records" $ do
-    output <- requireRight (renderBackendProgramLLVM rawFunctionPointerFieldCallProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM rawFunctionPointerFieldCallProgram)
 
     output `shouldSatisfy` isInfixOf "__mlfp_returned_partial$function$0"
     output `shouldSatisfy` isInfixOf "getelementptr i8, ptr %\"__llvm.case.field"
@@ -3272,19 +3416,19 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMObjectCode output
 
   it "preserves closure-valued first-order function fields through case binders" $ do
-    output <- requireRight (renderBackendProgramLLVM closureFunctionFieldCallProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM closureFunctionFieldCallProgram)
 
     output `shouldSatisfy` isInfixOf "getelementptr i8, ptr %\"__llvm.case.field"
     output `shouldNotSatisfy` isInfixOf "call i64 %\"__llvm.case.field"
     validateLLVMAssembly output
     validateLLVMObjectCode output
 
-    nativeOutput <- requireRight (renderBackendProgramNativeLLVM closureFunctionFieldCallProgram)
+    nativeOutput <- requireRight (renderFixtureBackendProgramNativeLLVM closureFunctionFieldCallProgram)
     runLLVMNativeExecutable nativeOutput
       `shouldReturn` NativeRunResult ExitSuccess "41\n" ""
 
   it "preserves closure-valued fields from returned constructors through case binders" $ do
-    output <- requireRight (renderBackendProgramLLVM returnedClosureFunctionFieldCallProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM returnedClosureFunctionFieldCallProgram)
 
     output `shouldSatisfy` isInfixOf "call ptr @\"makeBox\""
     output `shouldSatisfy` isInfixOf "getelementptr i8, ptr %\"__llvm.case.field"
@@ -3292,12 +3436,12 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
     validateLLVMObjectCode output
 
-    nativeOutput <- requireRight (renderBackendProgramNativeLLVM returnedClosureFunctionFieldCallProgram)
+    nativeOutput <- requireRight (renderFixtureBackendProgramNativeLLVM returnedClosureFunctionFieldCallProgram)
     runLLVMNativeExecutable nativeOutput
       `shouldReturn` NativeRunResult ExitSuccess "41\n" ""
 
   it "preserves case-reboxed closure fields from returned constructors" $ do
-    output <- requireRight (renderBackendProgramLLVM returnedReboxedClosureFunctionFieldCallProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM returnedReboxedClosureFunctionFieldCallProgram)
 
     output `shouldSatisfy` isInfixOf "call ptr @\"makeRestored\""
     output `shouldSatisfy` isInfixOf "getelementptr i8, ptr %\"__llvm.case.field"
@@ -3305,12 +3449,12 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
     validateLLVMObjectCode output
 
-    nativeOutput <- requireRight (renderBackendProgramNativeLLVM returnedReboxedClosureFunctionFieldCallProgram)
+    nativeOutput <- requireRight (renderFixtureBackendProgramNativeLLVM returnedReboxedClosureFunctionFieldCallProgram)
     runLLVMNativeExecutable nativeOutput
       `shouldReturn` NativeRunResult ExitSuccess "41\n" ""
 
   it "classifies case-returned closures for over-applied global calls" $ do
-    output <- requireRight (renderBackendProgramLLVM caseReturnedClosureOverApplicationProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM caseReturnedClosureOverApplicationProgram)
 
     output `shouldSatisfy` isInfixOf "call ptr @\"makeFromCase\""
     output `shouldSatisfy` isInfixOf "getelementptr i8, ptr %\"__llvm.call"
@@ -3318,7 +3462,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
     validateLLVMObjectCode output
 
-    nativeOutput <- requireRight (renderBackendProgramNativeLLVM caseReturnedClosureOverApplicationProgram)
+    nativeOutput <- requireRight (renderFixtureBackendProgramNativeLLVM caseReturnedClosureOverApplicationProgram)
     runLLVMNativeExecutable nativeOutput
       `shouldReturn` NativeRunResult ExitSuccess "41\n" ""
 
@@ -3342,7 +3486,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     assertNativeProgram sourceCaseParameterClosureFieldProgram "41"
 
   it "normalizes mixed callable case results to closure records" $ do
-    output <- requireRight (renderBackendProgramLLVM mixedCallableCaseResultProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM mixedCallableCaseResultProgram)
 
     output `shouldSatisfy` isInfixOf "__mlfp_returned_partial$function$0"
     output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_returned_partial$function$0"
@@ -3351,18 +3495,18 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
     validateLLVMObjectCode output
 
-    nativeOutput <- requireRight (renderBackendProgramNativeLLVM mixedCallableCaseResultProgram)
+    nativeOutput <- requireRight (renderFixtureBackendProgramNativeLLVM mixedCallableCaseResultProgram)
     runLLVMNativeExecutable nativeOutput
       `shouldReturn` NativeRunResult ExitSuccess "41\n" ""
 
   it "rejects BackendApp heads that select closure values through let or case" $ do
-    renderBackendProgramLLVM caseHeadedDirectClosureBackendAppProgram
+    renderFixtureBackendProgramLLVM caseHeadedDirectClosureBackendAppProgram
       `shouldSatisfyLeft` isInfixOf "Backend LLVM validation failed: BackendClosureCalledWithBackendApp \"__mlfp_unknown_closure_head\""
-    renderBackendProgramLLVM letHeadedDirectClosureBackendAppProgram
+    renderFixtureBackendProgramLLVM letHeadedDirectClosureBackendAppProgram
       `shouldSatisfyLeft` isInfixOf "Backend LLVM validation failed: BackendClosureCalledWithBackendApp \"__mlfp_closure$backend_app_let\""
 
   it "captures first-order lambda parameters as raw function pointers" $ do
-    output <- requireRight (renderBackendProgramLLVM capturedFirstOrderParameterClosureProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM capturedFirstOrderParameterClosureProgram)
 
     output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$capture_first_order_param\""
     output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.env.field"
@@ -3371,7 +3515,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMObjectCode output
 
   it "preserves let-bound first-order parameters captured by nested closures" $ do
-    output <- requireRight (renderBackendProgramLLVM letBoundFirstOrderParameterClosureProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM letBoundFirstOrderParameterClosureProgram)
 
     output `shouldSatisfy` isInfixOf "define private i64 @\"makeCaller$vk$function$__mlfp_closure$let_capture_first_order_param\""
     output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.env.field"
@@ -3380,7 +3524,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMObjectCode output
 
   it "specializes closure entries by callable capture representation" $ do
-    output <- requireRight (renderBackendProgramLLVM mixedCallableCaptureClosureEntryProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM mixedCallableCaptureClosureEntryProgram)
 
     output `shouldSatisfy` isInfixOf "define private i64 @\"makeCaller$vk$function$__mlfp_closure$mixed_callable_capture\""
     output `shouldSatisfy` isInfixOf "define private i64 @\"makeCaller$vk$closure$__mlfp_closure$mixed_callable_capture\""
@@ -3388,12 +3532,12 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
     validateLLVMObjectCode output
 
-    nativeOutput <- requireRight (renderBackendProgramNativeLLVM mixedCallableCaptureClosureEntryProgram)
+    nativeOutput <- requireRight (renderFixtureBackendProgramNativeLLVM mixedCallableCaptureClosureEntryProgram)
     runLLVMNativeExecutable nativeOutput
       `shouldReturn` NativeRunResult ExitSuccess "42\n" ""
 
   it "packages partial applications of returned closures" $ do
-    output <- requireRight (renderBackendProgramLLVM returnedClosurePartialApplicationProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM returnedClosurePartialApplicationProgram)
 
     output `shouldSatisfy` isInfixOf "__mlfp_returned_partial$closure"
     output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_returned_partial$closure"
@@ -3401,7 +3545,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMObjectCode output
 
   it "packages partial applications of returned raw function pointers" $ do
-    output <- requireRight (renderBackendProgramLLVM rawReturnedFunctionPointerPartialApplicationProgram)
+    output <- requireRight (renderFixtureBackendProgramLLVM rawReturnedFunctionPointerPartialApplicationProgram)
 
     output `shouldSatisfy` isInfixOf "__mlfp_returned_partial$function"
     output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.env.field"
@@ -3410,7 +3554,7 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMObjectCode output
 
   it "guards nullary global value-kind cycles" $ do
-    result <- timeout 1000000 (evaluate (renderBackendProgramLLVM nullaryGlobalValueKindCycleProgram))
+    result <- timeout 1000000 (evaluate (renderFixtureBackendProgramLLVM nullaryGlobalValueKindCycleProgram))
     case result of
       Nothing ->
         expectationFailure "value-kind classification did not terminate"
@@ -3422,11 +3566,11 @@ spec = describe "MLF.Backend.LLVM" $ do
         validateLLVMAssembly output
 
   it "rejects unknown base types" $ do
-    renderBackendProgramLLVM unknownBaseProgram
+    renderMainIdentifiedBackendProgramLLVM unknownBaseProgram
       `shouldSatisfyLeft` isInfixOf "BackendTypeHeadIdentityMissing \"Mystery\""
 
   it "rejects representation-changing roll/unroll nodes" $ do
-    case Lower.lowerBackendProgram rollMismatchProgram of
+    case lowerTestBackendProgram (metadataLightFixtureToIdentityProgram (attachFixtureMainIdentity rollMismatchProgram)) of
       Left err ->
         renderBackendLLVMError (BackendLLVMLoweringFailed err)
           `shouldSatisfy` isInfixOf "representation-changing roll"
@@ -5404,20 +5548,23 @@ staticArgumentMainProgram =
 recursiveStaticGlobalProgram :: BackendProgram
 recursiveStaticGlobalProgram =
   programWithBindings
-    [ BackendBinding
-        { backendBindingName = "loop",
-          backendBindingType = staticPolyBoolTy,
-          backendBindingExpr =
-            BackendLam
+    [ BackendBindingWithMetadata
+        { backendBindingIdentity = Just recursiveStaticLoopIdentity,
+          backendBindingNameWithMetadata = "loop",
+          backendBindingTypeWithMetadata = staticPolyBoolTy,
+          backendBindingExprWithMetadata =
+            BackendLamWithIdentity
               staticPolyBoolTy
+              (Just recursiveStaticPolyIdentity)
               "poly"
               polyIdTy
               ( BackendApp
                   boolTy
-                  (BackendVar staticPolyBoolTy "loop")
-                  (BackendVar polyIdTy "poly")
+                  (BackendVarWithIdentity staticPolyBoolTy (Just (TopLevelId recursiveStaticLoopIdentity)) "loop")
+                  (BackendVarWithIdentity polyIdTy (Just recursiveStaticPolyIdentity) "poly")
               ),
-          backendBindingExportedAsMain = False
+          backendBindingExportedAsMainWithMetadata = False,
+          backendBindingEvidenceParamIndices = Set.empty
         },
       BackendBinding
         { backendBindingName = "main",
@@ -5425,11 +5572,14 @@ recursiveStaticGlobalProgram =
           backendBindingExpr =
             BackendApp
               boolTy
-              (BackendVar staticPolyBoolTy "loop")
+              (BackendVarWithIdentity staticPolyBoolTy (Just (TopLevelId recursiveStaticLoopIdentity)) "loop")
               polyIdExpr,
           backendBindingExportedAsMain = True
         }
     ]
+  where
+    recursiveStaticLoopIdentity = symbolIdentityFromParts (UniqueIdentity 992032) SymbolValue "Main" "loop" Nothing
+    recursiveStaticPolyIdentity = localIdentity 992033 "poly"
 
 ordinaryFunctionEvidenceMethodProgram :: String
 ordinaryFunctionEvidenceMethodProgram =
@@ -5504,35 +5654,41 @@ localFunctionEvidenceMethodProgram =
 selfRecursiveHigherOrderProgram :: BackendProgram
 selfRecursiveHigherOrderProgram =
   programWithBindings
-    [ BackendBinding
-        { backendBindingName = "id",
-          backendBindingType = unaryIntTy,
-          backendBindingExpr = intIdentityExpr,
-          backendBindingExportedAsMain = False
+    [ BackendBindingWithMetadata
+        { backendBindingIdentity = Just selfRecursiveIdIdentity,
+          backendBindingNameWithMetadata = "id",
+          backendBindingTypeWithMetadata = unaryIntTy,
+          backendBindingExprWithMetadata = intIdentityExpr,
+          backendBindingExportedAsMainWithMetadata = False,
+          backendBindingEvidenceParamIndices = Set.empty
         },
-      BackendBinding
-        { backendBindingName = "loop",
-          backendBindingType = BTArrow unaryIntTy unaryIntTy,
-          backendBindingExpr =
-            BackendLam
+      BackendBindingWithMetadata
+        { backendBindingIdentity = Just selfRecursiveLoopIdentity,
+          backendBindingNameWithMetadata = "loop",
+          backendBindingTypeWithMetadata = BTArrow unaryIntTy unaryIntTy,
+          backendBindingExprWithMetadata =
+            BackendLamWithIdentity
               (BTArrow unaryIntTy unaryIntTy)
+              (Just selfRecursiveFIdentity)
               "f"
               unaryIntTy
-              ( BackendLam
+              ( BackendLamWithIdentity
                   unaryIntTy
+                  (Just selfRecursiveXIdentity)
                   "x"
                   intTy
                   ( BackendApp
                       intTy
                       ( BackendApp
                           unaryIntTy
-                          (BackendVar (BTArrow unaryIntTy unaryIntTy) "loop")
-                          (BackendVar unaryIntTy "f")
+                          (BackendVarWithIdentity (BTArrow unaryIntTy unaryIntTy) (Just (TopLevelId selfRecursiveLoopIdentity)) "loop")
+                          (BackendVarWithIdentity unaryIntTy (Just selfRecursiveFIdentity) "f")
                       )
-                      (BackendVar intTy "x")
+                      (BackendVarWithIdentity intTy (Just selfRecursiveXIdentity) "x")
                   )
               ),
-          backendBindingExportedAsMain = False
+          backendBindingExportedAsMainWithMetadata = False,
+          backendBindingEvidenceParamIndices = Set.empty
         },
       BackendBinding
         { backendBindingName = "main",
@@ -5542,13 +5698,18 @@ selfRecursiveHigherOrderProgram =
               intTy
               ( BackendApp
                   unaryIntTy
-                  (BackendVar (BTArrow unaryIntTy unaryIntTy) "loop")
-                  (BackendVar unaryIntTy "id")
+                  (BackendVarWithIdentity (BTArrow unaryIntTy unaryIntTy) (Just (TopLevelId selfRecursiveLoopIdentity)) "loop")
+                  (BackendVarWithIdentity unaryIntTy (Just (TopLevelId selfRecursiveIdIdentity)) "id")
               )
               (intLit 1),
           backendBindingExportedAsMain = True
         }
     ]
+  where
+    selfRecursiveIdIdentity = symbolIdentityFromParts (UniqueIdentity 992040) SymbolValue "Main" "id" Nothing
+    selfRecursiveLoopIdentity = symbolIdentityFromParts (UniqueIdentity 992041) SymbolValue "Main" "loop" Nothing
+    selfRecursiveFIdentity = localIdentity 992042 "f"
+    selfRecursiveXIdentity = localIdentity 992043 "x"
 
 inlineOnlyEvidenceCalleeProgram :: BackendProgram
 inlineOnlyEvidenceCalleeProgram =
@@ -6495,7 +6656,7 @@ inlineFunctionArgumentShadowsValueProgram =
                           (BTArrow unaryIntTy fnBoxTy)
                           "f"
                           unaryIntTy
-                          (BackendConstruct fnBoxTy "FnBox" [closureWithEntry "__mlfp_closure$field_shadow"]),
+                          (fnBoxConstruct [closureWithEntry "__mlfp_closure$field_shadow"]),
                       backendBindingExportedAsMain = False
                     },
                   BackendBinding
@@ -6532,10 +6693,11 @@ stringProgram :: BackendProgram
 stringProgram =
   BackendProgram
     { backendProgramModules =
-        [ BackendModule
-            { backendModuleName = "Main",
-              backendModuleData = [],
-              backendModuleBindings =
+        [ BackendModuleWithIdentity
+            { backendModuleIdentity = Just mainFixtureModuleIdentity,
+              backendModuleNameWithIdentity = "Main",
+              backendModuleDataWithIdentity = [],
+              backendModuleBindingsWithIdentity =
                 [ BackendBinding
                     { backendBindingName = "main",
                       backendBindingType = stringTy,
@@ -6552,10 +6714,11 @@ staleMainIdentityProgram :: BackendProgram
 staleMainIdentityProgram =
   BackendProgramWithIdentity
     { backendProgramModulesWithIdentity =
-        [ BackendModule
-            { backendModuleName = "Main",
-              backendModuleData = [],
-              backendModuleBindings =
+        [ BackendModuleWithIdentity
+            { backendModuleIdentity = Just mainFixtureModuleIdentity,
+              backendModuleNameWithIdentity = "Main",
+              backendModuleDataWithIdentity = [],
+              backendModuleBindingsWithIdentity =
                 [ BackendBindingWithMetadata
                     { backendBindingIdentity = Just staleMainIdentity,
                       backendBindingNameWithMetadata = "actual-main",
@@ -6575,10 +6738,11 @@ staleMainSelfReferenceProgram :: BackendProgram
 staleMainSelfReferenceProgram =
   BackendProgramWithIdentity
     { backendProgramModulesWithIdentity =
-        [ BackendModule
-            { backendModuleName = "Main",
-              backendModuleData = [],
-              backendModuleBindings =
+        [ BackendModuleWithIdentity
+            { backendModuleIdentity = Just mainFixtureModuleIdentity,
+              backendModuleNameWithIdentity = "Main",
+              backendModuleDataWithIdentity = [],
+              backendModuleBindingsWithIdentity =
                 [ BackendBindingWithMetadata
                     { backendBindingIdentity = Just staleMainIdentity,
                       backendBindingNameWithMetadata = "actual-main",
@@ -6599,10 +6763,11 @@ staleMainNameOnlySelfReferenceProgram :: BackendProgram
 staleMainNameOnlySelfReferenceProgram =
   BackendProgramWithIdentity
     { backendProgramModulesWithIdentity =
-        [ BackendModule
-            { backendModuleName = "Main",
-              backendModuleData = [],
-              backendModuleBindings =
+        [ BackendModuleWithIdentity
+            { backendModuleIdentity = Just mainFixtureModuleIdentity,
+              backendModuleNameWithIdentity = "Main",
+              backendModuleDataWithIdentity = [],
+              backendModuleBindingsWithIdentity =
                 [ BackendBindingWithMetadata
                     { backendBindingIdentity = Just staleMainIdentity,
                       backendBindingNameWithMetadata = "actual-main",
@@ -6622,10 +6787,11 @@ staleMainWithHelperIdentityProgram :: BackendProgram
 staleMainWithHelperIdentityProgram =
   BackendProgramWithIdentity
     { backendProgramModulesWithIdentity =
-        [ BackendModule
-            { backendModuleName = "Main",
-              backendModuleData = [],
-              backendModuleBindings =
+        [ BackendModuleWithIdentity
+            { backendModuleIdentity = Just mainFixtureModuleIdentity,
+              backendModuleNameWithIdentity = "Main",
+              backendModuleDataWithIdentity = [],
+              backendModuleBindingsWithIdentity =
                 [ BackendBindingWithMetadata
                     { backendBindingIdentity = Just staleHelperIdentity,
                       backendBindingNameWithMetadata = "actual-helper",
@@ -6658,6 +6824,10 @@ staleHelperIdentity :: SymbolIdentity
 staleHelperIdentity =
   symbolIdentityFromParts (UniqueIdentity 990012) SymbolValue "Main" "helper" Nothing
 
+mainFixtureModuleIdentity :: SymbolIdentity
+mainFixtureModuleIdentity =
+  symbolIdentityFromParts (UniqueIdentity 990013) SymbolModule "Main" "Main" Nothing
+
 conflictingStaleHelperIdentity :: SymbolIdentity
 conflictingStaleHelperIdentity =
   renameSymbolDefiningName "$stale-helper" staleHelperIdentity
@@ -6687,10 +6857,11 @@ nativeMainIdentityNameCollisionProgram :: BackendProgram
 nativeMainIdentityNameCollisionProgram =
   BackendProgramWithIdentity
     { backendProgramModulesWithIdentity =
-        [ BackendModule
-            { backendModuleName = "Main",
-              backendModuleData = [],
-              backendModuleBindings =
+        [ BackendModuleWithIdentity
+            { backendModuleIdentity = Just mainFixtureModuleIdentity,
+              backendModuleNameWithIdentity = "Main",
+              backendModuleDataWithIdentity = [],
+              backendModuleBindingsWithIdentity =
                 [ BackendBindingWithMetadata
                     { backendBindingIdentity = Just nativeMainCollisionIdentity,
                       backendBindingNameWithMetadata = "main",
@@ -6712,26 +6883,33 @@ nativeMainCollisionIdentity =
 
 identityBearingModuleNameOnlyBindingProgram :: BackendProgram
 identityBearingModuleNameOnlyBindingProgram =
-  BackendProgram
-    [ BackendModuleWithIdentity
-        { backendModuleIdentity = Just identityBearingModuleIdentity,
-          backendModuleNameWithIdentity = "Main",
-          backendModuleDataWithIdentity = [],
-          backendModuleBindingsWithIdentity =
-            [ BackendBinding
-                { backendBindingName = "main",
-                  backendBindingType = intTy,
-                  backendBindingExpr = intLit 1,
-                  backendBindingExportedAsMain = True
-                }
-            ]
-        }
-    ]
-    "main"
+  BackendProgramWithIdentity
+    { backendProgramModulesWithIdentity =
+        [ BackendModuleWithIdentity
+            { backendModuleIdentity = Just identityBearingModuleIdentity,
+              backendModuleNameWithIdentity = "Main",
+              backendModuleDataWithIdentity = [],
+              backendModuleBindingsWithIdentity =
+                [ BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = intTy,
+                      backendBindingExpr = intLit 1,
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMainIdentity = Just identityBearingNameOnlyMainIdentity,
+      backendProgramMainWithIdentity = "main"
+    }
 
 identityBearingModuleIdentity :: SymbolIdentity
 identityBearingModuleIdentity =
   symbolIdentityFromParts (UniqueIdentity 991736) SymbolModule "Main" "Main" Nothing
+
+identityBearingNameOnlyMainIdentity :: SymbolIdentity
+identityBearingNameOnlyMainIdentity =
+  symbolIdentityFromParts (UniqueIdentity 991737) SymbolValue "Main" "main" Nothing
 
 specializationNameCollisionProgram :: BackendProgram
 specializationNameCollisionProgram =
@@ -7424,7 +7602,7 @@ parameterNameShadowsDeadGlobalProgram =
                     { backendBindingName = "x",
                       backendBindingType = fnBoxTy,
                       backendBindingExpr =
-                        BackendConstruct fnBoxTy "FnBox" [BackendVar unaryIntTy "helper"],
+                        fnBoxConstruct [BackendVar unaryIntTy "helper"],
                       backendBindingExportedAsMain = False
                     },
                   BackendBinding
@@ -7545,6 +7723,19 @@ localIdentityStableAliasProgram =
       "x"
       intTy
       (intLit 42)
+      (BackendVarWithIdentity intTy (Just localX) (idDetailsStableName localX))
+  where
+    localX = localIdentity 2069105 "x"
+
+localIdentityNameOnlyStableAliasProgram :: BackendProgram
+localIdentityNameOnlyStableAliasProgram =
+  programWithMainExpr intTy $
+    BackendLetWithIdentity
+      intTy
+      (Just localX)
+      "x"
+      intTy
+      (intLit 42)
       (BackendVar intTy (idDetailsStableName localX))
   where
     localX = localIdentity 2069105 "x"
@@ -7605,10 +7796,10 @@ casePatternIdentityStaleBinderProgram =
                           (intLit 41)
                           ( BackendCase
                               intTy
-                              (BackendConstruct (optionTy intTy) "Some" [intLit 99])
+                              (optionSome intTy [intLit 99])
                               ( BackendAlternative
                                   ( BackendConstructorPatternWithBinderIdentities
-                                      Nothing
+                                      (Just optionSomeIdentity)
                                       "Some"
                                       [BackendPatternBinder (Just fieldIdentity) "$stale_x"]
                                   )
@@ -7684,17 +7875,17 @@ casePatternNameOnlyFieldTypeProgram =
                           intIdentityExpr
                           ( BackendCase
                               intTy
-                              (BackendConstruct (optionTy intTy) "Some" [intLit 41])
+                              (optionSome intTy [intLit 41])
                               ( BackendAlternative
                                   ( BackendConstructorPatternWithBinderIdentities
-                                      Nothing
+                                      (Just optionSomeIdentity)
                                       "Some"
-                                      [BackendPatternBinder Nothing "x"]
+                                      [BackendPatternBinder (Just fieldIdentity) "x"]
                                   )
                                   ( BackendApp
                                       intTy
                                       (BackendVarWithIdentity unaryIntTy (Just outerIdentity) "x")
-                                      (BackendVarWithIdentity intTy Nothing "x")
+                                      (BackendVarWithIdentity intTy (Just fieldIdentity) "x")
                                   )
                                   :| []
                               )
@@ -7708,6 +7899,7 @@ casePatternNameOnlyFieldTypeProgram =
     }
   where
     outerIdentity = localIdentity 2069121 "x"
+    fieldIdentity = localIdentity 2069122 "x"
 
 closureParamIdentityStaleNameProgram :: BackendProgram
 closureParamIdentityStaleNameProgram =
@@ -7716,6 +7908,65 @@ closureParamIdentityStaleNameProgram =
 returnedPartialClosureSlotIdentityProgram :: BackendProgram
 returnedPartialClosureSlotIdentityProgram =
   closureParamIdentityStaleNameProgramWithEntry "__mlfp_returned_partial$stale_param_identity"
+
+returnedPartialPrefixSourceClosureProgram :: BackendProgram
+returnedPartialPrefixSourceClosureProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [],
+              backendModuleBindings =
+                [ BackendBindingWithMetadata
+                    { backendBindingIdentity = Just functionSymbol,
+                      backendBindingNameWithMetadata = "f",
+                      backendBindingTypeWithMetadata = unaryIntTy,
+                      backendBindingExprWithMetadata =
+                        BackendLamWithIdentity
+                          unaryIntTy
+                          (Just ignoredIdentity)
+                          "ignored"
+                          intTy
+                          (intLit 41),
+                      backendBindingExportedAsMainWithMetadata = False,
+                      backendBindingEvidenceParamIndices = Set.empty
+                    },
+                  BackendBinding
+                    { backendBindingName = "entry",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendClosureCall
+                          intTy
+                          ( BackendClosureWithParamIdentities
+                              { backendExprType = unaryIntTy,
+                                backendClosureEntryIdentity = Just (UniqueIdentity 2069109),
+                                backendClosureEntryName = "__mlfp_returned_partial$source_closure",
+                                backendClosureCaptures =
+                                  [ BackendClosureCapture
+                                      (Just captureIdentity)
+                                      "f"
+                                      unaryIntTy
+                                      (BackendVarWithIdentity unaryIntTy (Just (TopLevelId functionSymbol)) "f")
+                                  ],
+                                backendClosureParamsWithIdentities =
+                                  [BackendClosureParam (Just paramIdentity) "x" intTy],
+                                backendClosureBody =
+                                  BackendVarWithIdentity intTy (Just paramIdentity) "x"
+                              }
+                          )
+                          [intLit 99],
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "entry"
+    }
+  where
+    functionSymbol = symbolIdentityFromParts (UniqueIdentity 2069110) SymbolValue "Main" "f" Nothing
+    captureIdentity = localIdentity 2069113 "f"
+    ignoredIdentity = localIdentity 2069111 "ignored"
+    paramIdentity = localIdentity 2069112 "x"
 
 closureParamIdentityStaleNameProgramWithEntry :: String -> BackendProgram
 closureParamIdentityStaleNameProgramWithEntry entryName =
@@ -7808,12 +8059,12 @@ closureParamIdentityDuplicateDisplayProgram =
 
 duplicateNameOnlyClosureParamProgram :: BackendProgram
 duplicateNameOnlyClosureParamProgram =
-  programWithMainExpr intTy $
+  singleBindingProgram "main" $
     BackendClosureCall
       intTy
       ( BackendClosureWithParamIdentities
           { backendExprType = binaryIntTy,
-            backendClosureEntryIdentity = Nothing,
+            backendClosureEntryIdentity = Just (UniqueIdentity 2069137),
             backendClosureEntryName = "__mlfp_closure$duplicate_name_only_param",
             backendClosureCaptures = [],
             backendClosureParamsWithIdentities =
@@ -8001,18 +8252,22 @@ caseHeadedCallProgram =
             { backendModuleName = "Main",
               backendModuleData = [optionData],
               backendModuleBindings =
-                [ BackendBinding
-                    { backendBindingName = "id",
-                      backendBindingType = unaryIntTy,
-                      backendBindingExpr = intIdentityExpr,
-                      backendBindingExportedAsMain = False
+                [ BackendBindingWithMetadata
+                    { backendBindingIdentity = Just caseHeadedIdIdentity,
+                      backendBindingNameWithMetadata = "id",
+                      backendBindingTypeWithMetadata = unaryIntTy,
+                      backendBindingExprWithMetadata = intIdentityExpr,
+                      backendBindingExportedAsMainWithMetadata = False,
+                      backendBindingEvidenceParamIndices = Set.empty
                     },
-                  BackendBinding
-                    { backendBindingName = "fallback",
-                      backendBindingType = unaryIntTy,
-                      backendBindingExpr =
+                  BackendBindingWithMetadata
+                    { backendBindingIdentity = Just caseHeadedFallbackIdentity,
+                      backendBindingNameWithMetadata = "fallback",
+                      backendBindingTypeWithMetadata = unaryIntTy,
+                      backendBindingExprWithMetadata =
                         BackendLam unaryIntTy "x" intTy (intLit 9),
-                      backendBindingExportedAsMain = False
+                      backendBindingExportedAsMainWithMetadata = False,
+                      backendBindingEvidenceParamIndices = Set.empty
                     },
                   BackendBinding
                     { backendBindingName = "main",
@@ -8022,9 +8277,14 @@ caseHeadedCallProgram =
                           intTy
                           ( BackendCase
                               unaryIntTy
-                              (BackendConstruct (optionTy intTy) "Some" [intLit 0])
-                              ( BackendAlternative (BackendConstructorPattern "Some" ["value"]) (BackendVar unaryIntTy "id")
-                                  :| [BackendAlternative (BackendConstructorPattern "None" []) (BackendVar unaryIntTy "fallback")]
+                              (optionSome intTy [intLit 0])
+                              ( BackendAlternative
+                                  (optionSomePattern [BackendPatternBinder (Just caseHeadedValueIdentity) "value"])
+                                  (BackendVarWithIdentity unaryIntTy (Just (TopLevelId caseHeadedIdIdentity)) "id")
+                                  :| [ BackendAlternative
+                                         optionNonePattern
+                                         (BackendVarWithIdentity unaryIntTy (Just (TopLevelId caseHeadedFallbackIdentity)) "fallback")
+                                     ]
                               )
                           )
                           (intLit 7),
@@ -8035,6 +8295,10 @@ caseHeadedCallProgram =
         ],
       backendProgramMain = "main"
     }
+  where
+    caseHeadedIdIdentity = symbolIdentityFromParts (UniqueIdentity 992010) SymbolValue "Main" "id" Nothing
+    caseHeadedFallbackIdentity = symbolIdentityFromParts (UniqueIdentity 992011) SymbolValue "Main" "fallback" Nothing
+    caseHeadedValueIdentity = localIdentity 992012 "value"
 
 userNamedRuntimeAndProgram :: BackendProgram
 userNamedRuntimeAndProgram =
@@ -8138,7 +8402,7 @@ mallocCollisionConstructorProgram =
                   BackendBinding
                     { backendBindingName = "main",
                       backendBindingType = optionTy intTy,
-                      backendBindingExpr = BackendConstruct (optionTy intTy) "None" [],
+                      backendBindingExpr = optionNone intTy,
                       backendBindingExportedAsMain = True
                     }
                 ]
@@ -8166,7 +8430,7 @@ mallocIdentityCollisionConstructorProgram =
                   BackendBinding
                     { backendBindingName = "main",
                       backendBindingType = optionTy intTy,
-                      backendBindingExpr = BackendConstruct (optionTy intTy) "None" [],
+                      backendBindingExpr = optionNone intTy,
                       backendBindingExportedAsMain = True
                     }
                 ]
@@ -8187,16 +8451,23 @@ unusedPolymorphicPatternFieldProgram =
                     { backendBindingName = "main",
                       backendBindingType = BTArrow lazyFieldBoxTy intTy,
                       backendBindingExpr =
-                        BackendLam
+                        BackendLamWithIdentity
                           (BTArrow lazyFieldBoxTy intTy)
+                          (Just boxIdentity)
                           "box"
                           lazyFieldBoxTy
                           ( BackendCase
                               intTy
-                              (BackendVar lazyFieldBoxTy "box")
+                              (BackendVarWithIdentity lazyFieldBoxTy (Just boxIdentity) "box")
                               ( BackendAlternative
-                                  (BackendConstructorPattern "Packed" ["unused", "value"])
-                                  (BackendVar intTy "value")
+                                  ( BackendConstructorPatternWithBinderIdentities
+                                      (Just lazyFieldBoxPackedIdentity)
+                                      "Packed"
+                                      [ BackendPatternBinder (Just unusedIdentity) "unused",
+                                        BackendPatternBinder (Just valueIdentity) "value"
+                                      ]
+                                  )
+                                  (BackendVarWithIdentity intTy (Just valueIdentity) "value")
                                   :| []
                               )
                           ),
@@ -8207,6 +8478,10 @@ unusedPolymorphicPatternFieldProgram =
         ],
       backendProgramMain = "main"
     }
+  where
+    boxIdentity = localIdentity 992029 "box"
+    unusedIdentity = localIdentity 992030 "unused"
+    valueIdentity = localIdentity 992031 "value"
 
 strictImmediateConstructFieldProgram :: BackendProgram
 strictImmediateConstructFieldProgram =
@@ -8222,13 +8497,18 @@ strictImmediateConstructFieldProgram =
                       backendBindingExpr =
                         BackendCase
                           intTy
-                          ( BackendConstruct
+                          ( BackendConstructWithIdentity
                               strictBoxTy
+                              (Just strictBoxConstructorIdentity)
                               "StrictBox"
                               [polyIdExpr, BackendRoll recIntTy (intLit 1)]
                           )
                           ( BackendAlternative
-                              (BackendConstructorPattern "StrictBox" ["poly", "unused"])
+                              ( BackendConstructorPatternWithBinderIdentities
+                                  (Just strictBoxConstructorIdentity)
+                                  "StrictBox"
+                                  (map (BackendPatternBinder Nothing) ["poly", "unused"])
+                              )
                               (intLit 0)
                               :| []
                           ),
@@ -8254,8 +8534,9 @@ strictImmediateDefaultProgram =
                       backendBindingExpr =
                         BackendCase
                           intTy
-                          ( BackendConstruct
+                          ( BackendConstructWithIdentity
                               strictBoxTy
+                              (Just strictBoxConstructorIdentity)
                               "StrictBox"
                               [polyIdExpr, BackendRoll recIntTy (intLit 1)]
                           )
@@ -8282,12 +8563,17 @@ unmatchedImmediateConstructorProgram =
                       backendBindingExpr =
                         BackendCase
                           intTy
-                          ( BackendConstruct
+                          ( BackendConstructWithIdentity
                               immediateChoiceTy
+                              (Just immediateChoiceConstructorIdentity)
                               "WithStatic"
                               [polyIdExpr, intLit 1]
                           )
-                          (BackendAlternative (BackendConstructorPattern "Other" []) (intLit 0) :| []),
+                          ( BackendAlternative
+                              (BackendConstructorPatternWithBinderIdentities (Just immediateChoiceOtherIdentity) "Other" [])
+                              (intLit 0)
+                              :| []
+                          ),
                       backendBindingExportedAsMain = True
                     }
                 ]
@@ -8368,12 +8654,20 @@ nameOnlyConstructorUseIdentityProgram =
               backendModuleBindings =
                 [ BackendBinding
                     { backendBindingName = "main",
-                      backendBindingType = immediateChoiceTy,
+                      backendBindingType = intTy,
                       backendBindingExpr =
-                        BackendConstruct
+                        BackendLetWithIdentity
+                          intTy
+                          (Just nameOnlyConstructorIgnoredIdentity)
+                          "ignored"
                           immediateChoiceTy
-                          "WithStatic"
-                          [polyIdExpr, intLit 1],
+                          ( BackendConstructWithIdentity
+                              immediateChoiceTy
+                              (Just immediateChoiceConstructorIdentity)
+                              "WithStatic"
+                              [polyIdExpr, intLit 1]
+                          )
+                          (intLit 0),
                       backendBindingExportedAsMain = True
                     }
                 ]
@@ -8381,6 +8675,8 @@ nameOnlyConstructorUseIdentityProgram =
         ],
       backendProgramMain = "main"
     }
+  where
+    nameOnlyConstructorIgnoredIdentity = localIdentity 992034 "ignored"
 
 displayAliasConstructorUseIdentityProgram :: BackendProgram
 displayAliasConstructorUseIdentityProgram =
@@ -8392,12 +8688,20 @@ displayAliasConstructorUseIdentityProgram =
               backendModuleBindings =
                 [ BackendBinding
                     { backendBindingName = "main",
-                      backendBindingType = immediateChoiceTy,
+                      backendBindingType = intTy,
                       backendBindingExpr =
-                        BackendConstruct
+                        BackendLetWithIdentity
+                          intTy
+                          (Just displayAliasConstructorIgnoredIdentity)
+                          "ignored"
                           immediateChoiceTy
-                          "WithStatic"
-                          [polyIdExpr, intLit 1],
+                          ( BackendConstructWithIdentity
+                              immediateChoiceTy
+                              (Just immediateChoiceConstructorIdentity)
+                              "$stale_WithStatic"
+                              [polyIdExpr, intLit 1]
+                          )
+                          (intLit 0),
                       backendBindingExportedAsMain = True
                     }
                 ]
@@ -8405,6 +8709,8 @@ displayAliasConstructorUseIdentityProgram =
         ],
       backendProgramMain = "main"
     }
+  where
+    displayAliasConstructorIgnoredIdentity = localIdentity 992035 "ignored"
 
 strictImmediateUnmatchedProgram :: BackendProgram
 strictImmediateUnmatchedProgram =
@@ -8420,12 +8726,17 @@ strictImmediateUnmatchedProgram =
                       backendBindingExpr =
                         BackendCase
                           intTy
-                          ( BackendConstruct
+                          ( BackendConstructWithIdentity
                               immediateStrictChoiceTy
+                              (Just immediateStrictWithStaticIdentity)
                               "WithStrictStatic"
                               [polyIdExpr, BackendRoll recIntTy (intLit 1)]
                           )
-                          (BackendAlternative (BackendConstructorPattern "StrictOther" []) (intLit 0) :| []),
+                          ( BackendAlternative
+                              (BackendConstructorPatternWithBinderIdentities (Just immediateStrictOtherIdentity) "StrictOther" [])
+                              (intLit 0)
+                              :| []
+                          ),
                       backendBindingExportedAsMain = True
                     }
                 ]
@@ -8448,9 +8759,9 @@ duplicateConstructorCaseProgram =
                       backendBindingExpr =
                         BackendCase
                           intTy
-                          (BackendConstruct (optionTy intTy) "None" [])
-                          ( BackendAlternative (BackendConstructorPattern "None" []) (intLit 0)
-                              :| [BackendAlternative (BackendConstructorPattern "None" []) (intLit 1)]
+                          (optionNone intTy)
+                          ( BackendAlternative optionNonePattern (intLit 0)
+                              :| [BackendAlternative optionNonePattern (intLit 1)]
                           ),
                       backendBindingExportedAsMain = True
                     }
@@ -8518,9 +8829,12 @@ nonTailDefaultCaseProgram =
                       backendBindingExpr =
                         BackendCase
                           intTy
-                          (BackendConstruct (optionTy intTy) "Some" [intLit 7])
+                          (optionSome intTy [intLit 7])
                           ( BackendAlternative BackendDefaultPattern (intLit 0)
-                              :| [BackendAlternative (BackendConstructorPattern "Some" ["value"]) (BackendVar intTy "value")]
+                              :| [ BackendAlternative
+                                     (optionSomePattern [BackendPatternBinder (Just nonTailValueIdentity) "value"])
+                                     (BackendVarWithIdentity intTy (Just nonTailValueIdentity) "value")
+                                 ]
                           ),
                       backendBindingExportedAsMain = True
                     }
@@ -8529,17 +8843,52 @@ nonTailDefaultCaseProgram =
         ],
       backendProgramMain = "main"
     }
+  where
+    nonTailValueIdentity = localIdentity 992013 "value"
 
 optionData :: BackendData
 optionData =
-  BackendData
-    { backendDataName = "Option",
-      backendDataParameters = ["a"],
-      backendDataConstructors =
-        [ BackendConstructor "None" [] [] (optionTy (BTVar "a")),
-          BackendConstructor "Some" [] [BTVar "a"] (optionTy (BTVar "a"))
+  BackendDataWithIdentity
+    { backendDataIdentity = Just optionIdentity,
+      backendDataNameWithIdentity = "Option",
+      backendDataParameterRefsWithIdentity = [backendDataParameterRefFromIdentity optionTypeParameterIdentity "a"],
+      backendDataConstructorsWithIdentity =
+        [ BackendConstructorWithIdentity
+            { backendConstructorIdentity = Just optionNoneIdentity,
+              backendConstructorNameWithIdentity = "None",
+              backendConstructorForallsWithIdentity = [],
+              backendConstructorFieldsWithIdentity = [],
+              backendConstructorResultWithIdentity = optionTy optionTypeParameterTy
+            },
+          BackendConstructorWithIdentity
+            { backendConstructorIdentity = Just optionSomeIdentity,
+              backendConstructorNameWithIdentity = "Some",
+              backendConstructorForallsWithIdentity = [],
+              backendConstructorFieldsWithIdentity = [optionTypeParameterTy],
+              backendConstructorResultWithIdentity = optionTy optionTypeParameterTy
+            }
         ]
     }
+
+optionIdentity :: SymbolIdentity
+optionIdentity =
+  symbolIdentityFromParts (UniqueIdentity 992000) SymbolType "Main" "Option" Nothing
+
+optionNoneIdentity :: SymbolIdentity
+optionNoneIdentity =
+  symbolIdentityFromParts (UniqueIdentity 992001) SymbolConstructor "Main" "None" (Just (SymbolOwnerType optionIdentity))
+
+optionSomeIdentity :: SymbolIdentity
+optionSomeIdentity =
+  symbolIdentityFromParts (UniqueIdentity 992002) SymbolConstructor "Main" "Some" (Just (SymbolOwnerType optionIdentity))
+
+optionTypeParameterIdentity :: TypeBinderIdentity
+optionTypeParameterIdentity =
+  typeBinderIdentityFromUnique (UniqueIdentity 992003)
+
+optionTypeParameterTy :: BackendType
+optionTypeParameterTy =
+  BTVarWithIdentity (Just optionTypeParameterIdentity) "a"
 
 intPairData :: BackendData
 intPairData =
@@ -8580,44 +8929,68 @@ singleFieldBoxExpr name field =
 
 nonePolyTy :: BackendType
 nonePolyTy =
-  BTForall "a" Nothing (optionTy (BTVar "a"))
+  BTForallWithIdentity (Just nonePolyTypeParameterIdentity) "a" Nothing (optionTy nonePolyTypeParameterTy)
 
 nonePolyExpr :: BackendExpr
 nonePolyExpr =
-  BackendTyAbs
+  BackendTyAbsWithIdentity
     nonePolyTy
+    (Just nonePolyTypeParameterIdentity)
     "a"
     Nothing
-    (BackendConstruct (optionTy (BTVar "a")) "None" [])
+    (optionNone nonePolyTypeParameterTy)
 
 noneViaDirectTyAbsExpr :: BackendExpr
 noneViaDirectTyAbsExpr =
-  BackendTyAbs
+  BackendTyAbsWithIdentity
     nonePolyTy
+    (Just nonePolyTypeParameterIdentity)
     "a"
     Nothing
     ( BackendTyApp
-        (optionTy (BTVar "a"))
+        (optionTy nonePolyTypeParameterTy)
         (BackendVar nonePolyTy "none")
-        (BTVar "a")
+        nonePolyTypeParameterTy
     )
 
 polyIdTy :: BackendType
 polyIdTy =
-  BTForall "a" Nothing (BTArrow (BTVar "a") (BTVar "a"))
+  BTForallWithIdentity (Just polyIdTypeParameterIdentity) "a" Nothing (BTArrow polyIdTypeParameterTy polyIdTypeParameterTy)
 
 polyIdExpr :: BackendExpr
 polyIdExpr =
-  BackendTyAbs
+  BackendTyAbsWithIdentity
     polyIdTy
+    (Just polyIdTypeParameterIdentity)
     "a"
     Nothing
-    ( BackendLam
-        (BTArrow (BTVar "a") (BTVar "a"))
+    ( BackendLamWithIdentity
+        (BTArrow polyIdTypeParameterTy polyIdTypeParameterTy)
+        (Just polyIdParamIdentity)
         "x"
-        (BTVar "a")
-        (BackendVar (BTVar "a") "x")
+        polyIdTypeParameterTy
+        (BackendVarWithIdentity polyIdTypeParameterTy (Just polyIdParamIdentity) "x")
     )
+
+nonePolyTypeParameterIdentity :: TypeBinderIdentity
+nonePolyTypeParameterIdentity =
+  typeBinderIdentityFromUnique (UniqueIdentity 992004)
+
+nonePolyTypeParameterTy :: BackendType
+nonePolyTypeParameterTy =
+  BTVarWithIdentity (Just nonePolyTypeParameterIdentity) "a"
+
+polyIdTypeParameterIdentity :: TypeBinderIdentity
+polyIdTypeParameterIdentity =
+  typeBinderIdentityFromUnique (UniqueIdentity 992005)
+
+polyIdTypeParameterTy :: BackendType
+polyIdTypeParameterTy =
+  BTVarWithIdentity (Just polyIdTypeParameterIdentity) "a"
+
+polyIdParamIdentity :: IdDetails
+polyIdParamIdentity =
+  localIdentity 992006 "x"
 
 staticPolyBoolTy :: BackendType
 staticPolyBoolTy =
@@ -8625,19 +8998,22 @@ staticPolyBoolTy =
 
 badPolyTy :: BackendType
 badPolyTy =
-  BTForall "a" Nothing fnBoxTy
+  BTForallWithIdentity (Just badPolyTypeParameterIdentity) "a" Nothing fnBoxTy
 
 badPolyExpr :: BackendExpr
 badPolyExpr =
-  BackendTyAbs
+  BackendTyAbsWithIdentity
     badPolyTy
+    (Just badPolyTypeParameterIdentity)
     "a"
     Nothing
-    ( BackendConstruct
-        fnBoxTy
-        "FnBox"
+    ( fnBoxConstruct
         [BackendVar unaryIntTy "helper"]
     )
+
+badPolyTypeParameterIdentity :: TypeBinderIdentity
+badPolyTypeParameterIdentity =
+  typeBinderIdentityFromUnique (UniqueIdentity 992007)
 
 polyIdCall :: BackendType -> BackendExpr -> BackendExpr
 polyIdCall ty arg =
@@ -9500,11 +9876,13 @@ polymorphicClosureFunctionWrapperProgram =
             { backendModuleName = "Main",
               backendModuleData = [fnBoxData],
               backendModuleBindings =
-                [ BackendBinding
-                    { backendBindingName = "polyWrapper",
-                      backendBindingType = polymorphicClosureFunctionWrapperTy,
-                      backendBindingExpr = polymorphicClosureFunctionWrapperExpr,
-                      backendBindingExportedAsMain = False
+                [ BackendBindingWithMetadata
+                    { backendBindingIdentity = Just polymorphicClosureFunctionWrapperIdentity,
+                      backendBindingNameWithMetadata = "polyWrapper",
+                      backendBindingTypeWithMetadata = polymorphicClosureFunctionWrapperTy,
+                      backendBindingExprWithMetadata = polymorphicClosureFunctionWrapperExpr,
+                      backendBindingExportedAsMainWithMetadata = False,
+                      backendBindingEvidenceParamIndices = Set.empty
                     },
                   BackendBinding
                     { backendBindingName = "main",
@@ -9532,20 +9910,42 @@ polymorphicClosureFunctionWrapperProgram =
 
 polymorphicClosureFunctionWrapperTy :: BackendType
 polymorphicClosureFunctionWrapperTy =
-  BTForall "a" Nothing (BTArrow (BTVar "a") fnBoxTy)
+  BTForallWithIdentity
+    (Just polymorphicClosureFunctionWrapperTypeIdentity)
+    "a"
+    Nothing
+    (BTArrow polymorphicClosureFunctionWrapperTypeVar fnBoxTy)
+
+polymorphicClosureFunctionWrapperTypeIdentity :: TypeBinderIdentity
+polymorphicClosureFunctionWrapperTypeIdentity =
+  typeBinderIdentityFromUnique (UniqueIdentity 990023)
+
+polymorphicClosureFunctionWrapperTypeVar :: BackendType
+polymorphicClosureFunctionWrapperTypeVar =
+  BTVarWithIdentity (Just polymorphicClosureFunctionWrapperTypeIdentity) "a"
+
+polymorphicClosureFunctionWrapperIdentity :: SymbolIdentity
+polymorphicClosureFunctionWrapperIdentity =
+  symbolIdentityFromParts (UniqueIdentity 990025) SymbolValue "Main" "polyWrapper" Nothing
 
 polymorphicClosureFunctionWrapperExpr :: BackendExpr
 polymorphicClosureFunctionWrapperExpr =
-  BackendTyAbs
+  BackendTyAbsWithIdentity
     polymorphicClosureFunctionWrapperTy
+    (Just polymorphicClosureFunctionWrapperTypeIdentity)
     "a"
     Nothing
-    ( BackendLam
-        (BTArrow (BTVar "a") fnBoxTy)
+    ( BackendLamWithIdentity
+        (BTArrow polymorphicClosureFunctionWrapperTypeVar fnBoxTy)
+        (Just polymorphicClosureFunctionWrapperParamIdentity)
         "ignored"
-        (BTVar "a")
-        (BackendConstruct fnBoxTy "FnBox" [closureContainingFunctionExpr])
+        polymorphicClosureFunctionWrapperTypeVar
+        (fnBoxConstruct [closureContainingFunctionExpr])
     )
+
+polymorphicClosureFunctionWrapperParamIdentity :: IdDetails
+polymorphicClosureFunctionWrapperParamIdentity =
+  localIdentity 990024 "ignored"
 
 closureContainingFunctionExpr :: BackendExpr
 closureContainingFunctionExpr =
@@ -9555,7 +9955,7 @@ polymorphicClosureFunctionWrapperCall :: BackendType -> BackendExpr -> BackendEx
 polymorphicClosureFunctionWrapperCall argTy arg =
   BackendApp
     fnBoxTy
-    (BackendTyApp (BTArrow argTy fnBoxTy) (BackendVar polymorphicClosureFunctionWrapperTy "polyWrapper") argTy)
+    (BackendTyApp (BTArrow argTy fnBoxTy) (BackendVarWithIdentity polymorphicClosureFunctionWrapperTy (Just (TopLevelId polymorphicClosureFunctionWrapperIdentity)) "polyWrapper") argTy)
     arg
 
 inlinePolymorphicClosureProgram :: BackendProgram
@@ -9627,9 +10027,7 @@ inlinePolymorphicClosureExpr =
 closureEntryFunctionWrapperCollisionProgram :: BackendProgram
 closureEntryFunctionWrapperCollisionProgram =
   programWithFnBoxMainExpr $
-    BackendConstruct
-      fnBoxTy
-      "FnBox"
+    fnBoxConstruct
       [closureWithEntry "__mlfp_function_wrapper$0"]
 
 closureEntryRuntimeDeclarationCollisionProgram :: BackendProgram
@@ -9646,12 +10044,16 @@ closureWithEntry :: String -> BackendExpr
 closureWithEntry entryName =
   BackendClosureWithParamIdentities
     { backendExprType = unaryIntTy,
-              backendClosureEntryIdentity = Nothing,
-              backendClosureEntryName = entryName,
+      backendClosureEntryIdentity = Nothing,
+      backendClosureEntryName = entryName,
       backendClosureCaptures = [],
-      backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
-      backendClosureBody = BackendVar intTy "x"
+      backendClosureParamsWithIdentities = [BackendClosureParam (Just closureWithEntryParamIdentity) "x" intTy],
+      backendClosureBody = BackendVarWithIdentity intTy (Just closureWithEntryParamIdentity) "x"
     }
+
+closureWithEntryParamIdentity :: IdDetails
+closureWithEntryParamIdentity =
+  localIdentity 990022 "x"
 
 functionFieldProgram :: BackendProgram
 functionFieldProgram =
@@ -9665,7 +10067,7 @@ functionFieldProgram =
                   BackendBinding
                     { backendBindingName = "main",
                       backendBindingType = fnBoxTy,
-                      backendBindingExpr = BackendConstruct fnBoxTy "FnBox" [closureWithEntry "__mlfp_closure$field_top"],
+                      backendBindingExpr = fnBoxConstruct [closureWithEntry "__mlfp_closure$field_top"],
                       backendBindingExportedAsMain = True
                     }
                 ]
@@ -9685,7 +10087,7 @@ directFunctionFieldProgram =
                 [ BackendBinding
                     { backendBindingName = "main",
                       backendBindingType = fnBoxTy,
-                      backendBindingExpr = BackendConstruct fnBoxTy "FnBox" [closureWithEntry "__mlfp_closure$field_direct"],
+                      backendBindingExpr = fnBoxConstruct [closureWithEntry "__mlfp_closure$field_direct"],
                       backendBindingExportedAsMain = True
                     }
                 ]
@@ -9698,12 +10100,14 @@ localFunctionFieldProgram :: BackendProgram
 localFunctionFieldProgram =
   programWithFnBoxMainExpr $
     BackendLetWithIdentity
-      { backendLetIdentity = Nothing, backendExprType = fnBoxTy,
+      { backendLetIdentity = Just localFunctionFieldFIdentity, backendExprType = fnBoxTy,
         backendLetName = "f",
         backendLetType = unaryIntTy,
         backendLetRhs = closureWithEntry "__mlfp_closure$field_local",
-        backendLetBody = BackendConstruct fnBoxTy "FnBox" [BackendVar unaryIntTy "f"]
+        backendLetBody = fnBoxConstruct [BackendVarWithIdentity unaryIntTy (Just localFunctionFieldFIdentity) "f"]
       }
+  where
+    localFunctionFieldFIdentity = localIdentity 992044 "f"
 
 transitiveLocalFunctionFieldProgram :: BackendProgram
 transitiveLocalFunctionFieldProgram =
@@ -9719,7 +10123,7 @@ transitiveLocalFunctionFieldProgram =
               backendLetName = "g",
               backendLetType = unaryIntTy,
               backendLetRhs = BackendVar unaryIntTy "f",
-              backendLetBody = BackendConstruct fnBoxTy "FnBox" [BackendVar unaryIntTy "g"]
+              backendLetBody = fnBoxConstruct [BackendVar unaryIntTy "g"]
             }
       }
 
@@ -9737,10 +10141,10 @@ immediateRestoredFunctionFieldProgram =
                       backendBindingExpr =
                         BackendCase
                           fnBoxTy
-                          (BackendConstruct fnBoxTy "FnBox" [closureWithEntry "__mlfp_closure$field_restored"])
+                          (fnBoxConstruct [closureWithEntry "__mlfp_closure$field_restored"])
                           ( BackendAlternative
-                              (BackendConstructorPattern "FnBox" ["f"])
-                              (BackendConstruct fnBoxTy "FnBox" [BackendVar unaryIntTy "f"])
+                              (fnBoxPatternWithBinders [BackendPatternBinder (Just immediateRestoredFIdentity) "f"])
+                              (fnBoxConstruct [BackendVarWithIdentity unaryIntTy (Just immediateRestoredFIdentity) "f"])
                               :| []
                           ),
                       backendBindingExportedAsMain = True
@@ -9750,6 +10154,8 @@ immediateRestoredFunctionFieldProgram =
         ],
       backendProgramMain = "main"
     }
+  where
+    immediateRestoredFIdentity = localIdentity 992045 "f"
 
 capturedFunctionFieldProgram :: BackendProgram
 capturedFunctionFieldProgram =
@@ -9763,21 +10169,26 @@ capturedFunctionFieldProgram =
                     { backendBindingName = "main",
                       backendBindingType = fnBoxTy,
                       backendBindingExpr =
-                        BackendLet
+                        BackendLetWithIdentity
                           fnBoxTy
+                          (Just capturedFunctionCapturedIdentity)
                           "captured"
                           intTy
                           (intLit 1)
-                          ( BackendConstruct
-                              fnBoxTy
-                              "FnBox"
+                          ( fnBoxConstruct
                               [ BackendClosureWithParamIdentities
                                   { backendExprType = unaryIntTy,
               backendClosureEntryIdentity = Nothing,
               backendClosureEntryName = "__mlfp_closure$field_captured",
-                                    backendClosureCaptures = [BackendClosureCapture Nothing "captured" intTy (BackendVar intTy "captured")],
-                                    backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
-                                    backendClosureBody = BackendVar intTy "captured"
+                                    backendClosureCaptures =
+                                      [ BackendClosureCapture
+                                          (Just capturedFunctionCapturedIdentity)
+                                          "captured"
+                                          intTy
+                                          (BackendVarWithIdentity intTy (Just capturedFunctionCapturedIdentity) "captured")
+                                      ],
+                                    backendClosureParamsWithIdentities = [BackendClosureParam (Just capturedFunctionXIdentity) "x" intTy],
+                                    backendClosureBody = BackendVarWithIdentity intTy (Just capturedFunctionCapturedIdentity) "captured"
                                   }
                               ]
                           ),
@@ -9788,6 +10199,9 @@ capturedFunctionFieldProgram =
         ],
       backendProgramMain = "main"
     }
+  where
+    capturedFunctionCapturedIdentity = localIdentity 992046 "captured"
+    capturedFunctionXIdentity = localIdentity 992047 "x"
 
 capturedFunctionPointerCallProgram :: BackendProgram
 capturedFunctionPointerCallProgram =
@@ -10190,12 +10604,12 @@ rawFunctionPointerFieldCallProgram =
                           intTy
                           "box"
                           fnBoxTy
-                          (BackendConstruct fnBoxTy "FnBox" [BackendVar unaryIntTy "helper"])
+                          (fnBoxConstruct [BackendVar unaryIntTy "helper"])
                               ( BackendCase
                                   intTy
                                   (BackendVar fnBoxTy "box")
                                   ( BackendAlternative
-                                      (BackendConstructorPattern "FnBox" ["f"])
+                                      (fnBoxPattern ["f"])
                                       (BackendClosureCall intTy (BackendVar unaryIntTy "f") [intLit 41])
                                       :| []
                                   )
@@ -10220,34 +10634,40 @@ closureFunctionFieldCallProgram =
                     { backendBindingName = "entry",
                       backendBindingType = intTy,
                       backendBindingExpr =
-                        BackendLet
+                        BackendLetWithIdentity
                           intTy
+                          (Just closureFunctionCapturedIdentity)
                           "captured"
                           intTy
                           (intLit 41)
-                          ( BackendLet
+                          ( BackendLetWithIdentity
                               intTy
+                              (Just closureFunctionBoxIdentity)
                               "box"
                               fnBoxTy
-                              ( BackendConstruct
-                                  fnBoxTy
-                                  "FnBox"
+                              ( fnBoxConstruct
                                   [ BackendClosureWithParamIdentities
                                       { backendExprType = unaryIntTy,
               backendClosureEntryIdentity = Nothing,
               backendClosureEntryName = "__mlfp_closure$field_case_closure",
-                                        backendClosureCaptures = [BackendClosureCapture Nothing "captured" intTy (BackendVar intTy "captured")],
-                                        backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
-                                        backendClosureBody = BackendVar intTy "captured"
+                                        backendClosureCaptures =
+                                          [ BackendClosureCapture
+                                              (Just closureFunctionCapturedIdentity)
+                                              "captured"
+                                              intTy
+                                              (BackendVarWithIdentity intTy (Just closureFunctionCapturedIdentity) "captured")
+                                          ],
+                                        backendClosureParamsWithIdentities = [BackendClosureParam (Just closureFunctionXIdentity) "x" intTy],
+                                        backendClosureBody = BackendVarWithIdentity intTy (Just closureFunctionCapturedIdentity) "captured"
                                       }
                                   ]
                               )
                               ( BackendCase
                                   intTy
-                                  (BackendVar fnBoxTy "box")
+                                  (BackendVarWithIdentity fnBoxTy (Just closureFunctionBoxIdentity) "box")
                                   ( BackendAlternative
-                                      (BackendConstructorPattern "FnBox" ["f"])
-                                      (BackendClosureCall intTy (BackendVar unaryIntTy "f") [intLit 0])
+                                      (fnBoxPatternWithBinders [BackendPatternBinder (Just closureFunctionFIdentity) "f"])
+                                      (BackendClosureCall intTy (BackendVarWithIdentity unaryIntTy (Just closureFunctionFIdentity) "f") [intLit 0])
                                       :| []
                                   )
                               )
@@ -10259,6 +10679,11 @@ closureFunctionFieldCallProgram =
         ],
       backendProgramMain = "entry"
     }
+  where
+    closureFunctionCapturedIdentity = localIdentity 992058 "captured"
+    closureFunctionBoxIdentity = localIdentity 992059 "box"
+    closureFunctionXIdentity = localIdentity 992060 "x"
+    closureFunctionFIdentity = localIdentity 992061 "f"
 
 returnedClosureFunctionFieldCallProgram :: BackendProgram
 returnedClosureFunctionFieldCallProgram =
@@ -10268,28 +10693,35 @@ returnedClosureFunctionFieldCallProgram =
             { backendModuleName = "Main",
               backendModuleData = [fnBoxData],
               backendModuleBindings =
-                [ BackendBinding
-                    { backendBindingName = "makeBox",
-                      backendBindingType = BTArrow intTy fnBoxTy,
-                      backendBindingExpr =
-                        BackendLam
+                [ BackendBindingWithMetadata
+                    { backendBindingIdentity = Just returnedClosureMakeBoxIdentity,
+                      backendBindingNameWithMetadata = "makeBox",
+                      backendBindingTypeWithMetadata = BTArrow intTy fnBoxTy,
+                      backendBindingExprWithMetadata =
+                        BackendLamWithIdentity
                           (BTArrow intTy fnBoxTy)
+                          (Just returnedClosureBaseIdentity)
                           "base"
                           intTy
-                          ( BackendConstruct
-                              fnBoxTy
-                              "FnBox"
+                          ( fnBoxConstruct
                               [ BackendClosureWithParamIdentities
                                   { backendExprType = unaryIntTy,
               backendClosureEntryIdentity = Nothing,
               backendClosureEntryName = "__mlfp_closure$returned_field_case_closure",
-                                    backendClosureCaptures = [BackendClosureCapture Nothing "base" intTy (BackendVar intTy "base")],
-                                    backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
-                                    backendClosureBody = BackendVar intTy "base"
+                                    backendClosureCaptures =
+                                      [ BackendClosureCapture
+                                          (Just returnedClosureBaseIdentity)
+                                          "base"
+                                          intTy
+                                          (BackendVarWithIdentity intTy (Just returnedClosureBaseIdentity) "base")
+                                      ],
+                                    backendClosureParamsWithIdentities = [BackendClosureParam (Just returnedClosureXIdentity) "x" intTy],
+                                    backendClosureBody = BackendVarWithIdentity intTy (Just returnedClosureBaseIdentity) "base"
                                   }
                               ]
                           ),
-                      backendBindingExportedAsMain = False
+                      backendBindingExportedAsMainWithMetadata = False,
+                      backendBindingEvidenceParamIndices = Set.empty
                     },
                   BackendBinding
                     { backendBindingName = "entry",
@@ -10297,10 +10729,10 @@ returnedClosureFunctionFieldCallProgram =
                       backendBindingExpr =
                         BackendCase
                           intTy
-                          (BackendApp fnBoxTy (BackendVar (BTArrow intTy fnBoxTy) "makeBox") (intLit 41))
+                          (BackendApp fnBoxTy (BackendVarWithIdentity (BTArrow intTy fnBoxTy) (Just (TopLevelId returnedClosureMakeBoxIdentity)) "makeBox") (intLit 41))
                           ( BackendAlternative
-                              (BackendConstructorPattern "FnBox" ["f"])
-                              (BackendClosureCall intTy (BackendVar unaryIntTy "f") [intLit 0])
+                              (fnBoxPatternWithBinders [BackendPatternBinder (Just returnedClosureFIdentity) "f"])
+                              (BackendClosureCall intTy (BackendVarWithIdentity unaryIntTy (Just returnedClosureFIdentity) "f") [intLit 0])
                               :| []
                           ),
                       backendBindingExportedAsMain = True
@@ -10310,6 +10742,11 @@ returnedClosureFunctionFieldCallProgram =
         ],
       backendProgramMain = "entry"
     }
+  where
+    returnedClosureMakeBoxIdentity = symbolIdentityFromParts (UniqueIdentity 992048) SymbolValue "Main" "makeBox" Nothing
+    returnedClosureBaseIdentity = localIdentity 992049 "base"
+    returnedClosureXIdentity = localIdentity 992050 "x"
+    returnedClosureFIdentity = localIdentity 992051 "f"
 
 returnedReboxedClosureFunctionFieldCallProgram :: BackendProgram
 returnedReboxedClosureFunctionFieldCallProgram =
@@ -10319,31 +10756,35 @@ returnedReboxedClosureFunctionFieldCallProgram =
             { backendModuleName = "Main",
               backendModuleData = [fnBoxData],
               backendModuleBindings =
-                [ BackendBinding
-                    { backendBindingName = "makeRestored",
-                      backendBindingType = BTArrow fnBoxTy fnBoxTy,
-                      backendBindingExpr =
-                        BackendLam
+                [ BackendBindingWithMetadata
+                    { backendBindingIdentity = Just returnedReboxedMakeRestoredIdentity,
+                      backendBindingNameWithMetadata = "makeRestored",
+                      backendBindingTypeWithMetadata = BTArrow fnBoxTy fnBoxTy,
+                      backendBindingExprWithMetadata =
+                        BackendLamWithIdentity
                           (BTArrow fnBoxTy fnBoxTy)
+                          (Just returnedReboxedBoxIdentity)
                           "box"
                           fnBoxTy
                           ( BackendCase
                               fnBoxTy
-                              (BackendVar fnBoxTy "box")
+                              (BackendVarWithIdentity fnBoxTy (Just returnedReboxedBoxIdentity) "box")
                               ( BackendAlternative
-                                  (BackendConstructorPattern "FnBox" ["f"])
-                                  (BackendConstruct fnBoxTy "FnBox" [BackendVar unaryIntTy "f"])
+                                  (fnBoxPatternWithBinders [BackendPatternBinder (Just returnedReboxedInnerFIdentity) "f"])
+                                  (fnBoxConstruct [BackendVarWithIdentity unaryIntTy (Just returnedReboxedInnerFIdentity) "f"])
                                   :| []
                               )
                           ),
-                      backendBindingExportedAsMain = False
+                      backendBindingExportedAsMainWithMetadata = False,
+                      backendBindingEvidenceParamIndices = Set.empty
                     },
                   BackendBinding
                     { backendBindingName = "entry",
                       backendBindingType = intTy,
                       backendBindingExpr =
-                        BackendLet
+                        BackendLetWithIdentity
                           intTy
+                          (Just returnedReboxedCapturedIdentity)
                           "captured"
                           intTy
                           (intLit 41)
@@ -10351,24 +10792,28 @@ returnedReboxedClosureFunctionFieldCallProgram =
                               intTy
                               ( BackendApp
                                   fnBoxTy
-                                  (BackendVar (BTArrow fnBoxTy fnBoxTy) "makeRestored")
-                                  ( BackendConstruct
-                                      fnBoxTy
-                                      "FnBox"
+                                  (BackendVarWithIdentity (BTArrow fnBoxTy fnBoxTy) (Just (TopLevelId returnedReboxedMakeRestoredIdentity)) "makeRestored")
+                                  ( fnBoxConstruct
                                       [ BackendClosureWithParamIdentities
                                           { backendExprType = unaryIntTy,
               backendClosureEntryIdentity = Nothing,
               backendClosureEntryName = "__mlfp_closure$returned_reboxed_field_case_closure",
-                                            backendClosureCaptures = [BackendClosureCapture Nothing "captured" intTy (BackendVar intTy "captured")],
-                                            backendClosureParamsWithIdentities = backendClosureParams [("x", intTy)],
-                                            backendClosureBody = BackendVar intTy "captured"
+                                            backendClosureCaptures =
+                                              [ BackendClosureCapture
+                                                  (Just returnedReboxedCapturedIdentity)
+                                                  "captured"
+                                                  intTy
+                                                  (BackendVarWithIdentity intTy (Just returnedReboxedCapturedIdentity) "captured")
+                                              ],
+                                            backendClosureParamsWithIdentities = [BackendClosureParam (Just returnedReboxedXIdentity) "x" intTy],
+                                            backendClosureBody = BackendVarWithIdentity intTy (Just returnedReboxedCapturedIdentity) "captured"
                                           }
                                       ]
                                   )
                               )
                               ( BackendAlternative
-                                  (BackendConstructorPattern "FnBox" ["f"])
-                                  (BackendClosureCall intTy (BackendVar unaryIntTy "f") [intLit 0])
+                                  (fnBoxPatternWithBinders [BackendPatternBinder (Just returnedReboxedOuterFIdentity) "f"])
+                                  (BackendClosureCall intTy (BackendVarWithIdentity unaryIntTy (Just returnedReboxedOuterFIdentity) "f") [intLit 0])
                                   :| []
                               )
                           ),
@@ -10379,6 +10824,13 @@ returnedReboxedClosureFunctionFieldCallProgram =
         ],
       backendProgramMain = "entry"
     }
+  where
+    returnedReboxedMakeRestoredIdentity = symbolIdentityFromParts (UniqueIdentity 992052) SymbolValue "Main" "makeRestored" Nothing
+    returnedReboxedBoxIdentity = localIdentity 992053 "box"
+    returnedReboxedInnerFIdentity = localIdentity 992054 "f"
+    returnedReboxedCapturedIdentity = localIdentity 992055 "captured"
+    returnedReboxedXIdentity = localIdentity 992056 "x"
+    returnedReboxedOuterFIdentity = localIdentity 992057 "f"
 
 caseReturnedClosureOverApplicationProgram :: BackendProgram
 caseReturnedClosureOverApplicationProgram =
@@ -10946,61 +11398,105 @@ helperBinding =
 intIdentityExpr :: BackendExpr
 intIdentityExpr =
   BackendLamWithIdentity
-    { backendParamIdentity = Nothing, backendExprType = unaryIntTy,
+    { backendParamIdentity = Just intIdentityParamIdentity, backendExprType = unaryIntTy,
       backendParamName = "x",
       backendParamType = intTy,
-      backendBody = BackendVar intTy "x"
+      backendBody = BackendVarWithIdentity intTy (Just intIdentityParamIdentity) "x"
     }
+
+intIdentityParamIdentity :: IdDetails
+intIdentityParamIdentity =
+  localIdentity 990026 "x"
 
 boolIdentityExpr :: BackendExpr
 boolIdentityExpr =
   BackendLamWithIdentity
-    { backendParamIdentity = Nothing, backendExprType = unaryBoolTy,
+    { backendParamIdentity = Just boolIdentityParamIdentity, backendExprType = unaryBoolTy,
       backendParamName = "x",
       backendParamType = boolTy,
-      backendBody = BackendVar boolTy "x"
+      backendBody = BackendVarWithIdentity boolTy (Just boolIdentityParamIdentity) "x"
     }
+
+boolIdentityParamIdentity :: IdDetails
+boolIdentityParamIdentity =
+  localIdentity 990027 "x"
 
 fnBoxData :: BackendData
 fnBoxData =
-  BackendData
-    { backendDataName = "FnBox",
-      backendDataParameters = [],
-      backendDataConstructors = [BackendConstructor "FnBox" [] [unaryIntTy] fnBoxTy]
+  BackendDataWithIdentity
+    { backendDataIdentity = Just fnBoxIdentity,
+      backendDataNameWithIdentity = "FnBox",
+      backendDataParameterRefsWithIdentity = [],
+      backendDataConstructorsWithIdentity =
+        [ BackendConstructorWithIdentity
+            { backendConstructorIdentity = Just fnBoxConstructorIdentity,
+              backendConstructorNameWithIdentity = "FnBox",
+              backendConstructorForallsWithIdentity = [],
+              backendConstructorFieldsWithIdentity = [unaryIntTy],
+              backendConstructorResultWithIdentity = fnBoxTy
+            }
+        ]
     }
+
+fnBoxIdentity :: SymbolIdentity
+fnBoxIdentity =
+  symbolIdentityFromParts (UniqueIdentity 990020) SymbolType "Main" "FnBox" Nothing
+
+fnBoxConstructorIdentity :: SymbolIdentity
+fnBoxConstructorIdentity =
+  symbolIdentityFromParts (UniqueIdentity 990021) SymbolConstructor "Main" "FnBox" (Just (SymbolOwnerType fnBoxIdentity))
+
+fnBoxConstruct :: [BackendExpr] -> BackendExpr
+fnBoxConstruct =
+  BackendConstructWithIdentity fnBoxTy (Just fnBoxConstructorIdentity) "FnBox"
+
+fnBoxPattern :: [String] -> BackendPattern
+fnBoxPattern binders =
+  fnBoxPatternWithBinders [BackendPatternBinder Nothing binder | binder <- binders]
+
+fnBoxPatternWithBinders :: [BackendPatternBinder] -> BackendPattern
+fnBoxPatternWithBinders binders =
+  BackendConstructorPatternWithBinderIdentities
+    (Just fnBoxConstructorIdentity)
+    "FnBox"
+    binders
 
 lazyFieldBoxData :: BackendData
 lazyFieldBoxData =
-  BackendData
-    { backendDataName = "LazyFieldBox",
-      backendDataParameters = [],
-      backendDataConstructors =
-        [ BackendConstructor
-            "Packed"
-            []
-            [BTForall "a" Nothing (BTVar "a"), intTy]
-            lazyFieldBoxTy
+  BackendDataWithIdentity
+    { backendDataIdentity = Just lazyFieldBoxIdentity,
+      backendDataNameWithIdentity = "LazyFieldBox",
+      backendDataParameterRefsWithIdentity = [],
+      backendDataConstructorsWithIdentity =
+        [ BackendConstructorWithIdentity
+            { backendConstructorIdentity = Just lazyFieldBoxPackedIdentity,
+              backendConstructorNameWithIdentity = "Packed",
+              backendConstructorForallsWithIdentity = [],
+              backendConstructorFieldsWithIdentity = [lazyFieldPolyTy, intTy],
+              backendConstructorResultWithIdentity = lazyFieldBoxTy
+            }
         ]
     }
+
+lazyFieldPolyTy :: BackendType
+lazyFieldPolyTy =
+  BTForallWithIdentity (Just lazyFieldPolyTypeParameterIdentity) "a" Nothing lazyFieldPolyTypeParameterTy
+
+lazyFieldPolyTypeParameterIdentity :: TypeBinderIdentity
+lazyFieldPolyTypeParameterIdentity =
+  typeBinderIdentityFromUnique (UniqueIdentity 992020)
+
+lazyFieldPolyTypeParameterTy :: BackendType
+lazyFieldPolyTypeParameterTy =
+  BTVarWithIdentity (Just lazyFieldPolyTypeParameterIdentity) "a"
 
 strictBoxData :: BackendData
 strictBoxData =
-  BackendData
-    { backendDataName = "StrictBox",
-      backendDataParameters = [],
-      backendDataConstructors =
-        [ BackendConstructor
-            "StrictBox"
-            []
-            [polyIdTy, recIntTy]
-            strictBoxTy
-        ]
-    }
-
-strictBoxDataWithConstructorIdentity :: BackendData
-strictBoxDataWithConstructorIdentity =
-  strictBoxData
-    { backendDataConstructors =
+  BackendDataWithIdentity
+    { backendDataIdentity = Just strictBoxIdentity,
+      backendDataNameWithIdentity = "StrictBox",
+      backendDataParameterRefsWithIdentity = [],
+      backendDataConstructorsWithIdentity =
         [ BackendConstructorWithIdentity
             { backendConstructorIdentity = Just strictBoxConstructorIdentity,
               backendConstructorNameWithIdentity = "StrictBox",
@@ -11011,33 +11507,25 @@ strictBoxDataWithConstructorIdentity =
         ]
     }
 
+strictBoxDataWithConstructorIdentity :: BackendData
+strictBoxDataWithConstructorIdentity =
+  strictBoxData
+
+strictBoxIdentity :: SymbolIdentity
+strictBoxIdentity =
+  symbolIdentityFromParts (UniqueIdentity 992021) SymbolType "Main" "StrictBox" Nothing
+
 strictBoxConstructorIdentity :: SymbolIdentity
 strictBoxConstructorIdentity =
-  symbolIdentityFromParts (UniqueIdentity 990005) SymbolConstructor "Main" "StrictBox" Nothing
+  symbolIdentityFromParts (UniqueIdentity 990005) SymbolConstructor "Main" "StrictBox" (Just (SymbolOwnerType strictBoxIdentity))
 
 immediateChoiceData :: BackendData
 immediateChoiceData =
-  BackendData
-    { backendDataName = "ImmediateChoice",
-      backendDataParameters = [],
-      backendDataConstructors =
-        [ BackendConstructor
-            "WithStatic"
-            []
-            [polyIdTy, intTy]
-            immediateChoiceTy,
-          BackendConstructor
-            "Other"
-            []
-            []
-            immediateChoiceTy
-        ]
-    }
-
-immediateChoiceDataWithConstructorIdentity :: BackendData
-immediateChoiceDataWithConstructorIdentity =
-  immediateChoiceData
-    { backendDataConstructors =
+  BackendDataWithIdentity
+    { backendDataIdentity = Just immediateChoiceIdentity,
+      backendDataNameWithIdentity = "ImmediateChoice",
+      backendDataParameterRefsWithIdentity = [],
+      backendDataConstructorsWithIdentity =
         [ BackendConstructorWithIdentity
             { backendConstructorIdentity = Just immediateChoiceConstructorIdentity,
               backendConstructorNameWithIdentity = "WithStatic",
@@ -11045,9 +11533,19 @@ immediateChoiceDataWithConstructorIdentity =
               backendConstructorFieldsWithIdentity = [polyIdTy, intTy],
               backendConstructorResultWithIdentity = immediateChoiceTy
             },
-          BackendConstructor "Other" [] [] immediateChoiceTy
+          BackendConstructorWithIdentity
+            { backendConstructorIdentity = Just immediateChoiceOtherIdentity,
+              backendConstructorNameWithIdentity = "Other",
+              backendConstructorForallsWithIdentity = [],
+              backendConstructorFieldsWithIdentity = [],
+              backendConstructorResultWithIdentity = immediateChoiceTy
+            }
         ]
     }
+
+immediateChoiceDataWithConstructorIdentity :: BackendData
+immediateChoiceDataWithConstructorIdentity =
+  immediateChoiceData
 
 immediateChoiceDataWithStaleConstructorDisplayIdentity :: BackendData
 immediateChoiceDataWithStaleConstructorDisplayIdentity =
@@ -11060,13 +11558,27 @@ immediateChoiceDataWithStaleConstructorDisplayIdentity =
               backendConstructorFieldsWithIdentity = [polyIdTy, intTy],
               backendConstructorResultWithIdentity = immediateChoiceTy
             },
-          BackendConstructor "Other" [] [] immediateChoiceTy
+          BackendConstructorWithIdentity
+            { backendConstructorIdentity = Just immediateChoiceOtherIdentity,
+              backendConstructorNameWithIdentity = "Other",
+              backendConstructorForallsWithIdentity = [],
+              backendConstructorFieldsWithIdentity = [],
+              backendConstructorResultWithIdentity = immediateChoiceTy
+            }
         ]
     }
 
+immediateChoiceIdentity :: SymbolIdentity
+immediateChoiceIdentity =
+  symbolIdentityFromParts (UniqueIdentity 992022) SymbolType "Main" "ImmediateChoice" Nothing
+
 immediateChoiceConstructorIdentity :: SymbolIdentity
 immediateChoiceConstructorIdentity =
-  symbolIdentityFromParts (UniqueIdentity 990006) SymbolConstructor "Main" "WithStatic" Nothing
+  symbolIdentityFromParts (UniqueIdentity 990006) SymbolConstructor "Main" "WithStatic" (Just (SymbolOwnerType immediateChoiceIdentity))
+
+immediateChoiceOtherIdentity :: SymbolIdentity
+immediateChoiceOtherIdentity =
+  symbolIdentityFromParts (UniqueIdentity 992023) SymbolConstructor "Main" "Other" (Just (SymbolOwnerType immediateChoiceIdentity))
 
 conflictingStaleConstructorIdentity :: SymbolIdentity
 conflictingStaleConstructorIdentity =
@@ -11078,22 +11590,653 @@ otherImmediateChoiceConstructorIdentity =
 
 immediateStrictChoiceData :: BackendData
 immediateStrictChoiceData =
-  BackendData
-    { backendDataName = "ImmediateStrictChoice",
-      backendDataParameters = [],
-      backendDataConstructors =
-        [ BackendConstructor
-            "WithStrictStatic"
-            []
-            [polyIdTy, recIntTy]
-            immediateStrictChoiceTy,
-          BackendConstructor
-            "StrictOther"
-            []
-            []
-            immediateStrictChoiceTy
+  BackendDataWithIdentity
+    { backendDataIdentity = Just immediateStrictChoiceIdentity,
+      backendDataNameWithIdentity = "ImmediateStrictChoice",
+      backendDataParameterRefsWithIdentity = [],
+      backendDataConstructorsWithIdentity =
+        [ BackendConstructorWithIdentity
+            { backendConstructorIdentity = Just immediateStrictWithStaticIdentity,
+              backendConstructorNameWithIdentity = "WithStrictStatic",
+              backendConstructorForallsWithIdentity = [],
+              backendConstructorFieldsWithIdentity = [polyIdTy, recIntTy],
+              backendConstructorResultWithIdentity = immediateStrictChoiceTy
+            },
+          BackendConstructorWithIdentity
+            { backendConstructorIdentity = Just immediateStrictOtherIdentity,
+              backendConstructorNameWithIdentity = "StrictOther",
+              backendConstructorForallsWithIdentity = [],
+              backendConstructorFieldsWithIdentity = [],
+              backendConstructorResultWithIdentity = immediateStrictChoiceTy
+            }
         ]
     }
+
+immediateStrictChoiceIdentity :: SymbolIdentity
+immediateStrictChoiceIdentity =
+  symbolIdentityFromParts (UniqueIdentity 992024) SymbolType "Main" "ImmediateStrictChoice" Nothing
+
+immediateStrictWithStaticIdentity :: SymbolIdentity
+immediateStrictWithStaticIdentity =
+  symbolIdentityFromParts (UniqueIdentity 992025) SymbolConstructor "Main" "WithStrictStatic" (Just (SymbolOwnerType immediateStrictChoiceIdentity))
+
+immediateStrictOtherIdentity :: SymbolIdentity
+immediateStrictOtherIdentity =
+  symbolIdentityFromParts (UniqueIdentity 992026) SymbolConstructor "Main" "StrictOther" (Just (SymbolOwnerType immediateStrictChoiceIdentity))
+
+type FixtureSymbolEnv = Map.Map String (Maybe SymbolIdentity)
+
+type FixtureTypeEnv = Map.Map String (Maybe TypeBinderIdentity)
+
+type FixtureTermEnv = Map.Map String (Maybe IdDetails)
+
+data FixtureReferencePolicy
+  = ResolveFixtureReferences
+  | PreserveMissingReferences
+
+metadataLightFixtureToIdentityProgram :: BackendProgram -> BackendProgram
+metadataLightFixtureToIdentityProgram =
+  fixtureToIdentityProgram ResolveFixtureReferences
+
+identityPreservingFixtureToIdentityProgram :: BackendProgram -> BackendProgram
+identityPreservingFixtureToIdentityProgram =
+  fixtureToIdentityProgram PreserveMissingReferences
+
+fixtureToIdentityProgram :: FixtureReferencePolicy -> BackendProgram -> BackendProgram
+fixtureToIdentityProgram refPolicy program =
+  BackendProgramWithIdentity
+    { backendProgramModulesWithIdentity = modulesWithBindings,
+      backendProgramMainIdentity =
+        backendProgramMainIdentity program
+          <|> (Map.lookup (backendProgramMain program) globalEnv >>= id),
+      backendProgramMainWithIdentity = backendProgramMain program
+    }
+  where
+    generator0 =
+      identityGeneratorAfter (generatedIdentitiesInBackendProgram program)
+    (generator1, modulesWithIdentities) =
+      mapAccumL assignModuleIdentity generator0 (backendProgramModules program)
+    (generator2, modulesWithDataHeads, dataEnv) =
+      assignDataHeads generator1 modulesWithIdentities
+    (generator3, modulesWithData) =
+      mapAccumL (assignModuleData refPolicy dataEnv) generator2 modulesWithDataHeads
+    constructorEnv =
+      fixtureConstructorEnv modulesWithData
+    (generator4, modulesWithBindingHeads, globalEnv) =
+      assignBindingHeads generator3 modulesWithData
+    (_, modulesWithBindings) =
+      mapAccumL (assignModuleBindings refPolicy dataEnv constructorEnv globalEnv) generator4 modulesWithBindingHeads
+
+assignModuleIdentity :: IdentityGenerator -> BackendModule -> (IdentityGenerator, BackendModule)
+assignModuleIdentity generator backendModule =
+  case backendModuleIdentity backendModule of
+    Just {} ->
+      (generator, backendModule)
+    Nothing ->
+      let (unique, generator') = freshIdentity generator
+          moduleName = backendModuleName backendModule
+       in ( generator',
+            backendModule
+              { backendModuleIdentity =
+                  Just (symbolIdentityFromParts unique SymbolModule moduleName moduleName Nothing)
+              }
+          )
+
+assignDataHeads :: IdentityGenerator -> [BackendModule] -> (IdentityGenerator, [BackendModule], FixtureSymbolEnv)
+assignDataHeads generator modules0 =
+  foldl assignModule (generator, [], Map.empty) modules0
+  where
+    assignModule (gen0, modulesAcc, env0) backendModule =
+      let moduleName = backendModuleName backendModule
+          (gen1, dataDecls, env1) =
+            foldl (assignDataHead moduleName) (gen0, [], env0) (backendModuleData backendModule)
+       in ( gen1,
+            modulesAcc ++ [backendModule {backendModuleDataWithIdentity = dataDecls}],
+            env1
+          )
+
+    assignDataHead moduleName (gen0, dataAcc, env0) dataDecl =
+      let dataName = backendDataName dataDecl
+          (identity, gen1) =
+            case backendDataIdentity dataDecl of
+              Just existing -> (existing, gen0)
+              Nothing ->
+                let (unique, gen') = freshIdentity gen0
+                 in (symbolIdentityFromParts unique SymbolType moduleName dataName Nothing, gen')
+          dataDecl' = dataDecl {backendDataIdentity = Just identity}
+       in (gen1, dataAcc ++ [dataDecl'], insertFixtureSymbol moduleName dataName identity env0)
+
+assignModuleData :: FixtureReferencePolicy -> FixtureSymbolEnv -> IdentityGenerator -> BackendModule -> (IdentityGenerator, BackendModule)
+assignModuleData refPolicy dataEnv generator backendModule =
+  let (generator', dataDecls') =
+        mapAccumL (assignDataDeclaration refPolicy dataEnv (backendModuleName backendModule)) generator (backendModuleData backendModule)
+   in (generator', backendModule {backendModuleDataWithIdentity = dataDecls'})
+
+assignDataDeclaration :: FixtureReferencePolicy -> FixtureSymbolEnv -> String -> IdentityGenerator -> BackendData -> (IdentityGenerator, BackendData)
+assignDataDeclaration refPolicy dataEnv moduleName generator dataDecl =
+  ( generator2,
+    dataDecl
+      { backendDataParameterRefsWithIdentity = parameterRefs,
+        backendDataConstructorsWithIdentity = constructors
+      }
+  )
+  where
+    (generator1, parameterRefs, typeEnv) =
+      foldl assignParameter (generator, [], Map.empty) (backendDataParameterRefs dataDecl)
+    (generator2, constructors) =
+      mapAccumL
+        (assignConstructor refPolicy dataEnv moduleName (backendDataIdentity dataDecl) typeEnv)
+        generator1
+        (backendDataConstructors dataDecl)
+
+    assignParameter (gen0, refs, env0) ref =
+      let name = backendDataParameterRefName ref
+          (identity, gen1) = freshFixtureTypeIdentity (backendDataParameterRefIdentity ref) gen0
+          ref' = backendDataParameterRefFromIdentity identity name
+       in (gen1, refs ++ [ref'], insertFixtureType name identity env0)
+
+assignConstructor ::
+  FixtureReferencePolicy ->
+  FixtureSymbolEnv ->
+  String ->
+  Maybe SymbolIdentity ->
+  FixtureTypeEnv ->
+  IdentityGenerator ->
+  BackendConstructor ->
+  (IdentityGenerator, BackendConstructor)
+assignConstructor refPolicy dataEnv moduleName mbDataIdentity typeEnv generator constructor =
+  ( generator4,
+    constructor
+      { backendConstructorIdentity = Just constructorIdentity,
+        backendConstructorForallsWithIdentity = foralls,
+        backendConstructorFieldsWithIdentity = fields,
+        backendConstructorResultWithIdentity = resultTy
+      }
+  )
+  where
+    (constructorIdentity, generator1) =
+      case backendConstructorIdentity constructor of
+        Just existing -> (existing, generator)
+        Nothing ->
+          let (unique, gen') = freshIdentity generator
+           in ( symbolIdentityFromParts
+                  unique
+                  SymbolConstructor
+                  moduleName
+                  (backendConstructorName constructor)
+                  (SymbolOwnerType <$> mbDataIdentity),
+                gen'
+              )
+    (generator2, foralls, typeEnv') =
+      assignTypeBinders refPolicy dataEnv typeEnv generator1 (backendConstructorForalls constructor)
+    (generator3, fields) =
+      mapAccumL (assignType refPolicy dataEnv typeEnv') generator2 (backendConstructorFields constructor)
+    (generator4, resultTy) =
+      assignType refPolicy dataEnv typeEnv' generator3 (backendConstructorResult constructor)
+
+fixtureConstructorEnv :: [BackendModule] -> FixtureSymbolEnv
+fixtureConstructorEnv =
+  foldl insertModule Map.empty
+  where
+    insertModule env backendModule =
+      foldl (insertData (backendModuleName backendModule)) env (backendModuleData backendModule)
+    insertData moduleName env dataDecl =
+      foldl (insertConstructor moduleName) env (backendDataConstructors dataDecl)
+    insertConstructor moduleName env constructor =
+      case backendConstructorIdentity constructor of
+        Just identity -> insertFixtureSymbol moduleName (backendConstructorName constructor) identity env
+        Nothing -> env
+
+assignBindingHeads :: IdentityGenerator -> [BackendModule] -> (IdentityGenerator, [BackendModule], FixtureSymbolEnv)
+assignBindingHeads generator modules0 =
+  foldl assignModule (generator, [], Map.empty) modules0
+  where
+    assignModule (gen0, modulesAcc, env0) backendModule =
+      let moduleName = backendModuleName backendModule
+          (gen1, bindings, env1) =
+            foldl (assignBindingHead moduleName) (gen0, [], env0) (backendModuleBindings backendModule)
+       in ( gen1,
+            modulesAcc ++ [backendModule {backendModuleBindingsWithIdentity = bindings}],
+            env1
+          )
+
+    assignBindingHead moduleName (gen0, bindingsAcc, env0) binding =
+      let bindingName = backendBindingName binding
+          (identity, gen1) =
+            case backendBindingIdentity binding of
+              Just existing -> (existing, gen0)
+              Nothing ->
+                let (unique, gen') = freshIdentity gen0
+                 in (symbolIdentityFromParts unique SymbolValue moduleName bindingName Nothing, gen')
+          binding' = binding {backendBindingIdentity = Just identity}
+       in (gen1, bindingsAcc ++ [binding'], insertFixtureSymbol moduleName bindingName identity env0)
+
+assignModuleBindings ::
+  FixtureReferencePolicy ->
+  FixtureSymbolEnv ->
+  FixtureSymbolEnv ->
+  FixtureSymbolEnv ->
+  IdentityGenerator ->
+  BackendModule ->
+  (IdentityGenerator, BackendModule)
+assignModuleBindings refPolicy dataEnv constructorEnv globalEnv generator backendModule =
+  let (generator', bindings') =
+        mapAccumL (assignBinding refPolicy dataEnv constructorEnv globalEnv) generator (backendModuleBindings backendModule)
+   in (generator', backendModule {backendModuleBindingsWithIdentity = bindings'})
+
+assignBinding ::
+  FixtureReferencePolicy ->
+  FixtureSymbolEnv ->
+  FixtureSymbolEnv ->
+  FixtureSymbolEnv ->
+  IdentityGenerator ->
+  BackendBinding ->
+  (IdentityGenerator, BackendBinding)
+assignBinding refPolicy dataEnv constructorEnv globalEnv generator binding =
+  ( generator2,
+    binding
+      { backendBindingTypeWithMetadata = bindingTy,
+        backendBindingExprWithMetadata = expr
+      }
+  )
+  where
+    (generator1, bindingTy) =
+      assignType refPolicy dataEnv Map.empty generator (backendBindingType binding)
+    bindingTypeEnv =
+      leadingFixtureTypeEnv bindingTy
+    (generator2, expr) =
+      assignExpr refPolicy dataEnv constructorEnv globalEnv bindingTypeEnv Map.empty generator1 (backendBindingExpr binding)
+
+leadingFixtureTypeEnv :: BackendType -> FixtureTypeEnv
+leadingFixtureTypeEnv =
+  go Map.empty
+  where
+    go typeEnv =
+      \case
+        BTForallWithIdentity (Just identity) name _ body ->
+          go (shadowFixtureType name identity typeEnv) body
+        _ ->
+          typeEnv
+
+assignTypeBinders ::
+  FixtureReferencePolicy ->
+  FixtureSymbolEnv ->
+  FixtureTypeEnv ->
+  IdentityGenerator ->
+  [BackendTypeBinder] ->
+  (IdentityGenerator, [BackendTypeBinder], FixtureTypeEnv)
+assignTypeBinders refPolicy dataEnv typeEnv generator =
+  foldl assignOne (generator, [], typeEnv)
+  where
+    assignOne (gen0, binders, env0) binder =
+      let (gen1, mbBound) =
+            assignMaybeType refPolicy dataEnv env0 gen0 (backendTypeBinderBound binder)
+          (identity, gen2) =
+            freshFixtureTypeIdentity (backendTypeBinderIdentity binder) gen1
+          binder' =
+            BackendTypeBinderWithIdentity
+              (Just identity)
+              (backendTypeBinderName binder)
+              mbBound
+       in (gen2, binders ++ [binder'], insertFixtureType (backendTypeBinderName binder) identity env0)
+
+assignMaybeType :: FixtureReferencePolicy -> FixtureSymbolEnv -> FixtureTypeEnv -> IdentityGenerator -> Maybe BackendType -> (IdentityGenerator, Maybe BackendType)
+assignMaybeType refPolicy dataEnv typeEnv generator =
+  \case
+    Nothing -> (generator, Nothing)
+    Just ty ->
+      let (generator', ty') = assignType refPolicy dataEnv typeEnv generator ty
+       in (generator', Just ty')
+
+assignType :: FixtureReferencePolicy -> FixtureSymbolEnv -> FixtureTypeEnv -> IdentityGenerator -> BackendType -> (IdentityGenerator, BackendType)
+assignType refPolicy dataEnv typeEnv generator =
+  \case
+    BTVarWithIdentity identity name ->
+      (generator, BTVarWithIdentity (identity <|> fixtureLookupByPolicy refPolicy name typeEnv) name)
+    BTArrow dom cod ->
+      let (generator1, dom') = assignType refPolicy dataEnv typeEnv generator dom
+          (generator2, cod') = assignType refPolicy dataEnv typeEnv generator1 cod
+       in (generator2, BTArrow dom' cod')
+    BTBaseWithIdentity identity base@(BaseTy name) ->
+      (generator, BTBaseWithIdentity (identity <|> fixtureLookupByPolicy refPolicy name dataEnv) base)
+    BTConWithIdentity identity base@(BaseTy name) args ->
+      let (generator', args') = assignNonEmptyTypes refPolicy dataEnv typeEnv generator args
+       in (generator', BTConWithIdentity (identity <|> fixtureLookupByPolicy refPolicy name dataEnv) base args')
+    BTVarAppWithIdentity identity name args ->
+      let (generator', args') = assignNonEmptyTypes refPolicy dataEnv typeEnv generator args
+       in (generator', BTVarAppWithIdentity (identity <|> fixtureLookupByPolicy refPolicy name typeEnv) name args')
+    BTForallWithIdentity identity name mbBound body ->
+      let (generator1, mbBound') = assignMaybeType refPolicy dataEnv typeEnv generator mbBound
+          (binderIdentity, generator2) = freshFixtureTypeIdentity identity generator1
+          (generator3, body') = assignType refPolicy dataEnv (shadowFixtureType name binderIdentity typeEnv) generator2 body
+       in (generator3, BTForallWithIdentity (Just binderIdentity) name mbBound' body')
+    BTMuWithIdentity identity name body ->
+      let (binderIdentity, generator1) =
+            freshFixtureStructuralTypeIdentity dataEnv identity name StructuralSelfBinder generator
+          (generator2, body') =
+            assignStructuralMuBody refPolicy dataEnv (shadowFixtureType name binderIdentity typeEnv) name generator1 body
+       in (generator2, BTMuWithIdentity (Just binderIdentity) name body')
+    BTBottom ->
+      (generator, BTBottom)
+
+assignStructuralMuBody :: FixtureReferencePolicy -> FixtureSymbolEnv -> FixtureTypeEnv -> String -> IdentityGenerator -> BackendType -> (IdentityGenerator, BackendType)
+assignStructuralMuBody refPolicy dataEnv typeEnv muName generator body =
+  case (fixtureStructuralDataIdentity dataEnv muName, body) of
+    (Just dataIdentity, BTForallWithIdentity identity resultName mbBound resultBody) ->
+      let (generator1, mbBound') = assignMaybeType refPolicy dataEnv typeEnv generator mbBound
+          (resultIdentity, generator2) =
+            case identity of
+              Just existing -> (existing, generator1)
+              Nothing ->
+                ( typeBinderIdentityFromStructural (symbolUniqueIdentity dataIdentity) StructuralResultBinder,
+                  generator1
+                )
+          (generator3, resultBody') =
+            assignType refPolicy dataEnv (shadowFixtureType resultName resultIdentity typeEnv) generator2 resultBody
+       in (generator3, BTForallWithIdentity (Just resultIdentity) resultName mbBound' resultBody')
+    _ ->
+      assignType refPolicy dataEnv typeEnv generator body
+
+assignNonEmptyTypes :: FixtureReferencePolicy -> FixtureSymbolEnv -> FixtureTypeEnv -> IdentityGenerator -> NonEmpty BackendType -> (IdentityGenerator, NonEmpty BackendType)
+assignNonEmptyTypes refPolicy dataEnv typeEnv generator (ty :| tys) =
+  let (generator1, ty') = assignType refPolicy dataEnv typeEnv generator ty
+      (generator2, tys') = mapAccumL (assignType refPolicy dataEnv typeEnv) generator1 tys
+   in (generator2, ty' :| tys')
+
+assignExpr ::
+  FixtureReferencePolicy ->
+  FixtureSymbolEnv ->
+  FixtureSymbolEnv ->
+  FixtureSymbolEnv ->
+  FixtureTypeEnv ->
+  FixtureTermEnv ->
+  IdentityGenerator ->
+  BackendExpr ->
+  (IdentityGenerator, BackendExpr)
+assignExpr refPolicy dataEnv constructorEnv globalEnv typeEnv termEnv generator =
+  \case
+    BackendVarWithIdentity resultTy identity name ->
+      let (generator', resultTy') = assignType refPolicy dataEnv typeEnv generator resultTy
+       in (generator', BackendVarWithIdentity resultTy' (identity <|> fixtureTermRefByPolicy refPolicy globalEnv termEnv name) name)
+    BackendLit resultTy lit ->
+      let (generator', resultTy') = assignType refPolicy dataEnv typeEnv generator resultTy
+       in (generator', BackendLit resultTy' lit)
+    BackendLamWithIdentity resultTy identity name paramTy body ->
+      let (generator1, resultTy') = assignType refPolicy dataEnv typeEnv generator resultTy
+          (generator2, paramTy') = assignType refPolicy dataEnv typeEnv generator1 paramTy
+          (paramIdentity, generator3) = freshFixtureTermIdentity identity name generator2
+          termEnv' = shadowFixtureTerm name paramIdentity termEnv
+          (generator4, body') = assignExpr refPolicy dataEnv constructorEnv globalEnv typeEnv termEnv' generator3 body
+       in (generator4, BackendLamWithIdentity resultTy' (Just paramIdentity) name paramTy' body')
+    BackendApp resultTy fun arg ->
+      let (generator1, resultTy') = assignType refPolicy dataEnv typeEnv generator resultTy
+          (generator2, fun') = assignExpr refPolicy dataEnv constructorEnv globalEnv typeEnv termEnv generator1 fun
+          (generator3, arg') = assignExpr refPolicy dataEnv constructorEnv globalEnv typeEnv termEnv generator2 arg
+       in (generator3, BackendApp resultTy' fun' arg')
+    BackendLetWithIdentity resultTy identity name bindingTy rhs body ->
+      let (generator1, resultTy') = assignType refPolicy dataEnv typeEnv generator resultTy
+          (generator2, bindingTy') = assignType refPolicy dataEnv typeEnv generator1 bindingTy
+          (generator3, rhs') = assignExpr refPolicy dataEnv constructorEnv globalEnv typeEnv termEnv generator2 rhs
+          (letIdentity, generator4) = freshFixtureTermIdentity identity name generator3
+          termEnv' = shadowFixtureTerm name letIdentity termEnv
+          (generator5, body') = assignExpr refPolicy dataEnv constructorEnv globalEnv typeEnv termEnv' generator4 body
+       in (generator5, BackendLetWithIdentity resultTy' (Just letIdentity) name bindingTy' rhs' body')
+    BackendTyAbsWithIdentity resultTy identity name mbBound body ->
+      let (generator1, resultTy') = assignType refPolicy dataEnv typeEnv generator resultTy
+          (generator2, mbBound') = assignMaybeType refPolicy dataEnv typeEnv generator1 mbBound
+          (binderIdentity, generator3) =
+            case resultTy' of
+              BTForallWithIdentity (Just resultIdentity) _ _ _ -> (resultIdentity, generator2)
+              _ -> freshFixtureTypeIdentity identity generator2
+          typeEnv' = shadowFixtureType name binderIdentity typeEnv
+          (generator4, body') = assignExpr refPolicy dataEnv constructorEnv globalEnv typeEnv' termEnv generator3 body
+       in (generator4, BackendTyAbsWithIdentity resultTy' (Just binderIdentity) name mbBound' body')
+    BackendTyApp resultTy fun argTy ->
+      let (generator1, resultTy') = assignType refPolicy dataEnv typeEnv generator resultTy
+          (generator2, fun') = assignExpr refPolicy dataEnv constructorEnv globalEnv typeEnv termEnv generator1 fun
+          (generator3, argTy') = assignType refPolicy dataEnv typeEnv generator2 argTy
+       in (generator3, BackendTyApp resultTy' fun' argTy')
+    BackendRoll resultTy payload ->
+      let (generator1, resultTy') = assignType refPolicy dataEnv typeEnv generator resultTy
+          (generator2, payload') = assignExpr refPolicy dataEnv constructorEnv globalEnv typeEnv termEnv generator1 payload
+       in (generator2, BackendRoll resultTy' payload')
+    BackendUnroll resultTy payload ->
+      let (generator1, resultTy') = assignType refPolicy dataEnv typeEnv generator resultTy
+          (generator2, payload') = assignExpr refPolicy dataEnv constructorEnv globalEnv typeEnv termEnv generator1 payload
+       in (generator2, BackendUnroll resultTy' payload')
+    BackendClosureWithParamIdentities resultTy entryIdentity entryName captures params body ->
+      let (generator1, resultTy') = assignType refPolicy dataEnv typeEnv generator resultTy
+          (entryIdentity', generator2) =
+            case entryIdentity of
+              Just existing -> (existing, generator1)
+              Nothing -> freshIdentity generator1
+          (generator3, captures', captureEnv) =
+            assignClosureCaptures refPolicy dataEnv constructorEnv globalEnv typeEnv termEnv generator2 captures
+          (generator4, params', paramEnv) =
+            assignClosureParams refPolicy dataEnv typeEnv generator3 params
+          bodyEnv = paramEnv `Map.union` captureEnv
+          (generator5, body') = assignExpr refPolicy dataEnv constructorEnv globalEnv typeEnv bodyEnv generator4 body
+       in (generator5, BackendClosureWithParamIdentities resultTy' (Just entryIdentity') entryName captures' params' body')
+    BackendClosureCall resultTy fun args ->
+      let (generator1, resultTy') = assignType refPolicy dataEnv typeEnv generator resultTy
+          (generator2, fun') = assignExpr refPolicy dataEnv constructorEnv globalEnv typeEnv termEnv generator1 fun
+          (generator3, args') = mapAccumL (assignExpr refPolicy dataEnv constructorEnv globalEnv typeEnv termEnv) generator2 args
+       in (generator3, BackendClosureCall resultTy' fun' args')
+    BackendConstructWithIdentity resultTy identity name args ->
+      let (generator1, resultTy') = assignType refPolicy dataEnv typeEnv generator resultTy
+          (generator2, args') = mapAccumL (assignExpr refPolicy dataEnv constructorEnv globalEnv typeEnv termEnv) generator1 args
+       in (generator2, BackendConstructWithIdentity resultTy' (identity <|> fixtureLookupByPolicy refPolicy name constructorEnv) name args')
+    BackendCase resultTy scrutinee alternatives ->
+      let (generator1, resultTy') = assignType refPolicy dataEnv typeEnv generator resultTy
+          (generator2, scrutinee') = assignExpr refPolicy dataEnv constructorEnv globalEnv typeEnv termEnv generator1 scrutinee
+          (generator3, alternatives') = assignNonEmptyAlternatives refPolicy dataEnv constructorEnv globalEnv typeEnv termEnv generator2 alternatives
+       in (generator3, BackendCase resultTy' scrutinee' alternatives')
+
+assignClosureCaptures ::
+  FixtureReferencePolicy ->
+  FixtureSymbolEnv ->
+  FixtureSymbolEnv ->
+  FixtureSymbolEnv ->
+  FixtureTypeEnv ->
+  FixtureTermEnv ->
+  IdentityGenerator ->
+  [BackendClosureCapture] ->
+  (IdentityGenerator, [BackendClosureCapture], FixtureTermEnv)
+assignClosureCaptures refPolicy dataEnv constructorEnv globalEnv typeEnv termEnv generator0 captures0 =
+  foldl assignOne (generator0, [], Map.empty) captures0
+  where
+    assignOne (gen0, capturesAcc, captureEnv) capture =
+      let (generator1, captureTy) = assignType refPolicy dataEnv typeEnv gen0 (backendClosureCaptureType capture)
+          (generator2, captureExpr) = assignExpr refPolicy dataEnv constructorEnv globalEnv typeEnv termEnv generator1 (backendClosureCaptureExpr capture)
+          (captureIdentity, generator3) =
+            freshFixtureTermIdentity (backendClosureCaptureIdentity capture) (backendClosureCaptureName capture) generator2
+          capture' =
+            capture
+              { backendClosureCaptureIdentity = Just captureIdentity,
+                backendClosureCaptureType = captureTy,
+                backendClosureCaptureExpr = captureExpr
+              }
+       in (generator3, capturesAcc ++ [capture'], insertFixtureTerm (backendClosureCaptureName capture) captureIdentity captureEnv)
+
+assignClosureParams ::
+  FixtureReferencePolicy ->
+  FixtureSymbolEnv ->
+  FixtureTypeEnv ->
+  IdentityGenerator ->
+  [BackendClosureParam] ->
+  (IdentityGenerator, [BackendClosureParam], FixtureTermEnv)
+assignClosureParams refPolicy dataEnv typeEnv generator0 params0 =
+  foldl assignOne (generator0, [], Map.empty) params0
+  where
+    assignOne (gen0, paramsAcc, paramEnv) param =
+      let (generator1, paramTy) = assignType refPolicy dataEnv typeEnv gen0 (backendClosureParamType param)
+          (paramIdentity, generator2) =
+            freshFixtureTermIdentity (backendClosureParamIdentity param) (backendClosureParamName param) generator1
+          param' =
+            param
+              { backendClosureParamIdentity = Just paramIdentity,
+                backendClosureParamType = paramTy
+              }
+       in (generator2, paramsAcc ++ [param'], insertFixtureTerm (backendClosureParamName param) paramIdentity paramEnv)
+
+assignNonEmptyAlternatives ::
+  FixtureReferencePolicy ->
+  FixtureSymbolEnv ->
+  FixtureSymbolEnv ->
+  FixtureSymbolEnv ->
+  FixtureTypeEnv ->
+  FixtureTermEnv ->
+  IdentityGenerator ->
+  NonEmpty BackendAlternative ->
+  (IdentityGenerator, NonEmpty BackendAlternative)
+assignNonEmptyAlternatives refPolicy dataEnv constructorEnv globalEnv typeEnv termEnv generator (alternative :| alternatives) =
+  let (generator1, alternative') = assignAlternative refPolicy dataEnv constructorEnv globalEnv typeEnv termEnv generator alternative
+      (generator2, alternatives') =
+        mapAccumL (assignAlternative refPolicy dataEnv constructorEnv globalEnv typeEnv termEnv) generator1 alternatives
+   in (generator2, alternative' :| alternatives')
+
+assignAlternative ::
+  FixtureReferencePolicy ->
+  FixtureSymbolEnv ->
+  FixtureSymbolEnv ->
+  FixtureSymbolEnv ->
+  FixtureTypeEnv ->
+  FixtureTermEnv ->
+  IdentityGenerator ->
+  BackendAlternative ->
+  (IdentityGenerator, BackendAlternative)
+assignAlternative refPolicy dataEnv constructorEnv globalEnv typeEnv termEnv generator alternative =
+  ( generator2,
+    alternative {backendAltPattern = pattern', backendAltBody = body'}
+  )
+  where
+    (generator1, pattern', patternEnv) =
+      assignPattern refPolicy constructorEnv generator (backendAltPattern alternative)
+    (generator2, body') =
+      assignExpr refPolicy dataEnv constructorEnv globalEnv typeEnv (patternEnv `Map.union` termEnv) generator1 (backendAltBody alternative)
+
+assignPattern :: FixtureReferencePolicy -> FixtureSymbolEnv -> IdentityGenerator -> BackendPattern -> (IdentityGenerator, BackendPattern, FixtureTermEnv)
+assignPattern refPolicy constructorEnv generator =
+  \case
+    BackendDefaultPattern ->
+      (generator, BackendDefaultPattern, Map.empty)
+    BackendConstructorPatternWithBinderIdentities identity name binders ->
+      let (generator', binders', termEnv) =
+            foldl assignBinder (generator, [], Map.empty) binders
+       in ( generator',
+            BackendConstructorPatternWithBinderIdentities (identity <|> fixtureLookupByPolicy refPolicy name constructorEnv) name binders',
+            termEnv
+          )
+  where
+    assignBinder (gen0, binders, env0) binder =
+      let binderName = backendPatternBinderName binder
+          (binderIdentity, gen1) =
+            freshFixtureTermIdentity (backendPatternBinderIdentity binder) binderName gen0
+          binder' = binder {backendPatternBinderIdentity = Just binderIdentity}
+       in (gen1, binders ++ [binder'], insertFixtureTerm binderName binderIdentity env0)
+
+freshFixtureTypeIdentity :: Maybe TypeBinderIdentity -> IdentityGenerator -> (TypeBinderIdentity, IdentityGenerator)
+freshFixtureTypeIdentity (Just identity) generator =
+  (identity, generator)
+freshFixtureTypeIdentity Nothing generator =
+  let (unique, generator') = freshIdentity generator
+   in (typeBinderIdentityFromUnique unique, generator')
+
+freshFixtureStructuralTypeIdentity ::
+  FixtureSymbolEnv ->
+  Maybe TypeBinderIdentity ->
+  String ->
+  StructuralTypeBinderRole ->
+  IdentityGenerator ->
+  (TypeBinderIdentity, IdentityGenerator)
+freshFixtureStructuralTypeIdentity _ (Just identity) _ _ generator =
+  (identity, generator)
+freshFixtureStructuralTypeIdentity dataEnv Nothing name role generator =
+  case fixtureStructuralDataIdentity dataEnv name of
+    Just dataIdentity ->
+      (typeBinderIdentityFromStructural (symbolUniqueIdentity dataIdentity) role, generator)
+    Nothing ->
+      freshFixtureTypeIdentity Nothing generator
+
+fixtureStructuralDataIdentity :: FixtureSymbolEnv -> String -> Maybe SymbolIdentity
+fixtureStructuralDataIdentity dataEnv name =
+  Structural.structuralRecursiveDataName name >>= (`fixtureLookup` dataEnv)
+
+freshFixtureTermIdentity :: Maybe IdDetails -> String -> IdentityGenerator -> (IdDetails, IdentityGenerator)
+freshFixtureTermIdentity (Just identity) _ generator =
+  (identity, generator)
+freshFixtureTermIdentity Nothing name generator =
+  let (ref, generator') = freshLocalRef name generator
+   in (LocalId ref, generator')
+
+fixtureTermRef :: FixtureSymbolEnv -> FixtureTermEnv -> String -> Maybe IdDetails
+fixtureTermRef globalEnv termEnv name =
+  fixtureLookup name termEnv
+    <|> (TopLevelId <$> fixtureLookup name globalEnv)
+    <|> primitiveFixtureRef name
+
+fixtureTermRefByPolicy :: FixtureReferencePolicy -> FixtureSymbolEnv -> FixtureTermEnv -> String -> Maybe IdDetails
+fixtureTermRefByPolicy ResolveFixtureReferences globalEnv termEnv name =
+  fixtureTermRef globalEnv termEnv name
+fixtureTermRefByPolicy PreserveMissingReferences _ _ _ =
+  Nothing
+
+primitiveFixtureRef :: String -> Maybe IdDetails
+primitiveFixtureRef name
+  | Map.member name PrimitiveInventory.primitiveValueSpecs =
+      Just (PrimitiveId (primitiveRefFromSymbol (PrimitiveInventory.builtinValueIdentity name)))
+  | otherwise =
+      Nothing
+
+insertFixtureSymbol :: String -> String -> SymbolIdentity -> FixtureSymbolEnv -> FixtureSymbolEnv
+insertFixtureSymbol moduleName name identity =
+  insertFixtureAliases (fixtureSymbolAliases moduleName name identity) identity
+
+insertFixtureType :: String -> TypeBinderIdentity -> FixtureTypeEnv -> FixtureTypeEnv
+insertFixtureType name identity =
+  insertFixtureAliases [name, typeBinderIdentityStableName identity] identity
+
+insertFixtureTerm :: String -> IdDetails -> FixtureTermEnv -> FixtureTermEnv
+insertFixtureTerm name identity =
+  insertFixtureAliases [name, idDetailsStableName identity] identity
+
+shadowFixtureType :: String -> TypeBinderIdentity -> FixtureTypeEnv -> FixtureTypeEnv
+shadowFixtureType name identity =
+  overwriteFixtureAliases [name, typeBinderIdentityStableName identity] identity
+
+shadowFixtureTerm :: String -> IdDetails -> FixtureTermEnv -> FixtureTermEnv
+shadowFixtureTerm name identity =
+  overwriteFixtureAliases [name, idDetailsStableName identity] identity
+
+overwriteFixtureAliases :: Ord key => [key] -> value -> Map.Map key (Maybe value) -> Map.Map key (Maybe value)
+overwriteFixtureAliases aliases value env =
+  foldr (\alias acc -> Map.insert alias (Just value) acc) env aliases
+
+fixtureSymbolAliases :: String -> String -> SymbolIdentity -> [String]
+fixtureSymbolAliases moduleName name identity =
+  filter (not . null) [name, moduleName ++ "." ++ name, moduleName ++ "__" ++ name, symbolIdentityStableName identity]
+
+insertFixtureAliases :: (Ord k, Eq value) => [k] -> value -> Map.Map k (Maybe value) -> Map.Map k (Maybe value)
+insertFixtureAliases aliases value env =
+  foldr (\alias acc -> Map.alter merge alias acc) env aliases
+  where
+    merge Nothing =
+      Just (Just value)
+    merge (Just (Just existing))
+      | existing == value = Just (Just existing)
+      | otherwise = Just Nothing
+    merge (Just Nothing) =
+      Just Nothing
+
+fixtureLookup :: Ord key => key -> Map.Map key (Maybe value) -> Maybe value
+fixtureLookup key env =
+  Map.lookup key env >>= id
+
+fixtureLookupByPolicy :: Ord key => FixtureReferencePolicy -> key -> Map.Map key (Maybe value) -> Maybe value
+fixtureLookupByPolicy ResolveFixtureReferences key env =
+  fixtureLookup key env
+fixtureLookupByPolicy PreserveMissingReferences _ _ =
+  Nothing
 
 programWithMainExpr :: BackendType -> BackendExpr -> BackendProgram
 programWithMainExpr mainTy expr =
@@ -11207,7 +12350,23 @@ charTy =
 
 optionTy :: BackendType -> BackendType
 optionTy ty =
-  BTCon (BaseTy "Option") (ty :| [])
+  BTConWithIdentity (Just optionIdentity) (BaseTy "Option") (ty :| [])
+
+optionNone :: BackendType -> BackendExpr
+optionNone ty =
+  BackendConstructWithIdentity (optionTy ty) (Just optionNoneIdentity) "None" []
+
+optionSome :: BackendType -> [BackendExpr] -> BackendExpr
+optionSome ty =
+  BackendConstructWithIdentity (optionTy ty) (Just optionSomeIdentity) "Some"
+
+optionNonePattern :: BackendPattern
+optionNonePattern =
+  BackendConstructorPatternWithBinderIdentities (Just optionNoneIdentity) "None" []
+
+optionSomePattern :: [BackendPatternBinder] -> BackendPattern
+optionSomePattern =
+  BackendConstructorPatternWithBinderIdentities (Just optionSomeIdentity) "Some"
 
 resultBoxTy :: BackendType
 resultBoxTy =
@@ -11239,23 +12398,31 @@ higherOrderEvidenceTy =
 
 fnBoxTy :: BackendType
 fnBoxTy =
-  BTBase (BaseTy "FnBox")
+  BTBaseWithIdentity (Just fnBoxIdentity) (BaseTy "FnBox")
 
 lazyFieldBoxTy :: BackendType
 lazyFieldBoxTy =
-  BTBase (BaseTy "LazyFieldBox")
+  BTBaseWithIdentity (Just lazyFieldBoxIdentity) (BaseTy "LazyFieldBox")
+
+lazyFieldBoxIdentity :: SymbolIdentity
+lazyFieldBoxIdentity =
+  symbolIdentityFromParts (UniqueIdentity 992027) SymbolType "Main" "LazyFieldBox" Nothing
+
+lazyFieldBoxPackedIdentity :: SymbolIdentity
+lazyFieldBoxPackedIdentity =
+  symbolIdentityFromParts (UniqueIdentity 992028) SymbolConstructor "Main" "Packed" (Just (SymbolOwnerType lazyFieldBoxIdentity))
 
 strictBoxTy :: BackendType
 strictBoxTy =
-  BTBase (BaseTy "StrictBox")
+  BTBaseWithIdentity (Just strictBoxIdentity) (BaseTy "StrictBox")
 
 immediateChoiceTy :: BackendType
 immediateChoiceTy =
-  BTBase (BaseTy "ImmediateChoice")
+  BTBaseWithIdentity (Just immediateChoiceIdentity) (BaseTy "ImmediateChoice")
 
 immediateStrictChoiceTy :: BackendType
 immediateStrictChoiceTy =
-  BTBase (BaseTy "ImmediateStrictChoice")
+  BTBaseWithIdentity (Just immediateStrictChoiceIdentity) (BaseTy "ImmediateStrictChoice")
 
 aUnderscoreTy :: BackendType
 aUnderscoreTy =
@@ -11442,6 +12609,67 @@ shouldSatisfyStringLeft result predicate =
       err `shouldSatisfy` predicate
     Right output ->
       expectationFailure ("expected backend LLVM failure, got output:\n" ++ output)
+
+renderFixtureBackendProgramLLVM :: BackendProgram -> Either BackendLLVMError String
+renderFixtureBackendProgramLLVM =
+  renderBackendProgramLLVM . metadataLightFixtureToIdentityProgram
+
+renderFixtureBackendProgramNativeLLVM :: BackendProgram -> Either BackendLLVMError String
+renderFixtureBackendProgramNativeLLVM =
+  renderBackendProgramNativeLLVM . metadataLightFixtureToIdentityProgram
+
+renderMainIdentifiedBackendProgramLLVM :: BackendProgram -> Either BackendLLVMError String
+renderMainIdentifiedBackendProgramLLVM =
+  renderBackendProgramLLVM . identityPreservingFixtureToIdentityProgram . attachFixtureMainIdentity
+
+renderMainIdentifiedBackendProgramNativeLLVM :: BackendProgram -> Either BackendLLVMError String
+renderMainIdentifiedBackendProgramNativeLLVM =
+  renderBackendProgramNativeLLVM . identityPreservingFixtureToIdentityProgram . attachFixtureMainIdentity
+
+attachFixtureMainIdentity :: BackendProgram -> BackendProgram
+attachFixtureMainIdentity program =
+  case backendProgramMainIdentity program of
+    Just {} ->
+      program
+    Nothing ->
+      BackendProgramWithIdentity
+        { backendProgramModulesWithIdentity = modules',
+          backendProgramMainIdentity = mbMainIdentity,
+          backendProgramMainWithIdentity = mainName
+        }
+  where
+    mainName =
+      backendProgramMain program
+    generator0 =
+      identityGeneratorAfter (generatedIdentitiesInBackendProgram program)
+    (_, modules', mbMainIdentity) =
+      foldl assignModule (generator0, [], Nothing) (backendProgramModules program)
+
+    assignModule (generator, modules, mbMainIdentity0) backendModule =
+      let moduleName = backendModuleName backendModule
+          (generator', bindings', mbMainIdentity') =
+            foldl
+              (assignMainBinding moduleName mainName)
+              (generator, [], mbMainIdentity0)
+              (backendModuleBindings backendModule)
+       in ( generator',
+            modules ++ [backendModule {backendModuleBindingsWithIdentity = bindings'}],
+            mbMainIdentity'
+          )
+
+    assignMainBinding moduleName name (generator, bindings, mbMainIdentity0) binding =
+      case mbMainIdentity0 of
+        Nothing
+          | backendBindingName binding == name ->
+              let (identity, generator') =
+                    case backendBindingIdentity binding of
+                      Just existing -> (existing, generator)
+                      Nothing ->
+                        let (unique, nextGenerator) = freshIdentity generator
+                         in (symbolIdentityFromParts unique SymbolValue moduleName name Nothing, nextGenerator)
+               in (generator', bindings ++ [binding {backendBindingIdentity = Just identity}], Just identity)
+        _ ->
+          (generator, bindings ++ [binding], mbMainIdentity0)
 
 goldenText :: FilePath -> String -> Expectation
 goldenText goldenPath actual = do

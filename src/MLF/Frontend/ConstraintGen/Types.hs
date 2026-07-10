@@ -11,6 +11,7 @@ module MLF.Frontend.ConstraintGen.Types
     AnnExpr (..),
     AnnExprF (..),
     Binding (..),
+    BindingKey (..),
     Env,
     ExternalEnv,
     ExternalBindingMode (..),
@@ -33,8 +34,8 @@ import MLF.Constraint.RootOwnership (ModuleRootId (..), RootOwnershipIndex (..))
 import MLF.Constraint.Types.Graph
 import MLF.Frontend.Symbol (SymbolIdentity)
 import MLF.Frontend.Syntax (Lit, NormSrcType, VarName)
-import MLF.Types.Elab (ResolvedVar (..), resolvedVarRuntimeName)
-import MLF.Types.Identity (DeferredRef, IdDetails (..), TypeBinderIdentity, deferredRefName)
+import MLF.Types.Elab (ResolvedVar (..))
+import MLF.Types.Identity (DeferredRef, IdDetails (..), ResolvedTermIdentityKey, TypeBinderIdentity, idDetailsRuntimeName)
 
 -- | Errors that can surface during constraint generation.
 data ConstraintError
@@ -59,7 +60,8 @@ data ConstraintResult p = ConstraintResult { crConstraint :: Constraint p,
     -- elaboration can recover annotation types that presolution strips.
     crAnnSourceTypes :: IntMap.IntMap NormSrcType,
     -- | Initial bindings created for external environment variables.
-    -- Each entry maps a variable name to its 'Binding' (node + gen).
+    -- Each entry maps an explicit metadata-light or resolved identity key to
+    -- its 'Binding' (node + gen + optional carried identity).
     -- The pipeline uses this to seed the elaboration and type-check
     -- environments for free variables that were not wrapped in ELamAnn.
     crInitialEnv :: Env
@@ -87,13 +89,15 @@ data ModuleConstraintResult key p = ModuleConstraintResult
 -- later phases (e.g., elaboration) can recover binder types.
 data AnnExpr
   = AVar VarName NodeId
+  | -- | Exact resolved identity, display/runtime spelling, occurrence node.
+    AResolvedVar IdDetails VarName NodeId
   | ALit Lit NodeId
-  | -- | param name, param node, scope root (gen), body, result node
-    ALam VarName NodeId GenNodeId AnnExpr NodeId
+  | -- | param name, optional resolved identity, param node, scope root (gen), body, result node
+    ALam VarName (Maybe IdDetails) NodeId GenNodeId AnnExpr NodeId
   | -- | fun, arg, fun inst edge id, arg inst edge id, result node
     AApp AnnExpr AnnExpr EdgeId EdgeId NodeId
-  | -- | binder name, scheme gen node, scheme root, expansion var, RHS scope gen, rhs, body, result node
-    ALet VarName GenNodeId NodeId ExpVarId GenNodeId AnnExpr AnnExpr NodeId
+  | -- | binder name, optional resolved identity, scheme gen node, scheme root, expansion var, RHS scope gen, rhs, body, result node
+    ALet VarName (Maybe IdDetails) GenNodeId NodeId ExpVarId GenNodeId AnnExpr AnnExpr NodeId
   | -- | expression, annotation node
     AAnn AnnExpr NodeId EdgeId
   | -- | expression, unfolded-type node, inst edge from expr to unfolded type
@@ -102,13 +106,14 @@ data AnnExpr
 
 data AnnExprF a
   = AVarF VarName NodeId
+  | AResolvedVarF IdDetails VarName NodeId
   | ALitF Lit NodeId
-  | -- | param name, param node, scope root (gen), body, result node
-    ALamF VarName NodeId GenNodeId a NodeId
+  | -- | param name, optional resolved identity, param node, scope root (gen), body, result node
+    ALamF VarName (Maybe IdDetails) NodeId GenNodeId a NodeId
   | -- | fun, arg, fun inst edge id, arg inst edge id, result node
     AAppF a a EdgeId EdgeId NodeId
-  | -- | binder name, scheme gen node, scheme root, expansion var, RHS scope gen, rhs, body, result node
-    ALetF VarName GenNodeId NodeId ExpVarId GenNodeId a a NodeId
+  | -- | binder name, optional resolved identity, scheme gen node, scheme root, expansion var, RHS scope gen, rhs, body, result node
+    ALetF VarName (Maybe IdDetails) GenNodeId NodeId ExpVarId GenNodeId a a NodeId
   | -- | expression, annotation node
     AAnnF a NodeId EdgeId
   | -- | expression, unfolded-type node, inst edge from expr to unfolded type
@@ -120,28 +125,31 @@ type instance Base AnnExpr = AnnExprF
 instance Recursive AnnExpr where
   project expr = case expr of
     AVar v nid -> AVarF v nid
+    AResolvedVar details v nid -> AResolvedVarF details v nid
     ALit l nid -> ALitF l nid
-    ALam v param scopeRoot body nid -> ALamF v param scopeRoot body nid
+    ALam v details param scopeRoot body nid -> ALamF v details param scopeRoot body nid
     AApp fun arg funEid argEid nid -> AAppF fun arg funEid argEid nid
-    ALet v schemeGenId schemeRootId expVar scopeRoot rhs body nid ->
-      ALetF v schemeGenId schemeRootId expVar scopeRoot rhs body nid
+    ALet v details schemeGenId schemeRootId expVar scopeRoot rhs body nid ->
+      ALetF v details schemeGenId schemeRootId expVar scopeRoot rhs body nid
     AAnn inner annNode eid -> AAnnF inner annNode eid
     AUnfold inner unfoldNode eid -> AUnfoldF inner unfoldNode eid
 
 instance Corecursive AnnExpr where
   embed expr = case expr of
     AVarF v nid -> AVar v nid
+    AResolvedVarF details v nid -> AResolvedVar details v nid
     ALitF l nid -> ALit l nid
-    ALamF v param scopeRoot body nid -> ALam v param scopeRoot body nid
+    ALamF v details param scopeRoot body nid -> ALam v details param scopeRoot body nid
     AAppF fun arg funEid argEid nid -> AApp fun arg funEid argEid nid
-    ALetF v schemeGenId schemeRootId expVar scopeRoot rhs body nid ->
-      ALet v schemeGenId schemeRootId expVar scopeRoot rhs body nid
+    ALetF v details schemeGenId schemeRootId expVar scopeRoot rhs body nid ->
+      ALet v details schemeGenId schemeRootId expVar scopeRoot rhs body nid
     AAnnF inner annNode eid -> AAnn inner annNode eid
     AUnfoldF inner unfoldNode eid -> AUnfold inner unfoldNode eid
 
 data Binding = Binding
   { bindingNode :: NodeId,
-    bindingGen :: Maybe GenNodeId
+    bindingGen :: Maybe GenNodeId,
+    bindingIdentity :: Maybe IdDetails
   }
   | LazyExternalBinding
       { bindingExternalRoot :: GenNodeId,
@@ -149,7 +157,15 @@ data Binding = Binding
       }
   deriving (Eq, Show)
 
-type Env = Map VarName Binding
+-- | Constraint-generation binding lookup is either explicitly metadata-light
+-- (raw surface syntax) or keyed by the carried post-resolution identity.
+-- Resolved lookups never fall back to the display spelling.
+data BindingKey
+  = MetadataLightBindingKey VarName
+  | ResolvedBindingKey ResolvedTermIdentityKey
+  deriving (Eq, Ord, Show)
+
+type Env = Map BindingKey Binding
 
 data ExternalBindingMode
   = ExternalBindingScheme
@@ -166,29 +182,27 @@ data ExternalBinding = ExternalBinding
   deriving (Eq, Show)
 
 data ExternalBindingIdentity = ExternalBindingIdentity
-  { externalBindingRuntimeName :: String,
-    externalBindingDetails :: IdDetails
+  { externalBindingDetails :: IdDetails
   }
   deriving (Show)
 
-externalBindingIdentityFromDetails :: String -> IdDetails -> ExternalBindingIdentity
-externalBindingIdentityFromDetails runtimeName details =
+externalBindingRuntimeName :: ExternalBindingIdentity -> String
+externalBindingRuntimeName =
+  idDetailsRuntimeName . externalBindingDetails
+
+externalBindingIdentityFromDetails :: IdDetails -> ExternalBindingIdentity
+externalBindingIdentityFromDetails details =
   ExternalBindingIdentity
-    { externalBindingRuntimeName = runtimeName,
-      externalBindingDetails = details
+    { externalBindingDetails = details
     }
 
 externalBindingIdentityFromResolvedVar :: ResolvedVar -> ExternalBindingIdentity
 externalBindingIdentityFromResolvedVar resolved =
-  externalBindingIdentityFromDetails
-    (resolvedVarRuntimeName resolved)
-    (resolvedVarDetails resolved)
+  externalBindingIdentityFromDetails (resolvedVarDetails resolved)
 
 externalBindingIdentityFromDeferredRef :: DeferredRef -> ExternalBindingIdentity
 externalBindingIdentityFromDeferredRef ref =
-  externalBindingIdentityFromDetails
-    (deferredRefName ref)
-    (DeferredId ref)
+  externalBindingIdentityFromDetails (DeferredId ref)
 
 instance Eq ExternalBindingIdentity where
   left == right =
@@ -208,13 +222,14 @@ replaceScopeRoot from to = cata alg
     repGen gid = if gid == from then to else gid
     alg ann = case ann of
       AVarF v nid -> AVar v nid
+      AResolvedVarF details v nid -> AResolvedVar details v nid
       ALitF lit nid -> ALit lit nid
-      ALamF v param scopeRoot body nid ->
-        ALam v param (repGen scopeRoot) body nid
+      ALamF v details param scopeRoot body nid ->
+        ALam v details param (repGen scopeRoot) body nid
       AAppF fun arg funEid argEid nid ->
         AApp fun arg funEid argEid nid
-      ALetF v schemeNode schemeRootId expVar scopeRoot rhs body nid ->
-        ALet v (repGen schemeNode) schemeRootId expVar (repGen scopeRoot) rhs body nid
+      ALetF v details schemeNode schemeRootId expVar scopeRoot rhs body nid ->
+        ALet v details (repGen schemeNode) schemeRootId expVar (repGen scopeRoot) rhs body nid
       AAnnF expr annNode eid ->
         AAnn expr annNode eid
       AUnfoldF expr unfoldNode eid ->

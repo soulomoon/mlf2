@@ -10,8 +10,10 @@ import MLF.Frontend.Program.Types
 import MLF.Frontend.Syntax.Program (ClassConstraintF (..), resolvedExportTypeRefFromSymbols, refDisplayName)
 import qualified MLF.Frontend.Symbol as Symbol
 import MLF.Frontend.Symbol
-  ( symbolIdentityAliasMapWith,
+  ( SymbolReferenceMode (..),
+    symbolIdentityAliasMapWith,
     symbolIdentityStableName,
+    symbolRefMatchesWith,
     symbolRefMatches,
   )
 import MLF.Frontend.Syntax
@@ -194,6 +196,7 @@ spec = do
       symbolRefMatches (Just valueInfoIdentity) "stale-answer" Nothing stableName `shouldBe` False
       symbolRefMatches Nothing stableName (Just valueInfoIdentity) "answer" `shouldBe` False
       symbolRefMatches (Just valueInfoIdentity) "answer" Nothing "answer" `shouldBe` False
+      symbolRefMatchesWith SymbolIdentityOnly Nothing "answer" Nothing "answer" `shouldBe` False
       symbolRefMatches
         (Just valueInfoIdentity)
         "answer"
@@ -582,6 +585,24 @@ spec = do
       Map.lookup "a" (typeViewBinderIdentities view) `shouldBe` Just identity
       Map.lookup "$typevar#203" (typeViewBinderIdentities view) `shouldBe` Just identity
 
+    it "requires carried identities for every resolved type head and binder" $ do
+      let ref = resolvedTypeBinderRef (UniqueIdentity 204) "a"
+          tokenSymbol = resolvedDataInfoSymbol (SymbolLocal "Lib") "Token" tokenDataInfo
+          resolvedView =
+            typeViewFromResolved
+              (RSTForall ref Nothing (RSTArrow (RSTBase tokenSymbol) (RSTVar ref)))
+          missingHead = mkTypeView (STBase "Token") (STBase "Token")
+          missingBinder =
+            mkTypeView
+              (STForall "a" Nothing (STVar "a"))
+              (STForall "a" Nothing (STVar "a"))
+      typeViewIdentityGaps resolvedView `shouldBe` []
+      typeViewIdentityComplete resolvedView `shouldBe` True
+      typeViewIdentityGaps missingHead
+        `shouldBe` [MissingTypeHeadIdentity "Token"]
+      typeViewIdentityGaps missingBinder
+        `shouldBe` [MissingTypeBinderIdentity "a"]
+
     it "compares type views by identity metadata when display names are stale" $ do
       let headName = symbolIdentityStableName tokenTypeIdentity
           binderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 208)
@@ -624,6 +645,26 @@ spec = do
                 typeViewBinderIdentities = Map.empty
               }
       view originalIdentity `shouldNotBe` view conflictingIdentity
+
+    it "keys class applications and evidence methods by carried type identities" $ do
+      let stableToken = symbolIdentityStableName tokenTypeIdentity
+          view identityName headKey =
+            (mkTypeView (STBase "Token") (STBase identityName))
+              { typeViewHeadIdentities = Map.singleton headKey tokenTypeIdentity
+              }
+          visibleView = view stableToken "Token"
+          staleView = view "$stale.Token" "$stale.Token"
+          otherIdentity = generatedSymbolIdentity 211 SymbolType "Other" "Token" Nothing
+          conflictingView =
+            staleView
+              { typeViewHeadIdentities = Map.singleton "$stale.Token" otherIdentity
+              }
+      classApplicationKey eqClassIdentity (visibleView :| [])
+        `shouldBe` classApplicationKey eqClassIdentity (staleView :| [])
+      classApplicationKey eqClassIdentity (visibleView :| [])
+        `shouldNotBe` classApplicationKey eqClassIdentity (conflictingView :| [])
+      evidenceMethodKey eqClassIdentity (visibleView :| []) eqMethodIdentity
+        `shouldBe` evidenceMethodKey eqClassIdentity (staleView :| []) eqMethodIdentity
 
     it "compares constraint infos by class identity when display names are stale" $ do
       let tokenView = sourceTypeViewInScope (mkElaborateScope Map.empty (Map.singleton "Token" tokenDataInfo) Map.empty []) (STBase "Token")
@@ -916,14 +957,22 @@ spec = do
       let binderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 212)
           otherBinderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 213)
           deferredRef = deferredRefFromIdentity (UniqueIdentity 214) "Some"
+          tokenStableName = symbolIdentityStableName tokenTypeIdentity
+          deferredTypeView =
+            (mkTypeView (STBase "Token") (STBase tokenStableName))
+              { typeViewHeadIdentities =
+                  Map.fromList
+                    [ ("Token", tokenTypeIdentity),
+                      (tokenStableName, tokenTypeIdentity)
+                    ]
+              }
           call binderName identity =
             DeferredConstructorCall
               { deferredConstructorRef = deferredRef,
                 deferredConstructorInfo = someCtor,
                 deferredConstructorArgCount = 0,
-                deferredConstructorSourceType = STBase "Token",
-                deferredConstructorOccurrenceType = STBase "Token",
-                deferredConstructorTypeHeadIdentities = Map.empty,
+                deferredConstructorSourceTypeView = deferredTypeView,
+                deferredConstructorOccurrenceTypeView = deferredTypeView,
                 deferredConstructorInstBinders = [(binderName, identity)],
                 deferredConstructorInitialSubst = emptyTypeBinderSubst,
                 deferredConstructorBindingMode = DeferredBindingScheme
@@ -957,6 +1006,12 @@ spec = do
       shape `shouldNotBe` staleShape {constructorShapeSymbol = higherCtorIdentity}
       someCtor `shouldBe` staleCtor
       someCtor `shouldNotBe` staleCtor {ctorInfoSymbol = higherCtorIdentity}
+      constructorShapeRuntimeName (constructorShapeFromInfo staleCtor) `shouldBe` "Lib__Some"
+      case dataConstructors (constructorOwnerDataInfoFromShapes staleCtor) of
+        [roundTrippedCtor] ->
+          ctorRuntimeName roundTrippedCtor `shouldBe` "Lib__Some"
+        other ->
+          expectationFailure ("expected one round-tripped constructor, got " ++ show other)
 
     it "compares constructor forall binders by identity when display names are stale" $ do
       let identity = typeBinderIdentityFromUnique (UniqueIdentity 209)
@@ -981,14 +1036,61 @@ spec = do
 
     it "lowers value sidecars from semantic identity instead of imported spelling" $ do
       let qualifiedValueIdentity = loweredBindingIdentityFromValueInfo valueInfo
+          staleRuntimeValue =
+            OrdinaryValue
+              { valueInfoSymbol = valueInfoIdentity,
+                valueRuntimeName = "$stale.answer",
+                valueTypeView = mkTypeView (STBase "Int") (STBase "Int"),
+                valueConstraints = [],
+                valueConstraintInfos = []
+              }
+          staleRuntimeValueIdentity =
+            loweredBindingIdentityFromValueInfo staleRuntimeValue
+          localValueIdentity =
+            generatedSymbolIdentity 301 SymbolValue "<local>" "$local_answer" Nothing
+          localValue =
+            OrdinaryValue
+              { valueInfoSymbol = localValueIdentity,
+                valueRuntimeName = "$stale.local_answer",
+                valueTypeView = mkTypeView (STBase "Int") (STBase "Int"),
+                valueConstraints = [],
+                valueConstraintInfos = []
+              }
+          localLoweredIdentity =
+            loweredBindingIdentityFromValueInfo localValue
           qualifiedMethodIdentity = loweredBindingIdentityFromValueInfo qualifiedEqMethodValue
+          staleRuntimeCtor =
+            someCtor
+              { ctorRuntimeName = "$stale.Some"
+              }
+          staleRuntimeConstructorValue =
+            ConstructorValue
+              { valueInfoSymbol = constructorInfoSymbolIdentity tokenDataInfo staleRuntimeCtor,
+                valueRuntimeName = "$also_stale.Some",
+                valueCtorInfo = staleRuntimeCtor
+              }
+          staleRuntimeConstructorIdentity =
+            loweredBindingIdentityFromValueInfo staleRuntimeConstructorValue
 
       loweredIdentityRuntimeName qualifiedValueIdentity `shouldBe` "Lib__answer"
       loweredIdentityDetails qualifiedValueIdentity
         `shouldBe` TopLevelId valueInfoIdentity
+      loweredIdentityRuntimeName staleRuntimeValueIdentity `shouldBe` "Lib__answer"
+      loweredIdentityDetails staleRuntimeValueIdentity
+        `shouldBe` TopLevelId valueInfoIdentity
+      valueInfoRuntimeName staleRuntimeValue `shouldBe` "Lib__answer"
+      loweredIdentityRuntimeName localLoweredIdentity `shouldBe` "$local_answer"
+      loweredIdentityDetails localLoweredIdentity
+        `shouldBe` TopLevelId localValueIdentity
+      valueInfoRuntimeName localValue `shouldBe` "$local_answer"
       loweredIdentityRuntimeName qualifiedMethodIdentity `shouldBe` "eq"
       loweredIdentityDetails qualifiedMethodIdentity
         `shouldBe` MethodId (methodInfoSymbolIdentity qualifiedEqMethodInfo)
+      constructorInfoRuntimeName staleRuntimeCtor `shouldBe` "Lib__Some"
+      valueInfoRuntimeName staleRuntimeConstructorValue `shouldBe` "Lib__Some"
+      loweredIdentityRuntimeName staleRuntimeConstructorIdentity `shouldBe` "Lib__Some"
+      loweredIdentityDetails staleRuntimeConstructorIdentity
+        `shouldBe` ConstructorId (constructorRefFromInfo staleRuntimeCtor)
 
   describe "substituteTypeVar" $ do
     it "composes variable-headed type application heads with partially applied constructors" $

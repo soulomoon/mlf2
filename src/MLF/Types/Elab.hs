@@ -53,7 +53,14 @@ module MLF.Types.Elab (
     elabToBound,
     containsForallTy,
     containsArrowTy,
+    ElabTypeIdentityGap(..),
+    elabTypeIdentityGaps,
+    elabTypeIdentityComplete,
+    xmlfTermTypeIdentityGaps,
     typeHeadRefMatches,
+    typeHeadRefMatchesWith,
+    typeHeadRefMatchesIdentityOnly,
+    typeHeadRefMatchesMetadataLight,
     ElabScheme,
     mkElabSchemeWithRefs,
     schemeBinderRefs,
@@ -178,7 +185,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
 import MLF.Constraint.Types.Graph (BaseTy(..), BindFlag(..), NodeId(..))
-import MLF.Frontend.Symbol (SymbolIdentity, symbolRefMatches)
+import MLF.Frontend.Symbol (SymbolIdentity, SymbolReferenceMode (..), symbolRefMatchesWith)
 import MLF.Frontend.Syntax (Lit(..))
 import qualified MLF.Primitive.Identity as PrimitiveIdentity
 import MLF.Types.Identity
@@ -263,6 +270,20 @@ data Ty (v :: TopVar) where
     TMuRef :: TypeBinderRef -> Ty 'AllowVar -> Ty a
     TBottom :: Ty a
 
+{- Note [Lawful shared Ty equality and the checked identity gate]
+
+`Ty` is shared with graph/reification fixtures that intentionally construct
+metadata-light type heads.  Its `Eq` instance must remain reflexive for those
+values, so two identityless heads compare by their stored spelling.  This is
+representation equality, not the checked-program semantic contract.
+
+Checked programs are fenced separately: `elabTypeIdentityGaps` and
+`xmlfTermTypeIdentityGaps` let the frontend publication gate reject every
+identityless type head before a checked artifact is exposed to production
+consumers.  Identity-sensitive algorithms should use `typeHeadRefMatches`;
+outside this lawful representation instance, metadata-light callers must opt
+in through the explicitly named helper.
+-}
 instance Eq (Ty v) where
     left == right =
         case (left, right) of
@@ -271,11 +292,11 @@ instance Eq (Ty v) where
             (TArrow leftArg leftResult, TArrow rightArg rightResult) ->
                 leftArg == rightArg && leftResult == rightResult
             (TConWithIdentity leftIdentity leftCon leftArgs, TConWithIdentity rightIdentity rightCon rightArgs) ->
-                typeHeadRefMatches leftIdentity leftCon rightIdentity rightCon && leftArgs == rightArgs
+                typeHeadRefMatchesMetadataLight leftIdentity leftCon rightIdentity rightCon && leftArgs == rightArgs
             (TVarAppRef leftRef leftArgs, TVarAppRef rightRef rightArgs) ->
                 leftRef == rightRef && leftArgs == rightArgs
             (TBaseWithIdentity leftIdentity leftBase, TBaseWithIdentity rightIdentity rightBase) ->
-                typeHeadRefMatches leftIdentity leftBase rightIdentity rightBase
+                typeHeadRefMatchesMetadataLight leftIdentity leftBase rightIdentity rightBase
             (TForallRef leftRef leftBound leftBody, TForallRef rightRef rightBound rightBody) ->
                 leftRef == rightRef && leftBound == rightBound && leftBody == rightBody
             (TMuRef leftRef leftBody, TMuRef rightRef rightBody) ->
@@ -286,13 +307,51 @@ instance Eq (Ty v) where
                 False
 
 typeHeadRefMatches :: Maybe SymbolIdentity -> BaseTy -> Maybe SymbolIdentity -> BaseTy -> Bool
-typeHeadRefMatches leftIdentity (BaseTy leftName) rightIdentity (BaseTy rightName) =
-    symbolRefMatches leftIdentity leftName rightIdentity rightName
+typeHeadRefMatches =
+    typeHeadRefMatchesWith SymbolIdentityOnly
+
+typeHeadRefMatchesIdentityOnly :: Maybe SymbolIdentity -> BaseTy -> Maybe SymbolIdentity -> BaseTy -> Bool
+typeHeadRefMatchesIdentityOnly =
+    typeHeadRefMatchesWith SymbolIdentityOnly
+
+typeHeadRefMatchesMetadataLight :: Maybe SymbolIdentity -> BaseTy -> Maybe SymbolIdentity -> BaseTy -> Bool
+typeHeadRefMatchesMetadataLight =
+    typeHeadRefMatchesWith SymbolMetadataLight
+
+typeHeadRefMatchesWith :: SymbolReferenceMode -> Maybe SymbolIdentity -> BaseTy -> Maybe SymbolIdentity -> BaseTy -> Bool
+typeHeadRefMatchesWith mode leftIdentity (BaseTy leftName) rightIdentity (BaseTy rightName) =
+    symbolRefMatchesWith mode leftIdentity leftName rightIdentity rightName
 
 deriving instance Show (Ty v)
 
 type ElabType = Ty 'AllowVar
 type BoundType = Ty 'NoTopVar
+
+data ElabTypeIdentityGap
+    = MissingElabTypeHeadIdentity BaseTy
+    deriving (Eq, Ord, Show)
+
+elabTypeIdentityGaps :: Ty v -> [ElabTypeIdentityGap]
+elabTypeIdentityGaps = Set.toList . go
+  where
+    go :: Ty w -> Set.Set ElabTypeIdentityGap
+    go ty =
+        case ty of
+            TVarRef {} -> Set.empty
+            TArrow dom cod -> go dom <> go cod
+            TConWithIdentity mbIdentity base args ->
+                missingHead mbIdentity base <> foldMap go args
+            TVarAppRef _ args -> foldMap go args
+            TBaseWithIdentity mbIdentity base -> missingHead mbIdentity base
+            TForallRef _ mbBound body -> maybe Set.empty go mbBound <> go body
+            TMuRef _ body -> go body
+            TBottom -> Set.empty
+
+    missingHead (Just _) _ = Set.empty
+    missingHead Nothing base = Set.singleton (MissingElabTypeHeadIdentity base)
+
+elabTypeIdentityComplete :: Ty v -> Bool
+elabTypeIdentityComplete = null . elabTypeIdentityGaps
 
 tVarWithRef :: TypeBinderRef -> Ty 'AllowVar
 tVarWithRef = TVarRef
@@ -945,3 +1004,42 @@ instance Corecursive XmlfTerm where
         ETyInstF e inst -> ETyInst e inst
         ERollF ty body -> ERoll ty body
         EUnrollF body -> EUnroll body
+
+xmlfTermTypeIdentityGaps :: XmlfTerm -> [ElabTypeIdentityGap]
+xmlfTermTypeIdentityGaps = Set.toList . termGaps
+  where
+    termGaps term =
+        case term of
+            EVarNode resolved -> resolvedGaps resolved
+            ELit {} -> Set.empty
+            ELam resolved body -> resolvedGaps resolved <> termGaps body
+            EApp fun arg -> termGaps fun <> termGaps arg
+            ELet resolved scheme rhs body ->
+                resolvedGaps resolved
+                    <> schemeGaps scheme
+                    <> termGaps rhs
+                    <> termGaps body
+            ETyAbsRef _ mbBound body -> maybe Set.empty typeGaps mbBound <> termGaps body
+            ETyInst inner inst -> termGaps inner <> instantiationGaps inst
+            ERoll ty body -> typeGaps ty <> termGaps body
+            EUnroll body -> termGaps body
+
+    resolvedGaps = typeGaps . resolvedVarType
+
+    schemeGaps scheme =
+        foldMap (maybe Set.empty typeGaps . snd) (schemeBinderRefs scheme)
+            <> typeGaps (schemeBody scheme)
+
+    instantiationGaps inst =
+        case inst of
+            InstId -> Set.empty
+            InstApp ty -> typeGaps ty
+            InstBot ty -> typeGaps ty
+            InstIntro -> Set.empty
+            InstElim -> Set.empty
+            InstAbstrRef {} -> Set.empty
+            InstUnderRef _ inner -> instantiationGaps inner
+            InstInside inner -> instantiationGaps inner
+            InstSeq left right -> instantiationGaps left <> instantiationGaps right
+
+    typeGaps = Set.fromList . elabTypeIdentityGaps

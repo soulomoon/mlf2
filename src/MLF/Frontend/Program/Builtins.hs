@@ -27,6 +27,7 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
+import MLF.Elab.Types (Ty (..), TypeBinderRef, typeBinderRefIdentity, typeBinderRefName)
 import MLF.Frontend.Program.Types
   ( DataInfo (..),
     ResolvedSymbol,
@@ -37,14 +38,16 @@ import MLF.Frontend.Program.Types
     mkTypeView,
     mkResolvedSymbol,
     resolvedSymbolIdentity,
+    valueInfoRuntimeName,
     typeViewDisplay,
+    typeViewBinderIdentities,
     typeViewHeadIdentities,
   )
 import MLF.Frontend.Symbol (symbolIdentityAliasMapWith)
 import MLF.Frontend.Syntax (SrcBound (..), SrcKind (..), SrcTy (..), SrcType, TypeParam (..), resolvedTypeBinderRefFromIdentity)
 import qualified MLF.Frontend.Syntax.Program as P
 import qualified MLF.Primitive.Inventory as Inventory
-import MLF.Types.Identity (UniqueIdentity (..), typeBinderIdentityFromUnique)
+import MLF.Types.Identity (TypeBinderIdentity, UniqueIdentity (..), typeBinderIdentityAliasMap, typeBinderIdentityFromUnique)
 
 builtinModuleName :: String
 builtinModuleName = Inventory.builtinModuleName
@@ -117,11 +120,34 @@ builtinOrdinary name ty =
           valueRuntimeName = name,
           valueTypeView =
             (mkTypeView ty identityTy)
-              { typeViewHeadIdentities = builtinSourceTypeHeadIdentities identityTy
+              { typeViewHeadIdentities = builtinSourceTypeHeadIdentities identityTy,
+                typeViewBinderIdentities = builtinValueTypeBinderIdentities name
               },
           valueConstraints = [],
           valueConstraintInfos = []
         }
+
+builtinValueTypeBinderIdentities :: String -> Map String TypeBinderIdentity
+builtinValueTypeBinderIdentities name =
+  case Map.lookup name Inventory.primitiveValueElabTypes of
+    Just ty ->
+      typeBinderIdentityAliasMap
+        [ (typeBinderRefName ref, typeBinderRefIdentity ref)
+        | ref <- elabTypeBinderRefs ty
+        ]
+    Nothing -> Map.empty
+
+elabTypeBinderRefs :: Ty v -> [TypeBinderRef]
+elabTypeBinderRefs ty =
+  case ty of
+    TVarRef ref -> [ref]
+    TArrow dom cod -> elabTypeBinderRefs dom ++ elabTypeBinderRefs cod
+    TBaseWithIdentity {} -> []
+    TConWithIdentity _ _ args -> foldMap elabTypeBinderRefs args
+    TVarAppRef ref args -> ref : foldMap elabTypeBinderRefs args
+    TForallRef ref mbBound body -> ref : maybe [] elabTypeBinderRefs mbBound ++ elabTypeBinderRefs body
+    TMuRef ref body -> ref : elabTypeBinderRefs body
+    TBottom -> []
 
 builtinSourceTypeHeadIdentities :: SrcTy n v -> Map String SymbolIdentity
 builtinSourceTypeHeadIdentities =
@@ -148,8 +174,8 @@ builtinSourceTypeHeadIdentities =
 builtinOpaqueValueNames :: Set String
 builtinOpaqueValueNames =
   Set.fromList
-    [ runtimeName
-      | OrdinaryValue {valueRuntimeName = runtimeName, valueTypeView = tyView} <- Map.elems builtinValues,
+    [ valueInfoRuntimeName valueInfo
+      | valueInfo@OrdinaryValue {valueTypeView = tyView} <- Map.elems builtinValues,
         let ty = typeViewDisplay tyView,
         srcTypeMentionsOpaqueBuiltin ty
     ]

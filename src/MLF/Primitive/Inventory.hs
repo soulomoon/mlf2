@@ -95,7 +95,7 @@ import qualified MLF.Primitive.Identity as PrimitiveIdentity
 import
   MLF.Types.Identity
     ( IdentityGenerator,
-      advanceIdentityGeneratorPast,
+      advanceIdentityGeneratorPastMany,
       initialIdentityGenerator,
       symbolGeneratedIdentities,
     )
@@ -973,10 +973,9 @@ primitiveTypeToElabTypeFrom generator0 ty =
    in (ty', generator')
   where
     generatorAfterHeads =
-      foldr
-        advanceIdentityGeneratorPast
-        generator0
+      advanceIdentityGeneratorPastMany
         (concatMap symbolGeneratedIdentities (primitiveTypeHeadIdentities ty))
+        generator0
 
     go :: Map String TypeBinderRef -> IdentityGenerator -> PrimitiveType -> (ElabType, IdentityGenerator)
     go env generator =
