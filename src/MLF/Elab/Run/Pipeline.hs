@@ -11,6 +11,7 @@ module MLF.Elab.Run.Pipeline
     prepareExternalBindings,
     preparedExternalTypeCheckEnv,
     extendPreparedExternalBindingTypeIdentities,
+    reservePreparedExternalBindingIdentities,
     restrictPreparedExternalBindings,
     restrictPreparedExternalBindingsByKeys,
     unionPreparedExternalBindings,
@@ -131,8 +132,8 @@ import MLF.Frontend.ConstraintGen
     ExternalEnv,
     ModuleConstraintRoot (..),
     ModuleConstraintResult (..),
-    generateConstraintsWithExternalBindings,
-    generateModuleConstraintsKeyedWithExternalBindings,
+    generateConstraintsWithExternalBindingsFromSupply,
+    generateModuleConstraintsKeyedWithExternalBindingsFromSupply,
   )
 import qualified MLF.Frontend.Program.Builtins as Builtins
 import MLF.Frontend.Program.Types (mergeSymbolIdentityMaps, mergeTypeBinderIdentityMaps)
@@ -177,11 +178,27 @@ data PreparedExternalBindings = PreparedExternalBindings
     pebElaborationBindings :: Map.Map VarName (SchemeInfo, ResolvedVar),
     pebTypeCheckEnv :: TypeCheck.Env,
     pebSourceTypeHeadIdentities :: Map.Map String SymbolIdentity,
-    pebSourceTypeBinderIdentities :: Map.Map String TypeBinderIdentity
+    pebSourceTypeBinderIdentities :: Map.Map String TypeBinderIdentity,
+    pebReservedIdentities :: [UniqueIdentity]
   }
 
 preparedExternalTypeCheckEnv :: PreparedExternalBindings -> TypeCheck.Env
 preparedExternalTypeCheckEnv = pebTypeCheckEnv
+
+preparedExternalIdentityGenerator :: [PreparedExternalBindings] -> IdentityGenerator
+preparedExternalIdentityGenerator prepared =
+  identityGeneratorAfter (concatMap preparedExternalGeneratedIdentities prepared)
+
+preparedExternalGeneratedIdentities :: PreparedExternalBindings -> [UniqueIdentity]
+preparedExternalGeneratedIdentities prepared =
+  pebReservedIdentities prepared
+    ++ concat
+      [ idDetailsGeneratedIdentities (resolvedVarDetails resolved)
+          ++ generatedIdentitiesInType (resolvedVarType resolved)
+      | (_, resolved) <- Map.elems (pebElaborationBindings prepared)
+      ]
+    ++ concatMap symbolGeneratedIdentities (Map.elems (pebSourceTypeHeadIdentities prepared))
+    ++ concatMap typeBinderGeneratedIdentities (Map.elems (pebSourceTypeBinderIdentities prepared))
 
 preparedExternalElaborationEnv :: PreparedExternalBindings -> Env
 preparedExternalElaborationEnv =
@@ -321,13 +338,12 @@ validateDirectRecursiveAnnotations = goExpr
   where
     goExpr expr =
       case expr of
-        Surface.EVar _ -> Right ()
+        Surface.EVarNode _ -> Right ()
         Surface.ELit _ -> Right ()
-        Surface.ELam _ body -> goExpr body
+        Surface.ELamNode _ body -> goExpr body
         Surface.EApp fun arg -> goExpr fun >> goExpr arg
-        Surface.ELet _ rhs body -> goExpr rhs >> goExpr body
-        Surface.EBinderIdentity _ inner -> goExpr inner
-        Surface.ELamAnn _ annTy body -> validateAnn annTy >> goExpr body
+        Surface.ELetNode _ rhs body -> goExpr rhs >> goExpr body
+        Surface.ELamAnnNode _ annTy body -> validateAnn annTy >> goExpr body
         Surface.EAnn inner annTy -> goExpr inner >> validateAnn annTy
         Surface.ECoerceConst _ -> Right ()
 
@@ -464,7 +480,8 @@ prepareExternalBindings extBindings0 = do
         pebElaborationBindings = elaborationBindings,
         pebTypeCheckEnv = typeCheckEnv0,
         pebSourceTypeHeadIdentities = headIdentities,
-        pebSourceTypeBinderIdentities = binderIdentities
+        pebSourceTypeBinderIdentities = binderIdentities,
+        pebReservedIdentities = externalBindingsGeneratedIdentities extBindings0
       }
 
 externalBindingsWithIdentityAliases :: ExternalBindings -> ExternalBindings
@@ -537,6 +554,10 @@ extendPreparedExternalBindingTypeIdentities headIdentities binderIdentities prep
           pebSourceTypeBinderIdentities = binders
         }
 
+reservePreparedExternalBindingIdentities :: [UniqueIdentity] -> PreparedExternalBindings -> PreparedExternalBindings
+reservePreparedExternalBindingIdentities identities prepared =
+  prepared {pebReservedIdentities = identities ++ pebReservedIdentities prepared}
+
 restrictPreparedExternalBindings :: Set.Set VarName -> PreparedExternalBindings -> PreparedExternalBindings
 restrictPreparedExternalBindings names prepared =
   let schemeInfos = Map.restrictKeys (pebSchemeInfos prepared) names
@@ -547,7 +568,8 @@ restrictPreparedExternalBindings names prepared =
           pebElaborationBindings = elaborationBindings,
           pebTypeCheckEnv = restrictTypeCheckEnv elaborationBindings (pebTypeCheckEnv prepared),
           pebSourceTypeHeadIdentities = pebSourceTypeHeadIdentities prepared,
-          pebSourceTypeBinderIdentities = pebSourceTypeBinderIdentities prepared
+          pebSourceTypeBinderIdentities = pebSourceTypeBinderIdentities prepared,
+          pebReservedIdentities = pebReservedIdentities prepared
         }
 
 -- | Restrict resolved callers by semantic identity while retaining the
@@ -584,9 +606,10 @@ unionPreparedExternalBindings preferred fallback =
         { pebBindings = pebBindings preferred `Map.union` pebBindings fallback,
           pebSchemeInfos = schemeInfos,
           pebElaborationBindings = pebElaborationBindings preferred `Map.union` pebElaborationBindings fallback,
-          pebTypeCheckEnv = unionTypeCheckEnv (pebTypeCheckEnv preferred) (pebTypeCheckEnv fallback),
+          pebTypeCheckEnv = TypeCheck.unionEnvs (pebTypeCheckEnv preferred) (pebTypeCheckEnv fallback),
           pebSourceTypeHeadIdentities = heads,
-          pebSourceTypeBinderIdentities = binders
+          pebSourceTypeBinderIdentities = binders,
+          pebReservedIdentities = pebReservedIdentities preferred ++ pebReservedIdentities fallback
         }
 
 externalBindingPreparedEnvs :: IdentityGenerator -> ExternalBindings -> Map.Map VarName SchemeInfo -> (Map.Map VarName (SchemeInfo, ResolvedVar), TypeCheck.Env)
@@ -651,10 +674,6 @@ restrictTypeCheckEnv bindings env =
       | (_, (_, resolved)) <- Map.toList bindings
       ]
 
-unionTypeCheckEnv :: TypeCheck.Env -> TypeCheck.Env -> TypeCheck.Env
-unionTypeCheckEnv preferred fallback =
-  TypeCheck.unionEnvs preferred fallback
-
 detailedPair :: PipelineElabDetailedResult -> (XmlfTerm, ElabType)
 detailedPair result = (pedTerm result, pedType result)
 
@@ -704,7 +723,11 @@ runPipelineElabWithPrepared finalCheckMode diagnosticsMode traceCfg polySyms ext
     diagnosticsMode
     traceCfg
     extPrepared
-    (generateConstraintsWithExternalBindings polySyms (pebBindings extPrepared))
+    ( generateConstraintsWithExternalBindingsFromSupply
+        (preparedExternalIdentityGenerator [extPrepared])
+        polySyms
+        (pebBindings extPrepared)
+    )
 
 runPipelineElabWithPreparedGenerated ::
   PipelineFinalCheckMode ->
@@ -807,7 +830,11 @@ runPipelineElabWithPreparedWithTiming timing label finalCheckMode diagnosticsMod
     diagnosticsMode
     traceCfg
     extPrepared
-    (generateConstraintsWithExternalBindings polySyms (pebBindings extPrepared))
+    ( generateConstraintsWithExternalBindingsFromSupply
+        (preparedExternalIdentityGenerator [extPrepared])
+        polySyms
+        (pebBindings extPrepared)
+    )
 
 runPipelineElabWithPreparedGeneratedWithTiming ::
   TimingConfig ->
@@ -960,7 +987,13 @@ runPipelineElabDetailedModuleKeyedWithPreparedExternalBindingsModeWithTiming fin
       mapM_ (fromConstraintError . validateDirectRecursiveAnnotations . snd) namedExprs
     ModuleConstraintResult {mcrConstraint = c0, mcrRoots = roots, mcrAnnSourceTypes = annSourceTypes, mcrRootOwnership = rootOwnership} <-
       evaluatePipelineEitherSuffix timing label ".generate_constraints" $
-        fromConstraintError (generateModuleConstraintsKeyedWithExternalBindings polySyms (pebBindings extPrepared) keyedNamedExprs)
+        fromConstraintError
+          ( generateModuleConstraintsKeyedWithExternalBindingsFromSupply
+              (preparedExternalIdentityGenerator (extPrepared : Map.elems rootPrepared))
+              polySyms
+              (pebBindings extPrepared)
+              keyedNamedExprs
+          )
     liftIO $
       whenProgramOperationsIO timing $
         emitModuleBatchGraphMetrics timing (label ++ ".graph") c0 rootOwnership roots annSourceTypes extPrepared rootPreparedSchemeUseCount

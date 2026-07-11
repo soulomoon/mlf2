@@ -39,10 +39,12 @@ import MLF.Frontend.Program.Package
     , trivialProgramPackage
     )
 import MLF.Frontend.Program.Prelude (withPreludeLocatedPackage)
+import MLF.Frontend.Program.Checked
+    ( checkedProgramMain
+    , checkedProgramModules
+    )
 import MLF.Frontend.Program.Types
     ( CheckedModule (..)
-    , CheckedProgram (..)
-    , checkedProgramMain
     )
 import MLF.Frontend.Syntax
     ( Expr (..)

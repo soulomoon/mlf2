@@ -1,8 +1,8 @@
 # Identity/String Reference Audit
 
 - **Created:** 2026-07-05
-- **Last reviewed:** 2026-07-10
-- **Status:** Implemented and verified in the 2026-07-10 working tree
+- **Last reviewed:** 2026-07-11
+- **Status:** Implemented and verified in the 2026-07-11 working tree
 - **Canonical decisions:**
   `docs/adr/2026-06-18-resolved-xmlf-identity-ir.md` and
   `docs/architecture.md`
@@ -34,10 +34,10 @@ The enforced invariant is:
 | Area | Status | Current invariant |
 | --- | --- | --- |
 | Evidence keys and lookup | **ADDRESSED** | Class applications and evidence methods use identity-bearing `TypeView` keys. |
-| Checked `TypeView` completeness | **ADDRESSED / REPRESENTATION DEBT** | Checked programs are mention-sensitively validated; `mkTypeView` remains available for explicit metadata-light construction. |
+| Checked `TypeView` completeness | **ADDRESSED / REPRESENTATION DEBT** | One node-level tree owns spellings and identities; display/identity types and alias indexes are read-only projections, production mutation is structural, and metadata-light construction is test-local. |
 | Constructor visible-type rewriting | **ADDRESSED** | Rewriting selects the constructor owner by `SymbolIdentity`. |
-| Resolved frontend binder transport | **ADDRESSED / BOUNDARY** | `EBinderIdentity` carries exact binder identity through the string-shaped surface pipeline. |
-| Constraint/elaboration binding environments | **ADDRESSED / BOUNDARY** | Resolved references use `BindingKey`; graph-local binders use scope-derived `LocalRef` identity. |
+| Resolved frontend binder transport | **ADDRESSED / BOUNDARY** | `EVar`/`ELam`/`ELet`/`ELamAnn` nodes carry `MetadataLightTermReference` or `ResolvedTermReference IdDetails` directly. |
+| Constraint/elaboration binding environments | **ADDRESSED / BOUNDARY** | Resolved references use `BindingKey`; derived-instance synthesis, lowering, and constraint generation share the caller-owned identity supply, and graph-derived locals retain graph provenance through capture avoidance. |
 | Opaque checked finalization | **ADDRESSED** | Every checked-binding path rejects remaining `DeferredId` references. |
 | Deferred constructor/case obligations | **ADDRESSED** | Obligations retain `TypeView`s and substitutions are keyed by `TypeBinderIdentity`. |
 | Constructor result abstraction/recovery | **ADDRESSED** | Structural result binders have an owner-derived identity and source recovery requires one unambiguous owner. |
@@ -59,9 +59,15 @@ Owner:
 - `src/MLF/Frontend/Program/Types.hs :: evidenceMethodKey`
 
 Elaboration, finalization, and runtime now share these keys. They retain the
-normalized identity structure, head identities, and binder identities carried
-by each `TypeView`; no production lookup projects arguments to `[SrcType]` and
-then rebuilds metadata-light views.
+normalized identity structure carried by each `TypeView`; no production lookup
+projects arguments to `[SrcType]` and then rebuilds metadata-light views.
+`TypeView` stores one node-level tree. Each head or binder node owns its display
+spelling, identity spelling, semantic payload, and relevant aliases; the public
+display/identity projections and lookup maps are derived views rather than four
+independently mutable fields. Context head/binder nodes retain identities needed
+by projected constructor views even when the visible source type no longer
+mentions them. Type substitution and quantified specialization walk node
+identities directly, so same-spelled binders are never selected by map order.
 
 This makes stale display text harmless and makes conflicting identity payloads
 unequal. Recursive superclass cycle/deduplication checks obey the same key rule
@@ -83,7 +89,8 @@ Owner:
 
 - `src/MLF/Frontend/Program/Types.hs :: TypeViewIdentityGap`
 - `src/MLF/Frontend/Program/Types.hs :: typeViewIdentityGaps`
-- `src/MLF/Frontend/Program/Check.hs :: validateCheckedProgramTypeViews`
+- `src/MLF/Frontend/Program/Checked.hs :: mkCheckedProgram`
+- `src/MLF/Frontend/Program/Checked/Internal.hs :: CheckedProgram`
 - `src/MLF/Backend/Convert.hs :: convertCheckedProgram`
 
 Completeness is mention-sensitive: every semantic type head and binder present
@@ -91,14 +98,21 @@ in a checked view must have identity evidence, while `STBottom` and other shapes
 with no semantic reference require none. Canonical builtin heads are recognized
 through their builtin identities.
 
-The validator covers binding views, data and constructor views, class and
-instance views, exports, evidence metadata, and deferred method/constructor/case
-payloads. It runs when the checked artifact is produced and again before backend
-conversion. Missing identity is a structured error, not an invitation to recover
-by spelling.
+One recursive constructor validates each binding's `TypeView` and `ElabType`
+payloads, then data and constructor views, class and instance views, exports,
+evidence metadata, and deferred method/constructor/case payloads. The public
+`CheckedProgram` type is abstract and its read accessors are not record fields,
+so production callers cannot bypass `mkCheckedProgram` with record update.
+Runtime and backend conversion consume that certificate without repeating the
+same traversal. `Checked.Internal` exists only for owner code and explicit
+invalid test fixtures. Missing identity is a structured construction error, not
+an invitation to recover by spelling.
 
-`mkTypeView` remains useful for parser-side or explicit metadata-light fixtures;
-that constructor availability is representation debt, not a production fallback.
+The production module no longer exports the partial `mkTypeView` constructor or
+a bidirectional record pattern. Explicit metadata-light fixtures use
+`test/TypeViewTestSupport.hs`; the underlying shared `TypeView` can still carry
+missing payloads before the checked completeness gate, which is the remaining
+representation debt.
 
 Focused coverage is in `test/ProgramSpec.hs` and `test/BackendConvertSpec.hs`.
 
@@ -123,27 +137,27 @@ Status: **ADDRESSED / BOUNDARY**.
 
 Owner:
 
-- `src/MLF/Frontend/Syntax.hs :: EBinderIdentity`
-- `src/MLF/Frontend/Program/Surface.hs :: surfaceBinderIdentity`
+- `src/MLF/Frontend/Syntax.hs :: TermReference`
+- `src/MLF/Frontend/Syntax.hs :: EVarNode / ELamNode / ELetNode / ELamAnnNode`
 - `src/MLF/Frontend/Normalize.hs`
 - `src/MLF/Frontend/Desugar.hs`
 - `src/MLF/Frontend/ConstraintGen/Translate.hs`
 - `src/MLF/Frontend/Program/Finalize.hs`
 
-`SurfaceExpr` remains the source-shaped, string-bearing parser/elaboration
-carrier. An internal `EBinderIdentity IdDetails` wrapper now transports the
-resolved binder through normalization, desugaring, constraint generation, and
-elaboration into the exact `ALam`/`ALet` node. Finalization therefore does not
-reconstruct local binder meaning from `Map String IdDetails` or a runtime-name
-sidecar.
+`SurfaceExpr` remains source-shaped, but variable and binder nodes now own a
+`TermReference` directly. Parser input constructs `MetadataLightTermReference`;
+resolved lowering constructs `ResolvedTermReference IdDetails displayName`.
+Normalization and desugaring preserve that payload, constraint generation
+derives `BindingKey` from it once, and finalization no longer branches through or
+reconstructs an identity wrapper.
 
 Generated handler parameters use fresh `LocalRef`s. Source pattern variables are
 introduced by branch-local identity-bearing lets. Deferred evidence matching uses
 `resolvedVarSameIdentity`; strings remain only runtime/display projections.
 
-Global references still cross the surface carrier as stable aliases, but entry
-into and exit from that boundary are identity-indexed and fail closed. The
-remaining string is a carrier spelling, not executable identity.
+Global and local resolved references cross the carrier with their semantic
+identity and a display/runtime spelling. The string is a projection, not
+executable identity.
 
 ## 5. Opaque and Deferred Finalization Fail Closed
 
@@ -206,17 +220,32 @@ Checked conversion returns `ProductionBackendProgram`, not an unchecked
 `BackendProgram`. Construction validates module/data/constructor/binding,
 lexical term, closure, type-head, and type-binder identities. LLVM entrypoints
 accept only that capability wrapper, so production lowering cannot accidentally
-take a metadata-light program.
+take a metadata-light program. The raw projection is owner-internal to LLVM
+lowering (with an explicit test-support import); metadata-light inputs use the
+separate `BackendProgramFixture` capability in `MLF.Backend.IR.Fixture`.
+
+`validateBackendProgram` is now the identity-complete default. The permissive
+core is explicitly named `validateBackendProgramMetadataLight`; tests reach it
+through `BackendProgramFixture` and
+`test/BackendIRTestSupport.hs :: validateBackendProgramFixture`.
+`BackendValidationContext` stores one tagged key map/set per namespace; it no
+longer keeps parallel name and identity collections or a mode flag.
 
 Structural recursive conversion uses data-owner identity, parameter identity,
 and explicit nominal/structural boundary checks. Generated and lexical type
 variables are not matched by shared spelling. Metadata-light structural-name
 recovery remains an explicitly named adapter for fixtures and boundary input.
 
-Shared Backend IR constructors still use `Maybe identity` and a name-keyed
-substitution alternative for explicit metadata-light tests. Splitting those
+Shared Backend IR constructors still use `Maybe identity` and type substitution
+retains an explicit metadata-light name key for fixture types. Splitting those
 representations can make invalid states unrepresentable later, but production
 behavior is already fail-closed.
+
+All reference matchers share `MLF.Types.Reference.ReferenceMode`; backend term,
+type, closure-entry, callable, symbol, and `IdDetails` paths no longer maintain
+parallel two-constructor mode enums or conversion functions. Callable-head
+classification also pattern-matches `BackendExpr` directly instead of routing
+through a one-instance typeclass and adapter view.
 
 ## 8. LLVM Uses Identity for Semantics
 
@@ -296,33 +325,51 @@ binders, attaches builtin `SymbolIdentity` values to heads, and seeds fresh
 identities after every supplied identity. Builtin `TypeView`s publish those
 binder sidecars rather than treating a stable-looking spelling as proof.
 
-Structural lowering maintains separate display and identity projections. Data
-parameter substitutions are selected from resolved binder aliases, constructor
-field lowering follows the exact transitive data-identity closure, and
-view-provided head aliases are admitted only after resolving their carried
-`SymbolIdentity` to an in-scope `DataInfo`. This preserves identities for hidden
-constructor-field types and stale display names without creating a name
-fallback. Backend conversion consumes the resulting complete `TypeView` and
-fails closed if any mentioned head or binder still lacks identity.
+Structural lowering follows the identity-bearing semantic projection. When a
+stale display head and its identity-bearing lowering produce different shapes,
+the visible lowered projection is rebuilt from the identity shape instead of
+publishing two incompatible trees. Data parameter substitutions are selected
+from resolved binder identities, constructor field lowering follows the exact
+transitive data-identity closure, and view-provided head aliases are admitted
+only after resolving their carried `SymbolIdentity` to an in-scope `DataInfo`.
+This preserves identities for hidden constructor-field types and stale display
+names without creating a name fallback. Backend conversion consumes the
+resulting complete `TypeView` and fails closed if any mentioned head or binder
+still lacks identity.
 
 ## 12. Structure Simplification Review
 
-The implementation review removed three avoidable parallel paths:
+The 2026-07-11 implementation pass removed the remaining avoidable parallel
+paths identified by this audit:
 
-- resolved `TypeView` comparison hydrates known head and binder identities once
-  in `ensureTypeViewCompatible`, rather than requiring each resolved-expression
-  caller to add builtin/scope identities independently;
-- evidence-method consumers share one resolved-variable requirement, so the
-  missing-identity failure is owned in one place; and
-- structural source recovery has no owner-unavailable production entrypoint.
-  Production uses `recoverElabSourceType`; string-only fixtures must opt into
-  `recoverSourceTypeMetadataLight` explicitly.
+- `TypeView` now stores one identity-bearing node tree; its two source-type
+  projections and head/binder alias indexes are read-only, and explicit
+  transforms replace a partial bidirectional record pattern;
+- `TypeViewSubst` is keyed directly by `TypeBinderIdentity`, without a
+  one-constructor key wrapper or conversion adapter;
+- surface term nodes carry metadata-light or resolved references directly, so
+  the wrapper constructor, the forwarding `Program.Surface` module, and every
+  wrapper-specific traversal branch are gone;
+- one shared `ReferenceMode` and matcher policy replaces the parallel symbol,
+  `IdDetails`, backend type/term, closure-entry, callable, type-bound, and
+  validation mode types;
+- backend validation uses tagged reference keys rather than parallel name and
+  identity maps/sets; production validation is the default, while the
+  metadata-light path is test-local;
+- `Backend.IR` classifies `BackendExpr` directly, with no one-instance callable
+  typeclass or intermediate expression view; callable-head collapse takes
+  `NonEmpty`, and unknown closure references use `Maybe` instead of a sentinel;
+- structural head metadata is a direct `Map String SymbolIdentity`, without a
+  one-field wrapper;
+- checked identity validation is one recursive program traversal covering both
+  `TypeView` and `ElabType` payloads; and
+- trivial forwarding aliases across backend conversion, IR, checking,
+  elaboration, and pipeline code were inlined and deleted.
 
-Two larger reductions remain representation changes rather than safe local
-cleanup: replace the string-shaped `SurfaceExpr` carrier with a resolved carrier,
-and split metadata-light Backend IR fixtures from identity-complete production
-IR constructors. The checked and production gates already fence both seams, so
-this audit does not add another compatibility abstraction around them.
+The remaining representation debt is narrower: raw Backend IR constructors
+still admit explicit metadata-light fixtures alongside the validated
+`ProductionBackendProgram` path. The production capability gate already fences
+that seam, so no compatibility layer was added.
 
 ## Expected String Boundaries
 
@@ -340,18 +387,16 @@ it for post-resolution semantic selection, equality, recovery, or substitution.
 
 ## Verification Notes
 
-Focused identity, Program finalization, constraint generation, elaboration,
-pipeline, Backend IR, structural recursive data, and Backend conversion suites
-pass in the 2026-07-10 working tree. In particular, Program source-type
-finalization passes 197/197, Backend conversion passes 151/151, Reify TypeOps
-passes 53/53, and the generalization shadow comparator passes 12/12.
+Focused identity, Program finalization, Backend IR, and Backend conversion suites
+pass in the 2026-07-11 working tree. In particular, resolved-symbol identity
+coverage passes 65/65, Program source-type finalization passes 197/197, Backend
+IR passes 123/123, and Backend conversion passes 151/151.
 
 The required completion gate passes without raising the default file-descriptor
 limit:
 
 ```sh
-cabal build all -j1
-cabal test -j1
+cabal build all && cabal test
 ```
 
 The full suite completed 3386 examples with 0 failures.

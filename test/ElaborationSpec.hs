@@ -109,7 +109,7 @@ import MLF.Frontend.Parse (parseRawEmlfExpr, parseRawEmlfType, renderEmlfParseEr
 import MLF.Frontend.Program.Builtins qualified as ProgramBuiltins
 import MLF.Frontend.Program.Elaborate qualified as ProgramElaborate
 import MLF.Frontend.Program.Finalize qualified as ProgramFinalize
-import MLF.Frontend.Program.Types qualified as ProgramTypes
+import TypeViewTestSupport (mkTypeView)
 import MLF.Frontend.Symbol (SymbolNamespace (..), symbolIdentityFromParts)
 import MLF.Frontend.Syntax (Expr (..), Lit (..), NormSrcType, SrcTy (..), SrcType, SurfaceExpr, mkSrcBound)
 import MLF.Types.Identity (IdDetails (..), UniqueIdentity (..), envRefFromIdentity, envRefIdentity, localRefFromNodeId, typeBinderIdentityStableName)
@@ -1636,7 +1636,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
     it "resolves finalize TypeView heads to carried identities" $ do
       let scope = ProgramElaborate.mkElaborateScope Map.empty Map.empty Map.empty []
           view =
-            ProgramTypes.mkTypeView (STBase "Int") (STBase "Int")
+            mkTypeView (STBase "Int") (STBase "Int")
       ProgramFinalize.typeViewToElabType scope view
         `shouldBe` Right
           ( ElabTypes.TBaseWithIdentity

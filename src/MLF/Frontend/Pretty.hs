@@ -16,6 +16,7 @@ import MLF.Frontend.Syntax
     SrcBound (..),
     SrcTopVar (..),
     SrcTy (..),
+    termReferenceName,
   )
 
 prettyEmlfType :: SrcTy n v -> String
@@ -80,26 +81,30 @@ prettyEmlfExpr = goExpr 0
   where
     goExpr :: Int -> Expr 'Surface (SrcTy n v) -> String
     goExpr p expr = case expr of
-      EVar v -> v
+      EVarNode ref -> termReferenceName ref
       ELit l -> prettyLit l
-      ELam v body ->
+      ELamNode ref body ->
+        let v = termReferenceName ref
+         in
         paren (p > 0) ("λ(" ++ v ++ ") " ++ goExpr 0 body)
-      ELamAnn v ty body ->
+      ELamAnnNode ref ty body ->
+        let v = termReferenceName ref
+         in
         paren (p > 0) ("λ(" ++ v ++ " : " ++ prettyEmlfType ty ++ ") " ++ goExpr 0 body)
       EApp f a ->
         paren (p > 1) (goExpr 1 f ++ " " ++ goArg a)
-      ELet v rhs body ->
+      ELetNode ref rhs body ->
+        let v = termReferenceName ref
+         in
         paren (p > 0) ("let " ++ v ++ " = " ++ goExpr 0 rhs ++ " in " ++ goExpr 0 body)
-      EBinderIdentity _ inner -> goExpr p inner
       EAnn e ty ->
         "(" ++ goExpr 0 e ++ " : " ++ prettyEmlfType ty ++ ")"
 
     goArg :: Expr 'Surface (SrcTy n v) -> String
     goArg expr = case expr of
-      EVar {} -> goExpr 2 expr
+      EVarNode {} -> goExpr 2 expr
       ELit {} -> goExpr 2 expr
       EAnn {} -> goExpr 2 expr
-      EBinderIdentity _ inner -> goArg inner
       _ -> "(" ++ goExpr 0 expr ++ ")"
 
     prettyLit :: Lit -> String

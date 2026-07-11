@@ -29,6 +29,7 @@ module MLF.Types.Identity
     localRefName,
     localRefDiscard,
     freshLocalRef,
+    freshGraphLocalRef,
     freshenLocalRef,
     localRefFromNodeId,
     localRefFromScopedNodeId,
@@ -72,7 +73,6 @@ module MLF.Types.Identity
     idDetailsIsDiscard,
     idDetailsRenameLocal,
     idDetailsSameIdentity,
-    IdDetailsReferenceMode (..),
     idDetailsRefMatchesWith,
     idDetailsRefMatches,
     idDetailsGeneratedIdentities,
@@ -86,6 +86,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import MLF.Constraint.Types.Graph (NodeId (..))
 import MLF.Frontend.Symbol (SymbolIdentity, SymbolIdentityPayloadKey, SymbolOwnerIdentity (..), symbolDefiningModule, symbolDefiningName, symbolIdentityAliasNames, symbolIdentityPayloadKey, symbolIdentityStableName, symbolOwnerIdentity, symbolUniqueIdentity)
+import MLF.Types.Reference (ReferenceMode (..), referenceMatchesWith)
 import MLF.Types.Unique
 
 data StructuralTypeBinderRole
@@ -201,6 +202,7 @@ data LocalRef = LocalRef
 data LocalIdentity
   = GraphLocalId NodeId
   | ScopedGraphLocalId NodeId Int
+  | GeneratedGraphLocalId UniqueIdentity NodeId
   | GeneratedLocalId UniqueIdentity
   deriving (Eq, Ord, Show)
 
@@ -209,6 +211,7 @@ localIdentityStableUnique identity =
   case identity of
     GraphLocalId nodeId -> UniqueIdentity (graphLocalIdentityBase - getNodeId nodeId)
     ScopedGraphLocalId _ binderOrdinal -> UniqueIdentity (scopedGraphLocalIdentityBase - binderOrdinal)
+    GeneratedGraphLocalId unique _ -> unique
     GeneratedLocalId unique -> unique
 
 graphLocalIdentityBase :: Int
@@ -230,10 +233,21 @@ freshLocalRef name generator =
   let (identity, generator') = freshIdentity generator
    in (localRefFromIdentity (GeneratedLocalId identity) name, generator')
 
+freshGraphLocalRef :: String -> NodeId -> IdentityGenerator -> (LocalRef, IdentityGenerator)
+freshGraphLocalRef name nodeId generator =
+  let (identity, generator') = freshIdentity generator
+   in (localRefFromIdentity (GeneratedGraphLocalId identity nodeId) name, generator')
+
 freshenLocalRef :: String -> IdentityGenerator -> LocalRef -> (LocalRef, IdentityGenerator)
 freshenLocalRef name generator ref =
   let (identity, generator') = freshIdentity generator
-   in (LocalRef (GeneratedLocalId identity) name (localRefDiscard ref), generator')
+      freshIdentityForOrigin =
+        case localRefIdentity ref of
+          GraphLocalId nodeId -> GeneratedGraphLocalId identity nodeId
+          ScopedGraphLocalId nodeId _ -> GeneratedGraphLocalId identity nodeId
+          GeneratedGraphLocalId _ nodeId -> GeneratedGraphLocalId identity nodeId
+          GeneratedLocalId {} -> GeneratedLocalId identity
+   in (LocalRef freshIdentityForOrigin name (localRefDiscard ref), generator')
 
 localRefFromIdentity :: LocalIdentity -> String -> LocalRef
 localRefFromIdentity identity name =
@@ -255,6 +269,7 @@ localRefMatchesNodeId ref nodeId =
   case localRefIdentity ref of
     GraphLocalId refNodeId -> refNodeId == nodeId
     ScopedGraphLocalId refNodeId _ -> refNodeId == nodeId
+    GeneratedGraphLocalId _ refNodeId -> refNodeId == nodeId
     GeneratedLocalId {} -> False
 
 localRefGeneratedIdentities :: LocalRef -> [UniqueIdentity]
@@ -262,6 +277,7 @@ localRefGeneratedIdentities ref =
   case localRefIdentity ref of
     GraphLocalId {} -> []
     ScopedGraphLocalId {} -> []
+    GeneratedGraphLocalId identity _ -> [identity]
     GeneratedLocalId identity -> [identity]
 
 renameLocalRef :: String -> LocalRef -> LocalRef
@@ -580,24 +596,13 @@ idDetailsSameIdentity left right =
     (DeferredId leftRef, DeferredId rightRef) -> leftRef == rightRef
     _ -> False
 
-data IdDetailsReferenceMode
-  = IdDetailsIdentityOnly
-  | IdDetailsMetadataLight
-  deriving (Eq, Show)
-
-idDetailsRefMatchesWith :: IdDetailsReferenceMode -> Maybe IdDetails -> String -> Maybe IdDetails -> String -> Bool
-idDetailsRefMatchesWith _ (Just left) _ (Just right) _ =
-  idDetailsSameIdentity left right
-idDetailsRefMatchesWith mode Nothing leftName Nothing rightName =
-  case mode of
-    IdDetailsIdentityOnly -> False
-    IdDetailsMetadataLight -> leftName == rightName
-idDetailsRefMatchesWith _ _ _ _ _ =
-  False
+idDetailsRefMatchesWith :: ReferenceMode -> Maybe IdDetails -> String -> Maybe IdDetails -> String -> Bool
+idDetailsRefMatchesWith =
+  referenceMatchesWith idDetailsSameIdentity
 
 idDetailsRefMatches :: Maybe IdDetails -> String -> Maybe IdDetails -> String -> Bool
 idDetailsRefMatches =
-  idDetailsRefMatchesWith IdDetailsIdentityOnly
+  idDetailsRefMatchesWith IdentityOnly
 
 idDetailsGeneratedIdentities :: IdDetails -> [UniqueIdentity]
 idDetailsGeneratedIdentities details =

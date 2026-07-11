@@ -4,7 +4,7 @@
 module MLF.Frontend.Program.Check
   ( ProgramError (..),
     ProgramDiagnostic (..),
-    CheckedProgram (..),
+    CheckedProgram,
     CheckedModule (..),
     CheckedBinding (..),
     DataInfo (..),
@@ -39,7 +39,6 @@ module MLF.Frontend.Program.Check
     checkProgram,
     checkProgramPackage,
     checkResolvedProgram,
-    validateCheckedProgramTypeViews,
     checkLocatedProgram,
     checkLocatedProgramPackage,
     checkLocatedProgramPackageWithTiming,
@@ -63,11 +62,15 @@ import System.Environment (lookupEnv)
 import Text.Read (readMaybe)
 import MLF.Frontend.Normalize (freeVarsSrcType)
 import qualified MLF.Frontend.Program.Builtins as Builtins
+import MLF.Frontend.Program.Checked
+  ( CheckedProgram,
+    mkCheckedProgram,
+  )
 import MLF.Frontend.Program.Elaborate
   ( ElaborateScope,
     lowerConstructorBinding,
-    lowerConstrainedResolvedExprBinding,
-    lowerResolvedConstrainedExprBinding,
+    lowerConstrainedResolvedExprBindingWithGenerator,
+    lowerResolvedConstrainedExprBindingWithGenerator,
     mkElaborateScope,
     resolveInstanceInfoWithIdentityType,
   )
@@ -116,11 +119,9 @@ import MLF.Frontend.Program.Package
 import MLF.Frontend.Program.Resolve (resolveProgram)
 import MLF.Frontend.Symbol (SymbolIdentityPayloadKey, lookupSymbolIdentityExact, sameSymbolIdentity, symbolIdentityAliasMap, symbolIdentityPayloadKey, symbolIdentityStableName, symbolUniqueIdentity)
 import MLF.Frontend.Program.TypeFamilies (normalizeTypeFamiliesInProgram)
-import MLF.Types.Elab (ElabTypeIdentityGap, elabTypeIdentityGaps, xmlfTermTypeIdentityGaps)
 import MLF.Frontend.Program.Types
   ( CheckedBinding (..),
     CheckedModule (..),
-    CheckedProgram (..),
     ClassApplicationKey,
     ClassInfo (..),
     ConstructorForallBinder (..),
@@ -128,14 +129,7 @@ import MLF.Frontend.Program.Types
     ConstructorInfo (..),
     ConstructorRef,
     DataInfo (..),
-    DeferredCaseCall (..),
-    DeferredConstructorCall (..),
-    DeferredMethodCall (..),
-    DeferredMethodEvidence (..),
-    DeferredProgramObligation (..),
     DeferredRef,
-    EvidenceInfo (..),
-    EvidenceMethod (..),
     ExportedTypeInfo (..),
     FunctionalDependencyInfo (..),
     IdDetails (..),
@@ -159,8 +153,10 @@ import MLF.Frontend.Program.Types
     SymbolNamespace (..),
     SymbolOwnerIdentity (..),
     ConstraintInfo (..),
-    TypeView (..),
-    typeViewIdentityGaps,
+    TypeView,
+    typeViewBinderIdentities,
+    typeViewDisplay,
+    typeViewIdentity,
     ValueInfo (..),
     applyConstraintInfoSubst,
     checkedBindingName,
@@ -204,11 +200,8 @@ import MLF.Frontend.Program.Types
     lookupInstanceMethod,
     methodName,
     methodParamBinders,
-    methodType,
     methodInfoOwnerClassSymbolIdentity,
     methodInfoSymbolIdentity,
-    mergeSymbolIdentityMaps,
-    mergeTypeBinderIdentityMaps,
     mkExportedTypeInfo,
     moduleExportsFromMaps,
     uniqueDisplayByIdentity,
@@ -226,8 +219,6 @@ import MLF.Frontend.Program.Types
     resolvedProgramSemanticArtifact,
     resolvedProgramGeneratedIdentities,
     resolvedModuleGeneratedIdentities,
-    resolvedDeclGeneratedIdentities,
-    resolvedTypeBinderGeneratedIdentities,
     symbolDefiningModule,
     symbolDefiningName,
     symbolIdentityFromParts,
@@ -238,16 +229,20 @@ import MLF.Frontend.Program.Types
     substituteTypeVar,
     splitForalls,
     typeBinderAliasIdentityMap,
-    typeBinderSubstViews,
     typeParamBinderIdentity,
     typeViewBinderIdentityAliasEntries,
     typeViewBinderIdentityForAlias,
     typeViewHeadIdentityForAlias,
     typeViewFromResolved,
+    mapTypeViewDisplayHeadNames,
+    typeViewMergeBinderIdentities,
+    typeViewMergeHeadIdentities,
     typeViewMentionedHeadIdentities,
     typeViewsDisplay,
     typeViewsIdentity,
     typeViewSubstFromParamIdentities,
+    typeViewWithBinderIdentities,
+    typeViewWithProjectedTypes,
     constructorInfoRuntimeName,
     ordinaryValueTypeView,
     primitiveRefFromSymbol,
@@ -288,9 +283,6 @@ import MLF.Types.Identity
   )
 
 type TcM a = Either ProgramError a
-
-runTcM :: TcM a -> Either ProgramError a
-runTcM = id
 
 data OverlapSide
   = OverlapLeft
@@ -782,7 +774,7 @@ checkResolvedProgramWithPackageGraph graph =
   checkResolvedProgramWithContext (Just graph)
 
 checkResolvedProgramWithContext :: Maybe PackageModuleGraph -> ResolvedProgram -> Either ProgramError CheckedProgram
-checkResolvedProgramWithContext mbGraph resolved = runTcM $ do
+checkResolvedProgramWithContext mbGraph resolved = do
   checkedProgram <- checkResolvedProgramCore mbGraph resolved
   case mbGraph of
     Nothing -> pure ()
@@ -807,9 +799,7 @@ checkedProgramFromCheckedModules resolved modulesChecked = do
       [] -> throwError ProgramMainNotFound
       [binding] -> pure binding
       bindings -> throwError (ProgramMultipleMainDefinitions (map checkedBindingName bindings))
-  let checked = checkedProgramFromModules resolved modulesChecked (checkedBindingResolvedVar mainBinding)
-  liftEither (validateCheckedProgramTypeViews checked)
-  pure checked
+  liftEither (mkCheckedProgram resolved modulesChecked (checkedBindingResolvedVar mainBinding))
 
 checkLocatedProgram :: P.LocatedProgram -> Either ProgramDiagnostic CheckedProgram
 checkLocatedProgram located =
@@ -889,7 +879,7 @@ checkLocatedProgramPackageWithTiming timing package = do
                             timeProgramIO
                               timing
                               "program.check.package-interface"
-                              (evaluate (runTcM (validateCheckedPackageInterface graph checked)))
+                              (evaluate (validateCheckedPackageInterface graph checked))
                           pure $
                             case interfaceResult of
                               Left err -> Left (diagnosticForProgramError (Just orderedProgram) err)
@@ -909,191 +899,7 @@ checkResolvedProgramCoreWithTiming timing mbGraph resolved = do
       timeProgramDetailIO
         timing
         "program.check.modules.main-binding"
-        (evaluate (runTcM (checkedProgramFromCheckedModules resolved modulesChecked)))
-
-checkedProgramFromModules :: ResolvedProgram -> [CheckedModule] -> ResolvedVar -> CheckedProgram
-checkedProgramFromModules resolved modulesChecked mainResolved =
-  CheckedProgram
-    { checkedProgramModules = modulesChecked,
-      checkedProgramMainResolvedVar = mainResolved,
-      checkedProgramResolved = resolved
-    }
-
-validateCheckedProgramTypeViews :: CheckedProgram -> Either ProgramError ()
-validateCheckedProgramTypeViews checked = do
-  mapM_ validateOne (concatMap checkedModuleTypeViews (checkedProgramModules checked))
-  mapM_ validateElabOne (checkedProgramElabTypeGaps checked)
-  where
-    validateOne :: (String, TypeView) -> Either ProgramError ()
-    validateOne (owner, view) =
-      case typeViewIdentityGaps view of
-        [] -> pure ()
-        gaps ->
-          Left
-            ( ProgramPipelineError
-                ("checked TypeView for " ++ owner ++ " is identity-incomplete: " ++ show gaps)
-            )
-
-    validateElabOne :: (String, [ElabTypeIdentityGap]) -> Either ProgramError ()
-    validateElabOne (_, []) = pure ()
-    validateElabOne (owner, gaps) =
-      Left
-        ( ProgramPipelineError
-            ("checked ElabType for " ++ owner ++ " is identity-incomplete: " ++ show gaps)
-        )
-
-checkedProgramElabTypeGaps :: CheckedProgram -> [(String, [ElabTypeIdentityGap])]
-checkedProgramElabTypeGaps checked =
-  ( "program main reference",
-    elabTypeIdentityGaps (resolvedVarType (checkedProgramMainResolvedVar checked))
-  )
-    : concatMap checkedModuleElabTypeGaps (checkedProgramModules checked)
-
-checkedModuleElabTypeGaps :: CheckedModule -> [(String, [ElabTypeIdentityGap])]
-checkedModuleElabTypeGaps =
-  concatMap checkedBindingElabTypeGaps . checkedModuleBindings
-
-checkedBindingElabTypeGaps :: CheckedBinding -> [(String, [ElabTypeIdentityGap])]
-checkedBindingElabTypeGaps binding =
-  [ (owner ++ " reference", elabTypeIdentityGaps (resolvedVarType (checkedBindingResolvedVar binding))),
-    (owner ++ " result", elabTypeIdentityGaps (checkedBindingType binding)),
-    (owner ++ " term", xmlfTermTypeIdentityGaps (checkedBindingTerm binding))
-  ]
-    ++ concatMap deferredObligationElabTypeGaps (Map.elems (checkedBindingDeferredObligations binding))
-  where
-    owner = "binding `" ++ checkedBindingName binding ++ "`"
-
-deferredObligationElabTypeGaps :: DeferredProgramObligation -> [(String, [ElabTypeIdentityGap])]
-deferredObligationElabTypeGaps obligation =
-  case obligation of
-    DeferredMethod deferred ->
-      maybe [] (evidenceMethodElabTypeGaps "deferred method evidence") (deferredMethodEvidence deferred)
-        ++ concatMap evidenceInfoElabTypeGaps (deferredMethodLocalEvidence deferred)
-    DeferredConstructor {} -> []
-    DeferredCase {} -> []
-
-evidenceMethodElabTypeGaps :: String -> DeferredMethodEvidence -> [(String, [ElabTypeIdentityGap])]
-evidenceMethodElabTypeGaps owner =
-  resolvedEvidenceMethodElabTypeGaps owner . deferredMethodEvidenceMethod
-
-evidenceInfoElabTypeGaps :: EvidenceInfo -> [(String, [ElabTypeIdentityGap])]
-evidenceInfoElabTypeGaps evidence =
-  concatMap
-    (resolvedEvidenceMethodElabTypeGaps "local evidence method")
-    (Map.elems (evidenceMethodsByIdentity evidence))
-
-resolvedEvidenceMethodElabTypeGaps :: String -> EvidenceMethod -> [(String, [ElabTypeIdentityGap])]
-resolvedEvidenceMethodElabTypeGaps owner method =
-  case evidenceMethodResolvedVar method of
-    Nothing -> []
-    Just resolved -> [(owner, elabTypeIdentityGaps (resolvedVarType resolved))]
-
-checkedModuleTypeViews :: CheckedModule -> [(String, TypeView)]
-checkedModuleTypeViews checked =
-  concat
-    [ concatMap checkedBindingTypeViews (checkedModuleBindings checked),
-      concatMap dataInfoTypeViews (Map.elems (checkedModuleData checked)),
-      concatMap classInfoTypeViews (Map.elems (checkedModuleClasses checked)),
-      concatMap instanceInfoTypeViews (checkedModuleInstances checked),
-      moduleExportTypeViews (checkedModuleExports checked)
-    ]
-
-checkedBindingTypeViews :: CheckedBinding -> [(String, TypeView)]
-checkedBindingTypeViews binding =
-  ("binding `" ++ checkedBindingName binding ++ "`", checkedBindingSourceTypeView binding)
-    : concatMap deferredObligationTypeViews (Map.elems (checkedBindingDeferredObligations binding))
-
-constraintInfoTypeViews :: ConstraintInfo -> [(String, TypeView)]
-constraintInfoTypeViews constraint =
-  [ ("constraint `" ++ constraintDisplayClass constraint ++ "`", view)
-  | view <- NE.toList (constraintTypeViews constraint)
-  ]
-
-constructorInfoTypeViews :: ConstructorInfo -> [(String, TypeView)]
-constructorInfoTypeViews ctor =
-  ("constructor `" ++ ctorName ctor ++ "`", ctorTypeView ctor)
-    : [ ("constructor owner shape `" ++ ctorName ctor ++ "`", constructorShapeTypeView shape)
-      | shape <- constructorOwnerShapes ctor
-      ]
-
-dataInfoTypeViews :: DataInfo -> [(String, TypeView)]
-dataInfoTypeViews =
-  concatMap constructorInfoTypeViews . dataConstructors
-
-methodInfoTypeViews :: MethodInfo -> [(String, TypeView)]
-methodInfoTypeViews method =
-  ("method `" ++ methodName method ++ "`", methodTypeViewRaw method)
-    : concatMap constraintInfoTypeViews (methodConstraintInfos method)
-
-classInfoTypeViews :: ClassInfo -> [(String, TypeView)]
-classInfoTypeViews classInfo =
-  concatMap constraintInfoTypeViews (classSuperclassInfos classInfo)
-    ++ concatMap methodInfoTypeViews (Map.elems (classMethodsByIdentity classInfo))
-
-valueInfoTypeViews :: ValueInfo -> [(String, TypeView)]
-valueInfoTypeViews valueInfo =
-  case valueInfo of
-    OrdinaryValue {valueConstraintInfos = constraints} ->
-      ("value `" ++ valueInfoRuntimeName valueInfo ++ "`", ordinaryValueTypeView valueInfo)
-        : concatMap constraintInfoTypeViews constraints
-    ConstructorValue {valueCtorInfo = ctor} ->
-      constructorInfoTypeViews ctor
-    OverloadedMethod {valueMethodInfo = method} ->
-      methodInfoTypeViews method
-
-instanceInfoTypeViews :: InstanceInfo -> [(String, TypeView)]
-instanceInfoTypeViews instanceInfo =
-  [ ("instance head `" ++ instanceClassName instanceInfo ++ "`", view)
-  | view <- NE.toList (instanceHeadTypeViews instanceInfo)
-  ]
-    ++ concatMap constraintInfoTypeViews (instanceConstraintInfos instanceInfo)
-    ++ concatMap valueInfoTypeViews (Map.elems (instanceMethodsByIdentity instanceInfo))
-
-evidenceInfoTypeViews :: EvidenceInfo -> [(String, TypeView)]
-evidenceInfoTypeViews evidence =
-  [("evidence class argument", view) | view <- NE.toList (evidenceTypeViews evidence)]
-    ++ [ ("evidence method", evidenceMethodTypeView method)
-       | method <- Map.elems (evidenceMethodsByIdentity evidence)
-       ]
-
-deferredMethodEvidenceTypeViews :: DeferredMethodEvidence -> [(String, TypeView)]
-deferredMethodEvidenceTypeViews evidence =
-  [("deferred method class argument", view) | view <- NE.toList (deferredMethodEvidenceClassArgs evidence)]
-    ++ [("deferred evidence method", evidenceMethodTypeView (deferredMethodEvidenceMethod evidence))]
-
-deferredObligationTypeViews :: DeferredProgramObligation -> [(String, TypeView)]
-deferredObligationTypeViews obligation =
-  case obligation of
-    DeferredMethod deferred ->
-      methodInfoTypeViews (deferredMethodInfo deferred)
-        ++ maybe [] (\view -> [("deferred method result", view)]) (deferredMethodExpectedResult deferred)
-        ++ maybe [] deferredMethodEvidenceTypeViews (deferredMethodEvidence deferred)
-        ++ concatMap evidenceInfoTypeViews (deferredMethodLocalEvidence deferred)
-    DeferredConstructor deferred ->
-      constructorInfoTypeViews (deferredConstructorInfo deferred)
-        ++ [ ("deferred constructor source", deferredConstructorSourceTypeView deferred),
-             ("deferred constructor occurrence", deferredConstructorOccurrenceTypeView deferred)
-           ]
-        ++ [ ("deferred constructor substitution", view)
-           | view <- typeBinderSubstViews (deferredConstructorInitialSubst deferred)
-           ]
-    DeferredCase deferred ->
-      dataInfoTypeViews (deferredCaseDataInfo deferred)
-        ++ [ ("deferred case scrutinee", deferredCaseScrutineeTypeView deferred),
-             ("deferred case result", deferredCaseResultTypeView deferred)
-           ]
-
-moduleExportTypeViews :: ModuleExports -> [(String, TypeView)]
-moduleExportTypeViews exports =
-  concat
-    [ concatMap valueInfoTypeViews (Map.elems (exportedValuesByIdentity exports)),
-      concatMap exportedTypeInfoViews (Map.elems (exportedTypesByIdentity exports)),
-      concatMap classInfoTypeViews (Map.elems (exportedClassesByIdentity exports))
-    ]
-  where
-    exportedTypeInfoViews info =
-      dataInfoTypeViews (exportedTypeData info)
-        ++ concatMap constructorInfoTypeViews (Map.elems (exportedTypeConstructorsByIdentity info))
+        (evaluate (checkedProgramFromCheckedModules resolved modulesChecked))
 
 validateCheckedPackageInterface :: PackageModuleGraph -> CheckedProgram -> TcM ()
 validateCheckedPackageInterface graph checked =
@@ -1314,9 +1120,15 @@ checkModule generator0 resolvedModule priorInterfaces = do
       fullNameEnv = valueNameEnv `preferDisplayNames` displayNameEnvFromScope scope0
   validateModuleKinds scope0 resolvedSyntax
   validateLocalClassMethodConstraints scope0 resolvedSyntax
-  derivedInstances <- synthesizeDerivedInstances (resolvedSemanticModuleIdentity resolvedModule) fullNameEnv scope0 resolvedSyntax
-  (instanceSkeletons, generator1) <-
-    buildInstanceSkeletons (resolvedSemanticModuleIdentity resolvedModule) generator0 fullNameEnv scope0 resolvedSyntax derivedInstances
+  (derivedInstances, generator1) <-
+    synthesizeDerivedInstances
+      (resolvedSemanticModuleIdentity resolvedModule)
+      generator0
+      fullNameEnv
+      scope0
+      resolvedSyntax
+  (instanceSkeletons, generator2) <-
+    buildInstanceSkeletons (resolvedSemanticModuleIdentity resolvedModule) generator1 fullNameEnv scope0 resolvedSyntax derivedInstances
   let scope1 = withScopeInstances (scopeInstances scope0 ++ instanceSkeletons) scope0
   let elaborateScope = mkElaborateScope (scopeValues scope1) (scopeElaborateTypes scope1) (scopeClasses scope1) (scopeInstances scope1)
   finalizeContext <- mkFinalizeContext elaborateScope
@@ -1327,8 +1139,8 @@ checkModule generator0 resolvedModule priorInterfaces = do
         | dataInfo <- Map.elems localData,
           ctor <- dataConstructors dataInfo
       ]
-  instanceBindings <- checkInstances fullNameEnv finalizeContext elaborateScope scope1 (derivedInstances ++ explicitInstances resolvedSyntax)
-  defBindings <- mapM (checkDef finalizeContext elaborateScope scope1) (moduleDefDecls resolvedSyntax)
+  (instanceBindings, generator3) <- checkInstances generator2 fullNameEnv finalizeContext elaborateScope scope1 (derivedInstances ++ explicitInstances resolvedSyntax)
+  (defBindings, generator4) <- checkDefs generator3 finalizeContext elaborateScope scope1 (moduleDefDecls resolvedSyntax)
   exports <- buildExports resolvedSyntax localData localClasses localValues
   let exportedMain = exportedMainIdentity resolvedSyntax exports
       markExportedMain binding =
@@ -1346,7 +1158,7 @@ checkModule generator0 resolvedModule priorInterfaces = do
           checkedModuleInstances = instanceSkeletons,
           checkedModuleExports = exports
         },
-      generator1
+      generator4
     )
 
 checkModuleWithTiming :: TimingConfig -> IdentityGenerator -> ResolvedSemanticModule -> [ModuleInterface] -> IO (TcM (CheckedModule, IdentityGenerator))
@@ -1428,16 +1240,25 @@ checkModuleWithTiming timing generator0 resolvedModule priorInterfaces = do
                               case validationResult of
                                 Left err -> pure (Left err)
                                 Right () -> do
-                                  derivedInstancesResult <- timePhase "derived-instances" (synthesizeDerivedInstances (resolvedSemanticModuleIdentity resolvedModule) fullNameEnv scope0 resolvedSyntax)
+                                  derivedInstancesResult <-
+                                    timePhase
+                                      "derived-instances"
+                                      ( synthesizeDerivedInstances
+                                          (resolvedSemanticModuleIdentity resolvedModule)
+                                          generator0
+                                          fullNameEnv
+                                          scope0
+                                          resolvedSyntax
+                                      )
                                   case derivedInstancesResult of
                                     Left err -> pure (Left err)
-                                    Right derivedInstances -> do
+                                    Right (derivedInstances, generator1) -> do
                                       instanceSkeletonsResult <-
                                         timePhase "instance-skeletons" $
-                                          buildInstanceSkeletons (resolvedSemanticModuleIdentity resolvedModule) generator0 fullNameEnv scope0 resolvedSyntax derivedInstances
+                                          buildInstanceSkeletons (resolvedSemanticModuleIdentity resolvedModule) generator1 fullNameEnv scope0 resolvedSyntax derivedInstances
                                       case instanceSkeletonsResult of
                                         Left err -> pure (Left err)
-                                        Right (instanceSkeletons, generator1) -> do
+                                        Right (instanceSkeletons, generator2) -> do
                                           let scope1 = withScopeInstances (scopeInstances scope0 ++ instanceSkeletons) scope0
                                               elaborateScope = mkElaborateScope (scopeValues scope1) (scopeElaborateTypes scope1) (scopeClasses scope1) (scopeInstances scope1)
                                           finalizeContextResult <- timePhase "finalize-context" (mkFinalizeContext elaborateScope)
@@ -1459,7 +1280,8 @@ checkModuleWithTiming timing generator0 resolvedModule priorInterfaces = do
                                                   elaborateScope
                                                   scope1
                                                   derivedInstances
-                                              pure (fmap (\checked -> (checked, generator1)) checkedResult)
+                                                  generator2
+                                              pure checkedResult
 
 finalizeCheckedModuleWithTiming ::
   TimingConfig ->
@@ -1475,8 +1297,9 @@ finalizeCheckedModuleWithTiming ::
   ElaborateScope ->
   Scope ->
   [P.ResolvedInstanceDecl] ->
-  IO (TcM CheckedModule)
-finalizeCheckedModuleWithTiming timing moduleName0 moduleIdentity resolvedSyntax localData localClasses localValues instanceSkeletons displayEnv finalizeContext elaborateScope scope1 derivedInstances = do
+  IdentityGenerator ->
+  IO (TcM (CheckedModule, IdentityGenerator))
+finalizeCheckedModuleWithTiming timing moduleName0 moduleIdentity resolvedSyntax localData localClasses localValues instanceSkeletons displayEnv finalizeContext elaborateScope scope1 derivedInstances generator0 = do
   constructorBindingsResult <-
     timeCheckModulePhaseIO timing moduleName0 "constructor-bindings" $
       checkConstructorsWithTiming timing moduleName0 finalizeContext elaborateScope localData
@@ -1485,16 +1308,16 @@ finalizeCheckedModuleWithTiming timing moduleName0 moduleIdentity resolvedSyntax
     Right constructorBindings -> do
       instanceBindingsResult <-
         timeCheckModulePhaseIO timing moduleName0 "instance-bindings" $
-          checkInstancesWithTiming timing moduleName0 displayEnv finalizeContext elaborateScope scope1 (derivedInstances ++ explicitInstances resolvedSyntax)
+          checkInstancesWithTiming timing moduleName0 generator0 displayEnv finalizeContext elaborateScope scope1 (derivedInstances ++ explicitInstances resolvedSyntax)
       case instanceBindingsResult of
         Left err -> pure (Left err)
-        Right instanceBindings -> do
+        Right (instanceBindings, generator1) -> do
           defBindingsResult <-
             timeCheckModulePhaseIO timing moduleName0 "def-bindings" $
-              checkDefsWithTiming timing moduleName0 finalizeContext elaborateScope scope1 (moduleDefDecls resolvedSyntax)
+              checkDefsWithTiming timing moduleName0 generator1 finalizeContext elaborateScope scope1 (moduleDefDecls resolvedSyntax)
           case defBindingsResult of
             Left err -> pure (Left err)
-            Right defBindings -> do
+            Right (defBindings, generator2) -> do
               exportsResult <- timeCheckModulePhase timing moduleName0 "exports" (buildExports resolvedSyntax localData localClasses localValues)
               pure $ do
                 exports <- exportsResult
@@ -1505,15 +1328,17 @@ finalizeCheckedModuleWithTiming timing moduleName0 moduleIdentity resolvedSyntax
                             maybe False (\identity -> checkedBindingValueIdentity binding == Just identity) exportedMain
                         }
                 pure
-                  CheckedModule
-                    { checkedModuleName = moduleName0,
-                      checkedModuleIdentity = moduleIdentity,
-                      checkedModuleBindings = constructorBindings ++ instanceBindings ++ map markExportedMain defBindings,
-                      checkedModuleData = checkedDataByIdentity localData,
-                      checkedModuleClasses = checkedClassesByIdentity localClasses,
-                      checkedModuleInstances = instanceSkeletons,
-                      checkedModuleExports = exports
-                    }
+                  ( CheckedModule
+                      { checkedModuleName = moduleName0,
+                        checkedModuleIdentity = moduleIdentity,
+                        checkedModuleBindings = constructorBindings ++ instanceBindings ++ map markExportedMain defBindings,
+                        checkedModuleData = checkedDataByIdentity localData,
+                        checkedModuleClasses = checkedClassesByIdentity localClasses,
+                        checkedModuleInstances = instanceSkeletons,
+                        checkedModuleExports = exports
+                      },
+                    generator2
+                  )
 
 timeCheckModulePhase :: TimingConfig -> P.ModuleName -> String -> TcM a -> IO (TcM a)
 timeCheckModulePhase timing moduleName0 phase action =
@@ -1565,29 +1390,32 @@ checkConstructorsWithTiming timing moduleName0 finalizeContext elaborateScope lo
         Left err -> pure (Left err)
         Right binding -> go (binding : acc) rest
 
-checkInstancesWithTiming :: TimingConfig -> P.ModuleName -> DisplayNameEnv -> FinalizeContext -> ElaborateScope -> Scope -> [P.ResolvedInstanceDecl] -> IO (TcM [CheckedBinding])
-checkInstancesWithTiming timing moduleName0 displayEnv finalizeContext elaborateScope scope instDecls =
-  go [] (zip [(1 :: Int) ..] instDecls)
+checkInstancesWithTiming :: TimingConfig -> P.ModuleName -> IdentityGenerator -> DisplayNameEnv -> FinalizeContext -> ElaborateScope -> Scope -> [P.ResolvedInstanceDecl] -> IO (TcM ([CheckedBinding], IdentityGenerator))
+checkInstancesWithTiming timing moduleName0 generator0 displayEnv finalizeContext elaborateScope scope instDecls =
+  go generator0 [] (zip [(1 :: Int) ..] instDecls)
   where
-    go acc [] =
-      finalizeBindingsAllowOpaqueWithContextWithTiming
-        timing
-        (checkModuleOperationLabel moduleName0 "instance_methods.group_finalize")
-        finalizeContext
-        (concat (reverse acc))
-    go acc ((index, instDecl) : rest) = do
+    go generator acc [] = do
+      checked <-
+        finalizeBindingsAllowOpaqueWithContextWithTiming
+          timing
+          (checkModuleOperationLabel moduleName0 "instance_methods.group_finalize")
+          finalizeContext
+          (concat (reverse acc))
+      pure (fmap (\bindings -> (bindings, generator)) checked)
+    go generator acc ((index, instDecl) : rest) = do
       result <-
         lowerInstanceWithTiming
           timing
           moduleName0
           (instanceTimingLabel index instDecl)
+          generator
           displayEnv
           elaborateScope
           scope
           instDecl
       case result of
         Left err -> pure (Left err)
-        Right lowereds -> go (lowereds : acc) rest
+        Right (lowereds, generator') -> go generator' (lowereds : acc) rest
 
 instanceTimingLabel :: Int -> P.ResolvedInstanceDecl -> String
 instanceTimingLabel index instDecl =
@@ -1598,38 +1426,50 @@ instanceTimingLabel index instDecl =
     ++ "."
     ++ intercalate "_" (map (sanitizeType . resolvedSrcTypeToSrcType) (NE.toList (P.instanceDeclTypes instDecl)))
 
-lowerInstanceWithTiming :: TimingConfig -> P.ModuleName -> String -> DisplayNameEnv -> ElaborateScope -> Scope -> P.ResolvedInstanceDecl -> IO (TcM [LoweredBinding])
-lowerInstanceWithTiming timing moduleName0 instanceLabel displayEnv elaborateScope scope instDecl = do
+lowerInstanceWithTiming :: TimingConfig -> P.ModuleName -> String -> IdentityGenerator -> DisplayNameEnv -> ElaborateScope -> Scope -> P.ResolvedInstanceDecl -> IO (TcM ([LoweredBinding], IdentityGenerator))
+lowerInstanceWithTiming timing moduleName0 instanceLabel generator displayEnv elaborateScope scope instDecl = do
   instanceResult <-
     timeCheckModuleOperation timing moduleName0 (instanceLabel ++ ".lookup") $
       lookupInstanceForDecl displayEnv scope instDecl
   case instanceResult of
     Left err -> pure (Left err)
     Right (classInfo, instanceInfo) ->
-      lowerInstanceMethodsWithTiming timing moduleName0 instanceLabel elaborateScope classInfo instanceInfo (instanceHeadTypeViews instanceInfo) (P.instanceDeclMethods instDecl)
+      lowerInstanceMethodsWithTiming timing moduleName0 instanceLabel generator elaborateScope classInfo instanceInfo (instanceHeadTypeViews instanceInfo) (P.instanceDeclMethods instDecl)
 
-lowerInstanceMethodsWithTiming :: TimingConfig -> P.ModuleName -> String -> ElaborateScope -> ClassInfo -> InstanceInfo -> NonEmpty TypeView -> [P.ResolvedMethodDef] -> IO (TcM [LoweredBinding])
-lowerInstanceMethodsWithTiming timing moduleName0 instanceLabel elaborateScope classInfo instanceInfo instanceHeadViews methodDefs =
-  go [] methodDefs
+lowerInstanceMethodsWithTiming :: TimingConfig -> P.ModuleName -> String -> IdentityGenerator -> ElaborateScope -> ClassInfo -> InstanceInfo -> NonEmpty TypeView -> [P.ResolvedMethodDef] -> IO (TcM ([LoweredBinding], IdentityGenerator))
+lowerInstanceMethodsWithTiming timing moduleName0 instanceLabel generator0 elaborateScope classInfo instanceInfo instanceHeadViews methodDefs =
+  go generator0 [] methodDefs
   where
-    go acc [] = pure (Right (reverse acc))
-    go acc (methodDef : rest) = do
+    go generator acc [] = pure (Right (reverse acc, generator))
+    go generator acc (methodDef : rest) = do
       result <-
         timeCheckModuleOperation timing moduleName0 (instanceLabel ++ ".method." ++ P.refDisplayName (P.methodDefName methodDef) ++ ".lower") $
-          lowerInstanceMethod elaborateScope classInfo instanceInfo instanceHeadViews methodDef
+          lowerInstanceMethodWithGenerator generator elaborateScope classInfo instanceInfo instanceHeadViews methodDef
       case result of
         Left err -> pure (Left err)
-        Right lowered -> go (lowered : acc) rest
+        Right (lowered, generator') -> go generator' (lowered : acc) rest
 
-checkInstances :: DisplayNameEnv -> FinalizeContext -> ElaborateScope -> Scope -> [P.ResolvedInstanceDecl] -> TcM [CheckedBinding]
-checkInstances displayEnv finalizeContext elaborateScope scope instDecls = do
-  lowereds <- concat <$> mapM (lowerInstance displayEnv elaborateScope scope) instDecls
-  liftEither (finalizeBindingsAllowOpaqueWithContext finalizeContext lowereds)
+checkInstances :: IdentityGenerator -> DisplayNameEnv -> FinalizeContext -> ElaborateScope -> Scope -> [P.ResolvedInstanceDecl] -> TcM ([CheckedBinding], IdentityGenerator)
+checkInstances generator0 displayEnv finalizeContext elaborateScope scope instDecls = do
+  (lowereds, generator1) <- lowerInstances generator0 [] instDecls
+  checked <- liftEither (finalizeBindingsAllowOpaqueWithContext finalizeContext lowereds)
+  pure (checked, generator1)
+  where
+    lowerInstances generator acc [] =
+      pure (concat (reverse acc), generator)
+    lowerInstances generator acc (instDecl : rest) = do
+      (lowereds, generator') <- lowerInstance generator displayEnv elaborateScope scope instDecl
+      lowerInstances generator' (lowereds : acc) rest
 
-lowerInstance :: DisplayNameEnv -> ElaborateScope -> Scope -> P.ResolvedInstanceDecl -> TcM [LoweredBinding]
-lowerInstance displayEnv elaborateScope scope instDecl = do
+lowerInstance :: IdentityGenerator -> DisplayNameEnv -> ElaborateScope -> Scope -> P.ResolvedInstanceDecl -> TcM ([LoweredBinding], IdentityGenerator)
+lowerInstance generator0 displayEnv elaborateScope scope instDecl = do
   (classInfo, instanceInfo) <- lookupInstanceForDecl displayEnv scope instDecl
-  mapM (lowerInstanceMethod elaborateScope classInfo instanceInfo (instanceHeadTypeViews instanceInfo)) (P.instanceDeclMethods instDecl)
+  let go generator acc [] = pure (reverse acc, generator)
+      go generator acc (methodDef : rest) = do
+        (lowered, generator') <-
+          lowerInstanceMethodWithGenerator generator elaborateScope classInfo instanceInfo (instanceHeadTypeViews instanceInfo) methodDef
+        go generator' (lowered : acc) rest
+  go generator0 [] (P.instanceDeclMethods instDecl)
 
 lookupInstanceForDecl :: DisplayNameEnv -> Scope -> P.ResolvedInstanceDecl -> TcM (ClassInfo, InstanceInfo)
 lookupInstanceForDecl displayEnv scope instDecl = do
@@ -1654,17 +1494,26 @@ lookupInstanceForDecl displayEnv scope instDecl = do
         )
         (scopeInstances scope)
 
-lowerInstanceMethod :: ElaborateScope -> ClassInfo -> InstanceInfo -> NonEmpty TypeView -> P.ResolvedMethodDef -> TcM LoweredBinding
-lowerInstanceMethod elaborateScope classInfo instanceInfo instanceHeadViews methodDef =
+lowerInstanceMethodWithGenerator :: IdentityGenerator -> ElaborateScope -> ClassInfo -> InstanceInfo -> NonEmpty TypeView -> P.ResolvedMethodDef -> TcM (LoweredBinding, IdentityGenerator)
+lowerInstanceMethodWithGenerator generator elaborateScope classInfo instanceInfo instanceHeadViews methodDef =
   case lookupClassMethod (P.methodDefName methodDef) classInfo of
     Just methodInfo | Just valueInfo@OrdinaryValue {} <- lookupInstanceMethod methodInfo instanceInfo -> do
       let methodBodyView = specializeMethodTypeView methodInfo instanceHeadViews
           methodSourceView =
-            (ordinaryValueTypeView valueInfo)
-              { typeViewBinderIdentities = typeViewBinderIdentities methodBodyView
-              }
+            typeViewWithBinderIdentities
+              (typeViewBinderIdentities methodBodyView)
+              (ordinaryValueTypeView valueInfo)
       liftEither
-        (lowerConstrainedResolvedExprBinding elaborateScope (loweredBindingIdentityFromValueInfo valueInfo) (valueConstraintInfos valueInfo) methodSourceView methodBodyView False (P.methodDefExpr methodDef))
+        ( lowerConstrainedResolvedExprBindingWithGenerator
+            generator
+            elaborateScope
+            (loweredBindingIdentityFromValueInfo valueInfo)
+            (valueConstraintInfos valueInfo)
+            methodSourceView
+            methodBodyView
+            False
+            (P.methodDefExpr methodDef)
+        )
     _ -> throwError (ProgramUnexpectedInstanceMethod (className classInfo) (P.refDisplayName (P.methodDefName methodDef)))
 
 data DefWorkItem = DefWorkItem
@@ -1674,12 +1523,12 @@ data DefWorkItem = DefWorkItem
     defWorkItemDependencies :: [SymbolIdentity]
   }
 
-checkDefsWithTiming :: TimingConfig -> P.ModuleName -> FinalizeContext -> ElaborateScope -> Scope -> [P.ResolvedDefDecl] -> IO (TcM [CheckedBinding])
-checkDefsWithTiming timing moduleName0 finalizeContext elaborateScope scope defDecls = do
-  workItemsResult <- lowerDefWorkItemsWithTiming timing moduleName0 elaborateScope scope defDecls
+checkDefsWithTiming :: TimingConfig -> P.ModuleName -> IdentityGenerator -> FinalizeContext -> ElaborateScope -> Scope -> [P.ResolvedDefDecl] -> IO (TcM ([CheckedBinding], IdentityGenerator))
+checkDefsWithTiming timing moduleName0 generator0 finalizeContext elaborateScope scope defDecls = do
+  workItemsResult <- lowerDefWorkItemsWithTiming timing moduleName0 generator0 elaborateScope scope defDecls
   case workItemsResult of
     Left err -> pure (Left err)
-    Right workItems -> do
+    Right (workItems, generator1) -> do
       batchSize <- moduleDefBatchSize
       nonRecursiveIdentitiesResult <-
         timeCheckModuleOperation timing moduleName0 "defs.scc_classification" $
@@ -1693,60 +1542,66 @@ checkDefsWithTiming timing moduleName0 finalizeContext elaborateScope scope defD
           case moduleContextResult of
             Left err -> pure (Left err)
             Right moduleContext ->
-              finalizeDefWorkItemsWithTiming
-                timing
-                moduleName0
-                finalizeContext
-                (Just moduleContext)
-                batchSize
-                nonRecursiveIdentities
-                workItems
+              fmap (fmap (\bindings -> (bindings, generator1))) $
+                finalizeDefWorkItemsWithTiming
+                  timing
+                  moduleName0
+                  finalizeContext
+                  (Just moduleContext)
+                  batchSize
+                  nonRecursiveIdentities
+                  workItems
 
 lowerDefWorkItemsWithTiming ::
   TimingConfig ->
   P.ModuleName ->
+  IdentityGenerator ->
   ElaborateScope ->
   Scope ->
   [P.ResolvedDefDecl] ->
-  IO (TcM [DefWorkItem])
-lowerDefWorkItemsWithTiming timing moduleName0 elaborateScope scope defDecls =
-  go (Set.fromList (map (resolvedSymbolIdentity . P.defDeclName) defDecls)) [] defDecls
+  IO (TcM ([DefWorkItem], IdentityGenerator))
+lowerDefWorkItemsWithTiming timing moduleName0 generator0 elaborateScope scope defDecls =
+  go (Set.fromList (map (resolvedSymbolIdentity . P.defDeclName) defDecls)) generator0 [] defDecls
   where
-    go _ acc [] = pure (Right (reverse acc))
-    go localDefIdentities acc (defDecl : rest) = do
+    go _ generator acc [] = pure (Right (reverse acc, generator))
+    go localDefIdentities generator acc (defDecl : rest) = do
       result <-
         timeCheckModuleOperation timing moduleName0 ("def." ++ P.refDisplayName (P.defDeclName defDecl) ++ ".lower") $
-          lowerDefWorkItem elaborateScope scope localDefIdentities defDecl
+          lowerDefWorkItem generator elaborateScope scope localDefIdentities defDecl
       case result of
         Left err -> pure (Left err)
-        Right workItem -> go localDefIdentities (workItem : acc) rest
+        Right (workItem, generator') -> go localDefIdentities generator' (workItem : acc) rest
 
 lowerDefWorkItem ::
+  IdentityGenerator ->
   ElaborateScope ->
   Scope ->
   Set.Set SymbolIdentity ->
   P.ResolvedDefDecl ->
-  TcM DefWorkItem
-lowerDefWorkItem elaborateScope scope localDefIdentities defDecl = do
+  TcM (DefWorkItem, IdentityGenerator)
+lowerDefWorkItem generator elaborateScope scope localDefIdentities defDecl = do
   let defName = P.refDisplayName (P.defDeclName defDecl)
   valueInfo <- lookupValueInfoBySymbol scope (P.defDeclName defDecl)
   case valueInfo of
     ordinary@OrdinaryValue {} -> do
-      lowered <-
+      (lowered, generator') <-
         liftEither $
-          lowerResolvedConstrainedExprBinding
+          lowerResolvedConstrainedExprBindingWithGenerator
+            generator
             elaborateScope
             (loweredBindingIdentityFromValueInfo ordinary)
             (P.defDeclType defDecl)
             (resolvedDefDeclIsMain defDecl)
             (P.defDeclExpr defDecl)
       pure
-        DefWorkItem
-          { defWorkItemDecl = defDecl,
-            defWorkItemIdentity = valueInfoSymbolIdentity ordinary,
-            defWorkItemLowered = lowered,
-            defWorkItemDependencies = localResolvedDefDependencies localDefIdentities (P.defDeclExpr defDecl)
-          }
+        ( DefWorkItem
+            { defWorkItemDecl = defDecl,
+              defWorkItemIdentity = valueInfoSymbolIdentity ordinary,
+              defWorkItemLowered = lowered,
+              defWorkItemDependencies = localResolvedDefDependencies localDefIdentities (P.defDeclExpr defDecl)
+            },
+          generator'
+        )
     _ -> throwError (ProgramDuplicateValue defName)
 
 localResolvedDefDependencies :: Set.Set SymbolIdentity -> P.ResolvedExpr -> [SymbolIdentity]
@@ -2236,9 +2091,7 @@ qualifyModuleExports alias exports =
     qualifyConstructorInfo ctor =
       ctor
         { ctorTypeView =
-            (ctorTypeView ctor)
-              { typeViewDisplay = qualifySrcType (ctorType ctor)
-              },
+            qualifyTypeView (ctorTypeView ctor),
           ctorOwningTypeIdentity = ctorOwningTypeIdentity ctor,
           ctorOwnerConstructors = map qualifyConstructorShape (ctorOwnerConstructors ctor)
         }
@@ -2246,9 +2099,7 @@ qualifyModuleExports alias exports =
     qualifyConstructorShape shape =
       shape
         { constructorShapeTypeView =
-            (constructorShapeTypeView shape)
-              { typeViewDisplay = qualifySrcType (constructorShapeType shape)
-              }
+            qualifyTypeView (constructorShapeTypeView shape)
         }
 
     qualifyClassInfo classInfo =
@@ -2256,10 +2107,6 @@ qualifyModuleExports alias exports =
             constraintInfo
               { constraintDisplayClass = qualifiedClassNameFor (constraintDisplayClass constraintInfo),
                 constraintTypeViews = fmap qualifyTypeView (constraintTypeViews constraintInfo)
-              }
-          qualifyTypeView view =
-            view
-              { typeViewDisplay = qualifySrcType (typeViewDisplay view)
               }
           qualifyMethod methodInfo =
             methodInfo
@@ -2279,9 +2126,7 @@ qualifyModuleExports alias exports =
         OrdinaryValue {} ->
           valueInfo
             { valueTypeView =
-                (valueTypeView valueInfo)
-                  { typeViewDisplay = qualifySrcType (typeViewDisplay (valueTypeView valueInfo))
-                  },
+                qualifyTypeView (valueTypeView valueInfo),
               valueConstraints = map qualifyConstraint (valueConstraints valueInfo)
             }
         OverloadedMethod {valueMethodInfo = methodInfo} ->
@@ -2300,9 +2145,7 @@ qualifyModuleExports alias exports =
     qualifyMethodFromExport methodInfo =
       methodInfo
         { methodTypeViewRaw =
-            (methodTypeViewRaw methodInfo)
-              { typeViewDisplay = qualifySrcType (methodType methodInfo)
-              },
+            qualifyTypeView (methodTypeViewRaw methodInfo),
           methodConstraints = map qualifyConstraint (methodConstraints methodInfo),
           methodConstraintInfos = map qualifyConstraintInfoFromExport (methodConstraintInfos methodInfo)
         }
@@ -2314,9 +2157,14 @@ qualifyModuleExports alias exports =
         }
 
     qualifyTypeViewFromExport view =
-      view
-        { typeViewDisplay = qualifySrcType (typeViewDisplay view)
-        }
+      qualifyTypeView view
+
+    qualifyTypeView =
+      mapTypeViewDisplayHeadNames qualifyHead
+
+    qualifyHead _ name
+      | name `Set.member` exportedTypeNames = qualifiedName name
+      | otherwise = name
 
     qualifiedClassNameFor className0
       | className0 `Set.member` exportedClassNames = qualifiedName className0
@@ -2645,13 +2493,9 @@ prepareImportedValue exports scope valueInfo =
       ( scope,
         valueInfo
           { valueTypeView =
-              view
-                { typeViewHeadIdentities =
-                    mergeSymbolIdentityMaps
-                      [ typeViewHeadIdentities view,
-                        importedValueTypeHeadIdentities exports view
-                      ]
-                }
+              typeViewMergeHeadIdentities
+                (importedValueTypeHeadIdentities exports view)
+                view
           }
       )
     ConstructorValue {valueCtorInfo = ctorInfo} ->
@@ -2712,14 +2556,13 @@ hiddenOwnerDataInfo dataInfo =
             dataInfoIdentityQualifiedName dataInfo
           ]
       ownerIdentity = dataInfoSymbolIdentity dataInfo
-      rewriteTypeView sourceTy view =
-        (view {typeViewDisplay = rewriteOwnerTypeHeads ownerIdentity ownerNames hiddenName view sourceTy})
-          { typeViewBinderIdentities =
-              mergeTypeBinderIdentityMaps
-                [ ownerParamBinderIdentities,
-                  typeViewBinderIdentities view
-                ]
-          }
+      rewriteTypeView _sourceTy view =
+        typeViewMergeBinderIdentities ownerParamBinderIdentities $
+          mapTypeViewDisplayHeadNames rewriteHead view
+      rewriteHead mbIdentity name
+        | maybe False (sameSymbolIdentity ownerIdentity) mbIdentity = hiddenName
+        | name `Set.member` ownerNames = hiddenName
+        | otherwise = name
       rewriteShape shape =
         shape
           { constructorShapeTypeView =
@@ -2743,27 +2586,6 @@ hiddenOwnerTypeName :: DataInfo -> String
 hiddenOwnerTypeName dataInfo =
   let identity = dataInfoSymbolIdentity dataInfo
    in "$" ++ symbolDefiningModule identity ++ "." ++ symbolDefiningName identity
-
-rewriteOwnerTypeHeads :: SymbolIdentity -> Set.Set String -> String -> TypeView -> SrcType -> SrcType
-rewriteOwnerTypeHeads ownerIdentity ownerNames hiddenName view = go
-  where
-    rewriteHead name
-      | typeViewHeadIdentityForAlias view name == Just ownerIdentity = hiddenName
-      | name `Set.member` ownerNames = hiddenName
-      | otherwise = name
-
-    go ty =
-      case ty of
-        STVar {} -> ty
-        STArrow dom cod -> STArrow (go dom) (go cod)
-        STBase name -> STBase (rewriteHead name)
-        STCon name args -> STCon (rewriteHead name) (fmap go args)
-        STVarApp name args -> STVarApp name (fmap go args)
-        STTyLam name body -> STTyLam name (go body)
-        STTyApp fun arg -> STTyApp (go fun) (go arg)
-        STForall name mb body -> STForall name (fmap (SrcBound . go . unSrcBound) mb) (go body)
-        STMu name body -> STMu name (go body)
-        STBottom -> STBottom
 
 importedHiddenConstructorInfo :: ConstructorInfo -> DataInfo -> ConstructorInfo
 importedHiddenConstructorInfo ctorInfo hiddenDataInfo =
@@ -2871,7 +2693,10 @@ displayClassConstraintForResolved env constraint = do
 typeViewForDisplayEnv :: DisplayNameEnv -> ResolvedSrcType -> TcM TypeView
 typeViewForDisplayEnv env ty = do
   display <- displaySrcTypeForResolved env ty
-  pure (typeViewFromResolved ty) {typeViewDisplay = display}
+  let view = typeViewFromResolved ty
+  case typeViewWithProjectedTypes display (typeViewIdentity view) view of
+    Right displayedView -> pure displayedView
+    Left err -> throwError (ProgramPipelineError ("resolved type display shape mismatch: " ++ show err))
 
 constraintInfoForDisplayEnv :: DisplayNameEnv -> P.ResolvedClassConstraint -> TcM ConstraintInfo
 constraintInfoForDisplayEnv env constraint = do
@@ -2892,16 +2717,13 @@ hydrateConstraintBinderIdentitiesFromView sourceView constraint =
 
 hydrateTypeViewBinderIdentitiesFromView :: TypeView -> TypeView -> TypeView
 hydrateTypeViewBinderIdentitiesFromView sourceView view =
-  view
-    { typeViewBinderIdentities =
-        mergeTypeBinderIdentityMaps
-          [ typeViewBinderIdentities view,
-            filterBinderIdentitiesByNames
-              freeNames
-              (typeViewBinderIdentityAliasEntries sourceView)
-              (typeBinderAliasIdentityMap binderAliases)
-          ]
-    }
+  typeViewMergeBinderIdentities
+    ( filterBinderIdentitiesByNames
+        freeNames
+        (typeViewBinderIdentityAliasEntries sourceView)
+        (typeBinderAliasIdentityMap binderAliases)
+    )
+    view
   where
     freeNames =
       freeVarsSrcType (typeViewDisplay view)
@@ -3587,32 +3409,43 @@ addConstructorValues dataInfos =
 
 synthesizeDerivedInstances ::
   SymbolIdentity ->
+  IdentityGenerator ->
   DisplayNameEnv ->
   Scope ->
   P.ResolvedModuleSyntax ->
-  TcM [P.ResolvedInstanceDecl]
-synthesizeDerivedInstances moduleIdentity displayEnv scope mod0 = do
-  candidates <- concat <$> mapM deriveForData (moduleDataDecls mod0)
+  TcM ([P.ResolvedInstanceDecl], IdentityGenerator)
+synthesizeDerivedInstances moduleIdentity generator0 displayEnv scope mod0 = do
+  (candidates, generator1) <- deriveDataDecls generator0 (moduleDataDecls mod0)
   pendingInstances <- mapM (\(_, _, classInfo, classDisplayName, instDecl) -> pendingDerivedInstance classInfo classDisplayName instDecl) candidates
   let validationScope = withScopeInstances (scopeInstances scope ++ pendingInstances) scope
   mapM_
     (\(resolvedDataDecl, displayDataDecl, classInfo, classDisplayName, _) -> validateEqDerivingFields classInfo classDisplayName validationScope resolvedDataDecl displayDataDecl)
     candidates
-  pure [instDecl | (_, _, _, _, instDecl) <- candidates]
+  pure ([instDecl | (_, _, _, _, instDecl) <- candidates], generator1)
   where
-    deriveForData dataDecl = do
+    deriveDataDecls generator [] = pure ([], generator)
+    deriveDataDecls generator (dataDecl : rest) = do
+      (current, generator1) <- deriveForData generator dataDecl
+      (remaining, generator2) <- deriveDataDecls generator1 rest
+      pure (current ++ remaining, generator2)
+
+    deriveForData generator0' dataDecl = do
       displayDataDecl <- resolvedDataDeclForEnv dataDecl
-      forM (P.dataDeclDeriving dataDecl) $ \classSymbol -> do
-        classInfo <- lookupClassInfoBySymbol scope classSymbol
-        let classDisplayName = resolvedSymbolDisplayName classSymbol
-        if hasDisplayName (dneClasses displayEnv) (classInfoSymbolIdentity classInfo) isEqName
-          then
-            case eqMethodReference classInfo of
-              Just eqMethodSymbol -> do
-                instDecl <- mkEqInstance classSymbol classInfo eqMethodSymbol dataDecl displayDataDecl
-                pure (dataDecl, displayDataDecl, classInfo, classDisplayName, instDecl)
-              Nothing -> throwError (ProgramUnsupportedDeriving (resolvedSymbolDisplayName classSymbol))
-          else throwError (ProgramUnsupportedDeriving (resolvedSymbolDisplayName classSymbol))
+      deriveClasses displayDataDecl generator0' (P.dataDeclDeriving dataDecl)
+      where
+        deriveClasses _ generator [] = pure ([], generator)
+        deriveClasses displayDataDecl generator (classSymbol : rest) = do
+          classInfo <- lookupClassInfoBySymbol scope classSymbol
+          let classDisplayName = resolvedSymbolDisplayName classSymbol
+          if hasDisplayName (dneClasses displayEnv) (classInfoSymbolIdentity classInfo) isEqName
+            then
+              case eqMethodReference classInfo of
+                Just eqMethodSymbol -> do
+                  (instDecl, generator1) <- mkEqInstance generator classSymbol classInfo eqMethodSymbol dataDecl displayDataDecl
+                  (remaining, generator2) <- deriveClasses displayDataDecl generator1 rest
+                  pure ((dataDecl, displayDataDecl, classInfo, classDisplayName, instDecl) : remaining, generator2)
+                Nothing -> throwError (ProgramUnsupportedDeriving (resolvedSymbolDisplayName classSymbol))
+            else throwError (ProgramUnsupportedDeriving (resolvedSymbolDisplayName classSymbol))
 
     eqMethodReference classInfo =
       methodSymbol <$> find hasEqMethodDisplay (Map.elems (classMethodsByIdentity classInfo))
@@ -3802,7 +3635,7 @@ synthesizeDerivedInstances moduleIdentity displayEnv scope mod0 = do
     scopeToElaborateScope scope0 =
       mkElaborateScope (scopeValues scope0) (scopeElaborateTypes scope0) (scopeClasses scope0) (scopeInstances scope0)
 
-    mkEqInstance classSymbol _classInfo eqMethodSymbol resolvedDataDecl _displayDataDecl = do
+    mkEqInstance generator0' classSymbol _classInfo eqMethodSymbol resolvedDataDecl _displayDataDecl = do
       let dataSymbol = P.dataDeclName resolvedDataDecl
           dataName0 = symbolDefiningName (resolvedSymbolIdentity dataSymbol)
           andSymbol = Builtins.builtinValueSymbol "__mlfp_and"
@@ -3813,25 +3646,21 @@ synthesizeDerivedInstances moduleIdentity displayEnv scope mod0 = do
           let ctorSymbol = P.constructorDeclName ctor
               argTypes = resolvedConstructorFieldTypes (P.constructorDeclType ctor)
           pure (ctor, ctorSymbol, argTypes)
-      let deriveGen0 =
-            identityGeneratorAfter
-              ( concatMap resolvedTypeBinderGeneratedIdentities paramRefs
-                  ++ resolvedDeclGeneratedIdentities (P.DeclData resolvedDataDecl)
-              )
-          headTy = dataDeclHeadResolvedType dataSymbol paramRefs
+      let headTy = dataDeclHeadResolvedType dataSymbol paramRefs
           derivedConstraintParamIdentities = derivedConstraintParams resolvedDataDecl headTy paramRefs
-          (leftRef, deriveGen1) = freshLocalRef "left" deriveGen0
+          (leftRef, deriveGen1) = freshLocalRef "left" generator0'
           (rightRef, deriveGen2) = freshLocalRef "right" deriveGen1
           left = P.Param leftRef (Just headTy)
           right = P.Param rightRef (Just headTy)
           selfName = "__derived_eq_" ++ dataName0
           (selfRef, deriveGen3) = freshLocalRef selfName deriveGen2
-          (recursiveBody, _) =
+          (recursiveBody, recursiveGenerator) =
             deriveEqBody eqMethodSymbol andSymbol headTy ctorEntries leftRef rightRef (Just selfRef) deriveGen3
-          (nonRecursiveBody, _) =
+          (nonRecursiveBody, nonRecursiveGenerator) =
             deriveEqBody eqMethodSymbol andSymbol headTy ctorEntries leftRef rightRef Nothing deriveGen3
+          recursive = any (isRecursiveOwnerResolvedField headTy) (concatMap (resolvedConstructorFieldTypes . P.constructorDeclType) (P.dataDeclConstructors resolvedDataDecl))
           methodBody =
-            if any (isRecursiveOwnerResolvedField headTy) (concatMap (resolvedConstructorFieldTypes . P.constructorDeclType) (P.dataDeclConstructors resolvedDataDecl))
+            if recursive
               then
                 P.ELet
                   selfRef
@@ -3840,8 +3669,11 @@ synthesizeDerivedInstances moduleIdentity displayEnv scope mod0 = do
                   (P.EVar (P.ResolvedLocalValue selfRef))
               else
                 P.ELam left (P.ELam right nonRecursiveBody)
+          generator1
+            | recursive = recursiveGenerator
+            | otherwise = nonRecursiveGenerator
       pure
-        P.InstanceDecl
+        ( P.InstanceDecl
             { P.instanceDeclClass = classSymbol,
               P.instanceDeclConstraints =
                 [ P.ClassConstraint
@@ -3853,7 +3685,9 @@ synthesizeDerivedInstances moduleIdentity displayEnv scope mod0 = do
                 ],
               P.instanceDeclTypes = headTy :| [],
               P.instanceDeclMethods = [P.MethodDef eqMethodSymbol methodBody]
-            }
+            },
+          generator1
+        )
       where
         resolvedDataParamRef :: P.TypeParam -> TcM ResolvedTypeBinderRef
         resolvedDataParamRef param =
@@ -3864,8 +3698,8 @@ synthesizeDerivedInstances moduleIdentity displayEnv scope mod0 = do
                 ProgramPipelineError
                   ("resolved data parameter `" ++ P.typeParamName param ++ "` is missing identity")
 
-    deriveEqBody eqMethodSymbol andSymbol ownerHeadTy ctorEntries leftRef rightRef mbSelfRef generator0 =
-      let (alts, generator1) = deriveCtorAlts generator0 ctorEntries
+    deriveEqBody eqMethodSymbol andSymbol ownerHeadTy ctorEntries leftRef rightRef mbSelfRef initialGenerator =
+      let (alts, generator1) = deriveCtorAlts initialGenerator ctorEntries
        in (P.ECase (P.EVar (P.ResolvedLocalValue leftRef)) alts, generator1)
       where
         deriveCtorAlts generator [] = ([], generator)
@@ -4297,16 +4131,33 @@ sanitizeNameChar c
   | c `elem` ['0' .. '9'] = [c]
   | otherwise = "_u" ++ show (fromEnum c) ++ "_"
 
-checkDef :: FinalizeContext -> ElaborateScope -> Scope -> P.ResolvedDefDecl -> TcM CheckedBinding
-checkDef finalizeContext elaborateScope scope defDecl = do
+checkDefs :: IdentityGenerator -> FinalizeContext -> ElaborateScope -> Scope -> [P.ResolvedDefDecl] -> TcM ([CheckedBinding], IdentityGenerator)
+checkDefs generator0 finalizeContext elaborateScope scope =
+  go generator0 []
+  where
+    go generator acc [] = pure (reverse acc, generator)
+    go generator acc (defDecl : rest) = do
+      (checked, generator') <- checkDef generator finalizeContext elaborateScope scope defDecl
+      go generator' (checked : acc) rest
+
+checkDef :: IdentityGenerator -> FinalizeContext -> ElaborateScope -> Scope -> P.ResolvedDefDecl -> TcM (CheckedBinding, IdentityGenerator)
+checkDef generator finalizeContext elaborateScope scope defDecl = do
   let defName = P.refDisplayName (P.defDeclName defDecl)
   valueInfo <- lookupValueInfoBySymbol scope (P.defDeclName defDecl)
   case valueInfo of
     ordinary@OrdinaryValue {} -> do
-      liftEither
-        ( lowerResolvedConstrainedExprBinding elaborateScope (loweredBindingIdentityFromValueInfo ordinary) (P.defDeclType defDecl) (resolvedDefDeclIsMain defDecl) (P.defDeclExpr defDecl)
-            >>= finalizeBindingAllowOpaqueWithContext finalizeContext
-        )
+      (lowered, generator') <-
+        liftEither
+          ( lowerResolvedConstrainedExprBindingWithGenerator
+              generator
+              elaborateScope
+              (loweredBindingIdentityFromValueInfo ordinary)
+              (P.defDeclType defDecl)
+              (resolvedDefDeclIsMain defDecl)
+              (P.defDeclExpr defDecl)
+          )
+      checked <- liftEither (finalizeBindingAllowOpaqueWithContext finalizeContext lowered)
+      pure (checked, generator')
     _ -> throwError (ProgramDuplicateValue defName)
 
 buildExports :: P.ResolvedModuleSyntax -> Map String DataInfo -> Map String ClassInfo -> Map String ValueInfo -> TcM ModuleExports

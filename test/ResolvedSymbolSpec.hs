@@ -10,12 +10,12 @@ import MLF.Frontend.Program.Types
 import MLF.Frontend.Syntax.Program (ClassConstraintF (..), resolvedExportTypeRefFromSymbols, refDisplayName)
 import qualified MLF.Frontend.Symbol as Symbol
 import MLF.Frontend.Symbol
-  ( SymbolReferenceMode (..),
-    symbolIdentityAliasMapWith,
+  ( symbolIdentityAliasMapWith,
     symbolIdentityStableName,
     symbolRefMatchesWith,
     symbolRefMatches,
   )
+import MLF.Types.Reference (ReferenceMode (..))
 import MLF.Frontend.Syntax
   ( ResolvedSrcTy (..),
     ResolvedTypeBinderRef,
@@ -33,6 +33,14 @@ import MLF.Frontend.Syntax
   )
 import MLF.Types.Identity (TypeBinderIdentity, UniqueIdentity (..), typeBinderIdentityFromUnique, typeBinderIdentityStableName)
 import Test.Hspec
+import TypeViewTestSupport
+  ( fixtureTypeView,
+    mkTypeView,
+    setTypeViewBinderIdentities,
+    setTypeViewDisplay,
+    setTypeViewHeadIdentities,
+    setTypeViewTypes,
+  )
 
 generatedSymbolIdentity ::
   Int ->
@@ -196,7 +204,7 @@ spec = do
       symbolRefMatches (Just valueInfoIdentity) "stale-answer" Nothing stableName `shouldBe` False
       symbolRefMatches Nothing stableName (Just valueInfoIdentity) "answer" `shouldBe` False
       symbolRefMatches (Just valueInfoIdentity) "answer" Nothing "answer" `shouldBe` False
-      symbolRefMatchesWith SymbolIdentityOnly Nothing "answer" Nothing "answer" `shouldBe` False
+      symbolRefMatchesWith IdentityOnly Nothing "answer" Nothing "answer" `shouldBe` False
       symbolRefMatches
         (Just valueInfoIdentity)
         "answer"
@@ -344,11 +352,13 @@ spec = do
           methodInfo =
             eqMethodInfo
               { methodTypeViewRaw =
-                  (methodTypeViewRaw eqMethodInfo)
-                    { typeViewDisplay = STBase "Token",
-                      typeViewIdentity = STBase stableToken,
-                      typeViewHeadIdentities = Map.singleton stableToken tokenTypeIdentity
-                    }
+                  setTypeViewHeadIdentities
+                    (Map.singleton stableToken tokenTypeIdentity)
+                    ( setTypeViewTypes
+                        (STBase "Token")
+                        (STBase stableToken)
+                        (methodTypeViewRaw eqMethodInfo)
+                    )
               }
 
       typeViewHeadIdentities (methodTypeView methodInfo)
@@ -361,11 +371,13 @@ spec = do
           methodInfo =
             eqMethodInfo
               { methodTypeViewRaw =
-                  (methodTypeViewRaw eqMethodInfo)
-                    { typeViewDisplay = STBase stableToken,
-                      typeViewIdentity = STBase stableToken,
-                      typeViewHeadIdentities = Map.singleton "Token" tokenTypeIdentity
-                    }
+                  setTypeViewHeadIdentities
+                    (Map.singleton "Token" tokenTypeIdentity)
+                    ( setTypeViewTypes
+                        (STBase stableToken)
+                        (STBase stableToken)
+                        (methodTypeViewRaw eqMethodInfo)
+                    )
               }
 
       typeViewHeadIdentities (methodResultTypeView methodInfo)
@@ -376,11 +388,13 @@ spec = do
           methodInfo =
             eqMethodInfo
               { methodTypeViewRaw =
-                  (methodTypeViewRaw eqMethodInfo)
-                    { typeViewDisplay = STArrow (STBase stableToken) (STBase "Bool"),
-                      typeViewIdentity = STArrow (STBase stableToken) (STBase "Bool"),
-                      typeViewHeadIdentities = Map.singleton "Token" tokenTypeIdentity
-                    }
+                  setTypeViewHeadIdentities
+                    (Map.singleton "Token" tokenTypeIdentity)
+                    ( setTypeViewTypes
+                        (STArrow (STBase stableToken) (STBase "Bool"))
+                        (STArrow (STBase stableToken) (STBase "Bool"))
+                        (methodTypeViewRaw eqMethodInfo)
+                    )
               }
 
       map typeViewHeadIdentities (methodParamTypeViews (methodTypeView methodInfo))
@@ -389,9 +403,9 @@ spec = do
     it "keeps projected method result head identities through display pairs" $ do
       let stableToken = symbolIdentityStableName tokenTypeIdentity
           view =
-            (mkTypeView (STArrow (STBase "Bool") (STBase "Token")) (STArrow (STBase "Bool") (STBase stableToken)))
-              { typeViewHeadIdentities = Map.singleton stableToken tokenTypeIdentity
-              }
+            setTypeViewHeadIdentities
+              (Map.singleton stableToken tokenTypeIdentity)
+              (mkTypeView (STArrow (STBase "Bool") (STBase "Token")) (STArrow (STBase "Bool") (STBase stableToken)))
           resultView = methodResultTypeViewFrom view
 
       Map.lookup "Token" (typeViewHeadIdentities resultView) `shouldBe` Just tokenTypeIdentity
@@ -400,12 +414,12 @@ spec = do
     it "keeps partial arrow result head identities through display pairs" $ do
       let stableToken = symbolIdentityStableName tokenTypeIdentity
           view =
-            ( mkTypeView
-                (STArrow (STBase "Bool") (STArrow (STBase "Char") (STBase "Token")))
-                (STArrow (STBase "Bool") (STArrow (STBase "Char") (STBase stableToken)))
-            )
-              { typeViewHeadIdentities = Map.singleton stableToken tokenTypeIdentity
-              }
+            setTypeViewHeadIdentities
+              (Map.singleton stableToken tokenTypeIdentity)
+              ( mkTypeView
+                  (STArrow (STBase "Bool") (STArrow (STBase "Char") (STBase "Token")))
+                  (STArrow (STBase "Bool") (STArrow (STBase "Char") (STBase stableToken)))
+              )
           resultView = typeViewArrowResultViewForArity view 1
 
       typeViewDisplay resultView `shouldBe` STArrow (STBase "Char") (STBase "Token")
@@ -419,9 +433,9 @@ spec = do
           methodInfo =
             eqMethodInfo
               { methodTypeViewRaw =
-                  (methodTypeViewRaw eqMethodInfo)
-                    { typeViewBinderIdentities = Map.singleton "a" bodyIdentity
-                    },
+                  setTypeViewBinderIdentities
+                    (Map.singleton "a" bodyIdentity)
+                    (methodTypeViewRaw eqMethodInfo),
                 methodParamBinders = ("a", paramIdentity) :| []
               }
 
@@ -529,7 +543,9 @@ spec = do
               heads = typeViewHeadIdentities valueView
           let builtinHead name = Builtins.builtinModuleName ++ "." ++ name
           identityTy
-            `shouldBe` STArrow (STBase (builtinHead "Int")) (STBase (builtinHead "String"))
+            `shouldBe` STArrow
+              (STBase (symbolIdentityStableName (Builtins.builtinTypeIdentity "Int")))
+              (STBase (symbolIdentityStableName (Builtins.builtinTypeIdentity "String")))
           Map.lookup (builtinHead "Int") heads
             `shouldBe` Just (Builtins.builtinTypeIdentity "Int")
           Map.lookup (builtinHead "String") heads
@@ -539,9 +555,9 @@ spec = do
     it "collects mentioned type head identities through aliases" $ do
       let stableToken = symbolIdentityStableName tokenTypeIdentity
           view =
-            (mkTypeView (STBase "Token") (STBase stableToken))
-              { typeViewHeadIdentities = Map.singleton "Lib.Token" tokenTypeIdentity
-              }
+            setTypeViewHeadIdentities
+              (Map.singleton "Lib.Token" tokenTypeIdentity)
+              (mkTypeView (STBase "Token") (STBase stableToken))
       typeViewMentionedHeadIdentities view `shouldBe` Map.keysSet (Map.singleton tokenTypeIdentity ())
 
     it "assigns identities to builtin opaque type parameters" $ do
@@ -608,57 +624,54 @@ spec = do
           binderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 208)
           binderName = typeBinderIdentityStableName binderIdentity
           view displayName headKey binderKey =
-            TypeView
-              { typeViewDisplay = STArrow (STBase displayName) (STVar "a"),
-                typeViewIdentity = STArrow (STBase headName) (STVar binderName),
-                typeViewHeadIdentities = Map.singleton headKey tokenTypeIdentity,
-                typeViewBinderIdentities = Map.singleton binderKey binderIdentity
-              }
+            fixtureTypeView
+              (STArrow (STBase displayName) (STVar "a"))
+              (STArrow (STBase headName) (STVar binderName))
+              (Map.singleton headKey tokenTypeIdentity)
+              (Map.singleton binderKey binderIdentity)
           staleView = view "$stale.Token" "$stale.Token" "$stale_a"
       view "Token" "Token" "a" `shouldBe` staleView
       view "Token" "Token" "a"
-        `shouldNotBe` staleView {typeViewBinderIdentities = Map.empty}
+        `shouldNotBe` setTypeViewBinderIdentities Map.empty staleView
 
     it "compares type views by carried identities when identity names are stale" $ do
       let binderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 209)
           view headName binderName =
-            TypeView
-              { typeViewDisplay = STForall "a" Nothing (STArrow (STBase "Token") (STVar "a")),
-                typeViewIdentity = STForall binderName Nothing (STArrow (STBase headName) (STVar binderName)),
-                typeViewHeadIdentities = Map.singleton headName tokenTypeIdentity,
-                typeViewBinderIdentities = Map.singleton binderName binderIdentity
-              }
+            fixtureTypeView
+              (STForall "a" Nothing (STArrow (STBase "Token") (STVar "a")))
+              (STForall binderName Nothing (STArrow (STBase headName) (STVar binderName)))
+              (Map.singleton headName tokenTypeIdentity)
+              (Map.singleton binderName binderIdentity)
           staleView = view "$stale.Token" "$stale_a"
       view "Token" "a" `shouldBe` staleView
       view "Token" "a"
-        `shouldNotBe` staleView {typeViewHeadIdentities = Map.empty}
+        `shouldNotBe` setTypeViewHeadIdentities Map.empty staleView
 
     it "does not compare type views equal when carried head payloads conflict" $ do
       let originalIdentity = generatedSymbolIdentity 210 SymbolType "Lib" "Token" Nothing
           conflictingIdentity = generatedSymbolIdentity 210 SymbolType "Other" "StaleToken" Nothing
           headName = symbolIdentityStableName originalIdentity
           view identity =
-            TypeView
-              { typeViewDisplay = STBase "Token",
-                typeViewIdentity = STBase headName,
-                typeViewHeadIdentities = Map.singleton "Token" identity,
-                typeViewBinderIdentities = Map.empty
-              }
+            fixtureTypeView
+              (STBase "Token")
+              (STBase headName)
+              (Map.singleton "Token" identity)
+              Map.empty
       view originalIdentity `shouldNotBe` view conflictingIdentity
 
     it "keys class applications and evidence methods by carried type identities" $ do
       let stableToken = symbolIdentityStableName tokenTypeIdentity
           view identityName headKey =
-            (mkTypeView (STBase "Token") (STBase identityName))
-              { typeViewHeadIdentities = Map.singleton headKey tokenTypeIdentity
-              }
+            setTypeViewHeadIdentities
+              (Map.singleton headKey tokenTypeIdentity)
+              (mkTypeView (STBase "Token") (STBase identityName))
           visibleView = view stableToken "Token"
           staleView = view "$stale.Token" "$stale.Token"
           otherIdentity = generatedSymbolIdentity 211 SymbolType "Other" "Token" Nothing
           conflictingView =
-            staleView
-              { typeViewHeadIdentities = Map.singleton "$stale.Token" otherIdentity
-              }
+            setTypeViewHeadIdentities
+              (Map.singleton "$stale.Token" otherIdentity)
+              staleView
       classApplicationKey eqClassIdentity (visibleView :| [])
         `shouldBe` classApplicationKey eqClassIdentity (staleView :| [])
       classApplicationKey eqClassIdentity (visibleView :| [])
@@ -747,7 +760,7 @@ spec = do
           replacement = mkTypeView (STBase "Int") (STBase "Int")
           conflictingReplacement = mkTypeView (STBase "Bool") (STBase "Bool")
           binderIdentity = typeBinderIdentityFromUnique (UniqueIdentity 210)
-          binderKey = typeViewSubstKeyForIdentity binderIdentity
+          binderKey = binderIdentity
           evidence runtimeName =
             EvidenceMethod
               { evidenceMethodRuntimeName = runtimeName,
@@ -959,13 +972,13 @@ spec = do
           deferredRef = deferredRefFromIdentity (UniqueIdentity 214) "Some"
           tokenStableName = symbolIdentityStableName tokenTypeIdentity
           deferredTypeView =
-            (mkTypeView (STBase "Token") (STBase tokenStableName))
-              { typeViewHeadIdentities =
-                  Map.fromList
-                    [ ("Token", tokenTypeIdentity),
-                      (tokenStableName, tokenTypeIdentity)
-                    ]
-              }
+            setTypeViewHeadIdentities
+              ( Map.fromList
+                  [ ("Token", tokenTypeIdentity),
+                    (tokenStableName, tokenTypeIdentity)
+                  ]
+              )
+              (mkTypeView (STBase "Token") (STBase tokenStableName))
           call binderName identity =
             DeferredConstructorCall
               { deferredConstructorRef = deferredRef,
@@ -995,12 +1008,13 @@ spec = do
           staleShape =
             shape
               { constructorShapeRuntimeName = "$stale.Some",
-                constructorShapeTypeView = (constructorShapeTypeView shape) {typeViewDisplay = STBase "$stale.Token"}
+                constructorShapeTypeView =
+                  setTypeViewDisplay (STBase "$stale.Token") (constructorShapeTypeView shape)
               }
           staleCtor =
             someCtor
               { ctorRuntimeName = "$stale.Some",
-                ctorTypeView = (ctorTypeView someCtor) {typeViewDisplay = STBase "$stale.Token"}
+                ctorTypeView = setTypeViewDisplay (STBase "$stale.Token") (ctorTypeView someCtor)
               }
       shape `shouldBe` staleShape
       shape `shouldNotBe` staleShape {constructorShapeSymbol = higherCtorIdentity}

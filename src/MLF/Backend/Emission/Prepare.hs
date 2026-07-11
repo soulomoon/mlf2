@@ -24,7 +24,12 @@ import MLF.Frontend.Parse.Program
 import MLF.Frontend.Program.Check
     ( checkLocatedProgramPackage
     , checkProgramPackage
-    , validateCheckedProgramTypeViews
+    )
+import MLF.Frontend.Program.Checked
+    ( CheckedProgram
+    , checkedProgramModules
+    , checkedProgramResolved
+    , mapCheckedProgramModules
     )
 import MLF.Frontend.Program.Package
     ( LocatedProgramPackage
@@ -35,7 +40,6 @@ import MLF.Frontend.Program.Prelude (withPreludeLocatedPackage)
 import MLF.Frontend.Program.Types
     ( CheckedBinding (..)
     , CheckedModule (..)
-    , CheckedProgram (..)
     , ConstructorInfo (..)
     , DataInfo (..)
     , ProgramDiagnostic
@@ -45,7 +49,8 @@ import MLF.Frontend.Program.Types
     , ResolvedReferenceKind (..)
     , SymbolIdentity
     , SymbolNamespace (..)
-    , TypeView (..)
+    , TypeView
+    , typeViewHeadIdentities
     , symbolDefiningName
     , symbolNamespace
     , resolvedModuleIdentity
@@ -98,8 +103,10 @@ prepareBackendEmissionFromLocatedPackage package =
 
 prepareCheckedProgramForBackendEmission :: CheckedProgram -> Either BackendEmissionPreparationError CheckedProgram
 prepareCheckedProgramForBackendEmission checked = do
-    first BackendEmissionProgramError (validateCheckedProgramTypeViews checked)
-    pure checked {checkedProgramModules = map (prepareModule preludeIdentity retainedPreludeBindings retainedPreludeData) modules0}
+    first BackendEmissionProgramError $
+        mapCheckedProgramModules
+            (map (prepareModule preludeIdentity retainedPreludeBindings retainedPreludeData))
+            checked
   where
     modules0 = checkedProgramModules checked
     preludeIdentity = preludeModuleIdentity modules0

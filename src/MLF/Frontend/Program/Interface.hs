@@ -17,6 +17,7 @@ import qualified Data.Set as Set
 
 import MLF.Frontend.Symbol (sameSymbolIdentity, symbolIdentityPayloadKey, symbolIdentityStableName, symbolUniqueIdentity)
 import qualified MLF.Frontend.Program.Builtins as Builtins
+import MLF.Frontend.Program.Checked (CheckedProgram, checkedProgramModules)
 import MLF.Frontend.Program.Package
     ( PackageId (..)
     , PackageModuleGraph (..)
@@ -25,7 +26,6 @@ import MLF.Frontend.Program.Package
     )
 import MLF.Frontend.Program.Types
     ( CheckedModule (..)
-    , CheckedProgram (..)
     , ClassInfo (..)
     , ConstructorInfo (..)
     , DataInfo (..)

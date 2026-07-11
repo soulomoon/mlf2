@@ -34,7 +34,7 @@ import Control.Monad (filterM, foldM, zipWithM)
 import Control.Monad.Except (ExceptT (..), runExceptT)
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.IntMap.Strict as IntMap
-import Data.List (find, mapAccumL, sort)
+import Data.List (find, sort)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
@@ -55,6 +55,7 @@ import MLF.Elab.Run.Pipeline
     prepareExternalBindings,
     restrictPreparedExternalBindingsByKeys,
     extendPreparedExternalBindingTypeIdentities,
+    reservePreparedExternalBindingIdentities,
     runPipelineElabDetailedWithPreparedExternalBindings,
     runPipelineElabDetailedModuleKeyedWithPreparedExternalBindingsWithTiming,
     runPipelineElabDetailedModuleKeyedDeferFinalCheckWithPreparedExternalBindingsWithTiming,
@@ -64,12 +65,13 @@ import MLF.Elab.Run.Pipeline
     freshenTypeAbsAgainstEnv,
     unionPreparedExternalBindings,
   )
-import MLF.Elab.TermClosure (closeTermWithSchemeSubstRefsIfNeeded)
+import MLF.Elab.TermClosure (closeTermWithSchemeSubstRefsIfNeeded, renameTermTypeVars)
 import MLF.Elab.Types (XmlfTerm, ElabType)
 import qualified MLF.Elab.Types as X
 import qualified MLF.Elab.TypeCheck as TypeCheck
 import MLF.Frontend.ConstraintGen
   ( BindingKey (..),
+    bindingKeyForTermReference,
     ExternalBinding (..),
     ExternalBindingIdentity,
     ExternalBindingMode (..),
@@ -90,6 +92,9 @@ import MLF.Frontend.Program.Elaborate
     elaborateScopeValueRuntimeAliases,
     classInfoForConstraint,
     constructorBindingSourceTypeView,
+    constructorBindingUsesStructuralPlaceholder,
+    constructorStructuralArgs,
+    constructorStructuralHandlerType,
     constructorTypeView,
     diagnosticTypeViewDisplay,
     lookupEvidenceMethodByClassViews,
@@ -129,7 +134,11 @@ import MLF.Frontend.Program.Types
     ProgramError (..),
     ConstraintInfo (..),
     ClassApplicationKey,
-    TypeView (..),
+    TypeView,
+    typeViewBinderIdentities,
+    typeViewDisplay,
+    typeViewHeadIdentities,
+    typeViewIdentity,
     TypeBinderSubst,
     TypeViewSubst,
     ValueInfo (..),
@@ -142,11 +151,9 @@ import MLF.Frontend.Program.Types
     constructorOwnerShapes,
     constructorShapeFromInfo,
     constructorShapeForalls,
-    constructorShapeForallsIdentity,
     constructorShapeArgs,
-    constructorShapeArgsIdentity,
     constructorShapeName,
-    constructorShapeResult,
+    constructorShapeResultView,
     constructorShapeResultIdentity,
     constructorInfoIdentityName,
     dataInfoIdentityHeadName,
@@ -167,7 +174,6 @@ import MLF.Frontend.Program.Types
     constraintClassApplicationKey,
     lookupInstanceMethod,
     ctorName,
-    ctorForalls,
     ctorArgs,
     ctorResult,
     lookupTypeViewSubst,
@@ -194,6 +200,7 @@ import MLF.Frontend.Program.Types
     splitArrows,
     splitForalls,
     specializeMethodTypeView,
+    specializeQuantifiedTypeView,
     typeViewBinderIdentityForAlias,
     typeViewBinderIdentityAliasEntries,
     typeViewIsBareBinderIdentity,
@@ -201,7 +208,9 @@ import MLF.Frontend.Program.Types
     typeViewSubstFromParamIdentities,
     typeViewHeadIdentityLookupAliases,
     typeViewGeneratedIdentities,
-    typeViewSubstKeyForIdentity,
+    typeViewMergeBinderIdentities,
+    typeViewMergeHeadIdentities,
+    typeViewWithIdentityMaps,
     typeParamBinderIdentity,
     typeBinderSubstFromTypeViewSubst,
     typeBinderSubstToTypeViewSubst,
@@ -212,7 +221,7 @@ import MLF.Frontend.Program.Types
     lookupTypeBinderSubstViewByIdentity,
     insertTypeBinderSubstViewWithIdentity,
   )
-import MLF.Frontend.Syntax (Expr (..), Lit (..), NormSurfaceExpr, SrcBound (..), SrcTy (..), SrcType, SurfaceExpr, typeParamName)
+import MLF.Frontend.Syntax (Expr (..), Lit (..), NormSurfaceExpr, SrcBound (..), SrcTy (..), SrcType, SurfaceExpr, TermReference (..), termReferenceName, typeParamName)
 import MLF.Reify.TypeOps (alphaEqType, churchAwareEqType, freeTypeVarRefsType, freshNameLike, matchTypeRefs, splitForallsRefs, substTypeCaptureRef)
 import MLF.Types.Identity
   ( DeferredRef,
@@ -222,9 +231,8 @@ import MLF.Types.Identity
     LocalRef,
     localRefGeneratedIdentities,
     TypeBinderIdentity,
-    StructuralTypeBinderRole (StructuralResultBinder, StructuralSelfBinder),
+    StructuralTypeBinderRole (StructuralSelfBinder),
     UniqueIdentity,
-    freshDeferredRef,
     freshLocalRef,
     idDetailsAliasMapWith,
     idDetailsAliasNamesWith,
@@ -285,6 +293,13 @@ data SurfaceBindingReference = SurfaceBindingReference
     surfaceBindingReferenceDisplayName :: String
   }
   deriving (Eq, Ord, Show)
+
+surfaceBindingReferenceFromTermReference :: TermReference -> SurfaceBindingReference
+surfaceBindingReferenceFromTermReference reference =
+  SurfaceBindingReference
+    { surfaceBindingReferenceKey = bindingKeyForTermReference reference,
+      surfaceBindingReferenceDisplayName = termReferenceName reference
+    }
 
 data SurfaceExternalBindingInput = SurfaceExternalBindingInput
   { surfaceExternalBindingInputName :: String,
@@ -361,8 +376,8 @@ runtimeTypeViewsWithVisibleConstructors scope =
 
 mkModuleFinalizeContext :: FinalizeContext -> [LoweredBinding] -> Either ProgramError ModuleFinalizeContext
 mkModuleFinalizeContext context lowereds0 = do
-  mapM_ validateLoweredBindingDeferredObligations lowereds0
-  let lowereds = stampLoweredBindingsDeferredIdentities lowereds0
+  validateLoweredBindingsDeferredObligations lowereds0
+  let lowereds = lowereds0
       schemeExternalTypeViews = Map.unions (map loweredBindingExternalTypeViews lowereds)
       schemeExternalTypes = Map.map typeViewDisplay schemeExternalTypeViews
       schemeDeferredObligations = Map.unions (map loweredBindingDeferredObligations lowereds)
@@ -489,13 +504,46 @@ setCheckedBindingType :: ElabType -> CheckedBinding -> CheckedBinding
 setCheckedBindingType ty checked =
   checked
     { checkedBindingResolvedVar = X.mapResolvedVarType (const ty) (checkedBindingResolvedVar checked),
+      checkedBindingTerm =
+        alignLeadingTypeAbsRefsToType ty
+          (mapBindingOccurrences (checkedBindingResolvedVar checked) ty (checkedBindingTerm checked)),
       checkedBindingType = ty
     }
+
+mapBindingOccurrences :: X.ResolvedVar -> ElabType -> XmlfTerm -> XmlfTerm
+mapBindingOccurrences target ty =
+  go
+  where
+    go term =
+      case term of
+        X.EVarNode resolved ->
+          X.EVarNode (update resolved)
+        X.ELit lit ->
+          X.ELit lit
+        X.ELam resolved body ->
+          X.ELam (update resolved) (go body)
+        X.EApp fun arg ->
+          X.EApp (go fun) (go arg)
+        X.ELet resolved scheme rhs body ->
+          X.ELet (update resolved) scheme (go rhs) (go body)
+        X.ETyAbsRef ref mbBound body ->
+          X.ETyAbsRef ref mbBound (go body)
+        X.ETyInst inner inst ->
+          X.ETyInst (go inner) inst
+        X.ERoll rollTy body ->
+          X.ERoll rollTy (go body)
+        X.EUnroll body ->
+          X.EUnroll (go body)
+
+    update resolved
+      | X.resolvedVarSameIdentity target resolved =
+          X.mapResolvedVarType (const ty) resolved
+      | otherwise = resolved
 
 finalizeOpaqueUncheckedBindingWithContext :: FinalizeContext -> LoweredBinding -> ElabType -> Either ProgramError CheckedBinding
 finalizeOpaqueUncheckedBindingWithContext context lowered0 placeholderTy = do
   validateDeferredObligationIdentities (loweredBindingName lowered0) (loweredBindingDeferredObligations lowered0)
-  let lowered = stampLoweredBindingDeferredIdentities lowered0
+  let lowered = lowered0
   pipelineResult <-
     runSurfacePipelineWithContext
       context
@@ -507,7 +555,10 @@ finalizeOpaqueUncheckedBindingWithContext context lowered0 placeholderTy = do
   let PipelineElabDetailedResult {pedTerm = term0, pedTypeCheckEnv = tcEnv} =
         pipelineResult
   term <- finalizeOpaqueDeferredConstructors context (loweredBindingDeferredObligations lowered) tcEnv term0
-  let resolvedTerm = annotateResolvedTermVars context lowered term
+  let resolvedTerm =
+        alignLeadingTypeAbsRefsToType placeholderTy
+          . TypeCheck.canonicalizeResolvedTermTypes (runtimeTypeCheckEnv context)
+          $ term
       resolvedDeferredObligations =
         annotateDeferredEvidenceResolvedVars resolvedTerm (loweredBindingDeferredObligations lowered)
   let sourceTypeView =
@@ -627,44 +678,32 @@ inferOpaqueSurfaceTypeIgnoringAscriptions = inferOpaqueSurfaceTypeWithAscription
 inferOpaqueSurfaceTypeWithAscriptions :: Bool -> ElaborateScope -> Set String -> (BindingKey -> String -> Maybe SrcType) -> Map BindingKey SrcType -> SurfaceExpr -> Either ProgramError SrcType
 inferOpaqueSurfaceTypeWithAscriptions keepAscriptions scope rigidVars runtimeTypeFor localTypes expr =
   case expr of
-    EVar name -> inferReference (MetadataLightBindingKey name) name
+    EVarNode reference -> inferReference (bindingKeyForTermReference reference) (termReferenceName reference)
     ELit lit -> Right (literalSourceType lit)
-    ELamAnn name ty body ->
+    ELamAnnNode reference ty body ->
       STArrow ty
         <$> inferOpaqueSurfaceTypeWithAscriptions
           keepAscriptions
           scope
           rigidVars
           runtimeTypeFor
-          (Map.insert (MetadataLightBindingKey name) ty localTypes)
+          (Map.insert (bindingKeyForTermReference reference) ty localTypes)
           body
-    ELam {} ->
+    ELamNode {} ->
       Left (ProgramPipelineError "opaque validation needs lambda annotations")
     EApp fun arg -> do
       funTy <- inferOpaqueSurfaceTypeWithAscriptions keepAscriptions scope rigidVars runtimeTypeFor localTypes fun
       argTy <- inferOpaqueSurfaceTypeWithAscriptions keepAscriptions scope rigidVars runtimeTypeFor localTypes arg
       applyOpaqueFunctionType scope funTy argTy
-    ELet name rhs body -> do
+    ELetNode reference rhs body -> do
       rhsTy <- inferOpaqueSurfaceTypeWithAscriptions keepAscriptions scope rigidVars runtimeTypeFor localTypes rhs
-      inferOpaqueSurfaceTypeWithAscriptions keepAscriptions scope rigidVars runtimeTypeFor (Map.insert (MetadataLightBindingKey name) rhsTy localTypes) body
-    EBinderIdentity details inner ->
-      let key = ResolvedBindingKey (X.idDetailsIdentityKey details)
-       in case inner of
-            EVar name -> inferReference key name
-            ELamAnn _ ty body ->
-              STArrow ty
-                <$> inferOpaqueSurfaceTypeWithAscriptions
-                  keepAscriptions
-                  scope
-                  rigidVars
-                  runtimeTypeFor
-                  (Map.insert key ty localTypes)
-                  body
-            ELam {} -> Left (ProgramPipelineError "opaque validation needs lambda annotations")
-            ELet _ rhs body -> do
-              rhsTy <- inferOpaqueSurfaceTypeWithAscriptions keepAscriptions scope rigidVars runtimeTypeFor localTypes rhs
-              inferOpaqueSurfaceTypeWithAscriptions keepAscriptions scope rigidVars runtimeTypeFor (Map.insert key rhsTy localTypes) body
-            _ -> inferOpaqueSurfaceTypeWithAscriptions keepAscriptions scope rigidVars runtimeTypeFor localTypes inner
+      inferOpaqueSurfaceTypeWithAscriptions
+        keepAscriptions
+        scope
+        rigidVars
+        runtimeTypeFor
+        (Map.insert (bindingKeyForTermReference reference) rhsTy localTypes)
+        body
     EAnn inner annTy -> do
       actualTy <- inferOpaqueSurfaceTypeWithAscriptions keepAscriptions scope rigidVars runtimeTypeFor localTypes inner
       let exact =
@@ -728,7 +767,7 @@ finalizeBinding scope lowered = do
 finalizeBindingWithContext :: FinalizeContext -> LoweredBinding -> Either ProgramError CheckedBinding
 finalizeBindingWithContext context lowered0 = do
   validateDeferredObligationIdentities (loweredBindingName lowered0) (loweredBindingDeferredObligations lowered0)
-  let lowered = stampLoweredBindingDeferredIdentities lowered0
+  let lowered = lowered0
   metadataBinding <- finalizeConstructorBindingFromMetadata context lowered
   case metadataBinding of
     Just checked -> Right checked
@@ -736,12 +775,12 @@ finalizeBindingWithContext context lowered0 = do
 
 finalizeBindingWithSurfacePipeline :: FinalizeContext -> LoweredBinding -> Either ProgramError CheckedBinding
 finalizeBindingWithSurfacePipeline context lowered0 = do
-  let lowered = stampLoweredBindingDeferredIdentities lowered0
+  let lowered = lowered0
   pipelineResult <-
     runSurfacePipelineWithContext
       context
       [lowered]
-      (constructorBindingNeedsUnchecked scope lowered)
+      False
       (loweredBindingDeferredObligations lowered)
       (loweredBindingExternalTypeViews lowered)
       (loweredBindingSurfaceExpr lowered)
@@ -750,8 +789,6 @@ finalizeBindingWithSurfacePipeline context lowered0 = do
   (term, actualTy) <-
     finalizeDeferredObligationsForBinding context lowered (loweredBindingDeferredObligations lowered) tcEnv term0 actualTy0 (loweredBindingExpectedType lowered)
   finalizeCheckedBindingFromTerm context lowered term actualTy
-  where
-    scope = finalizeContextScope context
 
 finalizeBindingAllowOpaqueWithContextWithTiming ::
   TimingConfig ->
@@ -797,7 +834,7 @@ finalizeBindingWithModuleContext moduleContext lowered0 = do
       lowered =
         case mbReadContext of
           Right readContext -> moduleBindingReadLowered readContext
-          Left _ -> stampLoweredBindingDeferredIdentities lowered0
+          Left _ -> lowered0
   metadataBinding <- finalizeConstructorBindingFromMetadata context lowered
   case metadataBinding of
     Just checked -> Right checked
@@ -807,7 +844,7 @@ finalizeBindingWithModuleContext moduleContext lowered0 = do
       pipelineResult <-
         runLoweredSurfacePipelineWithModuleContext
           moduleContext
-          (constructorBindingNeedsUnchecked scope stampedLowered)
+          False
           stampedLowered
       let PipelineElabDetailedResult {pedTerm = term0, pedType = actualTy0, pedTypeCheckEnv = tcEnv} =
             pipelineResult
@@ -816,7 +853,6 @@ finalizeBindingWithModuleContext moduleContext lowered0 = do
       finalizeCheckedBindingFromTermWithReadContext context (Just (moduleBindingReadCheckContext readContext)) stampedLowered term actualTy
   where
     context = moduleFinalizeContextBase moduleContext
-    scope = finalizeContextScope context
 
 finalizeBindingWithContextWithTiming ::
   TimingConfig ->
@@ -829,7 +865,7 @@ finalizeBindingWithContextWithTiming timing label context forceUnchecked lowered
   case validateDeferredObligationIdentities (loweredBindingName lowered0) (loweredBindingDeferredObligations lowered0) of
     Left err -> pure (Left err)
     Right () -> do
-      let lowered = stampLoweredBindingDeferredIdentities lowered0
+      let lowered = lowered0
       metadataResult <-
         timeProgramOperationIO timing (label ++ ".constructor_metadata") $
           evaluate (finalizeConstructorBindingFromMetadata context lowered)
@@ -843,14 +879,12 @@ finalizeBindingWithContextWithTiming timing label context forceUnchecked lowered
                 (label ++ ".pipeline")
                 context
                 [lowered]
-                (forceUnchecked || constructorBindingNeedsUnchecked scope lowered)
+                forceUnchecked
                 (loweredBindingDeferredObligations lowered)
                 (loweredBindingExternalTypeViews lowered)
                 (loweredBindingSurfaceExpr lowered)
           finalizePipelineBindingResult timing label context lowered pipelineResult
         Left err -> pure (Left err)
-  where
-    scope = finalizeContextScope context
 
 finalizeBindingWithModuleContextWithTiming ::
   TimingConfig ->
@@ -880,7 +914,7 @@ finalizeBindingWithModuleContextWithTiming timing label moduleContext forceUnche
                 timing
                 (label ++ ".pipeline")
                 moduleContext
-                (forceUnchecked || constructorBindingNeedsUnchecked scope lowered)
+                forceUnchecked
                 lowered
           let mbCheckContext =
                 case mbReadContext of
@@ -890,7 +924,6 @@ finalizeBindingWithModuleContextWithTiming timing label moduleContext forceUnche
         Left err -> pure (Left err)
   where
     context = moduleFinalizeContextBase moduleContext
-    scope = finalizeContextScope context
 
 finalizeBindingLayerAllowOpaqueWithModuleContext ::
   ModuleFinalizeContext ->
@@ -1186,11 +1219,21 @@ finalizePipelineBindingResultWithReadContext timing label context mbCheckContext
 finalizeConstructorBindingFromMetadata :: FinalizeContext -> LoweredBinding -> Either ProgramError (Maybe CheckedBinding)
 finalizeConstructorBindingFromMetadata context lowered
   | not (loweredBindingIsConstructor lowered) = Right Nothing
-  | otherwise =
-      case metadataConstructorTerm context lowered of
-        Right (term, expectedTy) ->
-          Just <$> finalizeCheckedBindingFromTerm context lowered term expectedTy
-        _ -> Right Nothing
+  | otherwise = do
+      (term, expectedTy) <- metadataConstructorTerm context lowered
+      let resolvedTerm =
+            alignLeadingTypeAbsRefsToType expectedTy
+              . TypeCheck.canonicalizeResolvedTermTypes (runtimeTypeCheckEnv context)
+              $ term
+          resolvedDeferredObligations =
+            annotateDeferredEvidenceResolvedVars resolvedTerm (loweredBindingDeferredObligations lowered)
+      Just
+        <$> acceptResolvedCheckedBinding
+          lowered
+          (sourceTypeViewForLoweredBinding context lowered)
+          resolvedDeferredObligations
+          resolvedTerm
+          expectedTy
 
 metadataConstructorTerm :: FinalizeContext -> LoweredBinding -> Either ProgramError (XmlfTerm, ElabType)
 metadataConstructorTerm context lowered = do
@@ -1198,24 +1241,18 @@ metadataConstructorTerm context lowered = do
     case lookupConstructorBindingRuntime scope lowered of
       Just found -> Right found
       Nothing -> Left (ProgramPipelineError ("missing constructor metadata for `" ++ loweredBindingName lowered ++ "`"))
-  if constructorMetadataFastPathSupported scope dataInfo ctorInfo
+  if sameSymbolIdentity (dataInfoSymbol dataInfo) (ctorOwningTypeIdentity ctorInfo)
     then pure ()
-    else Left (ProgramPipelineError ("constructor metadata fast path unsupported for `" ++ loweredBindingName lowered ++ "`"))
+    else Left (ProgramPipelineError ("inconsistent constructor metadata for `" ++ loweredBindingName lowered ++ "`"))
   expectedTy <- loweredExpectedTypeToElabType scope lowered
   let constructorHeadIdentities =
         maybe Map.empty typeViewHeadIdentities $
           loweredBindingExpectedTypeView lowered <|> loweredBindingSourceTypeView lowered
-  term0 <- inlineConstructorHead scope constructorHeadIdentities (constructorBindingQuantifiedOwnerParams lowered dataInfo) ctorInfo emptyTypeBinderSubst
+  term0 <- inlineConstructorHead ConstructorBindingTerm scope constructorHeadIdentities (constructorBindingQuantifiedOwnerParams lowered dataInfo) ctorInfo emptyTypeBinderSubst
   let term = closeTermWithSchemeSubstRefsIfNeeded IntMap.empty (schemeFromType expectedTy) term0
   Right (term, expectedTy)
   where
     scope = finalizeContextScope context
-
-constructorMetadataFastPathSupported :: ElaborateScope -> DataInfo -> ConstructorInfo -> Bool
-constructorMetadataFastPathSupported scope dataInfo ctorInfo =
-  null (ctorForalls ctorInfo)
-    && sameSymbolIdentity (dataInfoSymbol dataInfo) (ctorOwningTypeIdentity ctorInfo)
-    && constructorOwnerRuntimeTypeTrackable (elaborateScopeDataTypesByIdentity scope) ctorInfo
 
 constructorBindingQuantifiedOwnerParams :: LoweredBinding -> DataInfo -> [(String, TypeBinderIdentity)]
 constructorBindingQuantifiedOwnerParams lowered dataInfo =
@@ -1291,10 +1328,9 @@ finalizeBindingsAllowOpaqueWithContextWithTiming timing label context lowereds =
 finalizeBindingGroupWithContext :: FinalizeContext -> [LoweredBinding] -> Either ProgramError [CheckedBinding]
 finalizeBindingGroupWithContext _ [] = Right []
 finalizeBindingGroupWithContext context lowereds0 = do
-  mapM_ validateLoweredBindingDeferredObligations lowereds0
+  validateLoweredBindingsDeferredObligations lowereds0
   let lowereds =
-        stampLoweredBindingsDeferredIdentities $
-          zipWith renameDeferredPlaceholdersForGroup [(1 :: Int) ..] lowereds0
+        zipWith renameDeferredPlaceholdersForGroup [(1 :: Int) ..] lowereds0
       deferredObligations = Map.unions (map loweredBindingDeferredObligations lowereds)
       externalTypeViews0 = Map.unions (map loweredBindingExternalTypeViews lowereds)
       groupExpr = groupedBindingExpr lowereds
@@ -1323,10 +1359,9 @@ finalizeBindingGroupWithContextWithTiming ::
 finalizeBindingGroupWithContextWithTiming _ _ _ [] = pure (Right [])
 finalizeBindingGroupWithContextWithTiming timing label context lowereds0 =
   runExceptT $ do
-    fromProgramEither (mapM_ validateLoweredBindingDeferredObligations lowereds0)
+    fromProgramEither (validateLoweredBindingsDeferredObligations lowereds0)
     let lowereds =
-          stampLoweredBindingsDeferredIdentities $
-            zipWith renameDeferredPlaceholdersForGroup [(1 :: Int) ..] lowereds0
+          zipWith renameDeferredPlaceholdersForGroup [(1 :: Int) ..] lowereds0
         deferredObligations = Map.unions (map loweredBindingDeferredObligations lowereds)
         externalTypeViews0 = Map.unions (map loweredBindingExternalTypeViews lowereds)
         groupExpr = groupedBindingExpr lowereds
@@ -1369,13 +1404,11 @@ groupedBindingExpr :: [LoweredBinding] -> SurfaceExpr
 groupedBindingExpr =
   foldr
     ( \lowered body ->
-        EBinderIdentity
+        EResolvedLet
           (loweredIdentityDetails (loweredBindingIdentity lowered))
-          ( ELet
-              (loweredBindingName lowered)
-              (EAnn (loweredBindingSurfaceExpr lowered) (groupedBindingAnnotationType lowered))
-              body
-          )
+          (loweredBindingName lowered)
+          (EAnn (loweredBindingSurfaceExpr lowered) (groupedBindingAnnotationType lowered))
+          body
     )
     (ELit (LBool True))
 
@@ -1456,20 +1489,24 @@ renameSurfaceVars renameName =
   where
     go bound expr =
       case expr of
-        EVar name
-          | name `Set.member` bound -> EVar name
-          | otherwise -> EVar (renameName name)
+        EVarNode reference ->
+          case reference of
+            MetadataLightTermReference name
+              | name `Set.member` bound -> expr
+              | otherwise -> EVar (renameName name)
+            ResolvedTermReference (DeferredId ref) _ ->
+              let renamedRef = renameDeferredRef (renameName (deferredRefName ref)) ref
+               in EResolvedVar (DeferredId renamedRef) (deferredRefName renamedRef)
+            ResolvedTermReference {} -> expr
         ELit {} -> expr
-        ELam name body -> ELam name (go (Set.insert name bound) body)
+        ELamNode reference body ->
+          ELamNode reference (go (Set.insert (termReferenceName reference) bound) body)
         EApp fun arg -> EApp (go bound fun) (go bound arg)
-        ELet name rhs body ->
-          let bound' = Set.insert name bound
-           in ELet name (go bound' rhs) (go bound' body)
-        EBinderIdentity (DeferredId ref) (EVar _) ->
-          let renamedRef = renameDeferredRef (renameName (deferredRefName ref)) ref
-           in EBinderIdentity (DeferredId renamedRef) (EVar (deferredRefName renamedRef))
-        EBinderIdentity details inner -> EBinderIdentity details (go bound inner)
-        ELamAnn name ty body -> ELamAnn name ty (go (Set.insert name bound) body)
+        ELetNode reference rhs body ->
+          let bound' = Set.insert (termReferenceName reference) bound
+           in ELetNode reference (go bound' rhs) (go bound' body)
+        ELamAnnNode reference ty body ->
+          ELamAnnNode reference ty (go (Set.insert (termReferenceName reference) bound) body)
         EAnn inner ty -> EAnn (go bound inner) ty
 
 renameDeferredObligation :: (String -> String) -> DeferredProgramObligation -> DeferredProgramObligation
@@ -1490,72 +1527,6 @@ renameDeferredObligation renameName obligation =
         deferred
           { deferredCaseRef = renameDeferredRef (renameName (deferredCasePlaceholder deferred)) (deferredCaseRef deferred)
           }
-
-stampLoweredBindingDeferredIdentities :: LoweredBinding -> LoweredBinding
-stampLoweredBindingDeferredIdentities lowered =
-  case stampLoweredBindingsDeferredIdentities [lowered] of
-    stamped : _ -> stamped
-    [] -> lowered
-
-stampLoweredBindingsDeferredIdentities :: [LoweredBinding] -> [LoweredBinding]
-stampLoweredBindingsDeferredIdentities lowereds =
-  snd (mapAccumL stampLowered (initialGenerator, Set.empty) lowereds)
-  where
-    initialGenerator =
-      identityGeneratorAfter (concatMap generatedIdentitiesInLoweredBinding lowereds)
-
-    stampLowered state lowered =
-      let (state', stampedObligations) =
-            mapAccumL stampDeferredObligation state (Map.elems (loweredBindingDeferredObligations lowered))
-          obligations = deferredObligationsFromList (map snd stampedObligations)
-          refMap = Map.fromList [(oldRef, deferredProgramObligationRef obligation) | (oldRef, obligation) <- stampedObligations]
-       in ( state',
-            lowered
-              { loweredBindingSurfaceExpr = remapSurfaceDeferredRefs refMap (loweredBindingSurfaceExpr lowered),
-                loweredBindingDeferredObligations = obligations
-              }
-          )
-
-stampDeferredObligation :: (IdentityGenerator, Set UniqueIdentity) -> DeferredProgramObligation -> ((IdentityGenerator, Set UniqueIdentity), (DeferredRef, DeferredProgramObligation))
-stampDeferredObligation (generator, seen) obligation =
-  if identity `Set.notMember` seen
-    then ((generator, Set.insert identity seen), (ref0, obligation))
-    else
-      let (ref, generator') = freshDeferredRef (deferredRefName ref0) generator
-          seen' = Set.insert (deferredRefIdentity ref) seen
-       in ((generator', seen'), (ref0, setDeferredProgramObligationRef ref obligation))
-  where
-    ref0 = deferredProgramObligationRef obligation
-    identity = deferredRefIdentity ref0
-
-remapSurfaceDeferredRefs :: Map DeferredRef DeferredRef -> SurfaceExpr -> SurfaceExpr
-remapSurfaceDeferredRefs refMap =
-  go
-  where
-    go expr =
-      case expr of
-        EVar {} -> expr
-        ELit {} -> expr
-        ELam name body -> ELam name (go body)
-        EApp fun arg -> EApp (go fun) (go arg)
-        ELet name rhs body -> ELet name (go rhs) (go body)
-        EBinderIdentity (DeferredId ref) inner ->
-          let ref' = Map.findWithDefault ref ref refMap
-              inner' =
-                case inner of
-                  EVar _ -> EVar (deferredRefName ref')
-                  _ -> go inner
-           in EBinderIdentity (DeferredId ref') inner'
-        EBinderIdentity details inner -> EBinderIdentity details (go inner)
-        ELamAnn name ty body -> ELamAnn name ty (go body)
-        EAnn inner ty -> EAnn (go inner) ty
-
-setDeferredProgramObligationRef :: DeferredRef -> DeferredProgramObligation -> DeferredProgramObligation
-setDeferredProgramObligationRef ref obligation =
-  case obligation of
-    DeferredMethod deferred -> DeferredMethod deferred {deferredMethodRef = ref}
-    DeferredConstructor deferred -> DeferredConstructor deferred {deferredConstructorRef = ref}
-    DeferredCase deferred -> DeferredCase deferred {deferredCaseRef = ref}
 
 remapDeferredObligations :: (DeferredProgramObligation -> DeferredProgramObligation) -> DeferredObligations -> DeferredObligations
 remapDeferredObligations f obligations =
@@ -1598,24 +1569,16 @@ acceptResolvedCheckedBinding lowered sourceTypeView resolvedDeferredObligations 
 
 finalizeCheckedBindingFromTermWithReadContext :: FinalizeContext -> Maybe BindingCheckReadContext -> LoweredBinding -> XmlfTerm -> ElabType -> Either ProgramError CheckedBinding
 finalizeCheckedBindingFromTermWithReadContext context mbCheckContext lowered term actualTy = do
-  let isUncheckedConstructor = constructorBindingNeedsUnchecked scope lowered
-      acceptedTerm0 = repairConstructorBindingTerm scope lowered term
-  (acceptedTy, acceptedTerm) <-
-    if isUncheckedConstructor
-      then do
-        expectedTy <- bindingCheckExpectedTypeFor lowered
-        Right (expectedTy, acceptedTerm0)
-      else Right (stripVacuousForallsAndTypeAbs actualTy acceptedTerm0)
-  let acceptedTermTyResult =
-        if isUncheckedConstructor
-          then Right acceptedTy
-          else TypeCheck.typeCheckWithEnv (runtimeTypeCheckEnv context) acceptedTerm
+  let (acceptedTy, acceptedTerm) = stripVacuousForallsAndTypeAbs actualTy term
+      acceptedTermTyResult = TypeCheck.typeCheckWithEnv (runtimeTypeCheckEnv context) acceptedTerm
   let acceptChecked = do
         checkedTy <- checkedBindingTypeForStorage lowered acceptedTy
         let sourceTypeView =
               sourceTypeViewForLoweredBinding context lowered
         let acceptedTermWithResolvedVars =
-              annotateResolvedTermVars context lowered acceptedTerm
+              alignLeadingTypeAbsRefsToType checkedTy
+                . TypeCheck.canonicalizeResolvedTermTypes (runtimeTypeCheckEnv context)
+                $ acceptedTerm
             resolvedDeferredObligations =
               annotateDeferredEvidenceResolvedVars acceptedTermWithResolvedVars (loweredBindingDeferredObligations lowered)
         acceptResolvedCheckedBinding
@@ -1624,27 +1587,24 @@ finalizeCheckedBindingFromTermWithReadContext context mbCheckContext lowered ter
           resolvedDeferredObligations
           acceptedTermWithResolvedVars
           checkedTy
-  if isUncheckedConstructor
+  case acceptedTermTyResult of
+    Right checkedTy
+      | meaningfulForallCount checkedTy < meaningfulForallCount acceptedTy ->
+          ensureRecoveredTypeCompatible (stripVacuousForalls checkedTy)
+    Left _
+      | not (termCoversMeaningfulForalls acceptedTy acceptedTerm),
+        not (directSurfaceValueCoversMeaningfulForalls acceptedTy) ->
+          ensureRecoveredTypeCompatible (stripVacuousForalls acceptedTy)
+    _ -> Right ()
+  let actualTyForCompare = stripVacuousForalls actualTy
+  expectedTyForCompare <- bindingCheckExpectedTypeForCompareFor lowered
+  compatible <- checkedOrRecoveredTypesCompatible expectedTyForCompare actualTyForCompare
+  if compatible
     then acceptChecked
     else do
-      case acceptedTermTyResult of
-        Right checkedTy
-          | meaningfulForallCount checkedTy < meaningfulForallCount acceptedTy ->
-              ensureRecoveredTypeCompatible (stripVacuousForalls checkedTy)
-        Left _
-          | not (termCoversMeaningfulForalls acceptedTy acceptedTerm),
-            not (directSurfaceValueCoversMeaningfulForalls acceptedTy) ->
-              ensureRecoveredTypeCompatible (stripVacuousForalls acceptedTy)
-        _ -> Right ()
-      let actualTyForCompare = stripVacuousForalls actualTy
-      expectedTyForCompare <- bindingCheckExpectedTypeForCompareFor lowered
-      compatible <- checkedOrRecoveredTypesCompatible expectedTyForCompare actualTyForCompare
-      if compatible
-        then acceptChecked
-        else do
-          let recoveredActualSrcTy = recoverElabSourceType scope actualTyForCompare
-          recoveredExpectedSrcTy <- bindingCheckRecoveredExpectedSourceTypeFor lowered
-          Left (ProgramTypeMismatch recoveredActualSrcTy recoveredExpectedSrcTy)
+      let recoveredActualSrcTy = recoverElabSourceType scope actualTyForCompare
+      recoveredExpectedSrcTy <- bindingCheckRecoveredExpectedSourceTypeFor lowered
+      Left (ProgramTypeMismatch recoveredActualSrcTy recoveredExpectedSrcTy)
   where
     scope = finalizeContextScope context
 
@@ -1757,9 +1717,7 @@ finalizeCheckedBindingFromTermWithReadContext context mbCheckContext lowered ter
     directSurfaceValueReference :: SurfaceExpr -> Maybe SurfaceBindingReference
     directSurfaceValueReference expr =
       case expr of
-        EVar name -> Just (SurfaceBindingReference (MetadataLightBindingKey name) name)
-        EBinderIdentity details (EVar name) ->
-          Just (SurfaceBindingReference (ResolvedBindingKey (X.idDetailsIdentityKey details)) name)
+        EVarNode reference -> Just (surfaceBindingReferenceFromTermReference reference)
         EAnn inner _ -> directSurfaceValueReference inner
         _ -> Nothing
 
@@ -1771,6 +1729,19 @@ finalizeCheckedBindingFromTermWithReadContext context mbCheckContext lowered ter
               1 + meaningfulForallCount body
           | otherwise -> meaningfulForallCount body
         _ -> 0
+
+alignLeadingTypeAbsRefsToType :: ElabType -> XmlfTerm -> XmlfTerm
+alignLeadingTypeAbsRefsToType expectedTy term =
+  case (expectedTy, term) of
+    (X.TForallRef targetRef _ targetBody, X.ETyAbsRef termRef mbBound body)
+      | X.typeBinderRefsSameIdentity targetRef termRef ->
+          X.ETyAbsRef termRef mbBound (alignLeadingTypeAbsRefsToType targetBody body)
+      | otherwise ->
+          X.ETyAbsRef
+            targetRef
+            mbBound
+            (alignLeadingTypeAbsRefsToType targetBody (renameTermTypeVars [(termRef, targetRef)] body))
+    _ -> term
 
 validateDeferredObligationIdentities :: String -> DeferredObligations -> Either ProgramError ()
 validateDeferredObligationIdentities bindingName obligations =
@@ -1800,96 +1771,18 @@ validateLoweredBindingDeferredObligations :: LoweredBinding -> Either ProgramErr
 validateLoweredBindingDeferredObligations lowered =
   validateDeferredObligationIdentities (loweredBindingName lowered) (loweredBindingDeferredObligations lowered)
 
-annotateResolvedTermVars :: FinalizeContext -> LoweredBinding -> XmlfTerm -> XmlfTerm
-annotateResolvedTermVars _context lowered term0 =
-  freshenGraphTermLocalIdentities
-    ( X.generatedIdentitiesInTerm term0
-        ++ generatedIdentitiesInDeferredObligations lowered
-        ++ concatMap generatedIdentitiesInLoweredResolvedLocalIdentity (loweredBindingResolvedLocalIdentities lowered)
-        ++ concatMap generatedIdentitiesInLoweredResolvedLocalIdentity (loweredBindingResolvedEvidenceIdentities lowered)
-    )
-    term0
-
-annotateResolvedTermVarsForGroup :: FinalizeContext -> [LoweredBinding] -> DeferredObligations -> XmlfTerm -> XmlfTerm
-annotateResolvedTermVarsForGroup _context lowereds deferredObligations term0 =
-  freshenGraphTermLocalIdentities
-    ( X.generatedIdentitiesInTerm term0
-        ++ generatedIdentitiesInDeferredObligationsMap deferredObligations
-        ++ concatMap generatedIdentitiesInLoweredResolvedLocalIdentity resolvedLocalIdentities
-        ++ concatMap generatedIdentitiesInLoweredResolvedLocalIdentity resolvedEvidenceIdentities
-    )
-    term0
+validateLoweredBindingsDeferredObligations :: [LoweredBinding] -> Either ProgramError ()
+validateLoweredBindingsDeferredObligations lowereds = do
+  mapM_ validateLoweredBindingDeferredObligations lowereds
+  if Set.size (Set.fromList refs) == length refs
+    then Right ()
+    else
+      Left
+        ( ProgramPipelineError
+            "lowered bindings contain duplicate deferred identities; lowering must allocate them from the module identity supply"
+        )
   where
-    resolvedLocalIdentities =
-      concatMap loweredBindingResolvedLocalIdentities lowereds
-    resolvedEvidenceIdentities =
-      concatMap loweredBindingResolvedEvidenceIdentities lowereds
-
-freshenGraphTermLocalIdentities :: [UniqueIdentity] -> XmlfTerm -> XmlfTerm
-freshenGraphTermLocalIdentities generatedIdentities term0 =
-  let (term, _) = go Map.empty initialGenerator term0
-   in term
-  where
-    initialGenerator =
-      identityGeneratorAfter generatedIdentities
-
-    go identityLocals generator current =
-      case current of
-        X.EVarNode resolved
-          | X.resolvedVarIsLocal resolved,
-            Just scoped <- lookupLocalByIdentity resolved identityLocals ->
-              (X.EVarNode (scoped {X.resolvedVarType = X.resolvedVarType resolved}), generator)
-        X.EVarNode {} -> (current, generator)
-        X.ELit {} -> (current, generator)
-        X.ELam resolved body ->
-          let (resolved', generator') = freshenGraphResolvedVar generator resolved
-              identityLocals' = insertLocalIdentity resolved resolved' identityLocals
-              (body', generator'') = go identityLocals' generator' body
-           in (X.ELam resolved' body', generator'')
-        X.EApp fun arg ->
-          let (fun', generator') = go identityLocals generator fun
-              (arg', generator'') = go identityLocals generator' arg
-           in (X.EApp fun' arg', generator'')
-        X.ELet resolved scheme rhs body ->
-          let resolvedWithScheme = X.mapResolvedVarType (const (schemeToType scheme)) resolved
-              (resolved', generator') = freshenGraphResolvedVar generator resolvedWithScheme
-              identityLocals' = insertLocalIdentity resolved resolved' identityLocals
-              (rhs', generator'') = go identityLocals' generator' rhs
-              (body', generator''') = go identityLocals' generator'' body
-           in (X.ELet resolved' scheme rhs' body', generator''')
-        X.ETyAbsRef ref mb body ->
-          let (body', generator') = go identityLocals generator body
-           in (X.ETyAbsRef ref mb body', generator')
-        X.ETyInst inner inst ->
-          let (inner', generator') = go identityLocals generator inner
-           in (X.ETyInst inner' inst, generator')
-        X.ERoll ty body ->
-          let (body', generator') = go identityLocals generator body
-           in (X.ERoll ty body', generator')
-        X.EUnroll body ->
-          let (body', generator') = go identityLocals generator body
-           in (X.EUnroll body', generator')
-
-    lookupLocalByIdentity resolved locals =
-      X.resolvedVarLocalRef resolved >>= (`Map.lookup` locals)
-
-    insertLocalIdentity original resolved =
-      case X.resolvedVarLocalRef original of
-        Just localRef -> Map.insert localRef resolved
-        Nothing -> id
-
-    freshenGraphResolvedVar generator resolved =
-      case X.resolvedVarDetails resolved of
-        LocalId localRef
-          | null (localRefGeneratedIdentities localRef) ->
-              let (freshRef, generator') = freshLocalRef (X.resolvedVarReferenceName resolved) generator
-               in (resolved {X.resolvedVarDetails = LocalId freshRef}, generator')
-        EvidenceId localRef
-          | null (localRefGeneratedIdentities localRef) ->
-              let (freshRef, generator') = freshLocalRef (X.resolvedVarReferenceName resolved) generator
-               in (resolved {X.resolvedVarDetails = EvidenceId freshRef}, generator')
-        _ ->
-          (resolved, generator)
+    refs = concatMap (Map.keys . loweredBindingDeferredObligations) lowereds
 
 annotateDeferredEvidenceResolvedVars :: XmlfTerm -> DeferredObligations -> DeferredObligations
 annotateDeferredEvidenceResolvedVars term obligations =
@@ -2256,20 +2149,6 @@ prepareSurfaceExternalBindingsForReferences scope runtimeTypes runtimeIndex defe
   inputs <- mapM (surfaceExternalBindingInputForReference scope runtimeTypes runtimeIndex deferredIndex externalTypeViews) references
   prepareSurfaceExternalBindingInputs scope [input | Just input <- inputs]
 
-constructorBindingNeedsUnchecked :: ElaborateScope -> LoweredBinding -> Bool
-constructorBindingNeedsUnchecked scope lowered =
-  case lookupConstructorBindingRuntime scope lowered of
-    Just (dataInfo, ctor) -> not (null (ctorForalls ctor)) || not (null (dataParams dataInfo))
-    Nothing -> False
-
-repairConstructorBindingTerm :: ElaborateScope -> LoweredBinding -> XmlfTerm -> XmlfTerm
-repairConstructorBindingTerm scope lowered term =
-  case lookupConstructorBindingRuntime scope lowered of
-    Just (dataInfo, ctor)
-      | not (null (dataParams dataInfo)) ->
-          moveConstructorResultAbs (dataInfoSymbol dataInfo) (length (ctorArgs ctor)) term
-    _ -> term
-
 lookupConstructorBindingRuntime :: ElaborateScope -> LoweredBinding -> Maybe (DataInfo, ConstructorInfo)
 lookupConstructorBindingRuntime scope lowered =
   case loweredBindingConstructorRef lowered of
@@ -2287,66 +2166,6 @@ lookupConstructorRuntimeBySymbol scope identity =
   of
     [match] -> Just match
     _ -> Nothing
-
-data TypeAbsInfo = TypeAbsInfo
-  { typeAbsRef :: X.TypeBinderRef,
-    typeAbsBound :: Maybe X.BoundType
-  }
-
-newtype TermLamInfo = TermLamInfo X.ResolvedVar
-
-data ConstructorSpineItem
-  = SpineTypeAbs TypeAbsInfo
-  | SpineLam TermLamInfo
-
-moveConstructorResultAbs :: SymbolIdentity -> Int -> XmlfTerm -> XmlfTerm
-moveConstructorResultAbs ownerIdentity argCount term =
-  let (spine, body) = collectConstructorSpine term
-      typeAbs = [info | SpineTypeAbs info <- spine]
-      lams = [info | SpineLam info <- spine]
-      (resultAbs, otherAbs) = partitionResultAbs typeAbs
-      (argLams, handlerLams) = splitAt argCount lams
-   in wrapTypeAbs otherAbs (wrapLams argLams (wrapTypeAbs resultAbs (wrapLams handlerLams body)))
-  where
-    partitionResultAbs =
-      foldr
-        ( \absInfo (results, others) ->
-            if isOwnerResultAbs absInfo
-              then (absInfo : results, others)
-              else (results, absInfo : others)
-        )
-        ([], [])
-
-    isOwnerResultAbs absInfo =
-      typeBinderIdentityStructural (X.typeBinderRefIdentity (typeAbsRef absInfo))
-        == Just (symbolUniqueIdentity ownerIdentity, StructuralResultBinder)
-
-collectConstructorSpine :: XmlfTerm -> ([ConstructorSpineItem], XmlfTerm)
-collectConstructorSpine = go []
-  where
-    go acc = \case
-      X.ETyAbsRef ref mb body ->
-        go (acc ++ [SpineTypeAbs (TypeAbsInfo ref mb)]) body
-      X.ELam resolved body ->
-        go
-          ( acc
-              ++ [ SpineLam
-                    (TermLamInfo resolved)
-                 ]
-          )
-          body
-      other ->
-        (acc, other)
-
-wrapTypeAbs :: [TypeAbsInfo] -> XmlfTerm -> XmlfTerm
-wrapTypeAbs infos body =
-  foldr (\TypeAbsInfo {typeAbsRef = ref, typeAbsBound = mb} acc -> X.ETyAbsRef ref mb acc) body infos
-
-wrapLams :: [TermLamInfo] -> XmlfTerm -> XmlfTerm
-wrapLams infos body =
-  foldr wrapLam body infos
-  where
-    wrapLam (TermLamInfo resolved) acc = X.ELam resolved acc
 
 prepareSurfacePipelineExternalBindings :: FinalizeContext -> DeferredObligations -> Map String TypeView -> SurfaceExpr -> Either ProgramError PreparedExternalBindings
 prepareSurfacePipelineExternalBindings context deferredObligations externalTypeViews surfaceExpr = do
@@ -2426,8 +2245,9 @@ runSurfacePipelineWithContextWithTiming timing label context lowereds forceUnche
       either (Left . ProgramPipelineError . renderPipelineError) Right pipelineResult
 
 extendPreparedWithLoweredTypeIdentities :: [LoweredBinding] -> PreparedExternalBindings -> PreparedExternalBindings
-extendPreparedWithLoweredTypeIdentities lowereds =
-  extendPreparedExternalBindingTypeIdentities headIdentities binderIdentities
+extendPreparedWithLoweredTypeIdentities lowereds prepared =
+  reservePreparedExternalBindingIdentities generatedIdentities
+    (extendPreparedExternalBindingTypeIdentities headIdentities binderIdentities prepared)
   where
     views =
       [ view
@@ -2438,6 +2258,8 @@ extendPreparedWithLoweredTypeIdentities lowereds =
       mergeSymbolIdentityMaps (map typeViewHeadIdentities views)
     binderIdentities =
       mergeTypeBinderIdentityMaps (map typeViewBinderIdentities views)
+    generatedIdentities =
+      concatMap generatedIdentitiesInLoweredBinding lowereds
 
 runLoweredSurfacePipelineWithModuleContext ::
   ModuleFinalizeContext ->
@@ -2676,10 +2498,7 @@ finalizeDeferredObligationsForBinding context lowered deferredObligations tcEnv 
       Left (ProgramPipelineError ("binding `" ++ loweredBindingName lowered ++ "`: " ++ msg))
     result -> result
   where
-    loweredForIdentities =
-      lowered {loweredBindingDeferredObligations = deferredObligations}
-    resolvedTerm =
-      annotateResolvedTermVars context loweredForIdentities term
+    resolvedTerm = term
     resolvedDeferredObligations =
       annotateDeferredEvidenceResolvedVars resolvedTerm deferredObligations
 
@@ -2692,11 +2511,10 @@ finalizeDeferredObligationsForGroup ::
   ElabType ->
   SrcType ->
   Either ProgramError (XmlfTerm, ElabType)
-finalizeDeferredObligationsForGroup context lowereds deferredObligations tcEnv term inferredTy expectedBindingTy =
+finalizeDeferredObligationsForGroup context _lowereds deferredObligations tcEnv term inferredTy expectedBindingTy =
   finalizeDeferredObligations context resolvedDeferredObligations tcEnv resolvedTerm inferredTy expectedBindingTy
   where
-    resolvedTerm =
-      annotateResolvedTermVarsForGroup context lowereds deferredObligations term
+    resolvedTerm = term
     resolvedDeferredObligations =
       annotateDeferredEvidenceResolvedVars resolvedTerm deferredObligations
 
@@ -3409,7 +3227,7 @@ resolveDeferredConstructors scope env deferredConstructors = go env
                   )
                   (X.EVarNode (resolvedVarFromConstructorInfo ctorInfo))
                   instBinders
-              else inlineConstructorHead scope constructorHeadIdentities [] ctorInfo substFinal
+              else inlineConstructorHead ConstructorOccurrenceTerm scope constructorHeadIdentities [] ctorInfo substFinal
           Right (foldl X.EApp ctorHead args)
         _ ->
           Left (ProgramAmbiguousConstructorUse (ctorName ctorInfo))
@@ -3486,13 +3304,7 @@ matchTypeBinderSubstTypeViewInScope scope binders subst templateView actualView 
 
 templateViewWithBinders :: [(String, TypeBinderIdentity)] -> TypeView -> TypeView
 templateViewWithBinders binders view =
-  view
-    { typeViewBinderIdentities =
-        mergeTypeBinderIdentityMaps
-          [ typeViewBinderIdentities view,
-            typeBinderAliasIdentityMap binders
-          ]
-    }
+  typeViewMergeBinderIdentities (typeBinderAliasIdentityMap binders) view
 
 typeBinderTemplateView :: ElaborateScope -> [(String, TypeBinderIdentity)] -> SrcType -> TypeView
 typeBinderTemplateView scope binders ty =
@@ -3523,11 +3335,21 @@ bindTypeBinderSubstViewInScope scope (name, identity) actualView subst =
           alphaEqType leftTy rightTy || churchAwareEqType leftTy rightTy
         _ -> False
 
-inlineConstructorHead :: ElaborateScope -> Map String SymbolIdentity -> [(String, TypeBinderIdentity)] -> ConstructorInfo -> TypeBinderSubst -> Either ProgramError XmlfTerm
-inlineConstructorHead scope extraHeadIdentities ownerParamBinders ctorInfo subst = do
+data ConstructorTermPurpose
+  = ConstructorBindingTerm
+  | ConstructorOccurrenceTerm
+
+inlineConstructorHead :: ConstructorTermPurpose -> ElaborateScope -> Map String SymbolIdentity -> [(String, TypeBinderIdentity)] -> ConstructorInfo -> TypeBinderSubst -> Either ProgramError XmlfTerm
+inlineConstructorHead purpose scope extraHeadIdentities ownerParamBinders ctorInfo subst = do
   let resultSrcTy = applyConstructorSubst subst (ctorResult ctorInfo)
-      argSrcTys = map (applyConstructorSubst subst) (ctorArgs ctorInfo)
       resultVar = "$" ++ symbolIdentityStableName (ctorOwningTypeIdentity ctorInfo) ++ "_result"
+      useStructuralTypes =
+        case purpose of
+          ConstructorBindingTerm -> constructorBindingUsesStructuralPlaceholder scope ctorInfo
+          ConstructorOccurrenceTerm -> False
+      argSrcTys
+        | useStructuralTypes = constructorStructuralArgs ctorInfo
+        | otherwise = map (applyConstructorSubst subst) (ctorArgs ctorInfo)
       argNames = ["$" ++ constructorInfoIdentityName ctorInfo ++ "_arg" ++ show ix | ix <- [1 .. length argSrcTys]]
       ownerShapes =
         case lookupConstructorRuntimeBySymbol scope (ctorInfoSymbol ctorInfo) of
@@ -3545,11 +3367,13 @@ inlineConstructorHead scope extraHeadIdentities ownerParamBinders ctorInfo subst
         [ "$" ++ constructorShapeName shape ++ "_k" ++ show ix
           | (ix, shape) <- zip ([1 :: Int ..]) handlerShapes
         ]
-      handlerSrcType shape =
-        foldr
-          (\(name, mbBound) acc -> STForall name (fmap SrcBound mbBound) acc)
-          (foldr STArrow (STVar resultVar) (constructorShapeArgs shape))
-          (constructorShapeForalls shape)
+      handlerSrcType shape
+        | useStructuralTypes = constructorStructuralHandlerType resultVar shape
+        | otherwise =
+            foldr
+              (\(name, mbBound) acc -> STForall name (fmap SrcBound mbBound) acc)
+              (foldr STArrow (STVar resultVar) (constructorShapeArgs shape))
+              (constructorShapeForalls shape)
       loweredResultSrcTy = lowerTypeView scope (sourceTypeViewWithHeadIdentities resultSrcTy)
       loweredArgSrcTys = map (lowerTypeView scope . sourceTypeViewWithHeadIdentities) argSrcTys
       loweredHandlerSrcTys = map (lowerTypeView scope . sourceTypeViewWithHeadIdentities . handlerSrcType) handlerShapes
@@ -3660,19 +3484,14 @@ inlineConstructorHead scope extraHeadIdentities ownerParamBinders ctorInfo subst
       sourceTypeViewInScopeWithHeadIdentities scope extraHeadIdentities ty
 
     constructorShapeResultMatchView shape =
-      TypeView
-        { typeViewDisplay = constructorShapeResult shape,
-          typeViewIdentity = constructorShapeResultIdentity shape,
-          typeViewHeadIdentities =
-            mergeSymbolIdentityMaps
-              [ typeViewHeadIdentities (constructorShapeTypeView shape),
-                typeViewHeadIdentities (sourceTypeViewInScope scope (constructorShapeResultIdentity shape))
-              ],
-          typeViewBinderIdentities =
-            mergeTypeBinderIdentityMaps
-              [ typeBinderAliasIdentityMap (constructorShapeForallBinders shape)
-              ]
-        }
+      typeViewWithIdentityMaps
+        ( mergeSymbolIdentityMaps
+            [ typeViewHeadIdentities (constructorShapeTypeView shape),
+              typeViewHeadIdentities (sourceTypeViewInScope scope (constructorShapeResultIdentity shape))
+            ]
+        )
+        (typeBinderAliasIdentityMap (constructorShapeForallBinders shape))
+        (constructorShapeResultView shape)
 
 applyConstructorShapeSubst :: TypeBinderSubst -> ConstructorShape -> ConstructorShape
 applyConstructorShapeSubst subst shape =
@@ -3686,32 +3505,11 @@ applyConstructorShapeSubst subst shape =
         case typeParamBinderIdentity param of
           Just identity -> maybe True (const False) (lookupTypeBinderSubstByIdentity identity subst)
           Nothing -> True
-      substForalls foralls =
-        [ (name, fmap (applyConstructorSubst subst) mbBound)
-          | ((name, mbBound), binder) <- zip foralls (constructorShapeForallBinderInfo shape),
-            keepBinder binder
-        ]
-      displayForalls = substForalls (constructorShapeForalls shape)
-      identityForalls = substForalls (constructorShapeForallsIdentity shape)
-      shapeType foralls args result =
-        foldr
-          (\(name, mbBound) acc -> STForall name (fmap SrcBound mbBound) acc)
-          (foldr STArrow result args)
-          foralls
    in shape
         { constructorShapeTypeView =
-            (constructorShapeTypeView shape)
-              { typeViewDisplay =
-                  shapeType
-                    displayForalls
-                    (map (applyConstructorSubst subst) (constructorShapeArgs shape))
-                    (applyConstructorSubst subst (constructorShapeResult shape)),
-                typeViewIdentity =
-                  shapeType
-                    identityForalls
-                    (map (applyConstructorSubst subst) (constructorShapeArgsIdentity shape))
-                    (applyConstructorSubst subst (constructorShapeResultIdentity shape))
-                  },
+            specializeQuantifiedTypeView
+              (typeBinderSubstToTypeViewSubst subst)
+              (constructorShapeTypeView shape),
           constructorShapeForallBinderInfo = keptBinders,
           constructorShapeOwnerTypeParams = keptOwnerParams
         }
@@ -3874,23 +3672,11 @@ resolveDeferredCases scope deferredCases = go
                   )
                   sourceHeadTy
           Just
-            sourceView
-              { typeViewBinderIdentities =
-                  mergeTypeBinderIdentityMaps
-                    [ typeViewBinderIdentities sourceView,
-                      typeViewBinderIdentities rawView
-                    ]
-              }
+            (typeViewMergeBinderIdentities (typeViewBinderIdentities rawView) sourceView)
         _ -> Nothing
 
     rawElabTypeView ty =
-      sourceView
-        { typeViewBinderIdentities =
-            mergeTypeBinderIdentityMaps
-              [ typeViewBinderIdentities sourceView,
-                elabTypeBinderIdentities ty
-              ]
-        }
+      typeViewMergeBinderIdentities (elabTypeBinderIdentities ty) sourceView
       where
         sourceView =
           sourceTypeViewInScopeWithHeadIdentities
@@ -4655,8 +4441,8 @@ lookupResolvedForallSubst subst aliasViews sourceView index ref =
     keys = identityKeys candidateNames
 
     identityKeys names0 =
-      typeViewSubstKeyForIdentity (X.typeBinderRefIdentity ref)
-        : [ typeViewSubstKeyForIdentity identity
+      (X.typeBinderRefIdentity ref)
+        : [ identity
           | view <- aliasViews,
             name <- names0,
             Just identity <- [typeViewBinderIdentityForAlias view name]
@@ -5347,46 +5133,32 @@ surfaceFreeBindingReferences = Set.toAscList . go Set.empty
   where
     go :: Set BindingKey -> SurfaceExpr -> Set SurfaceBindingReference
     go bound expr = case expr of
-      EVar name ->
-        freeReference bound (MetadataLightBindingKey name) name
+      EVarNode reference ->
+        freeReference bound reference
       ELit _ -> Set.empty
-      ELam name body -> go (Set.insert (MetadataLightBindingKey name) bound) body
-      ELamAnn name _ body -> go (Set.insert (MetadataLightBindingKey name) bound) body
+      ELamNode reference body -> go (Set.insert (bindingKeyForTermReference reference) bound) body
+      ELamAnnNode reference _ body -> go (Set.insert (bindingKeyForTermReference reference) bound) body
       EApp fun arg -> go bound fun `Set.union` go bound arg
-      ELet name rhs body ->
-        let bound' = Set.insert (MetadataLightBindingKey name) bound
+      ELetNode reference rhs body ->
+        let bound' = Set.insert (bindingKeyForTermReference reference) bound
          in go bound' rhs `Set.union` go bound' body
-      EBinderIdentity details inner ->
-        let resolvedKey = ResolvedBindingKey (X.idDetailsIdentityKey details)
-         in case inner of
-              EVar name -> freeReference bound resolvedKey name
-              ELam _ body -> go (Set.insert resolvedKey bound) body
-              ELamAnn _ _ body -> go (Set.insert resolvedKey bound) body
-              ELet _ rhs body ->
-                let bound' = Set.insert resolvedKey bound
-                 in go bound' rhs `Set.union` go bound' body
-              _ -> go bound inner
       EAnn inner _ -> go bound inner
 
-    freeReference bound key displayName
+    freeReference bound reference
       | key `Set.member` bound = Set.empty
-      | otherwise = Set.singleton (SurfaceBindingReference key displayName)
+      | otherwise = Set.singleton (surfaceBindingReferenceFromTermReference reference)
+      where
+        key = bindingKeyForTermReference reference
 
 toListNE :: NonEmpty a -> [a]
 toListNE (x :| xs) = x : xs
 
 elabTypeToRecoveredTypeView :: ElaborateScope -> X.Ty v -> TypeView
 elabTypeToRecoveredTypeView scope ty =
-  TypeView
-    { typeViewDisplay = displayTy,
-      typeViewIdentity = typeViewIdentity recoveredView,
-      typeViewHeadIdentities =
-        mergeSymbolIdentityMaps
-          [ typeViewHeadIdentities recoveredView,
-            headIdentities
-          ],
-      typeViewBinderIdentities = elabTypeBinderIdentities ty
-    }
+  typeViewWithIdentityMaps
+    (mergeSymbolIdentityMaps [typeViewHeadIdentities recoveredView, headIdentities])
+    (elabTypeBinderIdentities ty)
+    recoveredView
   where
     recoveredView =
       sourceTypeViewInScopeWithHeadIdentities scope headIdentities displayTy
@@ -5488,50 +5260,10 @@ srcTypeToElabTypeMaybeInScopeWithHeadIdentities scope headIdentities =
 
 sourceTypeViewInScopeWithHeadIdentities :: ElaborateScope -> Map String SymbolIdentity -> SrcType -> TypeView
 sourceTypeViewInScopeWithHeadIdentities scope extraHeadIdentities ty =
-  baseView
-    { typeViewIdentity = sourceTypeIdentityInScopeWithHeadIdentities scope extraHeadIdentities ty,
-      typeViewHeadIdentities =
-        mergeSymbolIdentityMaps
-          [ typeViewHeadIdentities baseView,
-            extraHeadIdentities
-          ]
-    }
+  typeViewMergeHeadIdentities extraHeadIdentities baseView
   where
     baseView =
       sourceTypeViewInScope scope ty
-
-sourceTypeIdentityInScopeWithHeadIdentities :: ElaborateScope -> Map String SymbolIdentity -> SrcType -> SrcType
-sourceTypeIdentityInScopeWithHeadIdentities scope extraHeadIdentities =
-  go
-  where
-    headIdentities =
-      mergeSymbolIdentityMaps [extraHeadIdentities, typeHeadIdentitiesInScope scope]
-
-    scopedHeadIdentities =
-      dataTypeHeadIdentitiesInScope scope
-
-    go ty =
-      case ty of
-        STVar {} -> ty
-        STArrow dom cod -> STArrow (go dom) (go cod)
-        STBase name -> STBase (headName name)
-        STCon name args -> STCon (headName name) (fmap go args)
-        STVarApp name args -> STVarApp name (fmap go args)
-        STTyLam name body -> STTyLam name (go body)
-        STTyApp fun arg -> STTyApp (go fun) (go arg)
-        STForall name mb body -> STForall name (fmap (SrcBound . go . unSrcBound) mb) (go body)
-        STMu name body -> STMu name (go body)
-        STBottom -> STBottom
-
-    headName name =
-      case scopedTypeHeadIdentity name of
-        Just identity -> symbolIdentityStableName identity
-        Nothing -> name
-
-    scopedTypeHeadIdentity name =
-      lookupSymbolIdentityAlias scopedHeadIdentities name
-        <|> Builtins.builtinTypeHeadIdentity name
-        <|> lookupSymbolIdentityAlias headIdentities name
 
 typeViewToElabType :: ElaborateScope -> TypeView -> Either ProgramError ElabType
 typeViewToElabType scope view =
@@ -5547,13 +5279,7 @@ typeViewToElabType scope view =
       typeViewBinderRefs headIdentities viewWithStructuralBinders ty
 
     viewWithStructuralBinders =
-      view
-        { typeViewBinderIdentities =
-            mergeTypeBinderIdentityMaps
-              [ typeViewBinderIdentities view,
-                sourceTypeBinderIdentitiesInScope scope ty
-              ]
-        }
+      typeViewMergeBinderIdentities (sourceTypeBinderIdentitiesInScope scope ty) view
 
 loweredExpectedTypeToElabType :: ElaborateScope -> LoweredBinding -> Either ProgramError ElabType
 loweredExpectedTypeToElabType scope lowered =

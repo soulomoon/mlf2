@@ -34,6 +34,7 @@ import MLF.Frontend.Parse.Program
     renderProgramParseError,
   )
 import MLF.Frontend.Program.Check (checkLocatedProgramPackage)
+import MLF.Frontend.Program.Checked (CheckedProgram)
 import MLF.Frontend.Program.Package
   ( LocatedProgramPackage,
     PackageId,
@@ -49,8 +50,7 @@ import MLF.Frontend.Program.Run
     runCheckedProgramOutput,
   )
 import MLF.Frontend.Program.Types
-  ( CheckedProgram,
-    ProgramError,
+  ( ProgramError,
     diagnosticForProgramError,
     renderProgramDiagnostic,
   )

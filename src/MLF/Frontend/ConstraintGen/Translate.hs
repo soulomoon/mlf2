@@ -26,7 +26,7 @@ import qualified MLF.Frontend.ConstraintGen.Scope as Scope
 import MLF.Frontend.ConstraintGen.State (BuildState (..), ConstraintM, ScopeFrame, withModuleRootOwner)
 import MLF.Frontend.ConstraintGen.Types
 import MLF.Frontend.Syntax
-import MLF.Types.Identity (IdDetails (..), idDetailsIdentityKey, localRefFromScopedNodeId)
+import MLF.Types.Identity (IdDetails (..), freshGraphLocalRef, idDetailsIdentityKey)
 
 data FreeBindingReference = FreeBindingReference
   { freeBindingKey :: BindingKey,
@@ -316,29 +316,17 @@ unwrapSchemeRoot start = do
 rhsMentionsBinder :: BindingKey -> NormCoreExpr -> Bool
 rhsMentionsBinder needle expr =
   case expr of
-    EVar name -> MetadataLightBindingKey name == needle
+    EVarNode reference -> bindingKeyForTermReference reference == needle
     ELit _ -> False
-    ELam param body
-      | MetadataLightBindingKey param == needle -> False
+    ELamNode reference body
+      | bindingKeyForTermReference reference == needle -> False
       | otherwise -> rhsMentionsBinder needle body
     EApp fun arg ->
       rhsMentionsBinder needle fun || rhsMentionsBinder needle arg
-    ELet name rhs body
-      | MetadataLightBindingKey name == needle -> False
+    ELetNode reference rhs body
+      | bindingKeyForTermReference reference == needle -> False
       | otherwise ->
           rhsMentionsBinder needle rhs || rhsMentionsBinder needle body
-    EBinderIdentity details inner ->
-      let resolvedKey = ResolvedBindingKey (idDetailsIdentityKey details)
-       in case inner of
-            EVar _ -> resolvedKey == needle
-            ELam _ body
-              | resolvedKey == needle -> False
-              | otherwise -> rhsMentionsBinder needle body
-            ELet _ rhs body
-              | resolvedKey == needle -> False
-              | otherwise ->
-                  rhsMentionsBinder needle rhs || rhsMentionsBinder needle body
-            _ -> rhsMentionsBinder needle inner
     ECoerceConst {} -> False
 
 freeCoreBindingReferences :: NormCoreExpr -> [FreeBindingReference]
@@ -347,26 +335,19 @@ freeCoreBindingReferences = Set.toAscList . go Set.empty
     go :: Set.Set BindingKey -> NormCoreExpr -> Set.Set FreeBindingReference
     go bound expr =
       case expr of
-        EVar name ->
-          freeReference bound (MetadataLightBindingKey name) name
+        EVarNode reference ->
+          freeReference bound (bindingKeyForTermReference reference) (termReferenceName reference)
         ELit _ -> Set.empty
-        ELam param body ->
-          go (Set.insert (MetadataLightBindingKey param) bound) body
+        ELamNode reference body ->
+          go (Set.insert (bindingKeyForTermReference reference) bound) body
         EApp fun arg ->
           go bound fun <> go bound arg
-        ELet name rhs body ->
-          go bound rhs <> go (Set.insert (MetadataLightBindingKey name) bound) body
-        EBinderIdentity details inner ->
-          let resolvedKey = ResolvedBindingKey (idDetailsIdentityKey details)
-           in case inner of
-                EVar name ->
-                  freeReference bound resolvedKey name
-                ELam _ body ->
-                  go (Set.insert resolvedKey bound) body
-                ELet _ rhs body ->
-                  let bound' = Set.insert resolvedKey bound
-                   in go bound' rhs <> go bound' body
-                _ -> go bound inner
+        ELetNode reference rhs body ->
+          let key = bindingKeyForTermReference reference
+              bound' = Set.insert key bound
+           in case termReferenceDetails reference of
+                Nothing -> go bound rhs <> go bound' body
+                Just {} -> go bound' rhs <> go bound' body
         ECoerceConst {} -> Set.empty
 
     freeReference bound key displayName
@@ -395,28 +376,22 @@ materializeExternalBindingReferences references env0 =
 buildExprRaw :: Env -> GenNodeId -> NormCoreExpr -> ConstraintM (NodeId, AnnExpr)
 buildExprRaw env scopeRoot expr =
   case expr of
-    EVar name ->
-      buildVar env (MetadataLightBindingKey name) Nothing name
+    EVarNode reference ->
+      buildVar env (bindingKeyForTermReference reference) (termReferenceDetails reference) (termReferenceName reference)
     ELit lit -> do
       baseNode <- allocBase (baseFor lit)
       varNode <- allocVar
       setVarBound varNode (Just baseNode)
       pure (varNode, ALit lit varNode)
-    EBinderIdentity details inner ->
-      let bindingKey = ResolvedBindingKey (idDetailsIdentityKey details)
-       in case inner of
-            EVar name ->
-              buildVar env bindingKey (Just details) name
-            ELam param body ->
-              buildLambda env scopeRoot bindingKey (Just details) param body
-            ELet name rhs body ->
-              buildLet env scopeRoot bindingKey (Just details) name rhs body
-            _ ->
-              throwError
-                (InternalConstraintError "resolved identity wrapper does not enclose a variable, lambda, or let")
     -- See Note [Lambda Translation]
-    ELam param body ->
-      buildLambda env scopeRoot (MetadataLightBindingKey param) Nothing param body
+    ELamNode reference body ->
+      buildLambda
+        env
+        scopeRoot
+        (bindingKeyForTermReference reference)
+        (termReferenceDetails reference)
+        (termReferenceName reference)
+        body
 
     -- Term annotation sugar: (a : τ) ≜ cτ a. See Note [Coercion domain/codomain semantics].
     EApp (ECoerceConst annTy) annotatedExpr ->
@@ -442,8 +417,15 @@ buildExprRaw env scopeRoot expr =
       pure (resultNode, AApp funAnn argAnn funEid argEid resultNode)
 
     -- See Note [Let Bindings and Expansion Variables]
-    ELet name rhs body ->
-      buildLet env scopeRoot (MetadataLightBindingKey name) Nothing name rhs body
+    ELetNode reference rhs body ->
+      buildLet
+        env
+        scopeRoot
+        (bindingKeyForTermReference reference)
+        (termReferenceDetails reference)
+        (termReferenceName reference)
+        rhs
+        body
 
     -- We only expect coercion constants to appear in an application position,
     -- i.e. as the result of desugaring @(a : τ)@ to @cτ a@.
@@ -483,7 +465,7 @@ buildLambda env scopeRoot bindingKey mbDetails param body = do
   binderDetails <- graphBinderDetails param argNode mbDetails
   let env' = Map.insert bindingKey (Binding argNode Nothing (Just binderDetails)) env
   (bodyNode, bodyAnn) <-
-    case annotatedLambdaMediator param body of
+    case annotatedLambdaMediator bindingKey param body of
       Just (mediator, rhs, innerBody) ->
         buildLet
           env'
@@ -506,12 +488,13 @@ buildLambda env scopeRoot bindingKey mbDetails param body = do
 -- but that mediator denotes the same source binder as the enclosing lambda.
 -- Give both graph nodes the same term identity so Phase 6 can discard the
 -- coercion mediator without reverting resolved body occurrences to name lookup.
-annotatedLambdaMediator :: VarName -> NormCoreExpr -> Maybe (VarName, NormCoreExpr, NormCoreExpr)
-annotatedLambdaMediator param body =
+annotatedLambdaMediator :: BindingKey -> VarName -> NormCoreExpr -> Maybe (VarName, NormCoreExpr, NormCoreExpr)
+annotatedLambdaMediator bindingKey param body =
   case body of
-    ELet mediator rhs@(EApp (ECoerceConst _) (EVar occurrence)) innerBody
+    ELet mediator rhs@(EApp (ECoerceConst _) (EVarNode occurrenceReference)) innerBody
       | mediator == param,
-        occurrence == param ->
+        termReferenceName occurrenceReference == param,
+        bindingKeyForTermReference occurrenceReference == bindingKey ->
           Just (mediator, rhs, innerBody)
     _ -> Nothing
 
@@ -590,9 +573,10 @@ graphBinderDetails name node mbDetails =
   case mbDetails of
     Just details -> pure details
     Nothing -> do
-      binderOrdinal <- gets bsNextLocalBinder
-      modify' $ \st -> st {bsNextLocalBinder = binderOrdinal + 1}
-      pure (LocalId (localRefFromScopedNodeId name node binderOrdinal))
+      generator <- gets bsLocalIdentityGenerator
+      let (localRef, generator') = freshGraphLocalRef name node generator
+      modify' $ \st -> st {bsLocalIdentityGenerator = generator'}
+      pure (LocalId localRef)
 
 -- | Translate a coercion application @cτ a@ (surface form @(a : τ)@).
 --
@@ -627,9 +611,8 @@ buildCoerce env scopeRoot annTy annotatedExpr = do
 variableReference :: NormCoreExpr -> Maybe (BindingKey, VarName)
 variableReference expr =
   case expr of
-    EVar name -> Just (MetadataLightBindingKey name, name)
-    EBinderIdentity details (EVar name) ->
-      Just (ResolvedBindingKey (idDetailsIdentityKey details), name)
+    EVarNode reference ->
+      Just (bindingKeyForTermReference reference, termReferenceName reference)
     _ -> Nothing
 
 {- Note [Coercion domain/codomain semantics]

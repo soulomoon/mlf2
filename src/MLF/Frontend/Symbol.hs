@@ -27,7 +27,6 @@ module MLF.Frontend.Symbol
     mkResolvedReference,
     sameSymbolIdentity,
     sameResolvedSymbol,
-    SymbolReferenceMode (..),
     symbolRefMatchesWith,
     symbolRefMatches,
     symbolIdentityPayloadMatches,
@@ -46,6 +45,7 @@ where
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import MLF.Types.Reference (ReferenceMode (..), referenceMatchesWith)
 import MLF.Types.Unique (UniqueIdentity, uniqueIdentityStableName)
 
 data SymbolNamespace
@@ -236,24 +236,13 @@ sameResolvedSymbol :: ResolvedSymbol -> ResolvedSymbol -> Bool
 sameResolvedSymbol left right =
   sameSymbolIdentity (resolvedSymbolIdentity left) (resolvedSymbolIdentity right)
 
-data SymbolReferenceMode
-  = SymbolIdentityOnly
-  | SymbolMetadataLight
-  deriving (Eq, Show)
-
-symbolRefMatchesWith :: SymbolReferenceMode -> Maybe SymbolIdentity -> String -> Maybe SymbolIdentity -> String -> Bool
-symbolRefMatchesWith _ (Just leftIdentity) _ (Just rightIdentity) _ =
-  symbolIdentityPayloadKey leftIdentity == symbolIdentityPayloadKey rightIdentity
-symbolRefMatchesWith mode Nothing leftName Nothing rightName =
-  case mode of
-    SymbolIdentityOnly -> False
-    SymbolMetadataLight -> leftName == rightName
-symbolRefMatchesWith _ _ _ _ _ =
-  False
+symbolRefMatchesWith :: ReferenceMode -> Maybe SymbolIdentity -> String -> Maybe SymbolIdentity -> String -> Bool
+symbolRefMatchesWith =
+  referenceMatchesWith sameSymbolIdentity
 
 symbolRefMatches :: Maybe SymbolIdentity -> String -> Maybe SymbolIdentity -> String -> Bool
 symbolRefMatches =
-  symbolRefMatchesWith SymbolIdentityOnly
+  symbolRefMatchesWith IdentityOnly
 
 symbolIdentityPayloadMatches :: SymbolIdentity -> SymbolIdentity -> Bool
 symbolIdentityPayloadMatches =

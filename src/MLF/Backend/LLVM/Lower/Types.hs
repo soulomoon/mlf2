@@ -72,9 +72,10 @@ import Data.Set (Set)
 import MLF.Backend.IR
 import MLF.Backend.LLVM.Syntax (LLVMBasicBlock, LLVMFunction, LLVMInstruction, LLVMOperand, LLVMType)
 import MLF.Constraint.Types.Graph (BaseTy (..))
-import MLF.Frontend.Symbol (SymbolIdentity, SymbolIdentityPayloadKey, SymbolReferenceMode (..), lookupSymbolIdentityExact, symbolIdentityPayloadKey, symbolRefMatchesWith)
+import MLF.Frontend.Symbol (SymbolIdentity, SymbolIdentityPayloadKey, lookupSymbolIdentityExact, symbolIdentityPayloadKey, symbolRefMatchesWith)
 import MLF.Frontend.Syntax (Lit (..))
 import MLF.Types.Identity (DeferredRef, EnvRef, IdDetails (..), IdentityGenerator, LocalRef, ResolvedTermIdentityKey, TypeBinderIdentity, UniqueIdentity, idDetailsIdentityKey)
+import MLF.Types.Reference (ReferenceMode (..))
 
 data BackendLLVMError
   = BackendLLVMValidationFailed BackendValidationError
@@ -183,7 +184,7 @@ bindingInfoIdentityMatches :: BindingInfo -> BindingInfo -> Bool
 bindingInfoIdentityMatches left right =
   case (biIdentity left, biIdentity right) of
     (Just leftIdentity, Just rightIdentity) ->
-      symbolRefMatchesWith SymbolIdentityOnly (Just leftIdentity) (biName left) (Just rightIdentity) (biName right)
+      symbolRefMatchesWith IdentityOnly (Just leftIdentity) (biName left) (Just rightIdentity) (biName right)
     (Nothing, Nothing) ->
       backendBindingRefIdentity (biRef left) == Nothing && backendBindingRefIdentity (biRef right) == Nothing
     _ ->
@@ -219,7 +220,7 @@ functionFormParamsMatch leftIdentities leftParams rightIdentities rightParams =
 
 functionFormParamMatches :: (Maybe IdDetails, (String, BackendType)) -> (Maybe IdDetails, (String, BackendType)) -> Bool
 functionFormParamMatches (leftIdentity, (leftName, leftType)) (rightIdentity, (rightName, rightType)) =
-  backendTermRefMatchesWith BackendTermIdentityOnly leftIdentity leftName rightIdentity rightName
+  backendTermRefMatchesWith IdentityOnly leftIdentity leftName rightIdentity rightName
     && leftType == rightType
 
 data ConstructorRuntime = ConstructorRuntime
@@ -585,7 +586,7 @@ instance Eq ClosureEntry where
   left == right =
     ceOrigin left == ceOrigin right
       && ceFunctionType left == ceFunctionType right
-      && closureEntryRefMatchesWith ClosureEntryIdentityOnly (ceEntryIdentity left) (ceEntryName left) (ceEntryIdentity right) (ceEntryName right)
+      && closureEntryRefMatchesWith IdentityOnly (ceEntryIdentity left) (ceEntryName left) (ceEntryIdentity right) (ceEntryName right)
       && ceCaptures left == ceCaptures right
       && functionFormParamsMatch (ceParamIdentities left) (ceParams left) (ceParamIdentities right) (ceParams right)
       && ceEvidenceParams left == ceEvidenceParams right
@@ -601,7 +602,7 @@ data ClosureCaptureSlot = ClosureCaptureSlot
 
 instance Eq ClosureCaptureSlot where
   left == right =
-    backendTermRefMatchesWith BackendTermIdentityOnly (ccsIdentity left) (ccsName left) (ccsIdentity right) (ccsName right)
+    backendTermRefMatchesWith IdentityOnly (ccsIdentity left) (ccsName left) (ccsIdentity right) (ccsName right)
       && ccsType left == ccsType right
       && ccsValueKind left == ccsValueKind right
 

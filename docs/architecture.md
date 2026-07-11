@@ -51,6 +51,7 @@ The code is organized by domain (not by phase) under `src/MLF/`:
 - `MLF.Frontend.Program.Interface` — private owner for typed checked module interface artifacts, including checked exports, local data/class summaries, visible instances, source-path metadata, and direct package-module dependencies
 - `MLF.Frontend.Program.BuildGraph` — private owner for deterministic package build graph and cache validation policy, using parsed source metadata plus typed interface summary metadata rather than file modification times, file sizes, hidden globals, or source-reparse fallbacks as the correctness mechanism
 - `MLF.Frontend.Program.Check` — module/import/class/data environment assembly for `.mlfp`, including static validation that may fail before the eMLF pipeline
+- `MLF.Frontend.Program.Checked` — abstract identity-complete checked-program capability; `mkCheckedProgram` validates once at publication, while `Checked.Internal` is restricted to the owner and explicit invalid test fixtures
 - `MLF.Frontend.Program.Elaborate` — lowers executable `.mlfp` bindings to surface eMLF `SurfaceExpr`
 - `MLF.Frontend.Program.Finalize` — normalizes lowered surface eMLF, calls the internal detailed eMLF pipeline entrypoints with program-owned external binding modes, resolves `.mlfp` deferred obligations, and accepts rewritten terms only after the xMLF typecheck guard
 - `MLF.Frontend.Program.Prelude` — built-in source-level `.mlfp` Prelude used by the CLI package entrypoints as an explicit import target
@@ -61,7 +62,7 @@ The code is organized by domain (not by phase) under `src/MLF/`:
 - `MLF.Platform.ToolchainIdentity` — private owner for pure validation of declared host toolchain identity from `MLF.Platform.Contract` against explicit observation snapshots, plus deterministic evidence and violation rendering for target triple, resolved tools, sysroot identity, system library identities, codegen settings, and linker mode. It owns validation over caller-provided declarations and observations only; real host toolchain discovery, checked package locks, native command records, native link records, native execution records, proof-manifest emission, and proof closeout remain later platform/proof slices.
 - `MLF.Platform.PackageLock` — private owner for pure checked local package lock validation over explicit package/build metadata, required ABI version, and declared substrate fingerprint material. It reuses package/module identities from `MLF.Frontend.Program.Package` and source/interface metadata from `MLF.Frontend.Program.BuildGraph`; package root discovery, source hashing/regeneration, final lock-file parsing, package solving, generated binding drift closure, native command/link/execution records, proof-manifest emission, and proof closeout remain later platform/proof slices.
 - `MLF.Platform.NativeLinkRecord` — private owner for pure canonical native link record validation over explicit link-step facts, deterministic evidence rendering, root-bounded stage-output checks for object inputs and linked output artifacts, and resolved linked-library identity diagnostics. It reuses `TargetTriple` and `ToolchainLinkerMode` from `MLF.Platform.Contract`; real linker invocation, host library/toolchain discovery, generated binding drift closure, native execution records, proof-manifest emission, proof-runner integration, and proof closeout remain later platform/proof slices.
-- `MLF.Backend.CallableShape` — private owner for direct-vs-closure callable-head classification shared by `MLF.Backend.IR`, `MLF.Backend.Convert`, and `MLF.Backend.LLVM.Lower`; it centralizes callable-head policy without creating a second executable backend IR surface
+- `MLF.Backend.CallableShape` — private owner for callable reference/head data and identity matching shared by `MLF.Backend.IR`, `MLF.Backend.Convert`, and `MLF.Backend.LLVM.Lower`; `MLF.Backend.IR` owns classification over executable expressions
 - `MLF.Backend.IR` — typed backend IR boundary for checked `.mlfp` programs, before LLVM lowering
 - `MLF.Backend.Convert` — checked `.mlfp` program to typed backend IR conversion, including backend type conversion, explicit ADT construct/case recovery, and closure conversion where the checked xMLF shape is unambiguous
 - `MLF.Backend.Emission.Prepare` — private adapter for backend-emission semantic preparation from a caller-provided source string or located package before LLVM rendering
@@ -178,7 +179,14 @@ fixture-like call sites. `CheckedBinding` carries a
 `ResolvedVar`, and constructor bindings carry a
 `ConstructorId` reference consumed by backend conversion. Normal checked-program
 finalization rejects terms that still carry deferred
-variable identity after annotating occurrences from runtime metadata. The opaque
+variable identity. Derived-instance synthesis, instance skeleton construction,
+lowering, and constraint generation share the module-owned supply, so lexical
+and deferred identities exist before xMLF is built. Graph-derived locals retain
+their graph provenance through capture avoidance; there is no checked-term
+stamping or graph-local freshening pass. Metadata-derived constructor bindings
+are published with the quantified `ETyAbs` spine constructed from
+`ConstructorInfo`, bypassing generic vacuous-forall stripping that would erase
+phantom owner parameters. The opaque
 unchecked finalization path runs the same `unresolvedXmlfTermVarRefs` rejection
 before it can publish a `CheckedBinding`. `MLF.Types.Identity` owns common
 `IdDetails` reference-name, local, constructor, and local-rename projections for
@@ -189,27 +197,31 @@ sidecar types when they rewrite binder types. Every `XmlfTerm` variable and bind
 form carries `ResolvedVar` at the type level.
 
 Resolved Program expressions still pass through `compileResolvedExpr` into the
-String-shaped `SurfaceExpr` boundary. Global references use stable identity
-aliases. Local, evidence, generated handler, and branch-local pattern binders
-carry `IdDetails` on the internal `EBinderIdentity` surface wrapper; that wrapper
-survives normalization, desugaring, constraint generation, and elaboration into
-the exact `ALam`/`ALet` node. Finalization therefore does not reconstruct binder
-meaning from a `Map String IdDetails` or a runtime-name sidecar. Runtime-name
-projections remain boundary views, not an alternate checked-term representation.
+source-shaped `SurfaceExpr` boundary. Its variable, lambda, let, and annotated
+lambda nodes carry `TermReference` directly: parser input is explicitly
+metadata-light, while resolved lowering stores `IdDetails` plus a display/runtime
+spelling. Normalization, desugaring, and constraint generation preserve that
+payload into the exact `ALam`/`ALet` node. Finalization therefore does not
+reconstruct binder meaning from a `Map String IdDetails`, a wrapper node, or a
+runtime-name sidecar. Runtime-name projections remain boundary views.
 
 Backend-emission preparation, runtime reachability, typechecking, reduction, and
 backend conversion consume `ResolvedVar` / `IdDetails`. Constructor applications
-carry `ConstructorId`; constructor bindings without constructor foralls can also
-be finalized directly from `ConstructorInfo` metadata. Other constructor shapes
-still use the surface pipeline until their metadata path preserves the same
-result-shape invariants.
+carry `ConstructorId`; constructor bindings, including constructor-local
+`forall` shapes, are finalized directly from `ConstructorInfo` metadata. Their
+surface expression is not a fallback semantic authority.
 
-Checked `TypeView` completeness is mention-sensitive and validated at checked
-artifact publication and before backend conversion. Constructor-visible
-rewriting, deferred constructor/case obligations, evidence keys, and type-binder
-substitution retain those identities. The remaining frontend representation
-debt is the string-shaped surface carrier itself; it is fenced by direct binder
-identity transport and identity-indexed global aliases. The focused snapshot is
+`TypeView` owns one node-level tree whose head and binder nodes carry display and
+identity spellings, semantic identity, and aliases. Display types, identity
+types, and lookup indexes are projections of that tree. Context nodes retain
+constructor-scope identities that are not visible in a projected result type;
+substitution and quantified specialization select nodes by `TypeBinderIdentity`.
+Structural lowering canonicalizes a stale display-shape mismatch to the
+identity-bearing shape before publishing another `TypeView`. Completeness is
+mention-sensitive and validated in one recursive checked-program traversal that
+also checks `ElabType` payloads. Constructor-visible rewriting, deferred
+constructor/case obligations, evidence keys, and type-binder substitution retain
+those identities. The focused snapshot is
 `docs/audit/identity-string-reference-audit.md`.
 
 The target does not duplicate every checked module declaration inside every
@@ -349,10 +361,15 @@ lowering share one executable contract.
 Production lowering accepts `ProductionBackendProgram`, constructed only by
 `mkProductionBackendProgram` after identity-complete validation.
 `MLF.Backend.Convert` returns this capability wrapper, and LLVM entrypoints do
-not accept a raw `BackendProgram`. Validation checks references under
-`RequireIdentityReferences`. Backend IR data types still admit name-only or
-optional-identity forms for explicit metadata-light fixtures and adapters; that
-is representation debt, not a production fallback.
+not accept a raw `BackendProgram`. Its raw projection is confined to
+`MLF.Backend.IR.Production.Internal` for the LLVM lowering owner and explicit
+test support. Metadata-light tests cross the separate
+`MLF.Backend.IR.Fixture.BackendProgramFixture` boundary.
+`validateBackendProgram` first rejects every
+missing semantic reference identity, then validates the executable/type
+invariants. Backend IR data types still admit name-only or optional-identity
+forms for explicit metadata-light fixtures; tests reach that path only through
+`BackendIRTestSupport`.
 
 That callable contract is explicit. `BackendApp` is the direct first-order
 call node, so local direct aliases that remain first-order stay on this path.
@@ -360,10 +377,10 @@ call node, so local direct aliases that remain first-order stay on this path.
 aliases, captured closures, constructor-field projections, and case/let-
 selected closure values stay on this explicit path instead of relying on
 lowerer recovery.
-`MLF.Backend.CallableShape` is the private owner for the shared callable-head
-classifier that enforces this split; `MLF.Backend.IR` stays the executable IR
-seam, while conversion and lowering consume the same owner instead of keeping
-separate direct-vs-closure heuristics.
+`MLF.Backend.IR` classifies callable heads directly from `BackendExpr`.
+`MLF.Backend.CallableShape` owns only the shared callable reference/head data
+and identity-matching rules, so conversion and lowering consume the same shape
+without creating a second executable-expression view.
 
 The ADT/case ownership split is explicit. Row-4 ADT/case ownership means
 semantic constructor/case nodes stay in `MLF.Backend.IR`:
@@ -456,8 +473,8 @@ The boundary invariants are:
   diagnostics;
 - lambda, application, let, type abstraction/application, recursive roll, and
   recursive unroll nodes satisfy local type equalities checked by
-  `validateBackendProgramProduction`; the more permissive
-  `validateBackendProgram` is the explicit metadata-light/test validator;
+  identity-complete `validateBackendProgram`; metadata-light fixtures use the
+  explicitly named `validateBackendProgramFixture` test adapter;
 - ADT construction and case analysis are explicit backend nodes checked against
   program constructor metadata for known constructors, constructor arity,
   constructor-local `forall` bounds, argument/result types, case scrutinee

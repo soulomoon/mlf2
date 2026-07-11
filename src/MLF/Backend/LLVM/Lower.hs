@@ -50,9 +50,8 @@ contract rather than legalizing malformed `BackendApp` heads after let/case
 peeling. `BackendApp` remains the direct first-order call path, and closure-
 valued aliases, captured closures, and case/let-selected closure values must
 already reach lowering as `BackendClosureCall`. Raw LLVM emission and native emission
-both start from the same `MLF.Backend.IR` program; the private
-`MLF.Backend.CallableShape` owner supplies the shared direct-vs-closure head
-classifier. The closure ABI, native wrapper/runtime symbol emission, and
+both start from the same `MLF.Backend.IR` program, which classifies callable
+heads directly. The closure ABI, native wrapper/runtime symbol emission, and
 executable rendering support stay downstream of that IR rather than becoming a
 second executable IR or a lazy runtime.
 -}
@@ -154,28 +153,23 @@ import qualified Data.Set as Set
 import Numeric (showHex)
 
 import MLF.Backend.CallableShape
-  ( BackendCallableBindingKind (..),
-    BackendCallableHead (..),
-    BackendCallableReferenceMode (..),
-    BackendCallableRef,
+  ( BackendCallableRef,
     backendCallableRef,
     backendCallableRefMatchesWith,
     backendCallableRefName,
-    backendCallableHeadWith,
   )
-import MLF.Backend.IR hiding
-  ( BackendCallableBindingKind (..),
-    BackendCallableHead (..),
-  )
+import MLF.Backend.IR
+import MLF.Backend.IR.Production.Internal (productionBackendProgramIR)
 import MLF.Backend.LLVM.Lower.Emit
 import MLF.Backend.LLVM.Lower.Types
 import MLF.Backend.LLVM.Syntax
 import qualified MLF.Backend.StructuralRecursiveData as Structural
 import MLF.Constraint.Types.Graph (BaseTy (..))
-import MLF.Frontend.Symbol (SymbolIdentity, SymbolReferenceMode (..), symbolIdentityStableName, symbolRefMatchesWith, symbolUniqueIdentity)
+import MLF.Frontend.Symbol (SymbolIdentity, symbolIdentityStableName, symbolRefMatchesWith, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit (..))
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
 import MLF.Types.Identity (constructorRefSymbol, deferredRefIdentity, envRefIdentity, IdDetails (..), IdentityGenerator, LocalRef, localRefIdentity, primitiveRefSymbol, idDetailsSymbolIdentity, StructuralTypeBinderRole (..), TypeBinderIdentity, UniqueIdentity (..), freshIdentity, freshLocalRef, identityGeneratorAfter, initialIdentityGenerator, localIdentityStableUnique, typeBinderIdentityFromUnique, typeBinderIdentityStableName, typeBinderIdentityStructural)
+import MLF.Types.Reference (ReferenceMode (..))
 import MLF.Util.Names (freshNameLike)
 
 lowerBackendProgram :: ProductionBackendProgram -> Either BackendLLVMError LLVMModule
@@ -4937,7 +4931,7 @@ functionFormCallsGlobal binding =
 
 globalReferenceMatchesBinding :: BindingInfo -> Maybe IdDetails -> String -> Bool
 globalReferenceMatchesBinding binding mbIdentity calleeName =
-  symbolRefMatchesWith SymbolIdentityOnly (biIdentity binding) (biName binding) (backendVarSymbolIdentity mbIdentity) calleeName
+  symbolRefMatchesWith IdentityOnly (biIdentity binding) (biName binding) (backendVarSymbolIdentity mbIdentity) calleeName
 
 patternBinderRefs :: BackendPattern -> [(Maybe IdDetails, String)]
 patternBinderRefs = \case
@@ -5431,7 +5425,7 @@ runtimeBindingNameAvailable base name =
 
 bindingSelfReference :: BindingInfo -> Maybe IdDetails -> String -> Bool
 bindingSelfReference binding mbIdentity name =
-  symbolRefMatchesWith SymbolIdentityOnly (biIdentity binding) (biName binding) (backendVarSymbolIdentity mbIdentity) name
+  symbolRefMatchesWith IdentityOnly (biIdentity binding) (biName binding) (backendVarSymbolIdentity mbIdentity) name
 
 lookupNonLocalBindingInfo :: ProgramBase -> Maybe IdDetails -> Maybe BindingInfo
 lookupNonLocalBindingInfo base mbIdentity =
@@ -7595,7 +7589,7 @@ requireUniqueClosureEntries entries =
           Left (BackendLLVMInternalError ("duplicate closure entry after specialization: " ++ ceEntryName entry))
 
     sameClosureEntryRef left right =
-      closureEntryRefMatchesWith ClosureEntryIdentityOnly (ceEntryIdentity left) (ceEntryName left) (ceEntryIdentity right) (ceEntryName right)
+      closureEntryRefMatchesWith IdentityOnly (ceEntryIdentity left) (ceEntryName left) (ceEntryIdentity right) (ceEntryName right)
 
 type ClosureEntryGeneratedIdentities = (UniqueIdentity, [Maybe IdDetails], [Maybe IdDetails])
 
@@ -8360,7 +8354,7 @@ applyWrapperArgs expr ty (arg : rest) =
 
 backendExprUsesClosureCallPath :: BackendExpr -> Bool
 backendExprUsesClosureCallPath expr =
-  case backendCallableHeadWith BackendCallableIdentityOnly (\_ _ -> BackendCallableBindingUnknown) expr of
+  case backendCallableHeadWith IdentityOnly (\_ _ -> BackendCallableBindingUnknown) expr of
     BackendClosureCallableHead _ -> True
     _ -> False
 
@@ -8779,9 +8773,9 @@ pushCallIntoExpression context resultTy fun typeArgs args =
 applyCallToExpr :: String -> BackendType -> BackendExpr -> [BackendType] -> [BackendExpr] -> Either BackendLLVMError BackendExpr
 applyCallToExpr context expectedTy expr typeArgs args = do
   (typedExpr, typedExprTy) <- applyTypeApplicationsToExprWithType context expr typeArgs
-  case backendCallableHeadWith BackendCallableIdentityOnly (\_ _ -> BackendCallableBindingUnknown) typedExpr of
-    BackendClosureCallableHead ref ->
-      Left (BackendLLVMValidationFailed (BackendClosureCalledWithBackendApp (backendCallableRefName ref)))
+  case backendCallableHeadWith IdentityOnly (\_ _ -> BackendCallableBindingUnknown) typedExpr of
+    BackendClosureCallableHead mbRef ->
+      Left (BackendLLVMValidationFailed (BackendClosureCalledWithBackendApp (backendCallableRefName <$> mbRef)))
     _ -> do
       (applied, actualTy) <- foldM applyOne (typedExpr, typedExprTy) args
       unless (alphaEqBackendType expectedTy actualTy) $
@@ -9219,9 +9213,9 @@ lowerCall env exprEnv context expr =
         BackendTyAbs _ _ _ _ ->
           lowerDirectFunctionCall env exprEnv context (backendExprType expr) (functionFormFromExpr headExpr) typeArgs args
         _ ->
-          case backendCallableHeadWith BackendCallableIdentityOnly (\_ _ -> BackendCallableBindingUnknown) headExpr of
-            BackendClosureCallableHead ref ->
-              liftEither (BackendLLVMValidationFailed (BackendClosureCalledWithBackendApp (backendCallableRefName ref)))
+          case backendCallableHeadWith IdentityOnly (\_ _ -> BackendCallableBindingUnknown) headExpr of
+            BackendClosureCallableHead mbRef ->
+              liftEither (BackendLLVMValidationFailed (BackendClosureCalledWithBackendApp (backendCallableRefName <$> mbRef)))
             _ ->
               case pushCallIntoExpression context (backendExprType expr) headExpr typeArgs args of
                 Right (Just applied) ->
@@ -9440,7 +9434,7 @@ etaAliasArgsMatch params args =
 etaAliasArgMatches :: (Maybe IdDetails, String, BackendType) -> BackendExpr -> Bool
 etaAliasArgMatches (paramIdentity, paramName, _) arg =
   case backendVarExprRef arg of
-    Just argRef -> backendCallableRefMatchesWith BackendCallableIdentityOnly (backendCallableRef paramIdentity paramName) argRef
+    Just argRef -> backendCallableRefMatchesWith IdentityOnly (backendCallableRef paramIdentity paramName) argRef
     Nothing -> False
 
 collectValueApps :: BackendExpr -> (BackendExpr, [BackendExpr])
@@ -9558,9 +9552,9 @@ runtimeCompatibleValueType left right =
                   ]
               )
       (BTBaseWithIdentity leftIdentity leftBase, BTBaseWithIdentity rightIdentity rightBase) ->
-        backendTypeHeadMatchesWith SymbolIdentityOnly leftIdentity leftBase rightIdentity rightBase
+        backendTypeHeadMatchesWith IdentityOnly leftIdentity leftBase rightIdentity rightBase
       (BTConWithIdentity leftIdentity leftCon leftArgs, BTConWithIdentity rightIdentity rightCon rightArgs) ->
-        backendTypeHeadMatchesWith SymbolIdentityOnly leftIdentity leftCon rightIdentity rightCon
+        backendTypeHeadMatchesWith IdentityOnly leftIdentity leftCon rightIdentity rightCon
           && length leftArgs == length rightArgs
           && and (zipWith runtimeCompatibleValueType (NE.toList leftArgs) (NE.toList rightArgs))
       (BTBottom, BTBottom) -> True
@@ -11038,7 +11032,7 @@ matchTypeParamsWith strictness binderSet substitution expected actual =
           matchTypeParamsWith strictness binderSet substitution leftA leftB >>= \subst ->
             matchTypeParamsWith strictness binderSet subst rightA rightB
         (BTConWithIdentity identityA conA argsA, BTConWithIdentity identityB conB argsB)
-          | backendTypeHeadMatchesWith SymbolIdentityOnly identityA conA identityB conB && length argsA == length argsB ->
+          | backendTypeHeadMatchesWith IdentityOnly identityA conA identityB conB && length argsA == length argsB ->
               foldM
                 (\subst (tyA, tyB) -> matchTypeParamsWith strictness binderSet subst tyA tyB)
                 substitution
@@ -11046,7 +11040,7 @@ matchTypeParamsWith strictness binderSet substitution expected actual =
         (BTVarAppWithIdentity identity name args, _) ->
           matchTypeParamApplication binderSet substitution (backendTypeSubstitutionKeyFromMaybeMetadataLight identity name) name (BTVarWithIdentity identity name) (NE.toList args) actual
         (BTBaseWithIdentity identityA baseA, BTBaseWithIdentity identityB baseB)
-          | backendTypeHeadMatchesWith SymbolIdentityOnly identityA baseA identityB baseB -> Right substitution
+          | backendTypeHeadMatchesWith IdentityOnly identityA baseA identityB baseB -> Right substitution
         (BTForallWithIdentity identityA nameA boundA bodyA, BTForallWithIdentity identityB nameB boundB bodyB) -> do
           substA <-
             case (boundA, boundB) of
@@ -11121,7 +11115,7 @@ matchTypeParamApplication binderSet substitution nameKey name expectedHead expec
 
 typeApplicationHeadMatches :: BackendType -> BackendType -> Bool
 typeApplicationHeadMatches (BTVarWithIdentity leftIdentity leftName) (BTVarWithIdentity rightIdentity rightName) =
-  typeBinderRefMatchesWith BackendTypeIdentityOnly leftIdentity leftName rightIdentity rightName
+  typeBinderRefMatchesWith IdentityOnly leftIdentity leftName rightIdentity rightName
 typeApplicationHeadMatches left right =
   alphaEqBackendType left right
 

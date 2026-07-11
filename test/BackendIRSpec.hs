@@ -1,24 +1,25 @@
 module BackendIRSpec (spec) where
 
+import BackendIRTestSupport (validateBackendProgramFixture)
 import Control.Monad (forM_)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import MLF.Backend.CallableShape
-  ( BackendCallableReferenceMode (..),
-    backendCallableRef,
+  ( backendCallableRef,
     backendCallableRefMatchesWith,
-    backendCallableRefName,
   )
 import MLF.Backend.IR
+import MLF.Backend.IR.Production.Internal (productionBackendProgramIR)
 import MLF.Backend.StructuralRecursiveData (structuralDataDeclarationMatches)
 import MLF.Constraint.Types.Graph (BaseTy (..), NodeId (..))
 import MLF.Frontend.Program.Builtins (builtinTypeIdentity, builtinValueIdentity)
-import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), SymbolReferenceMode (..), renameSymbolDefiningName, symbolIdentityFromParts, symbolIdentityStableName, symbolUniqueIdentity)
+import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), renameSymbolDefiningName, symbolIdentityFromParts, symbolIdentityStableName, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit (..))
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
 import MLF.Types.Identity (deferredRefFromIdentity, IdDetails (DeferredId, LocalId, PrimitiveId, TopLevelId), LocalIdentity (GeneratedLocalId), localRefFromIdentity, StructuralTypeBinderRole (..), TypeBinderIdentity, advanceIdentityGeneratorPastMany, initialIdentityGenerator, primitiveRefFromSymbol, typeBinderIdentityFromNode, typeBinderIdentityFromStructural, typeBinderIdentityFromUnique, typeBinderIdentityStableName, uniqueIdentityStableName)
 import qualified MLF.Types.Identity as Identity
+import MLF.Types.Reference (ReferenceMode (..))
 import MLF.Types.Unique (UniqueIdentity (..))
 import Test.Hspec
 
@@ -29,17 +30,17 @@ testSymbolIdentity unique namespace moduleName name =
 spec :: Spec
 spec = describe "MLF.Backend.IR" $ do
   it "accepts a minimal checked-like backend program" $ do
-    validateBackendProgram simpleProgram `shouldBe` Right ()
+    validateBackendProgramFixture simpleProgram `shouldBe` Right ()
 
   it "keeps metadata-light backend validation out of production validation" $ do
-    validateBackendProgram simpleProgram `shouldBe` Right ()
-    validateBackendProgramProduction simpleProgram
+    validateBackendProgramFixture simpleProgram `shouldBe` Right ()
+    validateBackendProgram simpleProgram
       `shouldBe` Left (BackendProgramMainIdentityMissing "main")
     mkProductionBackendProgram simpleProgram
       `shouldSatisfy` either
         (== BackendProgramMainIdentityMissing "main")
         (const False)
-    validateBackendProgramProduction productionIdentityCompleteProgram
+    validateBackendProgram productionIdentityCompleteProgram
       `shouldBe` Right ()
     case mkProductionBackendProgram productionIdentityCompleteProgram of
       Left err -> expectationFailure ("expected production capability, got " ++ show err)
@@ -75,32 +76,32 @@ spec = describe "MLF.Backend.IR" $ do
         (const False)
 
   it "rejects duplicate modules, data, and global bindings" $ do
-    validateBackendProgram (BackendProgram [emptyModule "Main", emptyModule "Main"] "main")
+    validateBackendProgramFixture (BackendProgram [emptyModule "Main", emptyModule "Main"] "main")
       `shouldBe` Left (BackendDuplicateModule "Main")
 
-    validateBackendProgram duplicateModuleIdentityProgram
+    validateBackendProgramFixture duplicateModuleIdentityProgram
       `shouldBe` Left (BackendDuplicateModule (symbolIdentityStableName duplicateModuleIdentity))
 
-    validateBackendProgram duplicateDataIdentityProgram
+    validateBackendProgramFixture duplicateDataIdentityProgram
       `shouldBe` Left (BackendDuplicateData (symbolIdentityStableName duplicateDataIdentity))
 
-    validateBackendProgram (programWithBindings [mainLiteralBinding, mainLiteralBinding])
+    validateBackendProgramFixture (programWithBindings [mainLiteralBinding, mainLiteralBinding])
       `shouldBe` Left (BackendDuplicateBinding "main")
 
-    validateBackendProgram duplicateBindingIdentityProgram
+    validateBackendProgramFixture duplicateBindingIdentityProgram
       `shouldBe` Left (BackendDuplicateBinding (symbolIdentityStableName duplicateValueIdentity))
 
   it "rejects backend symbol identity payload conflicts" $ do
-    validateBackendProgram conflictingModuleIdentityPayloadProgram
+    validateBackendProgramFixture conflictingModuleIdentityPayloadProgram
       `shouldBe` Left (BackendConflictingIdentityPayload "module" (symbolIdentityStableName conflictingModuleIdentity))
 
-    validateBackendProgram conflictingDataIdentityPayloadProgram
+    validateBackendProgramFixture conflictingDataIdentityPayloadProgram
       `shouldBe` Left (BackendConflictingIdentityPayload "data" (symbolIdentityStableName conflictingDataIdentity))
 
-    validateBackendProgram conflictingBindingIdentityPayloadProgram
+    validateBackendProgramFixture conflictingBindingIdentityPayloadProgram
       `shouldBe` Left (BackendConflictingIdentityPayload "binding" (symbolIdentityStableName conflictingValueIdentity))
 
-    validateBackendProgram conflictingConstructorIdentityPayloadProgram
+    validateBackendProgramFixture conflictingConstructorIdentityPayloadProgram
       `shouldBe` Left (BackendConflictingIdentityPayload "constructor" (symbolIdentityStableName conflictingConstructorIdentity))
 
   it "rejects identity-bearing modules with name-only backend payloads" $ do
@@ -114,17 +115,17 @@ spec = describe "MLF.Backend.IR" $ do
           BackendProgram
             [BackendModuleWithIdentity (Just moduleIdentity) "Main" [] [mainLiteralBinding]]
             "main"
-    validateBackendProgram programWithNameOnlyData
+    validateBackendProgramFixture programWithNameOnlyData
       `shouldBe` Left (BackendModuleDataIdentityMissing "Main" "Payload")
-    validateBackendProgram programWithNameOnlyBinding
+    validateBackendProgramFixture programWithNameOnlyBinding
       `shouldBe` Left (BackendModuleBindingIdentityMissing "Main" "main")
 
   it "rejects identity-bearing data declarations with name-only parameters" $
-    validateBackendProgram identityDataWithNameOnlyParameterProgram
+    validateBackendProgramFixture identityDataWithNameOnlyParameterProgram
       `shouldBe` Left (BackendDataParameterIdentityMissing "NamedBox" "a")
 
   it "rejects identity-bearing data declarations with name-only constructors" $
-    validateBackendProgram identityDataWithNameOnlyConstructorProgram
+    validateBackendProgramFixture identityDataWithNameOnlyConstructorProgram
       `shouldBe` Left (BackendDataConstructorIdentityMissing "NamedBox" "NamedBox")
 
   it "rejects duplicate backend data parameter keys" $ do
@@ -147,19 +148,19 @@ spec = describe "MLF.Backend.IR" $ do
                 }
             ]
             "main"
-    validateBackendProgram program
+    validateBackendProgramFixture program
       `shouldBe` Left (BackendDuplicateDataParameter "DupParams" (typeBinderIdentityStableName parameterIdentity))
 
   it "rejects identity-bearing constructor signatures with name-only parameter references" $
-    validateBackendProgram identityDataWithNameOnlyConstructorParameterProgram
+    validateBackendProgramFixture identityDataWithNameOnlyConstructorParameterProgram
       `shouldBe` Left (BackendConstructorUnknownTypeVariable "NamedBox" "a")
 
   it "rejects identity-bearing constructor signatures with undeclared parameter identities" $
-    validateBackendProgram identityDataWithUnknownConstructorParameterProgram
+    validateBackendProgramFixture identityDataWithUnknownConstructorParameterProgram
       `shouldBe` Left (BackendConstructorUnknownTypeVariable "NamedBox" (typeBinderIdentityStableName unknownDataIdentityBoxParamIdentity))
 
   it "rejects identity-bearing data constructors with name-only forall binders" $
-    validateBackendProgram identityDataWithNameOnlyConstructorForallProgram
+    validateBackendProgramFixture identityDataWithNameOnlyConstructorForallProgram
       `shouldBe` Left (BackendConstructorTypeBinderIdentityMissing "NamedBox" "a")
 
   it "requires primitive identity for shared primitive inventory globals during backend validation" $ do
@@ -182,15 +183,15 @@ spec = describe "MLF.Backend.IR" $ do
                   ]
               ]
               "main"
-      validateBackendProgram programByName `shouldBe` Left (BackendUnknownVariable name)
-      validateBackendProgram programByIdentity `shouldBe` Right ()
+      validateBackendProgramFixture programByName `shouldBe` Left (BackendUnknownVariable name)
+      validateBackendProgramFixture programByIdentity `shouldBe` Right ()
 
   it "uses primitive identity rather than spelling for primitive runtime type matching" $ do
     let primitiveName = PrimitiveInventory.stringLengthPrimitiveName
         placeholderTy = BTVarWithIdentity (Just (typeBinderIdentityFromUnique (UniqueIdentity 991205))) "$runtime_placeholder"
         primitiveDetails = PrimitiveId (primitiveRefFromSymbol (builtinValueIdentity primitiveName))
         expr = BackendVarWithIdentity placeholderTy (Just primitiveDetails) "__renamed_string_length"
-    validateBackendProgram (programWithMainExpr expr) `shouldBe` Right ()
+    validateBackendProgramFixture (programWithMainExpr expr) `shouldBe` Right ()
 
   it "does not treat name-only primitive structural self fields as identity matches" $ do
     let primitiveName = PrimitiveInventory.stringFromListPrimitiveName
@@ -217,7 +218,7 @@ spec = describe "MLF.Backend.IR" $ do
         actualTy = BTArrow malformedListTy stringTy
         primitiveDetails = PrimitiveId (primitiveRefFromSymbol (builtinValueIdentity primitiveName))
         expr = BackendVarWithIdentity actualTy (Just primitiveDetails) "__renamed_string_from_list"
-    case validateBackendProgram (programWithMainExpr expr) of
+    case validateBackendProgramFixture (programWithMainExpr expr) of
       Left (BackendVariableTypeMismatch "__renamed_string_from_list" _ actualTy') ->
         actualTy' `shouldBe` actualTy
       other ->
@@ -252,7 +253,7 @@ spec = describe "MLF.Backend.IR" $ do
         stalePrimitiveIdentity = renameSymbolDefiningName "$stale_and" (builtinValueIdentity primitiveName)
         primitiveDetails = PrimitiveId (primitiveRefFromSymbol stalePrimitiveIdentity)
         expr = BackendVarWithIdentity primitiveTy (Just primitiveDetails) "$stale_and"
-    validateBackendProgram (programWithMainExpr expr) `shouldBe` Left (BackendUnknownVariable "$stale_and")
+    validateBackendProgramFixture (programWithMainExpr expr) `shouldBe` Left (BackendUnknownVariable "$stale_and")
 
   it "types primitive Prelude data heads by identity during backend validation" $ do
     let primitiveName = PrimitiveInventory.stringCharAtOptionPrimitiveName
@@ -279,7 +280,7 @@ spec = describe "MLF.Backend.IR" $ do
               BackendModule "Main" [] [BackendBinding "main" primitiveTy expr True]
             ]
             "main"
-    validateBackendProgram program `shouldBe` Right ()
+    validateBackendProgramFixture program `shouldBe` Right ()
 
   it "does not grant primitive runtime type matching to same-named fake identities" $ do
     let primitiveName = PrimitiveInventory.stringLengthPrimitiveName
@@ -287,7 +288,7 @@ spec = describe "MLF.Backend.IR" $ do
           testSymbolIdentity 991206 SymbolValue "Main" primitiveName
         placeholderTy = BTVarWithIdentity (Just (typeBinderIdentityFromUnique (UniqueIdentity 991207))) "$fake_placeholder"
         expr = BackendVarWithIdentity placeholderTy (Just (TopLevelId fakeIdentity)) primitiveName
-    validateBackendProgram (programWithBindings [bindingWithMetadata primitiveName fakeIdentity intTy (intLit 1), mainBinding expr])
+    validateBackendProgramFixture (programWithBindings [bindingWithMetadata primitiveName fakeIdentity intTy (intLit 1), mainBinding expr])
       `shouldBe` Left (BackendVariableTypeMismatch primitiveName intTy placeholderTy)
 
   it "assigns identities to backend primitive type variables" $ do
@@ -435,29 +436,29 @@ spec = describe "MLF.Backend.IR" $ do
     BTCon (BaseTy "String") (intTy :| []) `shouldBe` BTConWithIdentity (Just (builtinTypeIdentity "String")) (BaseTy "String") (intTy :| [])
 
   it "rejects a missing main binding" $ do
-    validateBackendProgram (BackendProgram [moduleWithBindings "Main" [binding "other" intTy (intLit 1)]] "main")
+    validateBackendProgramFixture (BackendProgram [moduleWithBindings "Main" [binding "other" intTy (intLit 1)]] "main")
       `shouldBe` Left (BackendMainNotFound "main")
 
   it "finds the main binding by identity when the program main name is stale" $ do
-    validateBackendProgram identityMainProgram
+    validateBackendProgramFixture identityMainProgram
       `shouldBe` Right ()
 
-    validateBackendProgram conflictingIdentityMainProgram
+    validateBackendProgramFixture conflictingIdentityMainProgram
       `shouldBe` Left (BackendMainNotFound "$stale-main")
 
   it "does not find an identity-bearing main binding by stable identity name without metadata" $ do
-    validateBackendProgram identityMainStableNameProgram
+    validateBackendProgramFixture identityMainStableNameProgram
       `shouldBe` Left (BackendMainNotFound (symbolIdentityStableName duplicateValueIdentity))
 
   it "does not find an identity-bearing main binding by name-only entry" $ do
-    validateBackendProgram identityMainNameOnlyProgram
+    validateBackendProgramFixture identityMainNameOnlyProgram
       `shouldBe` Left (BackendProgramMainIdentityMissing "actual-main")
 
   it "checks global and lexical variable references" $ do
-    validateBackendProgram (programWithMainExpr (BackendVar intTy "missing"))
+    validateBackendProgramFixture (programWithMainExpr (BackendVar intTy "missing"))
       `shouldBe` Left (BackendUnknownVariable "missing")
 
-    validateBackendProgram
+    validateBackendProgramFixture
       ( programWithBindings
           [ binding "helper" intTy (intLit 1),
             mainBinding (BackendVar boolTy "helper")
@@ -465,7 +466,7 @@ spec = describe "MLF.Backend.IR" $ do
       )
       `shouldBe` Left (BackendVariableTypeMismatch "helper" intTy boolTy)
 
-    validateBackendProgram
+    validateBackendProgramFixture
       ( programWithBindings
           [ binding "helper" intTy (intLit 1),
             mainBinding (BackendVar (BTVar "a") "helper")
@@ -473,25 +474,25 @@ spec = describe "MLF.Backend.IR" $ do
       )
       `shouldBe` Left (BackendVariableTypeMismatch "helper" intTy (BTVar "a"))
 
-    validateBackendProgram mismatchedGlobalBindingIdentityProgram
+    validateBackendProgramFixture mismatchedGlobalBindingIdentityProgram
       `shouldBe` Left (BackendUnknownVariable "helper")
 
-    validateBackendProgram conflictingGlobalBindingPayloadProgram
+    validateBackendProgramFixture conflictingGlobalBindingPayloadProgram
       `shouldBe` Left (BackendUnknownVariable "helper")
 
-    validateBackendProgram identityGlobalReferencedByNameOnlyProgram
+    validateBackendProgramFixture identityGlobalReferencedByNameOnlyProgram
       `shouldBe` Left (BackendUnknownVariable "helper")
 
-    validateBackendProgram identityGlobalReferencedByStableNameProgram
+    validateBackendProgramFixture identityGlobalReferencedByStableNameProgram
       `shouldBe` Left (BackendUnknownVariable (symbolIdentityStableName duplicateValueIdentity))
 
-    validateBackendProgram mismatchedLocalBindingIdentityProgram
+    validateBackendProgramFixture mismatchedLocalBindingIdentityProgram
       `shouldBe` Left (BackendUnknownVariable "helper")
 
-    validateBackendProgram mismatchedLiftedHelperIdentityProgram
+    validateBackendProgramFixture mismatchedLiftedHelperIdentityProgram
       `shouldBe` Left (BackendUnknownVariable liftedHelperName)
 
-    validateBackendProgram
+    validateBackendProgramFixture
       ( programWithMainExpr
           ( BackendLam
               (BTArrow (BTVar "a") (BTVar "b"))
@@ -502,7 +503,7 @@ spec = describe "MLF.Backend.IR" $ do
       )
       `shouldBe` Left (BackendVariableTypeMismatch "x" (BTVar "a") (BTVar "b"))
 
-    validateBackendProgram
+    validateBackendProgramFixture
       ( programWithMainExpr
           ( BackendLam
               (BTArrow (BTVar "a") (BTVar "a1"))
@@ -513,38 +514,38 @@ spec = describe "MLF.Backend.IR" $ do
       )
       `shouldBe` Left (BackendVariableTypeMismatch "x" (BTVar "a") (BTVar "a1"))
 
-    validateBackendProgram (programWithMainExpr letIdentityExpr)
+    validateBackendProgramFixture (programWithMainExpr letIdentityExpr)
       `shouldBe` Right ()
 
   it "checks lexical variable references by resolved identity when binders carry identity" $ do
-    validateBackendProgram (programWithMainExpr (identityLam localXIdentity "stale" localXIdentity))
+    validateBackendProgramFixture (programWithMainExpr (identityLam localXIdentity "stale" localXIdentity))
       `shouldBe` Right ()
 
-    validateBackendProgram (programWithMainExpr (identityLam localXIdentity "x" otherLocalIdentity))
+    validateBackendProgramFixture (programWithMainExpr (identityLam localXIdentity "x" otherLocalIdentity))
       `shouldBe` Left (BackendUnknownVariable "x")
 
-    validateBackendProgram (programWithMainExpr (identityLamNameOnly localXIdentity "$stale_x"))
+    validateBackendProgramFixture (programWithMainExpr (identityLamNameOnly localXIdentity "$stale_x"))
       `shouldBe` Left (BackendUnknownVariable "$stale_x")
 
   it "checks case pattern binder references by resolved identity when binders carry identity" $ do
-    validateBackendProgram (programWithDataAndMainExpr [boxData] (identityPatternCase patternNIdentity "stale" patternNIdentity))
+    validateBackendProgramFixture (programWithDataAndMainExpr [boxData] (identityPatternCase patternNIdentity "stale" patternNIdentity))
       `shouldBe` Right ()
 
-    validateBackendProgram (programWithDataAndMainExpr [boxData] (identityPatternCase patternNIdentity "n" otherPatternNIdentity))
+    validateBackendProgramFixture (programWithDataAndMainExpr [boxData] (identityPatternCase patternNIdentity "n" otherPatternNIdentity))
       `shouldBe` Left (BackendUnknownVariable "n")
 
   it "checks closure capture references by resolved identity when captures carry identity" $ do
-    validateBackendProgram (programWithMainExpr (identityCapturedClosure localXIdentity "stale" localXIdentity))
+    validateBackendProgramFixture (programWithMainExpr (identityCapturedClosure localXIdentity "stale" localXIdentity))
       `shouldBe` Right ()
 
-    validateBackendProgram (programWithMainExpr (identityCapturedClosure localXIdentity "captured" otherLocalIdentity))
+    validateBackendProgramFixture (programWithMainExpr (identityCapturedClosure localXIdentity "captured" otherLocalIdentity))
       `shouldBe` Left (BackendUnknownVariable "captured")
 
   it "checks closure parameter references by resolved identity when params carry identity" $ do
-    validateBackendProgram (programWithMainExpr (identityParamClosure localXIdentity "stale" localXIdentity))
+    validateBackendProgramFixture (programWithMainExpr (identityParamClosure localXIdentity "stale" localXIdentity))
       `shouldBe` Right ()
 
-    validateBackendProgram (programWithMainExpr (identityParamClosure localXIdentity "x" otherLocalIdentity))
+    validateBackendProgramFixture (programWithMainExpr (identityParamClosure localXIdentity "x" otherLocalIdentity))
       `shouldBe` Left (BackendUnknownVariable "x")
 
   it "does not infer case-pattern provenance from a $case binder spelling" $ do
@@ -566,7 +567,7 @@ spec = describe "MLF.Backend.IR" $ do
                   }
             }
 
-    validateBackendProgram (programWithMainExpr expr)
+    validateBackendProgramFixture (programWithMainExpr expr)
       `shouldBe` Left (BackendVariableTypeMismatch "$case0" identityVar boolTy)
 
   it "does not infer case-pattern provenance from an identity reference name" $ do
@@ -589,7 +590,7 @@ spec = describe "MLF.Backend.IR" $ do
                   }
             }
 
-    validateBackendProgram (programWithMainExpr expr)
+    validateBackendProgramFixture (programWithMainExpr expr)
       `shouldBe` Left (BackendVariableTypeMismatch "renamedCase" identityVar boolTy)
 
   it "relaxes unbounded case fields by pattern-binder identity, independent of display spelling" $ do
@@ -609,7 +610,7 @@ spec = describe "MLF.Backend.IR" $ do
                   :| []
             }
 
-    validateBackendProgram (programWithDataAndMainExpr [packData] expr)
+    validateBackendProgramFixture (programWithDataAndMainExpr [packData] expr)
       `shouldBe` Right ()
 
   it "does not freshen-match identity-bearing generated type variables by name" $ do
@@ -626,27 +627,27 @@ spec = describe "MLF.Backend.IR" $ do
               backendBody = BackendVarWithIdentity actualTy (Just localXIdentity) "$evidence01"
             }
 
-    validateBackendProgram (programWithMainExpr expr)
+    validateBackendProgramFixture (programWithMainExpr expr)
       `shouldBe` Left (BackendVariableTypeMismatch "$evidence01" expectedTy actualTy)
 
   it "classifies closure-call heads by identity when local names shadow" $ do
-    validateBackendProgram (programWithMainExpr identityShadowedClosureApp)
-      `shouldBe` Left (BackendClosureCalledWithBackendApp "f")
+    validateBackendProgramFixture (programWithMainExpr identityShadowedClosureApp)
+      `shouldBe` Left (BackendClosureCalledWithBackendApp (Just "f"))
 
   it "does not let name-only binders shadow identity-bearing closure heads" $ do
-    validateBackendProgram (programWithMainExpr identityShadowedClosureAppByNameOnlyBinder)
-      `shouldBe` Left (BackendClosureCalledWithBackendApp "f")
+    validateBackendProgramFixture (programWithMainExpr identityShadowedClosureAppByNameOnlyBinder)
+      `shouldBe` Left (BackendClosureCalledWithBackendApp (Just "f"))
 
   it "classifies pattern closure heads by identity when pattern names shadow" $ do
-    validateBackendProgram (programWithDataAndMainExpr [fnBoxData, boxData] identityShadowedPatternClosureApp)
-      `shouldBe` Left (BackendClosureCalledWithBackendApp "f")
+    validateBackendProgramFixture (programWithDataAndMainExpr [fnBoxData, boxData] identityShadowedPatternClosureApp)
+      `shouldBe` Left (BackendClosureCalledWithBackendApp (Just "f"))
 
   it "keeps resolved global closure heads through same-named pattern and let binders" $ do
-    validateBackendProgram identityPatternFallbackClosureProgram
-      `shouldBe` Left (BackendClosureCalledWithBackendApp "f")
+    validateBackendProgramFixture identityPatternFallbackClosureProgram
+      `shouldBe` Left (BackendClosureCalledWithBackendApp (Just "f"))
 
   it "classifies closure-called parameters by identity through shadowing lets" $ do
-    validateBackendProgram (programWithMainExpr identityShadowedClosureParam)
+    validateBackendProgramFixture (programWithMainExpr identityShadowedClosureParam)
       `shouldBe` Right ()
 
   it "rejects bindings whose declared type differs from the expression type" $ do
@@ -732,10 +733,10 @@ spec = describe "MLF.Backend.IR" $ do
     validateBackendExpr (BackendApp listIntTy (BackendVar (BTArrow intTy listFreeTy) "f") (intLit 1))
       `shouldBe` Left (BackendApplicationResultMismatch listIntTy listFreeTy)
 
-    validateBackendProgram (programWithBindings [binding "f" listIntToBoolTy listIntToBoolExpr, mainBinding listTyAbsAppExpr])
+    validateBackendProgramFixture (programWithBindings [binding "f" listIntToBoolTy listIntToBoolExpr, mainBinding listTyAbsAppExpr])
       `shouldBe` Left (BackendApplicationArgumentMismatch listIntTy (listTy (BTVar "a")))
 
-    validateBackendProgram (programWithBindings [binding "f" structuralBoxIntToBoolTy structuralBoxIntToBoolExpr, mainBinding structuralBoxTyAbsAppExpr])
+    validateBackendProgramFixture (programWithBindings [binding "f" structuralBoxIntToBoolTy structuralBoxIntToBoolExpr, mainBinding structuralBoxTyAbsAppExpr])
       `shouldBe` Left (BackendApplicationArgumentMismatch structuralBoxIntTy structuralBoxFreeTy)
 
     validateBackendExpr (BackendApp boolTy (BackendVar (BTArrow structuralBoxFreeTy boolTy) "f") (BackendVar structuralBoxIntTy "box"))
@@ -807,13 +808,13 @@ spec = describe "MLF.Backend.IR" $ do
               backendClosureBody = boolLit True
             }
 
-    validateBackendProgram (programWithMainExpr (callClosure closure))
+    validateBackendProgramFixture (programWithMainExpr (callClosure closure))
       `shouldBe` Right ()
-    validateBackendProgram (programWithMainExpr (callClosure capturedClosure))
+    validateBackendProgramFixture (programWithMainExpr (callClosure capturedClosure))
       `shouldBe` Right ()
-    validateBackendProgram (programWithMainExpr (callClosureAlias closure))
+    validateBackendProgramFixture (programWithMainExpr (callClosureAlias closure))
       `shouldBe` Right ()
-    validateBackendProgram
+    validateBackendProgramFixture
       ( programWithDataAndBindings
           [fnBoxData]
           [mainBinding callCaseSelectedClosureField]
@@ -856,8 +857,8 @@ spec = describe "MLF.Backend.IR" $ do
                 )
             ]
 
-    validateBackendProgram shadowedLetCallProgram `shouldBe` Right ()
-    validateBackendProgram shadowedCaseClosureGlobalProgram `shouldBe` Right ()
+    validateBackendProgramFixture shadowedLetCallProgram `shouldBe` Right ()
+    validateBackendProgramFixture shadowedCaseClosureGlobalProgram `shouldBe` Right ()
 
   it "treats function-valued case pattern binders as closure values during validation" $ do
     let fieldClosure =
@@ -884,7 +885,7 @@ spec = describe "MLF.Backend.IR" $ do
                 )
             ]
 
-    validateBackendProgram program `shouldBe` Right ()
+    validateBackendProgramFixture program `shouldBe` Right ()
 
   it "rejects malformed closure IR" $ do
     let goodClosure entryName =
@@ -1070,39 +1071,39 @@ spec = describe "MLF.Backend.IR" $ do
             )
             [intLit 1]
 
-    validateBackendProgram (programWithMainExpr captureMismatch)
+    validateBackendProgramFixture (programWithMainExpr captureMismatch)
       `shouldBe` Left (BackendClosureCaptureTypeMismatch "captured" boolTy intTy)
-    validateBackendProgram (programWithMainExpr resultMismatch)
+    validateBackendProgramFixture (programWithMainExpr resultMismatch)
       `shouldBe` Left (BackendClosureTypeMismatch "__mlfp_closure$bad_result" idTy (BTArrow intTy boolTy))
-    validateBackendProgram (programWithMainExpr duplicateEntries)
+    validateBackendProgramFixture (programWithMainExpr duplicateEntries)
       `shouldBe` Left (BackendDuplicateClosureEntry "__mlfp_closure$dup")
-    validateBackendProgram entryNameBindingCollision
+    validateBackendProgramFixture entryNameBindingCollision
       `shouldBe` Left (BackendClosureEntryNameCollision "helper")
-    validateBackendProgram entryNameRuntimeCollision
+    validateBackendProgramFixture entryNameRuntimeCollision
       `shouldBe` Left (BackendClosureEntryNameCollision "__mlfp_and")
-    validateBackendProgram (programWithMainExpr duplicateCaptureAndParameter)
+    validateBackendProgramFixture (programWithMainExpr duplicateCaptureAndParameter)
       `shouldBe` Left (BackendDuplicateClosureParameter "x")
-    validateBackendProgram (programWithMainExpr nonFunctionClosure)
+    validateBackendProgramFixture (programWithMainExpr nonFunctionClosure)
       `shouldBe` Left (BackendClosureExpectedFunction "__mlfp_closure$non_function" intTy)
-    validateBackendProgram (programWithMainExpr underspecifiedClosureParams)
+    validateBackendProgramFixture (programWithMainExpr underspecifiedClosureParams)
       `shouldBe` Left (BackendClosureParameterArityMismatch "__mlfp_closure$underspecified_params" 0 1)
-    validateBackendProgram (programWithMainExpr badCall)
+    validateBackendProgramFixture (programWithMainExpr badCall)
       `shouldBe` Left (BackendClosureCallArgumentMismatch 0 intTy boolTy)
-    validateBackendProgram (programWithMainExpr nonClosureCall)
+    validateBackendProgramFixture (programWithMainExpr nonClosureCall)
       `shouldBe` Left (BackendDirectCalledWithBackendClosureCall "f")
-    validateBackendProgram (programWithMainExpr unlistedLocalCapture)
+    validateBackendProgramFixture (programWithMainExpr unlistedLocalCapture)
       `shouldBe` Left (BackendUnknownVariable "captured")
-    validateBackendProgram (programWithMainExpr appCalledClosure)
-      `shouldBe` Left (BackendClosureCalledWithBackendApp "f")
-    validateBackendProgram (programWithMainExpr appCalledLetHeadClosure)
-      `shouldBe` Left (BackendClosureCalledWithBackendApp "f")
-    validateBackendProgram (programWithMainExpr appCalledClosureAlias)
-      `shouldBe` Left (BackendClosureCalledWithBackendApp "f")
-    validateBackendProgram (programWithMainExpr appCalledCaseHeadClosure)
-      `shouldBe` Left (BackendClosureCalledWithBackendApp "__mlfp_closure$app_case")
-    validateBackendProgram (programWithMainExpr appCalledCapturedClosure)
-      `shouldBe` Left (BackendClosureCalledWithBackendApp "capturedClosure")
-    validateBackendProgram (programWithMainExpr closureCallMixedCaseHead)
+    validateBackendProgramFixture (programWithMainExpr appCalledClosure)
+      `shouldBe` Left (BackendClosureCalledWithBackendApp (Just "f"))
+    validateBackendProgramFixture (programWithMainExpr appCalledLetHeadClosure)
+      `shouldBe` Left (BackendClosureCalledWithBackendApp (Just "f"))
+    validateBackendProgramFixture (programWithMainExpr appCalledClosureAlias)
+      `shouldBe` Left (BackendClosureCalledWithBackendApp (Just "f"))
+    validateBackendProgramFixture (programWithMainExpr appCalledCaseHeadClosure)
+      `shouldBe` Left (BackendClosureCalledWithBackendApp (Just "__mlfp_closure$app_case"))
+    validateBackendProgramFixture (programWithMainExpr appCalledCapturedClosure)
+      `shouldBe` Left (BackendClosureCalledWithBackendApp (Just "capturedClosure"))
+    validateBackendProgramFixture (programWithMainExpr closureCallMixedCaseHead)
       `shouldBe` Left (BackendClosureCallExpectedClosureValue idTy)
 
   it "checks closure binder uniqueness by identity before display name" $ do
@@ -1162,15 +1163,15 @@ spec = describe "MLF.Backend.IR" $ do
             [BackendClosureParam (Just rightIdentity) "y" intTy]
             (BackendVarWithIdentity intTy (Just rightIdentity) "x")
 
-    validateBackendProgram (programWithMainExpr (closureCall distinctParamClosure))
+    validateBackendProgramFixture (programWithMainExpr (closureCall distinctParamClosure))
       `shouldBe` Right ()
-    validateBackendProgram (programWithMainExpr (BackendClosureCall intTy distinctCaptureParamClosure [intLit 2]))
+    validateBackendProgramFixture (programWithMainExpr (BackendClosureCall intTy distinctCaptureParamClosure [intLit 2]))
       `shouldBe` Right ()
-    validateBackendProgram (programWithMainExpr (closureCall duplicateParamClosure))
+    validateBackendProgramFixture (programWithMainExpr (closureCall duplicateParamClosure))
       `shouldBe` Left (BackendDuplicateClosureParameter "x")
-    validateBackendProgram (programWithMainExpr (BackendClosureCall intTy duplicateCaptureParamClosure [intLit 2]))
+    validateBackendProgramFixture (programWithMainExpr (BackendClosureCall intTy duplicateCaptureParamClosure [intLit 2]))
       `shouldBe` Left (BackendDuplicateClosureParameter "x")
-    validateBackendProgram (programWithMainExpr (BackendClosureCall intTy duplicateCaptureClosure [intLit 2]))
+    validateBackendProgramFixture (programWithMainExpr (BackendClosureCall intTy duplicateCaptureClosure [intLit 2]))
       `shouldBe` Left (BackendDuplicateClosureCapture "x")
 
   it "checks pattern binder uniqueness by identity before display name" $ do
@@ -1205,11 +1206,11 @@ spec = describe "MLF.Backend.IR" $ do
             ]
             (BackendVar boolTy "x")
 
-    validateBackendProgram (programWithDataAndMainExpr [identityPairData] distinctIdentityCase)
+    validateBackendProgramFixture (programWithDataAndMainExpr [identityPairData] distinctIdentityCase)
       `shouldBe` Right ()
-    validateBackendProgram (programWithDataAndMainExpr [identityPairData] duplicateIdentityCase)
+    validateBackendProgramFixture (programWithDataAndMainExpr [identityPairData] duplicateIdentityCase)
       `shouldBe` Left (BackendDuplicatePatternBinding "x")
-    validateBackendProgram (programWithDataAndMainExpr [identityPairData] duplicateNameOnlyCase)
+    validateBackendProgramFixture (programWithDataAndMainExpr [identityPairData] duplicateNameOnlyCase)
       `shouldBe` Left (BackendDuplicatePatternBinding "x")
 
   it "checks type application against forall nodes" $ do
@@ -1324,7 +1325,7 @@ spec = describe "MLF.Backend.IR" $ do
     generatedIdentitiesInBackendTypes [stableVar] `shouldBe` []
     substituteBackendTypesByKey (Map.singleton (backendTypeSubstitutionKeyFromIdentity identity) intTy) identityVar `shouldBe` intTy
     generatedIdentitiesInBackendTypes [identityVar] `shouldBe` [UniqueIdentity 991602]
-    typeBinderRefMatchesWith BackendTypeIdentityOnly Nothing stableName Nothing stableName
+    typeBinderRefMatchesWith IdentityOnly Nothing stableName Nothing stableName
       `shouldBe` False
 
   it "renders backend identity substitution keys from binder identity" $ do
@@ -1349,15 +1350,15 @@ spec = describe "MLF.Backend.IR" $ do
       `shouldBe` backendCallableRef (Just identity) "stale"
     backendCallableRef Nothing "f"
       `shouldNotBe` backendCallableRef Nothing "stale"
-    backendCallableRefMatchesWith BackendCallableIdentityOnly (backendCallableRef Nothing "f") (backendCallableRef Nothing "f")
+    backendCallableRefMatchesWith IdentityOnly (backendCallableRef Nothing "f") (backendCallableRef Nothing "f")
       `shouldBe` False
-    backendTermRefMatchesWith BackendTermIdentityOnly Nothing "f" Nothing "f"
+    backendTermRefMatchesWith IdentityOnly Nothing "f" Nothing "f"
       `shouldBe` False
     closureEntryRefMatches Nothing "__mlfp_closure$f" Nothing "__mlfp_closure$f"
       `shouldBe` False
-    closureEntryRefMatchesWith ClosureEntryIdentityOnly Nothing "__mlfp_closure$f" Nothing "__mlfp_closure$f"
+    closureEntryRefMatchesWith IdentityOnly Nothing "__mlfp_closure$f" Nothing "__mlfp_closure$f"
       `shouldBe` False
-    closureEntryRefMatchesWith ClosureEntryMetadataLight Nothing "__mlfp_closure$f" Nothing "__mlfp_closure$f"
+    closureEntryRefMatchesWith MetadataLight Nothing "__mlfp_closure$f" Nothing "__mlfp_closure$f"
       `shouldBe` True
 
   it "compares closure callable heads by entry identity when names are stale" $ do
@@ -1409,11 +1410,8 @@ spec = describe "MLF.Backend.IR" $ do
             )
     backendCallableHead (\_ _ -> BackendCallableBindingDirect) directCase
       `shouldBe` BackendDirectCallableHead Nothing
-    case backendCallableHead (\_ _ -> BackendCallableBindingUnknown) closureCase of
-      BackendClosureCallableHead ref ->
-        backendCallableRefName ref `shouldBe` "__mlfp_unknown_closure_head"
-      other ->
-        expectationFailure ("expected closure callable head, got " ++ show other)
+    backendCallableHead (\_ _ -> BackendCallableBindingUnknown) closureCase
+      `shouldBe` BackendClosureCallableHead Nothing
 
   it "compares backend binder records by identity when names are stale" $ do
     let identity = LocalId (localRefFromIdentity (GeneratedLocalId (UniqueIdentity 991607)) "x")
@@ -1731,7 +1729,7 @@ spec = describe "MLF.Backend.IR" $ do
     alphaEqBackendType (BTBase (BaseTy "Core.T")) (BTMu "$Core.T_self" BTBottom)
       `shouldBe` False
 
-    validateBackendProgram (programWithMainExpr malformedStructuralBoxConstructExpr)
+    validateBackendProgramFixture (programWithMainExpr malformedStructuralBoxConstructExpr)
       `shouldBe` Left (BackendConstructorResultMismatch "Box" boxTy malformedStructuralBoxTy)
 
   it "allows opaque IO continuations to specialize their argument type" $ do
@@ -1777,16 +1775,16 @@ spec = describe "MLF.Backend.IR" $ do
     alphaEqBackendType boxTy structuralBoxTy
       `shouldBe` False
 
-    validateBackendProgram (programWithMainExpr structuralBoxConstructExpr)
+    validateBackendProgramFixture (programWithMainExpr structuralBoxConstructExpr)
       `shouldBe` Right ()
 
-    validateBackendProgram (programWithMainExpr mismatchedStructuralBoxConstructExpr)
+    validateBackendProgramFixture (programWithMainExpr mismatchedStructuralBoxConstructExpr)
       `shouldBe` Left (BackendConstructorResultMismatch "Box" boxTy mismatchedStructuralBoxTy)
 
-    validateBackendProgram (programWithMainExpr graphIdentityStructuralBoxConstructExpr)
+    validateBackendProgramFixture (programWithMainExpr graphIdentityStructuralBoxConstructExpr)
       `shouldBe` Left (BackendConstructorResultMismatch "Box" boxTy graphIdentityStructuralBoxTy)
 
-    validateBackendProgram mismatchedStructuralBoxCaseProgram
+    validateBackendProgramFixture mismatchedStructuralBoxCaseProgram
       `shouldBe` Left (BackendCaseConstructorScrutineeMismatch "Box" mismatchedStructuralBoxTy boxTy)
 
   it "preserves nominal arguments when structural recursive payloads omit them" $ do
@@ -1801,7 +1799,7 @@ spec = describe "MLF.Backend.IR" $ do
       `shouldBe` True
 
   it "recovers structural data arguments in declared parameter order" $ do
-    validateBackendProgram (programWithDataAndMainExpr [outOfOrderStructuralData] outOfOrderStructuralConstructExpr)
+    validateBackendProgramFixture (programWithDataAndMainExpr [outOfOrderStructuralData] outOfOrderStructuralConstructExpr)
       `shouldBe` Right ()
 
   it "rejects recursive roll and unroll type mismatches" $ do
@@ -1823,13 +1821,13 @@ spec = describe "MLF.Backend.IR" $ do
       `shouldBe` Just (BTArrow recTy otherVar)
 
   it "compares vacuous recursive wrappers by their bodies" $ do
-    validateBackendProgram vacuousRecursiveVariableMismatchProgram
+    validateBackendProgramFixture vacuousRecursiveVariableMismatchProgram
       `shouldBe` Left (BackendVariableTypeMismatch "x" vacuousRecursiveIntTy vacuousRecursiveBoolTy)
 
-    validateBackendProgram oneSidedVacuousRecursiveMismatchProgram
+    validateBackendProgramFixture oneSidedVacuousRecursiveMismatchProgram
       `shouldBe` Left (BackendVariableTypeMismatch "x" recursiveArrowIntTy vacuousRecursiveBoolTy)
 
-    validateBackendProgram vacuousRecursiveConstructorMismatchProgram
+    validateBackendProgramFixture vacuousRecursiveConstructorMismatchProgram
       `shouldBe` Left
         (BackendConstructorArgumentMismatch "VacuousMuBox" 0 vacuousRecursiveIntTy vacuousRecursiveBoolTy)
 
@@ -1848,7 +1846,7 @@ spec = describe "MLF.Backend.IR" $ do
             "self"
             bodyTy
 
-    validateBackendProgram
+    validateBackendProgramFixture
       ( programWithBindings
           [ mainBinding
               BackendLamWithIdentity
@@ -1863,54 +1861,54 @@ spec = describe "MLF.Backend.IR" $ do
       `shouldBe` Right ()
 
   it "accepts ADT construction and case analysis through constructor metadata" $ do
-    validateBackendProgram (programWithMainExpr boxCaseExpr)
+    validateBackendProgramFixture (programWithMainExpr boxCaseExpr)
       `shouldBe` Right ()
 
   it "accepts parameterized constructor metadata at use and case sites" $ do
-    validateBackendProgram (programWithDataAndMainExpr [optionData] someIntExpr)
+    validateBackendProgramFixture (programWithDataAndMainExpr [optionData] someIntExpr)
       `shouldBe` Right ()
 
-    validateBackendProgram (programWithDataAndMainExpr [optionData] optionCaseExpr)
+    validateBackendProgramFixture (programWithDataAndMainExpr [optionData] optionCaseExpr)
       `shouldBe` Right ()
 
-    validateBackendProgram (programWithDataAndMainExpr [optionData] someIntAsOptionVarExpr)
+    validateBackendProgramFixture (programWithDataAndMainExpr [optionData] someIntAsOptionVarExpr)
       `shouldBe` Right ()
 
-    validateBackendProgram (programWithDataAndMainExpr [optionData] someBoolAsOptionIntExpr)
+    validateBackendProgramFixture (programWithDataAndMainExpr [optionData] someBoolAsOptionIntExpr)
       `shouldBe` Left (BackendConstructorArgumentMismatch "Some" 0 intTy boolTy)
 
   it "uses data parameter identities when backend parameter names collide" $ do
-    validateBackendProgram (programWithDataAndMainExpr [identityPairData] identityPairExpr)
+    validateBackendProgramFixture (programWithDataAndMainExpr [identityPairData] identityPairExpr)
       `shouldBe` Right ()
 
-    validateBackendProgram (programWithDataAndMainExpr [identityPairData] swappedIdentityPairExpr)
+    validateBackendProgramFixture (programWithDataAndMainExpr [identityPairData] swappedIdentityPairExpr)
       `shouldBe` Left (BackendConstructorArgumentMismatch "IdentityPair" 0 identityPairIntTy identityPairBoolTy)
 
   it "does not capture identity-bearing field placeholders by name-only data parameters" $ do
-    validateBackendProgram identityPlaceholderFieldProgram
+    validateBackendProgramFixture identityPlaceholderFieldProgram
       `shouldBe` Right ()
 
   it "uses identity-bearing constructor result placeholders when display names collide" $ do
-    validateBackendProgram (programWithDataAndMainExpr [resultPlaceholderData] resultPlaceholderConstructExpr)
+    validateBackendProgramFixture (programWithDataAndMainExpr [resultPlaceholderData] resultPlaceholderConstructExpr)
       `shouldBe` Right ()
 
-    validateBackendProgram (programWithDataAndMainExpr [resultPlaceholderData] resultPlaceholderCaseExpr)
+    validateBackendProgramFixture (programWithDataAndMainExpr [resultPlaceholderData] resultPlaceholderCaseExpr)
       `shouldBe` Right ()
 
   it "rejects constructor result types named only by encoded data identity" $ do
-    validateBackendProgram dataIdentityConstructorResultProgram
+    validateBackendProgramFixture dataIdentityConstructorResultProgram
       `shouldBe` Left (BackendConstructorResultMismatch "IdentityBox" dataIdentityBoxCanonicalTy dataIdentityBoxStableTy)
 
   it "rejects constructor result types named only by identity-bearing data display name" $ do
-    validateBackendProgram dataIdentityConstructorDisplayResultProgram
+    validateBackendProgramFixture dataIdentityConstructorDisplayResultProgram
       `shouldBe` Left (BackendConstructorResultMismatch "IdentityBox" dataIdentityBoxCanonicalTy dataIdentityBoxNameOnlyTy)
 
   it "rejects name-only structural boundaries for identity-bearing data" $ do
-    validateBackendProgram dataIdentityStructuralNameOnlyBoundaryProgram
+    validateBackendProgramFixture dataIdentityStructuralNameOnlyBoundaryProgram
       `shouldBe` Left (BackendBindingTypeMismatch "main" dataIdentityBoxNameOnlyFunctionTy dataIdentityBoxStructuralFunctionTy)
 
   it "does not match identity-bearing nominal data to identityless structural data by name during validation" $ do
-    validateBackendProgram dataIdentityStructuralIdentitylessSelfProgram
+    validateBackendProgramFixture dataIdentityStructuralIdentitylessSelfProgram
       `shouldBe` Left (BackendBindingTypeMismatch "main" dataIdentityBoxCanonicalFunctionTy dataIdentityBoxStructuralFunctionTy)
 
   it "does not match identity-bearing nominal data to identityless structural data without data scope" $ do
@@ -1944,18 +1942,18 @@ spec = describe "MLF.Backend.IR" $ do
         wrongShapeFunctionTy = BTArrow wrongShapeTy wrongShapeTy
         program = identityBoxStructuralBoundaryProgram wrongShapeTy
 
-    validateBackendProgram program
+    validateBackendProgramFixture program
       `shouldBe` Left (BackendBindingTypeMismatch "main" dataIdentityBoxCanonicalFunctionTy wrongShapeFunctionTy)
 
   it "uses pinned structural owner identity when its display spelling is stale" $ do
     let selfIdentity = typeBinderIdentityFromStructural (symbolUniqueIdentity dataIdentityBoxIdentity) StructuralSelfBinder
         staleTy = BTMuWithIdentity (Just selfIdentity) "$stale_owner" nullaryStructuralBody
 
-    validateBackendProgram (identityBoxStructuralBoundaryProgram staleTy)
+    validateBackendProgramFixture (identityBoxStructuralBoundaryProgram staleTy)
       `shouldBe` Right ()
 
   it "rejects structural self identities that point away from same-named data" $ do
-    validateBackendProgram dataIdentityStructuralMismatchedSelfProgram
+    validateBackendProgramFixture dataIdentityStructuralMismatchedSelfProgram
       `shouldBe` Left (BackendBindingTypeMismatch "main" dataIdentityBoxCanonicalFunctionTy dataIdentityBoxMismatchedStructuralFunctionTy)
 
   it "does not match structural data declarations by name when self identity differs" $
@@ -1973,11 +1971,11 @@ spec = describe "MLF.Backend.IR" $ do
       `shouldBe` False
 
   it "accepts stale constructor result type heads when data identity is carried" $ do
-    validateBackendProgram dataIdentityConstructorStaleResultProgram
+    validateBackendProgramFixture dataIdentityConstructorStaleResultProgram
       `shouldBe` Right ()
 
   it "rejects stale constructor result type heads when data identities differ" $ do
-    validateBackendProgram dataIdentityConstructorMismatchedResultProgram
+    validateBackendProgramFixture dataIdentityConstructorMismatchedResultProgram
       `shouldBe` Left (BackendConstructorResultMismatch "IdentityBox" dataIdentityBoxCanonicalTy dataIdentityBoxMismatchedStableTy)
 
   it "compares backend type heads by carried identity" $ do
@@ -2015,9 +2013,9 @@ spec = describe "MLF.Backend.IR" $ do
       (Just dataIdentityBoxIdentity)
       (BaseTy "IdentityBox")
       `shouldBe` False
-    backendTypeHeadMatchesWith SymbolIdentityOnly Nothing (BaseTy "IdentityBox") Nothing (BaseTy "IdentityBox")
+    backendTypeHeadMatchesWith IdentityOnly Nothing (BaseTy "IdentityBox") Nothing (BaseTy "IdentityBox")
       `shouldBe` False
-    backendTypeHeadMatchesWith SymbolMetadataLight Nothing (BaseTy "IdentityBox") Nothing (BaseTy "IdentityBox")
+    backendTypeHeadMatchesWith MetadataLight Nothing (BaseTy "IdentityBox") Nothing (BaseTy "IdentityBox")
       `shouldBe` True
 
   it "refines backend case scrutinees by identity without Eq name fallback" $ do
@@ -2027,7 +2025,7 @@ spec = describe "MLF.Backend.IR" $ do
       `shouldBe` False
     backendTypeRefinesScrutinee dataIdentityBoxNameOnlyTy dataIdentityBoxNameOnlyTy
       `shouldBe` False
-    backendTypeRefinesScrutineeWith BackendTypeMetadataLight dataIdentityBoxNameOnlyTy dataIdentityBoxNameOnlyTy
+    backendTypeRefinesScrutineeWith MetadataLight dataIdentityBoxNameOnlyTy dataIdentityBoxNameOnlyTy
       `shouldBe` True
 
   it "does not match identity-bearing type variables through name-only metadata bounds" $ do
@@ -2077,83 +2075,83 @@ spec = describe "MLF.Backend.IR" $ do
       (BTVarApp "f" (intTy :| []))
       `shouldBe` BTConWithIdentity (Just dataIdentityBoxIdentity) (BaseTy "IdentityBox") (intTy :| [])
 
-    validateBackendProgram (programWithDataAndMainExpr [boxFData, maybeFData] justFBoxBoolExpr)
+    validateBackendProgramFixture (programWithDataAndMainExpr [boxFData, maybeFData] justFBoxBoolExpr)
       `shouldBe` Right ()
 
-    validateBackendProgram (programWithDataAndMainExpr [boxFData, maybeFData] maybeFCaseExpr)
+    validateBackendProgramFixture (programWithDataAndMainExpr [boxFData, maybeFData] maybeFCaseExpr)
       `shouldBe` Right ()
 
   it "uses constructor-level forall metadata when validating constructor fields" $ do
-    validateBackendProgram (programWithDataAndMainExpr [packData] packIntExpr)
+    validateBackendProgramFixture (programWithDataAndMainExpr [packData] packIntExpr)
       `shouldBe` Right ()
 
   it "enforces constructor-level forall bounds at construct and case boundaries" $ do
-    validateBackendProgram (programWithDataAndMainExpr [boundedPackData] boundedPackIntExpr)
+    validateBackendProgramFixture (programWithDataAndMainExpr [boundedPackData] boundedPackIntExpr)
       `shouldBe` Right ()
 
-    validateBackendProgram (programWithDataAndMainExpr [boundedPackData] boundedPackBoolExpr)
+    validateBackendProgramFixture (programWithDataAndMainExpr [boundedPackData] boundedPackBoolExpr)
       `shouldBe` Left (BackendConstructorArgumentMismatch "BoundedPack" 0 intTy boolTy)
 
-    validateBackendProgram (programWithDataAndMainExpr [boundedPackData] boundedPackCaseExpr)
+    validateBackendProgramFixture (programWithDataAndMainExpr [boundedPackData] boundedPackCaseExpr)
       `shouldBe` Right ()
 
-    validateBackendProgram (programWithDataAndMainExpr [boundedPackData] boundedPackRepackCaseExpr)
+    validateBackendProgramFixture (programWithDataAndMainExpr [boundedPackData] boundedPackRepackCaseExpr)
       `shouldBe` Right ()
 
-    validateBackendProgram boundedPackOuterNameCollisionCaseProgram
+    validateBackendProgramFixture boundedPackOuterNameCollisionCaseProgram
       `shouldBe` Right ()
 
-    validateBackendProgram boundedPackOuterNameCollisionWrongOuterUseProgram
+    validateBackendProgramFixture boundedPackOuterNameCollisionWrongOuterUseProgram
       `shouldBe` Left (BackendVariableTypeMismatch "outer" (BTVar "a") intTy)
 
-    validateBackendProgram (programWithDataAndMainExpr [boundedPackData] boundedPackWrongBoundUseCaseExpr)
+    validateBackendProgramFixture (programWithDataAndMainExpr [boundedPackData] boundedPackWrongBoundUseCaseExpr)
       `shouldBe` Left (BackendVariableTypeMismatch "n" intTy boolTy)
 
-    validateBackendProgram boundedListPackCaseProgram
+    validateBackendProgramFixture boundedListPackCaseProgram
       `shouldBe` Right ()
 
-    validateBackendProgram boundedListPackWrongBoundUseCaseProgram
+    validateBackendProgramFixture boundedListPackWrongBoundUseCaseProgram
       `shouldBe` Left (BackendVariableTypeMismatch "n" (listTy intTy) (listTy boolTy))
 
-    validateBackendProgram (programWithDataAndMainExpr [dependentBoundedPackData] dependentBoundedPackIntExpr)
+    validateBackendProgramFixture (programWithDataAndMainExpr [dependentBoundedPackData] dependentBoundedPackIntExpr)
       `shouldBe` Right ()
 
-    validateBackendProgram (programWithDataAndMainExpr [dependentBoundedPackData] dependentBoundedPackBoolExpr)
+    validateBackendProgramFixture (programWithDataAndMainExpr [dependentBoundedPackData] dependentBoundedPackBoolExpr)
       `shouldBe` Left (BackendConstructorArgumentMismatch "DependentBoundedPack" 0 intTy boolTy)
 
-    validateBackendProgram dependentActualBoundPackProgram
+    validateBackendProgramFixture dependentActualBoundPackProgram
       `shouldBe` Right ()
 
-    validateBackendProgram dependentActualBoundPackWrongProgram
+    validateBackendProgramFixture dependentActualBoundPackWrongProgram
       `shouldBe` Left (BackendConstructorArgumentMismatch "DependentActualBoundPack" 0 (listTy intTy) (BTVar "b"))
 
   it "rejects matcher capture from inferred constructor parameters" $ do
-    validateBackendProgram captureForallConstructProgram
+    validateBackendProgramFixture captureForallConstructProgram
       `shouldBe` Left (BackendConstructorArgumentMismatch "CaptureForall" 0 captureForallInstantiatedTy captureForallActualTy)
 
-    validateBackendProgram captureMuConstructProgram
+    validateBackendProgramFixture captureMuConstructProgram
       `shouldBe` Left (BackendConstructorArgumentMismatch "CaptureMu" 0 captureMuInstantiatedTy captureMuActualTy)
 
-    validateBackendProgram captureCaseProgram
+    validateBackendProgramFixture captureCaseProgram
       `shouldBe` Left (BackendCaseConstructorScrutineeMismatch "CaptureCase" captureCaseScrutineeTy captureCaseTemplateTy)
 
   it "rejects unknown constructors and duplicate constructor metadata" $ do
-    validateBackendProgram (programWithMainExpr (BackendConstruct boxTy "Missing" []))
+    validateBackendProgramFixture (programWithMainExpr (BackendConstruct boxTy "Missing" []))
       `shouldBe` Left (BackendUnknownConstructor "Missing")
 
-    validateBackendProgram mismatchedConstructorIdentityProgram
+    validateBackendProgramFixture mismatchedConstructorIdentityProgram
       `shouldBe` Left (BackendUnknownConstructor "Box")
 
-    validateBackendProgram conflictingConstructorIdentityReferenceProgram
+    validateBackendProgramFixture conflictingConstructorIdentityReferenceProgram
       `shouldBe` Left (BackendUnknownConstructor "Box")
 
-    validateBackendProgram identityConstructorReferencedByNameOnlyProgram
+    validateBackendProgramFixture identityConstructorReferencedByNameOnlyProgram
       `shouldBe` Left (BackendUnknownConstructor "Box")
 
-    validateBackendProgram identityConstructorReferencedByStableNameProgram
+    validateBackendProgramFixture identityConstructorReferencedByStableNameProgram
       `shouldBe` Left (BackendUnknownConstructor (symbolIdentityStableName duplicateConstructorIdentity))
 
-    validateBackendProgram
+    validateBackendProgramFixture
       ( BackendProgram
           [ BackendModule
               { backendModuleName = "Main",
@@ -2168,27 +2166,27 @@ spec = describe "MLF.Backend.IR" $ do
       )
       `shouldBe` Left (BackendDuplicateConstructor "Box")
 
-    validateBackendProgram duplicateConstructorIdentityProgram
+    validateBackendProgramFixture duplicateConstructorIdentityProgram
       `shouldBe` Left (BackendDuplicateConstructor (symbolIdentityStableName duplicateConstructorIdentity))
 
   it "rejects constructor arity, argument, and result mismatches" $ do
-    validateBackendProgram (programWithMainExpr (BackendConstruct boxTy "Box" []))
+    validateBackendProgramFixture (programWithMainExpr (BackendConstruct boxTy "Box" []))
       `shouldBe` Left (BackendConstructorArityMismatch "Box" 1 0)
 
-    validateBackendProgram (programWithMainExpr (BackendConstruct boxTy "Box" [boolLit True]))
+    validateBackendProgramFixture (programWithMainExpr (BackendConstruct boxTy "Box" [boolLit True]))
       `shouldBe` Left (BackendConstructorArgumentMismatch "Box" 0 intTy boolTy)
 
-    validateBackendProgram (programWithMainExpr (BackendConstruct boolTy "Box" [intLit 1]))
+    validateBackendProgramFixture (programWithMainExpr (BackendConstruct boolTy "Box" [intLit 1]))
       `shouldBe` Left (BackendConstructorResultMismatch "Box" boxTy boolTy)
 
   it "rejects invalid case alternative result and constructor boundaries" $ do
-    validateBackendProgram (programWithMainExpr boxCaseWrongResultExpr)
+    validateBackendProgramFixture (programWithMainExpr boxCaseWrongResultExpr)
       `shouldBe` Left (BackendCaseResultMismatch intTy boolTy)
 
-    validateBackendProgram (programWithMainExpr boxCaseWrongScrutineeExpr)
+    validateBackendProgramFixture (programWithMainExpr boxCaseWrongScrutineeExpr)
       `shouldBe` Left (BackendCaseConstructorScrutineeMismatch "Box" boolTy boxTy)
 
-    validateBackendProgram (programWithMainExpr boxCaseWrongPatternArityExpr)
+    validateBackendProgramFixture (programWithMainExpr boxCaseWrongPatternArityExpr)
       `shouldBe` Left (BackendPatternArityMismatch "Box" 1 0)
 
 simpleProgram :: BackendProgram

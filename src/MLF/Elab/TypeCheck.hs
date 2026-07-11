@@ -18,6 +18,7 @@ module MLF.Elab.TypeCheck
     typeCheck,
     typeCheckWithEnv,
     typeCheckWithResolvedEnv,
+    canonicalizeResolvedTermTypes,
     checkInstantiation,
   )
 where
@@ -141,6 +142,45 @@ typeCheckWithResolvedEnv resolvedEnv env =
     (summarizeTypeCheckEnv env)
     (overlayResolvedTermEnv resolvedEnv (resolvedTermEnv env))
     env
+
+-- | Rebuild term-variable annotations from the identity-keyed environment.
+-- Binder annotations remain authoritative for their lexical scope; matching
+-- occurrences receive that exact type before a checked term is published.
+canonicalizeResolvedTermTypes :: Env -> XmlfTerm -> XmlfTerm
+canonicalizeResolvedTermTypes = go
+  where
+    go env term =
+      case term of
+        EVarNode resolved ->
+          EVarNode (canonicalResolved env resolved)
+        ELit lit ->
+          ELit lit
+        ELam resolved body ->
+          let env' = insertResolvedTermBinding resolved (resolvedVarType resolved) env
+           in ELam resolved (go env' body)
+        EApp fun arg ->
+          EApp (go env fun) (go env arg)
+        ELet resolved scheme rhs body ->
+          let schemeTy = schemeToType scheme
+              resolved' = mapResolvedVarType (const schemeTy) resolved
+              env' = insertResolvedTermBinding resolved' schemeTy env
+           in ELet resolved' scheme (go env' rhs) (go env' body)
+        ETyAbsRef ref mbBound body ->
+          ETyAbsRef ref mbBound (go env body)
+        ETyInst inner inst ->
+          ETyInst (go env inner) inst
+        ERoll ty body ->
+          ERoll ty (go env body)
+        EUnroll body ->
+          EUnroll (go env body)
+
+    canonicalResolved env resolved =
+      case lookupResolvedTermEnvEntry (resolvedTermEnv env) resolved of
+        Just (_, ty)
+          | not (resolvedVarIsLocal resolved)
+              || resolvedVarTypeMatches ty (resolvedVarType resolved) ->
+              mapResolvedVarType (const ty) resolved
+        _ -> resolved
 
 typeCheckWithEnvSummary :: TypeCheckEnvSummary -> ResolvedTermEnv -> Env -> XmlfTerm -> Either TypeCheckError ElabType
 typeCheckWithEnvSummary envSummary resolvedEnv env term = case term of

@@ -29,7 +29,12 @@ import qualified Data.Set as Set
 import MLF.Elab.Pipeline (XmlfTerm (..), Pretty (..), Ty (TForallRef), normalize, schemeFromType, typeCheck)
 import MLF.Elab.Types (ElabType, ResolvedTermIdentityKey, ResolvedVar (..), deferredResolvedVarRef, resolvedVarBindingSymbolIdentity, resolvedVarBoundBy, resolvedVarConstructorRef, resolvedVarIdentityKey, resolvedVarReferenceName, resolvedVarRuntimeName, resolvedVarSameIdentity)
 import qualified MLF.Elab.Types as X
-import MLF.Frontend.Program.Check (checkLocatedProgram, checkLocatedProgramPackage, checkLocatedProgramPackageWithTiming, checkProgram, checkProgramPackage, validateCheckedProgramTypeViews)
+import MLF.Frontend.Program.Check (checkLocatedProgram, checkLocatedProgramPackage, checkLocatedProgramPackageWithTiming, checkProgram, checkProgramPackage)
+import MLF.Frontend.Program.Checked
+  ( CheckedProgram,
+    checkedProgramMainResolvedVar,
+    checkedProgramModules,
+  )
 import MLF.Frontend.Program.Elaborate
   ( ElaborateScope,
     classInfoForConstraint,
@@ -55,7 +60,6 @@ import MLF.Frontend.Program.Types
   ( CheckedBinding (..),
     ClassInfo (..),
     CheckedModule (..),
-    CheckedProgram (..),
     ConstraintInfo (..),
     ClassApplicationKey,
     ConstructorForallBinder (..),
@@ -77,7 +81,10 @@ import MLF.Frontend.Program.Types
     symbolDefiningName,
     symbolNamespace,
     TypeBinderSubst,
-    TypeView (..),
+    TypeView,
+    typeViewDisplay,
+    typeViewHeadIdentities,
+    typeViewIdentity,
     TypeViewSubst,
     ValueInfo (..),
     applyConstraintInfoSubst,
@@ -107,8 +114,8 @@ import MLF.Frontend.Program.Types
     methodInfoOwnerClassSymbolIdentity,
     methodInfoSymbolIdentity,
     methodParamBinderIdentities,
-    mergeSymbolIdentityMaps,
-    mergeTypeBinderIdentityMaps,
+    mapTypeViewIdentityHeadNames,
+    metadataLightTypeView,
     specializeMethodTypeView,
     splitArrows,
     splitForalls,
@@ -118,6 +125,10 @@ import MLF.Frontend.Program.Types
     typeViewArrowResultViewForArity,
     typeViewSubstFromParamIdentities,
     typeViewBinderIdentityAliasEntries,
+    typeViewMergeBinderIdentities,
+    typeViewMergeHeadIdentities,
+    typeViewMentionedHeadIdentities,
+    typeViewFromSourceTypeWithIdentityMaps,
     uniqueEvidenceMethod,
     uniqueEvidenceMethodMatch,
     typeBinderSubstFromTypeViewSubst,
@@ -127,7 +138,7 @@ import MLF.Frontend.Program.Types
     resolvedVarFromValueInfo,
   )
 import MLF.Frontend.Symbol (SymbolIdentityPayloadKey, SymbolOwnerIdentity (..), lookupSymbolIdentityExact, memberSymbolIdentityExact, sameSymbolIdentity, symbolIdentityPayloadKey, symbolIdentityStableName, symbolOwnerIdentity, symbolUniqueIdentity)
-import MLF.Frontend.Syntax (Lit (..), SrcBound (..), SrcTy (..), SrcType)
+import MLF.Frontend.Syntax (Lit (..), SrcTy (..), SrcType)
 import qualified MLF.Frontend.Syntax.Program as ProgramSyntax
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
 import MLF.Reify.TypeOps (alphaEqType, churchAwareEqType, freeTypeVarRefsType)
@@ -218,7 +229,6 @@ programRunOutput result =
 
 runCheckedPureProgram :: CheckedProgram -> Either ProgramError Value
 runCheckedPureProgram checked = do
-  validateCheckedProgramTypeViews checked
   context <- mkRuntimeContext checked
   case classifyMainMode context checked of
     MainPure -> do
@@ -240,7 +250,6 @@ runCheckedPureMain context checked = do
 
 runCheckedProgramOutput :: CheckedProgram -> Either ProgramError ProgramRunResult
 runCheckedProgramOutput checked = do
-  validateCheckedProgramTypeViews checked
   context <- mkRuntimeContext checked
   case classifyMainMode context checked of
     MainPure -> do
@@ -341,16 +350,15 @@ preludeUnitTypeView context = do
   let displayHeadName = dataInfoIdentityName dataInfo
       identityHeadName = symbolIdentityStableName (dataInfoSymbol dataInfo)
   pure
-    TypeView
-      { typeViewDisplay = STBase displayHeadName,
-        typeViewIdentity = STBase identityHeadName,
-        typeViewHeadIdentities =
-          Map.fromList
+    ( typeViewFromSourceTypeWithIdentityMaps
+        ( Map.fromList
             [ (displayHeadName, dataInfoSymbol dataInfo),
               (identityHeadName, dataInfoSymbol dataInfo)
-            ],
-        typeViewBinderIdentities = Map.empty
-      }
+            ]
+        )
+        Map.empty
+        (STBase displayHeadName)
+    )
 
 preludeUnitDataInfo :: RuntimeContext -> Maybe DataInfo
 preludeUnitDataInfo context = do
@@ -1106,13 +1114,7 @@ matchRuntimeTypeBinderSubstInScope scope binders subst templateView actualView =
 
 typeBinderTemplateView :: [(String, TypeBinderIdentity)] -> TypeView -> TypeView
 typeBinderTemplateView binders view =
-  view
-    { typeViewBinderIdentities =
-        mergeTypeBinderIdentityMaps
-          [ typeViewBinderIdentities view,
-            typeBinderAliasIdentityMap binders
-          ]
-    }
+  typeViewMergeBinderIdentities (typeBinderAliasIdentityMap binders) view
 
 applyRuntimeConstructorSubstView :: TypeBinderSubst -> TypeView -> TypeView
 applyRuntimeConstructorSubstView subst =
@@ -1122,13 +1124,9 @@ runtimeConstructorOccurrenceResultView :: RuntimeConstructorSpec -> TypeView
 runtimeConstructorOccurrenceResultView spec =
   case runtimeConstructorDeferred spec of
     Just deferred ->
-      occurrenceView
-        { typeViewBinderIdentities =
-            mergeTypeBinderIdentityMaps
-              [ typeViewBinderIdentities occurrenceView,
-                typeBinderAliasIdentityMap (deferredConstructorInstBinders deferred)
-              ]
-        }
+      typeViewMergeBinderIdentities
+        (typeBinderAliasIdentityMap (deferredConstructorInstBinders deferred))
+        occurrenceView
       where
         occurrenceView =
           typeViewArrowResultViewForArity
@@ -2801,12 +2799,7 @@ decodeAnyData context term =
     _ -> Nothing
   where
     emptyView =
-      TypeView
-        { typeViewDisplay = STBottom,
-          typeViewIdentity = STBottom,
-          typeViewHeadIdentities = Map.empty,
-          typeViewBinderIdentities = Map.empty
-        }
+      metadataLightTypeView STBottom
 
 decodeChurchData :: RuntimeContext -> TypeView -> DataInfo -> TypeBinderSubst -> XmlfTerm -> Maybe Value
 decodeChurchData context sourceView dataInfo subst term = do
@@ -2850,77 +2843,22 @@ substDataParamView _sourceView subst view =
 
 canonicalFieldTypeView :: RuntimeContext -> DataInfo -> TypeView -> TypeView
 canonicalFieldTypeView context _ownerInfo view =
-  view
-    { typeViewIdentity = identityTy,
-      typeViewHeadIdentities =
-        mergeSymbolIdentityMaps
-          [ typeViewHeadIdentities view,
-            canonicalHeadIdentities
-          ]
-    }
+  typeViewMergeHeadIdentities canonicalHeadIdentities $
+    mapTypeViewIdentityHeadNames canonicalHeadName view
   where
-    (identityTy, canonicalHeadIdentities) = canonical (typeViewIdentity view)
+    canonicalHeadName mbIdentity name =
+      maybe name qualifiedDataName (lookupDataInfo mbIdentity name)
 
-    canonical ty =
-      case ty of
-        STVar {} -> (ty, Map.empty)
-        STBase name ->
-          case lookupDataInfoByViewHead name of
-            Just info ->
-              let canonicalName = qualifiedDataName info
-               in (STBase canonicalName, Map.singleton canonicalName (dataInfoSymbol info))
-            Nothing -> (ty, Map.empty)
-        STCon name args ->
-          let (args', argIdentities) = canonicalArgs args
-           in case lookupDataInfoByViewHead name of
-                Just info ->
-                  let canonicalName = qualifiedDataName info
-                   in (STCon canonicalName args', Map.insert canonicalName (dataInfoSymbol info) argIdentities)
-                Nothing -> (STCon name args', argIdentities)
-        STVarApp name args ->
-          let (args', identities) = canonicalArgs args
-           in (STVarApp name args', identities)
-        STTyLam name body ->
-          let (body', identities) = canonical body
-           in (STTyLam name body', identities)
-        STTyApp fun arg ->
-          let (fun', funIdentities) = canonical fun
-              (arg', argIdentities) = canonical arg
-           in (STTyApp fun' arg', mergeSymbolIdentityMaps [funIdentities, argIdentities])
-        STArrow dom cod ->
-          let (dom', domIdentities) = canonical dom
-              (cod', codIdentities) = canonical cod
-           in (STArrow dom' cod', mergeSymbolIdentityMaps [domIdentities, codIdentities])
-        STForall name mb body ->
-          let (mb', mbIdentities) =
-                case mb of
-                  Just (SrcBound bound) ->
-                    let (bound', boundIdentities) = canonical bound
-                     in (Just (SrcBound bound'), boundIdentities)
-                  Nothing -> (Nothing, Map.empty)
-              (body', bodyIdentities) = canonical body
-           in (STForall name mb' body', mergeSymbolIdentityMaps [mbIdentities, bodyIdentities])
-        STMu name body ->
-          let (body', identities) = canonical body
-           in (STMu name body', identities)
-        STBottom -> (STBottom, Map.empty)
+    canonicalHeadIdentities =
+      Map.fromList
+        [ (qualifiedDataName info, dataInfoSymbol info)
+        | identity <- Set.toList (typeViewMentionedHeadIdentities view),
+          Just info <- [lookupSymbolIdentityExact identity (runtimeDataByIdentity context)]
+        ]
 
-    canonicalArgs (arg NE.:| args) =
-      let (arg', argIdentities) = canonical arg
-          (argsRev, identities) =
-            foldl
-              ( \(accArgs, accIdentities) next ->
-                  let (next', nextIdentities) = canonical next
-                   in (next' : accArgs, mergeSymbolIdentityMaps [accIdentities, nextIdentities])
-              )
-              ([], argIdentities)
-              args
-       in (arg' NE.:| reverse argsRev, identities)
-
-    lookupDataInfoByViewHead name =
-      case typeViewHeadIdentityForAlias view name >>= (`lookupSymbolIdentityExact` runtimeDataByIdentity context) of
-        Just info -> Just info
-        Nothing -> Nothing
+    lookupDataInfo mbIdentity name =
+      (mbIdentity >>= (`lookupSymbolIdentityExact` runtimeDataByIdentity context))
+        <|> (typeViewHeadIdentityForAlias view name >>= (`lookupSymbolIdentityExact` runtimeDataByIdentity context))
 
 decodeArg :: RuntimeContext -> TypeView -> XmlfTerm -> Value
 decodeArg context view term =

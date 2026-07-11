@@ -22,7 +22,7 @@ import MLF.Backend.Convert
 import MLF.Backend.IR (ProductionBackendProgram)
 import qualified MLF.Backend.LLVM.Lower as Lower
 import MLF.Backend.LLVM.Ppr (renderLLVMModule)
-import MLF.Frontend.Program.Types (CheckedProgram)
+import MLF.Frontend.Program.Checked (CheckedProgram)
 
 renderCheckedProgramLLVM :: CheckedProgram -> Either BackendLLVMError String
 renderCheckedProgramLLVM checked =

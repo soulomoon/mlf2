@@ -31,9 +31,12 @@ import MLF.Frontend.Program.Package
     , programPackageModuleGraph
     )
 import MLF.Frontend.Program.Prelude (withPreludePackage)
+import MLF.Frontend.Program.Checked (CheckedProgram, checkedProgramModules)
+import MLF.Frontend.Program.Checked.Internal
+    ( checkedProgramModulesInternal
+    )
 import MLF.Frontend.Program.Types
     ( CheckedModule (..)
-    , CheckedProgram (..)
     , ConstructorInfo (..)
     , DataInfo (..)
     , ExportedTypeInfo (..)
@@ -52,7 +55,6 @@ import MLF.Frontend.Program.Types
     , exportedTypesForDisplay
     , exportedValuesForDisplay
     , mkExportedTypeInfo
-    , mkTypeView
     , moduleExportsFromMaps
     , renameSymbolDefiningName
     , valueInfoIdentityName
@@ -60,6 +62,7 @@ import MLF.Frontend.Program.Types
 import MLF.Frontend.Syntax (SrcTy (..))
 import MLF.Frontend.Syntax.Program qualified as P
 import MLF.Types.Identity (UniqueIdentity (..))
+import TypeViewTestSupport (mkTypeView)
 
 spec :: Spec
 spec = do
@@ -202,7 +205,7 @@ spec = do
             (graph, checked, packageInterface) <- requireCheckedPackageInterface interfacePackage
             let checked' =
                     checked
-                        { checkedProgramModules =
+                        { checkedProgramModulesInternal =
                             map staleCheckedModuleName (checkedProgramModules checked)
                         }
 

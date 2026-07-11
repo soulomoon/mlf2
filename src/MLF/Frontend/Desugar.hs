@@ -7,7 +7,7 @@ module MLF.Frontend.Desugar
 where
 
 import Data.Functor.Foldable (cata)
-import MLF.Frontend.Syntax (Expr (..), NormCoreExpr, NormSurfaceExpr, SurfaceExprF (..))
+import MLF.Frontend.Syntax (Expr (..), NormCoreExpr, NormSurfaceExpr, SurfaceExprF (..), termReferenceName)
 
 {- Note [κσ coercions and desugaring]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -45,26 +45,12 @@ desugarSurface :: NormSurfaceExpr -> NormCoreExpr
 desugarSurface = cata alg
   where
     alg = \case
-      EVarSurfaceF v -> EVar v
+      EVarSurfaceF ref -> EVarNode ref
       ELitSurfaceF l -> ELit l
-      ELamSurfaceF v body -> ELam v body
+      ELamSurfaceF ref body -> ELamNode ref body
       EAppSurfaceF fun arg -> EApp fun arg
-      ELetSurfaceF v rhs body -> ELet v rhs body
-      EBinderIdentitySurfaceF details inner ->
-        EBinderIdentity details (resolveAnnotatedBinderMediator details inner)
-      ELamAnnSurfaceF v ty body ->
-        ELam v (ELet v (EApp (ECoerceConst ty) (EVar v)) body)
+      ELetSurfaceF ref rhs body -> ELetNode ref rhs body
+      ELamAnnSurfaceF ref ty body ->
+        let name = termReferenceName ref
+         in ELamNode ref (ELet name (EApp (ECoerceConst ty) (EVarNode ref)) body)
       EAnnSurfaceF expr0 ty -> EApp (ECoerceConst ty) expr0
-
-    -- The variable introduced on the RHS of annotated-lambda sugar refers to
-    -- the resolved lambda binder. It is generated after resolution, so attach
-    -- the same identity explicitly instead of reintroducing a name lookup.
-    resolveAnnotatedBinderMediator details inner =
-      case inner of
-        ELam param (ELet mediator (EApp (coerce@ECoerceConst {}) (EVar occurrence)) body)
-          | param == mediator,
-            mediator == occurrence ->
-              ELam
-                param
-                (ELet mediator (EApp coerce (EBinderIdentity details (EVar occurrence))) body)
-        _ -> inner

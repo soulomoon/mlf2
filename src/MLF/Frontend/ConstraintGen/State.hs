@@ -5,6 +5,7 @@ module MLF.Frontend.ConstraintGen.State
     runConstraintM,
     mkInitialState,
     mkInitialStateWithPolySyms,
+    mkInitialStateWithPolySymsAndIdentityGenerator,
     buildConstraint,
     withModuleRootOwner,
     recordNodeRootOwner,
@@ -24,6 +25,7 @@ import MLF.Constraint.RootOwnership
 import MLF.Constraint.Types.Graph
 import MLF.Frontend.ConstraintGen.Types (Binding, BindingKey, ConstraintError)
 import MLF.Frontend.Syntax (NormSrcType)
+import MLF.Types.Identity (IdentityGenerator, initialIdentityGenerator)
 
 data ScopeFrame = ScopeFrame
   { sfNodes :: !IntSet.IntSet
@@ -38,9 +40,9 @@ data BuildState = BuildState
     bsNextExpVar :: !Int,
     -- | Next available EdgeId
     bsNextEdge :: !Int,
-    -- | Next graph-local lexical binder identity. Distinct binders may share
-    -- one inferred type node, so this cannot be derived from 'NodeId'.
-    bsNextLocalBinder :: !Int,
+    -- | Module/pipeline-owned supply for lexical binders introduced while
+    -- translating metadata-light surface syntax.
+    bsLocalIdentityGenerator :: !IdentityGenerator,
     -- | Map of all allocated type nodes
     bsNodes :: !(IntMap.IntMap TyNode),
     -- | Instantiation edges (accumulated in reverse)
@@ -88,12 +90,16 @@ mkInitialState = mkInitialStateWithPolySyms Set.empty
 
 mkInitialStateWithPolySyms :: PolySyms -> BuildState
 mkInitialStateWithPolySyms polySyms =
+  mkInitialStateWithPolySymsAndIdentityGenerator polySyms initialIdentityGenerator
+
+mkInitialStateWithPolySymsAndIdentityGenerator :: PolySyms -> IdentityGenerator -> BuildState
+mkInitialStateWithPolySymsAndIdentityGenerator polySyms identityGenerator =
   BuildState
     { bsNextNode = 0,
       bsNextGen = 0,
       bsNextExpVar = 0,
       bsNextEdge = 0,
-      bsNextLocalBinder = 0,
+      bsLocalIdentityGenerator = identityGenerator,
       bsNodes = IntMap.empty,
       bsInstEdges = [],
       bsUnifyEdges = [],

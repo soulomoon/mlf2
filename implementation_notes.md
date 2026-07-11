@@ -3930,3 +3930,66 @@ This repo’s design is primarily informed by:
 - Extended `test/ProgramParserParitySpec.hs` with the public behavior test for import-exposing source-span parity and an import-specific malformed-syntax negative through the public `run-program` path.
 - Scope remains parser-only: no Prelude or production facade widening, and no checker, backend, driver, platform, compiler-package, proof, parser-complete, or self-boot completion claim.
 - Evidence: focused RED/GREEN import parity matcher, focused RED/GREEN import negative matcher, full parser-parity group, direct new and round-304 package smokes, `git diff --check`, `cabal build all && cabal test`, and `./scripts/thesis-conformance-gate.sh`.
+## 2026-07-11 - Identity carrier and reference-policy simplification
+
+- `TypeView` now stores one node-level tree. Head and binder nodes own display
+  spelling, identity spelling, semantic payload, and aliases; display/identity
+  types and alias maps are read-only projections. The bidirectional pseudo-record
+  and partial builder are gone; production updates are explicit tree transforms,
+  and fixture construction lives in `TypeViewTestSupport`.
+  Context nodes retain non-visible constructor-scope identities, while
+  substitution and quantified specialization walk `TypeBinderIdentity` payloads
+  directly. Structural lowering rebuilds a divergent stale display projection
+  from the identity-bearing lowered shape.
+- `SurfaceExpr` variable and binder nodes carry `TermReference` directly.
+  Resolved lowering uses `ResolvedTermReference IdDetails`; the
+  `EBinderIdentity` wrapper and its traversal branches were removed.
+- Symbol, `IdDetails`, backend type/term, closure-entry, callable, type-bound,
+  and backend-validation reference policies now share `ReferenceMode` and one
+  identity-first fallback rule.
+- `BackendValidationContext` stores one tagged key collection per semantic
+  namespace instead of parallel name/identity maps and sets. The default
+  `validateBackendProgram` is identity-complete; metadata-light validation is
+  exposed to tests only through `BackendIRTestSupport`.
+- Backend callable classification now destructures `BackendExpr` directly; the
+  one-instance typeclass and intermediate callable-expression view were removed.
+- Checked identity validation now walks each program/module/binding/metadata
+  owner once and validates its `TypeView` and `ElabType` payloads together.
+- Removed trivial `Backend.Convert` forwarding helpers and the remaining no-op
+  reference-mode conversions.
+- Removed `TypeViewSubstKey`, the forwarding `Program.Surface` module, the
+  callable empty-list sentinel, the structural-head wrapper, and other trivial
+  one-line forwarding aliases.
+- Evidence: focused resolved-symbol identity (65), Program source-type
+  finalization (197), Backend IR (123), and Backend conversion (151) examples
+  pass; `cabal build all && cabal test` passes 3386 examples with 0 failures.
+
+## 2026-07-11 - Construction-time identity publication
+
+- `CheckedProgram` moved behind `MLF.Frontend.Program.Checked`. Its public
+  accessors are ordinary functions rather than record fields, and
+  `mkCheckedProgram` validates every `TypeView`, `ElabType`, and checked term
+  payload before publishing the capability. Runtime, backend conversion, and
+  emission preparation no longer repeat the same identity traversal.
+- Derived-instance synthesis, instance skeleton construction, resolved binding
+  lowering, and constraint generation now thread one module
+  `IdentityGenerator`. Constraint generation receives the same reserved
+  identity set and allocates metadata-light lexical binders directly;
+  graph-derived locals keep their `NodeId` provenance when capture avoidance
+  freshens them, and deferred references are allocated during lowering. The
+  former `stampLoweredBindingsDeferredIdentities` and
+  `freshenGraphTermLocalIdentities` repair passes were removed.
+- Constructor bindings, including constructor-local `forall` forms, are built
+  from `ConstructorInfo` metadata and published directly with that
+  metadata-built type-abstraction spine. The generic vacuous-forall finalizer
+  cannot erase a phantom owner parameter while leaving the constructor binding
+  type polymorphic. Checked term occurrence types are canonicalized when a
+  checked binding is accepted, so backend conversion no longer reconciles stale
+  local occurrence annotations.
+- `ProductionBackendProgram` remains the identity-complete backend capability,
+  but its raw projection is now confined to the LLVM lowering owner and
+  explicit test support. Metadata-light raw programs cross the separate
+  `BackendProgramFixture` boundary.
+- Evidence: Program source-type finalization passed 199 examples, runtime
+  parity passed 123, diagnostics passed 82, the LLVM IO contract passed 19,
+  and `cabal build all && cabal test` passed 3386 examples with 0 failures.

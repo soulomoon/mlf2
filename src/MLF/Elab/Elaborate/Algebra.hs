@@ -130,6 +130,7 @@ import MLF.Types.Identity
     IdentityGenerator,
     ResolvedTermIdentityKey,
     TypeBinderIdentity,
+    UniqueIdentity,
     freshEnvRef,
     freshLocalRef,
     idDetailsIdentityKey,
@@ -363,8 +364,12 @@ envSchemeTypes :: Env -> Map.Map VarName ElabType
 envSchemeTypes = Map.map ebSchemeType . envBindings
 
 envIdentityGenerator :: Env -> IdentityGenerator
-envIdentityGenerator env =
-  identityGeneratorAfter (concatMap envBindingGeneratedIdentities (Map.elems (envBindings env)))
+envIdentityGenerator =
+  identityGeneratorAfter . envGeneratedIdentities
+
+envGeneratedIdentities :: Env -> [UniqueIdentity]
+envGeneratedIdentities env =
+  concatMap envBindingGeneratedIdentities (Map.elems (envBindings env))
   where
     envBindingGeneratedIdentities binding =
       idDetailsGeneratedIdentities (ebIdentityDetails binding)
@@ -2123,7 +2128,8 @@ elabAlg algebraContext layer =
                         freshLocalRef
                           rootName
                           ( identityGeneratorAfter $
-                              generatedIdentitiesInType rootParamTy
+                              envGeneratedIdentities env
+                                ++ generatedIdentitiesInType rootParamTy
                                 ++ concatMap (generatedIdentitiesInTerm . EVarNode) etaParams
                           )
                       rootResolved = localResolvedVarFromRef rootRef rootParamTy

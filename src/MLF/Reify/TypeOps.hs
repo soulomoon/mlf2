@@ -44,9 +44,10 @@ import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types.Graph
 import qualified MLF.Constraint.VarStore as VarStore
-import MLF.Frontend.Symbol (SymbolIdentity, SymbolReferenceMode (..))
+import MLF.Frontend.Symbol (SymbolIdentity)
 import qualified MLF.Primitive.Identity as PrimitiveIdentity
 import MLF.Types.Elab
+import MLF.Types.Reference (ReferenceMode (..))
 import MLF.Util.ElabError (ElabError (..))
 import MLF.Util.Names (freshNameLike)
 
@@ -417,21 +418,21 @@ alphaEqRef envL envR left right =
 
 typeHeadMatches :: Maybe SymbolIdentity -> BaseTy -> Maybe SymbolIdentity -> BaseTy -> Bool
 typeHeadMatches =
-  typeHeadRefMatchesWith SymbolIdentityOnly
+  typeHeadRefMatchesWith IdentityOnly
 
 typeHeadMatchesMetadataLight :: Maybe SymbolIdentity -> BaseTy -> Maybe SymbolIdentity -> BaseTy -> Bool
 typeHeadMatchesMetadataLight =
-  typeHeadRefMatchesWith SymbolMetadataLight
+  typeHeadRefMatchesWith MetadataLight
 
 alphaEqType :: ElabType -> ElabType -> Bool
 alphaEqType =
-  alphaEqTypeWith SymbolIdentityOnly
+  alphaEqTypeWith IdentityOnly
 
 alphaEqTypeMetadataLight :: ElabType -> ElabType -> Bool
 alphaEqTypeMetadataLight =
-  alphaEqTypeWith SymbolMetadataLight
+  alphaEqTypeWith MetadataLight
 
-alphaEqTypeWith :: SymbolReferenceMode -> ElabType -> ElabType -> Bool
+alphaEqTypeWith :: ReferenceMode -> ElabType -> ElabType -> Bool
 alphaEqTypeWith mode = go [] []
   where
     headMatches = typeHeadRefMatchesWith mode

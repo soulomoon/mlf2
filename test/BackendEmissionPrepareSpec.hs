@@ -25,13 +25,14 @@ import MLF.Frontend.Program.Package
     , locatedProgramSourceUnitFromLocated
     )
 import MLF.Frontend.Program.Prelude (withPreludeLocatedPackage)
+import MLF.Frontend.Program.Checked (checkedProgramModules)
+import MLF.Frontend.Program.Checked.Internal (CheckedProgram (..))
 import MLF.Backend.LLVM (renderCheckedProgramLLVM)
 import qualified MLF.Types.Elab as Elab
 import qualified MLF.Frontend.Syntax as Surface
 import MLF.Frontend.Program.Types
     ( CheckedBinding (..)
     , CheckedModule (..)
-    , CheckedProgram (..)
     , ConstructorInfo (..)
     , DataInfo (..)
     , IdDetails (..)
@@ -52,10 +53,10 @@ import MLF.Frontend.Program.Types
     , SymbolNamespace (..)
     , SymbolOwnerIdentity (..)
     , SymbolOrigin (..)
-    , TypeView (..)
+    , TypeView
+    , typeViewHeadIdentities
     , checkedBindingName
     , ctorName
-    , mkTypeView
     , mkResolvedSymbol
     , mkResolvedReference
     , moduleExportsFromMaps
@@ -64,6 +65,7 @@ import MLF.Frontend.Symbol (symbolIdentityStableName)
 import qualified MLF.Frontend.Syntax.Program as ProgramSyntax
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
 import MLF.Types.Identity (UniqueIdentity (..))
+import TypeViewTestSupport (mkTypeView, setTypeViewHeadIdentities)
 
 spec :: Spec
 spec =
@@ -108,7 +110,7 @@ spec =
         it "rejects identity-incomplete checked inputs before backend pruning" $ do
             let incomplete =
                     resolvedShadowProgram
-                        { checkedProgramModules =
+                        { checkedProgramModulesInternal =
                             map poisonMainTypeView (checkedProgramModules resolvedShadowProgram)
                         }
                 poisonMainTypeView checkedModule0 =
@@ -178,7 +180,7 @@ spec =
         it "retains Prelude data carried only by a checked source TypeView identity" $ do
             let sourceViewOnlyProgram =
                     stalePreludeDataNameProgram
-                        { checkedProgramModules =
+                        { checkedProgramModulesInternal =
                             map stripCheckedElabType (checkedProgramModules stalePreludeDataNameProgram)
                         }
                 stripCheckedElabType checkedModule0 =
@@ -271,7 +273,7 @@ mainImportsLibProgram =
 resolvedShadowProgram :: CheckedProgram
 resolvedShadowProgram =
     CheckedProgram
-        { checkedProgramModules =
+        { checkedProgramModulesInternal =
             [ checkedModule
                 "Prelude"
                 [ testBinding "Prelude__keep" preludeKeepVar (Elab.ELit (Surface.LInt 1))
@@ -279,8 +281,8 @@ resolvedShadowProgram =
                 ]
             , checkedModule "Main" [testBinding "Main__main" mainVar shadowedGlobalReferenceTerm]
             ]
-        , checkedProgramMainResolvedVar = mainVar
-        , checkedProgramResolved = ResolvedProgram []
+        , checkedProgramMainResolvedVarInternal = mainVar
+        , checkedProgramResolvedInternal = ResolvedProgram []
         }
   where
     intTy = intElabType
@@ -295,7 +297,7 @@ resolvedShadowProgram =
 stalePreludeBindingNameProgram :: CheckedProgram
 stalePreludeBindingNameProgram =
     CheckedProgram
-        { checkedProgramModules =
+        { checkedProgramModulesInternal =
             [ checkedModule
                 "Prelude"
                 [ testBinding "$stale_keep" preludeKeepVar (Elab.ELit (Surface.LInt 1))
@@ -303,8 +305,8 @@ stalePreludeBindingNameProgram =
                 ]
             , checkedModule "Main" [testBinding "Main__main" mainVar (Elab.EVarNode preludeKeepVar)]
             ]
-        , checkedProgramMainResolvedVar = mainVar
-        , checkedProgramResolved = ResolvedProgram []
+        , checkedProgramMainResolvedVarInternal = mainVar
+        , checkedProgramResolvedInternal = ResolvedProgram []
         }
   where
     intTy = intElabType
@@ -315,7 +317,7 @@ stalePreludeBindingNameProgram =
 stalePreludeBindingPayloadProgram :: CheckedProgram
 stalePreludeBindingPayloadProgram =
     CheckedProgram
-        { checkedProgramModules =
+        { checkedProgramModulesInternal =
             [ checkedModule
                 "Prelude"
                 [ testBinding "Prelude__keep" preludeKeepVar (Elab.ELit (Surface.LInt 1))
@@ -323,8 +325,8 @@ stalePreludeBindingPayloadProgram =
                 ]
             , checkedModule "Main" [testBinding "Main__main" mainVar (Elab.EVarNode stalePreludeKeepVar)]
             ]
-        , checkedProgramMainResolvedVar = mainVar
-        , checkedProgramResolved = ResolvedProgram []
+        , checkedProgramMainResolvedVarInternal = mainVar
+        , checkedProgramResolvedInternal = ResolvedProgram []
         }
   where
     intTy = intElabType
@@ -336,7 +338,7 @@ stalePreludeBindingPayloadProgram =
 stalePreludeModuleNameProgram :: CheckedProgram
 stalePreludeModuleNameProgram =
     CheckedProgram
-        { checkedProgramModules =
+        { checkedProgramModulesInternal =
             [ ( checkedModule
                   "$stale_prelude"
                   [ testBinding "Prelude__keep" preludeKeepVar (Elab.ELit (Surface.LInt 1))
@@ -346,8 +348,8 @@ stalePreludeModuleNameProgram =
                 { checkedModuleIdentity = moduleIdentity "Prelude" }
             , checkedModule "Main" [testBinding "Main__main" mainVar (Elab.EVarNode preludeKeepVar)]
             ]
-        , checkedProgramMainResolvedVar = mainVar
-        , checkedProgramResolved = ResolvedProgram []
+        , checkedProgramMainResolvedVarInternal = mainVar
+        , checkedProgramResolvedInternal = ResolvedProgram []
         }
   where
     intTy = intElabType
@@ -358,7 +360,7 @@ stalePreludeModuleNameProgram =
 ambiguousPreludeModuleIdentityProgram :: CheckedProgram
 ambiguousPreludeModuleIdentityProgram =
     CheckedProgram
-        { checkedProgramModules =
+        { checkedProgramModulesInternal =
             [ ( checkedModule
                     "$prelude_left"
                     [ testBinding "Prelude__keep" preludeKeepVar (Elab.ELit (Surface.LInt 1))
@@ -374,8 +376,8 @@ ambiguousPreludeModuleIdentityProgram =
                 { checkedModuleIdentity = generatedSymbolIdentity 210 SymbolModule "PreludeRight" "Prelude" Nothing }
             , checkedModule "Main" [testBinding "Main__main" mainVar (Elab.EVarNode preludeKeepVar)]
             ]
-        , checkedProgramMainResolvedVar = mainVar
-        , checkedProgramResolved = ResolvedProgram []
+        , checkedProgramMainResolvedVarInternal = mainVar
+        , checkedProgramResolvedInternal = ResolvedProgram []
         }
   where
     intTy = intElabType
@@ -387,13 +389,13 @@ ambiguousPreludeModuleIdentityProgram =
 stalePreludeDataPayloadProgram :: CheckedProgram
 stalePreludeDataPayloadProgram =
     CheckedProgram
-        { checkedProgramModules =
+        { checkedProgramModulesInternal =
             [ (checkedModule "Prelude" [])
                 { checkedModuleData = Map.singleton (dataInfoSymbol unitData) unitData }
             , checkedModule "Main" [testBinding "Main__main" mainVar (Elab.ELit (Surface.LInt 1))]
             ]
-        , checkedProgramMainResolvedVar = mainVar
-        , checkedProgramResolved =
+        , checkedProgramMainResolvedVarInternal = mainVar
+        , checkedProgramResolvedInternal =
             ResolvedProgram
                 [ resolvedModuleWithReferences "Main" [typeReference staleUnitIdentity]
                 ]
@@ -412,7 +414,7 @@ stalePreludeDataPayloadProgram =
 stalePreludeDataNameProgram :: CheckedProgram
 stalePreludeDataNameProgram =
     CheckedProgram
-        { checkedProgramModules =
+        { checkedProgramModulesInternal =
             [ (checkedModule
                 "Prelude"
                 [ (testBinding "Prelude__keep" preludeKeepVar (Elab.ELit (Surface.LInt 1)))
@@ -434,8 +436,8 @@ stalePreludeDataNameProgram =
                 { checkedModuleData = Map.singleton (dataInfoSymbol staleUnitData) staleUnitData }
             , checkedModule "Main" [testBinding "Main__main" mainVar (Elab.EVarNode preludeKeepVar)]
             ]
-        , checkedProgramMainResolvedVar = mainVar
-        , checkedProgramResolved = ResolvedProgram []
+        , checkedProgramMainResolvedVarInternal = mainVar
+        , checkedProgramResolvedInternal = ResolvedProgram []
         }
   where
     intTy = intElabType
@@ -451,13 +453,13 @@ stalePreludeDataNameProgram =
 stalePreludeConstructorOwnerProgram :: CheckedProgram
 stalePreludeConstructorOwnerProgram =
     CheckedProgram
-        { checkedProgramModules =
+        { checkedProgramModulesInternal =
             [ (checkedModule "Prelude" [])
                 { checkedModuleData = Map.singleton (dataInfoSymbol unitData) unitData }
             , checkedModule "Main" [testBinding "Main__main" mainVar (Elab.ELit (Surface.LInt 1))]
             ]
-        , checkedProgramMainResolvedVar = mainVar
-        , checkedProgramResolved =
+        , checkedProgramMainResolvedVarInternal = mainVar
+        , checkedProgramResolvedInternal =
             ResolvedProgram
                 [ resolvedModuleWithReferences "Main" [constructorReference staleUnitConstructor]
                 ]
@@ -488,13 +490,13 @@ stalePreludeConstructorOwnerProgram =
 staleResolvedModuleNameProgram :: CheckedProgram
 staleResolvedModuleNameProgram =
     CheckedProgram
-        { checkedProgramModules =
+        { checkedProgramModulesInternal =
             [ (checkedModule "Prelude" [])
                 { checkedModuleData = Map.singleton (dataInfoSymbol unitData) unitData }
             , checkedModule "Main" [testBinding "Main__main" mainVar (Elab.ELit (Surface.LInt 1))]
             ]
-        , checkedProgramMainResolvedVar = mainVar
-        , checkedProgramResolved =
+        , checkedProgramMainResolvedVarInternal = mainVar
+        , checkedProgramResolvedInternal =
             ResolvedProgram
                 [ resolvedModuleWithIdentityAndReferences "Prelude" "Main" [constructorReference unitConstructor]
                 ]
@@ -525,7 +527,7 @@ staleResolvedModuleNameProgram =
 stalePreludeConstructorTypeProgram :: CheckedProgram
 stalePreludeConstructorTypeProgram =
     CheckedProgram
-        { checkedProgramModules =
+        { checkedProgramModulesInternal =
             [ (checkedModule "Prelude" [])
                 { checkedModuleData =
                     Map.fromList
@@ -535,8 +537,8 @@ stalePreludeConstructorTypeProgram =
                 }
             , checkedModule "Main" [testBinding "Main__main" mainVar (Elab.ELit (Surface.LInt 1))]
             ]
-        , checkedProgramMainResolvedVar = mainVar
-        , checkedProgramResolved =
+        , checkedProgramMainResolvedVarInternal = mainVar
+        , checkedProgramResolvedInternal =
             ResolvedProgram
                 [ resolvedModuleWithReferences "Main" [constructorReference boxConstructor]
                 ]
@@ -587,7 +589,7 @@ stalePreludeConstructorTypeProgram =
 conflictingPreludeConstructorOwnerProgram :: CheckedProgram
 conflictingPreludeConstructorOwnerProgram =
     CheckedProgram
-        { checkedProgramModules =
+        { checkedProgramModulesInternal =
             [ (checkedModule "Prelude" [])
                 { checkedModuleData =
                     Map.fromList
@@ -597,8 +599,8 @@ conflictingPreludeConstructorOwnerProgram =
                 }
             , checkedModule "Main" [testBinding "Main__main" mainVar (Elab.ELit (Surface.LInt 1))]
             ]
-        , checkedProgramMainResolvedVar = mainVar
-        , checkedProgramResolved =
+        , checkedProgramMainResolvedVarInternal = mainVar
+        , checkedProgramResolvedInternal =
             ResolvedProgram
                 [ resolvedModuleWithReferences "Main" [constructorReference unitConstructor]
                 ]
@@ -684,10 +686,9 @@ intTypeView =
 
 withTypeHeadIdentities :: [(String, SymbolIdentity)] -> TypeView -> TypeView
 withTypeHeadIdentities identities view =
-    view
-        { typeViewHeadIdentities =
-            Map.fromList identities `Map.union` typeViewHeadIdentities view
-        }
+    setTypeViewHeadIdentities
+        (Map.fromList identities `Map.union` typeViewHeadIdentities view)
+        view
 
 topLevelVar :: Int -> String -> String -> String -> Elab.ElabType -> ResolvedVar
 topLevelVar unique _runtimeName moduleName sourceName ty =

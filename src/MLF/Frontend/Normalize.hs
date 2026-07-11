@@ -290,11 +290,10 @@ forgetStageAsTop = \case
 -- | Normalize all type annotations in a surface expression.
 normalizeExpr :: SurfaceExpr -> Either NormalizationError NormSurfaceExpr
 normalizeExpr = \case
-  EVar v -> Right (EVar v)
+  EVarNode ref -> Right (EVarNode ref)
   ELit l -> Right (ELit l)
-  ELam v body -> ELam v <$> normalizeExpr body
+  ELamNode ref body -> ELamNode ref <$> normalizeExpr body
   EApp f a -> EApp <$> normalizeExpr f <*> normalizeExpr a
-  ELet v rhs body -> ELet v <$> normalizeExpr rhs <*> normalizeExpr body
-  EBinderIdentity details inner -> EBinderIdentity details <$> normalizeExpr inner
-  ELamAnn v ty body -> ELamAnn v <$> normalizeType ty <*> normalizeExpr body
+  ELetNode ref rhs body -> ELetNode ref <$> normalizeExpr rhs <*> normalizeExpr body
+  ELamAnnNode ref ty body -> ELamAnnNode ref <$> normalizeType ty <*> normalizeExpr body
   EAnn e ty -> EAnn <$> normalizeExpr e <*> normalizeType ty

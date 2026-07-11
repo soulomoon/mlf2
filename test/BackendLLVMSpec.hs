@@ -2,6 +2,7 @@
 
 module BackendLLVMSpec (spec) where
 
+import BackendIRTestSupport (validateBackendProgramFixture)
 import Control.Applicative ((<|>))
 import Control.Exception (bracket, evaluate)
 import Control.Monad (forM_, replicateM, when)
@@ -83,7 +84,7 @@ import MLF.Backend.LLVM.Syntax (LLVMModule)
 import qualified MLF.Backend.StructuralRecursiveData as Structural
 import MLF.Constraint.Types.Graph (BaseTy (..))
 import MLF.API (parseRawProgram, renderProgramParseError)
-import MLF.Frontend.Program.Types (CheckedProgram)
+import MLF.Frontend.Program.Checked (CheckedProgram)
 import MLF.Frontend.Symbol (SymbolIdentity, SymbolNamespace (..), SymbolOwnerIdentity (..), renameSymbolDefiningName, symbolIdentityFromParts, symbolIdentityStableName, symbolUniqueIdentity)
 import MLF.Frontend.Syntax (Lit (..))
 import MLF.Pipeline (checkProgram)
@@ -2078,7 +2079,7 @@ spec = describe "MLF.Backend.LLVM" $ do
             intTy
             (intLit 99)
             (BackendVar intTy "x")
-    outer `seq` validateBackendProgram (singleBindingProgram "main" staleBody)
+    outer `seq` validateBackendProgramFixture (singleBindingProgram "main" staleBody)
       `shouldBe` Left (BackendVariableIdentityMissing "x")
 
   it "resolves same-named lambda parameters by identity before name fallback" $ do
@@ -3501,9 +3502,9 @@ spec = describe "MLF.Backend.LLVM" $ do
 
   it "rejects BackendApp heads that select closure values through let or case" $ do
     renderFixtureBackendProgramLLVM caseHeadedDirectClosureBackendAppProgram
-      `shouldSatisfyLeft` isInfixOf "Backend LLVM validation failed: BackendClosureCalledWithBackendApp \"__mlfp_unknown_closure_head\""
+      `shouldSatisfyLeft` isInfixOf "Backend LLVM validation failed: BackendClosureCalledWithBackendApp Nothing"
     renderFixtureBackendProgramLLVM letHeadedDirectClosureBackendAppProgram
-      `shouldSatisfyLeft` isInfixOf "Backend LLVM validation failed: BackendClosureCalledWithBackendApp \"__mlfp_closure$backend_app_let\""
+      `shouldSatisfyLeft` isInfixOf "Backend LLVM validation failed: BackendClosureCalledWithBackendApp (Just \"__mlfp_closure$backend_app_let\")"
 
   it "captures first-order lambda parameters as raw function pointers" $ do
     output <- requireRight (renderFixtureBackendProgramLLVM capturedFirstOrderParameterClosureProgram)

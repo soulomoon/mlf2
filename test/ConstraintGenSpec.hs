@@ -187,11 +187,9 @@ spec = describe "Phase 1 — Constraint generation" $ do
             let outerDetails = localDetails 91001 "$runtime_outer"
                 innerDetails = localDetails 91002 "$runtime_inner"
                 expr =
-                    EBinderIdentity outerDetails $
-                        ELam "same" $
-                            EBinderIdentity innerDetails $
-                                ELam "same" $
-                                    EBinderIdentity outerDetails (EVar "$stale_outer_display")
+                    EResolvedLam outerDetails "same" $
+                        EResolvedLam innerDetails "same" $
+                            EResolvedVar outerDetails "$stale_outer_display"
             expectRight (generateConstraintsCore Set.empty expr) $ \result ->
                 case crAnnotated result of
                     ALam _ (Just outerBinder) outerNode _ (ALam _ (Just innerBinder) _ _ (AResolvedVar occurrenceDetails displayName occurrenceNode) _) _ -> do
@@ -207,8 +205,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
             let binderDetails = localDetails 91003 "same"
                 missingDetails = localDetails 91004 "same"
                 expr =
-                    EBinderIdentity binderDetails $
-                        ELam "same" (EBinderIdentity missingDetails (EVar "same"))
+                    EResolvedLam binderDetails "same" (EResolvedVar missingDetails "same")
             generateConstraintsCore Set.empty expr `shouldBe` Left (UnknownVariable "same")
 
         it "keeps an identity-bearing let local instead of rematerializing a same-named external" $ do
@@ -216,11 +213,11 @@ spec = describe "Phase 1 — Constraint generation" $ do
                 externalDetails = localDetails 91008 "same"
                 externalBinding = monomorphicExternalBinding externalDetails
                 expr =
-                    EBinderIdentity binderDetails $
-                        ELet
-                            "same"
-                            (ELit (LInt 1))
-                            (EBinderIdentity binderDetails (EVar "$stale_local_display"))
+                    EResolvedLet
+                        binderDetails
+                        "same"
+                        (ELit (LInt 1))
+                        (EResolvedVar binderDetails "$stale_local_display")
             expectRight
                 (generateConstraintsCoreWithExternalBindings Set.empty (Map.singleton "same" externalBinding) expr)
                 $ \result ->
@@ -247,7 +244,7 @@ spec = describe "Phase 1 — Constraint generation" $ do
         it "selects an external binding by resolved identity when its display spelling is stale" $ do
             let details = localDetails 91006 "$runtime_external"
                 externalBinding = monomorphicExternalBinding details
-                expr = EBinderIdentity details (EVar "$stale_external_display")
+                expr = EResolvedVar details "$stale_external_display"
             expectRight
                 (generateConstraintsCoreWithExternalBindings Set.empty (Map.singleton "$runtime_external" externalBinding) expr)
                 $ \result ->

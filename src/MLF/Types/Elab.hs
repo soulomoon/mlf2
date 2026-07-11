@@ -59,7 +59,6 @@ module MLF.Types.Elab (
     xmlfTermTypeIdentityGaps,
     typeHeadRefMatches,
     typeHeadRefMatchesWith,
-    typeHeadRefMatchesIdentityOnly,
     typeHeadRefMatchesMetadataLight,
     ElabScheme,
     mkElabSchemeWithRefs,
@@ -185,9 +184,10 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
 import MLF.Constraint.Types.Graph (BaseTy(..), BindFlag(..), NodeId(..))
-import MLF.Frontend.Symbol (SymbolIdentity, SymbolReferenceMode (..), symbolRefMatchesWith)
+import MLF.Frontend.Symbol (SymbolIdentity, symbolRefMatchesWith)
 import MLF.Frontend.Syntax (Lit(..))
 import qualified MLF.Primitive.Identity as PrimitiveIdentity
+import MLF.Types.Reference (ReferenceMode (..))
 import MLF.Types.Identity
     ( ConstructorRef
     , DeferredRef
@@ -308,17 +308,13 @@ instance Eq (Ty v) where
 
 typeHeadRefMatches :: Maybe SymbolIdentity -> BaseTy -> Maybe SymbolIdentity -> BaseTy -> Bool
 typeHeadRefMatches =
-    typeHeadRefMatchesWith SymbolIdentityOnly
-
-typeHeadRefMatchesIdentityOnly :: Maybe SymbolIdentity -> BaseTy -> Maybe SymbolIdentity -> BaseTy -> Bool
-typeHeadRefMatchesIdentityOnly =
-    typeHeadRefMatchesWith SymbolIdentityOnly
+    typeHeadRefMatchesWith IdentityOnly
 
 typeHeadRefMatchesMetadataLight :: Maybe SymbolIdentity -> BaseTy -> Maybe SymbolIdentity -> BaseTy -> Bool
 typeHeadRefMatchesMetadataLight =
-    typeHeadRefMatchesWith SymbolMetadataLight
+    typeHeadRefMatchesWith MetadataLight
 
-typeHeadRefMatchesWith :: SymbolReferenceMode -> Maybe SymbolIdentity -> BaseTy -> Maybe SymbolIdentity -> BaseTy -> Bool
+typeHeadRefMatchesWith :: ReferenceMode -> Maybe SymbolIdentity -> BaseTy -> Maybe SymbolIdentity -> BaseTy -> Bool
 typeHeadRefMatchesWith mode leftIdentity (BaseTy leftName) rightIdentity (BaseTy rightName) =
     symbolRefMatchesWith mode leftIdentity leftName rightIdentity rightName
 

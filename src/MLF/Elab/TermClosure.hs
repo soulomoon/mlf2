@@ -6,6 +6,7 @@ module MLF.Elab.TermClosure
     alignTermTypeVarsToScheme,
     alignTermTypeVarsToTopTyAbs,
     preserveRetainedChildAuthoritativeResult,
+    renameTermTypeVars,
     substInTermRefs,
   )
 where

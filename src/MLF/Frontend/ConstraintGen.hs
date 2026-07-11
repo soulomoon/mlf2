@@ -10,6 +10,7 @@ module MLF.Frontend.ConstraintGen
     ModuleConstraintResult (..),
     AnnExpr (..),
     BindingKey (..),
+    bindingKeyForTermReference,
     ExternalEnv,
     ExternalBindingMode (..),
     ExternalBinding (..),
@@ -24,7 +25,9 @@ module MLF.Frontend.ConstraintGen
     generateConstraintsCore,
     generateConstraintsWithEnv,
     generateConstraintsWithExternalBindings,
+    generateConstraintsWithExternalBindingsFromSupply,
     generateModuleConstraintsKeyedWithExternalBindings,
+    generateModuleConstraintsKeyedWithExternalBindingsFromSupply,
     generateModuleConstraintsWithExternalBindings,
     generateConstraintsCoreWithEnv,
     generateConstraintsCoreWithExternalBindings,
@@ -44,6 +47,7 @@ import MLF.Frontend.Syntax
     NormSurfaceExpr,
     VarName,
   )
+import MLF.Types.Identity (IdentityGenerator, initialIdentityGenerator)
 
 {- Note [Phase 1: Constraint Generation]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -134,7 +138,11 @@ generateConstraintsWithEnv polySyms extEnv expr =
 
 generateConstraintsWithExternalBindings :: PolySyms -> ExternalBindings -> NormSurfaceExpr -> Either ConstraintError (ConstraintResult p)
 generateConstraintsWithExternalBindings polySyms extBindings expr =
-  generateConstraintsCoreWithExternalBindings polySyms extBindings (desugarSurface expr)
+  generateConstraintsWithExternalBindingsFromSupply initialIdentityGenerator polySyms extBindings expr
+
+generateConstraintsWithExternalBindingsFromSupply :: IdentityGenerator -> PolySyms -> ExternalBindings -> NormSurfaceExpr -> Either ConstraintError (ConstraintResult p)
+generateConstraintsWithExternalBindingsFromSupply generator polySyms extBindings expr =
+  generateConstraintsCoreWithExternalBindingsFromSupply generator polySyms extBindings (desugarSurface expr)
 
 -- | Generate constraints from a normalized core expression.
 --
@@ -163,8 +171,12 @@ generateConstraintsCoreWithEnv polySyms extEnv expr = do
   generateConstraintsCoreWithExternalBindings polySyms extBindings expr
 
 generateConstraintsCoreWithExternalBindings :: PolySyms -> ExternalBindings -> NormCoreExpr -> Either ConstraintError (ConstraintResult p)
-generateConstraintsCoreWithExternalBindings polySyms extBindings expr = do
-  let initialState = mkInitialStateWithPolySyms polySyms
+generateConstraintsCoreWithExternalBindings =
+  generateConstraintsCoreWithExternalBindingsFromSupply initialIdentityGenerator
+
+generateConstraintsCoreWithExternalBindingsFromSupply :: IdentityGenerator -> PolySyms -> ExternalBindings -> NormCoreExpr -> Either ConstraintError (ConstraintResult p)
+generateConstraintsCoreWithExternalBindingsFromSupply generator polySyms extBindings expr = do
+  let initialState = mkInitialStateWithPolySymsAndIdentityGenerator polySyms generator
   ((_rootGen, initialEnv, rootNode, annRoot), finalState) <-
     runConstraintM (buildRootExprWithExternalBindings extBindings expr) initialState
   constraintResultFromState initialEnv rootNode annRoot finalState
@@ -177,8 +189,12 @@ generateModuleConstraintsWithExternalBindings polySyms extBindings namedExprs =
     [(name, name, expr) | (name, expr) <- namedExprs]
 
 generateModuleConstraintsKeyedWithExternalBindings :: (Ord key) => PolySyms -> ExternalBindings -> [(key, VarName, NormSurfaceExpr)] -> Either ConstraintError (ModuleConstraintResult key p)
-generateModuleConstraintsKeyedWithExternalBindings polySyms extBindings keyedExprs = do
-  let initialState = mkInitialStateWithPolySyms polySyms
+generateModuleConstraintsKeyedWithExternalBindings =
+  generateModuleConstraintsKeyedWithExternalBindingsFromSupply initialIdentityGenerator
+
+generateModuleConstraintsKeyedWithExternalBindingsFromSupply :: (Ord key) => IdentityGenerator -> PolySyms -> ExternalBindings -> [(key, VarName, NormSurfaceExpr)] -> Either ConstraintError (ModuleConstraintResult key p)
+generateModuleConstraintsKeyedWithExternalBindingsFromSupply generator polySyms extBindings keyedExprs = do
+  let initialState = mkInitialStateWithPolySymsAndIdentityGenerator polySyms generator
       namedCoreExprs =
         [ (key, name, desugarSurface expr)
         | (key, name, expr) <- keyedExprs

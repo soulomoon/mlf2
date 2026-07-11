@@ -35,13 +35,11 @@ import MLF.Frontend.Program.Types
     SymbolNamespace (..),
     SymbolOrigin (..),
     ValueInfo (..),
-    mkTypeView,
     mkResolvedSymbol,
+    typeViewFromSourceTypeWithIdentityMaps,
     resolvedSymbolIdentity,
     valueInfoRuntimeName,
     typeViewDisplay,
-    typeViewBinderIdentities,
-    typeViewHeadIdentities,
   )
 import MLF.Frontend.Symbol (symbolIdentityAliasMapWith)
 import MLF.Frontend.Syntax (SrcBound (..), SrcKind (..), SrcTy (..), SrcType, TypeParam (..), resolvedTypeBinderRefFromIdentity)
@@ -114,18 +112,17 @@ builtinValues =
 
 builtinOrdinary :: String -> SrcType -> ValueInfo
 builtinOrdinary name ty =
-  let identityTy = canonicalBuiltinSrcType ty
-   in OrdinaryValue
-        { valueInfoSymbol = builtinIdentity SymbolValue name,
-          valueRuntimeName = name,
-          valueTypeView =
-            (mkTypeView ty identityTy)
-              { typeViewHeadIdentities = builtinSourceTypeHeadIdentities identityTy,
-                typeViewBinderIdentities = builtinValueTypeBinderIdentities name
-              },
-          valueConstraints = [],
-          valueConstraintInfos = []
-        }
+  OrdinaryValue
+    { valueInfoSymbol = builtinIdentity SymbolValue name,
+      valueRuntimeName = name,
+      valueTypeView =
+        typeViewFromSourceTypeWithIdentityMaps
+          (builtinSourceTypeHeadIdentities ty)
+          (builtinValueTypeBinderIdentities name)
+          ty,
+      valueConstraints = [],
+      valueConstraintInfos = []
+    }
 
 builtinValueTypeBinderIdentities :: String -> Map String TypeBinderIdentity
 builtinValueTypeBinderIdentities name =
@@ -237,6 +234,3 @@ builtinTypeParamUniqueIdentities =
     [ (("IO", 0, "a"), UniqueIdentity (-300000)),
       (("IORef", 0, "a"), UniqueIdentity (-300001))
     ]
-
-canonicalBuiltinSrcType :: SrcType -> SrcType
-canonicalBuiltinSrcType = Inventory.canonicalizeBuiltinSourceType

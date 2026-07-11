@@ -8,11 +8,11 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import MLF.Constraint.Types.Graph (BaseTy (..))
 import MLF.Types.Elab (Ty (..), TypeBinderIdentity, typeBinderRefIdentity)
-import MLF.Types.Identity (UniqueIdentity (..), typeBinderIdentityFromUnique)
+import MLF.Types.Identity (UniqueIdentity (..), typeBinderIdentityFromUnique, typeBinderIdentityStableName)
 import qualified MLF.Frontend.Program.Builtins as Builtins
 import MLF.Frontend.Program.Types (ValueInfo (..), valueIdentityType, valueType)
 import MLF.Frontend.Symbol (renameSymbolDefiningName, symbolIdentityStableName)
-import MLF.Frontend.Syntax (SrcTy (..))
+import MLF.Frontend.Syntax (SrcBound (..), SrcTy (..), SrcType)
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
 import Test.Hspec
 
@@ -52,8 +52,11 @@ spec = describe "MLF.Primitive.Inventory" $ do
           valueInfoSymbol valueInfo `shouldBe` PrimitiveInventory.builtinValueIdentity name
           valueType valueInfo
             `shouldBe` PrimitiveInventory.primitiveTypeToSourceType (PrimitiveInventory.primitiveValueType spec0)
-          valueIdentityType valueInfo
-            `shouldBe` PrimitiveInventory.canonicalizeBuiltinSourceType (valueType valueInfo)
+          case Map.lookup name PrimitiveInventory.primitiveValueElabTypes of
+            Just identityTy ->
+              valueIdentityType valueInfo `shouldBe` elabIdentitySourceType identityTy
+            Nothing ->
+              expectationFailure ("missing primitive elaborated type for " ++ name)
         other ->
           expectationFailure ("expected ordinary builtin value for " ++ name ++ ", got " ++ show other)
 
@@ -269,6 +272,26 @@ spec = describe "MLF.Primitive.Inventory" $ do
           name `shouldBe` PrimitiveInventory.stringToAsciiUpperPrimitiveName
         PrimitiveInventory.PrimitiveNativeIO operation ->
           name `shouldBe` PrimitiveInventory.nativeIOPrimitiveName operation
+
+elabIdentitySourceType :: Ty v -> SrcType
+elabIdentitySourceType ty =
+  case ty of
+    TVarRef ref -> STVar (binderName ref)
+    TArrow dom cod -> STArrow (elabIdentitySourceType dom) (elabIdentitySourceType cod)
+    TBaseWithIdentity mbIdentity (BaseTy name) -> STBase (headName mbIdentity name)
+    TConWithIdentity mbIdentity (BaseTy name) args ->
+      STCon (headName mbIdentity name) (fmap elabIdentitySourceType args)
+    TVarAppRef ref args -> STVarApp (binderName ref) (fmap elabIdentitySourceType args)
+    TForallRef ref mbBound body ->
+      STForall
+        (binderName ref)
+        (fmap (SrcBound . elabIdentitySourceType) mbBound)
+        (elabIdentitySourceType body)
+    TMuRef ref body -> STMu (binderName ref) (elabIdentitySourceType body)
+    TBottom -> STBottom
+  where
+    binderName = typeBinderIdentityStableName . typeBinderRefIdentity
+    headName mbIdentity name = maybe name symbolIdentityStableName mbIdentity
 
 allNativeIOOperations :: [PrimitiveInventory.PrimitiveIOOperation]
 allNativeIOOperations = [minBound .. maxBound]

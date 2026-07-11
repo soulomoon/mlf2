@@ -22,7 +22,7 @@ import MLF.Frontend.Program.Run
     ( programRunOutput
     , runLocatedProgramPackageOutput
     )
-import MLF.Frontend.Program.Types (checkedProgramMain)
+import MLF.Frontend.Program.Checked (checkedProgramMain)
 import MLF.Program.CLI
     ( checkProgramArgs
     , checkProgramFile

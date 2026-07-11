@@ -12,6 +12,7 @@ module MLF.Frontend.ConstraintGen.Types
     AnnExprF (..),
     Binding (..),
     BindingKey (..),
+    bindingKeyForTermReference,
     Env,
     ExternalEnv,
     ExternalBindingMode (..),
@@ -33,9 +34,9 @@ import Data.Map.Strict (Map)
 import MLF.Constraint.RootOwnership (ModuleRootId (..), RootOwnershipIndex (..))
 import MLF.Constraint.Types.Graph
 import MLF.Frontend.Symbol (SymbolIdentity)
-import MLF.Frontend.Syntax (Lit, NormSrcType, VarName)
+import MLF.Frontend.Syntax (Lit, NormSrcType, TermReference (..), VarName)
 import MLF.Types.Elab (ResolvedVar (..))
-import MLF.Types.Identity (DeferredRef, IdDetails (..), ResolvedTermIdentityKey, TypeBinderIdentity, idDetailsRuntimeName)
+import MLF.Types.Identity (DeferredRef, IdDetails (..), ResolvedTermIdentityKey, TypeBinderIdentity, idDetailsIdentityKey, idDetailsRuntimeName)
 
 -- | Errors that can surface during constraint generation.
 data ConstraintError
@@ -164,6 +165,12 @@ data BindingKey
   = MetadataLightBindingKey VarName
   | ResolvedBindingKey ResolvedTermIdentityKey
   deriving (Eq, Ord, Show)
+
+bindingKeyForTermReference :: TermReference -> BindingKey
+bindingKeyForTermReference reference =
+  case reference of
+    MetadataLightTermReference name -> MetadataLightBindingKey name
+    ResolvedTermReference details _ -> ResolvedBindingKey (idDetailsIdentityKey details)
 
 type Env = Map BindingKey Binding
 

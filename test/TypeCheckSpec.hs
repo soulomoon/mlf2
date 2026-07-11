@@ -86,7 +86,6 @@ import MLF.Types.Identity
     , envRefFromIdentity
     , envRefIdentity
     , IdDetails(..)
-    , IdDetailsReferenceMode(..)
     , LocalIdentity(..)
     , localRefFromIdentity
     , localRefFromNodeId
@@ -98,7 +97,6 @@ import MLF.Types.Identity
     , idDetailsAliasMapWith
     , idDetailsConstructorRef
     , idDetailsDisplayName
-    , IdDetailsReferenceMode(..)
     , idDetailsIsLocal
     , idDetailsRenameLocal
     , idDetailsReferenceName
@@ -111,6 +109,7 @@ import MLF.Types.Identity
     , typeBinderIdentityStableName
     , uniqueIdentityStableName
     )
+import MLF.Types.Reference (ReferenceMode(..))
 import ElabTermTestSupport
     ( generatedLocalRef
     , generatedLocalRefForName
@@ -440,6 +439,7 @@ spec = describe "Phase 7 typecheck" $ do
         let fixtureIdentity =
                 case localRefIdentity (generatedLocalRefForName "x") of
                     GeneratedLocalId identity -> identity
+                    GeneratedGraphLocalId identity _ -> identity
                     GraphLocalId {} -> UniqueIdentity 0
                     ScopedGraphLocalId {} -> UniqueIdentity 0
             nextIdentity (UniqueIdentity value) = UniqueIdentity (value + 1)
@@ -1132,8 +1132,8 @@ spec = describe "Phase 7 typecheck" $ do
         idDetailsRefMatches (Just localDetails) "$x#0" Nothing "$x#0" `shouldBe` False
         idDetailsRefMatches (Just localDetails) "$x#0" Nothing (uniqueIdentityStableName (UniqueIdentity 0)) `shouldBe` False
         idDetailsRefMatches Nothing "$x#0" Nothing "$x#0" `shouldBe` False
-        idDetailsRefMatchesWith IdDetailsIdentityOnly Nothing "$x#0" Nothing "$x#0" `shouldBe` False
-        idDetailsRefMatchesWith IdDetailsMetadataLight Nothing "$x#0" Nothing "$x#0" `shouldBe` True
+        idDetailsRefMatchesWith IdentityOnly Nothing "$x#0" Nothing "$x#0" `shouldBe` False
+        idDetailsRefMatchesWith MetadataLight Nothing "$x#0" Nothing "$x#0" `shouldBe` True
         let otherLocalDetails = LocalId (generatedLocalRef 1 "$x#0")
             renamedSameIdentityDetails = idDetailsRenameLocal "$x#renamed" localDetails
             detailsByAlias = idDetailsAliasMapWith [("runtime-x", localDetails), ("runtime-y", otherLocalDetails)]

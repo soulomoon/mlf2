@@ -3,6 +3,22 @@
 ## Unreleased
 
 ### Changed
+- Made checked and backend publication capabilities construction-only:
+  `CheckedProgram` is abstract and validates identity payloads once at
+  `mkCheckedProgram`, production consumers no longer repeat that traversal,
+  production backend IR can be unwrapped only by its lowering owner, and
+  metadata-light backend inputs use an explicit fixture capability.
+- Threaded the module identity generator through derived-instance synthesis,
+  instance skeletons, resolved binding lowering, and constraint generation.
+  Deferred and lexical references are now allocated before their IR is built;
+  graph-derived locals retain graph provenance through capture avoidance,
+  duplicate deferred identities are rejected, and the former deferred-stamping
+  and graph-local freshening repair passes were removed.
+- Finalized all constructor bindings directly from `ConstructorInfo` metadata,
+  including constructor-local `forall` shapes, preserving the metadata-built
+  type-abstraction spine instead of passing it through generic vacuous-forall
+  stripping. Checked term occurrence types are canonical at publication rather
+  than reconciled in backend conversion.
 - Completed the post-resolution identity audit across the frontend, checked
   artifact, backend, and LLVM paths: semantic evidence keys, constructor
   rewriting, deferred obligations, type-binder substitution, structural
@@ -12,10 +28,25 @@
   it at checked artifact publication and backend conversion, including binding,
   data, constructor, class, instance, export, evidence, and deferred-obligation
   payloads.
-- Added the internal `EBinderIdentity` surface wrapper so exact local/evidence/
-  pattern binder identity survives normalization, desugaring, constraint
-  generation, and elaboration without a `Map String IdDetails` reconstruction
-  pass.
+- Replaced the resolved surface identity wrapper with direct `TermReference`
+  payloads on variable, lambda, let, and annotated-lambda nodes; normalization,
+  desugaring, constraint generation, and finalization now consume the same
+  identity-bearing node shape.
+- Collapsed `TypeView` onto one node-level identity-bearing tree; display and
+  identity source types plus head/binder alias indexes are derived projections,
+  projected constructor context remains in explicit tree nodes, and
+  substitution/specialization selects same-spelled binders by identity.
+- Unified reference matching under one `ReferenceMode`, removed the one-instance
+  backend callable classifier typeclass, merged checked `TypeView`/`ElabType`
+  validation into one recursive traversal, and deleted trivial backend
+  conversion forwarding helpers.
+- Made `validateBackendProgram` identity-complete by default, moved permissive
+  fixture validation behind `BackendIRTestSupport`, and collapsed backend
+  validation globals, data, constructors, locals, and closure classifications
+  from parallel name/identity collections onto tagged reference keys.
+- Removed the bidirectional `TypeView` pseudo-record and its partial builder;
+  production code now uses explicit tree transforms, while test construction is
+  isolated in `TypeViewTestSupport`.
 - Made backend conversion publish `ProductionBackendProgram` and restricted LLVM
   entrypoints to that identity-complete capability; raw metadata-light Backend
   IR remains available only through explicit fixture/boundary adapters.

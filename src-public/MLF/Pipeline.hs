@@ -88,7 +88,10 @@ module MLF.Pipeline
     -- * Unified `.mlfp` program checking/runtime
     , ProgramError(..)
     , ProgramDiagnostic(..)
-    , CheckedProgram(..)
+    , CheckedProgram
+    , checkedProgramModules
+    , checkedProgramMainResolvedVar
+    , checkedProgramResolved
     , checkedProgramMain
     , CheckedModule(..)
     , CheckedBinding(..)
@@ -156,11 +159,16 @@ import MLF.Constraint.Acyclicity (CycleError(..))
 import MLF.Frontend.Syntax (NormSurfaceExpr, NormSrcType, StructBound)
 import MLF.Frontend.Normalize (NormalizationError(..), normalizeExpr, normalizeType)
 import MLF.Frontend.ConstraintGen (ConstraintError(..), ConstraintResult(..), generateConstraints)
+import MLF.Frontend.Program.Checked
+    ( CheckedProgram
+    , checkedProgramMain
+    , checkedProgramMainResolvedVar
+    , checkedProgramModules
+    , checkedProgramResolved
+    )
 import MLF.Frontend.Program.Types
     ( CheckedBinding(..)
     , CheckedModule(..)
-    , CheckedProgram(..)
-    , checkedProgramMain
     , ResolvedModule(..)
     , ResolvedProgram(..)
     , ResolvedReference
